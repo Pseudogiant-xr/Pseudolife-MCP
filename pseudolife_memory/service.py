@@ -444,6 +444,19 @@ class MemoryService(DreamOps):
         # re-reaped on the next sweep, firing a dream per resume cycle.
         # In-memory only: a restart re-fires the SessionStart hook anyway.
         self._episode_touches: dict[str, float] = {}
+        # Tombstones for EMPTY session roots the reaper's sweep deleted:
+        # id -> (session_key, ended_at, title). A briefing handle presented
+        # after the sweep recreates its episode from here instead of
+        # degrading (2026-09-02 incident). Persisted to storage meta —
+        # unlike the touch map, a mid-break daemon restart must not lose
+        # these.
+        self._episode_tombstones: dict[str, tuple[str, float, str]] = {}
+        # Roots the reaper closed EMPTY (deferred prune): id -> ended_at.
+        # The sweep's candidate set is exactly this map — never the whole
+        # episode log, where "zero live band entries" also matches history
+        # whose memories were evicted or forgotten (review finding,
+        # 2026-09-02). Persisted: the deferral window outlives a restart.
+        self._deferred_empty_roots: dict[str, float] = {}
         # Retrieval-log write failures since process start. Both log paths
         # swallow their exceptions (a logging failure must not break the
         # search it rides on), so without this counter a broken log is
@@ -534,6 +547,8 @@ class MemoryService(DreamOps):
         self._entity_kind_cache: dict[str, str] | None = None
 
     _ACTIVE_SESSION_META_KEY = "active_session_pointer"
+    _EPISODE_TOMBSTONES_META_KEY = "episode_tombstones"
+    _DEFERRED_EMPTY_META_KEY = "deferred_empty_roots"
 
     def _resolve_writer(self) -> tuple[str, str | None]:
         """Identity tiers 1/3/4 (spec 2026-07-18): X-PL-Session header ->
@@ -832,6 +847,21 @@ class MemoryService(DreamOps):
             if isinstance(raw, dict) and raw.get("session_id"):
                 self._active_session = (str(raw["session_id"]),
                                          float(raw.get("ts") or 0.0))
+            # Episode tombstones survive a restart the same way — a handle
+            # presented after a mid-break daemon restart must still recreate
+            # its swept episode.
+            raw_t = self._storage.get_meta(self._EPISODE_TOMBSTONES_META_KEY)
+            if isinstance(raw_t, dict):
+                self._episode_tombstones = {
+                    str(tid): (str(m["session_key"]),
+                               float(m.get("ended_at") or 0.0),
+                               str(m.get("title") or ""))
+                    for tid, m in raw_t.items()
+                    if isinstance(m, dict) and m.get("session_key")}
+            raw_d = self._storage.get_meta(self._DEFERRED_EMPTY_META_KEY)
+            if isinstance(raw_d, dict):
+                self._deferred_empty_roots = {
+                    str(rid): float(ts or 0.0) for rid, ts in raw_d.items()}
         if self._embedder is None:
             # Reused across failed attempts: a retry after a mid-init
             # failure must never rebuild the model (same incident).
@@ -3506,6 +3536,7 @@ class MemoryService(DreamOps):
 
     def _close_session_locked(
         self, session_key: str | None, run_dream: bool,
+        prune_empty: bool = True,
     ) -> tuple[dict[str, Any], bool, bool]:
         """Cascade-close the session root for ``session_key`` and prune the
         subtree if it captured zero entries. Caller MUST hold the lock and have
@@ -3514,13 +3545,23 @@ class MemoryService(DreamOps):
         ``(result_dict, should_fire_dream, found)``; ``result_dict`` is ``{}``
         when nothing matched OR the subtree was pruned empty — ``found``
         disambiguates the two (``False`` only when no root matched
-        ``session_key`` at all)."""
+        ``session_key`` at all).
+
+        ``prune_empty=False`` (the idle reaper) closes an empty subtree but
+        KEEPS it: deleting it here orphaned the session's briefing handle
+        mid-break (2026-09-02) — the reaper's sweep deletes it with a
+        tombstone once past the resume window instead. An explicit end
+        (shim exit, ``episode_end``) keeps the immediate prune: the session
+        affirmatively finished, so no handle can legitimately return. An
+        empty close never fires a dream and is never auto-titled, deferred
+        or not."""
         assert self._cms is not None
         em = self._cms.episodes
         closed = em.end_session(session_key)
         found = closed is not None
         result = self._episode_to_dict(closed) if closed is not None else {}
         pruned = False
+        empty = False
         if closed is not None:
             subtree = {closed.id} | {
                 e.id for e in em.episodes.values()
@@ -3528,16 +3569,22 @@ class MemoryService(DreamOps):
             }
             counts = self._episode_entry_counts()
             if sum(counts.get(i, 0) for i in subtree) == 0:
-                for i in subtree:
-                    em.remove(i)
-                    self._delete_episode_row(i)
-                pruned = True
+                empty = True
+                if prune_empty:
+                    for i in subtree:
+                        em.remove(i)
+                        self._delete_episode_row(i)
+                    pruned = True
+                else:
+                    self._deferred_empty_roots[closed.id] = float(
+                        closed.ended_at or 0.0)
+                    self._persist_deferred_empty()
             else:
                 self._auto_title_locked(closed, subtree)
                 result = self._episode_to_dict(closed)
         if not pruned:
             self._persist_episodes()
-        fire = bool(run_dream and result and not pruned)
+        fire = bool(run_dream and result and not pruned and not empty)
         return ({} if pruned else result), fire, found
 
     def reap_idle_sessions(
@@ -3546,11 +3593,14 @@ class MemoryService(DreamOps):
         """Close session episodes with no activity for ``idle_seconds``.
 
         In the direct-HTTP transport there is no session-end signal, so a
-        session episode is closed here once idle: empty ones are pruned, and
-        non-empty ones are closed (firing one end-of-session dream so outcome
-        signals become lessons). A later store from the same client lazily
-        opens a fresh episode. ``now`` is injectable for tests. Returns
-        ``{"reaped": int, "session_keys": [...]}``."""
+        session episode is closed here once idle: non-empty ones are closed
+        (firing one end-of-session dream so outcome signals become lessons),
+        and empty ones are closed but KEPT until past the resume window —
+        the session may only be on a break, and its briefing handle must
+        stay resumable (2026-09-02) — then swept with a tombstone. A later
+        store from the same client lazily opens a fresh episode. ``now`` is
+        injectable for tests. Returns
+        ``{"reaped": int, "session_keys": [...], "swept": int}``."""
         now = time.time() if now is None else now
         reaped: list[str] = []
         fired_any = False
@@ -3579,12 +3629,137 @@ class MemoryService(DreamOps):
                 if now - activity >= idle_seconds:
                     targets.append(root.session_key)
             for sk in targets:
-                _result, fire, _found = self._close_session_locked(sk, run_dream=True)
+                _result, fire, _found = self._close_session_locked(
+                    sk, run_dream=True, prune_empty=False)
                 reaped.append(sk)
                 fired_any = fired_any or fire
+            swept = self._sweep_stale_empty_roots_locked(now)
         if fired_any:
             self._fire_and_forget_dream()
-        return {"reaped": len(reaped), "session_keys": reaped}
+        return {"reaped": len(reaped), "session_keys": reaped, "swept": swept}
+
+    def _sweep_stale_empty_roots_locked(self, now: float) -> int:
+        """Delete session roots the reaper closed EMPTY (deferred prune)
+        once ``ended_at`` is past the session resume window, leaving a
+        tombstone so the always-pass briefing handle can still be honored
+        by recreating the episode (:meth:`_resolve_episode_handle`).
+        Deferred from the reaper's close because an immediate prune made
+        the handle unknown rather than resumable — the 2026-09-02
+        incident: a session that only read before a long break lost its
+        attribution.
+
+        Candidates come ONLY from ``_deferred_empty_roots`` — never from a
+        scan of the episode log, where "zero live band entries" also
+        matches real history whose memories were evicted (the flat
+        preset's capacity eviction is a true drop) or forgotten; sweeping
+        those would silently delete session records (review finding,
+        2026-09-02). A deferred root that was resumed, explicitly pruned,
+        or gained entries since is dropped from the map, not swept.
+        Caller holds the lock. Returns the number of roots swept."""
+        assert self._cms is not None
+        em = self._cms.episodes
+        retention = float(os.environ.get(
+            "PSEUDOLIFE_SESSION_RESUME_SECONDS", "21600"))
+        counts: dict[str, int] | None = None
+        swept = 0
+        map_changed = False
+        for rid in list(self._deferred_empty_roots):
+            root = em.episodes.get(rid)
+            if root is None or root.ended_at is None:
+                # explicitly pruned, or resumed — no longer deferred
+                del self._deferred_empty_roots[rid]
+                map_changed = True
+                continue
+            if now - root.ended_at <= retention:
+                continue
+            subtree = {rid} | {
+                e.id for e in em.episodes.values()
+                if em._descends_from(e, rid)}
+            if counts is None:
+                counts = self._episode_entry_counts()
+            if sum(counts.get(i, 0) for i in subtree) != 0:
+                # gained entries after a resume: real history now
+                del self._deferred_empty_roots[rid]
+                map_changed = True
+                continue
+            if root.session_key:
+                self._episode_tombstones[rid] = (root.session_key,
+                                                 float(root.ended_at),
+                                                 root.title or "")
+            for i in subtree:
+                em.remove(i)
+                self._delete_episode_row(i)
+            del self._deferred_empty_roots[rid]
+            map_changed = True
+            swept += 1
+        if swept:
+            self._expire_tombstones_locked(now)
+            self._persist_tombstones()
+        if map_changed:
+            self._persist_deferred_empty()
+        return swept
+
+    def _expire_tombstones_locked(self, now: float) -> None:
+        """Drop tombstones past the handle-resume window, and cap the map so
+        a bank reaping many empty sessions can't grow meta without bound.
+        Caller holds the lock; caller persists."""
+        window = self._handle_resume_window()
+        if window <= 0:
+            self._episode_tombstones.clear()
+            return
+        for tid in [t for t, meta in self._episode_tombstones.items()
+                    if now - meta[1] > window]:
+            del self._episode_tombstones[tid]
+        cap = 200
+        if len(self._episode_tombstones) > cap:
+            newest = sorted(self._episode_tombstones.items(),
+                            key=lambda kv: kv[1][1], reverse=True)[:cap]
+            self._episode_tombstones = dict(newest)
+
+    def _persist_tombstones(self) -> None:
+        """Write-through the tombstone map (small; best-effort like the
+        active-session pointer). No-op in file mode."""
+        if self._storage is None:
+            return
+        try:
+            self._storage.set_meta(
+                self._EPISODE_TOMBSTONES_META_KEY,
+                {tid: {"session_key": key, "ended_at": ended, "title": title}
+                 for tid, (key, ended, title)
+                 in self._episode_tombstones.items()})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("episode tombstone write-through failed: %s", exc)
+
+    def _persist_deferred_empty(self) -> None:
+        """Write-through the deferred-empty-root map (small; best-effort
+        like the tombstones). No-op in file mode."""
+        if self._storage is None:
+            return
+        try:
+            self._storage.set_meta(self._DEFERRED_EMPTY_META_KEY,
+                                   dict(self._deferred_empty_roots))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("deferred-empty write-through failed: %s", exc)
+
+    @staticmethod
+    def _handle_resume_window() -> float:
+        """The explicit-handle resume window (seconds). Separate from — and
+        much longer than — the session-key window, because a presented
+        handle is a daemon-minted id only that session's briefing carried:
+        an explicit identity claim, not an inference. Default 30 days so a
+        session deferred for lack of GPU time (or just parked) still
+        attributes on return (2026-09-02); ``0`` disables closed-handle
+        resume and tombstone recreation. Parses defensively: this sits on
+        the handle-resolution path, which promises never to raise (a stale
+        handle must not lose a memory), so a typo'd env var falls back to
+        the default instead of failing every handle-carrying write."""
+        try:
+            return float(os.environ.get(
+                "PSEUDOLIFE_HANDLE_RESUME_SECONDS", "2592000"))
+        except ValueError:
+            logger.warning("PSEUDOLIFE_HANDLE_RESUME_SECONDS is not a "
+                           "number; using the 30-day default")
+            return 2592000.0
 
     def _persist_episodes(self) -> None:
         """Write-through the episode log (small; a full upsert sweep is the
@@ -3624,11 +3799,14 @@ class MemoryService(DreamOps):
             resume: bool = True) -> tuple[str, str | None] | None:
         """Identity tier 2 (spec 2026-07-18): match ``handle`` (a daemon-minted
         episode id or an unambiguous prefix, >=8 chars) against an OPEN root
-        episode — or a recently-reaped one (within
-        ``PSEUDOLIFE_SESSION_RESUME_SECONDS``), which is reopened: the
-        briefing advertises the handle as always-pass, so the idle reaper
-        closing the root mid-session must not defeat it (observed live
-        2026-08-10). Unlike a session-key resume, a handle resume never moves
+        episode — or a reaped one (within
+        ``PSEUDOLIFE_HANDLE_RESUME_SECONDS``, its own window, far longer
+        than the session-key one), which is reopened, or a swept-empty one,
+        which is recreated from its tombstone: the briefing advertises the
+        handle as always-pass, so neither the idle reaper closing the root
+        mid-session (observed live 2026-08-10) nor the sweep deleting an
+        empty root during a multi-day break (2026-09-02) may defeat it.
+        Unlike a session-key resume, a handle resume never moves
         ``current_id`` — the writer may be a different session. Caller MUST
         hold the lock. Returns ``(episode_id, session_key)`` on exactly one
         match; ``None`` on any miss — callers warn-and-degrade, never raise
@@ -3654,24 +3832,47 @@ class MemoryService(DreamOps):
         # end on a closed session refuses instead of resurrecting it.
         if not resume:
             return None
-        resume_window = float(os.environ.get(
-            "PSEUDOLIFE_SESSION_RESUME_SECONDS", "21600"))
+        resume_window = self._handle_resume_window()
         if resume_window <= 0:
             return None
+        now = time.time()
         closed = [e for e in self._cms.episodes.episodes.values()
                   if e.parent_id is None and e.ended_at is not None
                   and e.session_key and e.id.startswith(handle)]
-        if len(closed) != 1:
+        if len(closed) > 1:
             return None
-        ep = closed[0]
-        if time.time() - ep.ended_at > resume_window:
+        if len(closed) == 1:
+            ep = closed[0]
+            if now - ep.ended_at > resume_window:
+                return None
+            ep.ended_at = None
+            ep.closed_by_new_start = False
+            self._episode_touches[ep.id] = now
+            self._persist_episodes()
+            logger.info("resumed session episode %s via handle", ep.id)
+            return (ep.id, ep.session_key)
+        # Tombstone recreation: the sweep deleted this root as an empty husk
+        # while its session was on a long break. The handle proves the
+        # session is back — recreate the episode under its original id so
+        # attribution lands where the briefing promised.
+        tomb = [(tid, meta) for tid, meta in self._episode_tombstones.items()
+                if tid.startswith(handle)]
+        if len(tomb) != 1:
             return None
-        ep.ended_at = None
-        ep.closed_by_new_start = False
-        self._episode_touches[ep.id] = time.time()
+        tid, (skey, ended_at, title) = tomb[0]
+        if now - ended_at > resume_window:
+            return None
+        from pseudolife_memory.memory.episodes import Episode
+        ep = Episode(id=tid,
+                     title=title or time.strftime("session - %Y-%m-%d %H:%M"),
+                     started_at=now, session_key=skey)
+        self._cms.episodes.episodes[tid] = ep    # never moves current_id
+        del self._episode_tombstones[tid]
+        self._persist_tombstones()
+        self._episode_touches[tid] = now
         self._persist_episodes()
-        logger.info("resumed session episode %s via handle", ep.id)
-        return (ep.id, ep.session_key)
+        logger.info("recreated swept session episode %s via handle", tid)
+        return (tid, skey)
 
     def _ensure_session_episode(self, session_key: str | None) -> str | None:
         """Daemon-owned lazy episode open. In the direct-HTTP transport there is
