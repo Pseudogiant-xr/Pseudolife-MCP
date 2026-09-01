@@ -48,6 +48,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ping's timeout during a DB stall
   (`tests/test_web.py::test_asgi_health_runs_off_the_event_loop`).
 
+### Added (2026-09-01 — dreamer reasoning effort is now a knob)
+- **The dreamer's reasoning effort can be pinned from the Console.** What
+  the dream extractor spent on thinking was previously decided outside the
+  repo (the Claude CLI shim ran at the `claude` CLI's per-model default,
+  the Codex CLI shim inherited the host's `~/.codex/config.toml` — where
+  the desktop app had silently written `model_reasoning_effort = "high"`).
+  New `memory.dream.extractor_reasoning_effort` knob (Console → Extractor
+  panel, plus an **Effort** seg-row on the Dreamer card, applies at the
+  next dream): a set value rides every primary extractor request as
+  `reasoning_effort` — the Claude shim maps it to `claude --effort`, the
+  Codex shim to `-c model_reasoning_effort=`, OpenAI-compatible servers
+  read it natively, most local runtimes ignore the unknown field (a hosted
+  API may reject an unsupported value loudly). Empty (default) sends
+  nothing — byte-identical to the old behavior — and the fallback sidecar
+  never receives it (same rule as the model-only override). Both shims
+  also grew a `--reasoning-effort` launch flag; a request's value wins.
+  (`pseudolife_memory/memory/dream.py`, `pseudolife_memory/utils/config.py`,
+  `pseudolife_memory/web/config_io.py`, `evals/claude_shim.py`,
+  `evals/codex_shim.py`, Console `views/console.js`.)
+
 ### Fixed (2026-09-01 — beam_rejudge: a timed-out judge call can no longer hang the run)
 - **`evals/beam_rejudge.py` now kills the whole process tree on a judge-call
   timeout** — the same `subprocess.run(..., timeout=...)` gap fixed in

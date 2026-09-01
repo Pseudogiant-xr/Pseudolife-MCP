@@ -194,3 +194,72 @@ def test_chat_passes_override_model_to_cli():
     assert captured["model"] == "claude-sonnet-5"
     cli.chat("sys", "user")
     assert captured["model"] == "claude-opus-5"
+
+
+# ── per-request reasoning effort (2026-09-01 dreamer effort knob) ──────────
+
+
+def test_chat_threads_reasoning_effort_into_argv():
+    # Request effort wins over the launch default; maps to the claude CLI's
+    # --effort flag.
+    captured = {}
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0,
+                         reasoning_effort="medium")
+
+    def fake_run(cmd, payload):
+        captured["cmd"] = list(cmd)
+        return 0, b'{"result": "ok"}', b""
+
+    cli._run = fake_run
+    cli.chat("sys", "user", effort="high")
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--effort") + 1] == "high"
+    cli.chat("sys", "user")
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--effort") + 1] == "medium"
+
+
+def test_no_effort_omits_the_flag():
+    # Unset everywhere == pre-knob behavior: the CLI's own per-model default
+    # serves, exactly as before.
+    captured = {}
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0)
+
+    def fake_run(cmd, payload):
+        captured["cmd"] = list(cmd)
+        return 0, b'{"result": "ok"}', b""
+
+    cli._run = fake_run
+    cli.chat("sys", "user")
+    assert "--effort" not in captured["cmd"]
+
+
+def test_chat_completions_thread_reasoning_effort(monkeypatch):
+    # Mirror of the codex shim's handler pin: the daemon's extra_body lands
+    # the field in the request JSON; the handler must hand it to chat() or
+    # the knob silently does nothing on the DEPLOYED primary (:8082).
+    import json
+    import threading
+    import urllib.request
+
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0)
+    seen = {}
+
+    def _chat(system, user, model=None, effort=None):
+        seen["effort"] = effort
+        return "pong"
+    monkeypatch.setattr(cli, "chat", _chat)
+    srv = shim.ThreadingHTTPServer(("127.0.0.1", 0), shim.make_handler(cli))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{srv.server_address[1]}/v1/chat/completions",
+            data=json.dumps({"model": "extractor", "reasoning_effort": "low",
+                             "messages": [{"role": "user", "content": "hi"}]
+                             }).encode(),
+            headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req):
+            pass
+    finally:
+        srv.shutdown()
+    assert seen["effort"] == "low"

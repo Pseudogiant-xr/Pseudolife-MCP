@@ -234,7 +234,7 @@ def test_routes_config_write_via_dispatch(svc):
 def test_dream_status_carries_dreamer_card_fields(svc):
     st = ConsoleRoutes(svc).dispatch("GET", "/api/dream/status", {}, {})
     for key in ("primary_model", "primary_model_served", "fallback_model",
-                "extractor_source", "model_override"):
+                "extractor_source", "model_override", "reasoning_effort"):
         assert key in st, f"dreamer card field missing: {key}"
 
 
@@ -243,6 +243,13 @@ def test_dreamer_model_override_knob_applies_live(svc):
         "POST", "/api/config", {},
         {"patch": {"memory.dream.extractor_model_override": "claude-fable-5"}})
     assert "memory.dream.extractor_model_override" in out["applied"]
+
+
+def test_dreamer_reasoning_effort_knob_applies_live(svc):
+    out = ConsoleRoutes(svc).dispatch(
+        "POST", "/api/config", {},
+        {"patch": {"memory.dream.extractor_reasoning_effort": "high"}})
+    assert "memory.dream.extractor_reasoning_effort" in out["applied"]
 
 
 # ── ASGI app ────────────────────────────────────────────────────────────────
