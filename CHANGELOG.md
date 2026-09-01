@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-02 — memory_consolidate supersessions survive a restart)
+- **A `memory_consolidate` call marked the old entries superseded in memory
+  but never wrote the marks to Postgres, so the correction was lost on the
+  next daemon restart and the consolidated-away entries came back looking
+  current.** `MemoryService.consolidate` set `superseded_at` /
+  `superseded_by_text` on the matched band entries and stopped there;
+  `_persist_all` syncs only `access_count` for entries (plus the
+  cortex/world/lesson snapshots), so nothing else carried the columns down.
+  On the next `hydrate_cms` the entries hydrated from their unchanged rows,
+  un-superseded — silently reverting the consolidation. `consolidate` now
+  mirrors the write-through `MemoryService.supersede` and
+  `ContinuumMemorySystem.store`'s contradiction decay have always had:
+  collect the marked entries, then `update_entry` each one carrying a
+  `db_id`. Both matching branches are covered — the exact-text pass and the
+  embedding fallback for paraphrases, which marks a different entry object.
+  No schema change; the columns already existed and were simply never
+  written on this path. Found while building the retract-direction
+  traversal, which reads supersession from both the live band entries and
+  the `entries.superseded_at` column precisely because of this gap.
+
 ### Changed (2026-09-02 — served write-policy and trap-avoidance text)
 - **The always-on served text now names a write decision and warns that a
   recalled memory can anchor the current task.** Two prompt-level findings
