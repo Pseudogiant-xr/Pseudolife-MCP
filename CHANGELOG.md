@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-02 — served write-policy and trap-avoidance text)
+- **The always-on served text now names a write decision and warns that a
+  recalled memory can anchor the current task.** Two prompt-level findings
+  adopted; text only — no schema change, no behavior code, and the
+  measurement that would decide either has not been run.
+  - **Write policy (MCB, arXiv 2608.19564).** `memory_store`'s served
+    description and the session-start block's CAPTURE section now name the
+    four options for interaction-derived information — PERSIST /
+    CONTEXT ONLY / RE-VERIFY at source / ASK — with "re-verify" mapped onto
+    the existing `freshness_class="volatile"` vocabulary rather than a new
+    concept. The paper measured a policy prompt cutting erroneous
+    persistence 0.243 -> 0.100, and found models verify changing facts far
+    more reliably than they ask to resolve ambiguity, so the ASK clause is
+    stated explicitly instead of being left implicit.
+  - **Trap avoidance (MemTrapBench / AdaptiveMem, arXiv 2608.20202).**
+    `memory_search` and `memory_lesson_search`'s descriptions and the
+    block's TRUST ORDER paragraph now say a hit is a lead about the past,
+    not a directive for the present — check it against the task in hand
+    before it steers. "Re-derive when today's context differs" is carried
+    by `memory_search` alone: the block's TRUST ORDER already says
+    "re-verify before acting on it" two lines below, and its RECALL
+    section names re-deriving a known dead-end as the common failure, so
+    repeating it there would have cut both ways. The paper
+    found all five memory frameworks it tested underperforming no-memory
+    through stale-framing anchoring, recovered by an inference-time
+    instruction alone. `memory_lesson_search`'s wording is anchored to the
+    `re_verify` flag the tool already computes and returns but never
+    documented on its served surface; both `re_verify` keys are now in its
+    documented Returns shape. `memory_recall` is covered by the block line
+    rather than a third copy of the same sentence.
+  - **Not changed, deliberately.** `_MCP_INSTRUCTIONS` — the connect-time
+    instruction string every conforming client sees, rung 2 of the
+    hook-equivalent ladder in `docs/guide/providers.md` — still frames
+    storage as unconditional. It has 45 chars of headroom under its own
+    512-char cap (`tests/test_mcp_client_neutrality.py`), too little for
+    the four-way boundary; a client with no SessionStart hook therefore
+    gets the write policy from `memory_store`'s description only.
+  - **Manifest cost.** Tool descriptions +823 chars for core and full,
+    +551 for minimal (minimal 3232 -> 3783 of 5000, core 7054 -> 7877 of
+    11500, full 11740 -> 12563 of 17000); the session-start block
+    6908 -> 7316 of its 7500 guard, leaving 184 chars where there were 592.
+    No budget was raised. The block is now the binding surface: the next
+    addition to it must fund itself by trimming.
+  - Both edits are pinned by content tests
+    (`tests/test_tool_consolidation.py`, `tests/test_plugin_packaging.py`)
+    so a future trim that drops them goes red.
+
 ### Fixed (2026-09-01 — the answerability probe's text matching)
 - **Four bug classes in `evals/answerability_probe.py`'s containment
   ladder biased what it called answerable.** All four came out of the

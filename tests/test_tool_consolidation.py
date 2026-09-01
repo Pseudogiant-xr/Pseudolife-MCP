@@ -393,3 +393,45 @@ def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkey
                       "deploy-host", "pitfall")]
     bad = mod.memory_graph_review("dismiss_slot_pair", store="lesson", src="no-pipe")
     assert bad.get("error") == "store_src_dst_required"
+
+
+# ── served policy text (2026-09-02) ───────────────────────────────────────
+
+def _descriptions(tmp_path: Path, monkeypatch) -> dict[str, str]:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    tools = asyncio.run(mod.mcp.list_tools())
+    return {t.name: " ".join((t.description or "").split()) for t in tools}
+
+
+def test_store_description_carries_the_write_policy_boundary(
+        tmp_path: Path, monkeypatch) -> None:
+    """MCB (arXiv 2608.19564) measured agents over-persisting ambiguous
+    interaction-derived information; a policy prompt naming the four
+    options cut erroneous persistence 0.243 -> 0.100. The boundary is
+    served on ``memory_store`` itself, where the decision is made — a
+    future trim that drops it should go red rather than quietly restore
+    the un-gated "store anything worth keeping" surface."""
+    d = _descriptions(tmp_path, monkeypatch)["memory_store"]
+    assert "PERSIST" in d
+    assert "CONTEXT ONLY" in d
+    assert "RE-VERIFY" in d
+    assert 'memory_fact_set(..., freshness_class="volatile")' in d
+    assert "ASK when the claim is ambiguous" in d
+
+
+def test_recall_surface_carries_trap_avoidance_guidance(
+        tmp_path: Path, monkeypatch) -> None:
+    """MemTrapBench (arXiv 2608.20202) found faithfully-recorded, relevant
+    memories still anchoring models on a stale framing (Reasoning Fixation
+    / Belief Distortion), with every framework tested underperforming
+    no-memory; an inference-time instruction recovered the loss. Pin it on
+    the two retrieval surfaces where the anchoring shape is strongest —
+    the always-visible entry point and prior lessons."""
+    d = _descriptions(tmp_path, monkeypatch)
+    assert "leads about the PAST" in d["memory_search"]
+    assert "re-derive" in d["memory_search"]
+    assert "anchors you on a stale framing" in d["memory_lesson_search"]
+    # The prose is anchored to the flag the tool already returns, so the
+    # guidance points at a computed signal rather than a vague heuristic.
+    assert "re_verify" in d["memory_lesson_search"]

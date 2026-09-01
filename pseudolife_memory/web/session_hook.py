@@ -74,6 +74,9 @@ RECALL AGAIN mid-session — once at the start is not enough. Search when:
   and treat a memory-vs-file mismatch as review input, not noise.
 
 TRUST ORDER — memory tells you WHY; the repo tells you WHAT IS.
+A hit is a lead about the PAST, not a directive for the present: a
+relevant memory can still frame the wrong problem, so check it against
+the task in front of you before letting it steer.
 For anything live (deployed version, config, what's running), read the
 config/code and say where you read it. A memory records what was true when
 it was WRITTEN: cortex facts now carry `asserted_at` / `age`, so check them
@@ -96,6 +99,10 @@ against it — settle it with `memory_fact_resolve(entity, attribute, ...)`
 which only contests the slot further.
 
 CAPTURE — as durable things arise (one claim per call):
+- Before writing, choose: PERSIST what stays true; CONTEXT ONLY for
+  task-scoped detail; RE-VERIFY a value that rots, at source
+  (`memory_fact_set(..., freshness_class="volatile")`); ASK when the
+  claim is ambiguous.
 - Name the session EARLY: `memory_session_title("<project> - <topic>")`.
 - `memory_store` for durable context; set `origin` honestly
   (`user`/`action`/`agent`) and use a stable `source` per project/topic so

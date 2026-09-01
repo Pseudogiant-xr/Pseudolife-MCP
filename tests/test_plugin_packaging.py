@@ -256,7 +256,10 @@ def test_memory_loop_block_leaves_briefing_headroom():
     HOOK_CONTEXT_MAX_CHARS with the briefing LAST — every char the block
     grows is silently cut from the briefing tail (lessons, unsure-abouts,
     where-we-left-off). Reserve 2,000 chars for the briefing (the block
-    measured 6,663 on 2026-08-28; a truncated briefing has no other alarm)."""
+    measured 6,663 on 2026-08-28 and 7,316 on 2026-09-02, after the
+    write-policy and trap-avoidance text — 184 chars of reserve left, so
+    the next addition to the block funds itself by trimming; a truncated
+    briefing has no other alarm)."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
                                                     MEMORY_LOOP_BLOCK)
     assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000
@@ -342,3 +345,32 @@ def test_plugin_commands_reference_only_real_tools():
         assert referenced, f"{rel}: regex found no tool mentions"
         unknown = referenced - set(_TOOL_TIERS)
         assert not unknown, f"{rel} names unregistered tools: {unknown}"
+
+
+def test_memory_loop_block_carries_the_write_policy_boundary():
+    """MCB (arXiv 2608.19564): agents over-persist ambiguous
+    interaction-derived information, and a prompt naming the four options
+    — persist / context-only / re-verify / ask — cut erroneous persistence
+    0.243 -> 0.100. The CAPTURE section is where the served text tells the
+    model what to write, so the gate lives there (2026-09-02)."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "PERSIST what stays true" in text
+    assert "CONTEXT ONLY" in text
+    assert "RE-VERIFY" in text and 'freshness_class="volatile"' in text
+    assert "ASK when the claim is ambiguous" in text
+
+
+def test_memory_loop_block_carries_trap_avoidance_guidance():
+    """MemTrapBench (arXiv 2608.20202): relevant, faithfully-recorded
+    memories still anchor models on a stale framing, and every memory
+    framework tested underperformed no-memory until an inference-time
+    instruction was added. The block's TRUST ORDER paragraph already
+    ranks memory below the repo; this extends it to the framing a hit
+    carries, and covers every recall tool at once — including
+    ``memory_recall``, whose own description stays untouched
+    (2026-09-02)."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "a lead about the PAST, not a directive for the present" in text
+    assert "frame the wrong problem" in text
