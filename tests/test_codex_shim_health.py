@@ -318,7 +318,7 @@ def test_chat_completions_round_trips_the_resolved_model(monkeypatch):
     cli = shim.CodexCli(Path("codex"), "gpt-5.6-terra", 30.0)
     seen = {}
 
-    def _chat(system, user, model=None):
+    def _chat(system, user, model=None, effort=None):
         seen["model"] = model
         return "pong"
     monkeypatch.setattr(cli, "chat", _chat)
@@ -390,3 +390,55 @@ def test_health_stale_cache_served_while_revalidating(monkeypatch):
         time.sleep(0.02)
     assert cli.health()[0] is False
     assert calls["n"] == 1                   # exactly one refresh, no stampede
+
+
+# --- per-request reasoning effort (2026-09-01 dreamer effort knob) -------
+
+_OK_STREAM = (b'{"type":"item.completed","item":'
+              b'{"type":"agent_message","text":"ok"}}')
+
+
+def test_chat_threads_reasoning_effort_into_argv():
+    # Request effort wins over the launch default (mirrors resolve_model's
+    # precedence for the model).
+    cli = shim.CodexCli(Path("codex"), "gpt-5.6-terra", 30.0,
+                        reasoning_effort="medium")
+    seen = _stub_run(cli, stdout=_OK_STREAM)
+    cli.chat("sys", "hi", effort="high")
+    assert "model_reasoning_effort=high" in seen["argv"]
+    cli.chat("sys", "hi")
+    assert "model_reasoning_effort=medium" in seen["argv"]
+
+
+def test_no_effort_omits_the_config_key():
+    # Unset everywhere == pre-knob behavior: the CLI inherits the host's
+    # ~/.codex/config.toml, exactly as before.
+    cli = shim.CodexCli(Path("codex"), "gpt-5.6-terra", 30.0)
+    seen = _stub_run(cli, stdout=_OK_STREAM)
+    cli.chat("sys", "hi")
+    assert not any("model_reasoning_effort" in a for a in seen["argv"])
+
+
+def test_chat_completions_thread_reasoning_effort(monkeypatch):
+    # The daemon's extra_body lands the field in the request JSON; the
+    # handler must hand it to chat() or the knob silently does nothing.
+    cli = shim.CodexCli(Path("codex"), "gpt-5.6-terra", 30.0)
+    seen = {}
+
+    def _chat(system, user, model=None, effort=None):
+        seen["effort"] = effort
+        return "pong"
+    monkeypatch.setattr(cli, "chat", _chat)
+    srv, base = _serve(cli)
+    try:
+        req = urllib.request.Request(
+            f"{base}/v1/chat/completions",
+            data=json.dumps({"model": "extractor", "reasoning_effort": "low",
+                             "messages": [{"role": "user", "content": "hi"}]
+                             }).encode(),
+            headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req):
+            pass
+    finally:
+        srv.shutdown()
+    assert seen["effort"] == "low"

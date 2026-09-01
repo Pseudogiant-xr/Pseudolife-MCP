@@ -85,3 +85,21 @@ def test_judge_thinking_effort_string_sets_reasoning_effort(captured):
     body = captured[0]
     assert body["chat_template_kwargs"] == {"reasoning_effort": "low"}
     assert body["max_tokens"] == max(ex.max_tokens, 120) + 4096
+
+
+def test_extractor_reasoning_effort_never_reaches_the_judge_payload(captured):
+    # With judge_url unset the Step-C judge reuses the PRIMARY dream
+    # extractor, whose extra_body may carry the Console's dreamer effort
+    # knob (extractor_reasoning_effort). The judge owns its own thinking
+    # dimension (judge_thinking / the enable_thinking pin), so the dreamer
+    # knob must be stripped here — otherwise the CLI shims, which honour a
+    # top-level reasoning_effort, would silently override the judge's
+    # thinking-off pin the moment an operator tunes the dreamer.
+    ex = D.OpenAICompatExtractor(
+        "http://x/v1", "m",
+        extra_body={"cache_prompt": False, "reasoning_effort": "low"})
+    ex.judge_merges([_PROPOSAL])
+    body = captured[0]
+    assert "reasoning_effort" not in body
+    assert body["cache_prompt"] is False        # the rest still spreads
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}

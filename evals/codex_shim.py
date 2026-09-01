@@ -194,11 +194,16 @@ class CodexCli:
 
     def __init__(self, cli: Path, model: str, call_timeout: float,
                  system_override: str | None = None,
-                 health_ttl: float = 300.0):
+                 health_ttl: float = 300.0,
+                 reasoning_effort: str | None = None):
         self.cli = cli
         self.model = model
         self.call_timeout = call_timeout
         self.system_override = system_override
+        # Launch-default reasoning effort; a per-request value wins (mirrors
+        # resolve_model). None = never pass the -c key, so the CLI inherits
+        # the host's ~/.codex/config.toml — the pre-knob behavior.
+        self.reasoning_effort = reasoning_effort
         # Refresh cadence for /health — every refresh is a REAL CLI call, so
         # on a metered/free ChatGPT tier the default (300s ≈ 288 calls/day)
         # is real spend; the autostart installer raises it via --health-ttl.
@@ -212,7 +217,8 @@ class CodexCli:
         self._health_refreshing = False
 
     def _argv(self, instructions: Path | None,
-              model: str | None = None) -> list[str]:
+              model: str | None = None,
+              effort: str | None = None) -> list[str]:
         """Argv for one pure completion. ``instructions`` (when given) replaces
         Codex's built-in agent instructions with the request's system message."""
         argv = [str(self.cli), "exec",
@@ -222,6 +228,9 @@ class CodexCli:
                 "--ephemeral",
                 "-c", "web_search=disabled",
                 "-c", "features.shell_tool=false"]
+        if effort or self.reasoning_effort:
+            argv += ["-c", "model_reasoning_effort="
+                     f"{effort or self.reasoning_effort}"]
         if instructions is not None:
             argv += ["-c", f"model_instructions_file={instructions}"]
         argv.append("-")                  # prompt arrives on stdin
@@ -249,7 +258,8 @@ class CodexCli:
             raise
         return proc.returncode, out, err
 
-    def chat(self, system: str, user: str, model: str | None = None) -> str:
+    def chat(self, system: str, user: str, model: str | None = None,
+             effort: str | None = None) -> str:
         if self.system_override and system.startswith(_SYSTEM_PROMPT):
             # Swap the claims-extraction prompt prefix for the variant,
             # PRESERVING whatever the harness appended after it (vocab hint
@@ -264,7 +274,7 @@ class CodexCli:
             self.calls += 1
             n = self.calls
             t0 = time.monotonic()
-            rc, out, err = self._run(self._argv(instructions, model),
+            rc, out, err = self._run(self._argv(instructions, model, effort),
                                      user.encode("utf-8"))
         if rc != 0:
             # Prefer a STRUCTURED reason; a stream with no agent_message
@@ -365,7 +375,13 @@ def make_handler(cli: CodexCli):
                                    if m.get("role") != "system"
                                    and m.get("content"))
                 model = resolve_model(req.get("model"), cli.model)
-                reply = cli.chat(system, user, model=model)
+                # Per-request effort (the daemon's effort knob rides the
+                # request body); non-string/blank means unset.
+                effort = req.get("reasoning_effort")
+                effort = (effort.strip()
+                          if isinstance(effort, str) and effort.strip()
+                          else None)
+                reply = cli.chat(system, user, model=model, effort=effort)
                 self._json(200, {
                     "id": f"codex-shim-{int(time.time() * 1000)}",
                     "object": "chat.completion",
@@ -411,6 +427,11 @@ def _parse_args(argv=None):
                          "this file's body (text after the first '---' line, "
                          "or the whole file if no separator); the harness's "
                          "appended vocab hint is preserved")
+    ap.add_argument("--reasoning-effort", default=None,
+                    help="launch-default model_reasoning_effort "
+                         "(minimal/low/medium/high/xhigh); a request's "
+                         "reasoning_effort wins per call. Unset = the CLI "
+                         "inherits the host's ~/.codex/config.toml")
     return ap.parse_args(argv)
 
 
@@ -428,7 +449,8 @@ def main():
         print(f"codex_shim: system prompt override from "
               f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
     cli = CodexCli(args.cli, args.model, args.call_timeout,
-                   system_override=override, health_ttl=args.health_ttl)
+                   system_override=override, health_ttl=args.health_ttl,
+                   reasoning_effort=args.reasoning_effort)
     # Warm the health cache before serving: the only blocking health path is
     # an empty cache, and this guarantees no request ever hits it.
     ok, detail = cli.health()

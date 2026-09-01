@@ -81,11 +81,14 @@ gold_recoverable 1.0 / stale_leak 0.0, matching the Claude ceiling rungs,
 at 13.1 tokens/query (`terra`, artifact `results/terra.json`) and
 14.6 tokens/query (`luna`, artifact `results/luna.json`) — inside the
 ≤60%-of-naive gate but roughly 10× the Claude rungs' 1.4: both write
-wordier slot values. Reproducibility caveat: neither shim pins reasoning
-effort — the Codex shim inherits the host's `~/.codex/config.toml`
+wordier slot values. Reproducibility caveat: these runs predate the
+shims' `--reasoning-effort` flag, so neither pinned an effort — the Codex
+shim inherited the host's `~/.codex/config.toml`
 (`model_reasoning_effort = "high"` for these runs) and the Claude shim
-the `claude` CLI's per-model default — so cross-machine reruns may
-measure a different effort setting.
+the `claude` CLI's per-model default. Cross-machine reruns may measure a
+different effort setting; a rerun wanting comparability should pin it
+with the flag (or the request-level `reasoning_effort` field both shims
+now honour).
 
 Every `:8081` rung shares that **one** endpoint: the operator swaps the served
 GGUF between runs (see below). Run one, then the next.

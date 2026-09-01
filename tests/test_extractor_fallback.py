@@ -509,3 +509,38 @@ def test_true_forces_the_cache_on_explicitly():
     from pseudolife_memory.memory.dream import build_extractor
     ex = build_extractor(_pin_cfg(extractor_cache_prompt=True))
     assert ex.extra_body == {"cache_prompt": True}
+
+
+# ── reasoning-effort pass-through (2026-09-01 dreamer effort knob) ─────────
+
+def test_dreamconfig_reasoning_effort_defaults_off():
+    assert DreamConfig().extractor_reasoning_effort is None
+
+
+def test_primary_extractor_threads_reasoning_effort():
+    from pseudolife_memory.memory.dream import build_extractor
+    ex = build_extractor(_pin_cfg(extractor_reasoning_effort="high"))
+    assert ex.extra_body["reasoning_effort"] == "high"
+    assert ex.extra_body["cache_prompt"] is False   # merged, not replaced
+
+
+def test_unset_effort_sends_nothing():
+    # Empty knob == pre-knob behavior: the field never appears on the wire,
+    # so the endpoint / CLI / host-config default keeps serving.
+    from pseudolife_memory.memory.dream import build_extractor
+    ex = build_extractor(_pin_cfg())
+    assert "reasoning_effort" not in ex.extra_body
+    ex = build_extractor(_pin_cfg(extractor_reasoning_effort=""))
+    assert "reasoning_effort" not in ex.extra_body
+
+
+def test_fallback_extractor_never_carries_reasoning_effort():
+    # Same philosophy as the model override: the fallback sidecar's measured
+    # config is never perturbed by primary-side tuning.
+    from pseudolife_memory.memory.dream import build_extractor_with_fallback
+    cfg = _cfg("http://127.0.0.1:9/v1", fb="http://127.0.0.1:10/v1",
+               mode="fallback")
+    cfg.extractor_reasoning_effort = "high"
+    ex, which = build_extractor_with_fallback(cfg)
+    assert which == "fallback"
+    assert "reasoning_effort" not in ex.extra_body

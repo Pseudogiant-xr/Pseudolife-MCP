@@ -700,6 +700,8 @@ class FixtureService:
                 "fallback_model": "extractor",
                 "extractor_source": "env",
                 "model_override": override,
+                "reasoning_effort":
+                    self.config.memory.dream.extractor_reasoning_effort or None,
                 "primary_healthy": True,
                 "last_dream_extractor": {"which": "primary",
                                          "base_url": "http://host.docker.internal:8082/v1",
