@@ -6,6 +6,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-01 — daemon maintenance passes get named pauses and lose their biggest one)
+- **Slow service-lock holds and waits now name themselves in the log.** The
+  coarse service lock is a `MonitoredLock` (`utils/locks.py`): any hold or
+  wait past 1.0s warns with the holder's function name and the duration.
+  Threshold from the 2026-09-01 live-bank profile — every legitimate hold
+  measured there totalled ≤0.43s, so 1s only fires on regressions or the
+  unexplained stall class this exists to name. The 2026-08-31 hook-timeout
+  forensics needed two sessions of external probing to (mis)localize one
+  stall; this makes the next one a one-line diagnosis.
+- **Every sweep tick logs one ledger line with per-phase durations**
+  (`compact` / `prune_runs` / `prune_retrieval` / `deep_tick` / `judge` /
+  `dream` / `total`, also returned under `timings`), and the Step-C judge
+  announces its batch *before* the model call. Completions-only logging is
+  what let the same forensics misread a quiet 36s window as a judging
+  tick — with no tick start or duration in the ledger, a completion
+  timestamp invites back-dating the whole preceding window onto that phase.
+- **`candidate_pairs` is a descending-similarity scan with early exit
+  instead of an O(n²) Python pair loop** — 4.8s → 0.66s per deep tick on
+  the live bank (2,070 vector-eligible entities), verified output-identical
+  there and equivalence-pinned against a verbatim copy of the old loop in
+  `tests/test_graph_consolidation.py`. A similarity-threshold prefilter
+  cannot prune this space (64% of all pairs sit ≥ 0.55 on the live bank);
+  what bounds the work is the top-k output, so pairs are ranked by a
+  blocked matmul and only the top of the ranking runs the per-pair filter
+  chain, through the k-th survivor's rounded-similarity tie band. Worst
+  case degenerates to the old full scan, never worse.
+- **Saves report per-part durations** (`weights` / `access_counts` /
+  `cortex` / `world` / `lessons` under `timings` in the save result) and
+  warn with the breakdown when a save holds the service lock ≥ 1s — the
+  2026-08-31 probe caught a ~1.5s autosave-correlated stall that none of
+  the offline-measurable parts explains (weights ~5ms, access counts
+  ~30ms at live size), so the live daemon now names the part itself
+  instead of leaving it to correlation.
+- **`update_access_counts` is one `unnest`'d UPDATE instead of per-row
+  `executemany`** — 30.5ms → 9.8ms at the live bank's 1,135 rows, and the
+  autosave's lock hold stays O(1) in round trips as the bank grows.
+- **`/health` composes its payload off the event loop** (executor, like
+  every other blocking handler): the payload includes a blocking Postgres
+  ping, and inline it would freeze the daemon's entire web surface for the
+  ping's timeout during a DB stall
+  (`tests/test_web.py::test_asgi_health_runs_off_the_event_loop`).
+
 ### Fixed (2026-09-01 — session hooks stop mistaking a busy daemon for a dead one)
 - **The plugin's SessionStart/SessionEnd hooks retry before declaring the
   daemon down, and the fallback no longer claims the MCP tools are

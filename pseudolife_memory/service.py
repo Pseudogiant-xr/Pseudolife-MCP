@@ -58,6 +58,7 @@ from pseudolife_memory.session_title import (
     GENERIC_TITLE_RE, derive_session_title)
 from pseudolife_memory.writer_context import resolve_writer_detailed
 from pseudolife_memory.utils.config import AppConfig, load_config
+from pseudolife_memory.utils.locks import SLOW_LOCK_SECONDS, MonitoredLock
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +426,10 @@ class MemoryService(DreamOps):
         config_path: str | Path | None = None,
         database_url: str | None = None,
     ) -> None:
-        self._lock = Lock()
+        # Monitored so a hold or wait past ~1s names its holder in the log
+        # (2026-09-01: two sessions of external probing to localize one
+        # stall that this line would have named). Drop-in for Lock().
+        self._lock = MonitoredLock("service")
         # Schema v8: when a database URL is configured (param or
         # PSEUDOLIFE_MCP_DATABASE_URL), Postgres is the source of truth
         # and the in-memory bands are a write-through cache. Without it,
@@ -1832,8 +1836,35 @@ class MemoryService(DreamOps):
         File mode: legacy full-bank torch.save (v0.1 behavior).
         """
         assert self._cms is not None
+        # Per-part durations, warned on a slow save: every persist runs
+        # under the service lock, so a slow part IS a daemon pause — and
+        # the 2026-08-31 probe caught a ~1.5s autosave-correlated stall
+        # that none of the offline-measurable parts explains (weights
+        # ~5ms, access counts ~10-30ms at live size). This breakdown makes
+        # the live daemon name the part next time instead of leaving it to
+        # correlation.
+        t_start = time.perf_counter()
+        timings: dict[str, float] = {}
+
+        def _timed(part, fn):
+            t0 = time.perf_counter()
+            out = fn()
+            timings[part] = round(time.perf_counter() - t0, 3)
+            return out
+
+        def _finish(result):
+            # Wall time, not sum-of-parts: same meaning as the sweep
+            # ledger's total, and it still counts a part that raised.
+            timings["total"] = round(time.perf_counter() - t_start, 3)
+            result["timings"] = timings
+            if timings["total"] >= SLOW_LOCK_SECONDS:
+                logger.warning("%s save held the service lock %.2fs: %s",
+                               kind, timings["total"], timings)
+            return result
+
         if self._storage is not None:
-            self._cms.save_weights(self.config.memory.save_dir)
+            _timed("weights",
+                   lambda: self._cms.save_weights(self.config.memory.save_dir))
             pairs = [
                 (e.db_id, e.access_count)
                 for band in self._cms.bands
@@ -1841,27 +1872,31 @@ class MemoryService(DreamOps):
                 if e.db_id is not None
             ]
             try:
-                self._storage.update_access_counts(pairs)
+                _timed("access_counts",
+                       lambda: self._storage.update_access_counts(pairs))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("access-count sync failed: %s", exc)
             if kind in ("explicit", "flush"):
                 # Full resync on the rare explicit/exit saves — belt and
                 # braces against any dirty-mark gap in the per-slot path.
                 from pseudolife_memory.storage import sync as _sync
-                _sync.snapshot_cortex(self._cortex, self._storage)
+                _timed("cortex",
+                       lambda: _sync.snapshot_cortex(self._cortex, self._storage))
                 if self._world is not None:
-                    _sync.snapshot_world_cortex(self._world, self._storage)
+                    _timed("world", lambda: _sync.snapshot_world_cortex(
+                        self._world, self._storage))
                 if self._lessons is not None:
-                    _sync.snapshot_lessons(self._lessons, self._storage)
+                    _timed("lessons", lambda: _sync.snapshot_lessons(
+                        self._lessons, self._storage))
             else:
-                self._save_cortex()
-                self._save_world()
-                self._save_lessons()
-            return {"saved_to": self.config.memory.save_dir,
-                    "mode": "postgres+weights", "kind": kind}
-        self._cms.save(self.config.memory.save_dir)
-        self._save_cortex()
-        return {"saved_to": self.config.memory.save_dir, "kind": kind}
+                _timed("cortex", self._save_cortex)
+                _timed("world", self._save_world)
+                _timed("lessons", self._save_lessons)
+            return _finish({"saved_to": self.config.memory.save_dir,
+                            "mode": "postgres+weights", "kind": kind})
+        _timed("bank", lambda: self._cms.save(self.config.memory.save_dir))
+        _timed("cortex", self._save_cortex)
+        return _finish({"saved_to": self.config.memory.save_dir, "kind": kind})
 
     def _entity_kind_map(self) -> dict[str, str]:
         """entity_norm -> kind, cached. Order 1k rows and read on every fact

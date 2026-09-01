@@ -251,6 +251,97 @@ def test_candidate_pairs_skips_excluded_ids():
     assert {(c["src_id"], c["dst_id"]) for c in out} == {(1, 2)}
 
 
+def test_candidate_pairs_matches_naive_reference_on_random_graph():
+    """Equivalence pin for the vectorized similarity prefilter (2026-09-01).
+
+    candidate_pairs was a pure-Python O(n^2) pair loop — 4.2s per deep
+    tick at the live bank's 2,070 vector-eligible entities and quadratic
+    in entity count — replaced by a matmul prefilter plus per-survivor
+    exact scoring. The refactor's contract is bit-identical OUTPUT (the
+    per-pair filters, the reported similarity values from the same
+    np.dot, ordering and top-k), so this test runs the shipped function
+    against a verbatim naive reference over a seeded random graph that
+    exercises every filter class at once."""
+    rng = np.random.default_rng(20260901)
+    n = 90
+    ents = [{"id": i, "canonical": f"ent {i}", "display": f"ent {i}",
+             "etype": None} for i in range(n)]
+    # Clustered vectors so many pairs land near the threshold from both
+    # sides; a couple of exact-duplicate names to exercise the dup filter;
+    # one name-contained pair for the containment exemption.
+    base = rng.normal(size=(6, 24))
+    vecs = {}
+    for i in range(n):
+        v = base[i % 6] + rng.normal(scale=0.4, size=24)
+        # float32, like the live embeddings — so the fixture exercises the
+        # matmul-vs-dot accumulation error the prefilter margins absorb.
+        vecs[i] = (v / np.linalg.norm(v)).astype(np.float32)
+    ents[7]["canonical"] = ents[3]["canonical"]      # exact-dup pair
+    ents[11]["display"] = "ent 4 service"
+    ents[11]["canonical"] = "ent 4 service"          # name-contains ent 4
+    edges = [{"id": 1000 + k, "src_id": int(a), "dst_id": int(b),
+              "relation": "related-to", "confidence": 0.5, "origin": "agent"}
+             for k, (a, b) in enumerate(
+                 rng.integers(0, n, size=(40, 2)).tolist()) if a != b]
+    mentions = {i: frozenset(rng.integers(0, 60, size=rng.integers(1, 6)).tolist())
+                for i in range(n) if i % 5}          # some ids have no mentions
+    scope = {i: (["p1"] if i % 3 == 0 else ["p2"] if i % 3 == 1 else [])
+             for i in range(0, n, 2)}                # some unattributed
+    dismissed = {tuple(sorted((f"ent {a}", f"ent {b}")))
+                 for a, b in rng.integers(0, n, size=(15, 2)).tolist()}
+    pending = {frozenset((int(a), int(b)))
+               for a, b in rng.integers(0, n, size=(10, 2)).tolist()
+               if a != b}
+    excluded = {int(x) for x in rng.integers(0, n, size=5)}
+    kwargs = dict(min_similarity=0.55, top_k=25, dismissed=dismissed,
+                  max_support_overlap=0.8, pending_pairs=pending,
+                  excluded_ids=excluded)
+
+    def naive(vectors, edges, entities, scope_map, mention_map, *,
+              min_similarity, top_k, dismissed, max_support_overlap,
+              pending_pairs, excluded_ids):
+        # Verbatim pre-2026-09-01 loop body.
+        disp = {e["id"]: e["display"] for e in entities}
+        canon = {e["id"]: e["canonical"] for e in entities}
+        linked = {frozenset((e["src_id"], e["dst_id"])) for e in edges}
+        linked |= pending_pairs or set()
+        excl = excluded_ids or set()
+        dup = {frozenset(p) for p in gc.exact_duplicate_pairs(entities, edges)}
+        ids = sorted(i for i in vectors if i not in excl)
+        scored = []
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                u, v = ids[i], ids[j]
+                key = frozenset((u, v))
+                if key in linked or key in dup:
+                    continue
+                if dismissed and tuple(sorted((canon.get(u, ""), canon.get(v, "")))) in dismissed:
+                    continue
+                mu, mv = mention_map.get(u), mention_map.get(v)
+                if (mu and mv
+                        and (len(mu & mv) / min(len(mu), len(mv))
+                             >= max_support_overlap)
+                        and not gc._name_contains(disp.get(u, ""), disp.get(v, ""))):
+                    continue
+                su, sv = set(scope_map.get(u, [])), set(scope_map.get(v, []))
+                if su and sv and not (su & sv):
+                    continue
+                sim = float(np.dot(vectors[u], vectors[v]))
+                if sim < min_similarity:
+                    continue
+                scored.append({"src_id": u, "dst_id": v,
+                               "src": disp.get(u, str(u)),
+                               "dst": disp.get(v, str(v)),
+                               "similarity": round(sim, 4)})
+        scored.sort(key=lambda c: (-c["similarity"], c["src_id"], c["dst_id"]))
+        return scored[:top_k]
+
+    expect = naive(vecs, edges, ents, scope, mentions, **kwargs)
+    got = gc.candidate_pairs(vecs, edges, ents, scope, mentions, **kwargs)
+    assert len(expect) > 5, "fixture too sparse to prove anything"
+    assert got == expect
+
+
 def test_partition_candidates_merge_vs_link():
     ents = [
         {"id": 1, "canonical": "atlas review", "display": "Atlas Review", "etype": None},
