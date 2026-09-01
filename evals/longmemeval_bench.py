@@ -63,6 +63,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")                # embedder on
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
+from context_format import hybrid_context  # noqa: E402
 from ladder_sweep import approx_tokens, build_service, probe  # noqa: E402
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 import answerability_probe  # noqa: E402
@@ -647,9 +648,7 @@ def build_contexts(svc, question: str, variants: bool = False,
             f, versions, enumerated=(FACT_RENDER == "enum")))
 
     def _hyb(facts: list[str], mems: list[str]) -> str:
-        return ("Known facts:\n" + "\n".join(facts) +
-                "\n\nRelevant memories:\n" +
-                "\n\n".join(mems[:HYBRID_TOP_K]))
+        return hybrid_context(facts, mems[:HYBRID_TOP_K])
 
     ctx = {
         "rag": "\n\n".join(raw_texts),
