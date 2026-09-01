@@ -715,6 +715,98 @@ paper-faithful float, `score_intfaithful` = code-faithful).
 judged locally or by an Opus-class CLI judge. Cognee's 0.79 is also a
 20-question single-conversation protocol. Compare within a row.
 
+## Comparator arms — ReFind and no-memory (added 2026-09-01, unrun)
+
+Two opt-in arms, both adopted from the 2026-09-01 briefing-backlog triage.
+Neither has been run: they are harness code with unit coverage, and no arm
+score exists for either of them yet. (The leak-check numbers further down
+are a different thing — CPU-only re-parsing of an artifact that already
+existed.)
+
+| arm | flag | context | measures |
+|-----|------|---------|----------|
+| `refind` | `--refind` | an **agentic lexical loop** over the same formatted turns the bank holds: the answerer model plans BM25 queries for up to `--refind-rounds` rounds, narrowing by date range, never re-reading a turn it already inspected, with session-aware rank fusion; the surviving turns are budget-matched to the rag control | the honest lexical baseline ([ReFind, arXiv 2608.12888](https://arxiv.org/abs/2608.12888)) — single-shot BM25 badly understates it, and without it a claim about the structural stack (bands, cortex, graph) has no floor to beat |
+| `nomem` | `--nomem` | nothing — the question and the shared task framing | the memory-off floor ([MemTrapBench, arXiv 2608.20202](https://arxiv.org/abs/2608.20202), where all five frameworks tested scored *below* it). If memory-on does not beat memory-off, the win is imaginary |
+
+The ReFind loop only **retrieves**; its context is answered by the
+harness's own answerer and graded by the harness's own judge, so the arm
+is instrument-matched to `rag`/`cortex`/`hybrid` (the same rule the Cognee
+adapter follows — retrieval modes, never completion modes). It searches
+the *identical* formatted turns that were stored into the bank, so a
+`refind` − `rag` delta is about the retrieval loop and nothing else. Cost
+per question is `--refind-rounds` extra planner calls (default 3) on top
+of the arm's own answer + judge calls; `--nomem` costs one answer + its
+judge items.
+
+The loop's knobs — session fusion weight 0.3, 3 rounds, 3 queries per
+round, 8 turns inspected per query — are **declared defaults, not
+measured values**: ReFind publishes no fusion weight and no sweep has been
+run here. Every one of them is a flag (`--refind-session-weight`,
+`--refind-rounds`, `--refind-max-queries`, `--refind-per-round-k`, plus
+`--refind-top-k` to break the budget match deliberately) so they can be
+measured before anything is claimed from a number this arm produces. The
+one constant that is not a flag is the 400-character snippet the planner
+sees per turn, which is display width, not retrieval.
+
+Ranking runs the fusion twice, and the second pass is the one that
+decides what is served: once inside a query, to choose what that query
+inspects, and again over the **union of everything inspected** at serve
+time. Normalising per query would put every query's best hit at exactly
+1.0, so a lone weak hit from a late round would tie the strongest hit of
+the first and win on tie-break — caught in review before the arm ever
+ran, and pinned by
+`test_serve_ranking_fuses_across_rounds_not_per_query`.
+
+```bash
+# both comparator arms alongside the usual three, one chat first
+PYTHONPATH=. python evals/beam_adapter.py --beam-root <path-to-BEAM> \
+    --tier 100K --extractor qwen-27b --out-tag refind-smoke \
+    --refind --nomem --limit-chats 1
+# the comparison proper: full tier, all five arms
+PYTHONPATH=. python evals/beam_adapter.py --beam-root <path-to-BEAM> \
+    --tier 100K --extractor qwen-27b --out-tag refind-100k --refind --nomem
+```
+
+### Gold-answer leak check (`leak_check.py`)
+
+The [SR-TTT retraction](https://arxiv.org/abs/2603.06642) came down to the
+gold answer already sitting in the context the model was handed, so the
+reported win measured nothing. Every BEAM row now records
+`gold_in_question` at answer time, `--report` carries a `leak_check` block
+(how many rows named their own gold answer, and every arm's mean with
+those rows excluded), and the same check runs standalone over any judged
+artifact — BEAM `*_score` rows or LongMemEval `*_correct` rows:
+
+```bash
+python evals/leak_check.py --in evals/results/<artifact>.jsonl
+```
+
+It always writes its report (`<artifact>.leakcheck.json`) and exits 1 when
+any row leaked, so it can gate a promotion. Rows whose gold answer is too
+short or generic to test (`yes`, a bare number) are reported as
+**untestable** rather than counted clean. It also flags a context-free arm
+that was served a context — a `nomem` row with content in it would flatter
+memory-off in exactly the comparison the arm exists to make.
+
+Run over the committed 2026-08-21 BEAM run (400 rows), it finds
+**0 leaked rows**. Its untestable rows split
+**200 `no_gold`** and **10 `trivial_gold`**: five of BEAM's ten question
+types are rubric-judged and carry no gold string at all, so this check
+cannot speak to half of that benchmark — and says so rather than
+reporting those rows clean. The arm means it recomputes reproduce the
+run's committed summary exactly
+(rag 0.5005, cortex 0.2918, hybrid 0.4682), which is what makes the
+recomputation trustworthy as a leak-free comparator. Artifact:
+`beam-100K-qwen-27b-beam100k-qwen38.leakcheck.json`.
+
+Beside those, the report carries each arm's mean over only the 190 rows
+the check could examine: **rag 0.4789, cortex 0.1759, hybrid 0.4229**.
+That is a different slice of the same run, not a correction to it — and
+the gap is a fact about where each arm earns its score, not about
+leakage. The rubric-only types it drops include abstention, which is the
+cortex arm's one decisive win (0.950 above), so removing them costs that
+arm the most.
+
 ## Findings — 2026-08-03 to 2026-08-24
 
 | finding | evidence |

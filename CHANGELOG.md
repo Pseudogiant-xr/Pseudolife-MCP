@@ -6,6 +6,67 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-01 — two eval arms that decide whether a memory win is real)
+- **The BEAM adapter can now run an agentic lexical arm and a no-memory
+  control arm.** Both come from the 2026-09-01 briefing-backlog triage,
+  and both are measurement instruments only — no engine, daemon, or
+  serving behaviour changes, and neither arm has been run yet.
+  - `--refind` (ReFind, [arXiv 2608.12888](https://arxiv.org/abs/2608.12888))
+    answers from an agentic **lexical** search loop over the same
+    formatted turns the bank holds: the answerer model plans BM25 queries
+    for up to `--refind-rounds` rounds, may narrow the search to a date
+    range, never re-reads a turn an earlier round inspected, and ranks
+    with session-aware fusion (a weak hit inside a session that already
+    yielded strong evidence outranks an equally weak hit standing alone).
+    That fusion runs twice — once inside a query to choose what it
+    inspects, then again over the union of everything inspected to choose
+    what is served, because per-query normalisation puts every query's
+    best hit at exactly 1.0 and would let a lone weak hit from a late
+    round tie the strongest hit of the first.
+    The paper reports this loop beating most structured memory systems;
+    single-shot BM25 is not that baseline and understates it, so without
+    this arm no ladder claim about the structural stack has a floor to
+    beat. The loop only *retrieves* — its context is answered and judged
+    by the harness's own answerer and judge, so it stays
+    instrument-matched to `rag`/`cortex`/`hybrid` — and its served turn
+    budget is matched to the rag control by default, so any win comes
+    from the loop rather than a wider window. It reuses the engine's own
+    BM25 (`pseudolife_memory/memory/bm25.py`) rather than a second
+    scorer. The index is built over the temporal window and exclusion is
+    applied to its results, so IDF does not drift as rounds accumulate;
+    undated turns stay eligible in every window, because narrowing must
+    not hide evidence it cannot place. `--refind-session-weight`,
+    `--refind-rounds`, `--refind-max-queries`, `--refind-per-round-k` and
+    `--refind-top-k` are flags precisely because their defaults are
+    declared, not measured.
+  - `--nomem` (MemTrapBench,
+    [arXiv 2608.20202](https://arxiv.org/abs/2608.20202)) answers from the
+    question alone under the same task framing — same completeness
+    instruction, same exact abstention string, context clauses removed
+    rather than emptied. All five frameworks that paper tested scored
+    *below* their no-memory arm on trap tasks; if memory-on does not beat
+    memory-off, the win is imaginary, and a harness that never asks
+    cannot tell.
+- **Gold-answer leak check (`evals/leak_check.py`).** After the
+  [SR-TTT retraction](https://arxiv.org/abs/2603.06642) — where the gold
+  answer was already in the injected context, so the reported win measured
+  nothing — every BEAM row records `gold_in_question` at answer time,
+  `--report` carries a `leak_check` block (leaked-row count plus every
+  arm's mean with those rows excluded), and the check also runs standalone
+  over any judged artifact, BEAM `*_score` rows or LongMemEval
+  `*_correct` rows alike. It always writes its report and exits 1 when any
+  row leaked, so it can gate a promotion; answers too short or generic to
+  test for containment — or absent entirely — are reported as untestable
+  and broken down by reason rather than counted clean, each arm gets a
+  testable-only mean beside the leak-free one (untestable rows are not
+  leaked, so they would otherwise ride along inside it), and a
+  context-free arm that was served a context is flagged too.
+  First run, committed with the claim: over the 2026-08-21 BEAM artifact,
+  0 of 400 rows leak, untestable splits 200 no-gold / 10 trivial-gold
+  (five of BEAM's ten question types are rubric-judged and carry no gold
+  string, so the check cannot speak to half of it and says so), and the
+  recomputed arm means reproduce that run's committed summary exactly.
+
 ### Fixed (2026-09-01 — session hooks stop mistaking a busy daemon for a dead one)
 - **The plugin's SessionStart/SessionEnd hooks retry before declaring the
   daemon down, and the fallback no longer claims the MCP tools are
