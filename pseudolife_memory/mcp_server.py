@@ -351,6 +351,18 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
     aged = needs_correction_nudge(
         f.get("freshness_class") or "evergreen",
         f.get("last_confirmed") or f.get("asserted_at"))
+    # ``re_verify`` deliberately does NOT gate here. It is a passive
+    # caution, exactly as it is on lessons (`_annotate_lesson_staleness`),
+    # and it fires on ~25% of a mature bank's facts — measured 2026-09-02
+    # on the live bank: 1264/5153 current facts stand on a source memory
+    # contradicted since they were last confirmed, because `cms.store`'s
+    # contradiction decay marks entries superseded automatically and
+    # liberally. Routing that into a call the served CORRECTION_NOTE tells
+    # the reader to run NOW would turn a common, weak signal into a
+    # standing instruction to rewrite a quarter of the cortex every
+    # session. The ACTIVE affordance for retracted evidence is
+    # `memory_supersede`'s `derived_flagged`, which fires only on an
+    # explicit correction and names exactly the facts affected.
     if not (f.get("contested") or f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "
@@ -497,6 +509,18 @@ def memory_search(
                         {"last_known_value": f["last_known_value"]}
                         if "last_known_value" in f else {}
                     ),
+                    # Retract traversal (arXiv 2608.10502): this fact was
+                    # derived from a memory that has since been superseded.
+                    # Absent on every unaffected fact, so the common payload
+                    # is unchanged — but it must be re-selected explicitly
+                    # here or the correction never reaches the most-used
+                    # read surface (the same failure the stale-policy
+                    # comment above records).
+                    **(
+                        {"re_verify": True,
+                         "re_verify_reason": f.get("re_verify_reason")}
+                        if f.get("re_verify") else {}
+                    ),
                     # Supersede-at-discovery: aged/stale/contested facts
                     # carry their exact correction call (see CORRECTION_NOTE).
                     **(
@@ -576,7 +600,10 @@ def memory_supersede(
     entry is kept but flagged superseded, so retrieval ranks the correction
     higher and shows both together.
 
-    Returns: ``{superseded_count, superseded_texts, new_memory_stored}``.
+    Returns: ``{superseded_count, superseded_texts, new_memory_stored,
+    derived_flagged}`` — the last being the canonical facts the dream built
+    on the memories just corrected. They are FLAGGED, never rewritten;
+    check each and re-assert the ones that moved.
     """
     return service.supersede(old_text=old_text, new_text=new_text)
 
@@ -714,6 +741,8 @@ def memory_fact_get(
     entity has a graph node). Non-empty ``contenders`` = unsettled
     conflict (see ``memory_fact_resolve``); on an empty slot,
     ``candidates`` lists nearby slots — ranked leads, not answers.
+    ``re_verify`` = a memory this fact was derived from has since been
+    corrected; the value still stands but check it before acting.
     """
     rec = service.cortex_lookup(entity, attribute)
     out = {

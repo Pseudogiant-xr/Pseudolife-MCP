@@ -6,6 +6,78 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-02 — the engram cross-index read in the retract direction)
+
+- **Correcting a memory now says what it put in doubt.** The dream derives
+  cortex facts FROM source memories and records the link in the engram
+  cross-index (`memory_traces`, schema v13), but that link had only ever
+  been used to answer "where did this fact come from?" — for one entry at a
+  time, as a display affordance (`memory_get`'s `consolidated_into`).
+  Superseding a source memory left every fact the dream built on it
+  standing as current with no signal at all (arXiv 2608.10502). No schema
+  change; gated on the existing `memory.traces.enabled` knob.
+  - `PostgresStorage.slots_for_entries` reads the edge backwards in batch,
+    and `MemoryService.derived_from_entries` reports it in display
+    vocabulary (the index stores norms). `memory_supersede` now returns
+    `derived_flagged` — the facts the correction put in doubt, named at the
+    moment of correction.
+  - Served cortex facts carry `re_verify` + `re_verify_reason` when they
+    stand on evidence corrected since they were last confirmed — the same
+    shape lessons already use for "subject facts changed since", not a
+    parallel one. Computed at read time from the cross-index plus live
+    entry state; no stored state, and the keys are absent on unaffected
+    facts, so their payloads are byte-identical.
+  - **FLAG, never cascade.** Nothing is auto-deleted or auto-superseded:
+    deciding whether a derivation still holds is a review judgment, the
+    same two-man rule the consolidation quarantine encodes.
+  - **The `last_confirmed` comparison is load-bearing.** The cross-index is
+    slot-keyed and trace rows are never deleted, so `source_entries` lists
+    every entry that ever formed the slot. A bare "any source superseded"
+    test latches on forever; measured on the live bank it would fire on
+    1470/5153 current facts (28.5%). Keyed on `last_confirmed` it fires on
+    1264 (24.5%) and — unlike the bare test — is cleared by re-asserting or
+    re-confirming the slot.
+  - **`re_verify` is deliberately PASSIVE**, exactly as it is on lessons: it
+    does NOT gate the `correct_with` affordance. At ~25% of a mature bank,
+    routing it into a call whose served note says to run a correction NOW
+    would be a standing instruction to rewrite a quarter of the cortex every
+    session. The active, targeted affordance is `derived_flagged`, which
+    fires only on an explicit correction.
+  - **Not changed, deliberately.** Evicting an entry CASCADE-deletes its
+    trace rows, so removed evidence leaves nothing to traverse and only
+    supersession is detectable. Set-slot read surfaces carry no
+    `source_entries`, so the flag does not reach them.
+
+### Investigated, not adopted (2026-09-02 — distinct-provenance-root vote counting)
+
+- **CAMA (arXiv 2608.19701) does not apply to merge fold direction, and the
+  bank says so.** Every place agreement among entries or claims raises
+  confidence, promotes a contender, or resolves arbitration was enumerated;
+  the candidate for root-deduping was fold direction, which ranks entities
+  by `degree + fact_count` and DESTROYS the loser, where one verbose source
+  memory seeding six slots casts six votes. Counting distinct provenance
+  roots instead was built and measured against the live bank: it changes
+  526/1083 entity counts and flips 3 of 53 pending merge proposals — and all
+  three flips hand the merge to a node with ZERO facts and a few edges,
+  against nodes carrying 13 and 5 facts. That is verbatim the regression the
+  `fact_count` term was added to prevent in 2026-07-26. The term is a
+  content-mass measure ("which node is better specified?"), not a
+  corroboration measure ("does this claim have independent support?"), so
+  deduping it is the wrong operation. Reverted; nothing ships.
+- **The other counting sites, for the record.** The consolidation
+  quarantine's second-witness test already collapses at episode granularity
+  (coarser than the entry) and needs no change. The cortex `_confirm`
+  ratchet is already keyed to a distinct `(slot, source entry)` by the
+  dream's `has_trace` guard. Edge confidence still ratchets +0.05 per
+  re-assertion with no per-source key — a real unguarded false majority, but
+  the graph has no cross-index equivalent, so keying it needs a new table
+  and the full schema-bump checklist. Outcome signals are stored without
+  dedup. Everything else that counts (entity context vectors, consolidation
+  clustering, graph-insight question triggers, chronicle dedup, retrieval
+  scoring) counts band ENTRIES, and an entry is its own provenance root —
+  the engine has no entry-to-entry derivation edge, so there is nothing to
+  collapse.
+
 ### Changed (2026-09-02 — served write-policy and trap-avoidance text)
 - **The always-on served text now names a write decision and warns that a
   recalled memory can anchor the current task.** Two prompt-level findings

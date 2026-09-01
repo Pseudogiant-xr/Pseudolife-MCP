@@ -1794,6 +1794,50 @@ class PostgresStorage:
             "WHERE entity_norm = %s AND attribute_norm = %s ORDER BY entry_id",
             (entity_norm, attribute_norm)).fetchall()]
 
+    def superseded_evidence(self, entry_ids) -> dict[int, float]:
+        """``{entry_id: superseded_at}`` for those of these entries that
+        carry a supersession mark.
+
+        The TIMESTAMP, not just the fact of it: the cross-index is keyed on
+        the SLOT, so it returns every entry that ever formed that slot
+        across its whole supersession history. A caller asking "is my
+        evidence still good?" has to compare WHEN the evidence was
+        retracted against when the standing value was last confirmed, or it
+        flags every slot that ever had a corrected contributor and never
+        stops.
+
+        Scoped to the ids asked about and served by the primary key, never a
+        full-table scan — the caller is a read surface annotating exactly
+        the source entries the facts it is serving cite (a handful on a
+        lookup, the whole cited set on a dump)."""
+        ids = [int(i) for i in (entry_ids or []) if i is not None]
+        if not ids:
+            return {}
+        return {int(r[0]): float(r[1]) for r in self.conn.execute(
+            "SELECT id, superseded_at FROM entries "
+            "WHERE id = ANY(%s) AND superseded_at IS NOT NULL",
+            (ids,)).fetchall()}
+
+    def slots_for_entries(self, entry_ids) -> list[dict]:
+        """The engram cross-index read in the RETRACT direction: given source
+        entries, every cortex slot they helped form.
+
+        :meth:`traces_for_slot` walks the same edge forwards. Correcting a
+        source memory needs it backwards — that is what scopes a repair to
+        the derivations that actually stood on the retracted evidence,
+        instead of leaving them current (arXiv 2608.10502) or resetting the
+        store. Served by ``memory_traces_entry_idx``.
+        """
+        ids = [int(i) for i in (entry_ids or []) if i is not None]
+        if not ids:
+            return []
+        cols = ("entity_norm", "attribute_norm", "entry_id")
+        return [dict(zip(cols, r)) for r in self.conn.execute(
+            "SELECT entity_norm, attribute_norm, entry_id FROM memory_traces "
+            "WHERE entry_id = ANY(%s) "
+            "ORDER BY entity_norm, attribute_norm, entry_id",
+            (ids,)).fetchall()]
+
     def upsert_entity_source(self, entity_id: int, source: str,
                              origin: str, now: float) -> None:
         """Attribute an entity to a project/source. A 'derived' upsert never

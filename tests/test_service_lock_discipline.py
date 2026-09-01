@@ -73,6 +73,11 @@ CALLER_HOLDS_LOCK = {
     "_link_lesson_graph",
     "_link_dream_relations",
     "_annotate_lesson_staleness",
+    # Retract traversal — read-time helpers over the engram cross-index,
+    # each reached only from an already-locked read surface (the fixpoint
+    # below is what actually verifies that).
+    "_superseded_evidence",
+    "_derived_from_entries_locked",
     "_log_retrieval_event",
     "_record_retrieval_use",
     "_track_slot_reads",

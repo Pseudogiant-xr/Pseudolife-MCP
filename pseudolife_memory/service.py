@@ -1552,6 +1552,13 @@ class MemoryService(DreamOps):
                             superseded_by_text=e.superseded_by_text,
                         )
 
+            # Retract traversal: what the dream derived from the memories
+            # just corrected. Reported, never cascaded — the caller decides
+            # whether a derivation still holds, and the same facts carry
+            # ``re_verify`` on every later read until they are re-asserted.
+            derived = self._derived_from_entries_locked(
+                [e.db_id for e in superseded_entries])
+
             # Always store the correction text as a regular memory so future
             # retrieval surfaces the new state.
             store_emb = self._embedder.encode_single(new_text)
@@ -1562,6 +1569,7 @@ class MemoryService(DreamOps):
             return {
                 "superseded_count": len(superseded),
                 "superseded_texts": superseded,
+                "derived_flagged": derived,
                 "new_memory_stored": stored,
                 "new_memory_surprise": round(float(surprise), 4),
             }
@@ -2180,11 +2188,140 @@ class MemoryService(DreamOps):
                 from pseudolife_memory.memory.cortex import _norm_key
                 d["source_entries"] = self._storage.traces_for_slot(
                     _norm_key(rec.entity), _norm_key(rec.attribute))
+                self._annotate_evidence_supersession([d])
             if track:
                 from pseudolife_memory.memory.cortex import _norm_key
                 self._track_slot_reads(
                     [(_norm_key(rec.entity), _norm_key(rec.attribute))])
             return d
+
+    # ── retract-direction traversal (arXiv 2608.10502) ───────────────────
+    # The engram cross-index has only ever been read forwards (slot -> the
+    # entries that formed it). Correcting a source memory therefore left
+    # every fact the dream derived from it standing as current, with nothing
+    # on the served fact saying its evidence had moved. The paper's fix is
+    # to traverse the provenance graph DOWNSTREAM and scope the repair —
+    # not to delete the derivations (which loses benign state) and not to
+    # reset the store. Here that scoping is a FLAG: cascading a correction
+    # through derived facts is a review judgment, which is the same
+    # two-man rule the consolidation quarantine already encodes.
+
+    def _superseded_evidence(self, ids: set[int]) -> set[int]:
+        """``{entry_id: superseded_at}`` for the superseded ones among these
+        source entries.
+
+        BOTH sides are consulted, scoped to the ids actually being served.
+        ``entries.superseded_at`` is the durable side. The live band entries
+        are the one path it misses: :meth:`consolidate` stamps
+        ``superseded_at`` in memory and — unlike :meth:`supersede`
+        (write-through at the end of its marking pass) and
+        ``cms.store``'s contradiction decay (write-through at
+        ``cms.py``'s "persist supersession marks" block) — never calls
+        ``update_entry``, and ``_persist_all`` syncs only access counts. So
+        a ``memory_consolidate`` supersession exists ONLY in RAM until the
+        next restart. That is a pre-existing bug filed separately; until it
+        lands, reading both is what makes this flag honest, and
+        ``test_consolidate_marks_are_seen_before_any_write_through`` is what
+        keeps the branch load-bearing rather than decoration.
+
+        No cached index either way — the same one-pass idiom
+        ``cms.bump_entry_reinforcements`` uses for db_id lookups, and the
+        same no-stored-state rule as :meth:`_cortex_change_index`. Caller
+        holds the lock."""
+        if not ids:
+            return {}
+        dead: dict[int, float] = {}
+        if self._cms is not None:
+            dead = {e.db_id: float(e.superseded_at)
+                    for band in self._cms.bands for e in band.entries
+                    if e.db_id in ids and e.superseded_at is not None}
+        if self._storage is not None and len(dead) < len(ids):
+            dead.update(self._storage.superseded_evidence(ids - dead.keys()))
+        return dead
+
+    def _annotate_evidence_supersession(self, rows: list[dict]) -> list[dict]:
+        """Read-time flag: a served fact standing on evidence that was
+        corrected AFTER the fact was last confirmed gets ``re_verify`` +
+        ``re_verify_reason`` — the SAME shape lessons already carry for
+        "subject facts changed since"
+        (:meth:`_annotate_lesson_staleness`), not a parallel one.
+
+        The ``last_confirmed`` comparison is what makes the flag mean
+        something and what makes it CLEARABLE. The cross-index is keyed on
+        the slot, so ``source_entries`` lists every entry that ever formed
+        it across the slot's whole supersession history, and trace rows are
+        never deleted. A bare "any source superseded" test would therefore
+        latch on forever — including on slots whose current value was
+        asserted long after the retracted contributor, which on a mature
+        bank is a large fraction of the cortex. Worse, it would latch while
+        routing into ``correct_with``, whose served note tells the reader to
+        write a correction NOW: an unclearable flag there is a standing
+        instruction to rewrite a quarter of the cortex, every session.
+        Keying on ``last_confirmed`` means the documented remedy —
+        re-assert the slot, which confirms it and moves the clock — is
+        exactly what silences it.
+
+        The keys are ABSENT on unaffected facts, keeping their payloads
+        byte-identical (the ``stance`` precedent in
+        ``_cortex_record_to_dict``). Caller holds the lock."""
+        if not self.config.memory.traces.enabled:
+            return rows
+        cited = {i for r in rows for i in (r.get("source_entries") or [])}
+        if not cited:
+            return rows                 # nothing to traverse — skip the scan
+        dead = self._superseded_evidence(cited)
+        if not dead:
+            return rows
+        for row in rows:
+            # Fall back to asserted_at only when the record carries no
+            # confirmation stamp at all (legacy rows); never to 0.0, which
+            # would re-open the latch this comparison exists to close.
+            seen = row.get("last_confirmed") or row.get("asserted_at")
+            if not seen:
+                continue
+            hit = [i for i in (row.get("source_entries") or [])
+                   if (ts := dead.get(i)) is not None and ts > seen]
+            if not hit:
+                continue
+            row["re_verify"] = True
+            row["re_verify_reason"] = (
+                f"derived from {len(hit)} source "
+                f"{'memory' if len(hit) == 1 else 'memories'} "
+                "corrected since this fact was last confirmed")
+        return rows
+
+    def _derived_from_entries_locked(self, entry_ids) -> list[dict]:
+        """Slots these source entries helped form, in display vocabulary.
+        Caller holds the lock; :meth:`derived_from_entries` is the public,
+        self-locking form."""
+        ids = [int(i) for i in (entry_ids or []) if i is not None]
+        if (not ids or self._storage is None
+                or not self.config.memory.traces.enabled):
+            return []
+        from pseudolife_memory.memory.cortex import _norm_key
+        by_slot: dict[tuple[str, str], list[int]] = {}
+        for r in self._storage.slots_for_entries(ids):
+            by_slot.setdefault(
+                (r["entity_norm"], r["attribute_norm"]), []).append(r["entry_id"])
+        disp: dict[tuple[str, str], tuple[str, str]] = {}
+        if self._cortex is not None:
+            for rec in self._cortex.records:
+                disp.setdefault(
+                    (_norm_key(rec.entity), _norm_key(rec.attribute)),
+                    (rec.entity, rec.attribute))
+        return [{"entity": disp.get(k, k)[0], "attribute": disp.get(k, k)[1],
+                 "source_entry_ids": sorted(set(src))}
+                for k, src in sorted(by_slot.items())]
+
+    def derived_from_entries(self, entry_ids) -> dict[str, Any]:
+        """What the dream derived FROM these source memories — the retract
+        read of the engram cross-index. The blast radius of correcting or
+        removing an entry, reported so a human can scope the repair; nothing
+        here mutates anything."""
+        with self._lock:
+            self._ensure_init()
+            facts = self._derived_from_entries_locked(entry_ids)
+        return {"count": len(facts), "facts": facts}
 
     def cortex_contenders(self, entity: str, attribute: str) -> dict[str, Any]:
         """Active contenders parked at a slot — a conflicting lower-tier / below-
@@ -2399,6 +2536,7 @@ class MemoryService(DreamOps):
                         "age": _relative_time(anchor) if anchor else None,
                     })
             _demote_stale(entries, self._stale_policy)
+            self._annotate_evidence_supersession(entries)
             from pseudolife_memory.memory.cortex import _norm_key
             self._track_slot_reads(sorted({
                 (_norm_key(e["entity"]), _norm_key(e["attribute"]))
@@ -2866,6 +3004,7 @@ class MemoryService(DreamOps):
                     d["entity_id"] = emap.get(norm_name(d["entity"]))
                     d["source_entries"] = self._storage.traces_for_slot(
                         _norm_key(d["entity"]), _norm_key(d["attribute"]))
+                self._annotate_evidence_supersession(rows)
             return {"count": len(rows), "entries": rows}
 
     def compact_superseded(self) -> dict[str, Any]:
