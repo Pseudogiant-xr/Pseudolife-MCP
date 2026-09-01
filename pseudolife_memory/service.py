@@ -4220,6 +4220,7 @@ class MemoryService(DreamOps):
 
             now = time.time()
             superseded: list[str] = []
+            superseded_entries: list[MemoryEntry] = []
             for old_text in replaces:
                 marked_this_round = False
                 # Exact-text pass for this specific replacement.
@@ -4232,6 +4233,7 @@ class MemoryService(DreamOps):
                             entry.superseded_at = now
                             entry.superseded_by_text = new_text
                             superseded.append(entry.text)
+                            superseded_entries.append(entry)
                             marked_this_round = True
                 if marked_this_round:
                     continue
@@ -4244,6 +4246,21 @@ class MemoryService(DreamOps):
                         target.superseded_at = now
                         target.superseded_by_text = new_text
                         superseded.append(target.text)
+                        superseded_entries.append(target)
+
+            # Write-through the supersession marks, exactly as ``supersede``
+            # does. Postgres is the source of truth across a restart and
+            # ``_persist_all`` syncs only ``access_count`` for entries — a
+            # mark left in RAM is lost at the next ``hydrate_cms`` and the
+            # consolidated-away entry comes back looking current.
+            if self._storage is not None:
+                for e in superseded_entries:
+                    if e.db_id is not None:
+                        self._storage.update_entry(
+                            e.db_id,
+                            superseded_at=e.superseded_at,
+                            superseded_by_text=e.superseded_by_text,
+                        )
 
             # Always store the consolidated entry — source defaults to
             # ``"consolidation"`` for audit / filtering.
