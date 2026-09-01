@@ -138,3 +138,77 @@ def test_service_restart_roundtrip(pg_conn, pg_url, tmp_path):
     assert fact is not None and fact["value"] == "alice"
     eps = svc2.episode_list()
     assert any(e["title"] == "restart check" for e in eps["episodes"])
+
+
+# ── Supersession marks ────────────────────────────────────────────────────
+# ``supersede`` and ``consolidate`` mark band entries in memory
+# (``superseded_at`` / ``superseded_by_text``). ``_persist_all`` syncs only
+# ``access_count`` for entries, so a mark that is not written through when it
+# is set is lost at the next ``hydrate_cms`` and the corrected entry comes
+# back looking current. Asserted through a SECOND service on the same DSN —
+# that is the restart the loss actually manifests in.
+
+
+def _rehydrated(tmp_path, pg_url, text):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "restart", database_url=pg_url)
+    recent = svc.recent(n=50)
+    return next(e for e in recent["entries"] if e["text"] == text)
+
+
+def test_consolidate_supersession_survives_restart(pg_conn, pg_url, tmp_path):
+    """Exact-text match: the mark must reach Postgres, not just RAM."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    svc.store("fact A v1", source="wt-test")
+
+    out = svc.consolidate(
+        replaces=["fact A v1"], new_text="Consolidated: fact A current",
+    )
+    assert out["superseded_count"] == 1
+
+    entry = _rehydrated(tmp_path, pg_url, "fact A v1")
+    assert entry["superseded"] is True
+    assert entry["superseded_by_text"] == "Consolidated: fact A current"
+
+
+def test_consolidate_paraphrase_supersession_survives_restart(
+    pg_conn, pg_url, tmp_path,
+):
+    """The embedding fallback marks a different entry object than the
+    exact-text pass, so it needs its own pin."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    svc.store("the deploy target is the staging cluster", source="wt-test")
+
+    out = svc.consolidate(
+        replaces=["deploy target: staging cluster"],
+        new_text="Consolidated: the deploy target is production",
+    )
+    assert out["superseded_count"] == 1
+
+    entry = _rehydrated(
+        tmp_path, pg_url, "the deploy target is the staging cluster",
+    )
+    assert entry["superseded"] is True
+    assert entry["superseded_by_text"] == (
+        "Consolidated: the deploy target is production"
+    )
+
+
+def test_supersede_supersession_survives_restart(pg_conn, pg_url, tmp_path):
+    """The reference implementation, pinned so it cannot regress alongside."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    svc.store("Sky is green", source="wt-test")
+
+    out = svc.supersede("Sky is green", "Sky is blue")
+    assert out["superseded_count"] == 1
+
+    entry = _rehydrated(tmp_path, pg_url, "Sky is green")
+    assert entry["superseded"] is True
+    assert entry["superseded_by_text"] == "Sky is blue"
