@@ -109,6 +109,14 @@ function cortexHit(f) {
     el("div", { class: "entry-text" },
       el("span", { class: "mono dim" }, `${f.entity} · ${f.attribute} → `), el("b", {}, f.value)),
     el("div", { class: "entry-meta" }, badge(f.origin || "agent", (f.origin || "agent")),
+      // Retract traversal: a memory this fact was derived from has since
+      // been corrected. The Console is the surface where a human decides
+      // whether the derivation still holds, so it is shown rather than
+      // passed through unread; the reason rides the tooltip because the
+      // value, not the caveat, is what the row is for.
+      f.re_verify ? el("span", { class: "badge stale",
+        title: f.re_verify_reason || "evidence corrected since this fact was last confirmed" },
+        "re-verify") : null,
       f.score != null ? el("span", { class: "score-pill" }, Number(f.score).toFixed(3)) : null));
 }
 

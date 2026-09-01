@@ -284,13 +284,13 @@ def test_re_confirming_the_same_value_also_clears_it(svc):
     assert "re_verify" not in svc.cortex_lookup("payments-db", "host")
 
 
-def test_consolidate_marks_are_seen_before_any_write_through(svc):
-    """``memory_consolidate`` stamps ``superseded_at`` in memory and never
-    calls ``update_entry`` (unlike ``supersede`` and ``cms.store``'s
-    contradiction decay, which both write through), and ``_persist_all``
-    syncs only access counts. Reading the live band entries as well as the
-    column is what keeps the flag honest across that path — this is the
-    test that makes that branch load-bearing rather than decoration."""
+def test_consolidate_marks_reach_the_flag_through_the_durable_column(svc):
+    """``memory_consolidate`` is the third entry-level supersession site, and
+    since PR #239 it writes its marks through to ``entries.superseded_at``
+    like ``supersede`` and ``cms.store``'s contradiction decay always have.
+    Both halves are asserted together deliberately: the flag reaches a
+    consolidate-corrected slot BECAUSE the column is written, so if a future
+    change drops that write-through this test says which half broke."""
     svc.store("payments db is db-prod-1", source="pseudolife")
     with svc._lock:
         eid = svc._cms.bands[0].entries[-1].db_id
@@ -302,8 +302,264 @@ def test_consolidate_marks_are_seen_before_any_write_through(svc):
     svc.consolidate(replaces=["payments db is db-prod-1"],
                     new_text="payments db is db-prod-9")
 
-    # The column is still NULL — the mark exists only in RAM.
     row = svc._storage.conn.execute(
         "SELECT superseded_at FROM entries WHERE id = %s", (eid,)).fetchone()
-    assert row[0] is None, "consolidate started writing through; simplify me"
+    assert row[0] is not None, "consolidate stopped writing through (PR #239)"
     assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+
+def test_a_mark_that_never_reached_postgres_does_not_flag(svc):
+    """The durable column is the authority, and this is the recorded contract
+    for that choice — not an accident.
+
+    Every entry-level site that stamps ``superseded_at`` writes it through in
+    the same locked call (``supersede``, ``cms.store``'s contradiction decay,
+    and ``consolidate`` since PR #239), so a RAM-only mark is not a state any
+    live path can produce; the in-memory scan that used to back-stop it cost
+    an O(bank) pass on every annotated read for a window that cannot open.
+    Constructed directly here because nothing else can construct it. A future
+    site that marks in RAM without writing through is a KNOWN miss for the
+    flag — this test is where that trade-off is written down, and re-adding
+    the scan is what turns it red."""
+    svc.store("payments db is db-prod-1", source="pseudolife")
+    with svc._lock:
+        entry = svc._cms.bands[0].entries[-1]
+        eid = entry.db_id
+    assert eid is not None
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc._storage.conn.commit()
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+
+    # Direct construction: stamp the LIVE band entry and nothing else.
+    with svc._lock:
+        entry.superseded_at = _time.time() + 60
+        entry.superseded_by_text = "payments db is db-prod-9"
+    row = svc._storage.conn.execute(
+        "SELECT superseded_at FROM entries WHERE id = %s", (eid,)).fetchone()
+    assert row[0] is None                      # the harness, not the claim
+
+    assert "re_verify" not in svc.cortex_lookup("payments-db", "host")
+
+
+# ── the flag is BEST-EFFORT: losing the evidence loses the flag ───────────
+
+def test_evicting_the_superseded_source_clears_the_flag(svc):
+    """Pins the known limitation rather than claiming it away.
+
+    ``memory_traces.entry_id`` is ``ON DELETE CASCADE`` and a true-drop
+    capacity eviction hard-deletes the row (every eviction under the default
+    flat preset, since there is no deeper band to demote into). A superseded
+    entry is also the TOP eviction candidate — contradiction decay multiplies
+    its surprise by 0.3, and eviction ranks on retention. So the flag can
+    appear and then vanish with no re-verification having happened. Fixing
+    that needs durable per-slot state, i.e. a schema change; until then the
+    contract is "best-effort", and this is the test that says so."""
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    svc.store("payments db is db-prod-1", source="pseudolife")
+    with svc._lock:
+        entry = svc._cms.bands[0].entries[-1]
+        eid = entry.db_id
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc._storage.conn.commit()
+    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+                              superseded_by_text="payments db is db-prod-9")
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+    with svc._lock:
+        band = svc._cms.bands[0]
+        svc._cms._on_band_evict(entry, band_idx=0)      # true drop: row gone
+        band.entries = [e for e in band.entries if e is not entry]
+
+    rec = svc.cortex_lookup("payments-db", "host")
+    assert "re_verify" not in rec               # traces cascaded away with it
+    assert rec["value"] == "db-prod-1"          # the fact itself is untouched
+
+
+def test_deleting_the_source_entry_produces_no_flag(svc):
+    """``memory_delete`` is the strongest retraction there is and it raises no
+    flag at all — the row and its trace rows are gone, so there is nothing
+    left to traverse. Recorded, not fixed: same schema-change gate as the
+    eviction case above."""
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    svc.store("payments db is db-prod-1", source="pseudolife")
+    with svc._lock:
+        eid = svc._cms.bands[0].entries[-1].db_id
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc._storage.conn.commit()
+
+    assert svc.delete(text="payments db is db-prod-1")["deleted_count"] == 1
+
+    assert "re_verify" not in svc.cortex_lookup("payments-db", "host")
+
+
+# ── cost: the annotation is for SERVING, not for verification ─────────────
+
+def test_verification_lookups_do_not_pay_for_the_annotation(svc,
+                                                            monkeypatch):
+    """``track=False`` already means "this lookup is verification, not
+    serving". The dream rollback (``service_dream._rewrite_prev``) calls it
+    once per journal row and reads only ``value``, so annotating there buys a
+    flag nobody reads at the price of a PG query per row."""
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    eid = _entry(svc, "payments db is db-prod-1")
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc._storage.conn.commit()
+    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+                              superseded_by_text="corrected")
+
+    seen = []
+    real = svc._annotate_evidence_supersession
+    monkeypatch.setattr(svc, "_annotate_evidence_supersession",
+                        lambda rows: (seen.append(len(rows)), real(rows))[1])
+
+    quiet = svc.cortex_lookup("payments-db", "host", track=False)
+    assert seen == [] and "re_verify" not in quiet
+
+    served = svc.cortex_lookup("payments-db", "host")
+    assert seen and served["re_verify"] is True
+
+
+# ── set-valued slots ──────────────────────────────────────────────────────
+
+def _superseded_set_slot(svc):
+    """A set slot whose one cited source memory has since been corrected."""
+    svc.set_add("stack", "languages", "python")
+    svc.set_add("stack", "languages", "rust")
+    eid = _entry(svc, "the stack is python and rust")
+    svc._storage.add_trace("stack", "languages", eid, 1234.0)
+    svc._storage.conn.commit()
+    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+                              superseded_by_text="the stack is python and go")
+    return eid
+
+
+def test_set_slot_lookup_carries_the_flag(svc):
+    """``slots_for_entries`` is kind-agnostic, so ``derived_flagged`` names set
+    slots — and ``memory_fact_get`` promises the flag without qualification.
+    A set slot that could never carry it made both statements false."""
+    _superseded_set_slot(svc)
+    rec = svc.cortex_lookup("stack", "languages")
+    assert rec["kind"] == "set"
+    assert rec["re_verify"] is True
+    assert "corrected since" in rec["re_verify_reason"]
+
+
+def test_set_slot_search_entry_carries_the_flag(svc):
+    """The grouped set entry ``cortex_search`` composes is a different dict
+    from the scalar row, built on a different branch; it needs its own
+    evidence lookup or the flag stops at the lookup surface."""
+    _superseded_set_slot(svc)
+    hits = svc.cortex_search("stack languages", top_k=5)["entries"]
+    sets = [h for h in hits if h.get("kind") == "set"]
+    assert sets and sets[0]["re_verify"] is True
+
+
+def test_set_slot_with_live_evidence_stays_byte_identical(svc):
+    """The no-harm half, for sets too."""
+    svc.set_add("stack", "languages", "python")
+    eid = _entry(svc, "the stack is python")
+    svc._storage.add_trace("stack", "languages", eid, 1234.0)
+    svc._storage.conn.commit()
+
+    rec = svc.cortex_lookup("stack", "languages")
+    assert "re_verify" not in rec and "re_verify_reason" not in rec
+
+
+# ── consistency across read paths ─────────────────────────────────────────
+
+def test_recall_facts_carry_the_flag(svc):
+    """``memory_recall`` serves the same canonical facts ``memory_search``
+    does, through the graph projection rather than the cortex block. Without
+    this the SAME fact reads as cautioned on one tool and clean on the
+    other, which is worse than either alone."""
+    svc.graph_relate("payments-db", "runs-on", "prod-host")
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    svc.store("payments-db host notes", source="pseudolife")
+    eid = _entry(svc, "payments db is db-prod-1")
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc._storage.conn.commit()
+    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+                              superseded_by_text="payments db is db-prod-9")
+
+    out = svc.recall("payments-db host")
+    facts = [f for e in out["entities"] for f in e["facts"]]
+    flagged = [f for f in facts if f.get("re_verify")]
+    assert flagged, f"no flag on any recalled fact: {facts}"
+    assert "source_entries" not in flagged[0]   # annotation only, no bulk
+
+
+# ── derived_flagged is a bounded, current-vocabulary report ───────────────
+
+def test_derived_flagged_is_capped_with_a_truncation_marker(svc):
+    """One verbose memory can seed hundreds of slots, and the whole list is
+    inlined into the MCP response. Cap it, and SAY that it is capped."""
+    from pseudolife_memory.service import DERIVED_FLAGGED_CAP as CAP
+
+    svc.store("a very widely cited source memory", source="pseudolife")
+    with svc._lock:
+        eid = svc._cms.bands[0].entries[-1].db_id
+    for i in range(CAP + 3):
+        svc._storage.add_trace(f"ent-{i:04d}", "attr", eid, 1234.0)
+    svc._storage.conn.commit()
+
+    out = svc.supersede("a very widely cited source memory", "corrected")
+    assert len(out["derived_flagged"]) == CAP
+    assert out["derived_flagged_total"] == CAP + 3
+    assert out["derived_flagged_truncated"] is True
+
+
+def test_derived_flagged_names_the_current_value_and_marks_dead_slots(svc):
+    """Two bugs in one report: the display name came from whichever record
+    happened to be OLDEST in the store (so a renamed slot was reported under
+    a name the reader can no longer look up), and slots with no current fact
+    were listed as if they were live facts to go re-check."""
+    svc.cortex_write("Payments DB", "Host", "db-prod-0", support="agent")
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    eid = _entry(svc, "payments db notes")
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc._storage.add_trace("ghost-slot", "attr", eid, 1234.0)
+    svc._storage.conn.commit()
+
+    facts = {f["entity"]: f for f in svc.derived_from_entries([eid])["facts"]}
+    assert facts["payments-db"]["attribute"] == "host"
+    assert facts["payments-db"]["has_current_value"] is True
+    assert facts["ghost-slot"]["has_current_value"] is False
+
+
+# ── downstream surfaces ───────────────────────────────────────────────────
+
+def test_bank_dumps_drop_the_read_time_annotation(tmp_path):
+    """``dump_bank`` strips ``source_entries`` because a read-time key that
+    is not part of the offline replay makes committed bank artifacts churn.
+    The two new keys ride the same surface and get the same treatment."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from evals.longmemeval_bench import dump_bank
+
+    class _Svc:
+        def cortex_dump(self):
+            return {"entries": [{
+                "entity": "payments-db", "attribute": "host",
+                "value": "db-prod-1", "source_entries": [1, 2],
+                "re_verify": True, "re_verify_reason": "corrected since"}]}
+
+        def history(self, *a, **k):
+            return {"versions": [{"value": "db-prod-1"}]}
+
+    facts = dump_bank(_Svc(), {"question_id": "q1", "question": "?",
+                               "answer": "a", "question_date": "2026-01-01"},
+                      tmp_path / "bank.json.gz")
+    assert "source_entries" not in facts[0]
+    assert "re_verify" not in facts[0] and "re_verify_reason" not in facts[0]
+
+
+def test_the_console_renders_the_flag_it_is_served(tmp_path):
+    """The Console's search view receives raw cortex entries. It is the one
+    surface where a HUMAN acts on the caution, so the flag is rendered rather
+    than passed through unread."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "pseudolife_memory" / "web"
+           / "static" / "js" / "views" / "stream.js").read_text(encoding="utf-8")
+    assert "re_verify" in src
+    assert "re_verify_reason" in src

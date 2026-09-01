@@ -1794,6 +1794,30 @@ class PostgresStorage:
             "WHERE entity_norm = %s AND attribute_norm = %s ORDER BY entry_id",
             (entity_norm, attribute_norm)).fetchall()]
 
+    def traces_for_slots(self, slot_keys) -> dict[tuple[str, str], list[int]]:
+        """:meth:`traces_for_slot` for MANY slots in one round trip.
+
+        The per-slot form is right where the caller is already doing per-row
+        work (a cortex lookup, or one row of a top_k search page). ``recall``
+        is not that shape: it serves the facts of up to ``max_entities``
+        nodes at once, so the per-slot form would put an unbounded query
+        count on a single call. Keys are the normalized ``(entity,
+        attribute)`` pairs, unnested into a join rather than an ``IN`` list
+        of tuples so one plan serves any batch size."""
+        keys = [(str(e), str(a)) for e, a in (slot_keys or [])]
+        if not keys:
+            return {}
+        out: dict[tuple[str, str], list[int]] = {}
+        for e, a, eid in self.conn.execute(
+                "SELECT t.entity_norm, t.attribute_norm, t.entry_id "
+                "FROM memory_traces t "
+                "JOIN unnest(%s::text[], %s::text[]) AS k(e, a) "
+                "  ON t.entity_norm = k.e AND t.attribute_norm = k.a "
+                "ORDER BY t.entity_norm, t.attribute_norm, t.entry_id",
+                ([k[0] for k in keys], [k[1] for k in keys])).fetchall():
+            out.setdefault((e, a), []).append(int(eid))
+        return out
+
     def superseded_evidence(self, entry_ids) -> dict[int, float]:
         """``{entry_id: superseded_at}`` for those of these entries that
         carry a supersession mark.

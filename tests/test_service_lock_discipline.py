@@ -77,6 +77,7 @@ CALLER_HOLDS_LOCK = {
     # each reached only from an already-locked read surface (the fixpoint
     # below is what actually verifies that).
     "_superseded_evidence",
+    "_annotate_set_slot_evidence",
     "_derived_from_entries_locked",
     "_log_retrieval_event",
     "_record_retrieval_use",

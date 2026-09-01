@@ -43,10 +43,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     would be a standing instruction to rewrite a quarter of the cortex every
     session. The active, targeted affordance is `derived_flagged`, which
     fires only on an explicit correction.
-  - **Not changed, deliberately.** Evicting an entry CASCADE-deletes its
-    trace rows, so removed evidence leaves nothing to traverse and only
-    supersession is detectable. Set-slot read surfaces carry no
-    `source_entries`, so the flag does not reach them.
+  - **`re_verify` is BEST-EFFORT, and the docs now say so.** It is derived
+    at read time from evidence that still exists, so losing the evidence
+    loses the flag: `memory_traces.entry_id` is `ON DELETE CASCADE`, a
+    true-drop capacity eviction hard-deletes the entry row (every eviction
+    under the default flat preset), and a superseded entry is the top
+    eviction candidate because contradiction decay multiplies its surprise
+    by 0.3. So a flag can appear and later vanish with nobody having
+    re-verified anything, and `memory_delete` — the strongest retraction of
+    all — raises no flag at any point. Outliving the evidence needs durable
+    per-slot state, i.e. a schema change, which is deliberately not in this
+    change; both behaviours are pinned by tests so the limit is a recorded
+    contract rather than a surprise. `derived_flagged`, named once at the
+    moment of correction, is the half that does not evaporate.
+  - **Set-valued slots carry the flag too.** The grouped set payload has no
+    scalar record behind it, so it had neither `source_entries` nor a
+    slot-level confirmation stamp and could never be flagged — while
+    `slots_for_entries` is kind-agnostic and named set slots in
+    `derived_flagged` regardless. Both the lookup and the search surface now
+    resolve the slot's traces (the cross-index is slot-keyed, so one lookup
+    answers for the whole set) against the newest member's `last_confirmed`.
+  - **`memory_recall` is annotated as well.** It serves canonical facts
+    through the graph projection rather than the cortex block, so the same
+    fact read as cautioned via `memory_search` and clean via `memory_recall`.
+    Scoped to the recall surface — one batched trace query
+    (`traces_for_slots`) plus one evidence query per call — and not pushed
+    down into `graph_neighborhood`, which also backs the Console's Atlas and
+    whole-graph views where facts label a node rather than answer a
+    question. The entity dossier stays unannotated by the same reasoning,
+    stated in its docstring.
+  - **Verification lookups do not pay for it.** `cortex_lookup(track=False)`
+    already declares a lookup a verification rather than an answer; the
+    dream rollback makes one per journal row and reads only `value`, so the
+    annotation is now gated on `track`.
+  - **`derived_flagged` is capped** at 50 slots with
+    `derived_flagged_truncated` / `derived_flagged_total` alongside — one
+    verbose memory can seed many slots and the whole list lands inline in an
+    MCP response.
+  - **Downstream surfaces.** The Cortex Console's search view renders the
+    flag as a `re-verify` badge carrying its reason — it is the one surface
+    where a human acts on the caution, and it was receiving the field and
+    dropping it. The LME and BEAM bank dumps pop `re_verify` /
+    `re_verify_reason` beside `source_entries`, so regenerated bank
+    artifacts do not churn on a read-time key the offline replay never uses.
+  - **The durable column is the single authority.** An earlier draft also
+    scanned the live band entries, because `consolidate` stamped its marks
+    in RAM without writing them through. The `Fixed` entry below closed
+    that, so all three entry-level supersession sites write through inside
+    the same locked call that sets the mark and the scan was paying an
+    O(bank) pass per annotated read for a state no live path can produce. A
+    future site that marks in RAM only is a known miss, pinned by a test.
 
 ### Investigated, not adopted (2026-09-02 — distinct-provenance-root vote counting)
 

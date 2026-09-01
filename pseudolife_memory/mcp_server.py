@@ -603,7 +603,9 @@ def memory_supersede(
     Returns: ``{superseded_count, superseded_texts, new_memory_stored,
     derived_flagged}`` — the last being the canonical facts the dream built
     on the memories just corrected. They are FLAGGED, never rewritten;
-    check each and re-assert the ones that moved.
+    check each and re-assert the ones that moved. The list is capped;
+    ``derived_flagged_truncated`` / ``derived_flagged_total`` say when a
+    correction reached further than the cap.
     """
     return service.supersede(old_text=old_text, new_text=new_text)
 
@@ -742,7 +744,10 @@ def memory_fact_get(
     conflict (see ``memory_fact_resolve``); on an empty slot,
     ``candidates`` lists nearby slots — ranked leads, not answers.
     ``re_verify`` = a memory this fact was derived from has since been
-    corrected; the value still stands but check it before acting.
+    corrected; the value still stands but check it before acting. Set slots
+    carry it too, at the slot. Its absence is not a guarantee: the flag is
+    read from evidence that still exists, so it stops once the corrected
+    memory is evicted or deleted.
     """
     rec = service.cortex_lookup(entity, attribute)
     out = {

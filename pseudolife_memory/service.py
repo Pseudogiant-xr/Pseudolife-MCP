@@ -279,6 +279,17 @@ def _lesson_record_to_dict(rec) -> dict[str, Any]:
 # never by splitting on ":".
 _CURATION_STORES = ("lesson", "world")
 
+# How many derived slots ``supersede`` names inline in ``derived_flagged``.
+# The exact-text pass can supersede several entries at once and one verbose
+# memory can seed many slots, so the report is unbounded by construction and
+# lands whole in an MCP response. 50 is a review-batch bound, not a measured
+# one: a correction whose blast radius runs past it is a case for
+# ``memory_derived_from`` rather than a longer inline list, and
+# ``MemoryService.derived_from_entries`` (uncapped, no MCP surface) rather
+# than a longer inline list, and ``derived_flagged_truncated`` says when that
+# happened.
+DERIVED_FLAGGED_CAP = 50
+
 
 def _slot_key(entity_norm: str, attribute_norm: str) -> str:
     """Identity string for a slot: normalized components joined with ``|``.
@@ -1554,10 +1565,16 @@ class MemoryService(DreamOps):
 
             # Retract traversal: what the dream derived from the memories
             # just corrected. Reported, never cascaded — the caller decides
-            # whether a derivation still holds, and the same facts carry
-            # ``re_verify`` on every later read until they are re-asserted.
-            derived = self._derived_from_entries_locked(
+            # whether a derivation still holds. The same facts also carry
+            # ``re_verify`` on later reads, but that is a BEST-EFFORT read of
+            # still-present evidence and stops the moment the superseded
+            # entry is evicted (see ``_annotate_evidence_supersession``).
+            # This list, named once at the moment of correction, is the
+            # durable half of the affordance — which is why it is capped
+            # rather than truncated silently.
+            derived_total = self._derived_from_entries_locked(
                 [e.db_id for e in superseded_entries])
+            derived = derived_total[:DERIVED_FLAGGED_CAP]
 
             # Always store the correction text as a regular memory so future
             # retrieval surfaces the new state.
@@ -1570,6 +1587,8 @@ class MemoryService(DreamOps):
                 "superseded_count": len(superseded),
                 "superseded_texts": superseded,
                 "derived_flagged": derived,
+                "derived_flagged_total": len(derived_total),
+                "derived_flagged_truncated": len(derived) < len(derived_total),
                 "new_memory_stored": stored,
                 "new_memory_surprise": round(float(surprise), 4),
             }
@@ -2172,7 +2191,7 @@ class MemoryService(DreamOps):
                             from pseudolife_memory.memory.cortex import _norm_key
                             self._track_slot_reads(
                                 [(_norm_key(name), _norm_key(attribute))])
-                        return {
+                        out = {
                             "kind": "set", "entity": name, "attribute": attribute,
                             "members": [_cortex_record_to_dict(
                                 r, relative_age=ra, stale_policy=sp)
@@ -2181,6 +2200,10 @@ class MemoryService(DreamOps):
                                 r, relative_age=ra, stale_policy=sp)
                                 for r in removed],
                         }
+                        if self._storage is not None and track and members:
+                            self._annotate_set_slot_evidence(
+                                out, name, attribute, members)
+                        return out
                 return None
             d = _cortex_record_to_dict(rec, relative_age=self.config.time.relative_age,
                                        stale_policy=self._stale_policy)
@@ -2188,7 +2211,13 @@ class MemoryService(DreamOps):
                 from pseudolife_memory.memory.cortex import _norm_key
                 d["source_entries"] = self._storage.traces_for_slot(
                     _norm_key(rec.entity), _norm_key(rec.attribute))
-                self._annotate_evidence_supersession([d])
+                # Serving only. ``track=False`` already declares the lookup a
+                # verification rather than an answer — the dream rollback
+                # (``service_dream._rewrite_prev``) makes one per journal row
+                # and reads only ``value``, so annotating there buys a PG
+                # query per row for a flag nobody reads.
+                if track:
+                    self._annotate_evidence_supersession([d])
             if track:
                 from pseudolife_memory.memory.cortex import _norm_key
                 self._track_slot_reads(
@@ -2206,38 +2235,29 @@ class MemoryService(DreamOps):
     # through derived facts is a review judgment, which is the same
     # two-man rule the consolidation quarantine already encodes.
 
-    def _superseded_evidence(self, ids: set[int]) -> set[int]:
+    def _superseded_evidence(self, ids: set[int]) -> dict[int, float]:
         """``{entry_id: superseded_at}`` for the superseded ones among these
-        source entries.
+        source entries, scoped to the ids actually being served.
 
-        BOTH sides are consulted, scoped to the ids actually being served.
-        ``entries.superseded_at`` is the durable side. The live band entries
-        are the one path it misses: :meth:`consolidate` stamps
-        ``superseded_at`` in memory and — unlike :meth:`supersede`
-        (write-through at the end of its marking pass) and
-        ``cms.store``'s contradiction decay (write-through at
-        ``cms.py``'s "persist supersession marks" block) — never calls
-        ``update_entry``, and ``_persist_all`` syncs only access counts. So
-        a ``memory_consolidate`` supersession exists ONLY in RAM until the
-        next restart. That is a pre-existing bug filed separately; until it
-        lands, reading both is what makes this flag honest, and
-        ``test_consolidate_marks_are_seen_before_any_write_through`` is what
-        keeps the branch load-bearing rather than decoration.
+        ``entries.superseded_at`` is the single authority. An earlier draft
+        also scanned the live band entries, because :meth:`consolidate`
+        stamped its marks in RAM and never wrote them through. PR #239
+        closed that: all three entry-level supersession sites —
+        :meth:`supersede`, ``cms.store``'s contradiction decay, and
+        :meth:`consolidate` — now write through inside the same locked call
+        that sets the mark, so no window exists in which RAM and the column
+        disagree. The scan was therefore paying an O(bank) pass on every
+        annotated read to cover a state no live path can produce, and it
+        went. The consequence is recorded, not hidden: a future site that
+        marks in RAM without writing through is a known miss for this flag,
+        pinned by
+        ``test_a_mark_that_never_reached_postgres_does_not_flag``.
 
-        No cached index either way — the same one-pass idiom
-        ``cms.bump_entry_reinforcements`` uses for db_id lookups, and the
-        same no-stored-state rule as :meth:`_cortex_change_index`. Caller
-        holds the lock."""
-        if not ids:
+        No cached index — the same no-stored-state rule as
+        :meth:`_cortex_change_index`. Caller holds the lock."""
+        if not ids or self._storage is None:
             return {}
-        dead: dict[int, float] = {}
-        if self._cms is not None:
-            dead = {e.db_id: float(e.superseded_at)
-                    for band in self._cms.bands for e in band.entries
-                    if e.db_id in ids and e.superseded_at is not None}
-        if self._storage is not None and len(dead) < len(ids):
-            dead.update(self._storage.superseded_evidence(ids - dead.keys()))
-        return dead
+        return self._storage.superseded_evidence(ids)
 
     def _annotate_evidence_supersession(self, rows: list[dict]) -> list[dict]:
         """Read-time flag: a served fact standing on evidence that was
@@ -2263,7 +2283,21 @@ class MemoryService(DreamOps):
 
         The keys are ABSENT on unaffected facts, keeping their payloads
         byte-identical (the ``stance`` precedent in
-        ``_cortex_record_to_dict``). Caller holds the lock."""
+        ``_cortex_record_to_dict``).
+
+        BEST-EFFORT, and deliberately so. The flag is derived at read time
+        from evidence that still exists, so LOSING the evidence loses the
+        flag: ``memory_traces.entry_id`` is ``ON DELETE CASCADE``, a
+        true-drop capacity eviction hard-deletes the entry row (every
+        eviction under the default flat preset), and a superseded entry is
+        the top eviction candidate because contradiction decay multiplies
+        its surprise by 0.3. So a flag can appear and later vanish with no
+        re-verification having happened, and ``memory_delete`` — the
+        strongest retraction of all — raises no flag at any point. Making
+        the caution outlive its evidence needs durable per-slot state, i.e.
+        a schema change, which is out of scope here; both behaviours are
+        pinned by tests so the limit is a recorded contract rather than a
+        surprise. Caller holds the lock."""
         if not self.config.memory.traces.enabled:
             return rows
         cited = {i for r in rows for i in (r.get("source_entries") or [])}
@@ -2290,10 +2324,58 @@ class MemoryService(DreamOps):
                 "corrected since this fact was last confirmed")
         return rows
 
+    def _annotate_set_slot_evidence(self, out: dict, entity: str,
+                                    attribute: str, members: list) -> None:
+        """Carry the flag onto a set-valued slot's payload.
+
+        A set slot is served as ONE grouped dict with no scalar record
+        behind it, so it has neither the ``source_entries`` the scalar path
+        fetches nor a slot-level confirmation stamp — which meant a set slot
+        could never carry ``re_verify``, while ``slots_for_entries`` (which
+        is kind-agnostic) happily named set slots in ``derived_flagged`` and
+        ``memory_fact_get`` promised the flag without qualification.
+
+        The cross-index is keyed on the SLOT, not the member, so one
+        ``traces_for_slot`` answers for the whole set. The slot's
+        confirmation stamp is the newest member's: a set is re-verified
+        member by member, and the flag has to clear once the reader has
+        touched it — the same clearability the scalar path gets from
+        ``last_confirmed``. Only the flag keys are merged out, so the set
+        payload does not otherwise change shape. Caller holds the lock."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        probe = {
+            "source_entries": self._storage.traces_for_slot(
+                _norm_key(entity), _norm_key(attribute)),
+            # ``or m.asserted_at`` is the same legacy fallback the scalar
+            # path applies, taken per member so one unstamped member cannot
+            # drag the slot's clock back to nothing.
+            "last_confirmed": max(
+                (s for m in members
+                 if (s := m.last_confirmed or m.asserted_at)),
+                default=None),
+        }
+        self._annotate_evidence_supersession([probe])
+        if probe.get("re_verify"):
+            out["re_verify"] = True
+            out["re_verify_reason"] = probe["re_verify_reason"]
+
     def _derived_from_entries_locked(self, entry_ids) -> list[dict]:
         """Slots these source entries helped form, in display vocabulary.
         Caller holds the lock; :meth:`derived_from_entries` is the public,
-        self-locking form."""
+        self-locking form.
+
+        CURRENT records supply the display naming and the rest of the store
+        only fills gaps. ``self._cortex.records`` holds every version of
+        every slot, so a ``setdefault`` over it alone names each slot after
+        whichever version happens to sit oldest — a slot written as
+        "Payments DB / Host" and re-asserted as "payments-db / host" comes
+        back under the name the reader can no longer look up.
+
+        And a trace row outlives the fact it formed (the cross-index is
+        slot-keyed, rows are never deleted, and a slot can end up with no
+        current value at all), so slots are MARKED with
+        ``has_current_value`` rather than filtered: a dead slot is still
+        blast radius worth seeing, it is just not a fact to go re-check."""
         ids = [int(i) for i in (entry_ids or []) if i is not None]
         if (not ids or self._storage is None
                 or not self.config.memory.traces.enabled):
@@ -2304,12 +2386,18 @@ class MemoryService(DreamOps):
             by_slot.setdefault(
                 (r["entity_norm"], r["attribute_norm"]), []).append(r["entry_id"])
         disp: dict[tuple[str, str], tuple[str, str]] = {}
+        live: set[tuple[str, str]] = set()
         if self._cortex is not None:
+            for rec in self._cortex.current_records():
+                key = (_norm_key(rec.entity), _norm_key(rec.attribute))
+                disp.setdefault(key, (rec.entity, rec.attribute))
+                live.add(key)
             for rec in self._cortex.records:
                 disp.setdefault(
                     (_norm_key(rec.entity), _norm_key(rec.attribute)),
                     (rec.entity, rec.attribute))
         return [{"entity": disp.get(k, k)[0], "attribute": disp.get(k, k)[1],
+                 "has_current_value": k in live,
                  "source_entry_ids": sorted(set(src))}
                 for k, src in sorted(by_slot.items())]
 
@@ -2520,11 +2608,22 @@ class MemoryService(DreamOps):
                     anchor = max(
                         ((m.tx_time or m.asserted_at) for m in all_members),
                         default=None)
+                    # The cross-index is slot-keyed, so one lookup answers for
+                    # the whole set — the same per-row cost the scalar branch
+                    # above already pays, and without it the grouped entry is
+                    # the one served fact shape that can never carry
+                    # ``re_verify`` (the annotation below reads this key).
+                    set_traces = []
+                    if self._storage is not None:
+                        from pseudolife_memory.memory.cortex import _norm_key
+                        set_traces = self._storage.traces_for_slot(
+                            _norm_key(entity), _norm_key(attribute))
                     entries.append({
                         "kind": "set",
                         "entity": entity,
                         "attribute": attribute,
                         "value": value,
+                        "source_entries": set_traces,
                         "members": [_cortex_record_to_dict(
                             m, stale_policy=self._stale_policy)
                             for m in all_members],
@@ -4863,7 +4962,15 @@ class MemoryService(DreamOps):
         call: identity + attribution, canonical facts, cited world facts,
         relations (in/out, derived marked), provenance mentions, a merged
         newest-first chronology, and open review flags. Read-only; never
-        creates entities and never runs the full review scan."""
+        creates entities and never runs the full review scan.
+
+        The ``facts`` here deliberately carry NO ``re_verify``: the dossier
+        is a Console review view over one entity, reached beside the
+        ``mentions`` list and the review queues that show the same
+        correction directly, and every fact it lists is also reachable
+        through ``memory_search``/``memory_fact_get``, which do carry the
+        flag. ``recall`` is annotated because it ANSWERS with facts; this
+        page describes an entity."""
         from pseudolife_memory import graph as G
         with self._lock:
             self._ensure_init()
@@ -5607,5 +5714,71 @@ class MemoryService(DreamOps):
             hub_threshold=threshold,
             expand_budget=(cfg.expand_budget or None),
         )
+        self._annotate_recalled_facts(state.entity_facts)
         return recall_state_to_dict(state, query, hops)
+
+    def _annotate_recalled_facts(self, entity_facts) -> None:
+        """Carry ``re_verify`` onto the facts ``recall`` serves, in place.
+
+        ``recall`` reaches canonical facts through the graph projection, not
+        the cortex block, so without this the SAME fact reads as cautioned
+        via ``memory_search`` and clean via ``memory_recall`` — an
+        inconsistency between adjacent read paths that is worse than either
+        behaviour alone.
+
+        Annotated HERE rather than in ``graph_neighborhood``, which recall
+        composes: that method also backs the Console's Atlas and the whole-
+        graph view, where the facts are a label on a node rather than an
+        answer being acted on, and where the node set is capped in the
+        hundreds. Scoping the work to recall keeps it to one batched trace
+        query plus one evidence query per call, whatever the graph's size.
+
+        Slots are resolved through the cortex RECORD, not by re-normalizing
+        the display name — the graph keys facts by ``graph.norm_name`` and
+        the cross-index by ``cortex._norm_key``, and going via the record
+        means the two never have to agree. Only the flag keys are written
+        onto the served fact; the ``source_entries`` the traversal needs
+        stay on a probe, since a recalled fact is a label and would double
+        in size carrying them. ``recall`` holds no lock of its own, so this
+        takes it."""
+        if not entity_facts:
+            return
+        from pseudolife_memory import graph as G
+        from pseudolife_memory.memory.cortex import _norm_key
+        with self._lock:
+            self._ensure_init()
+            if (self._storage is None or self._cortex is None
+                    or not self.config.memory.traces.enabled):
+                return
+            # (graph-normalized entity, verbatim attribute) -> slot key +
+            # newest confirmation. A set slot has several current records at
+            # one key; the newest stamp is the slot's, as it is everywhere
+            # else a set is served.
+            resolved: dict[tuple[str, str], tuple[tuple[str, str], float]] = {}
+            for rec in self._cortex.current_records():
+                node_key = (G.norm_name(rec.entity), rec.attribute)
+                seen = rec.last_confirmed or rec.asserted_at
+                prev = resolved.get(node_key)
+                if prev is None or (seen or 0) > (prev[1] or 0):
+                    resolved[node_key] = (
+                        (_norm_key(rec.entity), _norm_key(rec.attribute)), seen)
+            targets: list[tuple[dict, tuple[str, str], float]] = []
+            for entity, facts in entity_facts.items():
+                for fact in facts or []:
+                    hit = resolved.get(
+                        (G.norm_name(entity), fact.get("attribute")))
+                    if hit is not None:
+                        targets.append((fact, hit[0], hit[1]))
+            if not targets:
+                return
+            traces = self._storage.traces_for_slots(
+                sorted({slot for _f, slot, _s in targets}))
+            probes = [{"source_entries": traces.get(slot, []),
+                       "last_confirmed": stamp}
+                      for _f, slot, stamp in targets]
+            self._annotate_evidence_supersession(probes)
+            for probe, (fact, _slot, _stamp) in zip(probes, targets):
+                if probe.get("re_verify"):
+                    fact["re_verify"] = True
+                    fact["re_verify_reason"] = probe["re_verify_reason"]
 
