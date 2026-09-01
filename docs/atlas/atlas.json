@@ -552,7 +552,7 @@
    "p": "pseudolife_memory/memory/episodes.py",
    "d": [
     "open_leaf_for(session_key): concurrent sessions never clobber each other",
-    "Daemon-owned lazy open; the idle reaper closes / prunes-if-empty",
+    "Daemon-owned lazy open; the idle reaper closes; empty roots are kept for the resume window, then swept to a tombstone (handle recreates)",
     "stamp() fills episode_id / title on every stored entry"
    ]
   },

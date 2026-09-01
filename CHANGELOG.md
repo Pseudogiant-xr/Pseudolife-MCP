@@ -146,6 +146,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the engine has no entry-to-entry derivation edge, so there is nothing to
   collapse.
 
+### Fixed (2026-09-02 — briefing handles survive long breaks and empty-root sweeps)
+- **A session's briefing `episode=` handle went permanently stale when the
+  session paused long enough for the idle reaper — the daemon then rejected
+  it as "unknown or closed" and every later write attributed under degraded
+  identity.** Two holes in the always-pass handle contract, observed live on
+  a session whose outcome and status writes lost their episode stamp:
+  - **Prune-at-reap deleted the row.** The reaper's close pruned a
+    zero-band-entry subtree immediately, so a session that had only
+    searched or written outcomes/cortex facts before a >30-min break lost
+    its episode entirely — resume was structurally impossible because
+    nothing remained to resume. The reaper now closes an empty root but
+    keeps it until past `PSEUDOLIFE_SESSION_RESUME_SECONDS`, then a sweep
+    deletes it leaving a **tombstone** (`(session_key, ended_at, title)`
+    in storage meta, restart-safe, capped at 200); a handle presented
+    after the sweep recreates the episode under its original id and
+    agent-set title. The sweep's candidates are exactly the roots the
+    reaper closed empty (a persisted deferred set) — never a scan of the
+    episode log, where zero live band entries also matches real history
+    whose memories were later evicted or forgotten. Explicit ends
+    (shim exit, `memory_episode_end`) keep the immediate prune — the
+    session affirmatively finished. Empty deferred closes fire no dream
+    and get no auto-title, matching what pruned empties did.
+  - **The 6 h session-key window also gated handles.** A presented handle
+    is a daemon-minted id only that session's briefing carried — an
+    explicit identity claim, unlike the session-key inference — so it now
+    resumes under its own `PSEUDOLIFE_HANDLE_RESUME_SECONDS` (default
+    2592000 = 30 days; `0` disables), covering a session deferred for days
+    or weeks (e.g. parked pending a GPU bench window). Reopening a
+    long-closed episode is safe: the dream cursor is monotonic, so late
+    writes are consolidated on the next pass.
+  `reap_idle_sessions` now reports `"swept"` alongside `"reaped"`. No
+  schema change — tombstones ride the existing meta key-value store.
+
 ### Fixed (2026-09-02 — memory_consolidate supersessions survive a restart)
 - **A `memory_consolidate` call marked the old entries superseded in memory
   but never wrote the marks to Postgres, so the correction was lost on the

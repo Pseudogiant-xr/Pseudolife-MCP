@@ -173,13 +173,56 @@ def test_reap_idle_closes_nonempty_session_keeps_it(pristine_service):
     assert len(mine) == 1 and mine[0]["ended_at"] is not None
 
 
-def test_reap_idle_prunes_empty_session(pristine_service):
+def test_reap_far_idle_sweeps_empty_session(pristine_service):
     service = pristine_service
     service.episode_start_session("SESS-EMPTY", "manual-empty")  # open, 0 entries
     out = service.reap_idle_sessions(idle_seconds=0, now=9e12)
     assert out["reaped"] == 1
     titles = _titles(service)
-    assert "manual-empty" not in titles  # empty -> pruned on reap
+    # now=9e12 is far past the retention window, so the same pass sweeps it
+    assert "manual-empty" not in titles
+
+
+def test_reap_defers_empty_prune_within_retention(pristine_service):
+    """An empty root closed by the reaper is KEPT while inside the session
+    resume window — deleting it immediately orphaned the session's briefing
+    handle (2026-09-02 incident); a later pass sweeps it once stale."""
+    import time as _t
+    service = pristine_service
+    service.episode_start_session("SESS-DEFER", "empty-deferred")
+    out = service.reap_idle_sessions(idle_seconds=0, now=_t.time() + 10_000)
+    assert out["reaped"] == 1
+    assert "empty-deferred" in _titles(service)   # closed but not yet deleted
+
+
+def test_reap_sweeps_stale_empty_root_and_reports(pristine_service):
+    import time as _t
+    service = pristine_service
+    service.episode_start_session("SESS-SWEEP", "empty-swept")
+    service.reap_idle_sessions(idle_seconds=0, now=_t.time() + 10_000)
+    out = service.reap_idle_sessions(idle_seconds=0, now=_t.time() + 30_000)
+    assert out["swept"] == 1
+    assert "empty-swept" not in _titles(service)
+
+
+def test_sweep_ignores_roots_that_lost_entries_after_close(pristine_service):
+    """A root that was NON-empty at close must never be swept, even when its
+    entries later vanish — the flat preset's capacity eviction is a true
+    drop, and forget deletes rows, so "zero live band entries" does not mean
+    "captured nothing". The sweep targets only roots the reaper closed
+    empty, never history whose memories aged out (review finding,
+    2026-09-02)."""
+    import time as _t
+    service = pristine_service
+    _store_in_session(service, "SESS-HIST", "durable work, later evicted")
+    root = _session_root(service, "SESS-HIST")
+    service.reap_idle_sessions(idle_seconds=0, now=_t.time() + 10_000)
+    for band in service._cms.bands:      # simulate eviction / forget
+        band.entries[:] = [e for e in band.entries
+                           if e.episode_id != root["id"]]
+    out = service.reap_idle_sessions(idle_seconds=0, now=_t.time() + 30_000)
+    assert out["swept"] == 0
+    assert root["id"] in service._cms.episodes.episodes   # history survives
 
 
 def test_reap_ignores_already_closed(pristine_service):
