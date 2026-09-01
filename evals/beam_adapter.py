@@ -48,6 +48,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ladder_sweep import build_service, probe  # noqa: E402
+import answerability_probe  # noqa: E402
 import leak_check  # noqa: E402
 import longmemeval_bench as lme  # noqa: E402
 import nomem_arm  # noqa: E402
@@ -579,6 +580,13 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
     # and their summaries stay unchanged.
     if any(leak_check.FLAG_KEY in r for r in rows):
         summary["leak_check"] = leak_check.check_rows(rows)
+    # Rows with persisted contexts carry the answerability + pathway
+    # cross-tab (AWM/PAST-Bench); legacy context-less artifacts (e.g. the
+    # 2026-08-21 qwen38 run) report unchanged. Same implementation the
+    # LongMemEval report uses.
+    ans_block = answerability_probe.report_block(rows)
+    if ans_block:
+        summary["answerability"] = ans_block
     for arm in arms:
         summary["arms"][arm] = {
             "score": round(sum(r[f"{arm}_score"] for r in rows)

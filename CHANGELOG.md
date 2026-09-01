@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-01 — failure attribution: was the right answer ever in memory?)
+- **`evals/answerability_probe.py` — memory-only answerability + pathway
+  evidence over judged artifacts.** AWM (arXiv 2608.25618) found 42.5%
+  of correct agent answers could not be reproduced from the agent's
+  memory alone — a failure end-to-end QA cannot see. The probe re-parses
+  a committed artifact's persisted contexts (CPU-only, both harness
+  shapes) and cross-tabs containment-answerability against each arm's
+  verdict; `unanswerable_correct` is the AWM red-flag candidate cell,
+  reconciled with the recorded `gold_in_question` leak flag. The same
+  parse emits per-row PAST-Bench (arXiv 2608.04003) pathway evidence:
+  which served context entries carry the gold, with per-arm supported
+  shares. Containment runs a two-step ladder (gold-variant span match,
+  then content-token coverage) and classifies what it cannot test with
+  reasons (`no_gold`/`trivial_gold`/`abstention`/`context_free_arm`/
+  `no_context`) instead of skipping — abstention golds name an absence
+  and the no-memory arm is unanswerable by construction, so neither may
+  fill the red-flag cell. A committed manual audit
+  (`*.redflag-audit.json`, kept in sync with the probe's red-flag ids by
+  test) records that all six ceiling-e2e red-flag arm-rows are
+  containment artifacts (inference-gap phrasing), not memory-support
+  failures. A judge-based level (`--judge`, `{arm}_answerable_judge`,
+  registered in `replicate.is_judge_field` for every stripper) is wired
+  with fail-fast server probing but has not been run. Both harnesses'
+  `--report` carry the block on artifacts with persisted contexts; probe
+  artifacts for the ceiling-e2e, qwen38 BEAM and both refind-smoke runs
+  are committed with pins in `tests/test_eval_evidence.py` — the qwen38
+  one records that the 2026-08-21 BEAM run predates context persistence
+  and is retroactively untestable (0 of 400 rows).
+
 ### Added (2026-09-01 — two eval arms that decide whether a memory win is real)
 - **The BEAM adapter can now run an agentic lexical arm and a no-memory
   control arm.** Both come from the 2026-09-01 briefing-backlog triage,

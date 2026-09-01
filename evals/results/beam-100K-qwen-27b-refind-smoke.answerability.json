@@ -1,0 +1,314 @@
+{
+  "check": "memory-only answerability + pathway evidence (AWM arXiv 2608.25618, PAST-Bench arXiv 2608.04003)",
+  "n_rows": 20,
+  "arms": {
+    "cortex": {
+      "n": 20,
+      "n_testable": 10,
+      "untestable_reasons": {
+        "no_gold": 10
+      },
+      "n_unjudged": 0,
+      "n_partial": 2,
+      "cells": {
+        "answerable_correct": 1,
+        "answerable_wrong": 0,
+        "unanswerable_correct": 1,
+        "unanswerable_wrong": 8
+      },
+      "answerable_share": 0.1,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 1
+      },
+      "unanswerable_correct_ids": [
+        "1/knowledge_update[1]"
+      ],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 6,
+        "untestable": 4,
+        "supported": 1,
+        "unsupported": 1,
+        "spanning": 0,
+        "supported_share": 0.5,
+        "unsupported_ids": [
+          "1/knowledge_update[1]"
+        ],
+        "spanning_ids": []
+      }
+    },
+    "hybrid": {
+      "n": 20,
+      "n_testable": 10,
+      "untestable_reasons": {
+        "no_gold": 10
+      },
+      "n_unjudged": 0,
+      "n_partial": 6,
+      "cells": {
+        "answerable_correct": 3,
+        "answerable_wrong": 1,
+        "unanswerable_correct": 2,
+        "unanswerable_wrong": 4
+      },
+      "answerable_share": 0.4,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 4
+      },
+      "unanswerable_correct_ids": [
+        "1/information_extraction[1]",
+        "1/temporal_reasoning[1]"
+      ],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 9,
+        "untestable": 4,
+        "supported": 2,
+        "unsupported": 2,
+        "spanning": 1,
+        "supported_share": 0.4,
+        "unsupported_ids": [
+          "1/information_extraction[1]",
+          "1/temporal_reasoning[1]"
+        ],
+        "spanning_ids": [
+          "1/multi_session_reasoning[0]"
+        ]
+      }
+    },
+    "nomem": {
+      "n": 20,
+      "n_testable": 0,
+      "untestable_reasons": {
+        "context_free_arm": 20
+      },
+      "n_unjudged": 0,
+      "n_partial": 2,
+      "cells": {
+        "answerable_correct": 0,
+        "answerable_wrong": 0,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": null,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 0
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 2,
+        "untestable": 2,
+        "supported": 0,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": null,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    },
+    "rag": {
+      "n": 20,
+      "n_testable": 10,
+      "untestable_reasons": {
+        "no_gold": 10
+      },
+      "n_unjudged": 0,
+      "n_partial": 8,
+      "cells": {
+        "answerable_correct": 1,
+        "answerable_wrong": 3,
+        "unanswerable_correct": 2,
+        "unanswerable_wrong": 4
+      },
+      "answerable_share": 0.4,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 4
+      },
+      "unanswerable_correct_ids": [
+        "1/information_extraction[1]",
+        "1/temporal_reasoning[1]"
+      ],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 7,
+        "untestable": 4,
+        "supported": 0,
+        "unsupported": 2,
+        "spanning": 1,
+        "supported_share": 0.0,
+        "unsupported_ids": [
+          "1/information_extraction[1]",
+          "1/temporal_reasoning[1]"
+        ],
+        "spanning_ids": [
+          "1/multi_session_reasoning[0]"
+        ]
+      }
+    },
+    "refind": {
+      "n": 20,
+      "n_testable": 10,
+      "untestable_reasons": {
+        "no_gold": 10
+      },
+      "n_unjudged": 0,
+      "n_partial": 7,
+      "cells": {
+        "answerable_correct": 2,
+        "answerable_wrong": 1,
+        "unanswerable_correct": 3,
+        "unanswerable_wrong": 4
+      },
+      "answerable_share": 0.3,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 3
+      },
+      "unanswerable_correct_ids": [
+        "1/information_extraction[1]",
+        "1/knowledge_update[0]",
+        "1/temporal_reasoning[1]"
+      ],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 8,
+        "untestable": 3,
+        "supported": 2,
+        "unsupported": 3,
+        "spanning": 0,
+        "supported_share": 0.4,
+        "unsupported_ids": [
+          "1/information_extraction[1]",
+          "1/knowledge_update[0]",
+          "1/temporal_reasoning[1]"
+        ],
+        "spanning_ids": []
+      }
+    }
+  },
+  "pathway_evidence": [
+    {
+      "id": "1/information_extraction[0]",
+      "arm": "cortex",
+      "n_context_entries": 24,
+      "gold_entries": [
+        1
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "1/knowledge_update[1]",
+      "arm": "cortex",
+      "n_context_entries": 24,
+      "gold_entries": [],
+      "verdict": "unsupported"
+    },
+    {
+      "id": "1/information_extraction[0]",
+      "arm": "hybrid",
+      "n_context_entries": 85,
+      "gold_entries": [
+        1,
+        52
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "1/information_extraction[1]",
+      "arm": "hybrid",
+      "n_context_entries": 115,
+      "gold_entries": [],
+      "verdict": "unsupported"
+    },
+    {
+      "id": "1/knowledge_update[1]",
+      "arm": "hybrid",
+      "n_context_entries": 65,
+      "gold_entries": [
+        59
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "1/multi_session_reasoning[0]",
+      "arm": "hybrid",
+      "n_context_entries": 60,
+      "gold_entries": [],
+      "verdict": "spanning"
+    },
+    {
+      "id": "1/temporal_reasoning[1]",
+      "arm": "hybrid",
+      "n_context_entries": 85,
+      "gold_entries": [],
+      "verdict": "unsupported"
+    },
+    {
+      "id": "1/information_extraction[1]",
+      "arm": "rag",
+      "n_context_entries": 91,
+      "gold_entries": [],
+      "verdict": "unsupported"
+    },
+    {
+      "id": "1/multi_session_reasoning[0]",
+      "arm": "rag",
+      "n_context_entries": 36,
+      "gold_entries": [],
+      "verdict": "spanning"
+    },
+    {
+      "id": "1/temporal_reasoning[1]",
+      "arm": "rag",
+      "n_context_entries": 61,
+      "gold_entries": [],
+      "verdict": "unsupported"
+    },
+    {
+      "id": "1/information_extraction[0]",
+      "arm": "refind",
+      "n_context_entries": 75,
+      "gold_entries": [
+        11
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "1/information_extraction[1]",
+      "arm": "refind",
+      "n_context_entries": 105,
+      "gold_entries": [],
+      "verdict": "unsupported"
+    },
+    {
+      "id": "1/knowledge_update[0]",
+      "arm": "refind",
+      "n_context_entries": 129,
+      "gold_entries": [],
+      "verdict": "unsupported"
+    },
+    {
+      "id": "1/knowledge_update[1]",
+      "arm": "refind",
+      "n_context_entries": 65,
+      "gold_entries": [
+        64
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "1/temporal_reasoning[1]",
+      "arm": "refind",
+      "n_context_entries": 37,
+      "gold_entries": [],
+      "verdict": "unsupported"
+    }
+  ],
+  "source": "beam-100K-qwen-27b-refind-smoke.jsonl",
+  "beam_correct_threshold": 1.0
+}

@@ -2182,6 +2182,109 @@ for _cid, _needle, _val, _stated, _places in [
         artifacts=(LME_E2E_LEAKCHECK,), value=_val, stated=_stated,
         places=_places))
 
+# The answerability + pathway probe's first run (2026-09-01,
+# evals/answerability_probe.py — CPU-only re-parsing, regenerates
+# exactly). The ceiling-e2e cross-tab and pathway shares are pinned, and
+# so is the fact the 2026-08-21 BEAM artifact is entirely untestable
+# (it predates context persistence) — that coverage gap is itself the
+# published claim.
+LME_E2E_ANSWERABILITY = (RESULTS
+                         + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e"
+                         + ".answerability.json")
+_ANS_SHARE_NEEDLE = "**rag 0.9556, hybrid 0.9111, cortex 0.6222**"
+_RED_FLAG_NEEDLE = "**rag 2, hybrid 1, cortex 3**"
+_PATHWAY_NEEDLE = "**rag 0.9189, hybrid 0.9429, cortex 0.8889**"
+for _cid, _needle, _val, _stated, _places in [
+    ("lme-answerability-rows", "(**78 rows**, 45 testable per arm",
+     lambda d: d["n_rows"], 78, 0),
+    ("lme-answerability-testable", "(**78 rows**, 45 testable per arm",
+     lambda d: d["arms"]["rag"]["n_testable"], 45, 0),
+    ("lme-answerability-trivial", "**27 `trivial_gold`, 6 `abstention`**",
+     lambda d: d["arms"]["rag"]["untestable_reasons"]["trivial_gold"],
+     27, 0),
+    ("lme-answerability-abstention",
+     "**27 `trivial_gold`, 6 `abstention`**",
+     lambda d: d["arms"]["rag"]["untestable_reasons"]["abstention"], 6, 0),
+    ("lme-answerability-cortex-unans-wrong",
+     "(**14** `unanswerable_wrong` against 4 `answerable_wrong`)",
+     lambda d: d["arms"]["cortex"]["cells"]["unanswerable_wrong"], 14, 0),
+    ("lme-answerability-cortex-ans-wrong",
+     "(**14** `unanswerable_wrong` against 4 `answerable_wrong`)",
+     lambda d: d["arms"]["cortex"]["cells"]["answerable_wrong"], 4, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS_README, needle=_needle,
+        artifacts=(LME_E2E_ANSWERABILITY,), value=_val, stated=_stated,
+        places=_places))
+for _arm, _stated in (("rag", 0.9556), ("hybrid", 0.9111),
+                      ("cortex", 0.6222)):
+    CLAIMS.append(Claim(
+        id=f"lme-answerability-{_arm}-share", doc=EVALS_README,
+        needle=_ANS_SHARE_NEEDLE, artifacts=(LME_E2E_ANSWERABILITY,),
+        value=(lambda a: lambda d: d["arms"][a]["answerable_share"])(_arm),
+        stated=_stated, places=4))
+for _arm, _stated in (("rag", 2), ("hybrid", 1), ("cortex", 3)):
+    CLAIMS.append(Claim(
+        id=f"lme-answerability-{_arm}-red-flag", doc=EVALS_README,
+        needle=_RED_FLAG_NEEDLE, artifacts=(LME_E2E_ANSWERABILITY,),
+        value=(lambda a: lambda d:
+               d["arms"][a]["cells"]["unanswerable_correct"])(_arm),
+        stated=_stated, places=0))
+for _arm, _stated in (("rag", 0.9189), ("hybrid", 0.9429),
+                      ("cortex", 0.8889)):
+    CLAIMS.append(Claim(
+        id=f"lme-answerability-{_arm}-pathway", doc=EVALS_README,
+        needle=_PATHWAY_NEEDLE, artifacts=(LME_E2E_ANSWERABILITY,),
+        value=(lambda a: lambda d:
+               d["arms"][a]["pathway"]["supported_share"])(_arm),
+        stated=_stated, places=4))
+
+# The manual red-flag audit is a published conclusion ("no confirmed
+# memory-support failure"), so its evidence is a committed artifact like
+# any other — one served-evidence snippet per audited arm-row
+# (tests/test_answerability_probe.py keeps it in sync with the probe's
+# red-flag ids).
+LME_E2E_REDFLAG_AUDIT = (RESULTS
+                         + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e"
+                         + ".redflag-audit.json")
+for _cid, _val, _stated in [
+    ("lme-redflag-audit-arm-rows",
+     lambda d: d["n_arm_rows"], 6),
+    ("lme-redflag-audit-questions",
+     lambda d: d["n_questions"], 3),
+    ("lme-redflag-audit-all-inference-gap",
+     lambda d: sum(1 for e in d["entries"]
+                   if e["verdict"] == "inference_gap"), 6),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS_README,
+        needle="**six red-flag arm-rows (three distinct questions)**",
+        artifacts=(LME_E2E_REDFLAG_AUDIT,), value=_val, stated=_stated,
+        places=0))
+
+BEAM38_ANSWERABILITY = (RESULTS
+                        + "beam-100K-qwen-27b-beam100k-qwen38"
+                        + ".answerability.json")
+_BEAM38_ANS_NEEDLE = ("**200 `no_gold`,\n10 `trivial_gold`, "
+                      "190 `no_context`**")
+for _cid, _needle, _val, _stated in [
+    ("beam38-answerability-rows",
+     "probe classifies all **400 rows** untestable",
+     lambda d: d["n_rows"], 400),
+    ("beam38-answerability-testable", "`n_testable`\n**0** on every arm",
+     lambda d: max(a["n_testable"] for a in d["arms"].values()), 0),
+    ("beam38-answerability-no-gold", _BEAM38_ANS_NEEDLE,
+     lambda d: d["arms"]["rag"]["untestable_reasons"]["no_gold"], 200),
+    ("beam38-answerability-trivial", _BEAM38_ANS_NEEDLE,
+     lambda d: d["arms"]["rag"]["untestable_reasons"]["trivial_gold"], 10),
+    ("beam38-answerability-no-context", _BEAM38_ANS_NEEDLE,
+     lambda d: d["arms"]["rag"]["untestable_reasons"]["no_context"], 190),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS_README, needle=_needle,
+        artifacts=(BEAM38_ANSWERABILITY,), value=_val, stated=_stated,
+        places=0))
+
 # The BEAM findings table also quotes three RANGES that live in a verdict
 # file as strings, not floats — the Claim machinery only compares numbers,
 # so they get their own check rather than going unguarded.

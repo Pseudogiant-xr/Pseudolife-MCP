@@ -1,0 +1,111 @@
+{
+  "check": "memory-only answerability + pathway evidence (AWM arXiv 2608.25618, PAST-Bench arXiv 2608.04003)",
+  "n_rows": 400,
+  "arms": {
+    "cortex": {
+      "n": 400,
+      "n_testable": 0,
+      "untestable_reasons": {
+        "no_gold": 200,
+        "no_context": 190,
+        "trivial_gold": 10
+      },
+      "n_unjudged": 0,
+      "n_partial": 75,
+      "cells": {
+        "answerable_correct": 0,
+        "answerable_wrong": 0,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": null,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 0
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 92,
+        "untestable": 92,
+        "supported": 0,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": null,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    },
+    "hybrid": {
+      "n": 400,
+      "n_testable": 0,
+      "untestable_reasons": {
+        "no_gold": 200,
+        "no_context": 190,
+        "trivial_gold": 10
+      },
+      "n_unjudged": 0,
+      "n_partial": 121,
+      "cells": {
+        "answerable_correct": 0,
+        "answerable_wrong": 0,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": null,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 0
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 137,
+        "untestable": 137,
+        "supported": 0,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": null,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    },
+    "rag": {
+      "n": 400,
+      "n_testable": 0,
+      "untestable_reasons": {
+        "no_gold": 200,
+        "no_context": 190,
+        "trivial_gold": 10
+      },
+      "n_unjudged": 0,
+      "n_partial": 137,
+      "cells": {
+        "answerable_correct": 0,
+        "answerable_wrong": 0,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": null,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 0
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 144,
+        "untestable": 144,
+        "supported": 0,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": null,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    }
+  },
+  "pathway_evidence": [],
+  "source": "beam-100K-qwen-27b-beam100k-qwen38.jsonl",
+  "beam_correct_threshold": 1.0
+}

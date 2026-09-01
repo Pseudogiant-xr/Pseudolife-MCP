@@ -889,6 +889,82 @@ leakage. The rubric-only types it drops include abstention, which is the
 cortex arm's one decisive win (0.950 above), so removing them costs that
 arm the most.
 
+### Memory-only answerability + pathway evidence (`answerability_probe.py`)
+
+[AWM](https://arxiv.org/abs/2608.25618) removed the source context and
+asked whether each question could still be answered from the agent's
+terminal memory alone — and found **42.5% of correct answers could not
+be reproduced from memory alone**: right answers whose notes were too
+thin to support them later. End-to-end QA cannot see that failure, and
+this stack is structurally exposed to it (dream claims and digests are
+written while the full session is still in context).
+[PAST-Bench](https://arxiv.org/abs/2608.04003) asks the per-row sibling:
+does a correct answer actually follow the save → retrieve → use pathway?
+
+```bash
+python evals/answerability_probe.py --in evals/results/<artifact>.jsonl
+```
+
+Per arm, over the persisted contexts (CPU-only re-parsing, no model):
+is the gold contained in the arm's served context — a two-step ladder
+(`span`: a gold variant as a contiguous normalized token sequence;
+`tokens`: every content token present — the reading a sentence-shaped
+BEAM gold needs), crossed with the arm's verdict into four cells. The
+interesting ones: `answerable_wrong` (an answering failure, the context
+sufficed) and `unanswerable_correct` — the **AWM red-flag candidates**,
+right answers without containment support. Containment is a floor, not
+a judge, and it errs in **both directions**: the strict `span` rung
+misses inference-phrased golds ("you *increased* the limit" is not
+containable in the cortex arm's served chain — `two cups`, earlier
+`one cup` — which plainly supports it), while the loose `tokens` rung
+can accept content tokens scattered across a large served context that
+no single passage states. So the red-flag cell is a **noisy candidate
+set, not a bound**; the per-arm `answerable_by` split says how much of
+the answerable side rests on the loose rung, and the judge-based level
+(`--judge`, "can this be answered from this context alone?") is wired
+to decide the cell: it probes the judge server up front and fails fast,
+annotates rows resumably (`{arm}_answerable_judge`, stripped by every
+rebuild/replicate path), and has deliberately not been run yet. The
+same parse emits per-row **pathway evidence** for every correct answer:
+which served entries carry the gold (`supported` / `unsupported` /
+`spanning` when the gold is only assembled across entries), with the
+supported share per arm. Two row classes classify out with their own
+reasons instead of polluting the cells: abstention rows (their gold
+names an absence — a right abstention with no memory support is the
+designed outcome) and context-free arms (`nomem` is served nothing by
+construction, so its correct answers are the arm's accuracy, not red
+flags). Both harnesses' `--report` carry the block on any artifact with
+persisted contexts.
+
+Over the committed ceiling-e2e run (**78 rows**, 45 testable per arm —
+**27 `trivial_gold`, 6 `abstention`**): answerable shares
+**rag 0.9556, hybrid 0.9111, cortex 0.6222**; red-flag candidates
+**rag 2, hybrid 1, cortex 3** of each arm's correct-testable answers;
+and the cortex arm's wrong answers are dominated by storage/retrieval
+(**14** `unanswerable_wrong` against 4 `answerable_wrong`) — when cortex
+is wrong, the fact context usually never contained the gold, matching
+the extractor-bottleneck reading of the e2e table above. Pathway
+supported shares among examined correct answers:
+**rag 0.9189, hybrid 0.9429, cortex 0.8889**. A committed audit of all
+**six red-flag arm-rows (three distinct questions)** records verdict
+`inference_gap` for each, with the served-evidence snippet quoted per
+arm-row: the served context supports the answer without containing its
+wording (the engineers-led 4→5 chain, the one-cup→two-cups chain, the
+listed road bike). So this run surfaces **no confirmed memory-support
+failure** — deciding the cell for real is the judge level's job.
+Artifacts:
+`longmemeval-ku-oracle-qwen-27b-ceiling-e2e.answerability.json`,
+`longmemeval-ku-oracle-qwen-27b-ceiling-e2e.redflag-audit.json`.
+
+The committed 2026-08-21 BEAM run predates context persistence, so the
+probe classifies all **400 rows** untestable — **200 `no_gold`,
+10 `trivial_gold`, 190 `no_context`** — and can say nothing about it
+retroactively; the artifact records exactly that
+(`beam-100K-qwen-27b-beam100k-qwen38.answerability.json`, `n_testable`
+**0** on every arm). The two refind-smoke artifacts (contexts persisted,
+all five arms) carry probe artifacts as plumbing receipts — n is far too
+small to read as measurement.
+
 ## Findings — 2026-08-03 to 2026-08-24
 
 | finding | evidence |

@@ -25,6 +25,7 @@ def _row() -> dict:
         row[f"{arm}_response"] = "resp"
         row[f"{arm}_correct"] = True
         row[f"{arm}_context_tokens"] = 10
+        row[f"{arm}_answerable_judge"] = True
     return row
 
 
@@ -32,6 +33,9 @@ def test_is_judge_field_is_the_one_rule_both_strippers_use():
     assert replicate.is_judge_field("refind_correct")
     assert replicate.is_judge_field("hybrid_ctg_context_tokens")
     assert replicate.is_judge_field("nomem_response")
+    # answerability_probe --judge verdicts are judged fields too: a
+    # rebuilt or replicated row must not carry a stale one.
+    assert replicate.is_judge_field("rag_answerable_judge")
     # row fields that merely look similar must survive
     for keep in ("answer_in_current_fact", "gold_in_question",
                  "refind_top_k", "question_id", "contexts", "answer"):
