@@ -35,8 +35,19 @@ def svc(pristine_service):
     return pristine_service
 
 
+# The cosine ordering between the host fact and the rule is a KNIFE EDGE
+# (0.6285 vs 0.6273 locally; CI read 0.6291 vs 0.6293 and flipped —
+# 2026-09-02), so no assertion below leans on it. The "higher-cosine
+# non-constraint" the pin must beat is instead a fact whose value IS the
+# query text: any embedder ranks it first by a wide margin (0.76 vs 0.63
+# locally), and ``_GAP`` makes a future fixture edit fail loudly here
+# rather than flap on CI (the test_cortex_bm25 knife-edge lesson).
+_GAP = 0.08
+
+
 def _seed(svc):
     svc.cortex_write("payments-db", "host", "db-prod-1", support="user")
+    svc.cortex_write("payments-db", "faq", QUERY, support="user")   # the top-cosine fact
     svc.cortex_write("payments-db", "port", "5433", support="user")
     svc.cortex_write("payments-db", "volume-rule",
                      "Never run docker compose down -v against payments-db",
@@ -53,11 +64,13 @@ def test_in_scope_constraint_outranks_a_higher_cosine_fact(svc):
     assert slots[0] == ("payments-db", "volume-rule")
     assert out[0]["pinned"] is True
     assert out[0]["distortion_tolerance"] == "constraint"
-    host = next(e for e in out if e["attribute"] == "host")
-    # The pin must have beaten cosine, or this test is vacuous: the host
-    # fact is the query's literal answer and scores higher.
-    assert host["score"] > out[0]["score"]
-    assert "pinned" not in host
+    faq = next(e for e in out if e["attribute"] == "faq")
+    # The pin must have beaten cosine by a clear margin, or this test is
+    # vacuous — and a fixture edit that narrows the margin fails HERE, named.
+    assert faq["score"] - out[0]["score"] >= _GAP, (
+        "knife-edge fixture: the top-cosine fact is not clearly above the "
+        f"pin ({faq['score']} vs {out[0]['score']}); widen the gap")
+    assert "pinned" not in faq
 
 
 def test_out_of_scope_constraint_is_not_pinned(svc):
@@ -88,7 +101,7 @@ def test_knob_off_restores_plain_ranking(svc):
         out = svc.cortex_search(QUERY, top_k=5, min_score=0.0)["entries"]
     finally:
         svc.config.memory.cortex.pin_constraints = True
-    assert out[0]["attribute"] == "host"
+    assert out[0]["attribute"] == "faq"          # plain cosine order
     assert not any("pinned" in e for e in out)
 
 
@@ -108,7 +121,7 @@ def test_pins_take_at_most_half_the_budget_best_cosine_first(svc):
     assert len(pinned) == 2
     assert out[:2] == pinned
     assert pinned[0]["score"] >= pinned[1]["score"]
-    assert out[2]["attribute"] == "host"          # the ranked answer survives
+    assert out[2]["attribute"] == "faq"           # the ranked answer survives
     assert not any(e.get("pinned") for e in out[2:])
 
 
@@ -119,12 +132,12 @@ def test_pins_respect_the_callers_relevance_floor(svc):
     _seed(svc)
     base = svc.cortex_search(QUERY, top_k=5, min_score=0.0)["entries"]
     pin = next(e for e in base if e.get("pinned"))
-    host = next(e for e in base if e["attribute"] == "host")
-    assert host["score"] > pin["score"]
-    floor = (pin["score"] + host["score"]) / 2
+    faq = next(e for e in base if e["attribute"] == "faq")
+    assert faq["score"] - pin["score"] >= _GAP
+    floor = (pin["score"] + faq["score"]) / 2
     out = svc.cortex_search(QUERY, top_k=5, min_score=floor)["entries"]
     assert not any(e.get("pinned") for e in out)
-    assert out[0]["attribute"] == "host"
+    assert out[0]["attribute"] == "faq"
     assert all(e["score"] >= floor for e in out)
 
 
