@@ -24,6 +24,152 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   same note; the
   `.sh` twins (systemd `--user`) never needed elevation and are unchanged.
 
+### Changed (2026-09-02 — the engram cross-index read in the retract direction)
+
+- **Correcting a memory now says what it put in doubt.** The dream derives
+  cortex facts FROM source memories and records the link in the engram
+  cross-index (`memory_traces`, schema v13), but that link had only ever
+  been used to answer "where did this fact come from?" — for one entry at a
+  time, as a display affordance (`memory_get`'s `consolidated_into`).
+  Superseding a source memory left every fact the dream built on it
+  standing as current with no signal at all (arXiv 2608.10502). No schema
+  change; gated on the existing `memory.traces.enabled` knob.
+  - `PostgresStorage.slots_for_entries` reads the edge backwards in batch,
+    and `MemoryService.derived_from_entries` reports it in display
+    vocabulary (the index stores norms). `memory_supersede` now returns
+    `derived_flagged` — the facts the correction put in doubt, named at the
+    moment of correction.
+  - Served cortex facts carry `re_verify` + `re_verify_reason` when they
+    stand on evidence corrected since they were last confirmed — the same
+    shape lessons already use for "subject facts changed since", not a
+    parallel one. Computed at read time from the cross-index plus live
+    entry state; no stored state, and the keys are absent on unaffected
+    facts, so their payloads are byte-identical.
+  - **FLAG, never cascade.** Nothing is auto-deleted or auto-superseded:
+    deciding whether a derivation still holds is a review judgment, the
+    same two-man rule the consolidation quarantine encodes.
+  - **The `last_confirmed` comparison is load-bearing.** The cross-index is
+    slot-keyed and trace rows are never deleted, so `source_entries` lists
+    every entry that ever formed the slot. A bare "any source superseded"
+    test latches on forever; measured on the live bank it would fire on
+    1470/5153 current facts (28.5%). Keyed on `last_confirmed` it fires on
+    1264 (24.5%) and — unlike the bare test — is cleared by re-asserting or
+    re-confirming the slot.
+  - **`re_verify` is deliberately PASSIVE**, exactly as it is on lessons: it
+    does NOT gate the `correct_with` affordance. At ~25% of a mature bank,
+    routing it into a call whose served note says to run a correction NOW
+    would be a standing instruction to rewrite a quarter of the cortex every
+    session. The active, targeted affordance is `derived_flagged`, which
+    fires only on an explicit correction.
+  - **`re_verify` is BEST-EFFORT, and the docs now say so.** It is derived
+    at read time from evidence that still exists, so losing the evidence
+    loses the flag: `memory_traces.entry_id` is `ON DELETE CASCADE`, a
+    true-drop capacity eviction hard-deletes the entry row (every eviction
+    under the default flat preset), and a superseded entry is the top
+    eviction candidate because contradiction decay multiplies its surprise
+    by 0.3. So a flag can appear and later vanish with nobody having
+    re-verified anything, and `memory_delete` — the strongest retraction of
+    all — raises no flag at any point. Outliving the evidence needs durable
+    per-slot state, i.e. a schema change, which is deliberately not in this
+    change; both behaviours are pinned by tests so the limit is a recorded
+    contract rather than a surprise. `derived_flagged`, named once at the
+    moment of correction, is the half that does not evaporate.
+  - **Set-valued slots carry the flag too.** The grouped set payload has no
+    scalar record behind it, so it carried no `source_entries` and could
+    never be flagged — while `slots_for_entries` is kind-agnostic and named
+    set slots in `derived_flagged` regardless (the lookup payload also had
+    no confirmation stamp; the search entry has carried `last_confirmed`
+    since the Task-6 review). Both surfaces now resolve the slot's traces —
+    the cross-index is slot-keyed, so one lookup answers for the whole set —
+    against the newest member's `last_confirmed`. Bluntly, and stated in the
+    docstring: adding a member also stamps the slot, so an unrelated add
+    silences the caution for members nobody re-checked. A set slot is one
+    served answer and a per-member flag on a grouped payload has nowhere to
+    render; `memory_recall`, where members ARE served individually, matches
+    per member instead.
+  - **`memory_recall` is annotated as well.** It serves canonical facts
+    through the graph projection rather than the cortex block, so the same
+    fact read as cautioned via `memory_search` and clean via `memory_recall`.
+    Scoped to the recall surface — one batched trace query
+    (`traces_for_slots`) plus one evidence query per call — and not pushed
+    down into `graph_neighborhood`, which also backs the Console's Atlas and
+    whole-graph views where facts label a node rather than answer a
+    question. The entity dossier stays unannotated by the same reasoning,
+    stated in its docstring. Facts are matched back to their slot on
+    `(entity, attribute, value)`: the graph and the cortex fold different
+    separator classes — `norm_name` folds `:`, `_norm_key` folds `-` and
+    leaves `:` alone — so `host:port` and `host-port` are two cortex slots
+    hanging off ONE graph node, and matching on entity and attribute alone
+    annotated both against whichever slot won the tie. `memory_recall`'s
+    DEFAULT (`verbose=False`) projection rebuilds each fact as
+    `{attribute, value}`, so it re-selects the two flag keys explicitly —
+    without that the service-layer annotation never reached a default
+    caller and the inconsistency this fixes survived intact on the MCP
+    surface. Both projections are pinned, mirroring the `memory_search`
+    whitelist pin.
+  - **Verification lookups do not pay for it.** `cortex_lookup(track=False)`
+    already declares a lookup a verification rather than an answer; the
+    dream rollback makes one per journal row and reads only `value`, so the
+    annotation is now gated on `track`.
+  - **`derived_flagged` is capped** at 50 slots with
+    `derived_flagged_truncated` / `derived_flagged_total` alongside — one
+    verbose memory can seed many slots and the whole list lands inline in an
+    MCP response.
+  - **`derived_flagged` reports the CURRENT slot vocabulary.** It took
+    display names from every version of every slot, oldest wins, so a slot
+    written as "Payments DB / Host" and re-asserted as "payments-db / host"
+    came back under a name the reader can no longer look up. Current records
+    now supply the naming. Trace rows also outlive the fact they formed, so
+    each row carries a new `has_current_value` — a slot with no current
+    value is still blast radius worth seeing, just not a fact to go
+    re-check — and the list is ordered live-slots-first so the cap keeps the
+    rows a reader can act on.
+  - **Downstream surfaces.** All three Cortex Console views that render
+    canonical facts — the search block, the Cortex view and Recall — now
+    show a shared `re-verify` badge carrying its reason. All three receive
+    the flag (Recall only because of this change), and a caution that shows
+    on one fact list and not the next is worse than none. The LME and BEAM
+    bank dumps pop `re_verify` / `re_verify_reason` beside `source_entries`,
+    so regenerated bank artifacts do not churn on a read-time key the
+    offline replay never uses.
+  - **The durable column is the single authority.** An earlier draft also
+    scanned the live band entries, because `consolidate` stamped its marks
+    in RAM without writing them through. The `Fixed` entry below closed
+    that, so all three entry-level supersession sites write through inside
+    the same locked call that sets the mark and the scan was paying an
+    O(bank) pass per annotated read for a state no live path can produce. A
+    future site that marks in RAM only is a known miss, pinned by a test.
+
+### Investigated, not adopted (2026-09-02 — distinct-provenance-root vote counting)
+
+- **CAMA (arXiv 2608.19701) does not apply to merge fold direction, and the
+  bank says so.** Every place agreement among entries or claims raises
+  confidence, promotes a contender, or resolves arbitration was enumerated;
+  the candidate for root-deduping was fold direction, which ranks entities
+  by `degree + fact_count` and DESTROYS the loser, where one verbose source
+  memory seeding six slots casts six votes. Counting distinct provenance
+  roots instead was built and measured against the live bank: it changes
+  526/1083 entity counts and flips 3 of 53 pending merge proposals — and all
+  three flips hand the merge to a node with ZERO facts and a few edges,
+  against nodes carrying 13 and 5 facts. That is verbatim the regression the
+  `fact_count` term was added to prevent in 2026-07-26. The term is a
+  content-mass measure ("which node is better specified?"), not a
+  corroboration measure ("does this claim have independent support?"), so
+  deduping it is the wrong operation. Reverted; nothing ships.
+- **The other counting sites, for the record.** The consolidation
+  quarantine's second-witness test already collapses at episode granularity
+  (coarser than the entry) and needs no change. The cortex `_confirm`
+  ratchet is already keyed to a distinct `(slot, source entry)` by the
+  dream's `has_trace` guard. Edge confidence still ratchets +0.05 per
+  re-assertion with no per-source key — a real unguarded false majority, but
+  the graph has no cross-index equivalent, so keying it needs a new table
+  and the full schema-bump checklist. Outcome signals are stored without
+  dedup. Everything else that counts (entity context vectors, consolidation
+  clustering, graph-insight question triggers, chronicle dedup, retrieval
+  scoring) counts band ENTRIES, and an entry is its own provenance root —
+  the engine has no entry-to-entry derivation edge, so there is nothing to
+  collapse.
+
 ### Fixed (2026-09-02 — briefing handles survive long breaks and empty-root sweeps)
 - **A session's briefing `episode=` handle went permanently stale when the
   session paused long enough for the idle reaper — the daemon then rejected

@@ -336,6 +336,11 @@ def dump_bank(svc, q: dict, path: Path) -> list[dict]:
     facts = svc.cortex_dump().get("entries", [])
     for f in facts:
         f.pop("source_entries", None)             # bulky, not needed offline
+        # Read-time annotations over those same traces: absent from the
+        # offline replay, and present or not depending on when the dump ran,
+        # so leaving them in churns committed bank artifacts for no signal.
+        f.pop("re_verify", None)
+        f.pop("re_verify_reason", None)
         try:
             versions = svc.history(f["entity"], f["attribute"]).get("versions", [])
             f["history"] = [v.get("value") for v in versions]  # oldest→newest

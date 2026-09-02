@@ -351,6 +351,18 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
     aged = needs_correction_nudge(
         f.get("freshness_class") or "evergreen",
         f.get("last_confirmed") or f.get("asserted_at"))
+    # ``re_verify`` deliberately does NOT gate here. It is a passive
+    # caution, exactly as it is on lessons (`_annotate_lesson_staleness`),
+    # and it fires on ~25% of a mature bank's facts — measured 2026-09-02
+    # on the live bank: 1264/5153 current facts stand on a source memory
+    # contradicted since they were last confirmed, because `cms.store`'s
+    # contradiction decay marks entries superseded automatically and
+    # liberally. Routing that into a call the served CORRECTION_NOTE tells
+    # the reader to run NOW would turn a common, weak signal into a
+    # standing instruction to rewrite a quarter of the cortex every
+    # session. The ACTIVE affordance for retracted evidence is
+    # `memory_supersede`'s `derived_flagged`, which fires only on an
+    # explicit correction and names exactly the facts affected.
     if not (f.get("contested") or f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "
@@ -497,6 +509,18 @@ def memory_search(
                         {"last_known_value": f["last_known_value"]}
                         if "last_known_value" in f else {}
                     ),
+                    # Retract traversal (arXiv 2608.10502): this fact was
+                    # derived from a memory that has since been superseded.
+                    # Absent on every unaffected fact, so the common payload
+                    # is unchanged — but it must be re-selected explicitly
+                    # here or the correction never reaches the most-used
+                    # read surface (the same failure the stale-policy
+                    # comment above records).
+                    **(
+                        {"re_verify": True,
+                         "re_verify_reason": f.get("re_verify_reason")}
+                        if f.get("re_verify") else {}
+                    ),
                     # Supersede-at-discovery: aged/stale/contested facts
                     # carry their exact correction call (see CORRECTION_NOTE).
                     **(
@@ -576,7 +600,15 @@ def memory_supersede(
     entry is kept but flagged superseded, so retrieval ranks the correction
     higher and shows both together.
 
-    Returns: ``{superseded_count, superseded_texts, new_memory_stored}``.
+    Returns: ``{superseded_count, superseded_texts, new_memory_stored,
+    derived_flagged}`` — the last being the canonical facts the dream built
+    on the memories just corrected. They are FLAGGED, never rewritten;
+    check each and re-assert the ones that moved. Each row carries
+    ``has_current_value``: false means the slot holds no current fact any
+    more — blast radius worth seeing, but nothing to go re-check. The list
+    is capped, live slots first; ``derived_flagged_truncated`` /
+    ``derived_flagged_total`` say when a correction reached further than
+    the cap.
     """
     return service.supersede(old_text=old_text, new_text=new_text)
 
@@ -714,6 +746,11 @@ def memory_fact_get(
     entity has a graph node). Non-empty ``contenders`` = unsettled
     conflict (see ``memory_fact_resolve``); on an empty slot,
     ``candidates`` lists nearby slots — ranked leads, not answers.
+    ``re_verify`` = a memory this fact was derived from has since been
+    corrected; the value still stands but check it before acting. Set slots
+    carry it too, at the slot. Its absence is not a guarantee: the flag is
+    read from evidence that still exists, so it stops once the corrected
+    memory is evicted or deleted.
     """
     rec = service.cortex_lookup(entity, attribute)
     out = {
@@ -1642,6 +1679,24 @@ def _cap_recall_texts(texts: list[str], seed_text_count: int,
     return seed_texts[:seed_take] + hop_texts[:hop_take]
 
 
+def _compact_recall_fact(f: dict[str, Any]) -> dict[str, Any]:
+    """One recalled fact in the default (non-verbose) projection:
+    ``{attribute, value}``, plus the retract-traversal caution when the
+    service attached one.
+
+    The caution has to be re-selected HERE or it never reaches a default
+    caller — this projection rebuilds each fact from scratch, which is the
+    same whitelist hazard ``memory_search``'s cortex block hit, and the
+    whole point of annotating recall was that the same fact must not read
+    as cautioned on one tool and clean on the other. Conditional, so an
+    unaffected fact's payload is unchanged (the ``stance`` precedent)."""
+    out = {"attribute": f.get("attribute"), "value": f.get("value")}
+    if f.get("re_verify"):
+        out["re_verify"] = True
+        out["re_verify_reason"] = f.get("re_verify_reason")
+    return out
+
+
 def _compact_recall_text(t: str) -> str:
     """Truncate one recall supporting text to the preview cap — same
     80/120/200-char + ellipsis convention as the existing text_preview
@@ -1683,7 +1738,9 @@ def memory_recall(
     per-hop reservation, so a hub seed's own 1-hop ring can't crowd out
     the deeper hops the walk exists to reach; ``edges`` prefers links
     between surviving entities; each entity's ``facts`` is capped
-    (currently 5). Details: docs/guide/retrieval.md.
+    (currently 5). A fact carrying ``re_verify`` stands on a memory that
+    has since been corrected — the value still stands, but check it before
+    acting. Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
     entity_hop = out.get("entity_hop") or {}
@@ -1711,8 +1768,7 @@ def memory_recall(
     if not verbose:
         out["entities"] = [
             {"entity": n.get("entity"),
-             "facts": [{"attribute": f.get("attribute"), "value": f.get("value")}
-                       for f in n.get("facts", [])]}
+             "facts": [_compact_recall_fact(f) for f in n.get("facts", [])]}
             for n in out["entities"]
         ]
         out["edges"] = [

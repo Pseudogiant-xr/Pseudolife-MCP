@@ -3,6 +3,7 @@
 // single-shot search can't produce.
 import { el, mount, clear, loadingBlock, emptyBlock, errorBlock } from "../util.js";
 import { api } from "../api.js";
+import { reVerifyBadge } from "../components.js";
 
 const TONE = "var(--c-assoc)";
 let state = { mode: "hops", q: "", hops: 3, source: "", target: "" };
@@ -185,6 +186,6 @@ function entityCard(ent) {
       el("button", { class: "btn sm", onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(ent.entity); } }, "graph ↗")),
     facts.length
       ? el("div", { style: { padding: "6px 18px 12px" } },
-          facts.map((f) => el("div", { class: "np-fact" }, el("div", { class: "a" }, f.attribute), el("div", {}, f.value))))
+          facts.map((f) => el("div", { class: "np-fact" }, el("div", { class: "a" }, f.attribute), el("div", {}, f.value, " ", reVerifyBadge(f)))))
       : el("div", { class: "dim", style: { padding: "6px 18px 14px", fontSize: ".84rem" } }, "no canonical facts"));
 }

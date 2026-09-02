@@ -372,6 +372,11 @@ def dump_chat_bank(svc, chat_id: str, tally: dict, path: Path) -> None:
     facts = svc.cortex_dump().get("entries", [])
     for f in facts:
         f.pop("source_entries", None)             # bulky, not needed offline
+        # Same treatment as the LME dump: read-time annotations over those
+        # traces are not part of the offline replay and would churn the
+        # committed bank artifacts.
+        f.pop("re_verify", None)
+        f.pop("re_verify_reason", None)
         try:
             versions = svc.history(f.get("entity", ""),
                                    f.get("attribute", "")).get("versions", [])
