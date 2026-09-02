@@ -264,6 +264,89 @@ def test_the_mcp_recall_projection_carries_the_flag(tmp_path, monkeypatch):
         assert "re_verify" not in other, verbose
 
 
+def test_recall_flags_an_alias_keyed_fact_through_the_default_projection(
+        svc, tmp_path, monkeypatch):
+    """``recall`` reaches a node's facts through ``graph_neighborhood``,
+    which attaches a cortex record to a node by resolving the record's
+    entity through the alias table (``find_entity`` semantics). The
+    annotation then matches each served fact back to its slot on
+    ``(entity, attribute, value)`` — and the entity side of that key has to
+    be built from the SAME resolved name the attachment used: the node's
+    entity is the canonical (``pr-#235``), the record's entity is the alias
+    (``pr-235``), and ``norm_name`` of the two differ. Keyed on the raw
+    record entity the lookup misses and the caution is silently dropped on
+    exactly the facts this change makes visible.
+
+    Asserted end to end through the MCP tool's DEFAULT projection, which
+    rebuilds each fact and must re-select the flag (the whitelist hazard
+    the sibling test above pins with a stubbed service)."""
+    from tests.helpers import reload_mcp_filemode
+
+    # The live shape (production bank, 2026-09-02): the dream wrote the fact
+    # and its trace under "pr-235"; a later merge folded that node into
+    # "PR #235", leaving the record's entity an alias of the node.
+    svc.cortex_write("pr-235", "branch", "feat/refind-nomem-eval-arms",
+                     support="agent")
+    eid = _entry(svc, "PR 235 is on branch feat/refind-nomem-eval-arms")
+    svc._storage.add_trace("pr-235", "branch", eid, 1234.0)
+    svc._storage.conn.commit()
+    svc.graph_relate("PR #235", "part-of", "pseudolife-mcp", origin="user")
+    assert svc.graph_merge("pr-235", "PR #235")["merged"] is True
+    svc._storage.update_entry(
+        eid, superseded_at=_time.time(),
+        superseded_by_text="PR 235 moved to branch feat/refind-v2")
+
+    out = svc.recall("which branch is pr-235 on", hops=1)
+    assert out["low_confidence"] is False
+    node = next(e for e in out["entities"] if e["entity"] == "PR #235")
+    (fact,) = [f for f in node["facts"] if f["attribute"] == "branch"]
+    assert fact["value"] == "feat/refind-nomem-eval-arms"
+    assert fact["re_verify"] is True
+    assert "corrected since" in fact["re_verify_reason"]
+
+    mod = reload_mcp_filemode(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod, "service", svc)
+    served = mod.memory_recall(query="which branch is pr-235 on", hops=1)
+    node = next(e for e in served["entities"] if e["entity"] == "PR #235")
+    (fact,) = [f for f in node["facts"] if f["attribute"] == "branch"]
+    assert fact == {"attribute": "branch",
+                    "value": "feat/refind-nomem-eval-arms",
+                    "re_verify": True,
+                    "re_verify_reason": fact["re_verify_reason"]}
+    assert "corrected since" in fact["re_verify_reason"]
+
+
+def test_recall_flags_a_fact_on_a_display_enriched_node(svc):
+    """The recall side of the annotation key is a node's DISPLAY name
+    (``run_recall`` keys ``entity_facts`` by ``node["entity"]``), and a
+    display enriched after minting no longer normalizes to the canonical the
+    attachment used — ``GND (Enshrouded server)`` over canonical ``gnd``,
+    the live 2026-08-16 shape ``graph_dismiss_duplicate`` records. Resolving
+    that side canonical → alias → display keeps the caution reachable on
+    such a node; keyed on the raw display norm, no fact on it could ever
+    carry ``re_verify``, including facts that attach by canonical exactly.
+    The query reaches the node through an alias because its display is not
+    a name a question would use verbatim."""
+    with svc._lock:
+        svc._ensure_init()
+        svc._storage.ensure_entity("gnd", display="GND (Enshrouded server)")
+    svc.cortex_write("gnd", "host", "10.0.0.102", support="agent")
+    eid = _entry(svc, "the GND server runs on 10.0.0.102")
+    svc._storage.add_trace("gnd", "host", eid, 1234.0)
+    svc._storage.conn.commit()
+    svc.graph_alias("gnd", "enshrouded")
+    svc._storage.update_entry(eid, superseded_at=_time.time(),
+                              superseded_by_text="GND moved to 10.0.0.103")
+
+    out = svc.recall("which host runs enshrouded", hops=1)
+    assert out["low_confidence"] is False
+    node = next(e for e in out["entities"]
+                if e["entity"] == "GND (Enshrouded server)")
+    (fact,) = [f for f in node["facts"] if f["attribute"] == "host"]
+    assert fact["value"] == "10.0.0.102"
+    assert fact["re_verify"] is True
+
+
 # ── the flag must CLEAR, or it is a standing nag ──────────────────────────
 
 def test_evidence_corrected_before_the_fact_was_confirmed_does_not_flag(svc):
