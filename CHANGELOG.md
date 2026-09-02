@@ -6,6 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-02 — recall serves the facts of a merged-away name)
+
+- **`memory_recall`, `memory_graph`, and the Console dossier served a node
+  with `facts: []` when its cortex records had been written under an alias
+  of the node's canonical.** A graph merge folds the absorbed node's
+  canonical into the survivor's aliases without rewriting the records, so
+  every fact written under the old name stopped attaching:
+  `graph_neighborhood`, the seedless whole-graph view, and `wiki_page`
+  compared `norm_name(rec.entity)` to the node's canonical alone, while
+  `memory_fact_get` on the same name resolved it (`cortex_lookup` has been
+  alias-aware since 2026-06-14). Observed live on the production bank after
+  the #240 deploy: `memory_fact_get("pr-235", "branch")` returned the
+  current record with `entity_ref.canonical = "pr-#235"`, and
+  `memory_recall` listed the `pr-#235` node with no facts. Pre-existing —
+  not a #240 regression.
+  - Fact attachment now resolves each record's entity through the alias
+    table with `find_entity`'s precedence (canonical first, then alias):
+    one `alias → canonical` map per call, built from the graph the read
+    already loaded (`graph.alias_canonical_map`), never a per-record
+    storage query on the recall path. Exact-match semantics for names that
+    are neither canonical nor alias are unchanged, as are
+    `current_records()` order and the per-entity fact cap — an alias-keyed
+    fact now competes for that cap like any other fact on its node.
+  - `recall`'s `re_verify` annotation matches a served fact back to its
+    slot on the same alias-resolved entity the attachment used, so an
+    alias-keyed fact standing on corrected evidence carries the caution
+    through `memory_recall`'s default projection instead of losing it on
+    exactly the facts this change makes visible. The trace lookup still
+    keys on the record's own slot (`cortex._norm_key(rec.entity)`), which
+    is where the dream wrote it. The recall side of that key is a node's
+    display name, which a later display enrichment can leave normalizing to
+    neither canonical nor alias (`GND (Enshrouded server)` over `gnd`), so
+    it resolves canonical → alias → display; before, no fact on such a node
+    could carry the caution. Cost: one graph load per `recall` call for
+    the alias table (the same load `graph_neighborhood` makes per hop).
+  - Unchanged, and now the visible asymmetry: `memory_fact_get` on the
+    node's display or canonical still does not search the node's aliases
+    (`cortex_lookup` retries alias → canonical only), so a fact recall
+    shows under `PR #235` is still fetched as `pr-235`. Follow-up.
+
 ### Changed (2026-09-02 — the engram cross-index read in the retract direction)
 
 - **Correcting a memory now says what it put in doubt.** The dream derives

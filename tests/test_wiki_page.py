@@ -114,3 +114,24 @@ def test_whole_graph_payload_carries_timestamps(svc):
     assert out["found"] is True
     assert all(isinstance(n["created_at"], float) for n in out["nodes"])
     assert all(isinstance(e["asserted_at"], float) for e in out["edges"])
+
+
+def test_wiki_page_attaches_facts_written_under_an_alias(svc):
+    """The dossier's cortex and world facts must attach through the alias
+    table the way ``find_entity`` resolves names, not by exact canonical
+    match: a fact the dream wrote under a name that a later merge turned
+    into an alias of this node is this node's fact (live bank, 2026-09-02:
+    ``pr-235`` folded into ``PR #235``, dossier and recall both served the
+    node fact-less while ``memory_fact_get`` on the alias found it)."""
+    _seed(svc)
+    svc.cortex_write("the-daemon", "port", "8765", support="user")
+    svc.world_write("the-daemon", "latest-release", "v2.0",
+                    source_url="https://example.com/rel",
+                    source_quote="v2.0 shipped")
+    assert svc.graph_merge("the-daemon", "daemon")["merged"] is True
+
+    out = svc.wiki_page("daemon")
+    assert "the-daemon" in out["aliases"]
+    assert [(f["attribute"], f["value"]) for f in out["facts"]] == [
+        ("port", "8765"), ("role", "serves MCP")]
+    assert [w["attribute"] for w in out["world_facts"]] == ["latest-release"]
