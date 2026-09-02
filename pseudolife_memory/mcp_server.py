@@ -603,9 +603,12 @@ def memory_supersede(
     Returns: ``{superseded_count, superseded_texts, new_memory_stored,
     derived_flagged}`` — the last being the canonical facts the dream built
     on the memories just corrected. They are FLAGGED, never rewritten;
-    check each and re-assert the ones that moved. The list is capped;
-    ``derived_flagged_truncated`` / ``derived_flagged_total`` say when a
-    correction reached further than the cap.
+    check each and re-assert the ones that moved. Each row carries
+    ``has_current_value``: false means the slot holds no current fact any
+    more — blast radius worth seeing, but nothing to go re-check. The list
+    is capped, live slots first; ``derived_flagged_truncated`` /
+    ``derived_flagged_total`` say when a correction reached further than
+    the cap.
     """
     return service.supersede(old_text=old_text, new_text=new_text)
 
@@ -1676,6 +1679,24 @@ def _cap_recall_texts(texts: list[str], seed_text_count: int,
     return seed_texts[:seed_take] + hop_texts[:hop_take]
 
 
+def _compact_recall_fact(f: dict[str, Any]) -> dict[str, Any]:
+    """One recalled fact in the default (non-verbose) projection:
+    ``{attribute, value}``, plus the retract-traversal caution when the
+    service attached one.
+
+    The caution has to be re-selected HERE or it never reaches a default
+    caller — this projection rebuilds each fact from scratch, which is the
+    same whitelist hazard ``memory_search``'s cortex block hit, and the
+    whole point of annotating recall was that the same fact must not read
+    as cautioned on one tool and clean on the other. Conditional, so an
+    unaffected fact's payload is unchanged (the ``stance`` precedent)."""
+    out = {"attribute": f.get("attribute"), "value": f.get("value")}
+    if f.get("re_verify"):
+        out["re_verify"] = True
+        out["re_verify_reason"] = f.get("re_verify_reason")
+    return out
+
+
 def _compact_recall_text(t: str) -> str:
     """Truncate one recall supporting text to the preview cap — same
     80/120/200-char + ellipsis convention as the existing text_preview
@@ -1717,7 +1738,9 @@ def memory_recall(
     per-hop reservation, so a hub seed's own 1-hop ring can't crowd out
     the deeper hops the walk exists to reach; ``edges`` prefers links
     between surviving entities; each entity's ``facts`` is capped
-    (currently 5). Details: docs/guide/retrieval.md.
+    (currently 5). A fact carrying ``re_verify`` stands on a memory that
+    has since been corrected — the value still stands, but check it before
+    acting. Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
     entity_hop = out.get("entity_hop") or {}
@@ -1745,8 +1768,7 @@ def memory_recall(
     if not verbose:
         out["entities"] = [
             {"entity": n.get("entity"),
-             "facts": [{"attribute": f.get("attribute"), "value": f.get("value")}
-                       for f in n.get("facts", [])]}
+             "facts": [_compact_recall_fact(f) for f in n.get("facts", [])]}
             for n in out["entities"]
         ]
         out["edges"] = [

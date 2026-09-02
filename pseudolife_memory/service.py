@@ -2381,7 +2381,15 @@ class MemoryService(DreamOps):
         nowhere to render. ``_annotate_recalled_facts``, where members ARE
         served individually, matches per member instead. Only the flag keys
         are merged out, so the set payload does not otherwise change shape.
-        Caller holds the lock."""
+        Gated on ``traces.enabled`` before the query, not after: unlike the
+        scalar path — which SERVES its traces as ``source_entries`` and so
+        fetches them either way — this lookup is purely feeding the
+        annotation and discards the result, so with the cross-index off the
+        query is pure waste. ``test_flag_off_when_the_cross_index_is_disabled``
+        states the rule it would break: "the read surface must not pay for
+        one". Caller holds the lock."""
+        if not self.config.memory.traces.enabled:
+            return
         from pseudolife_memory.memory.cortex import _norm_key
         probe = {
             "source_entries": self._storage.traces_for_slot(

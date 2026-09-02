@@ -82,7 +82,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     separator classes — `norm_name` folds `:`, `_norm_key` folds `-` and
     leaves `:` alone — so `host:port` and `host-port` are two cortex slots
     hanging off ONE graph node, and matching on entity and attribute alone
-    annotated both against whichever slot won the tie.
+    annotated both against whichever slot won the tie. `memory_recall`'s
+    DEFAULT (`verbose=False`) projection rebuilds each fact as
+    `{attribute, value}`, so it re-selects the two flag keys explicitly —
+    without that the service-layer annotation never reached a default
+    caller and the inconsistency this fixes survived intact on the MCP
+    surface. Both projections are pinned, mirroring the `memory_search`
+    whitelist pin.
   - **Verification lookups do not pay for it.** `cortex_lookup(track=False)`
     already declares a lookup a verification rather than an answer; the
     dream rollback makes one per journal row and reads only `value`, so the

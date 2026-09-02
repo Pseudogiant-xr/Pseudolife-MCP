@@ -230,6 +230,40 @@ def test_the_mcp_search_projection_carries_the_flag(tmp_path, monkeypatch):
     assert "correction_note" not in out
 
 
+def test_the_mcp_recall_projection_carries_the_flag(tmp_path, monkeypatch):
+    """``memory_recall``'s DEFAULT (``verbose=False``) projection rebuilds
+    each fact as ``{attribute, value}``, which strips a read-time key the
+    service just attached — the same whitelist hazard the search block above
+    is pinned for. Annotating recall at the service layer and losing it here
+    would leave the inconsistency that motivated the work exactly as it was
+    for a default caller: cautioned via ``memory_search``, clean via
+    ``memory_recall``.
+
+    Both modes are asserted, and so is the absence on an unaffected fact —
+    the flag must not become a key every recalled fact carries."""
+    from tests.helpers import reload_mcp_filemode
+
+    mod = reload_mcp_filemode(tmp_path, monkeypatch)
+    flagged = {"attribute": "host", "value": "db-prod-1", "origin": "agent",
+               "confidence": 0.9, "re_verify": True,
+               "re_verify_reason": "derived from 1 source memory corrected "
+                                   "since this fact was last confirmed"}
+    clean = {"attribute": "port", "value": "5433", "origin": "user",
+             "confidence": 1.0}
+    monkeypatch.setattr(mod.service, "recall", lambda *a, **k: {
+        "query": "q", "seeds": ["payments-db"], "paths": [], "texts": [],
+        "edges": [], "iterations": 1, "low_confidence": False,
+        "entities": [{"entity": "payments-db", "facts": [flagged, clean]}]})
+
+    for verbose in (False, True):
+        out = mod.memory_recall(query="payments db host", verbose=verbose)
+        (ent,) = out["entities"]
+        served, other = ent["facts"]
+        assert served["re_verify"] is True, verbose
+        assert "corrected since" in served["re_verify_reason"], verbose
+        assert "re_verify" not in other, verbose
+
+
 # ── the flag must CLEAR, or it is a standing nag ──────────────────────────
 
 def test_evidence_corrected_before_the_fact_was_confirmed_does_not_flag(svc):
@@ -536,6 +570,34 @@ def test_derived_flagged_is_capped_with_a_truncation_marker(svc):
     assert out["derived_flagged_truncated"] is True
 
 
+def test_the_cap_keeps_the_slots_a_reader_can_act_on(svc):
+    """The cap slices an ORDER, so the order has to put live slots first.
+    Trace rows outlive the facts they formed, so a correction can easily
+    touch more dead slots than the cap holds — and alphabetically they win,
+    because a dead slot is just as likely to sort early. Spending all 50
+    rows on slots with no current value while truncating away the live ones
+    reports the exact half nobody can re-check."""
+    from pseudolife_memory.service import DERIVED_FLAGGED_CAP as CAP
+
+    svc.store("another widely cited source memory", source="pseudolife")
+    with svc._lock:
+        eid = svc._cms.bands[0].entries[-1].db_id
+    # Dead slots sort FIRST alphabetically; the live ones sort last.
+    for i in range(CAP):
+        svc._storage.add_trace(f"aaa-dead-{i:04d}", "attr", eid, 1234.0)
+    for i in range(3):
+        svc.cortex_write(f"zzz-live-{i}", "attr", f"v{i}", support="agent")
+        svc._storage.add_trace(f"zzz-live-{i}", "attr", eid, 1234.0)
+    svc._storage.conn.commit()
+
+    rows = svc.supersede("another widely cited source memory",
+                         "corrected")["derived_flagged"]
+    assert len(rows) == CAP
+    live = [r["entity"] for r in rows if r["has_current_value"]]
+    assert sorted(live) == ["zzz-live-0", "zzz-live-1", "zzz-live-2"]
+    assert all(r["has_current_value"] for r in rows[:3])   # and they LEAD
+
+
 def test_derived_flagged_names_the_current_value_and_marks_dead_slots(svc):
     """Two bugs in one report: the display name came from whichever record
     happened to be OLDEST in the store (so a renamed slot was reported under
@@ -556,14 +618,15 @@ def test_derived_flagged_names_the_current_value_and_marks_dead_slots(svc):
 
 # ── downstream surfaces ───────────────────────────────────────────────────
 
-def test_bank_dumps_drop_the_read_time_annotation(tmp_path):
-    """``dump_bank`` strips ``source_entries`` because a read-time key that
+@pytest.mark.parametrize("which", ["lme", "beam"])
+def test_bank_dumps_drop_the_read_time_annotation(tmp_path, which):
+    """Both bank dumps strip ``source_entries`` because a read-time key that
     is not part of the offline replay makes committed bank artifacts churn.
-    The two new keys ride the same surface and get the same treatment."""
+    The two new keys ride the same surface and get the same treatment — in
+    BOTH dumps, which carry the pops independently."""
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from evals.longmemeval_bench import dump_bank
 
     class _Svc:
         def cortex_dump(self):
@@ -575,11 +638,43 @@ def test_bank_dumps_drop_the_read_time_annotation(tmp_path):
         def history(self, *a, **k):
             return {"versions": [{"value": "db-prod-1"}]}
 
-    facts = dump_bank(_Svc(), {"question_id": "q1", "question": "?",
-                               "answer": "a", "question_date": "2026-01-01"},
-                      tmp_path / "bank.json.gz")
+    svc = _Svc()
+    if which == "lme":
+        from evals.longmemeval_bench import dump_bank
+        facts = dump_bank(svc, {"question_id": "q1", "question": "?",
+                                "answer": "a", "question_date": "2026-01-01"},
+                          tmp_path / "bank.json.gz")
+    else:
+        from evals.beam_adapter import dump_chat_bank
+        # ``dump_chat_bank`` returns None; it mutates the dicts in place.
+        facts = svc.cortex_dump()["entries"]
+        dump_chat_bank(type("S", (), {
+            "cortex_dump": lambda self_: {"entries": facts},
+            "history": svc.history})(), "chat-1", {},
+            tmp_path / "bank.json.gz")
     assert "source_entries" not in facts[0]
     assert "re_verify" not in facts[0] and "re_verify_reason" not in facts[0]
+
+
+def test_set_slot_lookup_pays_nothing_when_the_cross_index_is_off(svc):
+    """``test_flag_off_when_the_cross_index_is_disabled`` states the rule:
+    with the cross-index off "the read surface must not pay for one". The
+    set-slot lookup fetches traces purely to feed the annotation and
+    discards them, so with the knob off that query is pure waste — unlike
+    the scalar path, which SERVES its traces as ``source_entries``."""
+    _superseded_set_slot(svc)
+    assert svc.cortex_lookup("stack", "languages")["re_verify"] is True
+
+    calls = []
+    real = svc._storage.traces_for_slot
+    svc._storage.traces_for_slot = lambda *a: (calls.append(a), real(*a))[1]
+    try:
+        svc.config.memory.traces.enabled = False
+        rec = svc.cortex_lookup("stack", "languages")
+    finally:
+        svc._storage.traces_for_slot = real
+    assert "re_verify" not in rec
+    assert calls == []
 
 
 def test_the_console_renders_the_flag_on_every_fact_view():
