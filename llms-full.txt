@@ -2034,7 +2034,12 @@ steps:
 1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
    requires a logged-in `claude` CLI:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
-     `127.0.0.1:8082`; `-Model` picks the served default —
+     `127.0.0.1:8082`; needs an elevated PowerShell — open it fresh from
+     the Start menu, never from a terminal inside Claude Desktop or another
+     Store-packaged app, or that app's next update fails to launch until a
+     reboot — see
+     [anthropics/claude-code#61635](https://github.com/anthropics/claude-code/issues/61635);
+     `-Model` picks the served default —
      `claude-opus-5` since the 2026-08-02 dreamer comparison; the one-shot
      installer prompts for this choice on Claude-shim installs).
    The shim also honors a concrete `claude-*` model named per request, so
@@ -2082,7 +2087,8 @@ ops/install.sh --extractor codex-fallback     # or codex-only; Windows: ops\inst
 
 which prompts for the GPT-5.6 dreamer (Sol / Terra / Luna), registers the
 shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
-Scheduler, elevated pwsh; `.sh` — systemd `--user`, docker-bridge bind),
+Scheduler, elevated pwsh opened from the Start menu, same caveat as the
+Claude shim above; `.sh` — systemd `--user`, docker-bridge bind),
 and writes the env triple for you. The autostart raises the shim's
 health-probe interval to 1800 s (`--health-ttl`) because every `/health`
 refresh is a real CLI call — metered spend on a free ChatGPT tier; a
