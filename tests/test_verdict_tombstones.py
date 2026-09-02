@@ -93,11 +93,17 @@ def test_judge_auto_reject_tombstones_without_a_second_dismiss(svc):
                      "note": "distinct"} for p in proposals]
 
     svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    calls: list[tuple] = []
+    real = st.dismiss_pair
+    st.dismiss_pair = lambda a, b: calls.append((a, b)) or real(a, b)
     out = svc.deep_dream_judge(_Judge())
     assert out["auto_rejected"] == 1
     assert st.get_entity_proposal(pid)["status"] == "rejected"
     assert ("gnd", "gnd-box") in st.dismissed_pairs()
-    assert st.conn.execute("SELECT count(*) FROM dismissed_pairs").fetchone()[0] == 1
+    # exactly one write, from the reject itself (a second display-keyed
+    # dismissal would land on the same PK under ON CONFLICT DO NOTHING,
+    # so the row count alone could not see it)
+    assert calls == [("gnd", "gnd-box")]
 
 
 # ── junk keeps ────────────────────────────────────────────────────────────

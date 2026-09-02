@@ -67,10 +67,12 @@ def _split(s, sep):
 # ── row shaping: the frozen evidence pack -> the shipped judge inputs ──────
 
 # The merge judge's per-snippet evidence cap. None = the frozen 240-char
-# serialization (every published number's exact prompt); the sweep stamps
-# deep_dream.judge_snippet_max_chars (3000 since 2026-09-03), so a run that
-# should match production passes --snippet-chars 3000 on a pack whose
-# snippets were built at full length (evals/queue_judge_fulllen_pack.py).
+# serialization (every published number's exact prompt), which is ALSO the
+# shipped deep_dream.judge_snippet_max_chars default (read it from
+# utils/config.py, never from a note). Pass --snippet-chars only to measure
+# a different cap on a pack whose snippets were built at full length
+# (evals/queue_judge_fulllen_pack.py) — the 2026-09-03 run at 3000 is
+# evals/results/queue-judge-ladder-20260903-fulllen.json.
 SNIPPET_CHARS: int | None = None
 
 

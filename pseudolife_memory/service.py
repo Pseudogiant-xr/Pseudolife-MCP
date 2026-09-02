@@ -3128,16 +3128,16 @@ class MemoryService(DreamOps):
             self._ensure_init()
             assert self._world is not None
             now = _t.time()
-            recs = self._world.restore(entity, attribute, now=now)
+            recs = self._world.restore(entity, attribute)
             if recs:
                 for r in recs:
                     self._record_store_decision(
                         "world", r, "restore", decided_by, None, now)
                 self._save_world()
-                return {"restored": len(recs), "source": "retired_record",
-                        "entity": entity, "attribute": attribute,
-                        "entries": [_world_record_to_dict(
-                            r, stale_policy=self._stale_policy) for r in recs]}
+            # Slots the in-memory pass could not cover (compaction purged
+            # the retired row) fall back to their audit snapshot in the
+            # SAME call — "every retired slot" is the contract, and the two
+            # populations coexist under a whole-entity restore.
             ne = _norm_key(entity)
             na = _norm_key(attribute) if attribute is not None else None
             live = {k for k in self._world._current
@@ -3146,11 +3146,11 @@ class MemoryService(DreamOps):
                 d for d in self._storage.retired_slots("world", entity_norm=ne)
                 if (na is None or d["attribute_norm"] == na) and d.get("record")
                 and (d["entity_norm"], d["attribute_norm"]) not in live]
-        if not snaps:
-            return {"restored": 0,
-                    "reason": "slot_live" if live else "nothing_retired",
-                    "entity": entity, "attribute": attribute}
-        return self._restore_from_snapshot("world", snaps, decided_by)
+        entries = [_world_record_to_dict(r, stale_policy=self._stale_policy)
+                   for r in recs]
+        return self._restore_result(
+            "world", recs, entries, snaps, decided_by, live,
+            {"entity": entity, "attribute": attribute})
 
     # ------------------------------------------------------------------
     # Procedural / outcome memory — lessons (schema v10)
@@ -3457,7 +3457,10 @@ class MemoryService(DreamOps):
         ``lesson_restore`` is the undo. The 2026-09-02 triage hard-deleted
         three lessons nothing could bring back — a forget is now reversible
         by construction. ``removed`` is kept for callers of the old contract
-        and counts the retired records."""
+        and counts the retired records. Best-effort like every store write:
+        the in-memory retire lands first, then the audit row, then the
+        per-slot sync — a persistence failure raises ``PersistenceError``
+        and the in-memory state stands until the next successful sync."""
         import time as _t
         with self._lock:
             self._ensure_init()
@@ -3485,16 +3488,17 @@ class MemoryService(DreamOps):
             self._ensure_init()
             assert self._lessons is not None
             now = _t.time()
-            recs = self._lessons.restore(task, aspect, now=now)
+            recs = self._lessons.restore(task, aspect)
             if recs:
                 for r in recs:
                     self._record_store_decision(
                         "lesson", r, "restore", decided_by, None, now)
                     self._link_lesson_graph(r.entity, r.about, r.polarity)
                 self._save_lessons()
-                return {"restored": len(recs), "source": "retired_record",
-                        "task": task, "aspect": aspect,
-                        "entries": [_lesson_record_to_dict(r) for r in recs]}
+            # Slots the in-memory pass could not cover (compaction purged
+            # the retired row) fall back to their audit snapshot in the
+            # SAME call — "every retired slot" is the contract, and the two
+            # populations coexist under a whole-task restore.
             ne = _norm_key(task)
             na = _norm_key(aspect) if aspect is not None else None
             live = {k for k in self._lessons._current
@@ -3503,11 +3507,28 @@ class MemoryService(DreamOps):
                 d for d in self._storage.retired_slots("lesson", entity_norm=ne)
                 if (na is None or d["attribute_norm"] == na) and d.get("record")
                 and (d["entity_norm"], d["attribute_norm"]) not in live]
-        if not snaps:
-            return {"restored": 0,
-                    "reason": "slot_live" if live else "nothing_retired",
-                    "task": task, "aspect": aspect}
-        return self._restore_from_snapshot("lesson", snaps, decided_by)
+        entries = [_lesson_record_to_dict(r) for r in recs]
+        return self._restore_result(
+            "lesson", recs, entries, snaps, decided_by, live,
+            {"task": task, "aspect": aspect})
+
+    def _restore_result(self, store: str, recs: list, entries: list[dict],
+                        snaps: list[dict], decided_by: str, live: set,
+                        label: dict[str, Any]) -> dict[str, Any]:
+        """Combine the in-memory restore with the snapshot fallback for the
+        slots it could not cover. Lock-free (the fallback writes through
+        the locked store writers). ``source`` is ``retired_record``,
+        ``audit_snapshot`` or ``mixed``."""
+        fb = (self._restore_from_snapshot(store, snaps, decided_by)
+              if snaps else {"restored": 0, "entries": []})
+        total = len(recs) + fb["restored"]
+        if not total:
+            return {"restored": 0, **label,
+                    "reason": "slot_live" if live else "nothing_retired"}
+        source = ("retired_record" if not fb["restored"]
+                  else "audit_snapshot" if not recs else "mixed")
+        return {"restored": total, "source": source, **label,
+                "entries": entries + fb["entries"]}
 
     def _record_store_decision(self, store: str, rec, action: str,
                                decided_by: str | None, reason: str | None,
@@ -3527,7 +3548,13 @@ class MemoryService(DreamOps):
                                decided_by: str) -> dict[str, Any]:
         """Re-write retired slots from their audit snapshots — the fallback
         once compaction has purged the retired rows. Lock-free: the store
-        writers take the lock themselves."""
+        writers take the lock themselves, so a concurrent write landing on
+        the slot between the caller's slot check and the write here is
+        superseded by the snapshot value (narrow; the retired-record path
+        under the lock has no such window). What a snapshot restore cannot
+        bring back: the HLC / writer / session / tx_time / valid_time
+        stamps (re-minted at write time) and, for world facts, polarity
+        (``world_write`` has none; no negative world facts exist)."""
         import time as _t
         restored: list[dict] = []
         for d in snaps:
@@ -3598,6 +3625,8 @@ class MemoryService(DreamOps):
                     if (d["store"], d["entity_norm"], d["attribute_norm"]) not in live]
         rows.sort(key=lambda d: (-float(d["decided_at"]), -int(d["id"])))
         rows = rows[: max(0, int(limit))]
+        for d in rows:      # the key restore_slot / the routes take back
+            d["key"] = _slot_key(d["entity_norm"], d["attribute_norm"])
         return {"count": len(rows), "entries": rows, "store": store,
                 "limit": limit}
 

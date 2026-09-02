@@ -33,8 +33,9 @@ ORIGIN = "source"
 class WorldRecord:
     """One canonical world fact at a slot, with citation + freshness.
 
-    ``status`` is ``current`` | ``superseded`` (no contender state — world facts have
-    a single provenance tier). Superseded records are kept for audit / revert.
+    ``status`` is ``current`` | ``superseded`` | ``retired`` (no contender state —
+    world facts have a single provenance tier). Superseded and retired records
+    are kept for audit / revert (``retire`` / ``restore``).
     """
 
     entity: str
@@ -280,13 +281,14 @@ class WorldCortexStore:
             }
         return out
 
-    def restore(self, entity: str, attribute: str | None = None, *,
-                now: float | None = None) -> list:
+    def restore(self, entity: str, attribute: str | None = None) -> list:
         """Bring back the newest retired record at an entity, or at one
         exact slot — only for slots with no current record (a slot written
-        again since the retire keeps its new value). Returns the restored
-        records."""
-        t = time.time() if now is None else float(now)
+        again since the retire keeps its new value). Flips status and
+        clears ``superseded_at`` ONLY: ``asserted_at`` / ``last_confirmed``
+        and the writer stamps stay, so read-time staleness (a lesson whose
+        subject's facts changed while it was retired) is still visible.
+        Returns the restored records."""
         ne = _norm_key(entity)
         na = _norm_key(attribute) if attribute is not None else None
         best: dict[tuple[str, str], object] = {}
@@ -304,7 +306,6 @@ class WorldCortexStore:
         for r in best.values():
             r.status = "current"
             r.superseded_at = None
-            r.last_confirmed = t
             self.dirty_slots.add(r.key)
             out.append(r)
         if out:

@@ -15,12 +15,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `status='retired'`, an FK-free `store_decisions` audit row (v37) records
   who decided, why, and the verbatim record, and `lesson_restore` /
   `world_restore` undo it — from the retired record while it exists
-  (provenance, stamps and embedding intact), from the audit snapshot once
-  compaction has purged it (`memory.compaction` treats a retired row like
-  any other non-live record). Surfaces: `memory_graph_review(
-  action="restore_slot", store=, src="entity|attribute")`,
-  `POST /api/lessons/restore`, `POST /api/world/restore`, and
-  `GET /api/curation/retired` for what is currently retired.
+  (provenance, stamps and embedding intact, so a lesson whose subject
+  changed while retired still comes back flagged `re_verify`), from the
+  audit snapshot once compaction has purged it (`memory.compaction`
+  treats a retired row like any other non-live record); a whole-entity
+  restore covers both populations in one call (`source: mixed`).
+  Surfaces: `memory_graph_review(action="restore_slot", store=,
+  src="entity|attribute")`, `POST /api/lessons/restore`,
+  `POST /api/world/restore`, and `GET /api/curation/retired` for what is
+  currently retired (each entry carries the `key` restore takes).
   `memory_forget(scope="fact")` and `scope="memory"` are unchanged (hard
   delete). The three lost lessons themselves were re-minted by the
   2026-09-02 09:58 dream from the re-seeded outcome signals (804-806 →

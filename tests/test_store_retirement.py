@@ -133,6 +133,53 @@ def test_lesson_restore_falls_back_to_the_audit_snapshot_after_compaction(svc):
     assert svc.curation_retired("lesson")["entries"] == []
 
 
+def test_restore_keeps_the_stamps_so_re_verify_survives(svc):
+    """A restore must not touch last_confirmed: _annotate_lesson_staleness
+    reads max(asserted_at, last_confirmed) against the about-entity's
+    fact churn, so a fresh stamp would silently clear re_verify on a
+    lesson whose subject changed while it was retired (review, 2026-09-03)."""
+    svc.lesson_write("deploy engine", "approach", "use tar --no-same-owner",
+                     about="engine-host", now=100.0)
+    svc.cortex_write("engine-host", "os", "ubuntu-24")          # later churn
+    assert svc.lesson_search("deploy engine")["entries"][0]["re_verify"] is True
+    svc.lesson_forget("deploy engine", "approach")
+    assert svc.lesson_restore("deploy engine", "approach")["restored"] == 1
+    row = svc.lesson_search("deploy engine")["entries"][0]
+    assert row["re_verify"] is True
+    assert row["last_confirmed"] == 100.0 and row["asserted_at"] == 100.0
+
+
+def test_whole_task_restore_mixes_retired_records_and_snapshots(svc):
+    """"Bring back every retired slot" holds when one slot's retired row
+    was already compacted: the in-memory pass covers what it can and the
+    audit-snapshot fallback covers the rest, in one call."""
+    svc.lesson_write("deploy engine", "approach", "back up first", now=100.0)
+    svc.lesson_write("deploy engine", "pitfall", "never skip the health check")
+    svc.lesson_forget("deploy engine")
+    # purge only the older retire (superseded_at is the retire time; the
+    # cutoff sits between the two forgets' stamps)
+    with svc._lock:
+        recs = {r.key: r for r in svc._lessons.records}
+        recs[("deploy-engine", "approach")].superseded_at = 50.0
+        svc._lessons.dirty_slots.add(("deploy-engine", "approach"))
+        svc._save_lessons()
+    cfg = svc.config.memory.compaction
+    cfg.keep_per_slot = 0
+    cfg.min_age_days = 0
+    from pseudolife_memory.memory.compaction import compact_store
+    with svc._lock:
+        assert compact_store(svc._lessons, keep_per_slot=0, min_age_days=0,
+                             now=1000.0) == 1                  # only the 50.0 one
+        svc._save_lessons()
+    assert _pg_rows(svc, "lessons", "deploy-engine") == [("retired", "never skip the health check")]
+    out = svc.lesson_restore("deploy engine")
+    assert out["restored"] == 2 and out["source"] == "mixed"
+    got = {e["aspect"]: e["lesson"] for e in svc.lessons_dump()["entries"]}
+    assert got == {"approach": "back up first",
+                   "pitfall": "never skip the health check"}
+    assert svc.curation_retired("lesson")["entries"] == []
+
+
 def test_curation_retired_lists_retired_slots_newest_first(svc):
     svc.lesson_write("a task", "approach", "x")
     svc.lesson_write("b task", "pitfall", "y")
@@ -142,6 +189,7 @@ def test_curation_retired_lists_retired_slots_newest_first(svc):
     keys = [(e["entity_norm"], e["attribute_norm"]) for e in listing["entries"]]
     assert keys == [("b-task", "pitfall"), ("a-task", "approach")]
     top = listing["entries"][0]
+    assert top["key"] == "b-task|pitfall"                  # what restore_slot takes
     assert top["decided_by"] == "agent" and top["reason"] == "noise"
     assert top["record"]["lesson"] == "y"
     svc.lesson_restore("a task")
