@@ -22,9 +22,16 @@ queue per tick (`memory.deep_dream.judge_batch`), each mode-gated:
 every judge stage in one move (the mechanical tick keeps running;
 `analyzer_file_duplicates` and `orphan_sweep` have their own switches, and
 `dream.enabled: false` stops the sweep timer but not a manual deep apply).
-A judge that is about to delete or fold writes the graph snapshot first;
-each judge applies at most one `judge_batch` slice per tick, which is also
-the rate limit. **Day-one behaviour on an existing bank:** with
+A judge that is about to delete or fold writes the graph snapshot first
+(the snapshot covers the five graph tables only — a curation `auto` forget
+removes a lesson/world row the snapshot does not hold, which is one reason
+that mode ships off and is recommended against until forgets retire
+instead of delete); each judge applies at most one `judge_batch` slice per
+tick, which is also the rate limit. Merge rows judged before this build
+carry the judge's CONFIGURED model name; second opinions stamp the SERVED
+name, so the distinct-model check also refuses a second opinion from the
+same extractor object or the same configured name — a dated served id for
+one physical model cannot pass as a second model. **Day-one behaviour on an existing bank:** with
 `judge_mode: auto-reject` already in `config.yaml` (the live default since
 2026-08-30) and `judge_second_opinion` defaulting on, the reject gate
 widens from single-vote >= 0.8 to ALSO two agreeing votes at mean >= 0.7

@@ -26,8 +26,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     the first path that ever auto-applies an accept — and only when the two
     opinions come from different models (compared on the model each
     endpoint reports SERVING, so a name-agnostic endpoint cannot satisfy
-    it with one model): a same-model second vote at temperature 0 is
-    independent only through batch composition. An accept is also refused
+    it with one model; a second opinion from the same extractor object or
+    the same configured name is never distinct, so rows stamped with a
+    configured name before this build cannot pass on a dated served id):
+    a same-model second vote at temperature 0 is independent only through
+    batch composition. An accept is also refused
     when the pair sits in `dismissed_pairs` (an earlier `relate` /
     `dismiss_pair` verdict settled it as distinct — the pending row is
     closed instead), when the row was filed by the analyzer (an unmeasured
@@ -95,8 +98,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     bounded `judge_batch` slice per tick (that is also the rate limit on
     auto-applies), getattr-guarded, never raising into the sweep; skipped
     rows are stamped `leave` at 0 confidence so a batch head cannot starve
-    the queue; a judge that is about to delete or fold writes the graph
-    snapshot first. Every mode ships `shadow` (candidate judge `off`); the
+    the queue; a judge that is about to delete or fold graph rows writes
+    the graph snapshot first (a curation `auto` forget removes lesson/world
+    rows the graph snapshot does not cover — one more reason that mode
+    ships off). Every mode ships `shadow` (candidate judge `off`); the
     Console's Deep-dream group gains a switch per judge plus one kill
     switch for all of them (`judges_enabled`). A verdict memoised under a
     lower mode (curation memo, candidate memo) is not applied

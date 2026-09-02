@@ -511,6 +511,61 @@ def test_auto_accept_refuses_dismissed_pairs_and_analyzer_rows(svc):
     assert row["status"] == "pending" and "unmeasured" in row["judge_note"]
 
 
+def test_auto_accept_same_endpoint_never_distinct_even_if_stamp_differs(svc):
+    """A row judged before this build carries the CONFIGURED model name;
+    the second opinion stamps the SERVED name. When both come from the same
+    extractor object the two strings may differ for one physical model —
+    that must not pass as a distinct second model."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "auto"
+    cfg.judge_second_opinion = True
+    svc.store("kappa svc handles the kappa path", source="t")
+    svc.store("kappa service is the kappa daemon", source="t")
+    pid = _propose(svc, "kappa svc", "kappa service")
+    judge = _MergeJudge({("kappa svc", "kappa service"): ("accept", 0.9)})
+    svc.deep_dream_judge(judge)
+    with svc._lock:
+        svc._storage.conn.execute(
+            "UPDATE entity_proposals SET judge_model = %s WHERE id = %s",
+            ("claude-opus-5", pid))                        # legacy configured stamp
+        svc._storage.conn.commit()
+    judge.served_model = "claude-opus-5-20260901"          # dated served id
+    out = svc.deep_dream_judge(judge)                       # ex2 is ex
+    assert out["auto_accepted"] == 0 and out["auto_accept_refused"] == 1
+    assert "distinct second model" in _merge_row(svc, pid)["judge_note"]
+
+
+def test_auto_accept_guard_keys_on_stored_canonicals(svc):
+    """dismissed_pairs is keyed by the entity's STORED canonical — an entity
+    minted from a bare name and later display-enriched ('GND (Enshrouded
+    server)' over canonical 'gnd') has a canonical norm_name(display) never
+    reproduces (graph_dismiss_duplicate's own 2026-08-16 lesson). The
+    guard must resolve through the proposal's entity ids, or a dismissed
+    pair folds anyway over the human verdict."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "auto"
+    cfg.judge_second_opinion = True
+    st = svc._storage
+    a = st.ensure_entity("gnd", display="gnd")
+    b = st.ensure_entity("gnd-box", display="GND box")
+    with st._txn():
+        st.conn.execute("UPDATE entities SET display = %s WHERE id = %s",
+                        ("GND (Enshrouded server)", a))
+    svc.store("GND (Enshrouded server) hosts the game world", source="t")
+    svc.store("GND box sits in the rack", source="t")
+    pid = st.insert_entity_proposal("merge", a, b, 0.8, "test", time.time())
+    assert svc.graph_dismiss_duplicate("GND (Enshrouded server)", "GND box")["dismissed"]
+    assert ("gnd", "gnd-box") in st.dismissed_pairs()          # canonical keys
+    verdicts = {("GND (Enshrouded server)", "GND box"): ("accept", 0.9)}
+    judge, second = _MergeJudge(verdicts), _SecondJudge(verdicts)
+    svc.deep_dream_judge(judge)
+    out = svc.deep_dream_judge(judge, second_extractor=second)
+    assert out["auto_accepted"] == 0
+    assert st.get_entity_proposal(pid)["status"] == "rejected"     # closed, not folded
+    displays = {e["display"] for e in st.load_graph()["entities"]}
+    assert {"GND (Enshrouded server)", "GND box"} <= displays
+
+
 def test_judges_kill_switch(svc):
     cfg = svc.config.memory.deep_dream
     cfg.judges_enabled = False

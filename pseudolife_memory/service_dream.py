@@ -2415,7 +2415,22 @@ class DreamOps:
                 now = _t.time()
                 with self._lock:
                     dismissed = self._storage.dismissed_pairs()
-                from pseudolife_memory.graph import norm_name as _nn
+                    # dismissed_pairs is keyed by the entity's STORED
+                    # canonical (graph_dismiss_duplicate resolves display
+                    # names to it): an entity minted from a bare name and
+                    # later display-enriched — 'GND (Enshrouded server)'
+                    # over canonical 'gnd' — has a canonical norm_name(display)
+                    # never reproduces, so the guard resolves through the
+                    # proposal's entity ids, never through names.
+                    canon_by_id = {e["id"]: e["canonical"]
+                                   for e in self._storage.load_graph()["entities"]}
+                # Same-model detection must survive rows judged before this
+                # build (stamped with the CONFIGURED name) and a shared
+                # extractor (ex2 is ex): distinct only when the second
+                # opinion came from another endpoint object AND its served
+                # and configured names both differ from the first stamp.
+                same_endpoint = ex2 is ex
+                configured2 = getattr(ex2, "model", None)
                 snap: dict = {}
                 for v in verdicts:
                     e = enriched[v["n"] - 1]
@@ -2452,7 +2467,9 @@ class DreamOps:
                             and mean >= cfg.judge_accept_min_confidence):
                         a_name = e["from"]["display"] or ""
                         b_name = e["into"]["display"] or ""
-                        pair = tuple(sorted((_nn(a_name), _nn(b_name))))
+                        pair = tuple(sorted((
+                            canon_by_id.get(row["entity_id"], ""),
+                            canon_by_id.get(row["into_id"], ""))))
                         if pair in dismissed:
                             # An earlier verdict (relate / dismiss_pair)
                             # settled these as distinct; the pending merge
@@ -2464,7 +2481,9 @@ class DreamOps:
                             out["auto_accept_refused"] = out.get(
                                 "auto_accept_refused", 0) + 1
                             continue
-                        if (row.get("judge_model") or "") == model2:
+                        first_model = row.get("judge_model") or ""
+                        if (same_endpoint or first_model == model2
+                                or (configured2 and first_model == configured2)):
                             reason = "auto-accept needs a distinct second model"
                         elif str(row.get("reason") or "").startswith("analyzer-duplicate"):
                             # The accept gate's evidence holds no analyzer-
