@@ -154,6 +154,10 @@ def test_auto_reject_applies_only_confident_rejects(svc):
 
 
 def test_judged_rows_are_not_resent(svc):
+    # First-opinion idempotence: with the 2026-09-02 second opinion on, a
+    # judged row IS re-sent exactly once (test_queue_judges_service covers
+    # that contract); this test pins the single-opinion path.
+    svc.config.memory.deep_dream.judge_second_opinion = False
     svc.config.memory.deep_dream.judge_mode = "shadow"
     _propose(svc, "eps svc", "eps service")
     judge = _StubJudge({("eps svc", "eps service"): ("leave", 0.4)})
@@ -164,6 +168,10 @@ def test_judged_rows_are_not_resent(svc):
 
 
 def test_skipped_rows_become_zero_confidence_leaves(svc):
+    # First-opinion idempotence: with the 2026-09-02 second opinion on, a
+    # judged row IS re-sent exactly once (test_queue_judges_service covers
+    # that contract); this test pins the single-opinion path.
+    svc.config.memory.deep_dream.judge_second_opinion = False
     # A model that returns no verdict for a row must not cause that row to
     # be re-sent every sweep (queue-head starvation): it is recorded as an
     # explicit abstain instead.

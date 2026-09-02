@@ -66,6 +66,9 @@ EXPORTED_TABLES = (
     "outcome_signals", "communities", "entity_communities",
     "memory_traces", "entity_sources", "merge_decisions",
     "chronicle_events",
+    # v35: the store-curation judge's verdict memo travels like
+    # dismissed_pairs — a settled pair stays settled on the target bank.
+    "curation_judgments",
 )
 
 # Operational, not knowledge: the dream pre-image journal only exists to

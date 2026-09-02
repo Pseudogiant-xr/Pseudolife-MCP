@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 34
+SCHEMA_META_VERSION = 35
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -383,7 +383,7 @@ BENCH_RESET_TABLES = (
     "communities", "entity_communities", "memory_traces", "entity_sources",
     # Declared by the additive-migration tail of ensure_schema, not SCHEMA_SQL.
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
-    "retrieval_events", "retrieval_uses", "slot_reads",
+    "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",
 )
 
 # The dimension every embedding column is declared at (schema v25). Not
@@ -837,6 +837,45 @@ def ensure_schema(conn) -> dict:
         cur.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_contested_uq "
             "ON facts (entity_norm, attribute_norm) WHERE status = 'contested'"
+        )
+        # v35 additive: the review-queue judges reach the queues the v30
+        # merge judge left for humans. (1) The LINK judge's opinion rides the
+        # edge_proposals row like v30's rides entity_proposals — plus
+        # judge_relation, the corrected relation a "retype" verdict names.
+        # NULL = not yet judged, exactly the pre-v35 behaviour. (2) The
+        # store-curation judge's memo: lesson/world duplicate LISTINGS are
+        # recomputed per pass (nothing is filed), so without a memo every
+        # sweep would re-send the same pairs; keyed like dismissed_pairs
+        # (store + sorted slot keys), overwritten on re-judge.
+        for ddl in ("judge_verdict TEXT", "judge_confidence REAL",
+                    "judge_note TEXT", "judge_model TEXT",
+                    "judged_at DOUBLE PRECISION", "judge_relation TEXT",
+                    "decided_by TEXT", "decided_at DOUBLE PRECISION"):
+            cur.execute(
+                f"ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS {ddl}")
+        # (3) The merge judge's SECOND opinion (a fresh batch, optionally a
+        # second model) beside the first: two-vote agreement is the apply
+        # gate for the rows the single-vote 0.8 reject gate leaves pending.
+        for ddl in ("judge2_verdict TEXT", "judge2_confidence REAL",
+                    "judge2_model TEXT", "judged2_at DOUBLE PRECISION"):
+            cur.execute(
+                f"ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS {ddl}")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS curation_judgments (
+              store      TEXT NOT NULL,
+              a_key      TEXT NOT NULL,
+              b_key      TEXT NOT NULL,
+              verdict    TEXT NOT NULL,
+              keep       TEXT,
+              fold       TEXT,
+              confidence REAL,
+              note       TEXT,
+              model      TEXT,
+              judged_at  DOUBLE PRECISION NOT NULL,
+              PRIMARY KEY (store, a_key, b_key)
+            )
+            """
         )
         cur.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS world_facts_slot_current_uq "

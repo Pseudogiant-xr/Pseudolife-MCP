@@ -2346,3 +2346,59 @@ def test_claim_text_still_appears_in_its_doc(claim: Claim):
         f"{claim.id}: {claim.doc} no longer contains the guarded text\n  "
         f"{claim.needle!r}\nIf the number changed, update this table; if the "
         f"claim was dropped, delete its row.")
+
+
+# ── the review-queue judge gates (2026-09-02) ─────────────────────────────
+# The CHANGELOG publishes the two-vote merge gates and the single-vote
+# accept precision they replace; all three come from the scrubbed panel
+# artifact (labels + votes), never from the private evidence pack.
+PANEL_0902 = "evals/results/queue-judge-panel-20260902.json"
+for _cid, _needle, _val, _stated, _places in [
+    ("queue-judge-two-vote-reject-n", "two-vote rejects 8/8",
+     lambda d: d["merge_gate_table"]["R2_two_vote_reject_mean_ge0.7"]["n"], 8, 0),
+    ("queue-judge-two-vote-reject-bad", "two-vote rejects 8/8",
+     lambda d: len(d["merge_gate_table"]["R2_two_vote_reject_mean_ge0.7"]["bad"]), 0, 0),
+    ("queue-judge-two-vote-accept-n", "non-low-differential accepts 6/6",
+     lambda d: d["merge_gate_table"]["A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["n"], 6, 0),
+    ("queue-judge-two-vote-accept-bad", "non-low-differential accepts 6/6",
+     lambda d: len(d["merge_gate_table"]["A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["bad"]), 0, 0),
+    ("queue-judge-single-accept-precision", "same rows 0.74",
+     lambda d: d["single_vote_accept_precision"]["shadow_opus"]["precision"], 0.74, 2),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(PANEL_0902,),
+        value=_val, stated=_stated, places=_places))
+
+LADDER_0902 = "evals/results/queue-judge-ladder-20260902.json"
+
+
+def _ladder(queue, metric, field):
+    return lambda d: d["arms"]["opus-r2"]["queues"][queue][metric][field]
+
+
+for _cid, _needle, _val, _stated in [
+    ("queue-ladder-link-accept-n", "link auto-accept 4/4", _ladder("links", "auto_accept", "n"), 4),
+    ("queue-ladder-link-accept-bad", "link auto-accept 4/4", _ladder("links", "auto_accept", "bad"), 0),
+    ("queue-ladder-link-reject-n", "auto-reject 5/5", _ladder("links", "auto_reject", "n"), 5),
+    ("queue-ladder-link-reject-bad", "auto-reject 5/5", _ladder("links", "auto_reject", "bad"), 0),
+    ("queue-ladder-junk-delete-n", "evidence bar 6/6", _ladder("junk", "auto_delete_under_bar", "n"), 6),
+    ("queue-ladder-junk-delete-bad", "evidence bar 6/6", _ladder("junk", "auto_delete_under_bar", "bad"), 0),
+    ("queue-ladder-junk-keep-n", "auto-keep 7/7", _ladder("junk", "auto_keep", "n"), 7),
+    ("queue-ladder-curation-distinct-n", "auto-distinct 21/21", _ladder("curation", "auto_distinct", "n"), 21),
+    ("queue-ladder-curation-distinct-bad", "auto-distinct 21/21", _ladder("curation", "auto_distinct", "bad"), 0),
+    ("queue-ladder-candidate-propose-n", "auto-propose 7/8", _ladder("candidates", "auto_propose", "n"), 8),
+    ("queue-ladder-candidate-propose-bad", "auto-propose 7/8", _ladder("candidates", "auto_propose", "bad"), 1),
+    ("queue-ladder-candidate-dismiss-n", "auto-dismiss 15/16", _ladder("candidates", "auto_dismiss", "n"), 16),
+    ("queue-ladder-candidate-dismiss-bad", "auto-dismiss 15/16", _ladder("candidates", "auto_dismiss", "bad"), 1),
+    ("queue-ladder-merge-two-vote-accept-n", "accept 4/4", _ladder("merges", "two_vote_accept_not_lowdiff", "n"), 4),
+    ("queue-ladder-merge-two-vote-accept-bad", "accept 4/4", _ladder("merges", "two_vote_accept_not_lowdiff", "bad"), 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(LADDER_0902,),
+        value=_val, stated=_stated, places=0))
+CLAIMS.append(Claim(
+    id="queue-ladder-curation-keep-precision", doc=CHANGELOG,
+    needle="precision was 0.5625", artifacts=(LADDER_0902,),
+    value=_ladder("curation", "duplicate_keep_precision", "precision"),
+    stated=0.5625, places=4))
+

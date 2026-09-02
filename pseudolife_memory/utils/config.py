@@ -489,6 +489,75 @@ class DeepDreamConfig:
     judge_reject_min_confidence: float = 0.8
     judge_url: str = ""                  # optional OpenAI-compatible override endpoint; empty = the dream extractor
     judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)
+    # Review-queue autonomy (2026-09-02 design, docs/superpowers/specs/
+    # 2026-09-02-review-queue-autonomy-design.md). Every gate below is
+    # measured on the 2026-09-02 blind-panel verdicts (committed as
+    # evals/results/queue-judge-panel-20260902.json; the raw evidence pack is
+    # private bank content and stays outside the tree), replayed by
+    # evals/queue_judge_ladder.py.
+    #
+    # Merge second opinion + guarded auto-accept. On the 63 residual merge
+    # rows (everything the single-vote 0.8 reject gate had left pending),
+    # two independent Opus rejects at mean >= 0.7 were 8/8 correct, and two
+    # independent accepts on NON-low-differential evidence were 6/6 at mean
+    # >= 0.6 — while single-vote accept precision on the same rows was 0.74
+    # and 9 of 10 two-vote accepts on low-differential rows were right but
+    # the tenth folded the wrong way. A wrong fold deletes an entity, so
+    # accepts additionally require judge_mode "auto".
+    judge_second_opinion: bool = True
+    # A same-model second vote (temperature 0) is independent only through
+    # batch composition — 2/129 flips on the 2026-08-16 ladder — which is
+    # enough to double-check a reject but not to authorize a fold: "auto"
+    # accepts require a DIFFERENT model here (with claude-fable-5 as the
+    # second model the same 63 rows gave 6/6 accepts, 8/8 rejects).
+    judge_second_model: str = ""         # empty = same endpoint, fresh batch
+    judge_reject_min_confidence_2: float = 0.7   # two-vote mean gate
+    judge_accept_min_confidence: float = 0.6     # two-vote mean gate ("auto" only)
+    # Link judge over pending edge_proposals. Edges are reversible
+    # (memory_graph_unrelate / supersede), which is why this is the one
+    # queue whose accepts may ship auto: the 2026-09-02 panel accepted 23,
+    # retyped 1 and rejected 13 of 37.
+    link_judge_mode: str = "shadow"      # off | shadow | auto
+    link_accept_min_confidence: float = 0.8
+    link_reject_min_confidence: float = 0.8
+    # Junk judge over pending junk proposals (the evidence-bearing rows the
+    # zero-structure auto-delete skipped). Deletes stay behind an evidence
+    # bar even in auto: degree <= junk_max_auto_degree and at most the one
+    # fact slot the name was minted from (a lesson-minted object passes by
+    # construction — deleting it only nulls the lesson's pointer).
+    junk_judge_mode: str = "shadow"      # off | shadow | auto
+    junk_keep_min_confidence: float = 0.8
+    junk_delete_min_confidence: float = 0.85
+    # The 2026-09-02 panel's 12 ratified deletes all sat at degree 1-2
+    # (lesson-minted objects: one prefers edge per lesson naming them);
+    # nothing above 2 was a delete. The bar is set at the measured edge.
+    junk_max_auto_degree: int = 2
+    # Store-curation judge over the lesson/world duplicate listings.
+    # "distinct" is a reversible dismissal (delete the dismissed_pairs row);
+    # "duplicate" forgets a slot and needs the full "auto".
+    curation_judge_mode: str = "shadow"  # off | shadow | auto-distinct | auto
+    curation_distinct_min_confidence: float = 0.8
+    curation_forget_min_confidence: float = 0.9
+    curation_rejudge_days: float = 30.0  # a judged pair is not re-sent sooner
+    # Step-C candidate judge: turns the deep dream's link CANDIDATES into
+    # filed proposals (then settled by the link judge) or dismissed pairs.
+    # Runs once per deep apply.
+    candidate_judge_mode: str = "off"    # off | auto
+    candidate_min_confidence: float = 0.6
+    # Mechanical apply additions: file the Console's live analyzer duplicate
+    # findings into the merge / link queues (they were never filed anywhere,
+    # so no judge ever saw them), and delete entities that carry no
+    # evidence at all — no edge (superseded included), fact, lesson, alias,
+    # scope, proposal or mentioning entry — once older than
+    # orphan_min_age_days (50 such on the 2026-09-02 live bank).
+    analyzer_file_duplicates: bool = True
+    # Off by default for one release: it is the only destructive default
+    # that would fire on the first apply after an upgrade, on a bank whose
+    # census nobody has read. Flip it on after reading `orphans_deleted`
+    # in a dry census (the storage helper) — and it stays capped per pass.
+    orphan_sweep: bool = False
+    orphan_min_age_days: float = 7.0
+    orphan_max_per_apply: int = 50       # 0 = uncapped
 
 
 @dataclass

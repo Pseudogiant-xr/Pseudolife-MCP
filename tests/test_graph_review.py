@@ -362,3 +362,31 @@ def test_near_duplicate_names_still_matches_same_variant():
                  "display": "ops/update.ps1", "aliases": []}]
     hits = near_duplicate_names("update.ps1", existing, min_jaccard=0.3)
     assert [h["entity_id"] for h in hits] == [7]
+
+
+def test_proposed_links_carry_the_link_judge_opinion():
+    # Schema v35: a judged link row shows the verdict beside the evidence,
+    # exactly as merge rows show the merge judge's; unjudged rows show
+    # nothing.
+    rows = gr.proposed_links([
+        {"id": 1, "src": "a", "relation": "uses", "dst": "b", "confidence": 0.7,
+         "source": "deep-dream", "judge_verdict": "retype", "judge_confidence": 0.9,
+         "judge_note": "direction", "judge_model": "m", "judge_relation": "implements"},
+        {"id": 2, "src": "c", "relation": "uses", "dst": "d", "confidence": 0.7},
+    ])[0]["links"]
+    assert rows[0]["judge"] == {"verdict": "retype", "confidence": 0.9,
+                                "note": "direction", "model": "m",
+                                "relation": "implements"}
+    assert rows[0]["source"] == "deep-dream"
+    assert "judge" not in rows[1]
+
+
+def test_merge_candidates_carry_the_second_opinion():
+    finding = gr.merge_candidates([
+        {"id": 5, "kind": "merge", "entity": "x svc", "into": "x service",
+         "score": 0.9, "reason": "t", "judge_verdict": "reject",
+         "judge_confidence": 0.6, "judge_note": "n", "judge_model": "m",
+         "judge2_verdict": "accept", "judge2_confidence": 0.7, "judge2_model": "m2"},
+    ])[0]["merges"][0]
+    assert finding["judge"]["verdict"] == "reject"
+    assert finding["judge2"] == {"verdict": "accept", "confidence": 0.7, "model": "m2"}

@@ -6,6 +6,120 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-02 — every review queue gets a judge; schema v35)
+- **The graph review queue kept refilling between human visits — merge
+  proposals below the auto-reject gate, junk proposals the zero-structure
+  guard skipped, link proposals nobody judged, lesson/world duplicate
+  listings, and ~90 analyzer duplicate findings the Console re-listed on
+  every load because they were never filed anywhere. The sweep now judges
+  every one of those queues itself and applies exactly the verdicts that
+  are cheap or reversible to get wrong; everything expensive stays pending
+  with the model's opinion attached.** Design:
+  `docs/superpowers/specs/2026-09-02-review-queue-autonomy-design.md`.
+  - **Merge judge: second opinion + guarded auto-accept.** A pending merge
+    whose first verdict sat below the single-vote gate is re-judged once in
+    a fresh batch (`judge_second_opinion`, optional `judge_second_model`);
+    two rejects at mean >= `judge_reject_min_confidence_2` (0.7) apply, a
+    disagreement stamps `split` on the note. New `judge_mode: auto` folds
+    a pair only when two independent accepts agree on a row that is NOT
+    `low_differential`, at mean >= `judge_accept_min_confidence` (0.6) —
+    the first path that ever auto-applies an accept — and only when the two
+    opinions come from different models (`judge_second_model`): a same-model
+    second vote at temperature 0 is independent only through batch
+    composition. Measured on the 63
+    residual (sub-gate) merge rows of the 2026-09-02 live queue against a
+    blind seven-agent Opus panel: two-vote rejects 8/8, two-vote
+    non-low-differential accepts 6/6, single-vote accept precision on the
+    same rows 0.74, and 9 of 10 two-vote accepts on LOW-differential rows
+    right with the tenth folding the wrong way — which is why the flag
+    gates (`evals/results/queue-judge-panel-20260902.json`, `merge_gate_table`).
+  - **Link judge** (`link_judge_mode`, schema v35 judge columns on
+    `edge_proposals`): judges pending link proposals from both sides' live
+    edges, scopes and the notes naming both; `auto` promotes accept /
+    retype verdicts at/above `link_accept_min_confidence` to live edges
+    (origin `action`, a retype with the judge's relation, row status
+    `retyped`) and rejects at/above `link_reject_min_confidence`. Edges are
+    reversible, which is why this is the one queue whose accepts may ship
+    auto. `graph_accept_proposal` / `graph_reject_proposal` now stamp
+    `decided_by` / `decided_at`.
+  - **Junk judge** (`junk_judge_mode`): judges the evidence-bearing junk
+    proposals with a provenance pack (detector class, live edges with
+    origin, fact count and text, whether the node is a lesson-minted
+    object, scopes, mentions); `auto` keeps at/above
+    `junk_keep_min_confidence` and deletes at/above
+    `junk_delete_min_confidence` ONLY under the evidence bar (degree <=
+    `junk_max_auto_degree`, at most one fact slot).
+  - **Store-curation judge** (`curation_judge_mode`): judges the
+    lesson/world duplicate listings; verdicts are remembered in the new
+    `curation_judgments` table (`curation_rejudge_days`) so pairs are not
+    re-sent every sweep. `auto-distinct` applies distinct verdicts as the
+    existing reversible dismissal; `auto` additionally forgets the losing
+    slot of a duplicate verdict after folding the judge's carry-over into
+    the surviving lesson.
+  - **Step-C candidate judge** (`candidate_judge_mode`): once per deep
+    apply, the dream's link candidates are judged — `propose` files an
+    edge proposal (source `deep-dream-judge`, then settled by the link
+    judge), `dismiss` marks the pair distinct.
+  - **Analyzer duplicates are filed** (`analyzer_file_duplicates`): each
+    deep apply files graph_review's live duplicate findings into the merge
+    queue (file/concept pairs into the link queue as `implements`), so the
+    judges finally see them; pairs the merge queue already holds are
+    skipped.
+  - **Unreachable-orphan sweep** (`orphan_sweep`, `orphan_min_age_days`,
+    `orphan_max_per_apply`): entities with no evidence at all — no edge
+    (superseded included), no fact, lesson or world fact by id or name, no
+    alias, scope or proposal — that no current entry mentions are deleted
+    after seven days, at most 50 per pass, audited as `dream-auto` /
+    `deleted` (deliberately not a junk tombstone). 50 such on the
+    2026-09-02 live bank. Ships **off**: it is the one destructive switch
+    that would fire on the first apply after an upgrade.
+  - All judges ride `run_sweep_once` after the merge judge, each a bounded
+    `judge_batch`, getattr-guarded, never raising into the sweep; skipped
+    rows are stamped `leave` at 0 confidence so a batch head cannot starve
+    the queue. Every mode ships `shadow` (candidate judge `off`); the
+    Console's Deep-dream group gains a switch per judge. A curation
+    verdict memoised under a lower mode is not applied retroactively when
+    the mode is raised — it is re-judged after `curation_rejudge_days`.
+  - **Schema v35** (additive/idempotent): `edge_proposals.judge_verdict /
+    judge_confidence / judge_note / judge_model / judged_at /
+    judge_relation / decided_by / decided_at`, `entity_proposals.judge2_*`
+    (the second opinion), `curation_judgments`. Review payloads show a
+    `judge` block on link rows and a `judge2` block on merge rows.
+  - **Eval gate.** `evals/results/queue-judge-panel-20260902.json` is the
+    committed, scrubbed record of the 2026-09-02 panel (63 merges with
+    three shipped-judge replays, 20 junk, 37 links, 42 candidates, 40 slot
+    pairs — labels, detector classes and votes; the raw evidence pack
+    freezes memory-bank text and stays private under the gitignored
+    `evals/data/`); `evals/queue_judge_ladder.py` replays the SHIPPED
+    prompts per queue against that pack and simulates the auto gates.
+    First run (`evals/results/queue-judge-ladder-20260902.json`, arm
+    `opus-r2`, claude-opus-5, two replicates; the harness-state caveat is
+    recorded in the artifact): link auto-accept 4/4 and auto-reject 5/5 at
+    0.8; junk auto-delete under the evidence bar 6/6 and auto-keep 7/7;
+    curation auto-distinct 21/21 at 0.8, while duplicate keep-side
+    precision was 0.5625 (so `auto` forgetting stays off); candidate
+    auto-propose 7/8 and auto-dismiss 15/16 at 0.6; merge two-vote reject
+    8/8 and two-vote non-low-differential accept 4/4.
+    `tests/test_eval_evidence.py` pins every number here to its artifact.
+
+### Fixed (2026-09-02 — three detector classes that fed the junk queue)
+- **`slot-key-artifact` flagged dotted code and config paths** whose prefix
+  happened to be a known entity (`cortex._norm_key`, `lme.RAG_TOP_K`,
+  `memory.dream.extractor_reasoning_effort`) and version dots
+  (`gpt-5.6-luna`) — 7 of the 10 flags in the 2026-09-02 junk queue. A
+  flattened slot key came through the cortex normalizer, so a tail with
+  underscores, capitals or a leading underscore, or a dot between digits,
+  is no longer flagged.
+- **`compound-artifact` flagged unspaced slashes** (`origin/master`,
+  `fix/autostart-elevation-guidance`): every unspaced slash in the live bank
+  is a ref, branch, path, route or repo slug (106/106 sampled), and every
+  slash-joined junk tombstone was spaced — a slash now joins a compound
+  only when spaced; `+` joins either way.
+- **Lesson objects minted from list-shaped `about` fields** (11 of the 20
+  pending junk rows) — `_link_lesson_graph` now consults the write-time
+  junk gate (and refuses spaced `/` / `+` joiners) like every other write
+  path; the lesson keeps its text, it just gets no graph node.
+
 ### Changed (2026-09-02 — the engram cross-index read in the retract direction)
 
 - **Correcting a memory now says what it put in doubt.** The dream derives

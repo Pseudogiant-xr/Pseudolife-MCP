@@ -70,6 +70,16 @@ _REQUIRED_COLUMNS = [
       "actor_norm", "description", "description_norm", "episode",
       "src_entry_id", "hlc_phys", "hlc_logical", "writer_id",
       "invalidated_at"}),
+    # v35 — the link judge's verdict on edge proposals (+ retype relation)
+    # and the store-curation judgment memo.
+    ("edge_proposals",
+     {"judge_verdict", "judge_confidence", "judge_note", "judge_model",
+      "judged_at", "judge_relation", "decided_by", "decided_at"}),
+    ("entity_proposals",
+     {"judge2_verdict", "judge2_confidence", "judge2_model", "judged2_at"}),
+    ("curation_judgments",
+     {"store", "a_key", "b_key", "verdict", "keep", "fold", "confidence",
+      "note", "model", "judged_at"}),
     # v30 — the Step-C judge's shadow verdict on merge proposals.
     ("entity_proposals",
      {"judge_verdict", "judge_confidence", "judge_note", "judge_model",
@@ -118,6 +128,18 @@ _NULLABLE_COLUMNS = [
     ("entity_proposals", "judge_note"),
     ("entity_proposals", "judge_model"),
     ("entity_proposals", "judged_at"),
+    ("edge_proposals", "judge_verdict"),          # v35: NULL = not yet judged
+    ("edge_proposals", "judge_confidence"),
+    ("edge_proposals", "judge_note"),
+    ("edge_proposals", "judge_model"),
+    ("edge_proposals", "judged_at"),
+    ("edge_proposals", "judge_relation"),         # v35: a retype verdict's relation
+    ("edge_proposals", "decided_by"),
+    ("edge_proposals", "decided_at"),
+    ("entity_proposals", "judge2_verdict"),       # v35: the second opinion
+    ("entity_proposals", "judge2_confidence"),
+    ("entity_proposals", "judge2_model"),
+    ("entity_proposals", "judged2_at"),
     ("dream_run_slots", "chronicle_event_id"),    # v28: NULL on non-event rows
 ]
 

@@ -117,7 +117,9 @@ def test_deep_dream_judge_mode_knob_surfaced_default_shadow():
     # help text instead of the default changing.
     knob = _knob("memory.deep_dream.judge_mode")
     assert knob["type"] == "enum"
-    assert knob["options"] == ["off", "shadow", "auto-reject"]
+    # "auto" added 2026-09-02: guarded two-vote auto-accept (see
+    # test_review_queue_judge_knobs).
+    assert knob["options"] == ["off", "shadow", "auto-reject", "auto"]
     assert knob["default"] == "shadow"
     # deep_dream_judge re-reads service.config on every sweep batch.
     assert knob["restart"] is False
@@ -171,3 +173,28 @@ def test_extractor_reasoning_effort_knob():
     assert k["restart"] is False
     for v in ("low", "medium", "high", "xhigh"):
         assert v in k["suggestions"]
+
+
+def test_review_queue_judge_knobs():
+    # 2026-09-02 review-queue autonomy: every queue's judge gets a mode
+    # switch in the Console (the gates stay config-file knobs like
+    # judge_reject_min_confidence). Defaults are the shipped ones: shadow
+    # everywhere a verdict deletes or writes, off for the candidate judge,
+    # on for the two mechanical apply additions.
+    for path, options, default in (
+            ("memory.deep_dream.link_judge_mode", ["off", "shadow", "auto"], "shadow"),
+            ("memory.deep_dream.junk_judge_mode", ["off", "shadow", "auto"], "shadow"),
+            ("memory.deep_dream.curation_judge_mode",
+             ["off", "shadow", "auto-distinct", "auto"], "shadow"),
+            ("memory.deep_dream.candidate_judge_mode", ["off", "shadow", "auto"], "off")):
+        knob = _knob(path)
+        assert knob["type"] == "enum" and knob["options"] == options, path
+        assert knob["default"] == default and knob["restart"] is False, path
+    for path in ("memory.deep_dream.judge_second_opinion",
+                 "memory.deep_dream.analyzer_file_duplicates"):
+        knob = _knob(path)
+        assert knob["type"] == "bool" and knob["default"] is True, path
+        assert knob["restart"] is False
+    # The one destructive switch ships OFF (review finding, 2026-09-02).
+    orphan = _knob("memory.deep_dream.orphan_sweep")
+    assert orphan["type"] == "bool" and orphan["default"] is False

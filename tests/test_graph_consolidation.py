@@ -716,7 +716,9 @@ def test_junk_entities_flags_metric_readings_and_lists():
 
 def test_junk_entities_flags_resolvable_compounds_only():
     from pseudolife_memory.memory.graph_consolidation import junk_entities
-    ents = [{"id": 1, "display": "memory_lesson_search/world_search"},
+    # Slash compounds must be SPACED since 2026-09-02 (an unspaced slash is
+    # a ref/path/route separator — see _COMPOUND_SEP).
+    ents = [{"id": 1, "display": "memory_lesson_search / world_search"},
             {"id": 2, "display": "pg+extractor"},
             {"id": 3, "display": "ops/backup.ps1"},       # extension-exempt
             {"id": 4, "display": "C++"}]                  # empty right side
@@ -724,7 +726,7 @@ def test_junk_entities_flags_resolvable_compounds_only():
                        "extractor", "ops", "backup-ps1"})
     out = junk_entities(ents, [], max_degree=1, known_norms=known)
     reasons = {j["display"]: j["reason"] for j in out}
-    assert reasons.get("memory_lesson_search/world_search") == "compound-artifact"
+    assert reasons.get("memory_lesson_search / world_search") == "compound-artifact"
     assert reasons.get("pg+extractor") == "compound-artifact"
     assert "ops/backup.ps1" not in reasons
     assert "C++" not in reasons
@@ -770,3 +772,69 @@ def test_variant_tokens_quarter_labels_not_variants():
     assert variant_tokens("Q1 2027 roadmap") == frozenset()
     # Q4_K forms ARE variants
     assert "q4-k" in variant_tokens("Q4_K 2026 quant")
+
+
+# ── 2026-09-02 junk-judge feedback: shape classes with a measured FP tail ──
+
+def test_slot_key_artifact_spares_code_symbols_and_versions():
+    # The 2026-09-02 junk panel scored slot-key-artifact at 3/10 precision:
+    # seven flags were dotted CODE/CONFIG paths whose prefix happened to be
+    # a known entity (cortex._norm_key, cms.store, nomem_arm.nomem_system,
+    # lme.RAG_TOP_K, memory.dream.extractor_reasoning_effort) or a version
+    # dot (gpt-5.6-luna). A flattened slot key came through the cortex
+    # normalizer, so its tail is lowercase-hyphenated prose; a code symbol
+    # keeps underscores / capitals / a leading underscore, and a version
+    # dot sits between digits.
+    ents = [
+        {"id": 1, "canonical": "cortex", "display": "cortex", "etype": None},
+        {"id": 2, "canonical": "cortex-norm-key", "display": "cortex._norm_key", "etype": None},
+        {"id": 3, "canonical": "nomem-arm", "display": "nomem_arm", "etype": None},
+        {"id": 4, "canonical": "nomem-arm-nomem-system", "display": "nomem_arm.nomem_system", "etype": None},
+        {"id": 5, "canonical": "lme", "display": "lme", "etype": None},
+        {"id": 6, "canonical": "lme-rag-top-k", "display": "lme.RAG_TOP_K", "etype": None},
+        {"id": 7, "canonical": "gpt-5", "display": "gpt-5", "etype": None},
+        {"id": 8, "canonical": "gpt-5-6-luna", "display": "gpt-5.6-luna", "etype": None},
+        {"id": 9, "canonical": "memory-dream", "display": "memory.dream", "etype": None},
+        {"id": 10, "canonical": "memory-dream-extractor-reasoning-effort",
+         "display": "memory.dream.extractor_reasoning_effort", "etype": None},
+        # still a slot-key artifact: normalized prose tail under a known head
+        {"id": 11, "canonical": "qwen38-migration", "display": "qwen38-migration", "etype": None},
+        {"id": 12, "canonical": "qwen38-migration-deferred-work",
+         "display": "qwen38-migration.deferred-work", "etype": None},
+        {"id": 13, "canonical": "gpu-window-queue-pending-slot",
+         "display": "gpu-window-queue.pending slot", "etype": None},
+        {"id": 14, "canonical": "gpu-window-queue", "display": "gpu-window-queue", "etype": None},
+    ]
+    known = frozenset(e["canonical"] for e in ents)
+    out = {j["entity_id"]: j["reason"]
+           for j in gc.junk_entities(ents, [], max_degree=1, known_norms=known)}
+    for spared in (2, 4, 6, 8, 10):
+        assert out.get(spared) != "slot-key-artifact", ents[spared - 1]["display"]
+    assert out.get(12) == "slot-key-artifact"
+    assert out.get(13) == "slot-key-artifact"
+
+
+def test_compound_artifact_requires_spaced_slash():
+    # origin/master and fix/autostart-elevation-guidance were flagged as
+    # compounds because both halves are known entities — but an unspaced
+    # slash is a ref/path separator. A genuine slash compound in the corpus
+    # is spaced ("codex-cli / multi-provider-installer"); "+" compounds
+    # (pg+extractor, 2026-07-11) stay flagged either way.
+    ents = [
+        {"id": 1, "canonical": "origin", "display": "origin", "etype": None},
+        {"id": 2, "canonical": "master", "display": "master", "etype": None},
+        {"id": 3, "canonical": "origin-master", "display": "origin/master", "etype": None},
+        {"id": 4, "canonical": "codex-cli", "display": "codex-cli", "etype": None},
+        {"id": 5, "canonical": "multi-provider-installer", "display": "multi-provider-installer", "etype": None},
+        {"id": 6, "canonical": "codex-cli-multi-provider-installer",
+         "display": "codex-cli / multi-provider-installer", "etype": None},
+        {"id": 7, "canonical": "pg", "display": "pg", "etype": None},
+        {"id": 8, "canonical": "extractor", "display": "extractor", "etype": None},
+        {"id": 9, "canonical": "pg-extractor", "display": "pg+extractor", "etype": None},
+    ]
+    known = frozenset(e["canonical"] for e in ents)
+    out = {j["entity_id"]: j["reason"]
+           for j in gc.junk_entities(ents, [], max_degree=1, known_norms=known)}
+    assert out.get(3) != "compound-artifact"
+    assert out.get(6) == "compound-artifact"
+    assert out.get(9) == "compound-artifact"

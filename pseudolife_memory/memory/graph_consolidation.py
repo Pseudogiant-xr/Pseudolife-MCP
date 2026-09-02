@@ -471,15 +471,21 @@ def _is_list_artifact(name: str) -> bool:
     return sum(1 for p in _split_outside_parens(str(name)) if p) >= 2
 
 
-_COMPOUND_SEP = re.compile(r"[+/]")
+# A slash joins a compound only when SPACED ("codex-cli / installer"): every
+# unspaced slash in the live bank is a ref, branch, path, route or repo slug
+# (origin/master, fix/…, /api/graph/merge, owner/repo — 106 of 106 sampled
+# on 2026-09-02, and every slash-joined junk tombstone was spaced), so the
+# unspaced form is a name, not a join. "+" joins either way (pg+extractor).
+_COMPOUND_SEP = re.compile(r"\s/\s|\+")
 _FILE_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,4}$")
 
 
 def _compound_halves(name: str) -> tuple[str, str] | None:
-    """Split at the FIRST ``/`` or ``+``; both halves must be non-empty and
-    carry alphanumeric content, and neither may end in a dot-extension (file
-    paths are exempt: ``ops/backup.ps1``). Detection-only feeder — a compound
-    is junk-PROPOSED, never write-dropped (2026-07-11: ``pg+extractor``)."""
+    """Split at the FIRST spaced ``/`` or any ``+``; both halves must be
+    non-empty and carry alphanumeric content, and neither may end in a
+    dot-extension (file paths are exempt: ``ops/backup.ps1``). Detection-only
+    feeder — a compound is junk-PROPOSED, never write-dropped (2026-07-11:
+    ``pg+extractor``)."""
     s = str(name)
     m = _COMPOUND_SEP.search(s)
     if not m:
@@ -599,6 +605,23 @@ def partition_candidates(pairs: list[dict], entities: list[dict], edges: list[di
     return merges, links
 
 
+# A flattened slot key came through the cortex normalizer, so its tail is
+# lowercase-hyphenated prose ("deferred-work", "pending slot"). A dotted
+# CODE/CONFIG path keeps what the normalizer would have folded: underscores,
+# capitals, a leading underscore (cortex._norm_key, lme.RAG_TOP_K,
+# nomem_arm.nomem_system, memory.dream.extractor_reasoning_effort), and a
+# version dot sits between digits (gpt-5.6-luna). The 2026-09-02 junk panel
+# scored the class at 3/10 precision before this exclusion: every false
+# positive was one of those two shapes.
+_CODE_TAIL = re.compile(r"^_|[A-Z_]")
+
+
+def _is_code_dotted(head: str, tail: str) -> bool:
+    if _CODE_TAIL.search(tail):
+        return True
+    return bool(head and head[-1].isdigit() and tail[:1].isdigit())
+
+
 def junk_entities(entities: list[dict], edges: list[dict], *,
                   max_degree: int = 1,
                   known_norms: frozenset[str] | None = None) -> list[dict]:
@@ -632,7 +655,8 @@ def junk_entities(entities: list[dict], edges: list[dict], *,
             # so real dotted names survive — `llama.cpp` is flagged only if an
             # entity `llama` exists, `host.docker.internal` never is.
             head, dot, tail = d.rpartition(".")
-            if dot and head and tail and not _CODE_OR_DATA_EXT.match(tail):
+            if (dot and head and tail and not _CODE_OR_DATA_EXT.match(tail)
+                    and not _is_code_dotted(head, tail)):
                 nh = norm_name(head)
                 if nh and nh in known_norms and nh != norm_name(d):
                     out.append({"entity_id": e["id"], "display": e["display"],

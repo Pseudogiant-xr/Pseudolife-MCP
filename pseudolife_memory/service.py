@@ -2934,6 +2934,14 @@ class MemoryService(DreamOps):
         an = norm_name(about)
         if not an or an == tn:
             return
+        # The write-time junk gate every other write path applies (plus a
+        # spaced "A / B" or "A + B" joiner, which names two things): a
+        # list-, compound- or sentence-shaped ``about`` keeps its text on
+        # the lesson but gets no graph node — 11 of the 20 pending junk
+        # proposals on 2026-09-02 were exactly these mints.
+        from pseudolife_memory.memory.graph_consolidation import junk_name_reason
+        if junk_name_reason(about) or " / " in about or " + " in about:
+            return
         oid = st.ensure_entity(an, display=about.strip())
         relation = "avoids" if polarity == "-" else "prefers"
         self._graph.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
@@ -5737,7 +5745,8 @@ class MemoryService(DreamOps):
         current evidence is the truth being tracked."""
         return (into, frm) if evidence(frm) > evidence(into) else (frm, into)
 
-    def graph_propose_links(self, proposals: list[dict]) -> dict[str, Any]:
+    def graph_propose_links(self, proposals: list[dict], *,
+                            source: str = "deep-dream") -> dict[str, Any]:
         """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
         production uses (resolve_relation -> closed vocab; edge_confidence; drop hard
         type-violations) and inserted into edge_proposals — never into edges."""
@@ -5765,14 +5774,22 @@ class MemoryService(DreamOps):
                 conf = edge_confidence(src, relation, dst)
                 pid = self._storage.insert_proposal(
                     se["id"], relation, de["id"], conf,
-                    p.get("similarity"), p.get("rationale"), "deep-dream", _t.time())
+                    p.get("similarity"), p.get("rationale"), source, _t.time())
                 if pid is not None:
                     proposed += 1
                 else:
                     skipped += 1
         return {"proposed": proposed, "skipped": skipped}
 
-    def graph_accept_proposal(self, proposal_id: int) -> dict[str, Any]:
+    def graph_accept_proposal(self, proposal_id: int, *,
+                              decided_by: str | None = None,
+                              relation: str | None = None) -> dict[str, Any]:
+        """Promote a pending link proposal to a live edge. ``relation``
+        overrides the proposed relation (the link judge's retype verdict);
+        the row is then marked ``retyped`` rather than ``accepted`` so the
+        audit shows the edge differs from what was filed."""
+        import time as _t
+        from pseudolife_memory import graph as G
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -5780,25 +5797,54 @@ class MemoryService(DreamOps):
             prop = self._storage.get_proposal(proposal_id)
             if prop is None or prop["status"] != "pending":
                 return {"accepted": False, "reason": "not_pending", "id": proposal_id}
+            rel = prop["relation"]
+            status = "accepted"
+            if relation and relation != rel:
+                # The same gate graph_propose_links applies: the lesson
+                # relations are never edge material, and a hard type
+                # violation is never written — a retype is an unattended
+                # write path and must not be looser than the filing one.
+                from pseudolife_memory.memory.relation_quality import (
+                    is_hard_type_violation)
+                registry = [r["name"] for r in self._graph.load_relations()
+                            if r["name"] not in ("prefers", "avoids")]
+                resolved, _ = G.resolve_relation(registry, relation)
+                if resolved is None:
+                    return {"accepted": False, "reason": "unknown_relation",
+                            "id": proposal_id, "relation": relation}
+                disp0 = {e["id"]: e["display"]
+                         for e in self._storage.load_graph()["entities"]}
+                if is_hard_type_violation(disp0.get(prop["src_id"], ""),
+                                          resolved,
+                                          disp0.get(prop["dst_id"], "")):
+                    return {"accepted": False, "reason": "type_violation",
+                            "id": proposal_id, "relation": resolved}
+                rel, status = resolved, "retyped"
             # A reviewed edge is no longer dubious: floor its confidence above
             # the dubious_edges threshold AND store it as a confirming action —
             # origin "agent" would be recaptured by the next apply's
             # rescore_edges (pure name-based recompute, e.g. related-to back
             # to 0.45) and re-flagged, undoing the verdict.
             conf = max(float(prop["confidence"] or 0.0), self._REVIEWED_EDGE_MIN_CONF)
-            self._graph.upsert_edge(prop["src_id"], prop["relation"], prop["dst_id"],
+            self._graph.upsert_edge(prop["src_id"], rel, prop["dst_id"],
                                     confidence=conf, origin="action")
-            self._storage.set_proposal_status(proposal_id, "accepted")
+            self._storage.set_proposal_status(
+                proposal_id, status, decided_by=decided_by, decided_at=_t.time())
             disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
         return {"accepted": True, "src": disp.get(prop["src_id"]),
-                "relation": prop["relation"], "dst": disp.get(prop["dst_id"])}
+                "relation": rel, "dst": disp.get(prop["dst_id"]),
+                "status": status}
 
-    def graph_reject_proposal(self, proposal_id: int) -> dict[str, Any]:
+    def graph_reject_proposal(self, proposal_id: int, *,
+                              decided_by: str | None = None) -> dict[str, Any]:
+        import time as _t
         with self._lock:
             self._ensure_init()
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
-            ok = self._storage.set_proposal_status(proposal_id, "rejected")
+            ok = self._storage.set_proposal_status(
+                proposal_id, "rejected", decided_by=decided_by,
+                decided_at=_t.time())
         return {"rejected": ok, "id": proposal_id}
 
     def graph_accept_entity_merge(self, proposal_id: int, *,

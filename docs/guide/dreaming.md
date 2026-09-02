@@ -574,10 +574,33 @@ default `shadow`; the dream extractor, or a dedicated `judge_url`), and
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
-(`decided_by='dream-judge'`, pair dismissed); accepts are never auto-applied
-at this phase. Which models judge reliably is measured, not assumed:
-`evals/judge_ladder.py` scores arms against ratified triage verdicts
-(`evals/results/judge-ladder-20260816.json`).
+(`decided_by='dream-judge'`, pair dismissed). A row whose first verdict sat
+below that gate gets a **second opinion** on a later sweep
+(`judge_second_opinion`, optionally `judge_second_model`) — a fresh batch,
+so an independent sample: two rejects at mean >= `judge_reject_min_confidence_2`
+apply, a disagreement stamps `split` on the note and leaves the row for a
+human. `judge_mode: auto` goes one step further and folds a pair when two
+independent accepts agree on a row that is not `low_differential` at mean
+>= `judge_accept_min_confidence` — the only path that ever auto-applies an
+accept. Since 2026-09-02 the other queues have judges too, each riding the
+same sweep as a bounded batch and each defaulting to `shadow`: the **link
+judge** (`link_judge_mode`; `auto` promotes accept/retype verdicts to live
+edges and rejects the rest at their gates — edges are reversible, which is
+why this queue may run auto), the **junk judge** (`junk_judge_mode`; `auto`
+deletes only under an evidence bar), the **store-curation judge**
+(`curation_judge_mode`; `auto-distinct` applies the reversible dismissal,
+`auto` also forgets the losing duplicate slot after folding its carry-over
+into the survivor), and the **Step-C candidate judge**
+(`candidate_judge_mode`; files proposals and dismisses co-mention pairs once
+per deep apply). Two mechanical additions stop the queues refilling: each
+apply files the Console's live analyzer duplicate findings into the merge
+and link queues (`analyzer_file_duplicates`) and deletes week-old entities
+that carry no evidence and no mention at all (`orphan_sweep`). Which models
+judge reliably is measured, not assumed: `evals/judge_ladder.py` scores the
+merge judge against ratified triage verdicts
+(`evals/results/judge-ladder-20260816.json`) and `evals/queue_judge_ladder.py`
+scores every queue's judge against the 2026-09-02 blind-panel set
+(`evals/results/queue-judge-panel-20260902.json`), simulating each auto gate.
 The same need signal rides `memory_dream(action="status")` as the
 `deep_dream: {recommended, reason, ...}` block — a harness-agnostic
 nudge any MCP client can surface to its user when a triage session is
