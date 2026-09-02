@@ -476,19 +476,30 @@ class DeepDreamConfig:
     auto_tick: bool = True               # False disables the tick entirely
     auto_min_new_entities: int = 150     # fire when the bank grew this much since the last apply; 0 disables
     auto_interval_days: float = 7.0      # time backstop since the last apply; 0 disables
-    # Autonomous Step-C judge (2026-08-16 design): the sweep sends pending
-    # merge proposals to the configured extractor for a shadow verdict.
+    # Autonomous Step-C judge (2026-08-16 design, extended 2026-09-02): the
+    # sweep sends pending merge proposals to the configured extractor.
     # "off" = never; "shadow" = record the verdict on the proposal, apply
     # nothing; "auto-reject" = additionally apply reject verdicts at/above
     # judge_reject_min_confidence (decided_by='dream-judge', pair
-    # dismissed). Accepts are NEVER auto-applied at this phase. Mode gates
-    # per the judge ladder (evals/judge_ladder.py,
-    # evals/results/judge-ladder-20260816.json).
-    judge_mode: str = "shadow"           # off | shadow | auto-reject
+    # dismissed — and, with judge_second_opinion on, two agreeing rejects
+    # at mean >= judge_reject_min_confidence_2); "auto" = additionally
+    # fold a pair on two agreeing accepts from DIFFERENT models on
+    # non-low-differential evidence (the only path that applies an
+    # accept). Note a wrong auto-reject also writes dismissed_pairs, which
+    # has no expiry. Mode gates per the judge ladders
+    # (evals/judge_ladder.py, evals/queue_judge_ladder.py).
+    judge_mode: str = "shadow"           # off | shadow | auto-reject | auto
     judge_batch: int = 8                 # proposals judged per sweep (one model call)
     judge_reject_min_confidence: float = 0.8
     judge_url: str = ""                  # optional OpenAI-compatible override endpoint; empty = the dream extractor
     judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)
+    # One switch for every judge stage below (merge, link, junk, curation,
+    # candidates): False makes each return {"skipped": "judges_disabled"}
+    # without reading a queue — the documented "turn it all off" for an
+    # operator who wants the mechanical tick but no model verdicts. The
+    # two apply-time mechanics have their own switches
+    # (analyzer_file_duplicates, orphan_sweep).
+    judges_enabled: bool = True
     # Review-queue autonomy (2026-09-02 design, docs/superpowers/specs/
     # 2026-09-02-review-queue-autonomy-design.md). Every gate below is
     # measured on the 2026-09-02 blind-panel verdicts (committed as
@@ -542,8 +553,9 @@ class DeepDreamConfig:
     # Step-C candidate judge: turns the deep dream's link CANDIDATES into
     # filed proposals (then settled by the link judge) or dismissed pairs.
     # Runs once per deep apply.
-    candidate_judge_mode: str = "off"    # off | auto
+    candidate_judge_mode: str = "off"    # off | shadow | auto
     candidate_min_confidence: float = 0.6
+    candidate_rejudge_days: float = 30.0  # a judged pair (any verdict) is not re-sent sooner
     # Mechanical apply additions: file the Console's live analyzer duplicate
     # findings into the merge / link queues (they were never filed anywhere,
     # so no judge ever saw them), and delete entities that carry no

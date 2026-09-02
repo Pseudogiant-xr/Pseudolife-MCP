@@ -86,7 +86,7 @@ judge columns (`entity_proposals` rows of kind `junk`).
 each side's existing edges (in/out, capped), scopes, the detector's
 rationale, and the notes naming BOTH entities (`shared_mention_entries`;
 per-side mentions when nothing names both). Verdicts
-`accept | reject | retype(relation) | leave`. Schema v35 adds the same five
+`accept | reject | retype(relation) | leave`. Schema v36 adds the same five
 judge columns to `edge_proposals` plus `judge_relation` (the retype).
 `link_judge_mode: off | shadow | auto`. In `auto`, accept at
 >= `link_accept_min_confidence` (0.8) promotes the edge exactly as
@@ -112,7 +112,7 @@ gate, so the two stages compose.
 
 `judge_slot_pairs(pairs)` judges the lesson/world duplicate listings with
 both slots' full labels. Verdicts `duplicate(keep a|b) | distinct | leave`.
-A new `curation_judgments` table (v35) records every verdict so a pair is
+A new `curation_judgments` table (v36) records every verdict so a pair is
 not re-sent every sweep (`curation_rejudge_days`, 30).
 `curation_judge_mode: off | shadow | auto-distinct | auto`:
 `auto-distinct` applies distinct verdicts at >= 0.8 via the existing
@@ -205,7 +205,7 @@ claude-opus-5 pass in shuffled batches, and claude-fable-5
 |---|---|---|---|
 | single shadow accept >= 0.8 | 9 | 0 | small n; 4/4 on 2026-08-21 |
 | two-vote accept, mean >= 0.7 | 12 | 1 | the one is right-pair-wrong-direction (2220) |
-| two-vote accept, mean >= 0.6, not low-differential | 6 | 0 | **shipped gate** |
+| two-vote accept, mean >= 0.6, not low-differential | 6 | 0 | **shipped gate** (shadow Opus + Fable; the other distinct pairing, second Opus + Fable, is 5/6 — fair figure 11/12 on n=6 each) |
 | two-vote accept, any confidence, not low-differential | 7 | 0 | |
 | three-vote accept, not low-differential | 7 | 0 | Fable adds no coverage |
 | single shadow reject >= 0.7 | 10 | 0 | the >= 0.8 gate had already cleared its rows |
@@ -237,17 +237,24 @@ records the caveat). Majority vote of the two replicates against the panel:
 Reading: every reversible or evidence-barred auto path scored perfectly at
 its gate on this set, at small n; the destructive paths that did not — the
 curation forget (keep-side 0.56) and unguarded merge accepts — stay behind
-their gates. The candidate judge's relation choice differs from the panel's
+their gates. The ladder's two-vote accept is two replicates of ONE model,
+a configuration the code refuses for folds; the artifact records that it
+ran at max_tokens 400 in identical row order, which the committed harness
+(2048, shuffled) does not reproduce — a rerun is owed before any accept
+default moves. Retype scored 0/1, so retypes are recorded, never
+auto-written. The candidate judge's relation choice differs from the panel's
 in 4/10 proposals, which is why a proposal is filed for the link judge
 rather than written as an edge.
 
-## Schema v35
+## Schema v36
 
 Additive, idempotent:
 
 * `edge_proposals.judge_verdict / judge_confidence / judge_note /
-  judge_model / judged_at / judge_relation` — the link judge's opinion
-  (NULL = not yet judged, exactly the pre-v35 behaviour).
+  judge_model / judged_at / judge_relation / decided_by / decided_at` — the
+  link judge's opinion and who settled the row (NULL = not yet judged,
+  exactly the pre-v36 behaviour); `entity_proposals.judge2_*` — the merge
+  judge's second opinion.
 * `curation_judgments(store, a_key, b_key, verdict, keep, fold,
   confidence, note, model, judged_at)`, PRIMARY KEY (store, a_key, b_key).
 

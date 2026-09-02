@@ -229,6 +229,13 @@ def test_list_shaped_about_gets_no_graph_node(svc):
                            about=about, outcome="success", polarity="+")
     assert out["about"] == about                      # text preserved
     assert svc._storage.find_entity(norm_name(about)) is None
+    # The same compound predicate the junk detector uses: "pg+extractor"
+    # (unspaced "+") and "codex-cli / installer" (spaced "/") get no node.
+    for compound in ("pg+extractor", "codex-cli / multi-provider-installer"):
+        svc.lesson_write("adding a new eval checker", "pitfall",
+                         "do not mint compounds", about=compound,
+                         outcome="failure", polarity="-")
+        assert svc._storage.find_entity(norm_name(compound)) is None, compound
     # A real single referent is still linked.
     svc.lesson_write("adding a new eval checker", "tool-choice",
                      "use the leak checker", about="evals/leak_check.py",

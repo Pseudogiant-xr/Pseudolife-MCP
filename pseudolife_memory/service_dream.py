@@ -1970,8 +1970,28 @@ class DreamOps:
 
         totals = {"entities": len(entities), "edges": len(edges),
                   "candidates": len(candidates)}
+        # Fact tally by graph-normalized subject NAME, folded from the raw
+        # cortex text (see the junk tombstone note in the apply branch for
+        # why the id cross-index alone is not enough).
+        from pseudolife_memory.graph import norm_name as _nn2
+        facts_by_norm: dict[str, int] = {}
+        for _text, _n in fact_texts.items():
+            _k = _nn2(_text)
+            if _k:
+                facts_by_norm[_k] = facts_by_norm.get(_k, 0) + _n
         if not apply:
+            # The orphan sweep's census, so an operator can read what
+            # `orphan_sweep: true` would delete before switching it on.
+            with self._lock:
+                would_orphan = self._unreachable_orphans(
+                    entries, mentions, facts_by_norm, set())
+            import time as _t0
             return {"dry_run": True, "rescored": len(rescore),
+                    "would_orphan_count": len(would_orphan),
+                    "would_orphan": [
+                        {"entity": c["display"],
+                         "age_days": round((_t0.time() - float(c.get("created_at") or _t0.time())) / 86400.0, 1)}
+                        for c in would_orphan[:200]],
                     "would_supersede": [self._edge_label(e, entities) for e in violations],
                     "would_merge": self._merge_labels(dups, entities),
                     "would_merge_propose": [
@@ -2039,23 +2059,17 @@ class DreamOps:
             # deleted on 2026-08-16 and re-minted into the same queue the
             # same week. The zero-structure guard below still protects
             # never-judged names.
-            from pseudolife_memory.graph import norm_name as _nn2
             tombstones = {_nn2(d)
                           for d in self._storage.junk_accepted_displays()}
-            # Fact tally by graph-normalized subject NAME, folded from the raw
-            # cortex text. The entity_id cross-index reads zero for facts an
-            # earlier delete_entity orphaned (it NULLs facts.entity_id, and
-            # only a slot write re-links one), which is precisely the
-            # already-damaged population: a name deleted once WHILE carrying
-            # facts would otherwise look contentless on every later re-mint
-            # and be deleted again unattended. Folding here, not in SQL,
-            # because facts.entity_norm is the cortex norm and the entity
-            # side is the graph norm.
-            facts_by_norm: dict[str, int] = {}
-            for _text, _n in fact_texts.items():
-                _k = _nn2(_text)
-                if _k:
-                    facts_by_norm[_k] = facts_by_norm.get(_k, 0) + _n
+            # facts_by_norm (computed above the branch): the entity_id
+            # cross-index reads zero for facts an earlier delete_entity
+            # orphaned (it NULLs facts.entity_id, and only a slot write
+            # re-links one), which is precisely the already-damaged
+            # population: a name deleted once WHILE carrying facts would
+            # otherwise look contentless on every later re-mint and be
+            # deleted again unattended. Folded in Python, not SQL, because
+            # facts.entity_norm is the cortex norm and the entity side is
+            # the graph norm.
             for p in self._storage.pending_entity_proposals():
                 if p.get("kind") != "junk":
                     continue
@@ -2290,6 +2304,22 @@ class DreamOps:
             cfg.snippet_max_chars, True, fact_counts=fact_counts)
 
     @staticmethod
+    def _model_name(ex, fallback: str | None = None) -> str:
+        """The model a judge endpoint reported serving on its last call,
+        else its configured name, else the class — stamped on verdicts."""
+        return (getattr(ex, "served_model", None) or fallback
+                or getattr(ex, "model", None) or type(ex).__name__)
+
+    def _snapshot_once(self, state: dict) -> bool:
+        """Graph snapshot before the FIRST destructive auto-apply of a judge
+        call (every apply the spec covers is snapshot-first; the deep apply
+        already is). False = the snapshot could not be written, so the
+        caller must refuse the apply."""
+        if "snapshot" not in state:
+            state["snapshot"] = self._write_graph_snapshot()
+        return state["snapshot"] is not None
+
+    @staticmethod
     def _stamp_skipped(verdicts: list[dict], rows: list[dict],
                        **leave_fields) -> None:
         """Rows the model silently skipped in an otherwise-successful call
@@ -2331,6 +2361,8 @@ class DreamOps:
         opinion's endpoint. Never raises into the sweep timer."""
         import time as _t
         cfg = self.config.memory.deep_dream
+        if not cfg.judges_enabled:
+            return {"judged": 0, "skipped": "judges_disabled"}
         if cfg.judge_mode not in ("shadow", "auto-reject", "auto"):
             return {"judged": 0, "skipped": "disabled"}
         try:
@@ -2379,8 +2411,12 @@ class DreamOps:
                              for i, e in enumerate(enriched)]
                 verdicts = ex2.judge_merges(proposals)
                 self._stamp_skipped(verdicts, proposals)
-                model2 = getattr(ex2, "model", None) or type(ex2).__name__
+                model2 = self._model_name(ex2)
                 now = _t.time()
+                with self._lock:
+                    dismissed = self._storage.dismissed_pairs()
+                from pseudolife_memory.graph import norm_name as _nn
+                snap: dict = {}
                 for v in verdicts:
                     e = enriched[v["n"] - 1]
                     row = batch[v["n"] - 1]
@@ -2416,12 +2452,32 @@ class DreamOps:
                             and mean >= cfg.judge_accept_min_confidence):
                         a_name = e["from"]["display"] or ""
                         b_name = e["into"]["display"] or ""
+                        pair = tuple(sorted((_nn(a_name), _nn(b_name))))
+                        if pair in dismissed:
+                            # An earlier verdict (relate / dismiss_pair)
+                            # settled these as distinct; the pending merge
+                            # row is moot — close it instead of folding
+                            # over a human's decision.
+                            res = self.graph_reject_entity_proposal(
+                                e["id"], decided_by="dream-judge")
+                            out["auto_rejected"] += bool(res.get("rejected"))
+                            out["auto_accept_refused"] = out.get(
+                                "auto_accept_refused", 0) + 1
+                            continue
                         if (row.get("judge_model") or "") == model2:
                             reason = "auto-accept needs a distinct second model"
+                        elif str(row.get("reason") or "").startswith("analyzer-duplicate"):
+                            # The accept gate's evidence holds no analyzer-
+                            # filed rows (2026-09-02 panel: write-dedup 56,
+                            # dream-alias 4, token-subset 3); unmeasured
+                            # class stays pending with the verdicts attached.
+                            reason = "auto-accept refused: analyzer-filed rows are unmeasured"
                         elif merge_veto(a_name, b_name) is not None:
                             reason = "auto-accept refused: name veto"
                         elif variant_conflict(a_name, b_name):
                             reason = "auto-accept refused: variant conflict"
+                        elif not self._snapshot_once(snap):
+                            reason = "auto-accept refused: graph snapshot failed"
                         else:
                             reason = None
                         if reason is not None:
@@ -2451,7 +2507,8 @@ class DreamOps:
                              for i, e in enumerate(enriched)]
                 verdicts = ex.judge_merges(proposals)
                 self._stamp_skipped(verdicts, proposals)
-                model = out["model"]
+                model = self._model_name(ex, out["model"])
+                out["model"] = model
                 now = _t.time()
                 for v in verdicts:
                     e = enriched[v["n"] - 1]
@@ -2551,6 +2608,8 @@ class DreamOps:
         rejected. Never raises into the sweep."""
         import time as _t
         cfg = self.config.memory.deep_dream
+        if not cfg.judges_enabled:
+            return {"judged": 0, "skipped": "judges_disabled"}
         mode = cfg.link_judge_mode
         if mode not in ("shadow", "auto"):
             return {"judged": 0, "skipped": "disabled"}
@@ -2573,7 +2632,7 @@ class DreamOps:
             rows = self._enrich_link_proposals(batch)
             verdicts = ex.judge_links(rows)
             self._stamp_skipped(verdicts, rows, relation=None)
-            model = getattr(ex, "model", None) or type(ex).__name__
+            model = self._model_name(ex)
             judged = applied = 0
             now = _t.time()
             for v in verdicts:
@@ -2592,11 +2651,11 @@ class DreamOps:
                 if v["verdict"] == "accept" and conf >= cfg.link_accept_min_confidence:
                     res = self.graph_accept_proposal(p["id"], decided_by="dream-judge")
                     applied += bool(res.get("accepted"))
-                elif (v["verdict"] == "retype" and v.get("relation")
-                        and conf >= cfg.link_accept_min_confidence):
-                    res = self.graph_accept_proposal(
-                        p["id"], decided_by="dream-judge", relation=v["relation"])
-                    applied += bool(res.get("accepted"))
+                # A retype is recorded, never auto-written: the first ladder
+                # run scored the judge's relation choice at 0/1 on retypes
+                # (and 6/10 on candidate proposals), so the corrected edge
+                # waits for a reviewer — the verdict and judge_relation are
+                # on the row for the Console / an agent to apply.
                 elif v["verdict"] == "reject" and conf >= cfg.link_reject_min_confidence:
                     res = self.graph_reject_proposal(p["id"], decided_by="dream-judge")
                     applied += bool(res.get("rejected"))
@@ -2692,6 +2751,8 @@ class DreamOps:
         Never raises into the sweep."""
         import time as _t
         cfg = self.config.memory.deep_dream
+        if not cfg.judges_enabled:
+            return {"judged": 0, "skipped": "judges_disabled"}
         mode = cfg.junk_judge_mode
         if mode not in ("shadow", "auto"):
             return {"judged": 0, "skipped": "disabled"}
@@ -2714,9 +2775,10 @@ class DreamOps:
             rows = self._enrich_junk_proposals(batch)
             verdicts = ex.judge_junk(rows)
             self._stamp_skipped(verdicts, rows)
-            model = getattr(ex, "model", None) or type(ex).__name__
+            model = self._model_name(ex)
             judged = applied = 0
             now = _t.time()
+            snap: dict = {}
             for v in verdicts:
                 p = batch[v["n"] - 1]
                 r = rows[v["n"] - 1]
@@ -2737,7 +2799,8 @@ class DreamOps:
                 elif (v["verdict"] == "delete"
                         and conf >= cfg.junk_delete_min_confidence
                         and r["degree"] <= cfg.junk_max_auto_degree
-                        and r["facts"] <= 1):
+                        and r["facts"] <= 1
+                        and self._snapshot_once(snap)):
                     res = self.graph_accept_entity_junk(
                         p["id"], decided_by="dream-judge")
                     applied += bool(res.get("accepted"))
@@ -2763,6 +2826,8 @@ class DreamOps:
         raises into the sweep."""
         import time as _t
         cfg = self.config.memory.deep_dream
+        if not cfg.judges_enabled:
+            return {"judged": 0, "skipped": "judges_disabled"}
         mode = cfg.curation_judge_mode
         if mode not in ("shadow", "auto-distinct", "auto"):
             return {"judged": 0, "skipped": "disabled"}
@@ -2774,6 +2839,13 @@ class DreamOps:
                 dismissed = self._storage.dismissed_pairs()
                 lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
                 world_recs = self._curation_records("world", cfg.snippet_max_chars)
+                # The judge reads FULL values: the 2026-09-02 panel judged
+                # 240-char clipped values and lost guidance in three
+                # "duplicate" folds — a destructive queue never gets
+                # truncated evidence.
+                full = {store: {r["key"]: r["value"]
+                                for r in self._curation_records(store, 0)}
+                        for store in ("lesson", "world")}
                 memo = {"lesson": self._storage.curation_judgments("lesson"),
                         "world": self._storage.curation_judgments("world")}
             lesson_dups, world_dups = self._slot_duplicate_listings(
@@ -2797,12 +2869,17 @@ class DreamOps:
             batch = todo[:cap]
             logger.info("deep-dream curation judge: judging %d duplicate "
                         "listing(s) (mode %s)", len(batch), mode)
+            def side(store, c, k):
+                d = dict(c[k])
+                d["value"] = full[store].get(c[f"{k}_key"], d.get("value"))
+                return d
             rows = [{"n": i + 1, "store": store, "similarity": c.get("similarity"),
-                     "a": c["a"], "b": c["b"], "a_key": c["a_key"], "b_key": c["b_key"]}
+                     "a": side(store, c, "a"), "b": side(store, c, "b"),
+                     "a_key": c["a_key"], "b_key": c["b_key"]}
                     for i, (store, c) in enumerate(batch)]
             verdicts = ex.judge_slot_pairs(rows)
             self._stamp_skipped(verdicts, rows, keep=None, fold=None)
-            model = getattr(ex, "model", None) or type(ex).__name__
+            model = self._model_name(ex)
             judged = applied = 0
             for v in verdicts:
                 store, c = batch[v["n"] - 1]
@@ -2866,13 +2943,22 @@ class DreamOps:
     def deep_dream_judge_candidates(self, extractor=None, *,
                                     candidates: list[dict] | None = None,
                                     limit: int | None = None) -> dict[str, Any]:
-        """Judge the deep dream's link CANDIDATES (unlinked near-pairs):
+        """Judge the deep dream's link CANDIDATES (unlinked near-pairs) ONE
+        slice per tick (``judge_batch``), like every other judge:
         ``propose`` files an edge proposal (source ``deep-dream-judge``,
         then settled by the link judge like any other), ``dismiss`` marks
-        the pair distinct, ``leave`` keeps the slot. Runs once per deep
-        apply when ``candidates`` is not supplied (the scan is the dry-run
-        pass). Never raises into the sweep."""
+        the pair distinct, ``leave`` keeps the slot. Every judged pair is
+        memoised (``deep_candidate_verdicts`` meta, bounded) so no pair is
+        re-sent within ``candidate_rejudge_days`` — in ``shadow`` mode that
+        memo is the only record. The scan (a dry-run pass) runs only while
+        an apply's candidates are still unjudged; the per-apply watermark
+        turns ``complete`` once every candidate has a fresh memo. Never
+        raises into the sweep."""
+        import time as _t
+        from pseudolife_memory.graph import norm_name as _nn
         cfg = self.config.memory.deep_dream
+        if not cfg.judges_enabled:
+            return {"judged": 0, "skipped": "judges_disabled"}
         mode = cfg.candidate_judge_mode
         if mode not in ("shadow", "auto"):
             return {"judged": 0, "skipped": "disabled"}
@@ -2885,63 +2971,85 @@ class DreamOps:
                         return {"judged": 0, "skipped": "no_storage"}
                     mark = self._storage.get_meta("deep_last_apply")
                     done = self._storage.get_meta("deep_candidates_judged")
-                if mark is None or (done and done.get("ts") == mark.get("ts")):
+                if mark is None or (done and done.get("ts") == mark.get("ts")
+                                    and done.get("complete")):
                     return {"judged": 0, "reason": "no_new_apply"}
                 candidates = self.deep_dream(apply=False).get("candidates", [])
-            if not candidates:
+            with self._lock:
+                self._ensure_init()
+                memo = self._storage.get_meta("deep_candidate_verdicts") or {}
+            pairs = dict(memo.get("pairs") or {})
+            now = _t.time()
+            horizon = float(cfg.candidate_rejudge_days) * 86400.0
+
+            def key(c):
+                return "|".join(sorted((_nn(c["src"]), _nn(c["dst"]))))
+
+            todo = [c for c in candidates
+                    if key(c) not in pairs
+                    or (now - float(pairs[key(c)].get("ts", 0))) >= horizon]
+            if not todo:
                 if mark is not None:
                     with self._lock:
                         self._storage.set_meta("deep_candidates_judged",
-                                               {"ts": mark["ts"]})
-                return {"judged": 0}
+                                               {"ts": mark["ts"], "complete": True})
+                return {"judged": 0, "reason": "all_judged"}
             ex = self._judge_extractor(extractor, method="judge_candidates")
             if ex is None:
                 return {"judged": 0, "skipped": "no_judge_extractor"}
             cap = max(1, int(limit if limit is not None else cfg.judge_batch))
-            model = getattr(ex, "model", None) or type(ex).__name__
+            chunk = todo[:cap]
+            logger.info("deep-dream candidate judge: judging %d of %d unjudged "
+                        "link candidate(s) (mode %s)", len(chunk), len(todo), mode)
+            rows = [{"n": i + 1, "src": c["src"], "dst": c["dst"],
+                     "similarity": c.get("similarity"),
+                     "src_snippets": c.get("src_snippets") or [],
+                     "dst_snippets": c.get("dst_snippets") or []}
+                    for i, c in enumerate(chunk)]
+            verdicts = ex.judge_candidates(rows)
+            self._stamp_skipped(verdicts, rows, relation=None, src=None,
+                                dst=None, rationale=None)
+            model = self._model_name(ex)
             judged = proposed = dismissed = left = 0
-            logger.info("deep-dream candidate judge: judging %d link "
-                        "candidate(s)", len(candidates))
-            for start in range(0, len(candidates), cap):
-                chunk = candidates[start:start + cap]
-                rows = [{"n": i + 1, "src": c["src"], "dst": c["dst"],
-                         "similarity": c.get("similarity"),
-                         "src_snippets": c.get("src_snippets") or [],
-                         "dst_snippets": c.get("dst_snippets") or []}
-                        for i, c in enumerate(chunk)]
-                verdicts = ex.judge_candidates(rows)
-                for v in verdicts:
-                    c = chunk[v["n"] - 1]
-                    judged += 1
-                    conf = float(v["confidence"])
-                    if mode != "auto":
-                        # shadow: the verdict is logged (per apply, via the
-                        # sweep ledger) and nothing is filed or dismissed.
-                        left += 1
-                        continue
-                    if (v["verdict"] == "propose" and v.get("relation")
-                            and conf >= cfg.candidate_min_confidence):
-                        res = self.graph_propose_links(
-                            [{"src": v.get("src") or c["src"],
-                              "relation": v["relation"],
-                              "dst": v.get("dst") or c["dst"],
-                              "similarity": c.get("similarity"),
-                              "rationale": v.get("rationale")}],
-                            source="deep-dream-judge")
-                        proposed += int(res.get("proposed", 0))
-                    elif (v["verdict"] == "dismiss"
-                            and conf >= cfg.candidate_min_confidence):
-                        res = self.graph_dismiss_duplicate(c["src"], c["dst"])
-                        dismissed += bool(res.get("dismissed"))
-                    else:
-                        left += 1
-            if mark is not None:
-                with self._lock:
-                    self._storage.set_meta("deep_candidates_judged",
-                                           {"ts": mark["ts"]})
+            for v in verdicts:
+                c = chunk[v["n"] - 1]
+                judged += 1
+                conf = float(v["confidence"])
+                pairs[key(c)] = {"verdict": v["verdict"], "confidence": conf,
+                                 "ts": now, "mode": mode}
+                if mode != "auto":
+                    left += 1                 # shadow: memo only
+                    continue
+                if (v["verdict"] == "propose" and v.get("relation")
+                        and conf >= cfg.candidate_min_confidence):
+                    res = self.graph_propose_links(
+                        [{"src": v.get("src") or c["src"],
+                          "relation": v["relation"],
+                          "dst": v.get("dst") or c["dst"],
+                          "similarity": c.get("similarity"),
+                          "rationale": v.get("rationale")}],
+                        source="deep-dream-judge")
+                    proposed += int(res.get("proposed", 0))
+                elif (v["verdict"] == "dismiss"
+                        and conf >= cfg.candidate_min_confidence):
+                    res = self.graph_dismiss_duplicate(c["src"], c["dst"])
+                    dismissed += bool(res.get("dismissed"))
+                else:
+                    left += 1
+            # Bounded memo: newest 500 pairs.
+            if len(pairs) > 500:
+                keep = sorted(pairs.items(), key=lambda kv: -float(kv[1].get("ts", 0)))[:500]
+                pairs = dict(keep)
+            remaining = max(0, len(todo) - len(chunk))
+            with self._lock:
+                self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
+                if mark is not None:
+                    self._storage.set_meta(
+                        "deep_candidates_judged",
+                        {"ts": mark["ts"], "complete": remaining == 0})
             return {"judged": judged, "proposed": proposed,
-                    "dismissed": dismissed, "left": left, "model": model,
-                    "mode": mode}
+                    "dismissed": dismissed, "left": left,
+                    "remaining": remaining, "model": model, "mode": mode}
         except Exception as exc:  # noqa: BLE001 — never kill the sweep
             logger.warning("deep-dream candidate judge failed: %s", exc)
             return {"judged": 0, "error": str(exc)}
@@ -3006,25 +3114,21 @@ class DreamOps:
             filed += pid is not None
         return filed
 
-    def _sweep_unreachable_orphans(self, entries, mentions, facts_by_norm,
-                                   dropped: set[int], now: float) -> int:
-        """Delete zero-evidence entities no current entry mentions. Caller
-        holds the lock. Audited as ``dream-auto`` / status ``deleted`` —
-        deliberately NOT a junk tombstone (``accepted`` + no fold target),
-        which would relax the junk guard for any later re-mint."""
+    def _unreachable_orphans(self, entries, mentions, facts_by_norm,
+                             dropped: set[int]) -> list[dict]:
+        """The orphan sweep's census: zero-evidence entities (storage
+        predicate) that no current entry mentions. Caller holds the lock.
+        Read-only — the dry run reports it as ``would_orphan``."""
         from pseudolife_memory.graph import norm_name as _nn
         from pseudolife_memory.memory.graph_review import _token_set
         cfg = self.config.memory.deep_dream
         cands = self._storage.zero_evidence_entities(
             float(cfg.orphan_min_age_days) * 86400.0)
         if not cands:
-            return 0
+            return []
         entry_tokens = [_token_set(e.get("text", "")) for e in entries]
-        deleted = 0
-        cap = int(cfg.orphan_max_per_apply)
+        out: list[dict] = []
         for c in cands:
-            if cap > 0 and deleted >= cap:
-                break                         # bounded blast radius per pass
             eid = c["id"]
             if eid in dropped or mentions.get(eid):
                 continue
@@ -3034,11 +3138,26 @@ class DreamOps:
             want = _token_set(c["display"])
             if not want or any(want <= toks for toks in entry_tokens):
                 continue                      # mentioned (or unverifiable): keep
-            if self._storage.delete_entity(eid):
-                self._storage.record_merge_decision(
-                    None, c["display"], None, "deleted", None,
-                    "orphan-unreachable auto-delete", "dream-auto", now)
-                dropped.add(eid)
+            out.append(c)
+        return out
+
+    def _sweep_unreachable_orphans(self, entries, mentions, facts_by_norm,
+                                   dropped: set[int], now: float) -> int:
+        """Delete the census (at most ``orphan_max_per_apply`` per pass).
+        Caller holds the lock. Each delete and its audit row are ONE
+        transaction; audited as ``dream-auto`` / status ``deleted`` —
+        deliberately NOT a junk tombstone (``accepted`` + no fold target),
+        which would relax the junk guard for any later re-mint."""
+        cfg = self.config.memory.deep_dream
+        cap = int(cfg.orphan_max_per_apply)
+        deleted = 0
+        for c in self._unreachable_orphans(entries, mentions, facts_by_norm, dropped):
+            if cap > 0 and deleted >= cap:
+                break                         # bounded blast radius per pass
+            if self._storage.delete_entity_audited(
+                    c["id"], c["display"], "deleted",
+                    "orphan-unreachable auto-delete", "dream-auto", now):
+                dropped.add(c["id"])
                 deleted += 1
         return deleted
 

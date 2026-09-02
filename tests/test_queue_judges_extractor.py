@@ -193,3 +193,27 @@ def test_judge_batches_floor_max_tokens_per_row(wire):
     ex = D.OpenAICompatExtractor("http://x/v1", "m", max_tokens=100)
     ex.judge_junk([{**_JUNK, "n": i + 1} for i in range(5)])
     assert wire["bodies"][-1]["max_tokens"] == 120 * 5
+
+
+def test_judge_request_records_the_served_model(wire):
+    """The distinct-second-model check compares what the endpoint SERVED,
+    not the configured name (a name-agnostic endpoint serves one model
+    under any requested name)."""
+    ex = _ex()
+    assert ex.served_model is None
+    wire["reply"] = '{"verdicts": []}'
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return json.dumps({"model": "really-served-x",
+                               "choices": [{"message": {"content": '{"verdicts": []}'}}]}).encode()
+
+    with mock.patch("urllib.request.urlopen", lambda req, timeout=None: _Resp()):
+        ex.judge_junk([_JUNK])
+    assert ex.served_model == "really-served-x"

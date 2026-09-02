@@ -179,17 +179,21 @@ def test_link_judge_auto_applies_accept_reject_retype_at_gate(svc):
         ("g-a", "uses", "g-b"): ("leave", 0.5, None),
     })
     out = svc.deep_dream_judge_links(judge)
-    assert out["judged"] == 5 and out["applied"] == 3
+    assert out["judged"] == 5 and out["applied"] == 2
     edges = _live_edges(svc)
     assert ("a-tool", "uses", "b-lib", "action") in edges
-    assert ("e-file.py", "implements", "e-concept", "action") in edges
-    assert not any(e[0] == "e-file.py" and e[1] == "runs-on" for e in edges)
+    # A retype is recorded (verdict + corrected relation), never auto-written.
+    assert not any(e[0] == "e-file.py" for e in edges)
+    ret_row = _pending_link(svc, ret)
+    assert ret_row["judge_verdict"] == "retype" and ret_row["judge_relation"] == "implements"
     assert _pending_link(svc, acc) is None and _pending_link(svc, rej) is None
-    assert _pending_link(svc, ret) is None
     st = svc._storage
     assert st.get_proposal(rej)["status"] == "rejected"
-    assert st.get_proposal(ret)["status"] == "retyped"
     assert st.get_proposal(acc)["decided_by"] == "dream-judge"
+    # The reviewer's own retype path still works, gated like propose.
+    res = svc.graph_accept_proposal(ret, decided_by="agent", relation="implements")
+    assert res["accepted"] and res["status"] == "retyped"
+    assert ("e-file.py", "implements", "e-concept", "action") in _live_edges(svc)
     # below-gate and leave rows stay pending with the opinion attached
     assert _pending_link(svc, low)["judge_verdict"] == "accept"
     assert _pending_link(svc, lv)["judge_verdict"] == "leave"
@@ -473,6 +477,48 @@ def test_auto_mode_refuses_same_model_second_vote_and_name_vetoes(svc):
     assert "auto-accept refused" in note
 
 
+def test_auto_accept_refuses_dismissed_pairs_and_analyzer_rows(svc):
+    """A pair an earlier verdict settled as distinct (relate / dismiss_pair
+    writes dismissed_pairs, never the proposal row) must never be folded
+    over that decision; analyzer-filed rows are an unmeasured class."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "auto"
+    cfg.judge_second_opinion = True
+    svc.store("theta svc handles the theta path", source="t")
+    svc.store("theta service is the theta daemon", source="t")
+    svc.store("iota svc handles the iota path", source="t")
+    svc.store("iota service is the iota daemon", source="t")
+    dismissed = _propose(svc, "theta svc", "theta service")
+    assert svc.graph_dismiss_duplicate("theta svc", "theta service")["dismissed"]
+    st = svc._storage
+    from pseudolife_memory.graph import norm_name
+    for n in ("iota svc", "iota service"):
+        st.ensure_entity(norm_name(n), display=n)
+    analyzer = st.insert_entity_proposal(
+        "merge", st.find_entity("iota-svc")["id"], st.find_entity("iota-service")["id"],
+        0.75, "analyzer-duplicate: jaccard 0.75", time.time())
+    verdicts = {("theta svc", "theta service"): ("accept", 0.9),
+                ("iota svc", "iota service"): ("accept", 0.9)}
+    judge, second = _MergeJudge(verdicts), _SecondJudge(verdicts)
+    svc.deep_dream_judge(judge)
+    out = svc.deep_dream_judge(judge, second_extractor=second)
+    assert out["auto_accepted"] == 0 and out["auto_accept_refused"] == 2
+    assert st.get_entity_proposal(dismissed)["status"] == "rejected"     # moot row closed
+    assert st.get_entity_proposal(dismissed)["decided_by"] == "dream-judge"
+    displays = {e["display"] for e in st.load_graph()["entities"]}
+    assert {"theta svc", "theta service", "iota svc", "iota service"} <= displays
+    row = _merge_row(svc, analyzer)
+    assert row["status"] == "pending" and "unmeasured" in row["judge_note"]
+
+
+def test_judges_kill_switch(svc):
+    cfg = svc.config.memory.deep_dream
+    cfg.judges_enabled = False
+    for name in ("deep_dream_judge", "deep_dream_judge_links", "deep_dream_judge_junk",
+                 "deep_dream_judge_curation", "deep_dream_judge_candidates"):
+        assert getattr(svc, name)()["skipped"] == "judges_disabled", name
+
+
 def test_auto_reject_mode_never_auto_accepts(svc):
     cfg = svc.config.memory.deep_dream
     cfg.judge_mode = "auto-reject"
@@ -503,6 +549,30 @@ def test_candidate_judge_shadow_files_nothing(svc):
     out = svc.deep_dream_judge_candidates(judge, candidates=cands)
     assert out["judged"] == 1 and out["dismissed"] == 0 and out["mode"] == "shadow"
     assert ("shadow-a", "shadow-b") not in st.dismissed_pairs()
+
+
+def test_candidate_judge_one_slice_per_call_and_memo(svc):
+    cfg = svc.config.memory.deep_dream
+    cfg.candidate_judge_mode = "auto"
+    cfg.candidate_min_confidence = 0.6
+    st = svc._storage
+    for n in ("slice-a", "slice-b", "slice-c", "slice-d"):
+        st.ensure_entity(n, display=n)
+    cands = [{"src_id": st.find_entity("slice-a")["id"], "dst_id": st.find_entity("slice-b")["id"],
+              "src": "slice-a", "dst": "slice-b", "similarity": 0.9, "src_snippets": ["s"], "dst_snippets": ["d"]},
+             {"src_id": st.find_entity("slice-c")["id"], "dst_id": st.find_entity("slice-d")["id"],
+              "src": "slice-c", "dst": "slice-d", "similarity": 0.8, "src_snippets": ["s"], "dst_snippets": ["d"]}]
+    judge = _CandidateJudge({("slice-a", "slice-b"): ("dismiss", 0.9, None, None, None),
+                             ("slice-c", "slice-d"): ("dismiss", 0.9, None, None, None)})
+    out = svc.deep_dream_judge_candidates(judge, candidates=cands, limit=1)
+    assert out["judged"] == 1 and out["remaining"] == 1
+    out = svc.deep_dream_judge_candidates(judge, candidates=cands, limit=1)
+    assert out["judged"] == 1 and out["remaining"] == 0
+    assert ("slice-a", "slice-b") in st.dismissed_pairs()
+    assert ("slice-c", "slice-d") in st.dismissed_pairs()
+    # memoised: nothing re-sent
+    out = svc.deep_dream_judge_candidates(judge, candidates=cands, limit=1)
+    assert out["judged"] == 0 and out["reason"] == "all_judged"
 
 
 def test_candidate_judge_files_proposals_and_dismisses(svc):
@@ -542,7 +612,8 @@ def test_apply_files_analyzer_duplicates_into_the_queues(svc):
     # A NEAR-duplicate pair (jaccard 0.75): a token-set-identical pair would
     # be Step A's exact-duplicate auto-merge, never the analyzer's.
     for name in ("Cortex Console web frontend", "Cortex Console frontend",
-                 "band.py", "band", "gemma E4B model", "gemma E2B model"):
+                 "band.py", "band", "gemma E4B model", "gemma E2B model",
+                 "gemma-4 UD-Q4_K_XL", "gemma-4 Q4_K_M"):
         from pseudolife_memory.graph import norm_name
         st.ensure_entity(norm_name(name), display=name)
     svc.graph_relate("Cortex Console web frontend", "uses", "js-lib", origin="agent")
@@ -551,6 +622,8 @@ def test_apply_files_analyzer_duplicates_into_the_queues(svc):
     svc.graph_relate("band", "stores-data-in", "postgres", origin="agent")
     svc.graph_relate("gemma E4B model", "uses", "gguf-a", origin="agent")
     svc.graph_relate("gemma E2B model", "uses", "gguf-b", origin="agent")
+    svc.graph_relate("gemma-4 UD-Q4_K_XL", "uses", "gguf-c", origin="agent")
+    svc.graph_relate("gemma-4 Q4_K_M", "uses", "gguf-d", origin="agent")
     out = svc.deep_dream(apply=True, include_snippets=False)
     assert out["applied"] is True
     merges = [p for p in svc._storage.pending_entity_proposals()
@@ -558,8 +631,14 @@ def test_apply_files_analyzer_duplicates_into_the_queues(svc):
     assert any({p["entity"], p["into"]} == {"Cortex Console web frontend",
                                             "Cortex Console frontend"}
                for p in merges)
-    # A size/quant/version-conflicting pair is never filed as a merge.
+    # Size/quant/version-conflicting pairs are never filed as merges. The
+    # E4B/E2B pair is caught by merge_veto's numeric-substitution rule
+    # inside duplicate_candidates; the quant pair below passes merge_veto
+    # (no digit-bearing diff tokens) and is stopped ONLY by
+    # variant_conflict on the analyzer path — the load-bearing check.
     assert not any({p["entity"], p["into"]} == {"gemma E4B model", "gemma E2B model"}
+                   for p in merges)
+    assert not any({p["entity"], p["into"]} == {"gemma-4 UD-Q4_K_XL", "gemma-4 Q4_K_M"}
                    for p in merges)
     links = svc._storage.pending_proposals()
     assert any(p["src"] == "band.py" and p["relation"] == "implements"
@@ -607,6 +686,24 @@ def test_apply_sweeps_only_old_unreachable_orphans(svc):
     assert audit and audit[0]["decided_by"] == "dream-auto"
     assert audit[0]["status"] == "deleted"                           # not a junk tombstone
     assert "stale-orphan" not in st.junk_accepted_displays()
+
+
+def test_dry_run_reports_the_orphan_census_without_deleting(svc):
+    cfg = svc.config.memory.deep_dream
+    cfg.orphan_sweep = False                                       # shipped default
+    cfg.orphan_min_age_days = 7
+    st = svc._storage
+    old = st.ensure_entity("census-orphan", display="census-orphan")
+    with st._txn():
+        st.conn.execute("UPDATE entities SET created_at = created_at - %s WHERE id = %s",
+                        (8 * 86400, old))
+    out = svc.deep_dream(apply=False)
+    assert out["would_orphan_count"] >= 1
+    assert any(w["entity"] == "census-orphan" and w["age_days"] >= 7 for w in out["would_orphan"])
+    assert st.find_entity("census-orphan") is not None
+    applied = svc.deep_dream(apply=True, include_snippets=False)
+    assert applied["orphans_deleted"] == 0                          # switch is off
+    assert st.find_entity("census-orphan") is not None
 
 
 def test_zero_evidence_census_is_storage_level(svc):

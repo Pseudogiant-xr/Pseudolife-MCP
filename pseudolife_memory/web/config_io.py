@@ -292,6 +292,14 @@ KNOBS: list[dict[str, Any]] = [
              "confident scores (local Qwen 0.918, confidence "
              "uninformative), so leave \"shadow\" unless the dream "
              "extractor or judge_url resolves to an Opus-class model."},
+    {"path": "memory.deep_dream.judges_enabled", "group": "Deep dream",
+     "label": "Review-queue judges (all)", "type": "bool", "default": True,
+     "restart": False,
+     "help": "The one switch for every judge stage (merge, link, junk, "
+             "store-curation, candidates): off = no model verdicts at all, "
+             "the mechanical tick keeps running. The two apply-time "
+             "mechanics keep their own switches (analyzer_file_duplicates, "
+             "orphan_sweep)."},
     {"path": "memory.deep_dream.judge_second_opinion", "group": "Deep dream",
      "label": "Merge judge second opinion", "type": "bool", "default": True,
      "restart": False,
@@ -303,10 +311,12 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Link judge", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "shadow",
      "restart": False,
-     "help": "Autonomous verdicts on pending link proposals (schema v35): "
-             "\"shadow\" records; \"auto\" promotes accept/retype verdicts "
+     "help": "Autonomous verdicts on pending link proposals (schema v36): "
+             "\"shadow\" records; \"auto\" promotes accept verdicts "
              "at/above link_accept_min_confidence (0.8) to live edges and "
-             "rejects at/above link_reject_min_confidence (0.8). Edges are "
+             "rejects at/above link_reject_min_confidence (0.8); a retype "
+             "is recorded with its corrected relation but never auto-written "
+             "(first ladder: retype 0/1). Edges are "
              "reversible (memory_graph_unrelate), which is why this queue "
              "may run auto; measured per arm by evals/queue_judge_ladder.py."},
     {"path": "memory.deep_dream.junk_judge_mode", "group": "Deep dream",

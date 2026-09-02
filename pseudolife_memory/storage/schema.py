@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 35
+SCHEMA_META_VERSION = 36
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -838,11 +838,11 @@ def ensure_schema(conn) -> dict:
             "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_contested_uq "
             "ON facts (entity_norm, attribute_norm) WHERE status = 'contested'"
         )
-        # v35 additive: the review-queue judges reach the queues the v30
+        # v36 additive: the review-queue judges reach the queues the v30
         # merge judge left for humans. (1) The LINK judge's opinion rides the
         # edge_proposals row like v30's rides entity_proposals — plus
         # judge_relation, the corrected relation a "retype" verdict names.
-        # NULL = not yet judged, exactly the pre-v35 behaviour. (2) The
+        # NULL = not yet judged, exactly the pre-v36 behaviour. (2) The
         # store-curation judge's memo: lesson/world duplicate LISTINGS are
         # recomputed per pass (nothing is filed), so without a memo every
         # sweep would re-send the same pairs; keyed like dismissed_pairs

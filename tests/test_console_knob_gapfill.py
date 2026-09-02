@@ -190,7 +190,8 @@ def test_review_queue_judge_knobs():
         knob = _knob(path)
         assert knob["type"] == "enum" and knob["options"] == options, path
         assert knob["default"] == default and knob["restart"] is False, path
-    for path in ("memory.deep_dream.judge_second_opinion",
+    for path in ("memory.deep_dream.judges_enabled",
+                 "memory.deep_dream.judge_second_opinion",
                  "memory.deep_dream.analyzer_file_duplicates"):
         knob = _knob(path)
         assert knob["type"] == "bool" and knob["default"] is True, path

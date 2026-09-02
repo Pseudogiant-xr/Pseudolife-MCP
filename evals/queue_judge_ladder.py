@@ -27,8 +27,10 @@ Per queue (majority vote across replicates):
   * links      — accept / reject precision (retype must name the panel's
                  relation), auto-accept + auto-reject at ``--link-gate``.
   * junk       — keep / delete precision; auto-delete at ``--junk-gate``
-                 UNDER the evidence bar (degree <= 3, facts <= 1) — the
-                 daemon never deletes above it.
+                 UNDER the evidence bar (degree <= 2, facts <= 1 — the
+                 shipped junk_max_auto_degree) — the daemon never deletes
+                 above it. The bar is structural, not a precision claim:
+                 16 of the 20 panel rows pass it, including 5 keeps.
   * candidates — propose / dismiss precision at ``--candidate-gate``.
   * curation   — distinct / duplicate precision at the curation gates.
 
@@ -229,7 +231,7 @@ def score_links(rows, reps, args):
 def score_junk(rows, reps, args):
     final = [majority([rep[i] for rep in reps]) for i in range(len(rows))]
     lab = lambda r, v: r["label"] == v["verdict"]  # noqa: E731
-    under_bar = lambda r: int(r.get("deg") or 0) <= 3 and int(r.get("facts") or 0) <= 1  # noqa: E731
+    under_bar = lambda r: int(r.get("deg") or 0) <= 2 and int(r.get("facts") or 0) <= 1  # noqa: E731  (= junk_max_auto_degree)
     return {"rows": len(rows),
             "keep_precision": _prec(rows, final, "keep", lab),
             "delete_precision": _prec(rows, final, "delete", lab),

@@ -1138,6 +1138,27 @@ class PostgresStorage:
                 "DELETE FROM entities WHERE id = %s RETURNING id", (entity_id,)).fetchone()
         return row is not None
 
+    def delete_entity_audited(self, entity_id: int, display: str, status: str,
+                              reason: str, decided_by: str, now: float) -> bool:
+        """``delete_entity`` plus its ``merge_decisions`` audit row in ONE
+        transaction — an unattended deletion whose audit row a crash could
+        separate from the delete would be an invisible deletion."""
+        with self._txn():
+            for tbl in ("facts", "lessons"):
+                self.conn.execute(f"UPDATE {tbl} SET entity_id = NULL WHERE entity_id = %s", (entity_id,))
+                self.conn.execute(f"UPDATE {tbl} SET object_entity_id = NULL WHERE object_entity_id = %s", (entity_id,))
+            row = self.conn.execute(
+                "DELETE FROM entities WHERE id = %s RETURNING id", (entity_id,)).fetchone()
+            if row is None:
+                return False
+            self.conn.execute(
+                "INSERT INTO merge_decisions "
+                "(proposal_id, entity_display, into_display, status, score, "
+                " reason, decided_by, decided_at) "
+                "VALUES (NULL, %s, NULL, %s, NULL, %s, %s, %s)",
+                (display, status, reason, decided_by, now))
+        return True
+
     def merge_entity(self, from_id: int, into_id: int) -> bool:
         """Fold `from` into `into`: drop edges that would duplicate or self-loop,
         re-point the rest, re-point fact/lesson refs, carry aliases + sources,

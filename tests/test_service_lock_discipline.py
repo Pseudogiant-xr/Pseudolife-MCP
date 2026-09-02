@@ -104,6 +104,7 @@ CALLER_HOLDS_LOCK = {
     # sweep).
     "_file_analyzer_duplicates",
     "_sweep_unreachable_orphans",
+    "_unreachable_orphans",
     # These three pass self._storage as an argument to the sync helpers
     # rather than calling methods on it — invisible to the first walker,
     # surfaced by the argument-passing check.

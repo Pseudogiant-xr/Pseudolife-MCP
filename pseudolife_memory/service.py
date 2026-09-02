@@ -2939,9 +2939,10 @@ class MemoryService(DreamOps):
         # list-, compound- or sentence-shaped ``about`` keeps its text on
         # the lesson but gets no graph node — 11 of the 20 pending junk
         # proposals on 2026-09-02 were exactly these mints.
-        from pseudolife_memory.memory.graph_consolidation import junk_name_reason
-        if junk_name_reason(about) or " / " in about or " + " in about:
-            return
+        from pseudolife_memory.memory.graph_consolidation import (
+            _compound_halves, junk_name_reason)
+        if junk_name_reason(about) or _compound_halves(about) is not None:
+            return          # same compound predicate the junk detector uses
         oid = st.ensure_entity(an, display=about.strip())
         relation = "avoids" if polarity == "-" else "prefers"
         self._graph.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")

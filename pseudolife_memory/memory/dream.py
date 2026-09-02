@@ -967,6 +967,9 @@ class OpenAICompatExtractor:
         # a byte-identical judge ladder). True = server/template default;
         # "low"/"medium" pins an explicit per-request reasoning_effort.
         self.judge_thinking = judge_thinking
+        # Set by _judge_request from the response: the model name the
+        # endpoint reported serving (None until the first judge call).
+        self.served_model: str | None = None
         # Base system prompt for claims extraction. Defaults to the shipped
         # ``_SYSTEM_PROMPT`` (the daemon never passes this arg, so its behaviour
         # is byte-identical). Off-label harnesses (e.g. the LME-V2 trajectory
@@ -1361,6 +1364,13 @@ class OpenAICompatExtractor:
                 headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
+            # The model the endpoint actually SERVED (OpenAI-compatible
+            # responses echo it). A name-agnostic endpoint (llama-server
+            # serving one model under any requested name) reports the same
+            # served model for two configured names — which is what the
+            # merge judge's distinct-second-model check must compare.
+            served = data.get("model") if isinstance(data, dict) else None
+            self.served_model = str(served) if served else None
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
             if s != -1 and e > s:
