@@ -879,6 +879,7 @@ renders the real frontend against canned data:
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
 | Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
+| Write-time labels | `authority` (`directive` / `observation` / `quoted` — the speech act, orthogonal to the `origin` tier) and `distortion_tolerance` (`constraint` / `procedural` / `belief` / `preference` / `episodic`) on entries and facts, set at write time (explicit, or a deterministic heuristic under `auto`) and inherited through supersession unless restated. A `constraint` source is carried verbatim through the dream (with a post-dream guard) and pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` when the query names its entity; a `quoted` source is low-trust for the two-man rule (schema v35) |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
@@ -888,7 +889,7 @@ renders the real frontend against canned data:
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v34 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v35 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1147,6 +1148,45 @@ replacement, state transition), which still handle everything without
 slots. Slot extraction is deliberately precision-gated — about 0.6% of
 conversational turns yield one — so this path mostly serves deliberate,
 fact-shaped writes, and its reach grows with extraction quality.
+
+### Who said it, and how exactly must it survive? (schema v35)
+
+Two labels ride on every entry and every fact, set at write time and
+inherited through supersession unless a later write restates them:
+
+- **`authority`** is the *speech act* of the text — `directive` (an
+  instruction to the agent), `observation` (a plain statement; the
+  default, stored as NULL and served as nothing), `quoted` (reported
+  speech: a document, a paper, a third person). It is deliberately a
+  separate axis from `origin`: `origin` says *who wrote* and is a tier
+  that drives supersession arithmetic (the provenance guard, the two-man
+  rule), while directive-vs-observation is not a tier ordering at all —
+  and the failure this closes (arXiv 2608.01679, *authority collapse*)
+  is exactly a third party's offhand remark consolidating into what reads
+  as a standing user instruction. The pair `(origin, authority)` is what
+  the paper calls authority. A `quoted` source is low-trust for the
+  [consolidation quarantine](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in).
+- **`distortion_tolerance`** is how exactly the text must survive
+  consolidation (arXiv 2608.22752, *the compaction cliff*): `constraint`
+  (zero — verbatim), `procedural`, `belief`, `preference`, `episodic`.
+  Only `constraint` has consumers today: the dream copies a constraint
+  entry's text verbatim onto a derived fact and a post-dream guard reports
+  any constraint left without a carrier ([dreaming](dreaming.md#constraint-entries-survive-verbatim--typecompact--guard-schema-v35)),
+  and in-scope constraint facts are served *ahead of* the cosine ranking
+  ([retrieval](retrieval.md#constraint-pinning-schema-v35)).
+
+Both are explicit parameters on `memory_store` and `memory_fact_set`;
+the `auto` default is a deterministic form heuristic (no model call on
+the store path) that asserts `constraint` only for rule-sized deontic or
+imperative text (`must`, `shall`, `forbidden`, `rule:`, or an opener like
+`Never run …`), `quoted` on an explicit reporting construction
+(`according to`, `per the`, `the docs say`), and `directive` on an
+instruction addressed to the reader — measured on the live bank before
+shipping (`evals/results/label-heuristic-audit-20260902.json`). The
+other four fidelity classes are accepted explicitly and carried.
+Neither label ever feeds confidence or supersession routing; a
+`constraint` label is the one label retrieval *ranks* on. Served only
+when set, so an unlabelled record's payload is byte-identical to before.
 
 ## Set-valued slots (schema v26)
 
@@ -1738,6 +1778,30 @@ then walks its graph neighbourhood one hop per iteration (up to `hops`,
 capped at 5), accumulating bridging entities, facts, edges, and paths. It
 is **read-only** — it never writes to the bank or the graph.
 
+### Constraint pinning (schema v35)
+
+TypeRetrieve (arXiv 2608.22752):
+a fact whose `distortion_tolerance` is `constraint` is served *ahead of*
+the cosine ranking, marked `pinned: true`, when it is **in scope** — and
+scope is defined cheaply and precisely, with no second embedding pass:
+in `memory_search`'s cortex block, the query *names the fact's entity*
+(both sides go through the cortex's slot normalisation, so `payments db`
+matches `payments-db`, and the entity must occur as a separator-bounded
+run, so `db` does not match `payments-database`); in `memory_recall`, the
+fact's entity is a **seed** of the walk (hop 0 — the entities the query
+itself resolved to; hop-discovered entities are context, not scope, and
+keep record order). Pins share the block's `top_k` budget — a pin
+displaces the weakest ranked fact rather than growing the payload — and
+a pinned fact that never made the ranked list is served in the identical
+shape with its true cosine as `score`, so a reader can see it was pinned,
+not ranked. In recall the pin also guarantees the rule survives the
+per-entity fact cap below. An unlabelled bank is served byte-identically;
+`memory.cortex.pin_constraints = false` restores plain ranking. Under
+`stale_policy = demote` a stale (`slow` / `volatile`) constraint still
+sinks below the fresh ranked facts — staleness is a trust decision and
+outranks the pin. The labels themselves are described in
+[memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35).
+
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
 `paths`, supporting `texts`, and `iterations`.
@@ -2283,6 +2347,51 @@ contested by design; the aggregate guard already parks the dangerous
 member-over-scalar case). Preregistration:
 `docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
 
+## Constraint entries survive verbatim — TypeCompact + guard (schema v35)
+
+The dream is a compression step, and the compaction cliff (arXiv
+2608.22752) is what compression does to a rule: a safety rule and an
+episodic log are summarised at the same rate, but only the rule needs
+its exact wording to stay enforceable. An entry whose
+`distortion_tolerance` is `constraint` (set explicitly on `memory_store`,
+or inferred by the `auto` heuristic for rule-sized deontic text — see
+[memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35))
+is therefore treated as zero-distortion by the dream:
+
+- **The carrier (TypeCompact).** Among the claims the extractor cites
+  the entry for, at least one scalar claim must contain the entry's text
+  verbatim (whitespace-collapsed, case-preserving). If none does, the
+  first scalar claim's *value* is replaced with the entry text — the
+  extractor's entity and attribute are kept (slotting is what it is good
+  at; wording is not), sibling claims are left alone. Member (`op`)
+  claims are never carriers. The derived fact inherits the source's
+  labels, so it reads back as `distortion_tolerance: constraint` and is
+  pinned in recall.
+- **The guard verifier.** After the claims loop, every constraint entry
+  in the processed window must have a derived item carrying its text
+  verbatim (a parked contender counts; so does a slot the same entry
+  formed on an earlier pass). Misses are reported on the run result as
+  `constraint_misses` (entry id + text) beside `constraint_verbatim`, on
+  the run row's tallies as `constraint_missed`, and logged at WARNING.
+  This is a **flag, not a hard fail**: the paper fails a compaction whose
+  input is still there to retry, but here the raw entry is never
+  discarded (it stays in the associative store and is served by
+  `memory_search`), and holding the cursor would hostage every other
+  claim in the batch to one rule the extractor could not slot. The
+  typical miss is an extractor that emitted no scalar claim for the
+  entry at all — inventing a slot is not the dream's business.
+
+**Authority rides along.** Every derived fact takes the *source entry's*
+`authority` (`quoted` / `directive` / observation) and inherits the slot's
+label when the source is unlabelled — never anything the extractor wrote,
+which is model output and steerable by note text (the same trust class
+as claim `origin`). Under the two-man rule above, a `quoted` source is
+low-trust whoever relayed it: a third party's remark parks as a contender
+instead of taking `current` on the relayer's tier. The label only ever
+*demotes*; promotion stays keyed on entry metadata, so dressing a note up
+as a quote gains nothing but a park. Rollback restores the previous
+version's labels along with its value.
+
 ## Chronicle events (schema v28) — dated occurrences beside facts
 
 Facts answer "what is current"; they systematically lose *occurrences* —
@@ -2684,7 +2793,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v34). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v35). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -2813,6 +2922,14 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   false-merge risk in mind. See
   [the single-writer cortex design](../specs/2026-06-19-single-writer-cortex-design.md)
   for the structural fix.
+- **Constraint pinning on** (`memory.cortex.pin_constraints = true`, schema
+  v35) — a fact whose `distortion_tolerance` is `constraint` is served
+  AHEAD of the cosine ranking, marked `pinned: true`, when it is in
+  scope: in `memory_search`'s cortex block when the query names the
+  fact's entity (separator-insensitive, word-bounded), in
+  `memory_recall` when the entity is a seed of the walk. Pins share the
+  block's `top_k` budget rather than growing it. An unlabelled bank is
+  served byte-identically either way; set `false` for plain ranking.
 - **Slot read telemetry on** (`memory.cortex.read_tracking = true`, schema
   v33) — every cortex slot served as an answer (`memory_fact_get` and the
   cortex-first block of `memory_search`) bumps its `slot_reads` counter,
@@ -3272,7 +3389,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v34**; migrations are additive
+The current Postgres meta version is **v35**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -3312,6 +3429,7 @@ The milestones:
 | v32 | `retrieval_events.params` — the ranking knobs in force for the query (effective `top_k` / keep-threshold, the recency ramp, BM25 weight and scorer params, the reranker's fusion weight + margin gate and whether it actually fired, timeline/contiguity settings, and the call's filters), logged beside a widened `served` list whose per-entry `components` blob carries the fusion INPUTS: bi-encoder score, cross-encoder score (`null` when the margin gate skipped the pass — a distinction a learned head needs), BM25 boost, surprise, recency and the source/supersession multipliers. Phase 0 logged only the fused score, which is the output a Phase-1 learned head is supposed to predict; the inputs are not recoverable afterwards, because config is mutable at runtime and band recency, supersession flags and access counts all mutate on every serve. Nothing new is computed at serve time — these values were already in hand and were being discarded. `NULL` params = a v31-era row. Additive/idempotent |
 | v33 | `slot_reads` + `entries.explicit_reinforcements` — read telemetry. `slot_reads` counts how many times each cortex slot was *served as an answer* (`memory_fact_get` and `memory_search`'s cortex-first block), keyed on the stable `(entity_norm, attribute_norm)` slot like `memory_traces` so counters survive cortex snapshot saves; deliberately uncounted are internal verification lookups (e.g. the dream rollback's post-revert check) and the facts attached to `memory_recall`/`memory_graph` neighborhoods (context, not a direct answer), so never-read is a lower bound. `explicit_reinforcements` moves only on `memory_reinforce`, splitting the deliberate "this was useful" signal out of the shared `reinforcements` counter, which also counts dream-trace links (and still feeds the retention formula unchanged). Both feed the new `read_audit` section of `memory_stats` (never-read fractions by age and source, read/write balance, slot coverage) — motivated by the 2026-08-26 bank audit, where entry reads were measurable but the 4.6k fact slots had no read signal at all. Kill-switch: `memory.cortex.read_tracking`. Additive/idempotent |
 | v34 | `retrieval_events.served_facts` — the fact half of the reranker training tuple. The v31 event log recorded only served *entries*; the cortex-first block's facts, served above those entries in every `memory_search` response, were invisible to a future learned reranker. The search handler now attaches them (`[{entity_norm, attribute_norm, rank, score, kind, contested}]`) to the exact event row that search wrote, keyed by the event id `search(return_event_id=True)` hands back — no session-window guessing. `NULL` = a pre-v34 row or a search that served no facts. Also (no DDL): `memory_stats` `read_audit` gains `graduation_candidates` — entries served in ≥60% of the last 30 days' distinct sessions (once ≥8 sessions are on record), i.e. static-context ("promote to CLAUDE.md") candidates that retrieval keeps re-paying for per query. Additive/idempotent |
+| v35 | `entries.authority` / `entries.distortion_tolerance` and `facts.authority` / `facts.distortion_tolerance` — the write-time label pair (authority collapse, arXiv 2608.01679; the compaction cliff, arXiv 2608.22752). `authority` is the SPEECH ACT of the text (`directive` \| `observation` \| `quoted`), deliberately a separate axis from the `origin` tier (who wrote — which drives supersession arithmetic and which entries never persisted anyway); `distortion_tolerance` is the fidelity class (`constraint` \| `procedural` \| `belief` \| `preference` \| `episodic`). Set at write time — explicit `memory_store` / `memory_fact_set` parameters, or a deterministic heuristic under the `auto` default that asserts only `constraint` (rule-sized deontic/imperative text) and `quoted`/`directive` — and inherited through `memory_supersede` / `memory_consolidate` / fact supersession unless the new write restates one. Consumers: the dream carries a `constraint` source's text verbatim onto a derived fact and a post-dream guard reports any constraint entry left without a verbatim carrier (`constraint_verbatim` / `constraint_misses`); a `quoted` source is low-trust for the two-man rule; `constraint` facts are pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` (`memory.cortex.pin_constraints`). `NULL` = observation / unlabelled, exactly the pre-v35 reading, so the migration is a no-op on an existing bank — no backfill, by design. Additive/idempotent |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 

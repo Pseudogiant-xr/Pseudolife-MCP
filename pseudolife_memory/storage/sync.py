@@ -70,6 +70,9 @@ def entry_to_row(entry: MemoryEntry) -> dict[str, Any]:
         "episode_title": entry.episode_title,
         "tags": list(entry.tags),
         "slots": [list(s) for s in entry.slots],
+        # v35 write-time labels; nullable, NULL = unlabelled.
+        "authority": entry.authority,
+        "distortion_tolerance": entry.distortion_tolerance,
     }
 
 
@@ -91,6 +94,9 @@ def row_to_entry(row: dict[str, Any], device: str = "cpu") -> MemoryEntry:
         tags=list(row["tags"] or []),
         db_id=row["id"],
         reinforcements=row.get("reinforcements", 0),
+        # v35; pre-v35 rows carry no key -> None (unlabelled).
+        authority=row.get("authority"),
+        distortion_tolerance=row.get("distortion_tolerance"),
     )
 
 
@@ -191,6 +197,9 @@ def _record_to_row(r: CortexRecord) -> dict[str, Any]:
         "value_norm": _norm_value(r.value) if r.kind == "member" else None,
         # v29: nullable — NULL round-trips as "asserted plainly".
         "stance": r.stance,
+        # v35: nullable label pair, same NULL = default rule as stance.
+        "authority": r.authority,
+        "distortion_tolerance": r.distortion_tolerance,
         **_stamp_to_row(r),
     }
 
@@ -291,6 +300,9 @@ def hydrate_cortex(cortex: CortexStore, storage) -> int:
             kind=row.get("kind") or "scalar",
             # v29; pre-v29 rows have no column -> None ("asserted plainly").
             stance=row.get("stance"),
+            # v35; pre-v35 rows have no column -> None (unlabelled).
+            authority=row.get("authority"),
+            distortion_tolerance=row.get("distortion_tolerance"),
             **_stamp_from_row(row),
         ))
     cortex.supersession_log = list(storage.meta_get(_CORTEX_LOG_KEY, []) or [])

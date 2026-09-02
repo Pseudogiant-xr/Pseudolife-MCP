@@ -6,6 +6,75 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-02 — a claim now remembers who said it and how exactly it must survive; schema v35)
+
+- **A memory kept the claim and lost the terms of its use.** Consolidation
+  preserved *what* was said while erasing *who* said it and *how* (arXiv
+  2608.01679, authority collapse: a third party's offhand remark reads back
+  as a standing user instruction — collapse in 48/49 consolidator configs,
+  50.3% unauthorized-action rate without a label, 16.9% → 0.0% with one),
+  and it summarised a rule at the same rate as a log entry although only
+  the rule needs its exact wording (arXiv 2608.22752, the compaction cliff).
+  Schema v35 (additive/idempotent) adds one write-time label pair to
+  `entries` and `facts`, carried through supersession:
+  - **`authority`** — the SPEECH ACT: `directive` / `observation` /
+    `quoted`. Deliberately a separate axis from `origin`, which says *who
+    wrote* and is a tier driving the provenance guard and the two-man
+    rule (and which entries never persisted — the quarantine derives an
+    entry's tier from `source`); directive-vs-observation is not a tier
+    ordering. The composite `(origin, authority)` is what the paper calls
+    authority.
+  - **`distortion_tolerance`** — the paper's five fidelity classes:
+    `constraint` (zero — verbatim) / `procedural` / `belief` / `preference`
+    / `episodic`.
+  - Explicit parameters on `memory_store` and `memory_fact_set`; the `auto`
+    default is a deterministic form heuristic (no model call on the store
+    path) that asserts only `constraint` (rule-sized deontic or imperative
+    text — `must`, `shall`, `forbidden`, `rule:`, `Never run …`), `quoted`
+    (an explicit reporting construction — `according to`, `per the`, `the
+    docs say`) and `directive` (addressed to the reader). Measured on the
+    live bank before shipping: 836 current entries / 5,267 current facts,
+    hand-labelled hits; the shipped rule fires on ~1.6% of facts at ~0.86
+    precision and on 1 of 836 entries; the rejected variants (any deontic
+    word anywhere: 36% of entries; mid-sentence never/always: 0.53; an
+    attribute-name rule: 0.63) are recorded beside it in
+    `evals/results/label-heuristic-audit-20260902.json`. No backfill.
+  - **Inherit unless restated.** `memory_supersede` and
+    `memory_consolidate` carry the strictest label across the entries they
+    retire (quoted beats directive; a constraint anywhere in the cluster
+    stays a constraint — TypeDecompose) unless the new text restates one;
+    a fact write keeps the slot's labels unless it passes one (explicit
+    `None` clears; the dream passes `INHERIT` for an unlabelled source).
+    Rollback restores the previous version's labels with its value.
+  - **Served absent-when-default** on every read surface an agent acts on
+    (`memory_search` entries and cortex block, `memory_fact_get`,
+    `memory_recall`, history), so an unlabelled record's payload is
+    byte-identical (the `stance` precedent); the compact projections
+    re-select the keys explicitly (the chip 4.1 whitelist lesson).
+- **Dream (TypeCompact).** A `constraint` source entry is zero-distortion:
+  if no scalar claim citing it contains its text verbatim, the first scalar
+  claim's value is replaced with the entry text (entity/attribute kept,
+  siblings untouched, member ops never carriers). A **post-dream guard
+  verifier** then reports every constraint entry in the window with no
+  verbatim derived item — `constraint_verbatim` / `constraint_misses` on
+  the run result, `constraint_missed` on the run row, WARNING in the log.
+  Flag, not hard fail: the raw entry is never discarded and a held cursor
+  would hostage every other claim in the batch. Every derived fact takes
+  the SOURCE entry's labels, never anything the extractor wrote; a `quoted`
+  source is low-trust for the two-man rule (parks as a contender, whoever
+  relayed it — the label only ever demotes). Ships inert on an unlabelled
+  bank; extraction-ladder paired arms are GATE-PENDING (see the PR).
+- **Recall (TypeRetrieve).** In-scope `constraint` facts are pinned AHEAD of
+  the cosine ranking, marked `pinned: true`, inside the same `top_k`
+  budget. In scope = the query names the fact's entity (`memory_search`'s
+  cortex block; separator-insensitive, word-bounded) or the entity is a
+  seed of the walk (`memory_recall`; the pin also survives the per-entity
+  fact cap). Kill switch `memory.cortex.pin_constraints` (Console: Cortex
+  → Pin constraint facts). Retrieval-affecting only when labels exist —
+  an unlabelled bank is served byte-identically, pinned by test.
+- Served text: the CAPTURE section names the two labels (funded by two
+  trims; the block stays under its budget).
+
 ### Changed (2026-09-02 — the engram cross-index read in the retract direction)
 
 - **Correcting a memory now says what it put in doubt.** The dream derives

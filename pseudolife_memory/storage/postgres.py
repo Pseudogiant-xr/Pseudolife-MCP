@@ -30,6 +30,8 @@ _ENTRY_COLS = (
     "band", "text", "embedding", "surprise", "ts", "access_count", "source",
     "superseded_at", "superseded_by_text", "last_logical_turn",
     "episode_id", "episode_title", "tags", "slots",
+    # v35: the write-time label pair — nullable, NULL = unlabelled.
+    "authority", "distortion_tolerance",
 )
 _ENTRY_JSONB = {"tags", "slots"}
 
@@ -53,6 +55,8 @@ _FACT_COLS = (
     "kind", "value_norm",
     # v29: epistemic stance — nullable, NULL = asserted plainly.
     "stance",
+    # v35: the write-time label pair — nullable, NULL = unlabelled.
+    "authority", "distortion_tolerance",
 ) + _STAMP_COLS
 _FACT_JSONB = {"support", "provenance"}
 

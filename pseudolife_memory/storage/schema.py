@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 34
+SCHEMA_META_VERSION = 35
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -52,7 +52,16 @@ CREATE TABLE IF NOT EXISTS entries (
   episode_id TEXT,
   episode_title TEXT,
   tags JSONB NOT NULL DEFAULT '[]',
-  slots JSONB NOT NULL DEFAULT '[]'
+  slots JSONB NOT NULL DEFAULT '[]',
+  -- v35 (write-time label pair, arXiv 2608.01679 + 2608.22752):
+  -- authority = the speech act of the text ('directive' | 'observation'
+  -- | 'quoted'), distortion_tolerance = how exactly it must survive
+  -- consolidation ('constraint' | 'procedural' | 'belief' |
+  -- 'preference' | 'episodic'). Both nullable: NULL = observation /
+  -- unlabelled, exactly the pre-v35 reading, so the migration is a
+  -- no-op on an existing bank. Carried through supersede/consolidate.
+  authority TEXT,
+  distortion_tolerance TEXT
 );
 CREATE INDEX IF NOT EXISTS entries_band_idx ON entries (band);
 CREATE INDEX IF NOT EXISTS entries_ts_idx ON entries (ts);
@@ -194,7 +203,15 @@ CREATE TABLE IF NOT EXISTS facts (
   -- confident canonical fact. NULL = asserted plainly (every pre-v29
   -- row). Reader metadata only — never an input to confidence, ranking,
   -- or supersession.
-  stance TEXT
+  stance TEXT,
+  -- v35 (write-time label pair): the SOURCE's speech act and fidelity
+  -- class, inherited from the entry the dream derived the fact from and
+  -- kept through supersession unless a write restates them. NULL =
+  -- observation / unlabelled. distortion_tolerance = 'constraint' is
+  -- the one label recall ranks on (pinned ahead of cosine when the
+  -- query names the entity); neither feeds confidence or supersession.
+  authority TEXT,
+  distortion_tolerance TEXT
 );
 CREATE INDEX IF NOT EXISTS facts_slot_idx
   ON facts (entity_norm, attribute_norm, status);
@@ -671,6 +688,17 @@ def ensure_schema(conn) -> dict:
         # means "asserted plainly", exactly the pre-v29 behaviour, so this
         # migration is a no-op until an extractor emits a stance.
         cur.execute("ALTER TABLE facts ADD COLUMN IF NOT EXISTS stance TEXT")
+        # v35 additive: the write-time label pair on entries AND facts
+        # (authority collapse, arXiv 2608.01679; compaction cliff, arXiv
+        # 2608.22752). NULL = observation / unlabelled — the pre-v35
+        # reading of every existing row — so this is a no-op until a
+        # writer labels something; no backfill, by design (a label
+        # inferred over the whole bank would pin ~1.4% of facts on a
+        # heuristic the maintainer has not opted into).
+        for table in ("entries", "facts"):
+            for col in ("authority", "distortion_tolerance"):
+                cur.execute(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} TEXT")
         # v31 additive: retrieval event log (learned-reranker Phase 0).
         # retrieval_events = one append-only row per search that served
         # entries (query text, the served list as JSONB with ids/scores/

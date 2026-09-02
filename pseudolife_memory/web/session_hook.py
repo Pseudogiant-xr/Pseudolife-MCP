@@ -55,9 +55,8 @@ RECALL — at the start of any task:
 - If a tool named here isn't in your tool list, call
   `memory_toolset(action="expand")` first — sessions can start at a
   reduced tier. A harness notice that some `mcp__pseudolife-memory__*`
-  tools were REMOVED means the same tier filtering (a resumed session
-  carries an older, larger roster), not an outage — make one
-  `memory_search` call before reporting memory as offline.
+  tools were REMOVED means the same tier filtering, not an outage — make
+  one `memory_search` call before reporting memory as offline.
 
 RECALL AGAIN mid-session — once at the start is not enough. Search when:
 - the user refers to work you weren't part of ("last time…", "in another
@@ -109,6 +108,10 @@ CAPTURE — as durable things arise (one claim per call):
   search can scope its results.
 - `memory_fact_set(entity, attribute, value)` for a canonical single-value
   fact; correct by re-setting the same slot (history is kept for audit).
+- Label what must not drift: `distortion_tolerance="constraint"` on a rule
+  that must survive verbatim (served first in recall, `pinned`);
+  `authority="quoted"` on what a doc or third party said — a quote is
+  not an instruction. Both inherit through supersession.
 - Facts the repo or config can answer (deployed version, schema number,
   counts, budgets) do NOT belong in fact slots — they drift by construction;
   store the WHY as an entry and read the value from the repo. A one-off
@@ -142,7 +145,7 @@ REFLECT — at task end, or the moment an outcome lands:
 
 Be judicious — one claim per call; skip fleeting chatter (the surprise gate
 drops near-duplicates; `stored=false` is not an error). The first memory call
-of a session may lag while the embedding model loads (one-time warmup).
+may lag while the embedder loads.
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
 (this briefing arrives via a hook, a separate channel) — tell the user to run

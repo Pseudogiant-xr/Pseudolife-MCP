@@ -57,6 +57,12 @@ from pseudolife_memory.memory.slots import Slot
 from pseudolife_memory.session_title import (
     GENERIC_TITLE_RE, derive_session_title)
 from pseudolife_memory.writer_context import resolve_writer_detailed
+from pseudolife_memory.memory.labels import (INHERIT, infer_authority,
+                                             infer_distortion_tolerance,
+                                             resolve_authority,
+                                             resolve_distortion,
+                                             strictest_authority,
+                                             strictest_distortion)
 from pseudolife_memory.utils.config import AppConfig, load_config
 from pseudolife_memory.utils.locks import SLOW_LOCK_SECONDS, MonitoredLock
 
@@ -103,6 +109,12 @@ def _entry_to_dict(
         "episode_title": entry.episode_title,
         "tags": list(entry.tags),
     }
+    # v35 labels: present ONLY when set, so an unlabelled entry serves a
+    # byte-identical payload (the stance precedent).
+    if getattr(entry, "authority", None):
+        out["authority"] = entry.authority
+    if getattr(entry, "distortion_tolerance", None):
+        out["distortion_tolerance"] = entry.distortion_tolerance
     if entry.slots:
         out["slots"] = [
             {"entity": e, "attribute": a, "value": v, "polarity": p}
@@ -191,6 +203,11 @@ def _cortex_record_to_dict(rec, relative_age: bool = True,
     # payload stays byte-identical for every pre-v29 fact.
     if getattr(rec, "stance", None):
         d["stance"] = rec.stance
+    # v35 label pair: same absent-when-default rule.
+    if getattr(rec, "authority", None):
+        d["authority"] = rec.authority
+    if getattr(rec, "distortion_tolerance", None):
+        d["distortion_tolerance"] = rec.distortion_tolerance
     if relative_age:
         d["age"] = _relative_time(rec.tx_time or rec.asserted_at)
     return _apply_stale_policy(d, stale_policy)
@@ -386,6 +403,34 @@ def _origin_from_source(source: str | None) -> str | None:
     return _SOURCE_ORIGIN.get((source or "").strip().lower())
 
 
+def _entity_in_query(entity: str | None, query: str | None) -> bool:
+    """The recall-scope test for constraint pinning (TypeRetrieve, arXiv
+    2608.22752): a fact is in scope when the query NAMES its entity. Both
+    sides go through the cortex's own slot normalisation (casefold,
+    separators folded to one hyphen) and the entity must occur as a
+    hyphen-bounded run — so ``payments db`` matches ``payments-db`` but
+    ``db`` does not match ``payments-database``. No embedding pass; the
+    cost is one string scan per constraint-labelled fact."""
+    from pseudolife_memory.memory.cortex import _norm_key
+    e = _norm_key(entity or "")
+    if not e:
+        return False
+    return f"-{e}-" in f"-{_norm_key(query or '')}-"
+
+
+def _inherited_labels(parents, new_text: str) -> tuple[str | None, str | None]:
+    """Inherit-unless-restated for a superseding ENTRY: the new text's own
+    heuristic label wins its axis; otherwise the strictest label across
+    the entries it replaces carries over (never an upgrade — quoted beats
+    directive; a constraint anywhere in the cluster stays a constraint)."""
+    parents = list(parents)
+    auth = infer_authority(new_text) or strictest_authority(
+        getattr(e, "authority", None) for e in parents)
+    dt = infer_distortion_tolerance(new_text) or strictest_distortion(
+        getattr(e, "distortion_tolerance", None) for e in parents)
+    return auth, dt
+
+
 # ── consolidation quarantine (spec 2026-08-09-consolidation-quarantine) ──
 # The two-man rule keys on WHO wrote — persisted entry metadata only (the
 # prereg mandates no schema change, and the entries table stores neither
@@ -399,6 +444,13 @@ def _quarantine_low_trust(claim: dict, src_entry: dict | None,
                           trusted: set[str]) -> bool:
     """True iff the claim's backing is agent-tier and outside ``trusted``."""
     if src_entry is not None:
+        # v35: reported speech is low-trust whoever relayed it — a third
+        # party's remark must not take current on the relayer's tier
+        # (arXiv 2608.01679). The label only ever DEMOTES: promotion stays
+        # keyed on entry metadata, so a note dressed up as a quote gains
+        # nothing but a park.
+        if src_entry.get("authority") == "quoted":
+            return True
         src = src_entry.get("source") or ""
         return _origin_from_source(src) == "agent" and src not in trusted
     return (claim.get("origin") or "agent") == "agent"
@@ -1033,6 +1085,8 @@ class MemoryService(DreamOps):
         tags: list[str] | None = None,
         origin: str | None = None,
         episode: str | None = None,
+        authority: str | None = "auto",
+        distortion_tolerance: str | None = "auto",
     ) -> dict[str, Any]:
         """Embed and store a memory through the CMS pipeline.
 
@@ -1056,7 +1110,18 @@ class MemoryService(DreamOps):
         "cortex_promoted": int}``. Stores can be rejected by either the
         meta-filter (looks like self-reference) or the surprise gate (already
         known) — the ``reason`` field surfaces which.
+
+        ``authority`` / ``distortion_tolerance`` (schema v35): the write-time
+        label pair. ``"auto"`` (default) runs the deterministic heuristic in
+        :mod:`pseudolife_memory.memory.labels` over ``text``; an explicit
+        value is validated (``ValueError`` on junk). A fresh store has
+        nothing to inherit from, so an unresolved ``auto`` is NULL. The
+        applied labels ride back on the result only when set.
         """
+        auth = resolve_authority(authority, text)
+        auth = None if auth is INHERIT else auth
+        dt = resolve_distortion(distortion_tolerance, text)
+        dt = None if dt is INHERIT else dt
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cms is not None
@@ -1082,6 +1147,7 @@ class MemoryService(DreamOps):
                 text, embedding, source=source, tags=tags,
                 session_key=session_id,
                 attribution_episode_id=resolved[0] if resolved is not None else None,
+                authority=auth, distortion_tolerance=dt,
             )
             reason: str | None = None
             if not stored:
@@ -1100,7 +1166,9 @@ class MemoryService(DreamOps):
             promoted = 0
             cc = self.config.memory.cortex
             if cc.enabled and cc.auto_promote and reason != "filtered_meta":
-                promoted = self._promote_slots(text, source=source, origin=origin)
+                promoted = self._promote_slots(text, source=source, origin=origin,
+                                               authority=auth,
+                                               distortion_tolerance=dt)
                 if promoted and self._storage is not None:
                     self._save_cortex()
             out = {
@@ -1109,6 +1177,10 @@ class MemoryService(DreamOps):
                 "reason": reason,
                 "cortex_promoted": promoted,
             }
+            if auth is not None:
+                out["authority"] = auth
+            if dt is not None:
+                out["distortion_tolerance"] = dt
             # Nudge the agent while the lazily-opened session episode still
             # carries the generic fallback title (the daemon has no project
             # signal of its own; the agent does).
@@ -1121,7 +1193,9 @@ class MemoryService(DreamOps):
                 out["episode_warning"] = "unknown or closed episode handle"
             return out
 
-    def _promote_slots(self, text: str, *, source: str, origin: str | None) -> int:
+    def _promote_slots(self, text: str, *, source: str, origin: str | None,
+                       authority: str | None = None,
+                       distortion_tolerance: str | None = None) -> int:
         """Lift any slot-shaped facts in ``text`` into the cortex deterministically
         (regex ``extract_slots``, no LLM). Caller MUST already hold ``self._lock``
         — writes go straight to ``self._cortex`` (not via ``cortex_write``, which
@@ -1149,6 +1223,12 @@ class MemoryService(DreamOps):
                     hlc=self._hlc.tick(),
                     writer_id=writer_id,
                     session_id=session_id,
+                    # v35: the entry's labels ride onto the promoted fact;
+                    # an unlabelled entry inherits what the slot has.
+                    authority=(authority if authority is not None else INHERIT),
+                    distortion_tolerance=(distortion_tolerance
+                                          if distortion_tolerance is not None
+                                          else INHERIT),
                 )
                 self._ensure_subject_entity(s.entity, propose_dupes=True)
                 written += 1
@@ -1607,11 +1687,15 @@ class MemoryService(DreamOps):
             derived = derived_total[:DERIVED_FLAGGED_CAP]
 
             # Always store the correction text as a regular memory so future
-            # retrieval surfaces the new state.
+            # retrieval surfaces the new state. v35: the correction INHERITS
+            # the superseded entries' labels unless its own text restates
+            # one — a corrected rule is still a rule.
+            auth, dt = _inherited_labels(superseded_entries, new_text)
             store_emb = self._embedder.encode_single(new_text)
             stored, surprise = self._cms.store(
                 new_text, store_emb, source="correction",
                 session_key=self._resolve_writer()[1],
+                authority=auth, distortion_tolerance=dt,
             )
             return {
                 "superseded_count": len(superseded),
@@ -1982,6 +2066,8 @@ class MemoryService(DreamOps):
         freshness_class: str = "auto",
         force_contend: bool = False,
         stance: str | None = None,
+        authority="auto",
+        distortion_tolerance="auto",
     ) -> dict[str, Any]:
         """Write / confirm / supersede a canonical fact at the
         ``(entity, attribute)`` slot. The claim is embedded through the same
@@ -2008,7 +2094,15 @@ class MemoryService(DreamOps):
         ...record fields}``. On ``"contested"`` the returned record is the parked
         *contender* and a ``"current"`` key carries the canonical value that won,
         so the caller sees both sides of the conflict.
+
+        ``authority`` / ``distortion_tolerance`` (v35): ``"auto"`` runs the
+        deterministic heuristic over ``value`` and falls back to INHERIT
+        (keep what the slot has); the dream passes the source entry's label
+        or INHERIT explicitly and never ``auto`` (labels are a property of
+        the SOURCE, not of model output); ``None`` clears (rollback).
         """
+        auth = resolve_authority(authority, value)
+        dt = resolve_distortion(distortion_tolerance, value)
         with self._lock:
             self._ensure_init()
             if freshness_class == "auto":
@@ -2041,6 +2135,8 @@ class MemoryService(DreamOps):
                     freshness_class=freshness_class,
                     force_contend=force_contend,
                     stance=stance,
+                    authority=auth,
+                    distortion_tolerance=dt,
                 )
             except ValueError as exc:
                 if "holds a set" in str(exc):
@@ -2622,21 +2718,7 @@ class MemoryService(DreamOps):
             for tag, payload in order:
                 if tag == "scalar":
                     r, s = payload
-                    d = {**_cortex_record_to_dict(
-                        r, stale_policy=self._stale_policy),
-                        "score": round(float(s), 4)}
-                    conts = self._cortex.contenders_for(r.entity, r.attribute)
-                    if conts:
-                        d["contested"] = True
-                        d["contender_value"] = conts[0].value
-                        d["contender_origin"] = conts[0].origin
-                    else:
-                        d["contested"] = False
-                    if self._storage is not None:
-                        from pseudolife_memory.memory.cortex import _norm_key
-                        d["source_entries"] = self._storage.traces_for_slot(
-                            _norm_key(r.entity), _norm_key(r.attribute))
-                    entries.append(d)
+                    entries.append(self._scalar_fact_entry(r, s))
                 else:
                     from pseudolife_memory.memory.cortex import compose_set_value
                     key = payload
@@ -2693,6 +2775,10 @@ class MemoryService(DreamOps):
                         "asserted_at": anchor,
                         "age": _relative_time(anchor) if anchor else None,
                     })
+            # TypeRetrieve (arXiv 2608.22752): in-scope CONSTRAINT facts are
+            # pinned ahead of the cosine ranking, inside the same top_k.
+            if getattr(self.config.memory.cortex, "pin_constraints", True):
+                entries = self._pin_constraint_facts(query, emb, entries, top_k)
             _demote_stale(entries, self._stale_policy)
             self._annotate_evidence_supersession(entries)
             from pseudolife_memory.memory.cortex import _norm_key
@@ -2700,6 +2786,77 @@ class MemoryService(DreamOps):
                 (_norm_key(e["entity"]), _norm_key(e["attribute"]))
                 for e in entries}))
             return {"count": len(entries), "entries": entries}
+
+    def _scalar_fact_entry(self, r, s) -> dict[str, Any]:
+        """One served scalar fact for ``cortex_search`` (caller holds the
+        lock): the record dict plus score, contender flags and the slot's
+        source entries. Shared by the ranked path and the pinned path so a
+        pinned fact is served in exactly the shape a ranked one is."""
+        d = {**_cortex_record_to_dict(r, stale_policy=self._stale_policy),
+             "score": round(float(s), 4)}
+        conts = self._cortex.contenders_for(r.entity, r.attribute)
+        if conts:
+            d["contested"] = True
+            d["contender_value"] = conts[0].value
+            d["contender_origin"] = conts[0].origin
+        else:
+            d["contested"] = False
+        if self._storage is not None:
+            from pseudolife_memory.memory.cortex import _norm_key
+            d["source_entries"] = self._storage.traces_for_slot(
+                _norm_key(r.entity), _norm_key(r.attribute))
+        return d
+
+    def _pin_constraint_facts(self, query: str, emb, entries: list[dict],
+                              top_k: int) -> list[dict]:
+        """TypeRetrieve (arXiv 2608.22752) for the cortex block. Caller
+        holds the lock.
+
+        In scope = the query names the fact's entity (``_entity_in_query``
+        — one string scan per constraint-labelled current scalar; no
+        second embedding pass, no index to keep fresh). In-scope
+        constraints go FIRST, marked ``pinned: True``, whatever their
+        cosine; the ranked list fills the rest of the SAME ``top_k`` budget
+        (a pin displaces the weakest ranked fact rather than growing the
+        payload). A pinned fact that never made the ranked list is served
+        in the identical shape with its true cosine as ``score``, so the
+        reader can see that it was pinned, not ranked. No constraint
+        labels in the bank → the input is returned untouched, so an
+        unlabelled bank is served byte-identically. Set members carry no
+        labels in v1 and are never pinned. Runs BEFORE ``_demote_stale``
+        on purpose: under ``stale_policy="demote"`` a stale (slow /
+        volatile) constraint sinks below the fresh ranked facts — the
+        staleness policy is a trust decision and outranks the pin; the
+        default ``evergreen`` never goes stale, so this only bites on a
+        constraint the writer also marked transient."""
+        import torch  # noqa: PLC0415 - no module-level torch in service.py
+        pins = [r for r in self._cortex.current_records()
+                if r.kind == "scalar"
+                and r.distortion_tolerance == "constraint"
+                and _entity_in_query(r.entity, query)]
+        if not pins:
+            return entries
+        k = max(1, int(top_k))
+        pins = pins[:k]
+        keyed = {(e["entity"], e["attribute"]): e for e in entries
+                 if e.get("kind") != "set"}
+        q = emb.detach().reshape(1, -1).to("cpu", torch.float32)
+        pinned: list[dict] = []
+        for r in pins:
+            d = keyed.get((r.entity, r.attribute))
+            if d is None:
+                score = 0.0
+                if r.embedding is not None:
+                    v = r.embedding.detach().reshape(1, -1).to("cpu", torch.float32)
+                    score = float(torch.nn.functional.cosine_similarity(q, v).item())
+                d = self._scalar_fact_entry(r, score)
+            d["pinned"] = True
+            pinned.append(d)
+        pinned_keys = {(r.entity, r.attribute) for r in pins}
+        rest = [e for e in entries
+                if e.get("kind") == "set"
+                or (e["entity"], e["attribute"]) not in pinned_keys]
+        return (pinned + rest)[:k]
 
     def _cortex_bm25_fuse(self, query, hits, cfg, top_k):
         """Fuse dense cortex hits with a lexical pool over composed fact
@@ -4731,7 +4888,11 @@ class MemoryService(DreamOps):
                         )
 
             # Always store the consolidated entry — source defaults to
-            # ``"consolidation"`` for audit / filtering.
+            # ``"consolidation"`` for audit / filtering. v35: the note
+            # inherits the STRICTEST label across the cluster unless its
+            # own text restates one (TypeDecompose: an in-scope rule is
+            # replicated into the partition, never summarised away).
+            auth, dt = _inherited_labels(superseded_entries, new_text)
             store_emb = self._embedder.encode_single(new_text)
             stored, surprise = self._cms.store(
                 new_text,
@@ -4739,6 +4900,7 @@ class MemoryService(DreamOps):
                 source=source or "consolidation",
                 tags=tags,
                 session_key=self._resolve_writer()[1],
+                authority=auth, distortion_tolerance=dt,
             )
             return {
                 "superseded_count": len(superseded),
@@ -5490,14 +5652,19 @@ class MemoryService(DreamOps):
             facts_by_norm: dict[str, list[dict]] = {}
             if include_facts and self._cortex is not None:
                 for rec in self._cortex.current_records():
-                    facts_by_norm.setdefault(
-                        G.norm_name(rec.entity), [],
-                    ).append({
+                    fd = {
                         "attribute": rec.attribute,
                         "value": rec.value,
                         "origin": rec.origin,
                         "confidence": round(float(rec.confidence), 4),
-                    })
+                    }
+                    # v35 labels, absent when unset (recall pins on them).
+                    if rec.authority:
+                        fd["authority"] = rec.authority
+                    if rec.distortion_tolerance:
+                        fd["distortion_tolerance"] = rec.distortion_tolerance
+                    facts_by_norm.setdefault(
+                        G.norm_name(rec.entity), []).append(fd)
 
             nodes = []
             for nid in sorted(sub["nodes"]):
@@ -5944,8 +6111,38 @@ class MemoryService(DreamOps):
             hub_threshold=threshold,
             expand_budget=(cfg.expand_budget or None),
         )
+        if getattr(cfg, "pin_constraints", None) is None:
+            pin = getattr(self.config.memory.cortex, "pin_constraints", True)
+        else:  # pragma: no cover — recall has no knob of its own
+            pin = bool(cfg.pin_constraints)
+        if pin:
+            self._pin_recalled_constraints(state)
         self._annotate_recalled_facts(state.entity_facts)
         return recall_state_to_dict(state, query, hops)
+
+    @staticmethod
+    def _pin_recalled_constraints(state) -> None:
+        """TypeRetrieve for ``memory_recall``: on each SEED entity (hop 0 —
+        the entities the query itself resolved to, which is the scope
+        definition here), move constraint-labelled facts to the front of
+        its facts list and mark them ``pinned``, so the per-entity fact cap
+        downstream can never drop an in-scope rule behind five plainer
+        facts. Hop-discovered entities are context, not scope, and stay in
+        record order. In place, on dicts ``graph_neighborhood`` built for
+        this call."""
+        for name in state.seeds:
+            facts = state.entity_facts.get(name)
+            if not facts:
+                continue
+            pins = [f for f in facts
+                    if f.get("distortion_tolerance") == "constraint"]
+            if not pins:
+                continue
+            for f in pins:
+                f["pinned"] = True
+            state.entity_facts[name] = pins + [
+                f for f in facts
+                if f.get("distortion_tolerance") != "constraint"]
 
     def _annotate_recalled_facts(self, entity_facts) -> None:
         """Carry ``re_verify`` onto the facts ``recall`` serves, in place.

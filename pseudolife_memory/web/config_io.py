@@ -157,6 +157,12 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Dream-path slot resolver: a paraphrased claim adopts an existing "
              "slot when its value-free embedding cosine ≥ this. 0 = exact-key "
              "only."},
+    {"path": "memory.cortex.pin_constraints", "group": "Cortex",
+     "label": "Pin constraint facts", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Serve in-scope constraint-labelled facts ahead of cosine "
+             "ranking in search's cortex block and recall (schema v35). "
+             "Off = plain ranking; an unlabelled bank is unaffected."},
     # ── Dream ──────────────────────────────────────────────────────────────
     {"path": "memory.dream.enabled", "group": "Dream", "label": "Dream sweep",
      "type": "bool", "default": True, "restart": True,

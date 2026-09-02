@@ -220,6 +220,10 @@ class MIRASBand:
                     "episode_id": e.episode_id,
                     "episode_title": e.episode_title,
                     "tags": e.tags,
+                    # v35 labels; omitting them here would strip every
+                    # label on a file-mode restart (the stance lesson).
+                    "authority": e.authority,
+                    "distortion_tolerance": e.distortion_tolerance,
                 }
                 for e in self.entries
             ]
@@ -245,6 +249,8 @@ class MIRASBand:
                 episode_id=e.get("episode_id"),
                 episode_title=e.get("episode_title"),
                 tags=list(e.get("tags") or []),
+                authority=e.get("authority"),
+                distortion_tolerance=e.get("distortion_tolerance"),
             )
             for e in state.get("entries", [])
         ]

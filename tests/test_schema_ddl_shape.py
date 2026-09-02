@@ -51,8 +51,12 @@ _REQUIRED_COLUMNS = [
     # v24 — per-entity kind, the input to the freshness policy.
     ("entity_kinds",
      {"entity_norm", "kind", "origin", "confidence", "decided_at"}),
-    # v23 freshness_class / v26 kind+value_norm / v29 stance.
-    ("facts", {"freshness_class", "kind", "value_norm", "stance"}),
+    # v23 freshness_class / v26 kind+value_norm / v29 stance / v35 labels.
+    ("facts", {"freshness_class", "kind", "value_norm", "stance",
+               "authority", "distortion_tolerance"}),
+    # v35 — the write-time label pair on entries (authority collapse /
+    # compaction cliff); NULL = observation / unlabelled.
+    ("entries", {"authority", "distortion_tolerance"}),
     # v27 — dream-run audit.
     ("dream_runs",
      {"id", "started_at", "finished_at", "cursor_before", "cursor_after",
@@ -119,6 +123,10 @@ _NULLABLE_COLUMNS = [
     ("entity_proposals", "judge_model"),
     ("entity_proposals", "judged_at"),
     ("dream_run_slots", "chronicle_event_id"),    # v28: NULL on non-event rows
+    ("entries", "authority"),                     # v35: NULL = observation
+    ("entries", "distortion_tolerance"),          # v35: NULL = unlabelled
+    ("facts", "authority"),
+    ("facts", "distortion_tolerance"),
 ]
 
 
