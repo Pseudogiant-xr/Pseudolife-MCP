@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Any, Hashable
+from typing import Any, Hashable, Iterable
 
 import networkx as nx
 
@@ -37,6 +37,40 @@ def norm_name(s: str) -> str:
     s = _SEP_RE.sub("-", s)
     s = re.sub(r"-{2,}", "-", s)
     return s.strip("-")
+
+
+def alias_canonical_map(entities: Iterable[dict],
+                        aliases: dict[int, list[str]] | None) -> dict[str, str]:
+    """Alias → canonical of the entity it names, from a loaded graph
+    (``load_graph()``'s ``entities`` + ``aliases``), with the precedence
+    ``PostgresStorage.find_entity`` applies: canonical first, then alias.
+    An alias that coincides with some entity's canonical is dropped, since
+    ``find_entity`` resolves that name to the canonical's owner and never
+    reaches the alias row. ``m.get(n, n)`` therefore resolves any
+    normalized name exactly as ``find_entity`` would, or leaves it alone —
+    one dict per call in place of a storage lookup per record.
+
+    Why the read surfaces need it: a fact's ``entity`` string is whatever
+    its writer used, and a later merge turns the absorbed node's canonical
+    into an alias of the survivor without rewriting the record. Matching
+    ``norm_name(rec.entity)`` against a node's canonical alone then drops
+    every fact written under the folded name (live bank, 2026-09-02:
+    ``pr-235`` merged into ``PR #235``; ``memory_fact_get`` on the alias
+    found the fact, ``memory_recall`` served the node with ``facts: []``).
+    An alias row whose entity is missing from ``entities`` is skipped —
+    the two are read in separate statements."""
+    canon_by_id = {e["id"]: e["canonical"] for e in entities}
+    canonicals = set(canon_by_id.values())
+    out: dict[str, str] = {}
+    for eid, names in (aliases or {}).items():
+        canonical = canon_by_id.get(eid)
+        if canonical is None:
+            continue
+        for alias in names:
+            if alias in canonicals:
+                continue
+            out[alias] = canonical
+    return out
 
 
 def resolve_relation(

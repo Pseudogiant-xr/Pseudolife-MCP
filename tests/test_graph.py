@@ -39,6 +39,26 @@ def test_resolve_relation_suggests_on_miss():
     assert len(suggestions) <= 3
 
 
+def test_alias_canonical_map_mirrors_find_entity_precedence():
+    """The map ``graph_neighborhood`` / the dossier resolve record entities
+    through must agree with ``PostgresStorage.find_entity``: canonical
+    first, then alias. An alias that coincides with some entity's canonical
+    is therefore dropped (find_entity would never reach it), and a name the
+    map does not know resolves to itself via the caller's ``get(n, n)``."""
+    entities = [{"id": 1, "canonical": "pr-#235", "display": "PR #235"},
+                {"id": 2, "canonical": "gnd", "display": "GND"}]
+    aliases = {1: ["pr-235", "gnd"], 2: ["enshrouded"]}
+    m = G.alias_canonical_map(entities, aliases)
+    assert m["pr-235"] == "pr-#235"
+    assert m["enshrouded"] == "gnd"
+    assert "gnd" not in m                      # canonical wins the collision
+    assert m.get("pr-#235", "pr-#235") == "pr-#235"
+    assert m.get("unknown", "unknown") == "unknown"
+    # An alias list for an entity the graph no longer carries is skipped,
+    # not a KeyError — load_graph reads the two tables in separate statements.
+    assert G.alias_canonical_map(entities, {9: ["orphan"]}) == {}
+
+
 # ── pure logic: on-read inference ────────────────────────────────────────
 
 _RELS = {
@@ -386,6 +406,50 @@ def test_graph_neighborhood_facts_and_derived(svc):
     pg_node = next(n for n in out["nodes"] if n["canonical"] == "postgres")
     assert {"attribute": "port", "value": "5433", "origin": "user",
             "confidence": pytest.approx(0.7)}.items() <= pg_node["facts"][0].items()
+
+
+def test_graph_neighborhood_attaches_facts_written_under_an_alias(svc):
+    """A cortex record whose entity is an ALIAS of a node's canonical must
+    land on that node, exactly as ``find_entity`` would resolve the name.
+
+    The live shape (production bank, 2026-09-02): the dream wrote
+    ``pr-235 / branch`` and a later merge folded that node into ``PR #235``,
+    so the record's entity string became an alias of the surviving node.
+    ``memory_fact_get("pr-235", "branch")`` resolved it (``cortex_lookup``
+    is alias-aware since 2026-06-14) while ``memory_recall`` served the node
+    with ``facts: []`` — the attachment compared ``norm_name(rec.entity)``
+    to the canonical alone. Canonical-keyed facts still attach, a name that
+    is neither canonical nor alias still stays off the node, and the list
+    keeps ``current_records()`` order (the alias-keyed fact was written
+    first, so it comes first)."""
+    svc.cortex_write("pr-235", "branch", "feat/refind-nomem-eval-arms",
+                     support="user")
+    svc.graph_relate("PR #235", "part-of", "pseudolife-mcp", origin="user")
+    assert svc.graph_merge("pr-235", "PR #235")["merged"] is True
+    svc.cortex_write("PR #235", "state", "merged", support="user")
+    svc.cortex_write("pr-2350", "branch", "unrelated", support="user")
+
+    out = svc.graph_neighborhood("PR #235", depth=1)
+    node = next(n for n in out["nodes"] if n["canonical"] == "pr-#235")
+    assert "pr-235" in node["aliases"]
+    assert [(f["attribute"], f["value"]) for f in node["facts"]] == [
+        ("branch", "feat/refind-nomem-eval-arms"), ("state", "merged")]
+    assert {"origin": "user", "confidence": pytest.approx(0.7)}.items() <= (
+        node["facts"][0].items())
+
+    # Reaching the node THROUGH the alias serves the same facts.
+    via_alias = svc.graph_neighborhood("pr-235", depth=1)
+    same = next(n for n in via_alias["nodes"] if n["canonical"] == "pr-#235")
+    assert same["facts"] == node["facts"]
+
+    # The seedless whole-graph view attaches the same way.
+    whole = svc.graph_neighborhood(entity=None)
+    wnode = next(n for n in whole["nodes"] if n["canonical"] == "pr-#235")
+    assert [(f["attribute"], f["value"]) for f in wnode["facts"]] == [
+        ("branch", "feat/refind-nomem-eval-arms"), ("state", "merged")]
+    # ...and the unrelated name keeps its own node rather than leaking.
+    other = next(n for n in whole["nodes"] if n["canonical"] == "pr-2350")
+    assert [f["value"] for f in other["facts"]] == ["unrelated"]
 
 
 def test_graph_path_between_two_entities(svc):
