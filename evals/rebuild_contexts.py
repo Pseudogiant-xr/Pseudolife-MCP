@@ -67,6 +67,15 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
     default (the 2026-07-30 A/B measured no end-to-end benefit); lexical
     hits gate on the normalised ``bm25.min_score``, not the dense floor.
 
+    Schema v35: the live ``cortex_search`` also pins in-scope
+    CONSTRAINT-labelled facts ahead of this ranking. That step is NOT
+    mirrored here, so the lockstep holds only for banks that carry no
+    ``distortion_tolerance`` labels — which every committed bench bank
+    is (the dumps predate v35, and the bench turn prefix defeats the
+    auto heuristic). A labelled bank needs either
+    ``memory.cortex.pin_constraints = false`` for the run or a measured
+    fire rate beside the result.
+
     Task 6: a fact dict may carry an optional ``"kind"`` — ``"member"``
     marks one row of a set-valued slot; absent (every bank dumped before
     this change) means scalar, so a legacy bank ranks and composes lines

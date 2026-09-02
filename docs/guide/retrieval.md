@@ -236,6 +236,37 @@ then walks its graph neighbourhood one hop per iteration (up to `hops`,
 capped at 5), accumulating bridging entities, facts, edges, and paths. It
 is **read-only** — it never writes to the bank or the graph.
 
+### Constraint pinning (schema v35)
+
+TypeRetrieve (arXiv 2608.22752):
+a fact whose `distortion_tolerance` is `constraint` is served *ahead of*
+the cosine ranking, marked `pinned: true`, when it is **in scope** — and
+scope is defined cheaply and precisely, with no second embedding pass:
+in `memory_search`'s cortex block, the query *names the fact's entity*
+(both sides go through the cortex's slot normalisation, so `payments db`
+matches `payments-db`, and the entity must occur as a separator-bounded
+run, so `db` does not match `payments-database`; a raw-string test — it
+does not resolve graph aliases, so a constraint written under an alias
+later folded into another name is pinned by `memory_recall` but not by
+the cortex block until the alias map lands with PR #243); in `memory_recall`, the
+fact's entity is a **seed** of the walk (hop 0 — the entities the query
+itself resolved to; hop-discovered entities are context, not scope, and
+keep record order). Pinning is exemption from ranking, not from
+relevance: a pin must clear the caller's `min_score` floor (the cortex
+block's `guard_min_score`), pins take at most half of `top_k` so the
+ranked answer always keeps the rest, and among pins the best cosine wins
+the slots. A pin displaces the weakest ranked fact rather than growing
+the payload, and
+a pinned fact that never made the ranked list is served in the identical
+shape with its true cosine as `score`, so a reader can see it was pinned,
+not ranked. In recall the pin also guarantees the rule survives the
+per-entity fact cap below. An unlabelled bank is served byte-identically;
+`memory.cortex.pin_constraints = false` restores plain ranking. Under
+`stale_policy = demote` a stale (`slow` / `volatile`) constraint still
+sinks below the fresh ranked facts — staleness is a trust decision and
+outranks the pin. The labels themselves are described in
+[memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35).
+
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
 `paths`, supporting `texts`, and `iterations`.

@@ -81,6 +81,16 @@ class MemoryEntry:
     # Multi-valued tag list (schema v6, Tier C). Normalised by the caller
     # (lowercase / stripped / deduplicated). Empty when no tags were set.
     tags: list[str] = field(default_factory=list)
+    # Write-time label pair (schema v35; memory/labels.py). ``authority``
+    # = the speech act ("directive" | "observation" | "quoted"; None =
+    # observation, the plainly-asserted default) and
+    # ``distortion_tolerance`` = how exactly the text must survive
+    # consolidation ("constraint" | "procedural" | "belief" |
+    # "preference" | "episodic"; None = unlabelled). Persisted on the
+    # entries row and carried through supersede / consolidate / band
+    # relocation; NULL everywhere is exactly the pre-v35 behaviour.
+    authority: str | None = None
+    distortion_tolerance: str | None = None
     # Storage row id (schema v8, transient — NOT persisted in .pt saves).
     # None in file mode or before the write-through insert returns.
     db_id: int | None = None

@@ -19,6 +19,9 @@ from typing import Any
 
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 
+from pseudolife_memory.memory.labels import (INHERIT, contains_verbatim,
+                                             content_tokens)
+
 logger = logging.getLogger(__name__)
 
 
@@ -476,6 +479,11 @@ class DreamOps:
                         # batch's sources — dropping this field silently
                         # disables that (2026-07-19 regression).
                         "source": e.source,
+                        # v35: the source's labels travel with the pull —
+                        # the dream stamps derived facts from them and the
+                        # carrier/guard key on distortion_tolerance.
+                        "authority": e.authority,
+                        "distortion_tolerance": e.distortion_tolerance,
                     }
                     for e in rows
                 ],
@@ -667,6 +675,7 @@ class DreamOps:
                     "quarantine_promoted": 0,
                     "events_inserted": 0, "events_duplicate": 0,
                     "events_pass_failed": False,
+                    "constraint_verbatim": 0, "constraint_misses": [],
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "outcome_inference": outcome_inference,
                     "digests": digests,
@@ -712,6 +721,12 @@ class DreamOps:
         events_inserted = 0
         events_duplicate = 0
         events_pass_failed = False
+        # TypeCompact (v35, arXiv 2608.22752): constraint entries by batch
+        # index, and the indices whose text reached a derived item
+        # verbatim. Filled after the pull is extracted; read by the guard.
+        constraint_idx: dict[int, dict] = {}
+        carried: set[int] = set()
+        constraint_misses: list[dict] = []
 
         def _held(reason: str, exc: Exception) -> dict[str, Any]:
             logger.warning("dream %s (%s); cursor NOT advanced, will retry "
@@ -729,6 +744,11 @@ class DreamOps:
                     "events_inserted": events_inserted,
                     "events_duplicate": events_duplicate,
                     "events_pass_failed": False,
+                    # Writes that landed before the failure keep their
+                    # carrier count (the run row records the same figure);
+                    # misses are not judged on a held pass.
+                    "constraint_verbatim": len(carried),
+                    "constraint_misses": [],
                     "lessons": {"signals": 0, "lessons": 0}}
 
         # ONE batched call for the whole pull: the model must see a fact's
@@ -815,6 +835,42 @@ class DreamOps:
         else:
             self._dream_batch_failures.pop(batch_key, None)
 
+        # TypeCompact: a CONSTRAINT source is zero-distortion — its text
+        # is copied verbatim onto a derived claim, never paraphrased by
+        # the extractor. Runs on the final claim set (batch or isolation
+        # path) and before any write. Keyed by batch index, not db_id:
+        # file mode has no ids.
+        idx_of = {id(e): i for i, e in enumerate(entries)}
+        constraint_idx = {i: e for i, e in enumerate(entries)
+                          if e.get("distortion_tolerance") == "constraint"}
+        if constraint_idx:
+            self._apply_constraint_carrier(pairs, entries)
+
+        def _source_class(c: dict, src_entry: dict | None):
+            # The source's distortion class rides onto the derived fact,
+            # EXCEPT that ``constraint`` (zero tolerance) is earned only by
+            # the claim whose value contains the source text verbatim.
+            label = (src_entry or {}).get("distortion_tolerance")
+            if not label:
+                return INHERIT
+            if label == "constraint" and not contains_verbatim(
+                    c.get("value"), src_entry.get("text")):
+                return INHERIT
+            return label
+
+        def _mark_carried(c: dict, src_entry: dict | None) -> None:
+            # A derived item now exists (or already existed) for a
+            # constraint entry with its text verbatim — the guard's
+            # pass condition. Scalars only; a member can't be a carrier.
+            # ``op`` is judged the way the writer normalises it: anything
+            # but add/remove is written as a scalar.
+            if src_entry is None or c.get("op") in ("add", "remove"):
+                return
+            i = idx_of.get(id(src_entry))
+            if i in constraint_idx and contains_verbatim(
+                    c.get("value"), src_entry.get("text")):
+                carried.add(i)
+
         # Entities that exist BEFORE this cycle's writes — claims landing on a
         # norm-key outside this set minted a new entity, which the alias-
         # candidate post-pass below screens against existing names.
@@ -862,6 +918,9 @@ class DreamOps:
                                  "quarantine_parked": qt_parked,
                                  "quarantine_held": qt_held,
                                  "quarantine_promoted": qt_promoted,
+                                 "constraint_verbatim": len(carried),
+                                 "constraint_missed": (len(constraint_idx)
+                                                       - len(carried)),
                                  "quarantined": quarantined})
             except Exception as exc2:  # noqa: BLE001
                 logger.warning("dream: run-row finish failed (%s)", exc2)
@@ -1009,7 +1068,9 @@ class DreamOps:
                         # This source entry already formed this slot once
                         # (batch retry after a mid-batch failure). A
                         # re-dream must be a no-op, not a confirmation —
-                        # the confirm path ratchets confidence.
+                        # the confirm path ratchets confidence. The
+                        # earlier write is still this entry's carrier.
+                        _mark_carried(c, src_entry)
                         continue
                 # Pre-image capture (v27 journal): O(1) reads under a short
                 # lock, released before the write — the lock is
@@ -1085,6 +1146,17 @@ class DreamOps:
                         "confidence": float(c.get("confidence", 0.55)),
                         "support": c.get("origin", "agent"),
                         "stance": c.get("stance"),
+                        # v35: labels are a property of the SOURCE entry,
+                        # never of model output — an unlabelled source
+                        # inherits whatever the slot already carries.
+                        # authority applies to everything derived (who
+                        # said it); a CONSTRAINT class applies only to
+                        # the claim that carries the text verbatim — a
+                        # paraphrased sibling is an observation and must
+                        # not be pinned (review finding, 2026-09-02).
+                        "authority": ((src_entry or {}).get("authority")
+                                      or INHERIT),
+                        "distortion_tolerance": _source_class(c, src_entry),
                     }
                     try:
                         if q_route == "promote":
@@ -1167,6 +1239,9 @@ class DreamOps:
                             continue
                         raise
                 tally[res["action"]] = tally.get(res["action"], 0) + 1
+                if res["action"] not in ("member_invalid", "member_capped",
+                                         "member_not_found"):
+                    _mark_carried(c, src_entry)   # contested still exists
                 # Journal the write with its ACTUAL returned action —
                 # immediately, per claim (crash-durable; a buffered journal
                 # would lose exactly the rows whose writes already landed).
@@ -1245,6 +1320,15 @@ class DreamOps:
                     else:
                         ev_src = None
                     _write_event(c, ev_src)
+            # Post-dream GUARD VERIFIER (TypeCompact, arXiv 2608.22752):
+            # every constraint entry in the window must have a derived
+            # item carrying its text verbatim. FLAG, not hard fail: the
+            # paper fails a compaction whose input is still there to
+            # retry; here the raw entry is never discarded, and a hard
+            # fail would hold every other claim in the batch hostage to
+            # one rule the extractor could not slot.
+            constraint_misses = self._constraint_misses(
+                constraint_idx, carried)
         except Exception as exc:  # noqa: BLE001 — a write failure must hold the cursor too
             # Partial writes may have landed and are journaled — record
             # `failed` (NOT a silent absence) so rollback can refuse to
@@ -1307,8 +1391,108 @@ class DreamOps:
                 "events_inserted": events_inserted,
                 "events_duplicate": events_duplicate,
                 "events_pass_failed": events_pass_failed,
+                "constraint_verbatim": len(carried),
+                "constraint_misses": constraint_misses,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined, "retyped": retyped}
+
+    def _carrier_slot_eligible(self, entity: str, attribute: str) -> bool:
+        """A carrier may land only on a slot that is EMPTY or already holds a
+        CONSTRAINT: copying the rule over a standing non-constraint fact
+        would destroy a correct value (the 2026-09-02 peer review reproduced
+        exactly that — ``bank-volumes.kind = external`` superseded by a
+        deploy rule because it happened to be the extractor's first claim).
+        Resolves the slot the way the write loop will."""
+        ent, attr = self._resolve_dream_slot(entity, attribute)
+        with self._lock:
+            self._ensure_init()
+            cur = self._cortex.lookup(ent, attr)
+            if cur is None:
+                return not self._cortex.members(ent, attr)   # a set slot is never a carrier
+            return cur.distortion_tolerance == "constraint"
+
+    def _apply_constraint_carrier(self, pairs: list, entries: list[dict]) -> int:
+        """TypeCompact (arXiv 2608.22752): for each CONSTRAINT-labelled
+        source entry, make sure at least one derived scalar claim carries
+        the entry's text verbatim. If the extractor paraphrased every
+        claim it cited the entry for, ONE claim's value is replaced with
+        the entry text — the extractor's entity/attribute are kept
+        (slotting is what it is good at; wording is not).
+
+        Which claim: among the scalar claims citing the entry whose target
+        slot is empty or already a constraint (``_carrier_slot_eligible``),
+        the one whose content tokens overlap the rule text most, and only
+        if at least one token overlaps — a claim about something else
+        entirely is never hijacked, whatever position it has. Position
+        in extractor output decides nothing. If no claim is eligible the
+        carrier REFUSES and the guard reports the miss (flag-not-fail):
+        an entry with no scalar claim, or whose only claims target
+        occupied non-constraint slots, is left for the reader. Returns
+        the number of claims rewritten; mutates the claim dicts in
+        ``pairs`` in place."""
+        idx_of = {id(e): i for i, e in enumerate(entries)}
+        by_src: dict[int, list[dict]] = {}
+        for c, _sid, se in pairs:
+            if se is None or c.get("kind") == "event":
+                continue
+            by_src.setdefault(idx_of[id(se)], []).append(c)
+        rewritten = 0
+        for i, e in enumerate(entries):
+            if e.get("distortion_tolerance") != "constraint":
+                continue
+            text = e.get("text") or ""
+            claims = by_src.get(i, [])
+            # ``op`` judged as the writer normalises it (anything but
+            # add/remove degrades to a scalar write).
+            scalars = [c for c in claims if c.get("op") not in ("add", "remove")]
+            if any(contains_verbatim(c.get("value"), text) for c in scalars):
+                continue
+            rule_tokens = content_tokens(text)
+            best, best_overlap = None, 0
+            for c in scalars:
+                overlap = len(rule_tokens & content_tokens(
+                    f"{c.get('attribute', '')} {c.get('value', '')}"))
+                if overlap <= best_overlap:
+                    continue           # ties keep the earlier candidate
+                if not self._carrier_slot_eligible(c.get("entity", ""),
+                                                   c.get("attribute", "")):
+                    continue
+                best, best_overlap = c, overlap
+            if best is None:
+                logger.info("dream: constraint entry %s has no eligible carrier "
+                            "claim (none overlaps the rule on an empty or "
+                            "constraint slot); left for the guard",
+                            e.get("db_id") if e.get("db_id") is not None else i)
+                continue
+            logger.info("dream: constraint entry %s carried verbatim onto "
+                        "%s.%s (extractor value %r replaced; %d overlapping "
+                        "tokens)",
+                        e.get("db_id") if e.get("db_id") is not None else i,
+                        best.get("entity"), best.get("attribute"),
+                        best.get("value"), best_overlap)
+            best["value"] = text
+            rewritten += 1
+        return rewritten
+
+    @staticmethod
+    def _constraint_misses(constraint_idx: dict[int, dict],
+                           carried: set[int]) -> list[dict]:
+        """The guard verifier's report: constraint entries in the processed
+        window with NO derived item carrying their text verbatim. Logged
+        at WARNING per miss and returned on the dream result
+        (``constraint_misses``) and the run row (``constraint_missed``)."""
+        misses = []
+        for i, e in constraint_idx.items():
+            if i in carried:
+                continue
+            text = e.get("text") or ""
+            logger.warning("dream: constraint entry %s has NO verbatim derived "
+                           "item after this pass (extractor emitted no scalar "
+                           "claim for it): %r",
+                           e.get("db_id") if e.get("db_id") is not None else i,
+                           text[:120])
+            misses.append({"entry_id": e.get("db_id"), "text": text})
+        return misses
 
     def _quarantine_route(self, ent: str, attr: str, c: dict,
                           src_entry: dict | None,
@@ -1432,12 +1616,29 @@ class DreamOps:
                 return None
             return max(recs, key=lambda r: r.superseded_at or 0).stance
 
+        def _prev_label(row: dict, attr: str):
+            # v35: the journal carries no labels either; recover them from
+            # the NEWEST superseded record for that value. None when it
+            # carried none — passed explicitly so the rewrite CLEARS
+            # rather than inheriting the label the rolled-back write set.
+            want = _norm_value(row["prev_value"] or "")
+            with self._lock:
+                recs = [r for r in self._cortex.records_for(
+                            row["entity"], row["attribute"])
+                        if r.status == "superseded"
+                        and _norm_value(r.value) == want]
+            if not recs:
+                return None
+            return getattr(max(recs, key=lambda r: r.superseded_at or 0), attr)
+
         def _rewrite_prev(row: dict) -> str:
             res = self.cortex_write(
                 row["entity"], row["attribute"], row["prev_value"],
                 confidence=float(row["prev_confidence"] or 0.55),
                 support=row["prev_support"] or "agent",
-                stance=_prev_stance(row))
+                stance=_prev_stance(row),
+                authority=_prev_label(row, "authority"),
+                distortion_tolerance=_prev_label(row, "distortion_tolerance"))
             if res["action"] == "contested":
                 # Rollback is explicit authority: a low-confidence prev
                 # must still win the slot back (the same path resolve

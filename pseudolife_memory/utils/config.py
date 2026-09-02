@@ -538,6 +538,12 @@ class CortexConfig:
     # cortex search into slot_reads. Kill switch, not a tuning constant —
     # one small upsert per fact-serving call, PG-only.
     read_tracking: bool = True
+    # TypeRetrieve (schema v35, arXiv 2608.22752): pin in-scope
+    # CONSTRAINT-labelled facts ahead of cosine in memory_search's cortex
+    # block (query names the entity) and memory_recall (seed entities).
+    # Kill switch, not a tuning constant: an unlabelled bank is served
+    # identically either way. Retrieval-affecting when labels exist.
+    pin_constraints: bool = True
 
 
 @dataclass

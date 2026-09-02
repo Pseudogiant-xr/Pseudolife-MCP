@@ -22,7 +22,7 @@ from __future__ import annotations
 from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 # Bump this literal in the same commit that bumps SCHEMA_META_VERSION.
-CURRENT_SCHEMA = 34
+CURRENT_SCHEMA = 35
 
 _CHECKLIST = """\
 SCHEMA_META_VERSION is v{actual}, this pin says v{pinned}.

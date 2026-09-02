@@ -79,6 +79,11 @@ CALLER_HOLDS_LOCK = {
     "_superseded_evidence",
     "_annotate_set_slot_evidence",
     "_derived_from_entries_locked",
+    # Constraint pinning (schema v35) — cortex_search's per-fact dict builder
+    # and the TypeRetrieve pin step, both reached only from inside
+    # cortex_search's lock (the fixpoint verifies the callers).
+    "_scalar_fact_entry",
+    "_pin_constraint_facts",
     "_log_retrieval_event",
     "_record_retrieval_use",
     "_track_slot_reads",

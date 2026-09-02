@@ -126,6 +126,45 @@ slots. Slot extraction is deliberately precision-gated — about 0.6% of
 conversational turns yield one — so this path mostly serves deliberate,
 fact-shaped writes, and its reach grows with extraction quality.
 
+### Who said it, and how exactly must it survive? (schema v35)
+
+Two labels ride on every entry and every fact, set at write time and
+inherited through supersession unless a later write restates them:
+
+- **`authority`** is the *speech act* of the text — `directive` (an
+  instruction to the agent), `observation` (a plain statement; the
+  default, stored as NULL and served as nothing), `quoted` (reported
+  speech: a document, a paper, a third person). It is deliberately a
+  separate axis from `origin`: `origin` says *who wrote* and is a tier
+  that drives supersession arithmetic (the provenance guard, the two-man
+  rule), while directive-vs-observation is not a tier ordering at all —
+  and the failure this closes (arXiv 2608.01679, *authority collapse*)
+  is exactly a third party's offhand remark consolidating into what reads
+  as a standing user instruction. The pair `(origin, authority)` is what
+  the paper calls authority. A `quoted` source is low-trust for the
+  [consolidation quarantine](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in).
+- **`distortion_tolerance`** is how exactly the text must survive
+  consolidation (arXiv 2608.22752, *the compaction cliff*): `constraint`
+  (zero — verbatim), `procedural`, `belief`, `preference`, `episodic`.
+  Only `constraint` has consumers today: the dream copies a constraint
+  entry's text verbatim onto a derived fact and a post-dream guard reports
+  any constraint left without a carrier ([dreaming](dreaming.md#constraint-entries-survive-verbatim--typecompact--guard-schema-v35)),
+  and in-scope constraint facts are served *ahead of* the cosine ranking
+  ([retrieval](retrieval.md#constraint-pinning-schema-v35)).
+
+Both are explicit parameters on `memory_store` and `memory_fact_set`;
+the `auto` default is a deterministic form heuristic (no model call on
+the store path) that asserts `constraint` only for rule-sized deontic or
+imperative text (`must`, `shall`, `forbidden`, `rule:`, or an opener like
+`Never run …`), `quoted` on an explicit reporting construction
+(`according to`, `per the`, `the docs say`), and `directive` on an
+instruction addressed to the reader — measured on the live bank before
+shipping (`evals/results/label-heuristic-audit-20260902.json`). The
+other four fidelity classes are accepted explicitly and carried.
+Neither label ever feeds confidence or supersession routing; a
+`constraint` label is the one label retrieval *ranks* on. Served only
+when set, so an unlabelled record's payload is byte-identical to before.
+
 ## Set-valued slots (schema v26)
 
 A cortex slot is scalar by default — one *current* value, corrected by

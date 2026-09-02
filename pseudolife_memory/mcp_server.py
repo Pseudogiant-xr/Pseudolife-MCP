@@ -240,6 +240,16 @@ def memory_store(
         description="Who asserted the claim.")] = None,
     episode: Annotated[str | None, Field(
         description="Episode handle for attribution.")] = None,
+    authority: Annotated[
+        Literal["auto", "directive", "observation", "quoted"], Field(
+            description='Speech act: "directive" (an instruction to you) '
+                        '/ "quoted" (a doc or third party said it) / '
+                        '"observation"; "auto" infers.')] = "auto",
+    distortion_tolerance: Annotated[
+        Literal["auto", "constraint", "procedural", "belief", "preference",
+                "episodic"], Field(
+            description='"constraint" = must survive verbatim, pinned '
+                        'in recall; "auto" infers only that.')] = "auto",
 ) -> dict[str, Any]:
     """Store one durable fact, decision, or observation. Use proactively
     for anything worth keeping — one claim per call, and decide which
@@ -256,7 +266,8 @@ def memory_store(
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
     return service.store(
-        text=text, source=source, tags=tags, origin=origin, episode=episode)
+        text=text, source=source, tags=tags, origin=origin, episode=episode,
+        authority=authority, distortion_tolerance=distortion_tolerance)
 
 
 def _restates_fact(entry_text: str, value: str) -> bool:
@@ -303,6 +314,11 @@ def _compact_entry(e: dict[str, Any]) -> dict[str, Any]:
         out["superseded"] = True
     if e.get("superseded_by_text"):
         out["superseded_by_text"] = e["superseded_by_text"]
+    # v35 labels change how a hit may be USED (a quoted remark is not an
+    # instruction; a constraint is verbatim), so they survive compaction.
+    for k in ("authority", "distortion_tolerance"):
+        if e.get(k):
+            out[k] = e[k]
     return out
 
 
@@ -425,7 +441,10 @@ def memory_search(
     (``contested: true`` awaits ``memory_fact_resolve``).
     ``low_confidence=True``: no confident match, prefer abstaining. On a
     superseded entry, prefer ``superseded_by_text``. Temporal cues may
-    add ``events`` (oldest first). The ``sources``/``bands``/``episodes``/
+    add ``events`` (oldest first). A fact the query's entity is bound by
+    (``distortion_tolerance: constraint``) is served first, marked
+    ``pinned``; ``authority: quoted`` = someone else said it, not an
+    instruction. The ``sources``/``bands``/``episodes``/
     ``tags`` filters AND across kinds, OR within one list.
 
     Returns: ``{query, count, entries, cortex, low_confidence}``.
@@ -520,6 +539,22 @@ def memory_search(
                         {"re_verify": True,
                          "re_verify_reason": f.get("re_verify_reason")}
                         if f.get("re_verify") else {}
+                    ),
+                    # v35 label pair + pin marker: absent on every
+                    # unlabelled fact (payload unchanged), re-selected
+                    # explicitly here for the same whitelist reason as
+                    # re_verify above.
+                    **(
+                        {"authority": f["authority"]}
+                        if f.get("authority") else {}
+                    ),
+                    **(
+                        {"distortion_tolerance": f["distortion_tolerance"]}
+                        if f.get("distortion_tolerance") else {}
+                    ),
+                    **(
+                        {"pinned": True}
+                        if f.get("pinned") else {}
                     ),
                     # Supersede-at-discovery: aged/stale/contested facts
                     # carry their exact correction call (see CORRECTION_NOTE).
@@ -805,6 +840,16 @@ def memory_fact_set(
         Literal["auto", "evergreen", "slow", "volatile"], Field(
             description='How fast the value rots. "auto" infers the decay '
                         "rate from the entity kind.")] = "auto",
+    authority: Annotated[
+        Literal["auto", "directive", "observation", "quoted"], Field(
+            description='Speech act of the source: "directive" / "quoted" '
+                        '(doc or third party) / "observation"; "auto" '
+                        'infers.')] = "auto",
+    distortion_tolerance: Annotated[
+        Literal["auto", "constraint", "procedural", "belief", "preference",
+                "episodic"], Field(
+            description='"constraint" = verbatim, pinned in recall; "auto" '
+                        'infers only that.')] = "auto",
 ) -> dict[str, Any]:
     """Assert a canonical fact — insert, confirm, or correct a slot.
 
@@ -813,12 +858,16 @@ def memory_fact_set(
     winner under ``current``) — check with the human, settle via
     ``memory_fact_resolve``.
 
+    ``authority`` / ``distortion_tolerance`` inherit the slot's labels
+    unless restated.
+
     Returns: ``{action: inserted|confirmed|superseded|contested, ...record}``.
     """
     return service.cortex_write(
         entity, attribute, value,
         confidence=confidence, support=(origin or "agent"), episode=episode,
         freshness_class=freshness_class,
+        authority=authority, distortion_tolerance=distortion_tolerance,
     )
 
 
@@ -1694,6 +1743,11 @@ def _compact_recall_fact(f: dict[str, Any]) -> dict[str, Any]:
     if f.get("re_verify"):
         out["re_verify"] = True
         out["re_verify_reason"] = f.get("re_verify_reason")
+    # v35: the label pair and the pin marker (a constraint pinned ahead
+    # of the fact cap must say so, or it reads as an ordinary rank).
+    for k in ("authority", "distortion_tolerance", "pinned"):
+        if f.get(k):
+            out[k] = f[k]
     return out
 
 
@@ -1716,11 +1770,10 @@ def memory_recall(
     hops: Annotated[int, Field(
         description="Max graph hops. Clamped to 1..5.")] = 3,
     top_k: Annotated[int, Field(
-        description="Bounds only the SEED search — the initial hits naming "
-                    "the entities the walk starts from — NOT the result, "
-                    "which is capped separately. Up to 3 ``texts`` slots "
-                    "go to seed hits; the rest to hop-discovered "
-                    "support.")] = 5,
+        description="Bounds only the SEED search (the initial hits that "
+                    "name the walk's start entities), not the result, which "
+                    "is capped separately; up to 3 ``texts`` slots go to "
+                    "seed hits.")] = 5,
     verbose: Annotated[bool, Field(
         description="Full fact/edge provenance and untruncated texts. "
                     "Default facts are ``{attribute, value}``, edges "
@@ -1740,7 +1793,8 @@ def memory_recall(
     between surviving entities; each entity's ``facts`` is capped
     (currently 5). A fact carrying ``re_verify`` stands on a memory that
     has since been corrected — the value still stands, but check it before
-    acting. Details: docs/guide/retrieval.md.
+    acting. A seed entity's ``constraint`` facts come first, marked
+    ``pinned``. Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
     entity_hop = out.get("entity_hop") or {}

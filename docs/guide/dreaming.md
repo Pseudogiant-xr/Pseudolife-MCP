@@ -509,6 +509,56 @@ contested by design; the aggregate guard already parks the dangerous
 member-over-scalar case). Preregistration:
 `docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
 
+## Constraint entries survive verbatim — TypeCompact + guard (schema v35)
+
+The dream is a compression step, and the compaction cliff (arXiv
+2608.22752) is what compression does to a rule: a safety rule and an
+episodic log are summarised at the same rate, but only the rule needs
+its exact wording to stay enforceable. An entry whose
+`distortion_tolerance` is `constraint` (set explicitly on `memory_store`,
+or inferred by the `auto` heuristic for rule-sized deontic text — see
+[memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35))
+is therefore treated as zero-distortion by the dream:
+
+- **The carrier (TypeCompact).** Among the claims the extractor cites
+  the entry for, at least one scalar claim must contain the entry's text
+  verbatim (whitespace-collapsed, case-preserving). If none does, ONE
+  claim's *value* is replaced with the entry text: the claim whose
+  content tokens overlap the rule most (at least one must), and only if
+  its target slot is empty or already holds a constraint — a standing
+  non-constraint fact is never overwritten and a claim about something
+  else is never hijacked, whatever position it has in extractor output.
+  The extractor's entity and attribute are kept (slotting is what it is
+  good at; wording is not), sibling claims are left alone, member (`op`)
+  claims are never carriers, and with no eligible claim the carrier
+  refuses and leaves the miss to the guard. Only the carrier earns
+  `distortion_tolerance: constraint` (and the pin in recall); a
+  paraphrased sibling is an observation and inherits its slot's label.
+- **The guard verifier.** After the claims loop, every constraint entry
+  in the processed window must have a derived item carrying its text
+  verbatim (a parked contender counts; so does a slot the same entry
+  formed on an earlier pass). Misses are reported on the run result as
+  `constraint_misses` (entry id + text) beside `constraint_verbatim`, on
+  the run row's tallies as `constraint_missed`, and logged at WARNING.
+  This is a **flag, not a hard fail**: the paper fails a compaction whose
+  input is still there to retry, but here the raw entry is never
+  discarded (it stays in the associative store and is served by
+  `memory_search`), and holding the cursor would hostage every other
+  claim in the batch to one rule the extractor could not slot. The
+  typical miss is an extractor that emitted no scalar claim for the
+  entry at all — inventing a slot is not the dream's business.
+
+**Authority rides along.** Every derived fact takes the *source entry's*
+`authority` (`quoted` / `directive` / observation) and inherits the slot's
+label when the source is unlabelled — never anything the extractor wrote,
+which is model output and steerable by note text (the same trust class
+as claim `origin`). Under the two-man rule above, a `quoted` source is
+low-trust whoever relayed it: a third party's remark parks as a contender
+instead of taking `current` on the relayer's tier. The label only ever
+*demotes*; promotion stays keyed on entry metadata, so dressing a note up
+as a quote gains nothing but a park. Rollback restores the previous
+version's labels along with its value.
+
 ## Chronicle events (schema v28) — dated occurrences beside facts
 
 Facts answer "what is current"; they systematically lose *occurrences* —

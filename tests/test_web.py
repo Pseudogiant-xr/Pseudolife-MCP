@@ -636,6 +636,32 @@ def test_facts_set_threads_freshness_class(svc):
     assert json.loads(body)["freshness_class"] == "volatile"
 
 
+def test_facts_set_threads_the_v35_label_pair(svc):
+    """Same contract as freshness_class: the REST fallback must be able to
+    say what memory_fact_set says (review finding, 2026-09-02 — the route
+    had not gained the two params)."""
+    app = _app(svc)
+    st, body = call(app, "POST", "/api/facts/set",
+                     headers=[(b"host", b"127.0.0.1"),
+                              (b"content-type", b"application/json")],
+                     body=b'{"entity":"deploy","attribute":"rule",'
+                          b'"value":"tag before you ship",'
+                          b'"authority":"quoted",'
+                          b'"distortion_tolerance":"constraint"}')
+    assert st == 200
+    out = json.loads(body)
+    assert out["authority"] == "quoted"
+    assert out["distortion_tolerance"] == "constraint"
+    # omitted -> "auto", which infers from the value (here: nothing)
+    st, body = call(app, "POST", "/api/facts/set",
+                     headers=[(b"host", b"127.0.0.1"),
+                              (b"content-type", b"application/json")],
+                     body=b'{"entity":"proj","attribute":"language","value":"python"}')
+    assert st == 200
+    out = json.loads(body)
+    assert "authority" not in out and "distortion_tolerance" not in out
+
+
 def test_facts_set_defaults_freshness_class_to_evergreen(svc):
     """Omitting the field must not become volatile — the personal cortex
     defaults durable, unlike the world cortex."""

@@ -2295,6 +2295,64 @@ _BEAM_VERDICT_QUOTES = [
 ]
 
 
+# The v35 write-time label heuristic audit (2026-09-02,
+# evals/label_heuristic_audit.py — regenerates from a bank dump plus the
+# committed verdict-hash file; no bank text is committed). The CHANGELOG
+# quotes the shipped rule's fact hit rate, precision and entry count and
+# the three rejected variants; labels.py's module docstring quotes the
+# decomposition. Both are pinned to the artifact.
+LABEL_AUDIT = RESULTS + "label-heuristic-audit-20260902.json"
+LABELS_PY = "pseudolife_memory/memory/labels.py"
+_LA_SHIPPED = lambda d: d["distortion_tolerance_variants"][  # noqa: E731
+    "shipped_strong_or_framing_or_opener_cap400"]
+for _cid, _doc, _needle, _val, _stated, _places in [
+    ("label-audit-fact-hit-rate", "CHANGELOG.md",
+     "fires on ~1.6% of facts at ~0.86",
+     lambda d: _LA_SHIPPED(d)["fact_hit_rate"] * 100, 1.6, 1),
+    ("label-audit-precision", "CHANGELOG.md",
+     "fires on ~1.6% of facts at ~0.86",
+     lambda d: _LA_SHIPPED(d)["precision"], 0.86, 2),
+    ("label-audit-entry-hits", "CHANGELOG.md", "on 1 of 836 entries",
+     lambda d: _LA_SHIPPED(d)["entry_hits"], 1, 0),
+    ("label-audit-entries", "CHANGELOG.md", "on 1 of 836 entries",
+     lambda d: d["sample"]["current_entries"], 836, 0),
+    ("label-audit-loose-entry-rate", "CHANGELOG.md",
+     "any deontic\n    word anywhere: 36% of entries",
+     lambda d: d["distortion_tolerance_variants"][
+         "loose_any_deontic_word_anywhere_no_cap"]["entry_hit_rate"] * 100,
+     36, 0),
+    ("label-audit-imperative-anywhere", "CHANGELOG.md",
+     "mid-sentence never/always: 0.53",
+     lambda d: d["distortion_tolerance_variants"][
+         "imperative_never_always_do_not_anywhere"]["precision"], 0.53, 2),
+    ("label-audit-attribute-rule", "CHANGELOG.md",
+     "attribute-name rule: 0.52",
+     lambda d: d["distortion_tolerance_variants"][
+         "attribute_name_rule_increment"]["precision"], 0.52, 2),
+    ("label-audit-doc-shipped-hits", LABELS_PY,
+     "shipped rule fires on 86 facts (1.6%) of which 74 read as a genuine rule",
+     lambda d: _LA_SHIPPED(d)["fact_hits"], 86, 0),
+    ("label-audit-doc-shipped-genuine", LABELS_PY,
+     "shipped rule fires on 86 facts (1.6%) of which 74 read as a genuine rule",
+     lambda d: _LA_SHIPPED(d)["judged_genuine"], 74, 0),
+    ("label-audit-doc-strong-genuine", LABELS_PY, "63 of 74",
+     lambda d: _LA_SHIPPED(d)["decomposition"]["strong_deontic_or_framing"][
+         "judged_genuine"], 63, 0),
+    ("label-audit-doc-strong-hits", LABELS_PY, "63 of 74",
+     lambda d: _LA_SHIPPED(d)["decomposition"]["strong_deontic_or_framing"][
+         "fact_hits"], 74, 0),
+    ("label-audit-doc-opener-genuine", LABELS_PY, "11 of 12",
+     lambda d: _LA_SHIPPED(d)["decomposition"]["imperative_opener_increment"][
+         "judged_genuine"], 11, 0),
+    ("label-audit-doc-opener-hits", LABELS_PY, "11 of 12",
+     lambda d: _LA_SHIPPED(d)["decomposition"]["imperative_opener_increment"][
+         "fact_hits"], 12, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(LABEL_AUDIT,),
+        value=_val, stated=_stated, places=_places))
+
+
 def test_beam_range_quotes_match_the_committed_verdict():
     """The evals README quotes three sweep ranges; they must be the
     verdict file's, not a recollection of it."""

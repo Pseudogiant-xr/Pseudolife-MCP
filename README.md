@@ -873,6 +873,7 @@ renders the real frontend against canned data:
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
 | Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
+| Write-time labels | `authority` (`directive` / `observation` / `quoted` — the speech act, orthogonal to the `origin` tier) and `distortion_tolerance` (`constraint` / `procedural` / `belief` / `preference` / `episodic`) on entries and facts, set at write time (explicit, or a deterministic heuristic under `auto`) and inherited through supersession unless restated. A `constraint` source is carried verbatim through the dream (with a post-dream guard) and pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` when the query names its entity; a `quoted` source is low-trust for the two-man rule (schema v35) |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
@@ -882,7 +883,7 @@ renders the real frontend against canned data:
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v34 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v35 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 

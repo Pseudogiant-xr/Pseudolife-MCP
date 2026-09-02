@@ -355,6 +355,8 @@ class ContinuumMemorySystem:
         tags: list[str] | None = None,
         session_key: str | None = None,
         attribution_episode_id: str | None = None,
+        authority: str | None = None,
+        distortion_tolerance: str | None = None,
     ) -> tuple[bool, float]:
         """Store a new memory through the CMS pipeline.
 
@@ -381,6 +383,11 @@ class ContinuumMemorySystem:
         ``episode_id`` off the entry, not off ``session_key``) — doing
         this after :meth:`store` returns would race the very promotion it
         triggers internally, since a promoted entry is a new object.
+
+        ``authority`` / ``distortion_tolerance`` (schema v35): the write-time
+        label pair, already resolved by the caller (``service.store`` runs
+        the heuristic and the inheritance rules); stamped on the entry
+        before the write-through so the row carries them.
 
         Returns:
             Tuple of ``(was_stored, surprise_score)``.
@@ -479,6 +486,9 @@ class ContinuumMemorySystem:
             # Tag stamp (schema v6, Tier C). Normalised once here so
             # downstream filters can do plain set-intersection.
             entry.tags = normalize_tags(tags)
+            # Write-time label pair (schema v35), resolved upstream.
+            entry.authority = authority
+            entry.distortion_tolerance = distortion_tolerance
             # Structured slots (schema v4), extracted above the contradiction
             # scan because the slot-identity path needs them. Reused here
             # rather than re-extracted — ``last_entity_context`` threads
@@ -1795,6 +1805,9 @@ class ContinuumMemorySystem:
         moved.episode_id = entry.episode_id
         moved.episode_title = entry.episode_title
         moved.tags = list(entry.tags)
+        # Schema v35: the label pair follows the entry across bands.
+        moved.authority = entry.authority
+        moved.distortion_tolerance = entry.distortion_tolerance
         moved.db_id = entry.db_id
         if self.storage is not None and entry.db_id is not None:
             # Must not escape. On the demotion path this runs inside
@@ -2098,6 +2111,8 @@ class ContinuumMemorySystem:
                         episode_id=e.get("episode_id"),
                         episode_title=e.get("episode_title"),
                         tags=list(e.get("tags") or []),
+                        authority=e.get("authority"),
+                        distortion_tolerance=e.get("distortion_tolerance"),
                     ))
                 except Exception as exc:  # noqa: BLE001 — one bad entry
                     logger.warning("Skipping unrestorable entry from saved "
