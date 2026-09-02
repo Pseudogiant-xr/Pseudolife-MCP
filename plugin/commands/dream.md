@@ -4,9 +4,15 @@ description: Run a judgment session over the Pseudolife memory bank — triage t
 Run a judgment session over the Pseudolife-MCP bank. The pipeline halves
 run themselves — the auto-sweep extracts facts through the configured
 extractor, and a need-based tick applies the deep dream's mechanical half
-(rescore, guarded junk deletes, scope stamping, proposal filing,
-snapshot-first). What cannot be automated is judgment: this command works
-the review queues that automation fills.
+(rescore, guarded junk deletes, scope stamping, proposal filing, analyzer
+duplicate filing, the unreachable-orphan sweep, snapshot-first). Since
+2026-09-02 the sweep also judges every queue itself (merge second opinion,
+link, junk, store-curation and candidate judges — each mode-gated, see
+`docs/runbooks/deep-dream.md` §0), so what this command meets is the
+residue: rows whose verdict sat below a gate, a `split` second opinion, a
+`low_differential` accept, a junk delete above the evidence bar. Every
+such row carries the judge's `judge` / `judge2` blocks — treat them as
+leads, read the evidence, and disagree freely.
 
 1. Call `memory_dream(action="status")` and read three things:
    - `deep_dream` — `{recommended, reason, new_entities, days_since}`:

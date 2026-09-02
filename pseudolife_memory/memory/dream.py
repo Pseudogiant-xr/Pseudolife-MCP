@@ -276,6 +276,173 @@ def format_judge_proposal(p: dict) -> str:
     return out
 
 
+# ── Review-queue judges (2026-09-02 design) ───────────────────────────────
+# Four more judgment briefs, distilled from the 2026-09-02 blind Opus panel
+# (evals/data/queue_judge_eval_20260902.json: 37 links, 42 candidates, 20
+# junk, 40 slot pairs, every verdict ratified and applied). SHARED with
+# evals/queue_judge_ladder.py so measured arms and the shipped judges are
+# byte-identical; change them only through a new ladder run.
+
+_RELATION_VOCAB = (
+    "depends-on (src needs dst), part-of (src is a component of dst), "
+    "runs-on (src executes on host/platform dst), hosts (src serves dst), "
+    "uses (src makes use of dst), configures (src sets up dst), "
+    "stores-data-in, tests (src is a test of dst), implements (src code "
+    "realizes concept dst), superseded-by (src replaced by dst), related-to "
+    "(untyped; weakest)")
+
+_LINK_JUDGE_SYSTEM_PROMPT = (
+    "You judge LINK PROPOSALS for a knowledge graph. Each numbered proposal "
+    "is a typed edge SRC --relation--> DST awaiting a verdict. Accepting "
+    "writes it as durable structure that recall traverses; the bar is "
+    "\"true and useful\", and direction and relation type matter.\n"
+    "Relations: " + _RELATION_VOCAB + ".\n"
+    "Verdicts:\n"
+    "- accept: the relation holds in the stated direction and the evidence "
+    "(notes naming both, existing edges, scopes) supports it. Different "
+    "project scopes are NOT by themselves a reason to reject.\n"
+    "- retype: the pair is genuinely related but the RELATION is wrong; give "
+    "the corrected relation (same direction). A wrong direction is reject.\n"
+    "- reject: false, vague, an edge that merely re-files one that already "
+    "exists between the canonical nodes on a version- or value-suffixed "
+    "alias, an endpoint that is an attribute/state name or a captured list "
+    "rather than a thing, a relation that asserts something untrue of a "
+    "file (a module does not run on a host), or evidence that says the "
+    "thing is gone (uninstalled, deleted, superseded, rolled back).\n"
+    "- leave: genuinely undecidable.\n"
+    'Return JSON only: {"verdicts":[{"id":<number>,"verdict":"accept"|'
+    '"retype"|"reject"|"leave","confidence":<0..1>,"relation":<vocab or '
+    'null>,"note":"<reason, max 25 words>"}]} — one entry per proposal, '
+    "confidence is your honest probability that the verdict is correct."
+)
+
+_CANDIDATE_JUDGE_SYSTEM_PROMPT = (
+    "You judge LINK CANDIDATES for a knowledge graph: numbered pairs of "
+    "currently UNLINKED entities whose context vectors are near. For each, "
+    "decide whether a real typed relation holds that the graph should carry "
+    "— or whether the similarity is shared context (mentioned in the same "
+    "note), siblings under one parent (two options, models, runs, settings "
+    "of one thing), or a name-similarity accident.\n"
+    "Relations: " + _RELATION_VOCAB + ".\n"
+    "Verdicts:\n"
+    "- propose: a real relation holds; give relation, src and dst in the "
+    "direction the relation reads, and a one-line rationale grounded in the "
+    "evidence.\n"
+    "- dismiss: no real relation (the pair is marked distinct and never "
+    "resurfaces).\n"
+    "- leave: undecidable — or the two names look like the SAME referent "
+    "(that is a merge question, not a link; never dismiss it).\n"
+    'Return JSON only: {"verdicts":[{"id":<number>,"verdict":"propose"|'
+    '"dismiss"|"leave","confidence":<0..1>,"relation":<vocab or null>,'
+    '"src":<display or null>,"dst":<display or null>,"rationale":"<max 25 '
+    'words>"}]} — one entry per pair.'
+)
+
+_JUNK_JUDGE_SYSTEM_PROMPT = (
+    "You judge JUNK ENTITY proposals for a knowledge graph. A name-shape "
+    "detector flagged each numbered entity as an over-extraction artifact; "
+    "accepting HARD-DELETES the entity (its edges cascade away; fact and "
+    "lesson rows survive, merely unlinked). The detector classes have a "
+    "measured false-positive tail (2026-09-02: list-artifact 6/6 correct, "
+    "compound 2/4, slot-key 3/10), so judge the REFERENT, not the shape.\n"
+    "Verdicts:\n"
+    "- delete: no real referent — a comma list or spaced \"A / B\" / "
+    "\"A + B\" compound of several things captured as one name, a "
+    "flattened slot key (entity.attribute copied into a name), a captured "
+    "sentence or task description, a bare number or status word. A "
+    "lesson-minted object (its only edges are prefers/avoids from a lesson) "
+    "with such a shape is a safe delete: the lesson keeps its text.\n"
+    "- keep: a real thing — a file path, git branch or ref (origin/master, "
+    "fix/x), a model or server id, a dotted config key, a code symbol "
+    "(module.function, Class.method), a systemd unit, a host, a tool. "
+    "Typed edges, facts and mentions are evidence of reality.\n"
+    "- leave: genuinely undecidable.\n"
+    'Return JSON only: {"verdicts":[{"id":<number>,"verdict":"delete"|'
+    '"keep"|"leave","confidence":<0..1>,"note":"<max 25 words>"}]} — one '
+    "entry per proposal, confidence is your honest probability."
+)
+
+_SLOT_JUDGE_SYSTEM_PROMPT = (
+    "You judge DUPLICATE SLOT pairs in a slot-keyed store: the LESSON store "
+    "(procedural do/avoid guidance keyed by task|aspect) or the WORLD-FACT "
+    "store (cited external facts keyed by entity|attribute). Slot "
+    "supersession only dedups within one key, so a near-duplicate parked "
+    "under a second key accumulates silently.\n"
+    "Verdicts:\n"
+    "- duplicate: the two slots carry the SAME guidance or fact (a re-mint "
+    "under a drifted key: the same task named two ways, the same pitfall, a "
+    "low-confidence inferred twin of an observed lesson, the same external "
+    "fact about the same entity). Say which to KEEP (\"a\" or \"b\"): the "
+    "more general, reusable key; the observed over the inferred; for world "
+    "facts the more precise entity and more authoritative source. Put "
+    "anything the dropped side adds in \"fold\".\n"
+    "- distinct: deliberate siblings — aspect variants of one task (approach "
+    "vs pitfall vs correction), two different tools/products/papers that "
+    "merely share an attribute, facts about different entities, two tasks "
+    "that share wording but not guidance.\n"
+    "- leave: undecidable from the values shown.\n"
+    'Return JSON only: {"verdicts":[{"id":<number>,"verdict":"duplicate"|'
+    '"distinct"|"leave","keep":"a"|"b"|null,"fold":<text or null>,'
+    '"confidence":<0..1>,"note":"<max 25 words>"}]} — one entry per pair.'
+)
+
+
+def _snips(items, k=3, chars=240):
+    return "; ".join(str(x)[:chars] for x in (items or [])[:k])
+
+
+def format_link_proposal(p: dict) -> str:
+    """One link proposal rendered for the judge prompt (shared with the
+    ladder harness)."""
+    out = (f"[{p['n']}] SRC '{p.get('src', '?')}' (scopes "
+           f"{p.get('src_scopes') or []}) --{p.get('relation', '?')}--> "
+           f"DST '{p.get('dst', '?')}' (scopes {p.get('dst_scopes') or []})\n"
+           f"    detector: {p.get('rationale') or '?'}\n"
+           f"    src edges: {_snips(p.get('src_edges'), 8, 80) or 'none'}\n"
+           f"    dst edges: {_snips(p.get('dst_edges'), 8, 80) or 'none'}")
+    both = p.get("co_mentions") or []
+    if both:
+        out += f"\n    notes naming both: {_snips(both)}"
+    else:
+        out += (f"\n    src notes: {_snips(p.get('src_mentions'), 2) or 'none'}"
+                f"\n    dst notes: {_snips(p.get('dst_mentions'), 2) or 'none'}")
+    return out
+
+
+def format_candidate(p: dict) -> str:
+    return (f"[{p['n']}] '{p.get('src', '?')}' vs '{p.get('dst', '?')}' "
+            f"(cosine {p.get('similarity')})\n"
+            f"    src notes: {_snips(p.get('src_snippets')) or 'none'}\n"
+            f"    dst notes: {_snips(p.get('dst_snippets')) or 'none'}")
+
+
+def format_junk_proposal(p: dict) -> str:
+    return (f"[{p['n']}] '{p.get('display', '?')}' — detector: "
+            f"{p.get('reason') or '?'}; degree {p.get('degree', 0)}; facts "
+            f"{p.get('facts', 0)}; lesson-minted object: "
+            f"{'yes' if p.get('lesson_object') else 'no'}; scopes "
+            f"{p.get('scopes') or []}\n"
+            f"    edges: {_snips(p.get('edges'), 8, 100) or 'none'}\n"
+            f"    facts: {_snips(p.get('fact_text'), 3, 120) or 'none'}\n"
+            f"    notes: {_snips(p.get('mentions')) or 'none'}")
+
+
+def format_slot_pair(p: dict) -> str:
+    def side(tag, s):
+        s = s or {}
+        extra = ""
+        if p.get("store") == "lesson":
+            extra = (f" [polarity {s.get('polarity')}, outcome "
+                     f"{s.get('outcome')}, about {s.get('about')!r}]")
+        elif s.get("source_url"):
+            extra = f" [source {s.get('source_url')}]"
+        return (f"    {tag} '{s.get('entity', '?')}' | "
+                f"'{s.get('attribute', '?')}'{extra}: "
+                f"{str(s.get('value', ''))[:240]}")
+    return (f"[{p['n']}] store={p.get('store')} cosine {p.get('similarity')}\n"
+            + side("A", p.get("a")) + "\n" + side("B", p.get("b")))
+
+
 def _vocab_hint(vocab: list[str]) -> str:
     if not vocab:
         return ""
@@ -800,6 +967,9 @@ class OpenAICompatExtractor:
         # a byte-identical judge ladder). True = server/template default;
         # "low"/"medium" pins an explicit per-request reasoning_effort.
         self.judge_thinking = judge_thinking
+        # Set by _judge_request from the response: the model name the
+        # endpoint reported serving (None until the first judge call).
+        self.served_model: str | None = None
         # Base system prompt for claims extraction. Defaults to the shipped
         # ``_SYSTEM_PROMPT`` (the daemon never passes this arg, so its behaviour
         # is byte-identical). Off-label harnesses (e.g. the LME-V2 trajectory
@@ -1078,64 +1248,13 @@ class OpenAICompatExtractor:
         skipped are simply absent. Raises :class:`ExtractorError` on
         transport/parse failure so the caller can tell failure from a
         genuine empty result."""
-        import json
-        import urllib.request
-
         proposals = [p for p in (proposals or []) if p]
         if not proposals:
             return []
-        headers = {"content-type": "application/json"}
-        if self.api_key:
-            headers["authorization"] = f"Bearer {self.api_key}"
-        try:
-            # The judge owns its thinking dimension (judge_thinking / the
-            # enable_thinking pin below) — the dreamer's effort knob rides
-            # extra_body on the shared primary extractor (judge_url unset)
-            # and must NOT reach this payload: the CLI shims honour a
-            # top-level reasoning_effort, which would silently override the
-            # pin the moment an operator tunes the dreamer.
-            extra = {k: v for k, v in self.extra_body.items()
-                     if k != "reasoning_effort"}
-            payload = {**extra,
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
-                    {"role": "user", "content": "\n\n".join(
-                        format_judge_proposal(p) for p in proposals)},
-                ],
-                "response_format": {"type": "json_object"},
-                # Verdict rows are short but one is needed PER proposal; the
-                # 120/proposal floor protects large batches from a caller
-                # that constructed us with a small extraction budget.
-                "max_tokens": max(self.max_tokens, 120 * len(proposals)),
-                "temperature": 0,
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
-            if self.judge_thinking:
-                # Let thinking run, and give the reasoning trace headroom the
-                # verdict budget lacks (reasoning tokens count against
-                # max_tokens). True defers to the server/template default;
-                # a string pins an explicit reasoning_effort level.
-                if isinstance(self.judge_thinking, str):
-                    payload["chat_template_kwargs"] = {
-                        "reasoning_effort": self.judge_thinking}
-                else:
-                    del payload["chat_template_kwargs"]
-                payload["max_tokens"] += 4096
-            body = json.dumps(payload).encode()
-            req = urllib.request.Request(
-                f"{self.base_url}/chat/completions", data=body,
-                headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                data = json.loads(resp.read().decode())
-            content = data["choices"][0]["message"]["content"] or ""
-            s, e = content.find("{"), content.rfind("}")
-            if s != -1 and e > s:
-                content = content[s:e + 1]
-            parsed = json.loads(content)
-            raw = parsed.get("verdicts", []) if isinstance(parsed, dict) else []
-        except Exception as exc:  # noqa: BLE001
-            raise ExtractorError(f"judge_merges failed: {exc}") from exc
+        raw = self._judge_request(
+            _JUDGE_SYSTEM_PROMPT,
+            "\n\n".join(format_judge_proposal(p) for p in proposals),
+            len(proposals), label="judge_merges")
         known = {int(p["n"]) for p in proposals}
         out: list[dict] = []
         for v in raw if isinstance(raw, list) else []:
@@ -1191,6 +1310,207 @@ class OpenAICompatExtractor:
         except Exception as exc:  # noqa: BLE001 — transport, not content
             raise ExtractorError(f"infer_outcomes failed: {exc}") from exc
         return _parse_outcome_claims(content, cap)
+
+    def _judge_request(self, system_prompt: str, user_text: str,
+                       n_rows: int, *, label: str) -> list:
+        """One JSON-object judge call shared by every review-queue judge:
+        the payload the merge judge shipped with (pinned by
+        test_judge_thinking_payload), returning the raw ``verdicts`` list
+        for the caller to validate. Raises :class:`ExtractorError` on
+        transport/parse failure so a failed batch marks nothing."""
+        import json
+        import urllib.request
+
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        try:
+            # The judge owns its thinking dimension (judge_thinking / the
+            # enable_thinking pin below) — the dreamer's effort knob rides
+            # extra_body on the shared primary extractor (judge_url unset)
+            # and must NOT reach this payload: the CLI shims honour a
+            # top-level reasoning_effort, which would silently override the
+            # pin the moment an operator tunes the dreamer.
+            extra = {k: v for k, v in self.extra_body.items()
+                     if k != "reasoning_effort"}
+            payload = {**extra,
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_text},
+                ],
+                "response_format": {"type": "json_object"},
+                # Verdict rows are short but one is needed PER row; the
+                # 120/row floor protects large batches from a caller that
+                # constructed us with a small extraction budget.
+                "max_tokens": max(self.max_tokens, 120 * n_rows),
+                "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            if self.judge_thinking:
+                # Let thinking run, and give the reasoning trace headroom the
+                # verdict budget lacks (reasoning tokens count against
+                # max_tokens). True defers to the server/template default;
+                # a string pins an explicit reasoning_effort level.
+                if isinstance(self.judge_thinking, str):
+                    payload["chat_template_kwargs"] = {
+                        "reasoning_effort": self.judge_thinking}
+                else:
+                    del payload["chat_template_kwargs"]
+                payload["max_tokens"] += 4096
+            body = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions", data=body,
+                headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+            # The model the endpoint actually SERVED (OpenAI-compatible
+            # responses echo it). A name-agnostic endpoint (llama-server
+            # serving one model under any requested name) reports the same
+            # served model for two configured names — which is what the
+            # merge judge's distinct-second-model check must compare.
+            served = data.get("model") if isinstance(data, dict) else None
+            self.served_model = str(served) if served else None
+            content = data["choices"][0]["message"]["content"] or ""
+            s, e = content.find("{"), content.rfind("}")
+            if s != -1 and e > s:
+                content = content[s:e + 1]
+            parsed = json.loads(content)
+            raw = parsed.get("verdicts", []) if isinstance(parsed, dict) else []
+        except Exception as exc:  # noqa: BLE001
+            raise ExtractorError(f"{label} failed: {exc}") from exc
+        return raw if isinstance(raw, list) else []
+
+    @staticmethod
+    def _verdict_head(v, known: set, allowed: tuple):
+        """``(n, verdict, confidence)`` for a well-formed verdict row whose
+        id the batch knows and whose verdict is in ``allowed``, else None."""
+        if not isinstance(v, dict):
+            return None
+        try:
+            n = int(v.get("id"))
+        except (TypeError, ValueError):
+            return None
+        verdict = str(v.get("verdict", "")).strip().lower()
+        if n not in known or verdict not in allowed:
+            return None
+        try:
+            conf = max(0.0, min(1.0, float(v.get("confidence", 0.5))))
+        except (TypeError, ValueError):
+            conf = 0.5
+        return n, verdict, conf
+
+    @staticmethod
+    def _text(v, key, cap=400):
+        val = v.get(key)
+        return str(val)[:cap] if val not in (None, "") else None
+
+    def judge_links(self, proposals: list[dict]) -> list[dict]:
+        """Judge pending link proposals (see :func:`format_link_proposal`).
+        Returns ``{"n", "verdict", "confidence", "note", "relation"}`` rows;
+        ``relation`` is set only on ``retype`` — a retype naming no relation
+        cannot be applied and degrades to ``leave``."""
+        proposals = [p for p in (proposals or []) if p]
+        if not proposals:
+            return []
+        raw = self._judge_request(
+            _LINK_JUDGE_SYSTEM_PROMPT,
+            "\n\n".join(format_link_proposal(p) for p in proposals),
+            len(proposals), label="judge_links")
+        known = {int(p["n"]) for p in proposals}
+        out: list[dict] = []
+        for v in raw:
+            head = self._verdict_head(v, known, ("accept", "retype", "reject", "leave"))
+            if head is None:
+                continue
+            n, verdict, conf = head
+            relation = self._text(v, "relation", 64) if verdict == "retype" else None
+            if verdict == "retype" and not relation:
+                verdict = "leave"
+            out.append({"n": n, "verdict": verdict, "confidence": conf,
+                        "note": self._text(v, "note"), "relation": relation})
+        return out
+
+    def judge_candidates(self, rows: list[dict]) -> list[dict]:
+        """Judge Step-C link candidates (see :func:`format_candidate`).
+        Returns ``{"n", "verdict", "confidence", "relation", "src", "dst",
+        "rationale"}``; a ``propose`` naming no relation degrades to
+        ``leave``; src/dst default to the pair's own order."""
+        rows = [r for r in (rows or []) if r]
+        if not rows:
+            return []
+        raw = self._judge_request(
+            _CANDIDATE_JUDGE_SYSTEM_PROMPT,
+            "\n\n".join(format_candidate(r) for r in rows),
+            len(rows), label="judge_candidates")
+        by_n = {int(r["n"]): r for r in rows}
+        out: list[dict] = []
+        for v in raw:
+            head = self._verdict_head(v, set(by_n), ("propose", "dismiss", "leave"))
+            if head is None:
+                continue
+            n, verdict, conf = head
+            relation = src = dst = None
+            if verdict == "propose":
+                relation = self._text(v, "relation", 64)
+                src = self._text(v, "src", 200) or by_n[n].get("src")
+                dst = self._text(v, "dst", 200) or by_n[n].get("dst")
+                if not relation:
+                    verdict, src, dst = "leave", None, None
+            out.append({"n": n, "verdict": verdict, "confidence": conf,
+                        "relation": relation, "src": src, "dst": dst,
+                        "rationale": self._text(v, "rationale")})
+        return out
+
+    def judge_junk(self, rows: list[dict]) -> list[dict]:
+        """Judge junk proposals (see :func:`format_junk_proposal`). Returns
+        ``{"n", "verdict", "confidence", "note"}`` rows."""
+        rows = [r for r in (rows or []) if r]
+        if not rows:
+            return []
+        raw = self._judge_request(
+            _JUNK_JUDGE_SYSTEM_PROMPT,
+            "\n\n".join(format_junk_proposal(r) for r in rows),
+            len(rows), label="judge_junk")
+        known = {int(r["n"]) for r in rows}
+        out: list[dict] = []
+        for v in raw:
+            head = self._verdict_head(v, known, ("delete", "keep", "leave"))
+            if head is None:
+                continue
+            n, verdict, conf = head
+            out.append({"n": n, "verdict": verdict, "confidence": conf,
+                        "note": self._text(v, "note")})
+        return out
+
+    def judge_slot_pairs(self, rows: list[dict]) -> list[dict]:
+        """Judge lesson/world duplicate listings (see
+        :func:`format_slot_pair`). Returns ``{"n", "verdict", "keep",
+        "fold", "confidence", "note"}``; a ``duplicate`` naming no survivor
+        degrades to ``leave``."""
+        rows = [r for r in (rows or []) if r]
+        if not rows:
+            return []
+        raw = self._judge_request(
+            _SLOT_JUDGE_SYSTEM_PROMPT,
+            "\n\n".join(format_slot_pair(r) for r in rows),
+            len(rows), label="judge_slot_pairs")
+        known = {int(r["n"]) for r in rows}
+        out: list[dict] = []
+        for v in raw:
+            head = self._verdict_head(v, known, ("duplicate", "distinct", "leave"))
+            if head is None:
+                continue
+            n, verdict, conf = head
+            keep = fold = None
+            if verdict == "duplicate":
+                keep = str(v.get("keep") or "").strip().lower() or None
+                fold = self._text(v, "fold", 600)
+                if keep not in ("a", "b"):
+                    verdict, keep, fold = "leave", None, None
+            out.append({"n": n, "verdict": verdict, "keep": keep, "fold": fold,
+                        "confidence": conf, "note": self._text(v, "note")})
+        return out
 
     def summarize_session(self, context_text: str, *,
                           # Default matches DreamConfig.digest_target_chars
@@ -1623,6 +1943,20 @@ def run_sweep_once(service) -> dict:
         logger.info("deep-dream judge: %s", judged)
     if judged is not None:
         extra["deep_judge"] = judged
+    # The review-queue judges (2026-09-02): links, junk, store curation
+    # and Step-C candidates, each a bounded, mode-gated batch, each
+    # getattr-guarded like the merge judge and never raising into the sweep.
+    for key, name in (("judge_links", "deep_dream_judge_links"),
+                      ("judge_junk", "deep_dream_judge_junk"),
+                      ("judge_curation", "deep_dream_judge_curation"),
+                      ("judge_candidates", "deep_dream_judge_candidates")):
+        fn = getattr(service, name, None)
+        res = _timed(key, lambda fn=fn: fn() if fn is not None else None)
+        if res and (res.get("judged") or res.get("applied")
+                    or res.get("proposed") or res.get("error")):
+            logger.info("deep-dream %s: %s", key, res)
+        if res is not None:
+            extra[f"deep_{key}"] = res
     status = service.dream_status()
     if not status["would_fire"]:
         return _done({"fired": False, "reason": "below_threshold",

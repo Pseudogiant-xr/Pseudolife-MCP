@@ -334,11 +334,22 @@ def unattributed(entities, entity_sources_map, edges=(),
 def proposed_links(proposals):
     if not proposals:
         return []
-    links = [{"id": p.get("id"), "src": p["src"], "relation": p["relation"],
-              "dst": p["dst"], "confidence": p.get("confidence"),
-              "similarity": p.get("similarity"), "rationale": p.get("rationale"),
-              "tag": classify_edge(p, proposed=True)}
-             for p in proposals]
+    links = []
+    for p in proposals:
+        row = {"id": p.get("id"), "src": p["src"], "relation": p["relation"],
+               "dst": p["dst"], "confidence": p.get("confidence"),
+               "similarity": p.get("similarity"), "rationale": p.get("rationale"),
+               "source": p.get("source"),
+               "tag": classify_edge(p, proposed=True)}
+        # The link judge's opinion (schema v35), shown beside the row like
+        # the merge judge's; a verdict-less row shows nothing.
+        if p.get("judge_verdict"):
+            row["judge"] = {"verdict": p["judge_verdict"],
+                            "confidence": p.get("judge_confidence"),
+                            "note": p.get("judge_note"),
+                            "model": p.get("judge_model"),
+                            "relation": p.get("judge_relation")}
+        links.append(row)
     return [{"type": "proposed_link", "severity": "info", "action": "review",
              "label": f"{len(links)} proposed cross-session links",
              "links": links}]
@@ -392,6 +403,11 @@ def merge_candidates(entity_proposals):
                           "confidence": p.get("judge_confidence"),
                           "note": p.get("judge_note"),
                           "model": p.get("judge_model")}
+        # The second opinion (schema v35) beside the first.
+        if p.get("judge2_verdict"):
+            m["judge2"] = {"verdict": p["judge2_verdict"],
+                           "confidence": p.get("judge2_confidence"),
+                           "model": p.get("judge2_model")}
         merges.append(m)
     return [{"type": "merge_candidate", "severity": "warn", "action": "merge",
              "label": f"{len(merges)} near-duplicate entity merges", "merges": merges}]

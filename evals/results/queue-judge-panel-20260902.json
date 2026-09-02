@@ -1,0 +1,2873 @@
+{
+ "built": "2026-09-02",
+ "derived_from": {
+  "file": "evals/data/queue_judge_eval_20260902.json (private, gitignored)",
+  "sha256": "ac19b66342298bb71041774b85238073b845681a85da7ed79d96ea97a85d5607"
+ },
+ "provenance": "Blind Opus judge panel (7 agents: 3 group-aligned merge slices, junk, pending links, Step-C candidates, store curation), main-thread ratification of every accept/delete; verdicts applied to the live bank the same day. Merge rows also carry three replays of the SHIPPED judge_merges path via the Claude CLI shim: the daemon's own shadow verdict (claude-opus-5, at filing), a second claude-opus-5 pass in shuffled batches, and claude-fable-5. label: accept = ratified fold; reject = distinct OR related-but-distinct (panel_verdict says which).",
+ "scrub": "entity displays, snippets, notes, rationales and slot values are omitted — the pack freezes memory-bank text (hostnames, project scopes, session notes); this derivative carries labels, detector classes and votes only",
+ "counts": {
+  "merges": 63,
+  "junk": 20,
+  "links": 37,
+  "candidates": 42,
+  "curation": 40
+ },
+ "merge_gate_table": {
+  "A0_single_shadow_accept_ge0.8": {
+   "n": 9,
+   "bad": [],
+   "precision": 1.0
+  },
+  "A1_single_shadow_accept_ge0.8_not_lowdiff": {
+   "n": 1,
+   "bad": [],
+   "precision": 1.0
+  },
+  "A2_two_vote_accept_mean_ge0.7": {
+   "n": 12,
+   "bad": [
+    2220
+   ],
+   "precision": 0.917
+  },
+  "A3_two_vote_accept_mean_ge0.7_not_lowdiff": {
+   "n": 2,
+   "bad": [],
+   "precision": 1.0
+  },
+  "A4_two_vote_accept_mean_ge0.6_not_lowdiff": {
+   "n": 6,
+   "bad": [],
+   "precision": 1.0
+  },
+  "A5_two_vote_accept_mean_ge0.7_not_lowdiff_from_deg_le2": {
+   "n": 1,
+   "bad": [],
+   "precision": 1.0
+  },
+  "A6_three_vote_accept_not_lowdiff": {
+   "n": 7,
+   "bad": [],
+   "precision": 1.0
+  },
+  "A7_two_vote_any_conf_not_lowdiff": {
+   "n": 7,
+   "bad": [],
+   "precision": 1.0
+  },
+  "R0_single_shadow_reject_ge0.8_live_rule": {
+   "n": 0,
+   "bad": [],
+   "precision": null
+  },
+  "R1_single_shadow_reject_ge0.7": {
+   "n": 10,
+   "bad": [],
+   "precision": 1.0
+  },
+  "R2_two_vote_reject_mean_ge0.7": {
+   "n": 8,
+   "bad": [],
+   "precision": 1.0
+  },
+  "R3_two_vote_reject_mean_ge0.6": {
+   "n": 23,
+   "bad": [
+    2059,
+    2157
+   ],
+   "precision": 0.913
+  },
+  "R4_two_vote_reject_any_conf": {
+   "n": 29,
+   "bad": [
+    2059,
+    2157
+   ],
+   "precision": 0.931
+  },
+  "R5_three_vote_reject_any_conf": {
+   "n": 26,
+   "bad": [
+    2059,
+    2157
+   ],
+   "precision": 0.923
+  }
+ },
+ "single_vote_accept_precision": {
+  "shadow_opus": {
+   "n": 31,
+   "correct": 23,
+   "precision": 0.742
+  }
+ },
+ "merges": [
+  {
+   "id": 1930,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 1.0,
+   "low_differential": false,
+   "from_degree": 3,
+   "into_degree": 10,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.7
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.75
+    }
+   }
+  },
+  {
+   "id": 1931,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.6,
+   "ratified_override": "chain / group-cap release",
+   "detector": "write-dedup",
+   "score": 0.8,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.78
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.85
+    }
+   }
+  },
+  {
+   "id": 1932,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.8,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.714,
+   "low_differential": true,
+   "from_degree": 0,
+   "into_degree": 1,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.8
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": 1935,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 1,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.75
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.68
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.72
+    }
+   }
+  },
+  {
+   "id": 1936,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": false,
+   "from_degree": 1,
+   "into_degree": 1,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.72
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.65
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.8
+    }
+   }
+  },
+  {
+   "id": 1941,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 0,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.95
+    }
+   }
+  },
+  {
+   "id": 1943,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.75
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.8
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": 1944,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.7,
+   "ratified_override": null,
+   "detector": "dream-alias",
+   "score": 0.856,
+   "low_differential": true,
+   "from_degree": 0,
+   "into_degree": 7,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.78
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 1946,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 1,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.78
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.75
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.75
+    }
+   }
+  },
+  {
+   "id": 1947,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.65,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 1.0,
+   "low_differential": true,
+   "from_degree": 2,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 1952,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.72,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 2,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.62
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.5
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 1953,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.75,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 3,
+   "into_degree": 6,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": 1954,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.88,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 1,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.72
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 1955,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.6,
+   "ratified_override": "chain / group-cap release",
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 0,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.52
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.52
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 1960,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 1.0,
+   "low_differential": true,
+   "from_degree": 0,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.63
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 1962,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.55,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 1.0,
+   "low_differential": true,
+   "from_degree": 0,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.78
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.65
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.8
+    }
+   }
+  },
+  {
+   "id": 1966,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.75,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 3,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.55
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.5
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 1969,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "dream-alias",
+   "score": 0.872,
+   "low_differential": false,
+   "from_degree": 0,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.7
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.5
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2004,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.8,
+   "ratified_override": null,
+   "detector": "token-subset",
+   "score": 0.9892,
+   "low_differential": false,
+   "from_degree": 2,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.62
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.75
+    }
+   }
+  },
+  {
+   "id": 2007,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 2,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.7
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.7
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.8
+    }
+   }
+  },
+  {
+   "id": 2008,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.8,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": false,
+   "from_degree": 2,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.72
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.72
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.75
+    }
+   }
+  },
+  {
+   "id": 2015,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 3,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.75
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2016,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.62,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 0,
+   "into_degree": 15,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.62
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.7
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.75
+    }
+   }
+  },
+  {
+   "id": 2017,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 5,
+   "into_degree": 15,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.55
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 2022,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.833,
+   "low_differential": true,
+   "from_degree": 3,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.87
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.9
+    }
+   }
+  },
+  {
+   "id": 2024,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.65,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 3,
+   "into_degree": 15,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.55
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.52
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": 2027,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.75,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 7,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.55
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2028,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.88,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.55
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.5
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 2036,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.7,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 1,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.5
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.58
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2043,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.72,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.85
+    }
+   }
+  },
+  {
+   "id": 2049,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.7,
+   "ratified_override": null,
+   "detector": "dream-alias",
+   "score": 0.873,
+   "low_differential": false,
+   "from_degree": 0,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.75
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 2050,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.93,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.8,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.55
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": 2055,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.55,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 4,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.58
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2056,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.55,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 1,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.65
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.65
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.85
+    }
+   }
+  },
+  {
+   "id": 2057,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 1,
+   "into_degree": 13,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.68
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.72
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.75
+    }
+   }
+  },
+  {
+   "id": 2058,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 8,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.55
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.66
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.8
+    }
+   }
+  },
+  {
+   "id": 2059,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.65,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.62
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2060,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.65
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.68
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": 2066,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.78,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.93
+    }
+   }
+  },
+  {
+   "id": 2067,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.65,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 2,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.5
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 2112,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.65,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 5,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.7
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2113,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.5,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 1,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.65
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2121,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.62,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 4,
+   "into_degree": 4,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 2122,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.62,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 2,
+   "into_degree": 4,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.65
+    }
+   }
+  },
+  {
+   "id": 2123,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 0,
+   "into_degree": 4,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.55
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.5
+    }
+   }
+  },
+  {
+   "id": 2124,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.65
+    }
+   }
+  },
+  {
+   "id": 2130,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.7,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 0,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.58
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2131,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.7,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 1,
+   "into_degree": 4,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.65
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.65
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2137,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.55,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 1.0,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.5
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.55
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 2138,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.5
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.7
+    }
+   }
+  },
+  {
+   "id": 2143,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.82,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 4,
+   "into_degree": 6,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.62
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 2145,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.6,
+   "ratified_override": "chain / group-cap release",
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 1,
+   "into_degree": 6,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.68
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.62
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.75
+    }
+   }
+  },
+  {
+   "id": 2157,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 0,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.65
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.6
+    }
+   }
+  },
+  {
+   "id": 2212,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.95,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.6,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.55
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.55
+    }
+   }
+  },
+  {
+   "id": 2215,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.85,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.833,
+   "low_differential": true,
+   "from_degree": 0,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.88
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.95
+    }
+   }
+  },
+  {
+   "id": 2217,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.82,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 1.0,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 2,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.53
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.5
+    }
+   }
+  },
+  {
+   "id": 2220,
+   "label": "reject",
+   "panel_verdict": "reject",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 13,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.75
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.7
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.85
+    }
+   }
+  },
+  {
+   "id": 2221,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 1,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.72
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.7
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.75
+    }
+   }
+  },
+  {
+   "id": 2222,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.6,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.667,
+   "low_differential": false,
+   "from_degree": 3,
+   "into_degree": 11,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.7
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.72
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.8
+    }
+   }
+  },
+  {
+   "id": 2226,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.7,
+   "ratified_override": null,
+   "detector": "dream-alias",
+   "score": 0.89,
+   "low_differential": false,
+   "from_degree": 0,
+   "into_degree": 10,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.65
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.72
+    }
+   }
+  },
+  {
+   "id": 2232,
+   "label": "accept",
+   "panel_verdict": "accept",
+   "panel_confidence": 0.9,
+   "ratified_override": null,
+   "detector": "write-dedup",
+   "score": 0.75,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 0,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.85
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.88
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.85
+    }
+   }
+  },
+  {
+   "id": 2275,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.55,
+   "ratified_override": null,
+   "detector": "token-subset",
+   "score": 0.9898,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 3,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "accept",
+     "confidence": 0.6
+    },
+    "opus_2nd": {
+     "verdict": "accept",
+     "confidence": 0.72
+    },
+    "fable": {
+     "verdict": "accept",
+     "confidence": 0.65
+    }
+   }
+  },
+  {
+   "id": 2279,
+   "label": "reject",
+   "panel_verdict": "relate",
+   "panel_confidence": 0.65,
+   "ratified_override": null,
+   "detector": "token-subset",
+   "score": 0.9781,
+   "low_differential": true,
+   "from_degree": 1,
+   "into_degree": 1,
+   "votes": {
+    "shadow_opus": {
+     "verdict": "reject",
+     "confidence": 0.78
+    },
+    "opus_2nd": {
+     "verdict": "reject",
+     "confidence": 0.7
+    },
+    "fable": {
+     "verdict": "reject",
+     "confidence": 0.8
+    }
+   }
+  }
+ ],
+ "junk": [
+  {
+   "pid": 1977,
+   "label": "delete",
+   "panel_confidence": 0.85,
+   "detector": "slot-key-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 3
+  },
+  {
+   "pid": 1994,
+   "label": "delete",
+   "panel_confidence": 0.9,
+   "detector": "list-artifact",
+   "degree": 2,
+   "facts": 0,
+   "lessons": 2
+  },
+  {
+   "pid": 1995,
+   "label": "delete",
+   "panel_confidence": 0.85,
+   "detector": "compound-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 1996,
+   "label": "delete",
+   "panel_confidence": 0.88,
+   "detector": "slot-key-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 1997,
+   "label": "keep",
+   "panel_confidence": 0.95,
+   "detector": "compound-artifact",
+   "degree": 0,
+   "facts": 3,
+   "lessons": 0
+  },
+  {
+   "pid": 1998,
+   "label": "delete",
+   "panel_confidence": 0.9,
+   "detector": "list-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 1999,
+   "label": "keep",
+   "panel_confidence": 0.95,
+   "detector": "slot-key-artifact",
+   "degree": 3,
+   "facts": 0,
+   "lessons": 0
+  },
+  {
+   "pid": 2000,
+   "label": "keep",
+   "panel_confidence": 0.97,
+   "detector": "slot-key-artifact",
+   "degree": 3,
+   "facts": 0,
+   "lessons": 0
+  },
+  {
+   "pid": 2001,
+   "label": "delete",
+   "panel_confidence": 0.7,
+   "detector": "slot-key-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 2103,
+   "label": "delete",
+   "panel_confidence": 0.92,
+   "detector": "list-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 2104,
+   "label": "keep",
+   "panel_confidence": 0.97,
+   "detector": "slot-key-artifact",
+   "degree": 6,
+   "facts": 0,
+   "lessons": 0
+  },
+  {
+   "pid": 2105,
+   "label": "delete",
+   "panel_confidence": 0.85,
+   "detector": "compound-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 2194,
+   "label": "keep",
+   "panel_confidence": 0.9,
+   "detector": "slot-key-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 0
+  },
+  {
+   "pid": 2195,
+   "label": "delete",
+   "panel_confidence": 0.9,
+   "detector": "list-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 2196,
+   "label": "keep",
+   "panel_confidence": 0.92,
+   "detector": "slot-key-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 0
+  },
+  {
+   "pid": 2197,
+   "label": "delete",
+   "panel_confidence": 0.9,
+   "detector": "list-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 2198,
+   "label": "delete",
+   "panel_confidence": 0.9,
+   "detector": "list-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 1
+  },
+  {
+   "pid": 2269,
+   "label": "keep",
+   "panel_confidence": 0.95,
+   "detector": "slot-key-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 0
+  },
+  {
+   "pid": 2271,
+   "label": "keep",
+   "panel_confidence": 0.92,
+   "detector": "slot-key-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 0
+  },
+  {
+   "pid": 2272,
+   "label": "keep",
+   "panel_confidence": 0.98,
+   "detector": "compound-artifact",
+   "degree": 1,
+   "facts": 0,
+   "lessons": 0
+  }
+ ],
+ "links": [
+  {
+   "id": 457,
+   "label": "reject",
+   "panel_confidence": 0.6,
+   "relation": "runs-on",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 26,
+   "had_co_mentions": true
+  },
+  {
+   "id": 458,
+   "label": "accept",
+   "panel_confidence": 0.85,
+   "relation": "runs-on",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 2,
+   "dst_degree": 26,
+   "had_co_mentions": true
+  },
+  {
+   "id": 459,
+   "label": "accept",
+   "panel_confidence": 0.7,
+   "relation": "runs-on",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 26,
+   "had_co_mentions": true
+  },
+  {
+   "id": 465,
+   "label": "reject",
+   "panel_confidence": 0.65,
+   "relation": "related-to",
+   "detector": "low-confidence dream edge",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 0,
+   "had_co_mentions": false
+  },
+  {
+   "id": 474,
+   "label": "accept",
+   "panel_confidence": 0.65,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 1,
+   "dst_degree": 122,
+   "had_co_mentions": true
+  },
+  {
+   "id": 475,
+   "label": "accept",
+   "panel_confidence": 0.65,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 1,
+   "dst_degree": 122,
+   "had_co_mentions": true
+  },
+  {
+   "id": 476,
+   "label": "accept",
+   "panel_confidence": 0.65,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 1,
+   "dst_degree": 122,
+   "had_co_mentions": true
+  },
+  {
+   "id": 482,
+   "label": "accept",
+   "panel_confidence": 0.65,
+   "relation": "depends-on",
+   "detector": "retyped from related-to on 1 shared note(s)",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 0,
+   "had_co_mentions": true
+  },
+  {
+   "id": 498,
+   "label": "accept",
+   "panel_confidence": 0.6,
+   "relation": "superseded-by",
+   "detector": "retyped from related-to on 1 shared note(s)",
+   "retype_relation": null,
+   "src_degree": 4,
+   "dst_degree": 8,
+   "had_co_mentions": true
+  },
+  {
+   "id": 509,
+   "label": "reject",
+   "panel_confidence": 0.6,
+   "relation": "uses",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 14,
+   "dst_degree": 1,
+   "had_co_mentions": false
+  },
+  {
+   "id": 512,
+   "label": "accept",
+   "panel_confidence": 0.7,
+   "relation": "stores-data-in",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 14,
+   "dst_degree": 0,
+   "had_co_mentions": true
+  },
+  {
+   "id": 514,
+   "label": "reject",
+   "panel_confidence": 0.7,
+   "relation": "runs-on",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 14,
+   "had_co_mentions": true
+  },
+  {
+   "id": 525,
+   "label": "accept",
+   "panel_confidence": 0.6,
+   "relation": "uses",
+   "detector": "retyped from related-to on 4 shared note(s)",
+   "retype_relation": null,
+   "src_degree": 8,
+   "dst_degree": 8,
+   "had_co_mentions": true
+  },
+  {
+   "id": 535,
+   "label": "reject",
+   "panel_confidence": 0.85,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 24,
+   "dst_degree": 3,
+   "had_co_mentions": true
+  },
+  {
+   "id": 544,
+   "label": "reject",
+   "panel_confidence": 0.7,
+   "relation": "uses",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 1,
+   "dst_degree": 9,
+   "had_co_mentions": true
+  },
+  {
+   "id": 546,
+   "label": "reject",
+   "panel_confidence": 0.55,
+   "relation": "runs-on",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 2,
+   "dst_degree": 12,
+   "had_co_mentions": true
+  },
+  {
+   "id": 547,
+   "label": "reject",
+   "panel_confidence": 0.55,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 2,
+   "dst_degree": 2,
+   "had_co_mentions": true
+  },
+  {
+   "id": 548,
+   "label": "accept",
+   "panel_confidence": 0.75,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 2,
+   "dst_degree": 5,
+   "had_co_mentions": true
+  },
+  {
+   "id": 549,
+   "label": "accept",
+   "panel_confidence": 0.7,
+   "relation": "uses",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 12,
+   "dst_degree": 2,
+   "had_co_mentions": true
+  },
+  {
+   "id": 556,
+   "label": "reject",
+   "panel_confidence": 0.6,
+   "relation": "configures",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 6,
+   "had_co_mentions": true
+  },
+  {
+   "id": 557,
+   "label": "accept",
+   "panel_confidence": 0.7,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 6,
+   "had_co_mentions": true
+  },
+  {
+   "id": 558,
+   "label": "accept",
+   "panel_confidence": 0.65,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 1,
+   "dst_degree": 6,
+   "had_co_mentions": true
+  },
+  {
+   "id": 564,
+   "label": "accept",
+   "panel_confidence": 0.8,
+   "relation": "hosts",
+   "detector": "retyped from related-to on 1 shared note(s)",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 2,
+   "had_co_mentions": true
+  },
+  {
+   "id": 569,
+   "label": "reject",
+   "panel_confidence": 0.85,
+   "relation": "uses",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 48,
+   "dst_degree": 0,
+   "had_co_mentions": true
+  },
+  {
+   "id": 570,
+   "label": "accept",
+   "panel_confidence": 0.9,
+   "relation": "tests",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 7,
+   "had_co_mentions": true
+  },
+  {
+   "id": 571,
+   "label": "accept",
+   "panel_confidence": 0.85,
+   "relation": "tests",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 1,
+   "dst_degree": 0,
+   "had_co_mentions": true
+  },
+  {
+   "id": 573,
+   "label": "accept",
+   "panel_confidence": 0.75,
+   "relation": "configures",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 3,
+   "dst_degree": 5,
+   "had_co_mentions": true
+  },
+  {
+   "id": 574,
+   "label": "reject",
+   "panel_confidence": 0.55,
+   "relation": "uses",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 5,
+   "dst_degree": 2,
+   "had_co_mentions": true
+  },
+  {
+   "id": 575,
+   "label": "reject",
+   "panel_confidence": 0.55,
+   "relation": "configures",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 2,
+   "dst_degree": 5,
+   "had_co_mentions": true
+  },
+  {
+   "id": 577,
+   "label": "accept",
+   "panel_confidence": 0.65,
+   "relation": "uses",
+   "detector": "retyped from related-to on 1 shared note(s)",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 1,
+   "had_co_mentions": true
+  },
+  {
+   "id": 579,
+   "label": "accept",
+   "panel_confidence": 0.9,
+   "relation": "part-of",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 1,
+   "dst_degree": 1,
+   "had_co_mentions": true
+  },
+  {
+   "id": 585,
+   "label": "retype",
+   "panel_confidence": 0.55,
+   "relation": "runs-on",
+   "detector": "cross-project",
+   "retype_relation": "hosts",
+   "src_degree": 1,
+   "dst_degree": 9,
+   "had_co_mentions": true
+  },
+  {
+   "id": 592,
+   "label": "accept",
+   "panel_confidence": 0.8,
+   "relation": "hosts",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 9,
+   "dst_degree": 11,
+   "had_co_mentions": true
+  },
+  {
+   "id": 600,
+   "label": "accept",
+   "panel_confidence": 0.9,
+   "relation": "part-of",
+   "detector": "retyped from related-to on 4 shared note(s)",
+   "retype_relation": null,
+   "src_degree": 0,
+   "dst_degree": 8,
+   "had_co_mentions": true
+  },
+  {
+   "id": 603,
+   "label": "reject",
+   "panel_confidence": 0.55,
+   "relation": "part-of",
+   "detector": "retyped from related-to on 3 shared note(s)",
+   "retype_relation": null,
+   "src_degree": 3,
+   "dst_degree": 1,
+   "had_co_mentions": true
+  },
+  {
+   "id": 605,
+   "label": "accept",
+   "panel_confidence": 0.75,
+   "relation": "depends-on",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 4,
+   "dst_degree": 2,
+   "had_co_mentions": true
+  },
+  {
+   "id": 608,
+   "label": "accept",
+   "panel_confidence": 0.8,
+   "relation": "depends-on",
+   "detector": "cross-project",
+   "retype_relation": null,
+   "src_degree": 1,
+   "dst_degree": 3,
+   "had_co_mentions": true
+  }
+ ],
+ "candidates": [
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9919
+  },
+  {
+   "label": "propose",
+   "relation": "runs-on",
+   "panel_confidence": 0.6,
+   "similarity": 0.9859
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9857
+  },
+  {
+   "label": "propose",
+   "relation": "implements",
+   "panel_confidence": 0.6,
+   "similarity": 0.9832
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9831
+  },
+  {
+   "label": "propose",
+   "relation": "related-to",
+   "panel_confidence": 0.6,
+   "similarity": 0.9823
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.9817
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.7,
+   "similarity": 0.9809
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.9808
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.55,
+   "similarity": 0.9806
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9805
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.55,
+   "similarity": 0.9801
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.55,
+   "similarity": 0.98
+  },
+  {
+   "label": "propose",
+   "relation": "configures",
+   "panel_confidence": 0.6,
+   "similarity": 0.98
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.7,
+   "similarity": 0.9796
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.9796
+  },
+  {
+   "label": "propose",
+   "relation": "uses",
+   "panel_confidence": 0.7,
+   "similarity": 0.9794
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.7,
+   "similarity": 0.9789
+  },
+  {
+   "label": "propose",
+   "relation": "uses",
+   "panel_confidence": 0.7,
+   "similarity": 0.9787
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9784
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9782
+  },
+  {
+   "label": "propose",
+   "relation": "related-to",
+   "panel_confidence": 0.55,
+   "similarity": 0.9781
+  },
+  {
+   "label": "propose",
+   "relation": "implements",
+   "panel_confidence": 0.6,
+   "similarity": 0.9779
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.7,
+   "similarity": 0.9777
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.9769
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.9766
+  },
+  {
+   "label": "propose",
+   "relation": "part-of",
+   "panel_confidence": 0.9,
+   "similarity": 0.976
+  },
+  {
+   "label": "propose",
+   "relation": "implements",
+   "panel_confidence": 0.6,
+   "similarity": 0.9758
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.7,
+   "similarity": 0.9744
+  },
+  {
+   "label": "propose",
+   "relation": "implements",
+   "panel_confidence": 0.75,
+   "similarity": 0.9744
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9743
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.85,
+   "similarity": 0.9741
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.974
+  },
+  {
+   "label": "leave",
+   "relation": null,
+   "panel_confidence": 0.8,
+   "similarity": 0.9739
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9737
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9736
+  },
+  {
+   "label": "propose",
+   "relation": "hosts",
+   "panel_confidence": 0.65,
+   "similarity": 0.9733
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.55,
+   "similarity": 0.9732
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.9731
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.9731
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.5,
+   "similarity": 0.9731
+  },
+  {
+   "label": "dismiss",
+   "relation": null,
+   "panel_confidence": 0.7,
+   "similarity": 0.9726
+  }
+ ],
+ "curation": [
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "b",
+   "panel_confidence": 0.85,
+   "similarity": 0.8794
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "a",
+   "panel_confidence": 0.65,
+   "similarity": 0.8792
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "b",
+   "panel_confidence": 0.72,
+   "similarity": 0.8742
+  },
+  {
+   "store": "lesson",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.8735
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "a",
+   "panel_confidence": 0.62,
+   "similarity": 0.8693
+  },
+  {
+   "store": "lesson",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.6,
+   "similarity": 0.8657
+  },
+  {
+   "store": "lesson",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.65,
+   "similarity": 0.8603
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "b",
+   "panel_confidence": 0.75,
+   "similarity": 0.8594
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "b",
+   "panel_confidence": 0.7,
+   "similarity": 0.8579
+  },
+  {
+   "store": "lesson",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.55,
+   "similarity": 0.8566
+  },
+  {
+   "store": "lesson",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.85,
+   "similarity": 0.8558
+  },
+  {
+   "store": "lesson",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.75,
+   "similarity": 0.8514
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "b",
+   "panel_confidence": 0.82,
+   "similarity": 0.8508
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "a",
+   "panel_confidence": 0.78,
+   "similarity": 0.8507
+  },
+  {
+   "store": "lesson",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.85,
+   "similarity": 0.8497
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "b",
+   "panel_confidence": 0.85,
+   "similarity": 0.8478
+  },
+  {
+   "store": "lesson",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.92,
+   "similarity": 0.8459
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "a",
+   "panel_confidence": 0.7,
+   "similarity": 0.8452
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "a",
+   "panel_confidence": 0.88,
+   "similarity": 0.8419
+  },
+  {
+   "store": "lesson",
+   "label": "duplicate",
+   "keep": "a",
+   "panel_confidence": 0.7,
+   "similarity": 0.8413
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.9259
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.88,
+   "similarity": 0.9191
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.9138
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.8944
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.95,
+   "similarity": 0.8942
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.96,
+   "similarity": 0.8807
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.8717
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.8668
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.96,
+   "similarity": 0.866
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.8643
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.8632
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.96,
+   "similarity": 0.8628
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.8576
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.96,
+   "similarity": 0.8556
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.96,
+   "similarity": 0.8505
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.9,
+   "similarity": 0.8483
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.96,
+   "similarity": 0.8473
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.96,
+   "similarity": 0.8467
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.97,
+   "similarity": 0.8453
+  },
+  {
+   "store": "world",
+   "label": "distinct",
+   "keep": null,
+   "panel_confidence": 0.96,
+   "similarity": 0.8433
+  }
+ ]
+}

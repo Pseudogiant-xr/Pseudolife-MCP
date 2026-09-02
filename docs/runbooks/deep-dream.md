@@ -4,6 +4,59 @@ Manual, full-corpus graph consolidation. Writes touch the graph only
 (cortex/MIRAS untouched); the lesson and world stores are additionally
 *listed* for curation (cross-key duplicates), never written.
 
+## 0. What runs by itself
+
+Since 2026-09-02 the sweep timer works every queue this runbook describes
+before a human or an agent session ever looks at it, one bounded batch per
+queue per tick (`memory.deep_dream.judge_batch`), each mode-gated:
+
+| queue | knob | what `auto` applies |
+|---|---|---|
+| merge proposals | `judge_mode` (`off` / `shadow` / `auto-reject` / `auto`) | single reject >= 0.8; two-vote reject (second opinion) >= 0.7 mean; `auto` only: two-vote accept on a non-`low_differential` row >= 0.6 mean, and only when the second opinion came from a different model (`judge_second_model`) |
+| link proposals | `link_judge_mode` | accept >= `link_accept_min_confidence` becomes a live edge, `decided_by='dream-judge'`; reject >= `link_reject_min_confidence`; a retype is recorded (`judge_relation`) for a reviewer to apply |
+| junk proposals | `junk_judge_mode` | keep >= `junk_keep_min_confidence`; delete >= `junk_delete_min_confidence` only under the evidence bar (degree <= `junk_max_auto_degree`, at most one fact slot) |
+| lesson / world duplicates | `curation_judge_mode` | `auto-distinct`: the reversible dismissal; `auto`: also forget the losing slot after folding the carry-over into the surviving lesson |
+| link candidates (Step C) | `candidate_judge_mode` (`off` / `shadow` / `auto`) | one slice per tick after each deep apply: `propose` files an edge proposal (source `deep-dream-judge`), `dismiss` marks the pair distinct (for the merge analyzer too); every judged pair is memoised for `candidate_rejudge_days` |
+
+**Turning it all off:** `memory.deep_dream.judges_enabled: false` stops
+every judge stage in one move (the mechanical tick keeps running;
+`analyzer_file_duplicates` and `orphan_sweep` have their own switches, and
+`dream.enabled: false` stops the sweep timer but not a manual deep apply).
+A judge that is about to delete or fold writes the graph snapshot first
+(the snapshot covers the five graph tables only — a curation `auto` forget
+removes a lesson/world row the snapshot does not hold, which is one reason
+that mode ships off and is recommended against until forgets retire
+instead of delete); each judge applies at most one `judge_batch` slice per
+tick, which is also the rate limit. Merge rows judged before this build
+carry the judge's CONFIGURED model name; second opinions stamp the SERVED
+name, so the distinct-model check also refuses a second opinion from the
+same extractor object or the same configured name — a dated served id for
+one physical model cannot pass as a second model. **Day-one behaviour on an existing bank:** with
+`judge_mode: auto-reject` already in `config.yaml` (the live default since
+2026-08-30) and `judge_second_opinion` defaulting on, the reject gate
+widens from single-vote >= 0.8 to ALSO two agreeing votes at mean >= 0.7
+without any config edit — measured 8/8 on the 2026-09-02 rows — and a
+wrong auto-reject also writes `dismissed_pairs`, which has no expiry and
+no un-dismiss route (a SQL delete of the row is the only undo). Read the
+orphan census before switching the sweep on: `memory_dream(action="deep")`
+reports `would_orphan_count` / `would_orphan`.
+
+Every verdict is recorded on the row (`judge` / `judge2` blocks in the
+review payloads; `curation_judgments` for slot pairs) whatever the mode, so
+what is left pending is exactly what the judges could not settle: below-gate
+confidence, a `split` second opinion, a `low_differential` accept, a junk
+delete above the evidence bar. The apply pass also files the Console's live
+analyzer duplicate findings into these queues (`analyzer_file_duplicates`)
+and — once you switch it on — deletes week-old entities with no evidence
+and no mention (`orphan_sweep`, off by default, at most
+`orphan_max_per_apply` per pass, audited `dream-auto` / `deleted`). A
+curation verdict memoised under a lower mode is not applied when you raise
+the mode; the pair is re-judged after `curation_rejudge_days`. The measured
+floor for
+each judge is `evals/queue_judge_ladder.py` over
+`evals/results/queue-judge-panel-20260902.json`; a mode is only flipped to
+`auto` where that artifact supports it (see the CHANGELOG entry).
+
 ## 1. Preview (no writes)
 Call `memory_dream(action="deep")` (dry-run by default). Review:
 - `rescored` — agent edges whose confidence will change.
@@ -149,6 +202,11 @@ confirm-gated "Mark distinct" button.
 
 ## 4. Confirm in Atlas
 Open Atlas Review → `proposed_link` findings → accept (promotes to a real edge)
-or reject, per item. Nothing reaches `edges`/recall until you accept. The
-"recent merge decisions" list under the queue shows what the model applied or
-rejected in step 3b (decided_by=agent), newest first.
+or reject, per item. With `link_judge_mode: auto` the sweep has already
+settled every link whose verdict cleared its gate; what remains carries the
+link judge's `judge` block (verdict, confidence, note, and the corrected
+relation of a retype) beside the evidence. Nothing reaches `edges`/recall
+until a verdict — yours, an agent's, or the judge's — accepts it. The
+"recent merge decisions" list under the queue shows what was applied or
+rejected in step 3b (decided_by=agent, or dream-judge for the sweep's own
+verdicts), newest first.

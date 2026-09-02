@@ -276,19 +276,103 @@ KNOBS: list[dict[str, Any]] = [
     # Read from service.config on every sweep batch (deep_dream_judge).
     {"path": "memory.deep_dream.judge_mode", "group": "Deep dream",
      "label": "Step-C merge judge", "type": "enum",
-     "options": ["off", "shadow", "auto-reject"], "default": "shadow",
+     "options": ["off", "shadow", "auto-reject", "auto"], "default": "shadow",
      "restart": False,
      "help": "How the autonomous Step-C judge handles pending merge "
              "proposals: \"shadow\" records verdicts without applying them; "
              "\"auto-reject\" additionally applies reject verdicts at/above "
-             "the confidence gate (judge_reject_min_confidence, 0.8 — "
-             "accepts are never auto-applied). Caveat: auto-reject is only "
-             "measured-safe on an Opus-class judge endpoint (live precision "
-             "1.000, evals/results/judge-shadow-live-20260821.json); the "
+             "the confidence gate (judge_reject_min_confidence, 0.8) and, "
+             "with the second opinion on, two agreeing rejects at mean >= "
+             "judge_reject_min_confidence_2 (0.7); \"auto\" additionally "
+             "folds a pair when two independent accepts agree on "
+             "non-low-differential evidence at mean >= "
+             "judge_accept_min_confidence (0.6) and only when the two "
+             "opinions come from different models (judge_second_model) — "
+             "the only path that ever auto-applies an accept (6/6 on the "
+             "2026-09-02 panel, evals/results/queue-judge-panel-20260902.json"
+             "). Caveat: both "
+             "auto modes are only measured-safe on an Opus-class judge "
+             "endpoint (live auto-reject precision 1.000, "
+             "evals/results/judge-shadow-live-20260821.json); the "
              "2026-08-16 judge ladder shows weaker judges mis-reject with "
              "confident scores (local Qwen 0.918, confidence "
              "uninformative), so leave \"shadow\" unless the dream "
              "extractor or judge_url resolves to an Opus-class model."},
+    {"path": "memory.deep_dream.judges_enabled", "group": "Deep dream",
+     "label": "Review-queue judges (all)", "type": "bool", "default": True,
+     "restart": False,
+     "help": "The one switch for every judge stage (merge, link, junk, "
+             "store-curation, candidates): off = no model verdicts at all, "
+             "the mechanical tick keeps running. The two apply-time "
+             "mechanics keep their own switches (analyzer_file_duplicates, "
+             "orphan_sweep)."},
+    {"path": "memory.deep_dream.judge_second_opinion", "group": "Deep dream",
+     "label": "Merge judge second opinion", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Re-judge a pending merge proposal once more in a fresh batch "
+             "(optionally judge_second_model) after its first verdict sat "
+             "below the single-vote gate; the two-vote gates above apply "
+             "only when this is on."},
+    {"path": "memory.deep_dream.link_judge_mode", "group": "Deep dream",
+     "label": "Link judge", "type": "enum",
+     "options": ["off", "shadow", "auto"], "default": "shadow",
+     "restart": False,
+     "help": "Autonomous verdicts on pending link proposals (schema v36): "
+             "\"shadow\" records; \"auto\" promotes accept verdicts "
+             "at/above link_accept_min_confidence (0.8) to live edges and "
+             "rejects at/above link_reject_min_confidence (0.8); a retype "
+             "is recorded with its corrected relation but never auto-written "
+             "(first ladder: retype 0/1). Edges are "
+             "reversible (memory_graph_unrelate), which is why this queue "
+             "may run auto; measured per arm by evals/queue_judge_ladder.py."},
+    {"path": "memory.deep_dream.junk_judge_mode", "group": "Deep dream",
+     "label": "Junk judge", "type": "enum",
+     "options": ["off", "shadow", "auto"], "default": "shadow",
+     "restart": False,
+     "help": "Autonomous verdicts on the evidence-bearing junk proposals the "
+             "zero-structure auto-delete skips: \"auto\" keeps at/above "
+             "junk_keep_min_confidence (0.8) and deletes at/above "
+             "junk_delete_min_confidence (0.85) ONLY under the evidence bar "
+             "(degree <= junk_max_auto_degree, at most one fact slot); "
+             "richer nodes stay pending with the verdict attached."},
+    {"path": "memory.deep_dream.curation_judge_mode", "group": "Deep dream",
+     "label": "Store-curation judge", "type": "enum",
+     "options": ["off", "shadow", "auto-distinct", "auto"], "default": "shadow",
+     "restart": False,
+     "help": "Autonomous verdicts on the lesson/world duplicate listings: "
+             "\"auto-distinct\" applies distinct verdicts (a reversible "
+             "dismissal) at/above curation_distinct_min_confidence (0.8); "
+             "\"auto\" additionally forgets the losing slot of a duplicate "
+             "verdict at/above curation_forget_min_confidence (0.9) after "
+             "folding the judge's carry-over into the survivor (lessons)."},
+    {"path": "memory.deep_dream.candidate_judge_mode", "group": "Deep dream",
+     "label": "Step-C candidate judge", "type": "enum",
+     "options": ["off", "shadow", "auto"], "default": "off",
+     "restart": False,
+     "help": "Once per deep apply, judge the dream's link CANDIDATES: "
+             "\"shadow\" logs the verdict tally; \"auto\" files proposals "
+             "(then settled by the link judge) or dismisses co-mention "
+             "pairs, at/above candidate_min_confidence (0.6). A dismissal "
+             "marks the pair distinct for the merge analyzer too, so the "
+             "prompt leaves same-referent pairs alone rather than "
+             "dismissing them."},
+    {"path": "memory.deep_dream.analyzer_file_duplicates", "group": "Deep dream",
+     "label": "File analyzer duplicates", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Each deep apply files the Console's live duplicate findings "
+             "into the merge queue (file/concept pairs into the link queue as "
+             "implements), so the judges see them; they were never filed "
+             "anywhere before 2026-09-02."},
+    {"path": "memory.deep_dream.orphan_sweep", "group": "Deep dream",
+     "label": "Unreachable-orphan sweep", "type": "bool", "default": False,
+     "restart": False,
+     "help": "Each deep apply deletes entities that carry no evidence at all "
+             "(no edge — superseded included —, fact, lesson, alias, scope, "
+             "proposal or mentioning entry) once older than "
+             "orphan_min_age_days (7), at most orphan_max_per_apply (50) per "
+             "pass. Off by default: the one destructive switch that would "
+             "fire on the first apply after an upgrade. Audited as "
+             "dream-auto / deleted."},
     # ── Extractor ──────────────────────────────────────────────────────────
     # All live: build_extractor() constructs the client fresh on every dream
     # invocation from service.config.

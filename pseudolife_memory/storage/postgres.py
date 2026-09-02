@@ -1158,6 +1158,27 @@ class PostgresStorage:
                 "DELETE FROM entities WHERE id = %s RETURNING id", (entity_id,)).fetchone()
         return row is not None
 
+    def delete_entity_audited(self, entity_id: int, display: str, status: str,
+                              reason: str, decided_by: str, now: float) -> bool:
+        """``delete_entity`` plus its ``merge_decisions`` audit row in ONE
+        transaction — an unattended deletion whose audit row a crash could
+        separate from the delete would be an invisible deletion."""
+        with self._txn():
+            for tbl in ("facts", "lessons"):
+                self.conn.execute(f"UPDATE {tbl} SET entity_id = NULL WHERE entity_id = %s", (entity_id,))
+                self.conn.execute(f"UPDATE {tbl} SET object_entity_id = NULL WHERE object_entity_id = %s", (entity_id,))
+            row = self.conn.execute(
+                "DELETE FROM entities WHERE id = %s RETURNING id", (entity_id,)).fetchone()
+            if row is None:
+                return False
+            self.conn.execute(
+                "INSERT INTO merge_decisions "
+                "(proposal_id, entity_display, into_display, status, score, "
+                " reason, decided_by, decided_at) "
+                "VALUES (NULL, %s, NULL, %s, NULL, %s, %s, %s)",
+                (display, status, reason, decided_by, now))
+        return True
+
     def merge_entity(self, from_id: int, into_id: int) -> bool:
         """Fold `from` into `into`: drop edges that would duplicate or self-loop,
         re-point the rest, re-point fact/lesson refs, carry aliases + sources,
@@ -1609,33 +1630,95 @@ class PostgresStorage:
 
     def pending_proposals(self) -> list[dict]:
         cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
-                "rationale", "source", "created_at", "status")
+                "rationale", "source", "created_at", "status",
+                "judge_verdict", "judge_confidence", "judge_note",
+                "judge_model", "judged_at", "judge_relation")
         rows = self.conn.execute(
             "SELECT p.id, p.src_id, p.relation, p.dst_id, p.confidence, p.similarity, "
-            "       p.rationale, p.source, p.created_at, p.status, s.display, d.display "
+            "       p.rationale, p.source, p.created_at, p.status, "
+            "       p.judge_verdict, p.judge_confidence, p.judge_note, "
+            "       p.judge_model, p.judged_at, p.judge_relation, "
+            "       s.display, d.display "
             "FROM edge_proposals p "
             "JOIN entities s ON s.id = p.src_id JOIN entities d ON d.id = p.dst_id "
             "WHERE p.status = 'pending' ORDER BY p.confidence DESC, p.id"
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:10]))
-            d["src"], d["dst"] = r[10], r[11]
+            d = dict(zip(cols, r[:16]))
+            d["src"], d["dst"] = r[16], r[17]
             out.append(d)
         return out
 
+    def set_proposal_judgment(self, proposal_id: int, *, verdict: str,
+                              confidence: float | None, note: str | None,
+                              model: str | None, relation: str | None,
+                              at: float) -> bool:
+        """Record the link judge's verdict on a PENDING edge proposal (an
+        opinion, not a decision — schema v35 mirrors the v30 merge
+        contract). ``relation`` is the corrected relation of a retype."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE edge_proposals SET judge_verdict=%s, "
+                "judge_confidence=%s, judge_note=%s, judge_model=%s, "
+                "judged_at=%s, judge_relation=%s "
+                "WHERE id=%s AND status='pending'",
+                (verdict, confidence, note, model, at, relation, proposal_id))
+        return cur.rowcount > 0
+
+    def record_curation_judgment(self, store: str, a_key: str, b_key: str, *,
+                                 verdict: str, keep: str | None,
+                                 fold: str | None, confidence: float | None,
+                                 note: str | None, model: str | None,
+                                 at: float) -> bool:
+        """Memo the store-curation judge's verdict on a lesson/world slot
+        pair (keys stored sorted, like dismissed_pairs); a re-judge
+        overwrites in place. Returns True once written."""
+        a, b = sorted((a_key, b_key))
+        with self._txn():
+            self.conn.execute(
+                "INSERT INTO curation_judgments (store, a_key, b_key, verdict, "
+                " keep, fold, confidence, note, model, judged_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (store, a_key, b_key) DO UPDATE SET "
+                " verdict = EXCLUDED.verdict, keep = EXCLUDED.keep, "
+                " fold = EXCLUDED.fold, confidence = EXCLUDED.confidence, "
+                " note = EXCLUDED.note, model = EXCLUDED.model, "
+                " judged_at = EXCLUDED.judged_at",
+                (store, a, b, verdict, keep, fold, confidence, note, model, at))
+        return True
+
+    def curation_judgments(self, store: str) -> dict[tuple[str, str], dict]:
+        """``{(a_key, b_key): {verdict, keep, fold, confidence, note, model,
+        judged_at}}`` for one store, keys sorted."""
+        rows = self.conn.execute(
+            "SELECT a_key, b_key, verdict, keep, fold, confidence, note, "
+            "model, judged_at FROM curation_judgments WHERE store = %s",
+            (store,)).fetchall()
+        return {(r[0], r[1]): {"verdict": r[2], "keep": r[3], "fold": r[4],
+                               "confidence": r[5], "note": r[6],
+                               "model": r[7], "judged_at": r[8]}
+                for r in rows}
+
     def get_proposal(self, proposal_id: int) -> dict | None:
         cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
-                "rationale", "source", "created_at", "status")
+                "rationale", "source", "created_at", "status", "decided_by",
+                "decided_at", "judge_verdict", "judge_confidence",
+                "judge_relation")
         r = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM edge_proposals WHERE id = %s", (proposal_id,)
         ).fetchone()
         return dict(zip(cols, r)) if r else None
 
-    def set_proposal_status(self, proposal_id: int, status: str) -> bool:
+    def set_proposal_status(self, proposal_id: int, status: str, *,
+                            decided_by: str | None = None,
+                            decided_at: float | None = None) -> bool:
         with self._txn():
             cur = self.conn.execute(
-                "UPDATE edge_proposals SET status = %s WHERE id = %s", (status, proposal_id))
+                "UPDATE edge_proposals SET status = %s, "
+                "decided_by = COALESCE(%s, decided_by), "
+                "decided_at = COALESCE(%s, decided_at) WHERE id = %s",
+                (status, decided_by, decided_at, proposal_id))
         return cur.rowcount > 0
 
     def insert_entity_proposal(self, kind: str, entity_id: int, into_id: int | None,
@@ -1682,11 +1765,15 @@ class PostgresStorage:
     def pending_entity_proposals(self) -> list[dict]:
         cols = ("id", "kind", "entity_id", "into_id", "score", "reason",
                 "status", "created_at", "judge_verdict", "judge_confidence",
-                "judge_note", "judge_model", "judged_at")
+                "judge_note", "judge_model", "judged_at",
+                "judge2_verdict", "judge2_confidence", "judge2_model",
+                "judged2_at")
         rows = self.conn.execute(
             "SELECT p.id, p.kind, p.entity_id, p.into_id, p.score, p.reason, p.status, "
             "       p.created_at, p.judge_verdict, p.judge_confidence, "
             "       p.judge_note, p.judge_model, p.judged_at, "
+            "       p.judge2_verdict, p.judge2_confidence, p.judge2_model, "
+            "       p.judged2_at, "
             "       e.display, i.display "
             "FROM entity_proposals p "
             "JOIN entities e ON e.id = p.entity_id "
@@ -1695,10 +1782,70 @@ class PostgresStorage:
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:13]))
-            d["entity"], d["into"] = r[13], r[14]
+            d = dict(zip(cols, r[:17]))
+            d["entity"], d["into"] = r[17], r[18]
             out.append(d)
         return out
+
+    def set_entity_proposal_second_judgment(self, proposal_id: int, *,
+                                            verdict: str,
+                                            confidence: float | None,
+                                            model: str | None, at: float,
+                                            note: str | None = None) -> bool:
+        """Record the merge judge's SECOND opinion on a still-pending row
+        (schema v35); ``note`` replaces the combined judge_note when given."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE entity_proposals SET judge2_verdict=%s, "
+                "judge2_confidence=%s, judge2_model=%s, judged2_at=%s, "
+                "judge_note = COALESCE(%s, judge_note) "
+                "WHERE id=%s AND status='pending'",
+                (verdict, confidence, model, at, note, proposal_id))
+        return cur.rowcount > 0
+
+    def entity_fact_rows(self, entity_id: int, canonical: str,
+                         limit: int = 3) -> list[tuple[str, str]]:
+        """``(attribute, value)`` of the current facts an entity carries,
+        by id or by name — evidence for the junk judge."""
+        rows = self.conn.execute(
+            "SELECT attribute, value FROM facts "
+            "WHERE (entity_id = %s OR entity_norm = %s) "
+            "  AND superseded_at IS NULL ORDER BY id LIMIT %s",
+            (entity_id, canonical, int(limit))).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def zero_evidence_entities(self, min_age_seconds: float) -> list[dict]:
+        """Entities carrying NO structural evidence — no edge (superseded
+        rows count: edge history is evidence), no current fact by id or by
+        cortex norm, no lesson reference, no alias, no scope, no proposal
+        on either side — created before ``now - min_age_seconds``. The
+        orphan sweep's candidate list; the service still checks the
+        entries for a mention before deleting."""
+        cutoff = time.time() - float(min_age_seconds)
+        rows = self.conn.execute(
+            "SELECT e.id, e.display, e.canonical, e.created_at FROM entities e "
+            "WHERE e.created_at < %s "
+            "  AND NOT EXISTS (SELECT 1 FROM edges x "
+            "                  WHERE x.src_id = e.id OR x.dst_id = e.id) "
+            "  AND NOT EXISTS (SELECT 1 FROM facts f "
+            "                  WHERE (f.entity_id = e.id OR f.object_entity_id = e.id "
+            "                         OR f.entity_norm = e.canonical) "
+            "                    AND f.superseded_at IS NULL) "
+            "  AND NOT EXISTS (SELECT 1 FROM lessons l "
+            "                  WHERE l.entity_id = e.id OR l.object_entity_id = e.id "
+            "                     OR l.entity_norm = e.canonical) "
+            "  AND NOT EXISTS (SELECT 1 FROM world_facts w "
+            "                  WHERE w.entity_norm = e.canonical "
+            "                    AND w.status = 'current') "
+            "  AND NOT EXISTS (SELECT 1 FROM entity_aliases a WHERE a.entity_id = e.id) "
+            "  AND NOT EXISTS (SELECT 1 FROM entity_sources s WHERE s.entity_id = e.id) "
+            "  AND NOT EXISTS (SELECT 1 FROM edge_proposals p "
+            "                  WHERE p.src_id = e.id OR p.dst_id = e.id) "
+            "  AND NOT EXISTS (SELECT 1 FROM entity_proposals q "
+            "                  WHERE q.entity_id = e.id OR q.into_id = e.id) "
+            "ORDER BY e.id", (cutoff,)).fetchall()
+        return [{"id": r[0], "display": r[1], "canonical": r[2],
+                 "created_at": r[3]} for r in rows]
 
     def set_entity_proposal_judgment(self, proposal_id: int, *,
                                      verdict: str, confidence: float | None,
@@ -1715,7 +1862,9 @@ class PostgresStorage:
         return cur.rowcount > 0
 
     def get_entity_proposal(self, proposal_id: int) -> dict | None:
-        cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status", "created_at")
+        cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status",
+                "created_at", "decided_by", "decided_at", "judge_verdict",
+                "judge_confidence", "judge2_verdict", "judge2_confidence")
         r = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM entity_proposals WHERE id = %s", (proposal_id,)
         ).fetchone()

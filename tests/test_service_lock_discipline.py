@@ -104,6 +104,12 @@ CALLER_HOLDS_LOCK = {
     "_auto_title_locked",
     "_resolve_or_create_entity",
     "_propose_write_dedup",
+    # 2026-09-02 deep-dream apply helpers: called inside deep_dream's
+    # locked apply block (analyzer duplicate filing, unreachable-orphan
+    # sweep).
+    "_file_analyzer_duplicates",
+    "_sweep_unreachable_orphans",
+    "_unreachable_orphans",
     # Alias retry list for a slot miss (one storage probe for shadowed
     # aliases) — reached only from cortex_lookup and chain(), both locked.
     "_alias_retry_names",
