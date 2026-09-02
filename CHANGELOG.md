@@ -94,6 +94,139 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Served text: the CAPTURE section names the two labels (funded by two
   trims; the block stays under its budget).
 
+### Fixed (2026-09-02 — fact_get reaches the facts of a merged-away name)
+
+- **`memory_fact_get` returned `record: null` for a fact `memory_recall` had
+  just shown under the same name.** A graph merge folds the absorbed node's
+  canonical into the survivor's aliases without rewriting the cortex
+  records written under it, and the recall side now attaches those records
+  to the surviving node (`graph_neighborhood`, the whole-graph view,
+  `wiki_page` — the other 2026-09-02 alias fix, which recorded this
+  asymmetry as its follow-up). But `cortex_lookup` retried a miss in one
+  direction only, alias → canonical: `memory_fact_get("pr-235", "branch")`
+  found the record while `memory_fact_get("PR #235", "branch")` — the name
+  recall displays it under — missed, so an agent following recall output
+  with the displayed name got a miss on the fact it was shown. `chain()`
+  (`memory_history` with no attribute, `GET /api/chain`, the Atlas
+  timeline) had the same shape: its slot-key set was the queried name plus
+  the canonical, never the node's aliases.
+  - On a scalar miss `cortex_lookup` now retries the canonical, then each
+    of the node's aliases, in that order — a direct hit still
+    short-circuits, and a canonical-keyed record still wins over an
+    alias-keyed one at the same attribute. The served record keeps its own
+    slot key (`entity: "pr-235"`), which is where its `source_entries`,
+    contenders and `correct_with` call live. The set-slot fallback walks
+    the same widened list, so a set written under the alias is served in
+    set shape via the canonical or any other alias.
+  - `chain()` adds the node's aliases to its slot-key set, so the
+    assertion / supersession history written under the folded name shows
+    under the surviving node whichever name reaches it.
+  - **An alias that is also another entity's canonical is skipped.** The
+    alias table can carry such a row (`memory_alias` never checks the
+    entities table), and `find_entity` resolves canonical-first, so that
+    alias never resolves to this node — a record under that name is the
+    other entity's. The retry drops it, exactly as `graph.alias_canonical_map`
+    drops it for the graph read surfaces, so lookup and attachment agree
+    instead of disagreeing in opposite directions. Found by the #244
+    pre-merge review, which reproduced `memory_fact_get("dev-box", "owner")`
+    serving `gpu-rig`'s fact after `memory_alias("dev-box", "gpu-rig")`
+    while `memory_graph("dev-box")` correctly attached nothing.
+  - **A lesson about an alias no longer mints a shadowing entity.**
+    `_link_lesson_graph` (the dream's `lesson_write`, fed by
+    `memory_outcome`'s `about`) upserted the task and object entities by
+    canonical with no alias check, so one lesson about `pr-235` after that
+    node was folded into `PR #235` minted a fresh `pr-235` canonical — from
+    then on the graph detached the surviving node's alias-keyed facts, and
+    a retry that did not skip shadowed aliases would have kept serving
+    them. Both entities now resolve through the alias table first
+    (`_resolve_or_create_entity`, the find-then-create graph writes use;
+    its exact-match slot-key fold now applies to lesson subjects too).
+    Pre-existing, but this pair of changes makes the alias table
+    load-bearing for serving, so it ships here.
+  - Cost: one `find_entity` call per miss plus, only when the node has
+    aliases, one indexed probe (`canonical_names_among`) — still no
+    per-alias storage query. The set-slot check runs `slot_kind` once per
+    name in the list, and `slot_kind` scans the record list for a slot
+    with neither a current scalar nor current members, so a miss on a
+    node with K aliases costs 1+K scans where it cost at most 2 —
+    microseconds at the live bank's size. Aliases are graph norms, so a
+    record whose entity `cortex._norm_key` keeps distinct from its graph
+    norm (`host:port` vs `host-port`) is still not reached this way, the
+    limit the canonical retry has always had.
+  - This widens the resolution surface the 2026-07-27 bank curation
+    trimmed: back then, leak-shaped aliases (`canonical-suffix`) let an
+    alias with no fact at an attribute silently serve the canonical's. The
+    reverse now holds as well — a canonical with no fact at an attribute
+    serves an alias's. For a genuine synonym that is the contract (the
+    alias IS the entity) and it is exactly what recall, `memory_graph` and
+    the dossier already display; a leak-shaped alias remains a curation
+    matter, not a lookup one.
+  - Not changed: `memory_fact_get`'s `contenders` and the empty-slot
+    `candidates` still key on the queried name (and, for candidates, its
+    canonical), slot-mode `memory_history(entity, attribute)` does no
+    alias resolution in either direction, and `memory_alias` still accepts
+    an alias equal to another entity's canonical — the shadow state stays
+    creatable by hand; refusing it, or treating it as a merge, is a tool
+    behaviour change for a separate decision.
+
+### Fixed (2026-09-02 — recall serves the facts of a merged-away name)
+
+- **`memory_recall`, `memory_graph`, and the Console dossier served a node
+  with `facts: []` when its cortex records had been written under an alias
+  of the node's canonical.** A graph merge folds the absorbed node's
+  canonical into the survivor's aliases without rewriting the records, so
+  every fact written under the old name stopped attaching:
+  `graph_neighborhood`, the seedless whole-graph view, and `wiki_page`
+  compared `norm_name(rec.entity)` to the node's canonical alone, while
+  `memory_fact_get` on the same name resolved it (`cortex_lookup` has been
+  alias-aware since 2026-06-14). Observed live on the production bank after
+  the #240 deploy: `memory_fact_get("pr-235", "branch")` returned the
+  current record with `entity_ref.canonical = "pr-#235"`, and
+  `memory_recall` listed the `pr-#235` node with no facts. Pre-existing —
+  not a #240 regression.
+  - Fact attachment now resolves each record's entity through the alias
+    table with `find_entity`'s precedence (canonical first, then alias):
+    one `alias → canonical` map per call, built from the graph the read
+    already loaded (`graph.alias_canonical_map`), never a per-record
+    storage query on the recall path. Exact-match semantics for names that
+    are neither canonical nor alias are unchanged, as are
+    `current_records()` order and the per-entity fact cap — an alias-keyed
+    fact now competes for that cap like any other fact on its node.
+  - `recall`'s `re_verify` annotation matches a served fact back to its
+    slot on the same alias-resolved entity the attachment used, so an
+    alias-keyed fact standing on corrected evidence carries the caution
+    through `memory_recall`'s default projection instead of losing it on
+    exactly the facts this change makes visible. The trace lookup still
+    keys on the record's own slot (`cortex._norm_key(rec.entity)`), which
+    is where the dream wrote it. The recall side of that key is a node's
+    display name, which a later display enrichment can leave normalizing to
+    neither canonical nor alias (`GND (Enshrouded server)` over `gnd`), so
+    it resolves canonical → alias → display; before, no fact on such a node
+    could carry the caution. Cost: one graph load per `recall` call for
+    the alias table (the same load `graph_neighborhood` makes per hop).
+  - The reverse direction — `memory_fact_get` on the node's display or
+    canonical searching the node's aliases, and `chain()` doing the same —
+    lands with #244 (the `### Fixed` block above), which also makes the two
+    sides agree on an alias that another entity's canonical shadows.
+
+### Changed (2026-09-02 — elevated autostart steps say where to elevate)
+- **`ops\install-shim-autostart.ps1`, `ops\install-codex-shim-autostart.ps1`
+  and the one-shot installer's retry hints now tell Windows users to open
+  the elevated PowerShell fresh from the Start menu — never to request the
+  UAC prompt from a shell inside Claude Desktop or another Store-packaged
+  app.** Task Scheduler refuses per-user logon-task registration from an
+  unelevated administrator account (probed: fresh task, Limited principal,
+  root folder and subfolder all denied), so the elevation itself stays; but
+  elevating from inside a packaged app leaves Windows' Application
+  Information service holding that app's container job, and the app's next
+  update then fails to launch ("Another program is currently using this
+  file") until a reboot — anthropics/claude-code#61635, reproduced on the
+  maintainer's box on 2026-09-02, most likely triggered by the Codex
+  installer having been elevated from a Claude Desktop session on
+  2026-08-31 (inferred from timing). `docs/guide/dreaming.md` carries the
+  same note; the
+  `.sh` twins (systemd `--user`) never needed elevation and are unchanged.
+
 ### Changed (2026-09-02 — the engram cross-index read in the retract direction)
 
 - **Correcting a memory now says what it put in doubt.** The dream derives

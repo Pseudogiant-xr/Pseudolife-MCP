@@ -3,6 +3,20 @@
 # Scheduler). (Install under pwsh 7 — the ternary below needs it; the
 # scheduled task itself runs fine under powershell.exe 5.1.)
 #
+# Task Scheduler refuses per-user task registration from an UNELEVATED
+# administrator account (Access is denied - probed 2026-09-02: fresh task,
+# Limited principal, root folder and a subfolder alike), so run this from
+# an ELEVATED PowerShell. Open that PowerShell fresh from the Start menu
+# ("Windows PowerShell" -> Run as administrator). Do NOT request the UAC
+# elevation from a shell running inside Claude Desktop or any other
+# Store-packaged app (Store-installed pwsh 7 included): Windows' Application
+# Information service then keeps a handle to that app's container job, and
+# the app's next update fails to launch ("Another program is currently
+# using this file") until a reboot - anthropics/claude-code#61635,
+# reproduced live 2026-09-02; the most likely trigger was the Codex twin
+# of this script being elevated from a Claude Desktop session on
+# 2026-08-31 (inferred from timing, not proven).
+#
 #   ops\install-shim-autostart.ps1              # default port 8082, v2 prompt, opus
 #   ops\install-shim-autostart.ps1 -Model claude-sonnet-5   # pick the served model
 #
@@ -83,7 +97,11 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
     -Settings $settings -Description "Claude extractor CLI shim (dream pass primary; E4B sidecar is fallback)" `
     -ErrorAction Stop | Out-Null
 if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
-    throw "task '$taskName' was not registered (run from an ELEVATED pwsh)"
+    throw ("task '$taskName' was not registered - Task Scheduler needs an ELEVATED " +
+           "PowerShell on administrator accounts. Open it fresh from the Start menu; " +
+           "never elevate from a shell inside Claude Desktop or another Store-packaged " +
+           "app (its next update then fails to launch until a reboot - " +
+           "anthropics/claude-code#61635).")
 }
 Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
 Write-Host "Registered + started '$taskName' ($Model, port $Port, log $LogFile)."

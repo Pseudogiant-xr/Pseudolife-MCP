@@ -4,6 +4,15 @@
 # (Install under pwsh 7 — the ternary below needs it; the scheduled task
 # itself runs fine under powershell.exe 5.1.)
 #
+# Needs an ELEVATED PowerShell (Task Scheduler refuses unelevated per-user
+# registration on administrator accounts). Open it fresh from the Start
+# menu - never request the UAC elevation from a shell inside Claude Desktop
+# or another Store-packaged app: that app's next update then fails to
+# launch until a reboot (anthropics/claude-code#61635; full note in
+# install-shim-autostart.ps1). This very installer, elevated from a Claude
+# Desktop session on 2026-08-31, is the most likely trigger of the
+# 2026-09-02 reproduction (inferred from timing, not proven).
+#
 #   ops\install-codex-shim-autostart.ps1                      # port 8086, terra
 #   ops\install-codex-shim-autostart.ps1 -Model gpt-5.6-sol   # pick the served model
 #
@@ -90,7 +99,11 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
     -Settings $settings -Description "Codex extractor CLI shim (dream pass primary; E4B sidecar is fallback)" `
     -ErrorAction Stop | Out-Null
 if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
-    throw "task '$taskName' was not registered (run from an ELEVATED pwsh)"
+    throw ("task '$taskName' was not registered - Task Scheduler needs an ELEVATED " +
+           "PowerShell on administrator accounts. Open it fresh from the Start menu; " +
+           "never elevate from a shell inside Claude Desktop or another Store-packaged " +
+           "app (its next update then fails to launch until a reboot - " +
+           "anthropics/claude-code#61635).")
 }
 Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
 Write-Host "Registered + started '$taskName' ($Model, port $Port, health-ttl ${HealthTtl}s, log $LogFile)."
