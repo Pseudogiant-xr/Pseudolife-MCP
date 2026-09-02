@@ -2454,6 +2454,45 @@ for _cid, _needle, _val, _stated in [
     CLAIMS.append(Claim(
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(LADDER_0902,),
         value=_val, stated=_stated, places=0))
+# The 2026-09-03 full-length-evidence rerun (same 63 rows, snippets
+# recovered at full length, judge cap 3000) — a NEGATIVE result that keeps
+# judge_snippet_max_chars at 240; every number the CHANGELOG cites for it,
+# plus the 2026-09-02 comparators, is read from the artifacts.
+LADDER_0903 = "evals/results/queue-judge-ladder-20260903-fulllen.json"
+
+
+def _ladder_0903(metric, field):
+    return lambda d: d["arms"]["opus-r2-fulllen"]["queues"]["merges"][metric][field]
+
+
+def _disagreeing_rows(arm):
+    return lambda d: sum(
+        1 for r in d["arms"][arm]["queues"]["merges"]["per_row"]
+        if len({v["verdict"] for v in r["votes"] if v}) > 1)
+
+
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("fulllen-accept-precision", "fell to 0.70", LADDER_0903,
+     _ladder_0903("accept_precision", "precision"), 0.70, 2),
+    ("fulllen-accept-precision-clipped", "from 0.85 on clipped", LADDER_0902,
+     _ladder("merges", "accept_precision", "precision"), 0.85, 2),
+    ("fulllen-two-vote-accept-n", "passed 6/7", LADDER_0903,
+     _ladder_0903("two_vote_accept_not_lowdiff", "n"), 7, 0),
+    ("fulllen-two-vote-accept-bad", "passed 6/7", LADDER_0903,
+     _ladder_0903("two_vote_accept_not_lowdiff", "bad"), 1, 0),
+    ("fulllen-two-vote-reject-n", "7/7 two-vote", LADDER_0903,
+     _ladder_0903("two_vote_reject", "n"), 7, 0),
+    ("fulllen-two-vote-reject-bad", "7/7 two-vote", LADDER_0903,
+     _ladder_0903("two_vote_reject", "bad"), 0, 0),
+    ("fulllen-disagreement", "6/63 rows", LADDER_0903,
+     _disagreeing_rows("opus-r2-fulllen"), 6, 0),
+    ("fulllen-disagreement-clipped", "2/63) — the delta", LADDER_0902,
+     _disagreeing_rows("opus-r2"), 2, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
 CLAIMS.append(Claim(
     id="queue-ladder-curation-keep-precision", doc=CHANGELOG,
     needle="precision was 0.5625", artifacts=(LADDER_0902,),

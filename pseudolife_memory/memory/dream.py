@@ -253,9 +253,18 @@ _JUDGE_SYSTEM_PROMPT = (
 
 def format_judge_proposal(p: dict) -> str:
     """One proposal rendered for the judge prompt. Shared with the ladder
-    harness so measurement and production serialize identically."""
+    harness so measurement and production serialize identically.
+
+    ``snippet_chars`` on the proposal caps each snippet (0 = unbounded);
+    absent, the frozen 240-char cap applies byte-for-byte, so every
+    published judge number keeps its exact prompt. The sweep stamps
+    ``deep_dream.judge_snippet_max_chars`` (2026-09-03)."""
+    raw = p.get("snippet_chars")
+    cap = 240 if raw is None else (max(0, int(raw)) or None)
+
     def _side(s: dict) -> str:
-        snips = "; ".join(str(x)[:240] for x in (s.get("snippets") or [])[:2])
+        snips = "; ".join((str(x)[:cap] if cap else str(x))
+                          for x in (s.get("snippets") or [])[:2])
         return (f"'{s.get('display', '?')}' (degree {s.get('degree', 0)}, "
                 f"scopes {s.get('scopes') or []})"
                 + (f" evidence: {snips}" if snips else " evidence: none"))

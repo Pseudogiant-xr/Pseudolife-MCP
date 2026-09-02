@@ -209,6 +209,13 @@ class ConsoleRoutes:
         g("/api/curation/duplicates", lambda q, b: svc.curation_duplicates())
         p("/api/curation/dismiss-duplicate", lambda q, b: svc.curation_dismiss_duplicate(
             b["store"], b["a_entity"], b["a_attribute"], b["b_entity"], b["b_attribute"]))
+        # Retire-not-delete (2026-09-03): what a forget retired, and the undo.
+        g("/api/curation/retired", lambda q, b: svc.curation_retired(
+            store=_s(q, "store"), limit=_i(q, "limit", 100)))
+        p("/api/lessons/restore", lambda q, b: svc.lesson_restore(
+            b["task"], b.get("aspect"), decided_by=_decided_by(b)))
+        p("/api/world/restore", lambda q, b: svc.world_restore(
+            b["entity"], b.get("attribute"), decided_by=_decided_by(b)))
         p("/api/graph/delete-entity", lambda q, b: svc.graph_delete_entity(b["entity"]))
         p("/api/graph/merge", lambda q, b: svc.graph_merge(b["from"], b["into"]))
         p("/api/graph/accept-proposal", lambda q, b: svc.graph_accept_proposal(b["id"]))

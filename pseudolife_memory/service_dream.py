@@ -615,6 +615,13 @@ class DreamOps:
                     b = self._resolve_or_create_entity(target)
                     if a["id"] == b["id"]:
                         continue                    # already aliased/merged
+                    # The name-keyed check above misses a display-enriched
+                    # entity (canonical 'gnd', display 'GND (Enshrouded
+                    # server)'); dismissed_pairs is keyed on STORED
+                    # canonicals, so re-check on the resolved rows.
+                    if tuple(sorted((a.get("canonical") or "",
+                                     b.get("canonical") or ""))) in dismissed:
+                        continue
                     frm, into = a["id"], b["id"]
                     if _evidence(frm) > _evidence(into):
                         frm, into = into, frm
@@ -2117,6 +2124,15 @@ class DreamOps:
             | {_nn(a) for als in g["aliases"].values() for a in als})
         junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree,
                                 known_norms=known_norms)
+        # Keep tombstones: a name whose junk proposal was rejected is a real
+        # referent by verdict — never re-filed, never auto-deleted, even
+        # after the entity churned and re-minted (the rejected proposal
+        # row CASCADEs away; the text-keyed tombstone does not).
+        from pseudolife_memory.service import _kept_junk_norms
+        kept = _kept_junk_norms(dismissed)
+        if kept:
+            _canon = {e["id"]: e["canonical"] for e in entities}
+            junk = [j for j in junk if _canon.get(j["entity_id"]) not in kept]
         # Junk-first routing: a junk-flagged side — this pass or a pending
         # proposal — belongs to the junk queue; neither a merge nor a
         # candidate slot should double-handle it.
@@ -2499,10 +2515,13 @@ class DreamOps:
             g["entities"], entries, traces,
             min_mentions=cfg.min_entity_mentions,
             max_fallback_mentions=cfg.max_fallback_mentions or None)
+        # Built at the JUDGE's cap, not the review surface's: the
+        # 2026-09-02 panel judged 305/309 merge snippets clipped to 240
+        # chars at build time and lost guidance in three folds.
         return self._enrich_merge_proposals(
             pending, g["entities"], g["edges"], entries, traces,
             mentions, scope_map, cfg.max_context_snippets,
-            cfg.snippet_max_chars, True, fact_counts=fact_counts)
+            cfg.judge_snippet_max_chars, True, fact_counts=fact_counts)
 
     @staticmethod
     def _model_name(ex, fallback: str | None = None) -> str:
@@ -2608,7 +2627,8 @@ class DreamOps:
                 enriched = self._judge_enrich(batch)
                 proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
                               "reason": e.get("reason"), "score": e.get("score"),
-                              "low_differential": e.get("low_differential")}
+                              "low_differential": e.get("low_differential"),
+                              "snippet_chars": cfg.judge_snippet_max_chars}
                              for i, e in enumerate(enriched)]
                 verdicts = ex2.judge_merges(proposals)
                 self._stamp_skipped(verdicts, proposals)
@@ -2660,9 +2680,6 @@ class DreamOps:
                             e["id"], decided_by="dream-judge")
                         if res.get("rejected"):
                             out["auto_rejected"] += 1
-                            self.graph_dismiss_duplicate(
-                                e["from"]["display"] or "",
-                                e["into"]["display"] or "")
                     elif (v1 == v2 == "accept" and cfg.judge_mode == "auto"
                             and e.get("low_differential") is False
                             and mean >= cfg.judge_accept_min_confidence):
@@ -2723,7 +2740,8 @@ class DreamOps:
                 enriched = self._judge_enrich(batch)
                 proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
                               "reason": e.get("reason"), "score": e.get("score"),
-                              "low_differential": e.get("low_differential")}
+                              "low_differential": e.get("low_differential"),
+                              "snippet_chars": cfg.judge_snippet_max_chars}
                              for i, e in enumerate(enriched)]
                 verdicts = ex.judge_merges(proposals)
                 self._stamp_skipped(verdicts, proposals)
@@ -2747,9 +2765,6 @@ class DreamOps:
                             e["id"], decided_by="dream-judge")
                         if res.get("rejected"):
                             out["auto_rejected"] += 1
-                            self.graph_dismiss_duplicate(
-                                e["from"]["display"] or "",
-                                e["into"]["display"] or "")
             out["pending_unjudged"] = max(0, len(first) - out["judged"])
             return out
         except Exception as exc:  # noqa: BLE001 — the judge must never kill the sweep
@@ -3120,7 +3135,8 @@ class DreamOps:
                 elif (v["verdict"] == "duplicate" and mode == "auto"
                         and conf >= cfg.curation_forget_min_confidence):
                     applied += bool(self._apply_slot_duplicate(
-                        store, c, v.get("keep"), v.get("fold")))
+                        store, c, v.get("keep"), v.get("fold"),
+                        reason=v.get("note") or None))
             return {"judged": judged, "applied": applied,
                     "pending_unjudged": max(0, len(todo) - judged),
                     "model": model, "mode": mode}
@@ -3129,10 +3145,13 @@ class DreamOps:
             return {"judged": 0, "error": str(exc)}
 
     def _apply_slot_duplicate(self, store: str, pair: dict, keep: str | None,
-                              fold: str | None) -> bool:
+                              fold: str | None, *,
+                              reason: str | None = None) -> bool:
         """Settle a ratified duplicate listing: fold the judge's carry-over
         into the surviving LESSON slot (world facts are cited values and
-        are never concatenated), then forget the loser."""
+        are never concatenated), then RETIRE the loser (``decided_by``
+        ``dream-judge``, the judge's note as the reason) — reversible
+        through ``lesson_restore`` / ``world_restore``."""
         if keep not in ("a", "b"):
             return False
         survivor = pair["a"] if keep == "a" else pair["b"]
@@ -3153,9 +3172,11 @@ class DreamOps:
                         about=rec.about, outcome=rec.outcome,
                         polarity=rec.polarity, confidence=rec.confidence,
                         origin="agent")
-            out = self.lesson_forget(loser["entity"], loser["attribute"])
+            out = self.lesson_forget(loser["entity"], loser["attribute"],
+                                     decided_by="dream-judge", reason=reason)
         else:
-            out = self.world_forget(loser["entity"], loser["attribute"])
+            out = self.world_forget(loser["entity"], loser["attribute"],
+                                    decided_by="dream-judge", reason=reason)
         return bool(out.get("removed"))
 
     # ── Step-C candidate judge (2026-09-02) ───────────────────────────────

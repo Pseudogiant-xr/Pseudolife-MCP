@@ -395,6 +395,35 @@ def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkey
     assert bad.get("error") == "store_src_dst_required"
 
 
+def test_graph_review_restore_slot_routes_to_service(tmp_path: Path, monkeypatch) -> None:
+    """The undo for a lesson/world forget over MCP (2026-09-03): ``src`` is
+    the retired "entity|attribute" key as listed by the retired listing, or
+    a bare entity to restore every retired aspect of it."""
+    mod = _reload(tmp_path, monkeypatch)
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        mod.service, "lesson_restore",
+        lambda task, aspect=None, **kw: calls.append(("lesson", task, aspect, kw))
+        or {"restored": 1})
+    monkeypatch.setattr(
+        mod.service, "world_restore",
+        lambda entity, attribute=None, **kw: calls.append(("world", entity, attribute, kw))
+        or {"restored": 1})
+    out = _invoke("memory_graph_review",
+                  {"action": "restore_slot", "store": "lesson",
+                   "src": "deploy-daemon|approach"})
+    assert out == {"restored": 1}
+    out = _invoke("memory_graph_review",
+                  {"action": "restore_slot", "store": "world", "src": "acme"})
+    assert out == {"restored": 1}
+    assert calls == [("lesson", "deploy-daemon", "approach", {"decided_by": "agent"}),
+                     ("world", "acme", None, {"decided_by": "agent"})]
+    bad = mod.memory_graph_review("restore_slot", store="fact", src="x|y")
+    assert bad.get("error") == "store_src_required"
+    bad = mod.memory_graph_review("restore_slot", store="lesson")
+    assert bad.get("error") == "store_src_required"
+
+
 # ── served policy text (2026-09-02) ───────────────────────────────────────
 
 def _descriptions(tmp_path: Path, monkeypatch) -> dict[str, str]:

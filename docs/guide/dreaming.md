@@ -645,7 +645,7 @@ edges and rejects the rest at their gates — edges are reversible, which is
 why this queue may run auto), the **junk judge** (`junk_judge_mode`; `auto`
 deletes only under an evidence bar), the **store-curation judge**
 (`curation_judge_mode`; `auto-distinct` applies the reversible dismissal,
-`auto` also forgets the losing duplicate slot after folding its carry-over
+`auto` also retires — never deletes — the losing duplicate slot after folding its carry-over
 into the survivor), and the **Step-C candidate judge**
 (`candidate_judge_mode`; files proposals and dismisses co-mention pairs once
 per deep apply). Two mechanical additions stop the queues refilling: each
