@@ -552,3 +552,30 @@ def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
     # The failure-mode hint names the PEP 668 cause and the recovery paths.
     assert "externally-managed" in sh
     assert "pipx" in _read("ops/preflight.sh")
+
+
+def test_elevated_autostart_steps_warn_against_elevating_inside_claude_desktop() -> None:
+    """Task Scheduler refuses per-user logon-task registration from an
+    unelevated administrator account (probed 2026-09-02: fresh task, Limited
+    principal, root folder and a subfolder all return Access is denied), so
+    the Windows autostart installers legitimately need an elevated
+    PowerShell. WHERE that elevation is requested matters: a UAC prompt
+    raised from a shell running inside Claude Desktop (or any Store-packaged
+    app such as Store-installed pwsh 7) leaves Windows' Application
+    Information service holding a handle to that app's container job, and
+    the app's next update then fails to launch ("Another program is
+    currently using this file") until a reboot — anthropics/claude-code
+    #61635, reproduced live on the maintainer's box 2026-09-02, most likely
+    triggered by the codex-shim autostart installer having been elevated
+    from a Desktop session on 2026-08-31 (inferred from timing).
+    Every place that tells the user to elevate must say to open the elevated
+    PowerShell fresh from the Start menu instead."""
+    for rel in ("ops/install-shim-autostart.ps1",
+                "ops/install-codex-shim-autostart.ps1",
+                "docs/guide/dreaming.md"):
+        text = _read(rel)
+        assert "inside Claude Desktop" in text, f"{rel}: missing the caveat"
+        assert "claude-code#61635" in text, f"{rel}: missing the issue reference"
+    # The one-shot installer only points at the autostart scripts, but its
+    # own retry hint is where a user actually copies the command from.
+    assert "inside Claude Desktop" in _read("ops/install.ps1")

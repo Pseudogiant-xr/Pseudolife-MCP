@@ -879,6 +879,7 @@ renders the real frontend against canned data:
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
 | Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
+| Write-time labels | `authority` (`directive` / `observation` / `quoted` — the speech act, orthogonal to the `origin` tier) and `distortion_tolerance` (`constraint` / `procedural` / `belief` / `preference` / `episodic`) on entries and facts, set at write time (explicit, or a deterministic heuristic under `auto`) and inherited through supersession unless restated. A `constraint` source is carried verbatim through the dream (with a post-dream guard) and pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` when the query names its entity; a `quoted` source is low-trust for the two-man rule (schema v35) |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
@@ -1147,6 +1148,45 @@ replacement, state transition), which still handle everything without
 slots. Slot extraction is deliberately precision-gated — about 0.6% of
 conversational turns yield one — so this path mostly serves deliberate,
 fact-shaped writes, and its reach grows with extraction quality.
+
+### Who said it, and how exactly must it survive? (schema v35)
+
+Two labels ride on every entry and every fact, set at write time and
+inherited through supersession unless a later write restates them:
+
+- **`authority`** is the *speech act* of the text — `directive` (an
+  instruction to the agent), `observation` (a plain statement; the
+  default, stored as NULL and served as nothing), `quoted` (reported
+  speech: a document, a paper, a third person). It is deliberately a
+  separate axis from `origin`: `origin` says *who wrote* and is a tier
+  that drives supersession arithmetic (the provenance guard, the two-man
+  rule), while directive-vs-observation is not a tier ordering at all —
+  and the failure this closes (arXiv 2608.01679, *authority collapse*)
+  is exactly a third party's offhand remark consolidating into what reads
+  as a standing user instruction. The pair `(origin, authority)` is what
+  the paper calls authority. A `quoted` source is low-trust for the
+  [consolidation quarantine](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in).
+- **`distortion_tolerance`** is how exactly the text must survive
+  consolidation (arXiv 2608.22752, *the compaction cliff*): `constraint`
+  (zero — verbatim), `procedural`, `belief`, `preference`, `episodic`.
+  Only `constraint` has consumers today: the dream copies a constraint
+  entry's text verbatim onto a derived fact and a post-dream guard reports
+  any constraint left without a carrier ([dreaming](dreaming.md#constraint-entries-survive-verbatim--typecompact--guard-schema-v35)),
+  and in-scope constraint facts are served *ahead of* the cosine ranking
+  ([retrieval](retrieval.md#constraint-pinning-schema-v35)).
+
+Both are explicit parameters on `memory_store` and `memory_fact_set`;
+the `auto` default is a deterministic form heuristic (no model call on
+the store path) that asserts `constraint` only for rule-sized deontic or
+imperative text (`must`, `shall`, `forbidden`, `rule:`, or an opener like
+`Never run …`), `quoted` on an explicit reporting construction
+(`according to`, `per the`, `the docs say`), and `directive` on an
+instruction addressed to the reader — measured on the live bank before
+shipping (`evals/results/label-heuristic-audit-20260902.json`). The
+other four fidelity classes are accepted explicitly and carried.
+Neither label ever feeds confidence or supersession routing; a
+`constraint` label is the one label retrieval *ranks* on. Served only
+when set, so an unlabelled record's payload is byte-identical to before.
 
 ## Set-valued slots (schema v26)
 
@@ -1738,6 +1778,37 @@ then walks its graph neighbourhood one hop per iteration (up to `hops`,
 capped at 5), accumulating bridging entities, facts, edges, and paths. It
 is **read-only** — it never writes to the bank or the graph.
 
+### Constraint pinning (schema v35)
+
+TypeRetrieve (arXiv 2608.22752):
+a fact whose `distortion_tolerance` is `constraint` is served *ahead of*
+the cosine ranking, marked `pinned: true`, when it is **in scope** — and
+scope is defined cheaply and precisely, with no second embedding pass:
+in `memory_search`'s cortex block, the query *names the fact's entity*
+(both sides go through the cortex's slot normalisation, so `payments db`
+matches `payments-db`, and the entity must occur as a separator-bounded
+run, so `db` does not match `payments-database`; a raw-string test — it
+does not resolve graph aliases, so a constraint written under an alias
+later folded into another name is pinned by `memory_recall` but not by
+the cortex block until the alias map lands with PR #243); in `memory_recall`, the
+fact's entity is a **seed** of the walk (hop 0 — the entities the query
+itself resolved to; hop-discovered entities are context, not scope, and
+keep record order). Pinning is exemption from ranking, not from
+relevance: a pin must clear the caller's `min_score` floor (the cortex
+block's `guard_min_score`), pins take at most half of `top_k` so the
+ranked answer always keeps the rest, and among pins the best cosine wins
+the slots. A pin displaces the weakest ranked fact rather than growing
+the payload, and
+a pinned fact that never made the ranked list is served in the identical
+shape with its true cosine as `score`, so a reader can see it was pinned,
+not ranked. In recall the pin also guarantees the rule survives the
+per-entity fact cap below. An unlabelled bank is served byte-identically;
+`memory.cortex.pin_constraints = false` restores plain ranking. Under
+`stale_policy = demote` a stale (`slow` / `volatile`) constraint still
+sinks below the fresh ranked facts — staleness is a trust decision and
+outranks the pin. The labels themselves are described in
+[memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35).
+
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
 `paths`, supporting `texts`, and `iterations`.
@@ -2034,7 +2105,12 @@ steps:
 1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
    requires a logged-in `claude` CLI:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
-     `127.0.0.1:8082`; `-Model` picks the served default —
+     `127.0.0.1:8082`; needs an elevated PowerShell — open it fresh from
+     the Start menu, never from a terminal inside Claude Desktop or another
+     Store-packaged app, or that app's next update fails to launch until a
+     reboot — see
+     [anthropics/claude-code#61635](https://github.com/anthropics/claude-code/issues/61635);
+     `-Model` picks the served default —
      `claude-opus-5` since the 2026-08-02 dreamer comparison; the one-shot
      installer prompts for this choice on Claude-shim installs).
    The shim also honors a concrete `claude-*` model named per request, so
@@ -2082,7 +2158,8 @@ ops/install.sh --extractor codex-fallback     # or codex-only; Windows: ops\inst
 
 which prompts for the GPT-5.6 dreamer (Sol / Terra / Luna), registers the
 shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
-Scheduler, elevated pwsh; `.sh` — systemd `--user`, docker-bridge bind),
+Scheduler, elevated pwsh opened from the Start menu, same caveat as the
+Claude shim above; `.sh` — systemd `--user`, docker-bridge bind),
 and writes the env triple for you. The autostart raises the shim's
 health-probe interval to 1800 s (`--health-ttl`) because every `/health`
 refresh is a real CLI call — metered spend on a free ChatGPT tier; a
@@ -2282,6 +2359,56 @@ surfaces a poisoned *entry*; the quarantine only denies it silent
 contested by design; the aggregate guard already parks the dangerous
 member-over-scalar case). Preregistration:
 `docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
+
+## Constraint entries survive verbatim — TypeCompact + guard (schema v35)
+
+The dream is a compression step, and the compaction cliff (arXiv
+2608.22752) is what compression does to a rule: a safety rule and an
+episodic log are summarised at the same rate, but only the rule needs
+its exact wording to stay enforceable. An entry whose
+`distortion_tolerance` is `constraint` (set explicitly on `memory_store`,
+or inferred by the `auto` heuristic for rule-sized deontic text — see
+[memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35))
+is therefore treated as zero-distortion by the dream:
+
+- **The carrier (TypeCompact).** Among the claims the extractor cites
+  the entry for, at least one scalar claim must contain the entry's text
+  verbatim (whitespace-collapsed, case-preserving). If none does, ONE
+  claim's *value* is replaced with the entry text: the claim whose
+  content tokens overlap the rule most (at least one must), and only if
+  its target slot is empty or already holds a constraint — a standing
+  non-constraint fact is never overwritten and a claim about something
+  else is never hijacked, whatever position it has in extractor output.
+  The extractor's entity and attribute are kept (slotting is what it is
+  good at; wording is not), sibling claims are left alone, member (`op`)
+  claims are never carriers, and with no eligible claim the carrier
+  refuses and leaves the miss to the guard. Only the carrier earns
+  `distortion_tolerance: constraint` (and the pin in recall); a
+  paraphrased sibling is an observation and inherits its slot's label.
+- **The guard verifier.** After the claims loop, every constraint entry
+  in the processed window must have a derived item carrying its text
+  verbatim (a parked contender counts; so does a slot the same entry
+  formed on an earlier pass). Misses are reported on the run result as
+  `constraint_misses` (entry id + text) beside `constraint_verbatim`, on
+  the run row's tallies as `constraint_missed`, and logged at WARNING.
+  This is a **flag, not a hard fail**: the paper fails a compaction whose
+  input is still there to retry, but here the raw entry is never
+  discarded (it stays in the associative store and is served by
+  `memory_search`), and holding the cursor would hostage every other
+  claim in the batch to one rule the extractor could not slot. The
+  typical miss is an extractor that emitted no scalar claim for the
+  entry at all — inventing a slot is not the dream's business.
+
+**Authority rides along.** Every derived fact takes the *source entry's*
+`authority` (`quoted` / `directive` / observation) and inherits the slot's
+label when the source is unlabelled — never anything the extractor wrote,
+which is model output and steerable by note text (the same trust class
+as claim `origin`). Under the two-man rule above, a `quoted` source is
+low-trust whoever relayed it: a third party's remark parks as a contender
+instead of taking `current` on the relayer's tier. The label only ever
+*demotes*; promotion stays keyed on entry metadata, so dressing a note up
+as a quote gains nothing but a park. Rollback restores the previous
+version's labels along with its value.
 
 ## Chronicle events (schema v28) — dated occurrences beside facts
 
@@ -2836,6 +2963,16 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   false-merge risk in mind. See
   [the single-writer cortex design](../specs/2026-06-19-single-writer-cortex-design.md)
   for the structural fix.
+- **Constraint pinning on** (`memory.cortex.pin_constraints = true`, schema
+  v35) — a fact whose `distortion_tolerance` is `constraint` is served
+  AHEAD of the cosine ranking, marked `pinned: true`, when it is in
+  scope: in `memory_search`'s cortex block when the query names the
+  fact's entity (separator-insensitive, word-bounded), in
+  `memory_recall` when the entity is a seed of the walk. A pin must still
+  clear the caller's `min_score` floor, pins take at most half of `top_k`
+  (best cosine first) so the ranked answer keeps the rest, and the
+  payload never grows. An unlabelled bank is served byte-identically
+  either way; set `false` for plain ranking.
 - **Slot read telemetry on** (`memory.cortex.read_tracking = true`, schema
   v33) — every cortex slot served as an answer (`memory_fact_get` and the
   cortex-first block of `memory_search`) bumps its `slot_reads` counter,

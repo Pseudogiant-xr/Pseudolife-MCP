@@ -105,6 +105,15 @@ def test_service_attach_norms_and_records(svc):
     assert sf[0]["attribute_norm"] == "gpu"
     assert sf[0]["rank"] == 0
     assert sf[0]["kind"] == "scalar"
+    # v35: the log says whether rank 0 was earned by score or by a pin —
+    # a reranker trained on it must not learn a 0.37-cosine fact as rank 0.
+    assert sf[0]["pinned"] is False
+    facts[0]["pinned"] = True
+    res = svc.search(text, return_event_id=True)
+    svc.attach_served_facts(res["retrieval_event_id"], facts)
+    ev = {e["id"]: e for e in svc._storage.retrieval_events_window()}[
+        res["retrieval_event_id"]]
+    assert ev["served_facts"][0]["pinned"] is True
 
 
 def test_service_attach_failure_is_swallowed(svc, monkeypatch):

@@ -178,10 +178,18 @@ class FixtureService:
         return {"entries": hits[:top_k]}
 
     def cortex_write(self, entity, attribute, value, confidence=0.8, support="agent",
-                     freshness_class="auto"):
-        return {"action": "inserted", "entity": entity, "attribute": attribute,
-                "value": value, "origin": support, "confidence": confidence,
-                "freshness_class": freshness_class if freshness_class != "auto" else "evergreen"}
+                     freshness_class="auto", authority="auto",
+                     distortion_tolerance="auto"):
+        out = {"action": "inserted", "entity": entity, "attribute": attribute,
+               "value": value, "origin": support, "confidence": confidence,
+               "freshness_class": freshness_class if freshness_class != "auto" else "evergreen"}
+        # v35 labels: served only when set (the fixture mirrors the
+        # absent-when-default contract; "auto" resolves to nothing here).
+        for k, v in (("authority", authority),
+                     ("distortion_tolerance", distortion_tolerance)):
+            if v and v != "auto":
+                out[k] = v
+        return out
 
     def cortex_resolve(self, entity, attribute, accept):
         return {"resolved": True, "accepted": accept,

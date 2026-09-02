@@ -79,6 +79,11 @@ CALLER_HOLDS_LOCK = {
     "_superseded_evidence",
     "_annotate_set_slot_evidence",
     "_derived_from_entries_locked",
+    # Constraint pinning (schema v35) — cortex_search's per-fact dict builder
+    # and the TypeRetrieve pin step, both reached only from inside
+    # cortex_search's lock (the fixpoint verifies the callers).
+    "_scalar_fact_entry",
+    "_pin_constraint_facts",
     "_log_retrieval_event",
     "_record_retrieval_use",
     "_track_slot_reads",
@@ -105,6 +110,9 @@ CALLER_HOLDS_LOCK = {
     "_file_analyzer_duplicates",
     "_sweep_unreachable_orphans",
     "_unreachable_orphans",
+    # Alias retry list for a slot miss (one storage probe for shadowed
+    # aliases) — reached only from cortex_lookup and chain(), both locked.
+    "_alias_retry_names",
     # These three pass self._storage as an argument to the sync helpers
     # rather than calling methods on it — invisible to the first walker,
     # surfaced by the argument-passing check.

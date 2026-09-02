@@ -66,6 +66,16 @@ _EXPECTED_ENUMS = [
     # Literal edit that silently drops it breaks the inferred-default contract.
     ("memory_fact_set", "freshness_class",
      ["auto", "evergreen", "slow", "volatile"]),
+    # v35 write-time label pair — "auto" is the deterministic-heuristic
+    # sentinel; dropping it from either Literal breaks the default contract.
+    ("memory_store", "authority",
+     ["auto", "directive", "observation", "quoted"]),
+    ("memory_store", "distortion_tolerance",
+     ["auto", "constraint", "procedural", "belief", "preference", "episodic"]),
+    ("memory_fact_set", "authority",
+     ["auto", "directive", "observation", "quoted"]),
+    ("memory_fact_set", "distortion_tolerance",
+     ["auto", "constraint", "procedural", "belief", "preference", "episodic"]),
 ]
 
 

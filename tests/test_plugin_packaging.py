@@ -256,10 +256,11 @@ def test_memory_loop_block_leaves_briefing_headroom():
     HOOK_CONTEXT_MAX_CHARS with the briefing LAST — every char the block
     grows is silently cut from the briefing tail (lessons, unsure-abouts,
     where-we-left-off). Reserve 2,000 chars for the briefing (the block
-    measured 6,663 on 2026-08-28 and 7,316 on 2026-09-02, after the
-    write-policy and trap-avoidance text — 184 chars of reserve left, so
-    the next addition to the block funds itself by trimming; a truncated
-    briefing has no other alarm)."""
+    measured 6,663 on 2026-08-28, 7,316 on 2026-09-02 after the
+    write-policy and trap-avoidance text, and 7,491 later that day after
+    the v35 label line — which funded itself by two trims and left 9
+    chars of reserve, so the next addition trims first or the cap moves
+    deliberately; a truncated briefing has no other alarm)."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
                                                     MEMORY_LOOP_BLOCK)
     assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000

@@ -254,7 +254,12 @@ steps:
 1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
    requires a logged-in `claude` CLI:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
-     `127.0.0.1:8082`; `-Model` picks the served default —
+     `127.0.0.1:8082`; needs an elevated PowerShell — open it fresh from
+     the Start menu, never from a terminal inside Claude Desktop or another
+     Store-packaged app, or that app's next update fails to launch until a
+     reboot — see
+     [anthropics/claude-code#61635](https://github.com/anthropics/claude-code/issues/61635);
+     `-Model` picks the served default —
      `claude-opus-5` since the 2026-08-02 dreamer comparison; the one-shot
      installer prompts for this choice on Claude-shim installs).
    The shim also honors a concrete `claude-*` model named per request, so
@@ -302,7 +307,8 @@ ops/install.sh --extractor codex-fallback     # or codex-only; Windows: ops\inst
 
 which prompts for the GPT-5.6 dreamer (Sol / Terra / Luna), registers the
 shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
-Scheduler, elevated pwsh; `.sh` — systemd `--user`, docker-bridge bind),
+Scheduler, elevated pwsh opened from the Start menu, same caveat as the
+Claude shim above; `.sh` — systemd `--user`, docker-bridge bind),
 and writes the env triple for you. The autostart raises the shim's
 health-probe interval to 1800 s (`--health-ttl`) because every `/health`
 refresh is a real CLI call — metered spend on a free ChatGPT tier; a
@@ -502,6 +508,56 @@ surfaces a poisoned *entry*; the quarantine only denies it silent
 contested by design; the aggregate guard already parks the dangerous
 member-over-scalar case). Preregistration:
 `docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
+
+## Constraint entries survive verbatim — TypeCompact + guard (schema v35)
+
+The dream is a compression step, and the compaction cliff (arXiv
+2608.22752) is what compression does to a rule: a safety rule and an
+episodic log are summarised at the same rate, but only the rule needs
+its exact wording to stay enforceable. An entry whose
+`distortion_tolerance` is `constraint` (set explicitly on `memory_store`,
+or inferred by the `auto` heuristic for rule-sized deontic text — see
+[memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35))
+is therefore treated as zero-distortion by the dream:
+
+- **The carrier (TypeCompact).** Among the claims the extractor cites
+  the entry for, at least one scalar claim must contain the entry's text
+  verbatim (whitespace-collapsed, case-preserving). If none does, ONE
+  claim's *value* is replaced with the entry text: the claim whose
+  content tokens overlap the rule most (at least one must), and only if
+  its target slot is empty or already holds a constraint — a standing
+  non-constraint fact is never overwritten and a claim about something
+  else is never hijacked, whatever position it has in extractor output.
+  The extractor's entity and attribute are kept (slotting is what it is
+  good at; wording is not), sibling claims are left alone, member (`op`)
+  claims are never carriers, and with no eligible claim the carrier
+  refuses and leaves the miss to the guard. Only the carrier earns
+  `distortion_tolerance: constraint` (and the pin in recall); a
+  paraphrased sibling is an observation and inherits its slot's label.
+- **The guard verifier.** After the claims loop, every constraint entry
+  in the processed window must have a derived item carrying its text
+  verbatim (a parked contender counts; so does a slot the same entry
+  formed on an earlier pass). Misses are reported on the run result as
+  `constraint_misses` (entry id + text) beside `constraint_verbatim`, on
+  the run row's tallies as `constraint_missed`, and logged at WARNING.
+  This is a **flag, not a hard fail**: the paper fails a compaction whose
+  input is still there to retry, but here the raw entry is never
+  discarded (it stays in the associative store and is served by
+  `memory_search`), and holding the cursor would hostage every other
+  claim in the batch to one rule the extractor could not slot. The
+  typical miss is an extractor that emitted no scalar claim for the
+  entry at all — inventing a slot is not the dream's business.
+
+**Authority rides along.** Every derived fact takes the *source entry's*
+`authority` (`quoted` / `directive` / observation) and inherits the slot's
+label when the source is unlabelled — never anything the extractor wrote,
+which is model output and steerable by note text (the same trust class
+as claim `origin`). Under the two-man rule above, a `quoted` source is
+low-trust whoever relayed it: a third party's remark parks as a contender
+instead of taking `current` on the relayer's tier. The label only ever
+*demotes*; promotion stays keyed on entry metadata, so dressing a note up
+as a quote gains nothing but a park. Rollback restores the previous
+version's labels along with its value.
 
 ## Chronicle events (schema v28) — dated occurrences beside facts
 

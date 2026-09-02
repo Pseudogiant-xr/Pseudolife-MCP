@@ -15,7 +15,7 @@ import json
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import psycopg
@@ -30,6 +30,8 @@ _ENTRY_COLS = (
     "band", "text", "embedding", "surprise", "ts", "access_count", "source",
     "superseded_at", "superseded_by_text", "last_logical_turn",
     "episode_id", "episode_title", "tags", "slots",
+    # v35: the write-time label pair — nullable, NULL = unlabelled.
+    "authority", "distortion_tolerance",
 )
 _ENTRY_JSONB = {"tags", "slots"}
 
@@ -53,6 +55,8 @@ _FACT_COLS = (
     "kind", "value_norm",
     # v29: epistemic stance — nullable, NULL = asserted plainly.
     "stance",
+    # v35: the write-time label pair — nullable, NULL = unlabelled.
+    "authority", "distortion_tolerance",
 ) + _STAMP_COLS
 _FACT_JSONB = {"support", "provenance"}
 
@@ -1104,6 +1108,22 @@ class PostgresStorage:
             ).fetchall()
         ]
         return d
+
+    def canonical_names_among(self, names: Sequence[str]) -> set[str]:
+        """The subset of ``names`` that are some entity's canonical. One
+        indexed probe (``entities.canonical`` is UNIQUE); no query for an
+        empty list. Lets a caller holding a node's alias list drop the
+        aliases ``find_entity`` would never resolve to that node — it
+        resolves canonical-first, so an alias row that coincides with any
+        canonical is dead for resolution (``graph.alias_canonical_map``
+        applies the same drop from a loaded graph)."""
+        names = [n for n in names if n]
+        if not names:
+            return set()
+        rows = self.conn.execute(
+            "SELECT canonical FROM entities WHERE canonical = ANY(%s)",
+            (names,)).fetchall()
+        return {r[0] for r in rows}
 
     def find_fact_slot_entity(self, key_norm: str) -> str | None:
         """Display entity of a CURRENT fact whose slot key — entity_norm and
