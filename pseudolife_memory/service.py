@@ -2179,33 +2179,54 @@ class MemoryService(DreamOps):
         callers whose lookup is verification, not serving (the dream
         rollback's post-revert check).
 
-        Alias-aware: on a direct slot miss, the entity name is resolved through
-        the graph's ``entity_aliases`` (Postgres) and the canonical name is
-        retried, so a fact stored under e.g. ``dev-box`` surfaces regardless of
-        which alias (``4090``) the caller queried — honouring the contract that
-        every fact lookup resolves aliases first.
+        Alias-aware in both directions: on a direct slot miss, the entity
+        name is resolved through the graph's ``entity_aliases`` (Postgres)
+        and the canonical name is retried, then each of the node's aliases.
+        So a fact stored under ``dev-box`` surfaces when the caller queries
+        the alias ``4090``, and a fact the dream wrote under ``pr-235``
+        surfaces under ``PR #235`` once a merge has folded that name into
+        the node — the same attachment ``graph_neighborhood`` makes, so the
+        name recall shows a fact under is a name that fetches it. Order is
+        direct hit, canonical, aliases (``find_entity``'s alias order), so a
+        canonical-keyed record wins over an alias-keyed one at the same
+        attribute; the served record keeps its OWN slot key, which is where
+        its traces, contenders and ``correct_with`` live. One ``find_entity``
+        call per miss — the aliases ride along in its result, never a
+        per-alias storage query. Aliases are graph norms
+        (``graph.norm_name``), so a record whose entity the cortex normalizer
+        keeps distinct (``host:port`` vs ``host-port``) is not reached this
+        way — the limit the canonical retry has always had.
 
         A set-valued slot has no single ``current`` record to return, so it
         takes a different shape: ``{"kind": "set", "entity", "attribute",
         "members": [...], "removed": [...]}`` (current members / removed
-        audit rows). Checked only on a scalar miss, same alias-resolved name,
-        so a set slot under an alias is still found."""
+        audit rows). Checked only on a scalar miss, over the same name list
+        (query, canonical, aliases), so a set slot under an alias is still
+        found."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
             rec = self._cortex.lookup(entity, attribute)
-            canon = None
+            # Retry list on a miss: the canonical, then the node's aliases,
+            # all from the ONE find_entity call. Dedup on the graph norm so
+            # the query name is never retried under another spelling.
+            names = [entity]
             if rec is None and self._storage is not None:
                 from pseudolife_memory.graph import norm_name
                 node = self._storage.find_entity(norm_name(entity))
                 if node is not None:
-                    c = node.get("canonical")
-                    if c and norm_name(c) != norm_name(entity):
-                        canon = c
-                        rec = self._cortex.lookup(canon, attribute)
+                    seen = {norm_name(entity)}
+                    for c in (node.get("canonical"), *(node.get("aliases") or ())):
+                        if c and norm_name(c) not in seen:
+                            seen.add(norm_name(c))
+                            names.append(c)
+                    for name in names[1:]:
+                        rec = self._cortex.lookup(name, attribute)
+                        if rec is not None:
+                            break
             if rec is None:
                 ra = self.config.time.relative_age
-                for name in (entity, canon):
+                for name in names:
                     if name and self._cortex.slot_kind(name, attribute) == "set":
                         members = self._cortex.members(name, attribute)
                         removed = [
@@ -3292,9 +3313,13 @@ class MemoryService(DreamOps):
         """Causal chain — "what led to X": dated events about an entity,
         merged from four streams (canonical fact assertions + supersessions,
         source entries, graph edges, lessons) and sorted oldest→newest.
-        Alias-aware; streams degrade independently (no graph node → facts +
-        lessons only). Returns ``{found, entity, count, events}`` with events
-        ``{t, kind: fact_set|superseded|entry|edge|lesson, summary, refs}``."""
+        Alias-aware in both directions — the fact and lesson streams key on
+        the queried name, its canonical AND the node's aliases, so slot
+        history written under a name a later merge folded into the node is
+        the node's history too. Streams degrade independently (no graph
+        node → facts + lessons only). Returns ``{found, entity, count,
+        events}`` with events ``{t, kind:
+        fact_set|superseded|entry|edge|lesson, summary, refs}``."""
         from pseudolife_memory.memory.cortex import _norm_key
         with self._lock:
             self._ensure_init()
@@ -3311,6 +3336,11 @@ class MemoryService(DreamOps):
                 if node is not None:
                     display = node["display"]
                     keys.add(_norm_key(node.get("canonical") or ""))
+                    # Same find_entity result, no extra query: a merge folds
+                    # the absorbed canonical into these aliases without
+                    # rewriting the records written under it.
+                    keys.update(_norm_key(a) for a in node.get("aliases") or ()
+                                if a)
             events: list[dict] = []
             # 1. canonical fact history — assertions and supersessions.
             for r in self._cortex.records:

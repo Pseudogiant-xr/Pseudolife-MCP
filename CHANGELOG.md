@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-02 — fact_get reaches the facts of a merged-away name)
+
+- **`memory_fact_get` returned `record: null` for a fact `memory_recall` had
+  just shown under the same name.** A graph merge folds the absorbed node's
+  canonical into the survivor's aliases without rewriting the cortex
+  records written under it, and the recall side now attaches those records
+  to the surviving node (`graph_neighborhood`, the whole-graph view,
+  `wiki_page` — the other 2026-09-02 alias fix, which recorded this
+  asymmetry as its follow-up). But `cortex_lookup` retried a miss in one
+  direction only, alias → canonical: `memory_fact_get("pr-235", "branch")`
+  found the record while `memory_fact_get("PR #235", "branch")` — the name
+  recall displays it under — missed, so an agent following recall output
+  with the displayed name got a miss on the fact it was shown. `chain()`
+  (`memory_history` with no attribute, `GET /api/chain`, the Atlas
+  timeline) had the same shape: its slot-key set was the queried name plus
+  the canonical, never the node's aliases.
+  - On a scalar miss `cortex_lookup` now retries the canonical, then each
+    of the node's aliases, in that order — a direct hit still
+    short-circuits, and a canonical-keyed record still wins over an
+    alias-keyed one at the same attribute. The served record keeps its own
+    slot key (`entity: "pr-235"`), which is where its `source_entries`,
+    contenders and `correct_with` call live. The set-slot fallback walks
+    the same widened list, so a set written under the alias is served in
+    set shape via the canonical or any other alias.
+  - `chain()` adds the node's aliases to its slot-key set, so the
+    assertion / supersession history written under the folded name shows
+    under the surviving node whichever name reaches it.
+  - Cost is unchanged: one `find_entity` call per miss — the aliases ride
+    along in its result — and no per-alias storage query. Aliases are
+    graph norms, so a record whose entity `cortex._norm_key` keeps distinct
+    from its graph norm (`host:port` vs `host-port`) is still not reached
+    this way, the limit the canonical retry has always had.
+  - This widens the resolution surface the 2026-07-27 bank curation
+    trimmed: back then, leak-shaped aliases (`canonical-suffix`) let an
+    alias with no fact at an attribute silently serve the canonical's. The
+    reverse now holds as well — a canonical with no fact at an attribute
+    serves an alias's. For a genuine synonym that is the contract (the
+    alias IS the entity) and it is exactly what recall, `memory_graph` and
+    the dossier already display; a leak-shaped alias remains a curation
+    matter, not a lookup one.
+  - Not changed: `memory_fact_get`'s `contenders` and the empty-slot
+    `candidates` still key on the queried name (and, for candidates, its
+    canonical), and slot-mode `memory_history(entity, attribute)` does no
+    alias resolution in either direction.
+
 ### Changed (2026-09-02 — the engram cross-index read in the retract direction)
 
 - **Correcting a memory now says what it put in doubt.** The dream derives
