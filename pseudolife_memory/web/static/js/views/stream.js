@@ -3,7 +3,7 @@
 import { el, mount, clear, fmtAge, fmtTime, truncate, loadingBlock, emptyBlock, errorBlock, debounce } from "../util.js";
 import { api } from "../api.js";
 import { openDrawer, setDrawerBody, toast, openModal, closeModal, confirmDialog } from "../ui.js";
-import { badge, searchBox, facetBar } from "../components.js";
+import { badge, reVerifyBadge, searchBox, facetBar } from "../components.js";
 
 const TONE = "var(--c-assoc)";
 let state = { q: "", source: "all", rerank: false, bm25: false };
@@ -109,6 +109,7 @@ function cortexHit(f) {
     el("div", { class: "entry-text" },
       el("span", { class: "mono dim" }, `${f.entity} · ${f.attribute} → `), el("b", {}, f.value)),
     el("div", { class: "entry-meta" }, badge(f.origin || "agent", (f.origin || "agent")),
+      reVerifyBadge(f),
       f.score != null ? el("span", { class: "score-pill" }, Number(f.score).toFixed(3)) : null));
 }
 

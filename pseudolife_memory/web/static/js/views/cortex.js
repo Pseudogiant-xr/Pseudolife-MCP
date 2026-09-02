@@ -3,7 +3,7 @@
 import { el, mount, clear, fmtAge, fmtTime, titleCase, loadingBlock, emptyBlock, errorBlock, debounce, pressable } from "../util.js";
 import { api } from "../api.js";
 import { openDrawer, setDrawerBody, toast, confirmDialog, openModal, closeModal } from "../ui.js";
-import { originBadge, confMeter, searchBox, facetBar, badge } from "../components.js";
+import { originBadge, confMeter, reVerifyBadge, searchBox, facetBar, badge } from "../components.js";
 
 const TONE = "var(--c-cortex)";
 let state = { q: "", origin: "all", data: null };
@@ -90,6 +90,7 @@ function factRow(f, ctx) {
     el("div", { class: "fact-val" }, f.value),
     el("div", { class: "fact-side" },
       originBadge(f.origin),
+      reVerifyBadge(f),
       confMeter(f.confidence, TONE),
       el("span", { class: "fact-age", title: f.tx_time ? fmtTime(f.tx_time) : "" }, f.age || (f.tx_time ? fmtAge(f.tx_time) : "")),
       el("button", { class: "btn sm danger fact-forget", title: "Forget this fact",

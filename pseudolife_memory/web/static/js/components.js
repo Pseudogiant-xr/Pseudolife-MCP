@@ -16,6 +16,20 @@ export function badge(text, cls = "") {
   return el("span", { class: `badge ${cls}` }, text);
 }
 
+export function reVerifyBadge(f) {
+  // Retract traversal: a memory this fact was derived from has since been
+  // corrected. Shared across every view that renders a canonical fact — the
+  // Console is where a human decides whether the derivation still holds, and
+  // a caution that appears on one fact list and not the next is worse than
+  // none. Returns null when the flag is absent, which is the common case, so
+  // unaffected rows render exactly as before. The reason rides the tooltip:
+  // the value, not the caveat, is what the row is for.
+  if (!f || !f.re_verify) return null;
+  return el("span", { class: "badge stale",
+    title: f.re_verify_reason || "evidence corrected since this fact was last confirmed" },
+    "re-verify");
+}
+
 export function originBadge(origin) {
   const o = String(origin || "agent").toLowerCase();
   const cls = ["user", "action", "agent"].includes(o) ? o : "agent";
