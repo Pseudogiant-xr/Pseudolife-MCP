@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-02 — elevated autostart steps say where to elevate)
+- **`ops\install-shim-autostart.ps1`, `ops\install-codex-shim-autostart.ps1`
+  and the one-shot installer's retry hints now tell Windows users to open
+  the elevated PowerShell fresh from the Start menu — never to request the
+  UAC prompt from a shell inside Claude Desktop or another Store-packaged
+  app.** Task Scheduler refuses per-user logon-task registration from an
+  unelevated administrator account (probed: fresh task, Limited principal,
+  root folder and subfolder all denied), so the elevation itself stays; but
+  elevating from inside a packaged app leaves Windows' Application
+  Information service holding that app's container job, and the app's next
+  update then fails to launch ("Another program is currently using this
+  file") until a reboot — anthropics/claude-code#61635, reproduced on the
+  maintainer's box on 2026-09-02, most likely triggered by the Codex
+  installer having been elevated from a Claude Desktop session on
+  2026-08-31 (inferred from timing). `docs/guide/dreaming.md` carries the
+  same note; the
+  `.sh` twins (systemd `--user`) never needed elevation and are unchanged.
+
 ### Changed (2026-09-02 — the engram cross-index read in the retract direction)
 
 - **Correcting a memory now says what it put in doubt.** The dream derives
