@@ -6,6 +6,81 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-02 — fact_get reaches the facts of a merged-away name)
+
+- **`memory_fact_get` returned `record: null` for a fact `memory_recall` had
+  just shown under the same name.** A graph merge folds the absorbed node's
+  canonical into the survivor's aliases without rewriting the cortex
+  records written under it, and the recall side now attaches those records
+  to the surviving node (`graph_neighborhood`, the whole-graph view,
+  `wiki_page` — the other 2026-09-02 alias fix, which recorded this
+  asymmetry as its follow-up). But `cortex_lookup` retried a miss in one
+  direction only, alias → canonical: `memory_fact_get("pr-235", "branch")`
+  found the record while `memory_fact_get("PR #235", "branch")` — the name
+  recall displays it under — missed, so an agent following recall output
+  with the displayed name got a miss on the fact it was shown. `chain()`
+  (`memory_history` with no attribute, `GET /api/chain`, the Atlas
+  timeline) had the same shape: its slot-key set was the queried name plus
+  the canonical, never the node's aliases.
+  - On a scalar miss `cortex_lookup` now retries the canonical, then each
+    of the node's aliases, in that order — a direct hit still
+    short-circuits, and a canonical-keyed record still wins over an
+    alias-keyed one at the same attribute. The served record keeps its own
+    slot key (`entity: "pr-235"`), which is where its `source_entries`,
+    contenders and `correct_with` call live. The set-slot fallback walks
+    the same widened list, so a set written under the alias is served in
+    set shape via the canonical or any other alias.
+  - `chain()` adds the node's aliases to its slot-key set, so the
+    assertion / supersession history written under the folded name shows
+    under the surviving node whichever name reaches it.
+  - **An alias that is also another entity's canonical is skipped.** The
+    alias table can carry such a row (`memory_alias` never checks the
+    entities table), and `find_entity` resolves canonical-first, so that
+    alias never resolves to this node — a record under that name is the
+    other entity's. The retry drops it, exactly as `graph.alias_canonical_map`
+    drops it for the graph read surfaces, so lookup and attachment agree
+    instead of disagreeing in opposite directions. Found by the #244
+    pre-merge review, which reproduced `memory_fact_get("dev-box", "owner")`
+    serving `gpu-rig`'s fact after `memory_alias("dev-box", "gpu-rig")`
+    while `memory_graph("dev-box")` correctly attached nothing.
+  - **A lesson about an alias no longer mints a shadowing entity.**
+    `_link_lesson_graph` (the dream's `lesson_write`, fed by
+    `memory_outcome`'s `about`) upserted the task and object entities by
+    canonical with no alias check, so one lesson about `pr-235` after that
+    node was folded into `PR #235` minted a fresh `pr-235` canonical — from
+    then on the graph detached the surviving node's alias-keyed facts, and
+    a retry that did not skip shadowed aliases would have kept serving
+    them. Both entities now resolve through the alias table first
+    (`_resolve_or_create_entity`, the find-then-create graph writes use;
+    its exact-match slot-key fold now applies to lesson subjects too).
+    Pre-existing, but this pair of changes makes the alias table
+    load-bearing for serving, so it ships here.
+  - Cost: one `find_entity` call per miss plus, only when the node has
+    aliases, one indexed probe (`canonical_names_among`) — still no
+    per-alias storage query. The set-slot check runs `slot_kind` once per
+    name in the list, and `slot_kind` scans the record list for a slot
+    with neither a current scalar nor current members, so a miss on a
+    node with K aliases costs 1+K scans where it cost at most 2 —
+    microseconds at the live bank's size. Aliases are graph norms, so a
+    record whose entity `cortex._norm_key` keeps distinct from its graph
+    norm (`host:port` vs `host-port`) is still not reached this way, the
+    limit the canonical retry has always had.
+  - This widens the resolution surface the 2026-07-27 bank curation
+    trimmed: back then, leak-shaped aliases (`canonical-suffix`) let an
+    alias with no fact at an attribute silently serve the canonical's. The
+    reverse now holds as well — a canonical with no fact at an attribute
+    serves an alias's. For a genuine synonym that is the contract (the
+    alias IS the entity) and it is exactly what recall, `memory_graph` and
+    the dossier already display; a leak-shaped alias remains a curation
+    matter, not a lookup one.
+  - Not changed: `memory_fact_get`'s `contenders` and the empty-slot
+    `candidates` still key on the queried name (and, for candidates, its
+    canonical), slot-mode `memory_history(entity, attribute)` does no
+    alias resolution in either direction, and `memory_alias` still accepts
+    an alias equal to another entity's canonical — the shadow state stays
+    creatable by hand; refusing it, or treating it as a merge, is a tool
+    behaviour change for a separate decision.
+
 ### Fixed (2026-09-02 — recall serves the facts of a merged-away name)
 
 - **`memory_recall`, `memory_graph`, and the Console dossier served a node
@@ -41,10 +116,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     it resolves canonical → alias → display; before, no fact on such a node
     could carry the caution. Cost: one graph load per `recall` call for
     the alias table (the same load `graph_neighborhood` makes per hop).
-  - Unchanged, and now the visible asymmetry: `memory_fact_get` on the
-    node's display or canonical still does not search the node's aliases
-    (`cortex_lookup` retries alias → canonical only), so a fact recall
-    shows under `PR #235` is still fetched as `pr-235`. Follow-up.
+  - The reverse direction — `memory_fact_get` on the node's display or
+    canonical searching the node's aliases, and `chain()` doing the same —
+    lands with #244 (the `### Fixed` block above), which also makes the two
+    sides agree on an alias that another entity's canonical shadows.
 
 ### Changed (2026-09-02 — elevated autostart steps say where to elevate)
 - **`ops\install-shim-autostart.ps1`, `ops\install-codex-shim-autostart.ps1`

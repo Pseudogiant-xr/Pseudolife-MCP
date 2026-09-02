@@ -99,6 +99,9 @@ CALLER_HOLDS_LOCK = {
     "_auto_title_locked",
     "_resolve_or_create_entity",
     "_propose_write_dedup",
+    # Alias retry list for a slot miss (one storage probe for shadowed
+    # aliases) — reached only from cortex_lookup and chain(), both locked.
+    "_alias_retry_names",
     # These three pass self._storage as an argument to the sync helpers
     # rather than calling methods on it — invisible to the first walker,
     # surfaced by the argument-passing check.
