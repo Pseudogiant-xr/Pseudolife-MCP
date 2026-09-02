@@ -142,9 +142,11 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   AHEAD of the cosine ranking, marked `pinned: true`, when it is in
   scope: in `memory_search`'s cortex block when the query names the
   fact's entity (separator-insensitive, word-bounded), in
-  `memory_recall` when the entity is a seed of the walk. Pins share the
-  block's `top_k` budget rather than growing it. An unlabelled bank is
-  served byte-identically either way; set `false` for plain ranking.
+  `memory_recall` when the entity is a seed of the walk. A pin must still
+  clear the caller's `min_score` floor, pins take at most half of `top_k`
+  (best cosine first) so the ranked answer keeps the rest, and the
+  payload never grows. An unlabelled bank is served byte-identically
+  either way; set `false` for plain ranking.
 - **Slot read telemetry on** (`memory.cortex.read_tracking = true`, schema
   v33) — every cortex slot served as an answer (`memory_fact_get` and the
   cortex-first block of `memory_search`) bumps its `slot_reads` counter,

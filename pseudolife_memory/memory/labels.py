@@ -88,8 +88,10 @@ _FRAMING = re.compile(
 # The imperative openers, followed by a bare-infinitive verb. A participle
 # ("never instantiated"), a third-person form ("never calls") or an
 # auxiliary ("never been") is description, not instruction.
+# A leading bracketed stamp ("[2026-09-02] Never run …") is tolerated;
+# any other prefix makes it a sentence about a rule, not a rule.
 _IMPERATIVE_OPENER = re.compile(
-    r"^\W*(?:never|always|do not|don't|must|you must)\s+"
+    r"^\W*(?:\[[^\]]*\]\s*)?(?:never|always|do not|don't|must|you must)\s+"
     r"([A-Za-z][A-Za-z\-]*)", re.I)
 _NOT_BARE = frozenset({
     "be", "been", "being", "was", "were", "is", "are", "am", "had", "has",
@@ -107,7 +109,7 @@ _FIRST_PERSON_HABIT = re.compile(
 # the live bank they wrap error strings, session titles and log lines, none
 # of which is someone else speaking.
 _REPORTED = re.compile(
-    r"\b(?:according to|as per|per the|"
+    r"\b(?:according to|as per|per the (?!usual\b|plan\b|schedule\b|above\b|below\b)|"
     r"(?:the\s+)?(?:paper|docs?|documentation|spec|runbook|readme|article|"
     r"guide|manual|page|post|thread|vendor|upstream|authors?|he|she|they|"
     r"someone|colleague|friend)\s+"
@@ -233,6 +235,24 @@ def strictest_distortion(values: Iterable[str | None]) -> str | None:
     makes the consolidated entry a constraint (TypeDecompose replicates
     in-scope rules into every partition rather than losing them)."""
     return _strictest(values, _DISTORTION_RANK)
+
+
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_TOKEN_STOP = frozenset({
+    "the", "and", "for", "with", "that", "this", "from", "into",
+    "are", "was", "were", "has", "have", "not", "any", "all",
+    "you", "your", "its", "our", "their", "than", "then", "when",
+    "never", "always", "must", "should", "never", "do", "don", "t",
+})
+
+
+def content_tokens(text: str | None) -> frozenset[str]:
+    """Casefolded alphanumeric tokens of >= 3 chars minus a small stop
+    list (deontic markers included — every rule has them, so they carry
+    no information about WHICH claim restates the rule). The carrier's
+    overlap measure; deterministic, no model."""
+    return frozenset(t for t in (m.lower() for m in _TOKEN_RE.findall(text or ""))
+                     if len(t) >= 3 and t not in _TOKEN_STOP)
 
 
 def _collapse(s: str | None) -> str:

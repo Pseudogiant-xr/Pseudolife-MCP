@@ -1,22 +1,24 @@
 {
   "date": "2026-09-02",
-  "what": "Precision audit of the auto label heuristics (pseudolife_memory/memory/labels.py) against the live bank; counts and hand verdicts only, no bank text committed.",
+  "generated_by": "evals/label_heuristic_audit.py",
+  "what": "Precision audit of the auto label heuristics (pseudolife_memory/memory/labels.py) against a bank dump; counts and hand verdicts only, no bank text.",
   "sample": {
     "current_entries": 836,
     "current_facts": 5267
   },
-  "method": "All 215 fact hits of a deliberately LOOSE prototype rule (strong deontic | rule framing | never/always/do-not imperative anywhere | attribute name in {rule,constraint,policy,requirement,invariant,discipline}; value <= 400 chars) were hand-labelled genuine-rule vs descriptive by the implementing session (137 genuine). Each variant below is scored as the fraction of ITS hits judged genuine; every shipped hit lies inside the audited set.",
+  "method": "Every fact hit of the AUDITED SUPERSET rule (strong deontic | rule framing | never/always/do-not imperative anywhere | attribute name in {rule,constraint,policy,requirement,invariant,discipline}; value <= 400 chars) was hand-labelled genuine-rule vs descriptive; the verdict file holds the sha1-12 keys of the genuine ones. Each variant is scored as the fraction of ITS hits judged genuine; shipped hits outside the audited set are reported as unaudited, never as genuine.",
   "distortion_tolerance_variants": {
     "loose_any_deontic_word_anywhere_no_cap": {
       "entry_hits": 303,
+      "entry_hit_rate": 0.3624,
       "fact_hits": 236,
-      "note": "rejected: 36% of entries fire (status narratives with one 'must')"
+      "note": "rejected: status narratives with one 'must'"
     },
-    "prototype_v4_union_cap400": {
+    "audited_superset_cap400": {
       "fact_hits": 215,
       "judged_genuine": 137,
       "precision": 0.64,
-      "note": "the audited superset"
+      "note": "the hand-labelled set"
     },
     "imperative_never_always_do_not_anywhere": {
       "fact_hits": 57,
@@ -24,10 +26,10 @@
       "precision": 0.53,
       "note": "rejected"
     },
-    "attribute_name_rule": {
-      "fact_hits_increment": 67,
-      "judged_genuine": 42,
-      "precision": 0.63,
+    "attribute_name_rule_increment": {
+      "fact_hits": 84,
+      "judged_genuine": 44,
+      "precision": 0.52,
       "note": "rejected"
     },
     "shipped_strong_or_framing_or_opener_cap400": {
@@ -35,6 +37,7 @@
       "judged_genuine": 74,
       "precision": 0.86,
       "fact_hit_rate": 0.0163,
+      "unaudited_hits": 0,
       "entry_hits": 1,
       "entry_hit_rate": 0.0012,
       "decomposition": {
@@ -52,7 +55,7 @@
     }
   },
   "authority_heuristic": {
-    "gate": "same 400-char rule-sized gate as distortion_tolerance (added after review; ungated it fired quoted on 26/836 entries)",
+    "gate": "same 400-char rule-sized gate as distortion_tolerance",
     "entries_gated": {
       "None": 836
     },
@@ -65,12 +68,7 @@
       "None": 5243,
       "quoted": 8,
       "directive": 16
-    },
-    "directive_facts_hand_check": {
-      "hits": 16,
-      "judged_genuine_imperatives": 16,
-      "note": "all directive fact hits read as instructions in the 2026-09-02 hand check"
     }
   },
-  "blast_radius_note": "No backfill ships: existing rows stay NULL. These counts are what a hypothetical auto-labelling of the existing bank WOULD pin."
+  "blast_radius_note": "No backfill ships: existing rows stay NULL. These counts are what a hypothetical auto-labelling of the dumped bank WOULD pin."
 }

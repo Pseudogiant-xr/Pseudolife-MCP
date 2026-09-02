@@ -1787,11 +1787,18 @@ scope is defined cheaply and precisely, with no second embedding pass:
 in `memory_search`'s cortex block, the query *names the fact's entity*
 (both sides go through the cortex's slot normalisation, so `payments db`
 matches `payments-db`, and the entity must occur as a separator-bounded
-run, so `db` does not match `payments-database`); in `memory_recall`, the
+run, so `db` does not match `payments-database`; a raw-string test — it
+does not resolve graph aliases, so a constraint written under an alias
+later folded into another name is pinned by `memory_recall` but not by
+the cortex block until the alias map lands with PR #243); in `memory_recall`, the
 fact's entity is a **seed** of the walk (hop 0 — the entities the query
 itself resolved to; hop-discovered entities are context, not scope, and
-keep record order). Pins share the block's `top_k` budget — a pin
-displaces the weakest ranked fact rather than growing the payload — and
+keep record order). Pinning is exemption from ranking, not from
+relevance: a pin must clear the caller's `min_score` floor (the cortex
+block's `guard_min_score`), pins take at most half of `top_k` so the
+ranked answer always keeps the rest, and among pins the best cosine wins
+the slots. A pin displaces the weakest ranked fact rather than growing
+the payload, and
 a pinned fact that never made the ranked list is served in the identical
 shape with its true cosine as `score`, so a reader can see it was pinned,
 not ranked. In recall the pin also guarantees the rule survives the
@@ -2360,13 +2367,18 @@ is therefore treated as zero-distortion by the dream:
 
 - **The carrier (TypeCompact).** Among the claims the extractor cites
   the entry for, at least one scalar claim must contain the entry's text
-  verbatim (whitespace-collapsed, case-preserving). If none does, the
-  first scalar claim's *value* is replaced with the entry text — the
-  extractor's entity and attribute are kept (slotting is what it is good
-  at; wording is not), sibling claims are left alone. Member (`op`)
-  claims are never carriers. The derived fact inherits the source's
-  labels, so it reads back as `distortion_tolerance: constraint` and is
-  pinned in recall.
+  verbatim (whitespace-collapsed, case-preserving). If none does, ONE
+  claim's *value* is replaced with the entry text: the claim whose
+  content tokens overlap the rule most (at least one must), and only if
+  its target slot is empty or already holds a constraint — a standing
+  non-constraint fact is never overwritten and a claim about something
+  else is never hijacked, whatever position it has in extractor output.
+  The extractor's entity and attribute are kept (slotting is what it is
+  good at; wording is not), sibling claims are left alone, member (`op`)
+  claims are never carriers, and with no eligible claim the carrier
+  refuses and leaves the miss to the guard. Only the carrier earns
+  `distortion_tolerance: constraint` (and the pin in recall); a
+  paraphrased sibling is an observation and inherits its slot's label.
 - **The guard verifier.** After the claims loop, every constraint entry
   in the processed window must have a derived item carrying its text
   verbatim (a parked contender counts; so does a slot the same entry
@@ -2927,9 +2939,11 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   AHEAD of the cosine ranking, marked `pinned: true`, when it is in
   scope: in `memory_search`'s cortex block when the query names the
   fact's entity (separator-insensitive, word-bounded), in
-  `memory_recall` when the entity is a seed of the walk. Pins share the
-  block's `top_k` budget rather than growing it. An unlabelled bank is
-  served byte-identically either way; set `false` for plain ranking.
+  `memory_recall` when the entity is a seed of the walk. A pin must still
+  clear the caller's `min_score` floor, pins take at most half of `top_k`
+  (best cosine first) so the ranked answer keeps the rest, and the
+  payload never grows. An unlabelled bank is served byte-identically
+  either way; set `false` for plain ranking.
 - **Slot read telemetry on** (`memory.cortex.read_tracking = true`, schema
   v33) — every cortex slot served as an answer (`memory_fact_get` and the
   cortex-first block of `memory_search`) bumps its `slot_reads` counter,

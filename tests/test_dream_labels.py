@@ -166,6 +166,81 @@ def test_guard_reds_when_the_carrier_is_disabled(svc, monkeypatch):
     assert [m["text"] for m in out["constraint_misses"]] == [RULE]
 
 
+def test_carrier_never_overwrites_an_unrelated_standing_fact(svc):
+    """Peer review blocker (2026-09-02): the first cut took the FIRST scalar
+    claim citing the entry, whatever slot it targeted, and overwrote its
+    value with the rule — a correct standing fact (bank-volumes.kind =
+    external) was superseded by the rule text, stamped constraint and
+    pinned, while the rule's own slot kept the paraphrase and the guard
+    reported a clean pass. A carrier may only land on a slot that is EMPTY
+    or already a constraint, chosen by token overlap with the rule."""
+    svc.cortex_write("bank-volumes", "kind", "external", support="agent")
+    svc.store(RULE, source="notes", distortion_tolerance="constraint")
+    out = svc.dream_run(_StubExtractor([
+        _claim("external", entity="bank-volumes", attribute="kind"),   # first!
+        _claim("avoid compose down with volumes", entity="deploy",
+               attribute="volume-rule"),
+    ]))
+    kind = svc.cortex_lookup("bank-volumes", "kind")
+    assert kind["value"] == "external"
+    assert "distortion_tolerance" not in kind
+    rule = svc.cortex_lookup("deploy", "volume-rule")
+    assert RULE in rule["value"]
+    assert rule["distortion_tolerance"] == "constraint"
+    assert out["constraint_verbatim"] == 1
+    assert out["constraint_misses"] == []
+
+
+def test_carrier_picks_the_claim_that_overlaps_the_rule_not_the_first(svc):
+    """Two NEW slots from one constraint entry: the unrelated one comes
+    first in extractor order, the paraphrase second. Overlap with the rule
+    text decides, not position; the unrelated claim is written as-is."""
+    svc.store(RULE, source="notes", distortion_tolerance="constraint")
+    out = svc.dream_run(_StubExtractor([
+        _claim("alice", entity="deploy", attribute="owner"),
+        _claim("avoid compose down with volumes", entity="deploy",
+               attribute="volume-rule"),
+    ]))
+    owner = svc.cortex_lookup("deploy", "owner")
+    assert owner["value"] == "alice" and "distortion_tolerance" not in owner
+    rule = svc.cortex_lookup("deploy", "volume-rule")
+    assert RULE in rule["value"] and rule["distortion_tolerance"] == "constraint"
+    assert out["constraint_verbatim"] == 1 and out["constraint_misses"] == []
+
+
+def test_carrier_refuses_when_no_claim_is_eligible_and_the_guard_reports(svc):
+    """The paraphrase targets an occupied, unlabelled slot: rewriting it
+    would destroy a standing fact, so the carrier refuses; the claim is
+    written normally (agent supersedes agent) and the guard reports the
+    miss — flag-not-fail, the same posture as an extractor that emitted
+    nothing."""
+    svc.cortex_write("deploy", "policy", "backup first", support="agent")
+    svc.store(RULE, source="notes", distortion_tolerance="constraint")
+    out = svc.dream_run(_StubExtractor([
+        _claim("avoid compose down with volumes", entity="deploy",
+               attribute="policy")]))
+    pol = svc.cortex_lookup("deploy", "policy")
+    assert pol["value"] == "avoid compose down with volumes"
+    assert "distortion_tolerance" not in pol
+    assert out["constraint_verbatim"] == 0
+    assert [m["text"] for m in out["constraint_misses"]] == [RULE]
+
+
+def test_carrier_may_update_a_slot_that_is_already_a_constraint(svc):
+    """A re-extraction of an amended rule lands on the rule's existing
+    constraint slot (occupied, but by a constraint) — that is the one
+    occupied case the carrier may write into."""
+    svc.cortex_write("deploy", "volume-rule", "Never run compose down -v",
+                     support="agent", distortion_tolerance="constraint")
+    svc.store(RULE, source="notes", distortion_tolerance="constraint")
+    out = svc.dream_run(_StubExtractor([
+        _claim("avoid compose down with volumes", entity="deploy",
+               attribute="volume-rule")]))
+    rule = svc.cortex_lookup("deploy", "volume-rule")
+    assert RULE in rule["value"] and rule["distortion_tolerance"] == "constraint"
+    assert out["constraint_verbatim"] == 1
+
+
 def test_member_ops_are_never_carriers(svc):
     """v1 scope: only a scalar claim can carry a constraint verbatim; a
     constraint entry whose only claim is a set op is a reported miss, not

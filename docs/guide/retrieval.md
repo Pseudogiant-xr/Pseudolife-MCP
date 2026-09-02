@@ -245,11 +245,18 @@ scope is defined cheaply and precisely, with no second embedding pass:
 in `memory_search`'s cortex block, the query *names the fact's entity*
 (both sides go through the cortex's slot normalisation, so `payments db`
 matches `payments-db`, and the entity must occur as a separator-bounded
-run, so `db` does not match `payments-database`); in `memory_recall`, the
+run, so `db` does not match `payments-database`; a raw-string test — it
+does not resolve graph aliases, so a constraint written under an alias
+later folded into another name is pinned by `memory_recall` but not by
+the cortex block until the alias map lands with PR #243); in `memory_recall`, the
 fact's entity is a **seed** of the walk (hop 0 — the entities the query
 itself resolved to; hop-discovered entities are context, not scope, and
-keep record order). Pins share the block's `top_k` budget — a pin
-displaces the weakest ranked fact rather than growing the payload — and
+keep record order). Pinning is exemption from ranking, not from
+relevance: a pin must clear the caller's `min_score` floor (the cortex
+block's `guard_min_score`), pins take at most half of `top_k` so the
+ranked answer always keeps the rest, and among pins the best cosine wins
+the slots. A pin displaces the weakest ranked fact rather than growing
+the payload, and
 a pinned fact that never made the ranked list is served in the identical
 shape with its true cosine as `score`, so a reader can see it was pinned,
 not ranked. In recall the pin also guarantees the rule survives the

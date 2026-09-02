@@ -19,7 +19,8 @@ from typing import Any
 
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 
-from pseudolife_memory.memory.labels import INHERIT, contains_verbatim
+from pseudolife_memory.memory.labels import (INHERIT, contains_verbatim,
+                                             content_tokens)
 
 logger = logging.getLogger(__name__)
 
@@ -1395,17 +1396,40 @@ class DreamOps:
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined, "retyped": retyped}
 
+    def _carrier_slot_eligible(self, entity: str, attribute: str) -> bool:
+        """A carrier may land only on a slot that is EMPTY or already holds a
+        CONSTRAINT: copying the rule over a standing non-constraint fact
+        would destroy a correct value (the 2026-09-02 peer review reproduced
+        exactly that — ``bank-volumes.kind = external`` superseded by a
+        deploy rule because it happened to be the extractor's first claim).
+        Resolves the slot the way the write loop will."""
+        ent, attr = self._resolve_dream_slot(entity, attribute)
+        with self._lock:
+            self._ensure_init()
+            cur = self._cortex.lookup(ent, attr)
+            if cur is None:
+                return not self._cortex.members(ent, attr)   # a set slot is never a carrier
+            return cur.distortion_tolerance == "constraint"
+
     def _apply_constraint_carrier(self, pairs: list, entries: list[dict]) -> int:
         """TypeCompact (arXiv 2608.22752): for each CONSTRAINT-labelled
         source entry, make sure at least one derived scalar claim carries
         the entry's text verbatim. If the extractor paraphrased every
-        claim it cited the entry for, the FIRST scalar claim's value is
-        replaced with the entry text (the extractor's entity/attribute
-        are kept — slotting is what it is good at; wording is not).
-        Sibling claims are left as they are. An entry with no scalar
-        claim at all is left for the guard to report — inventing a slot
-        is not this method's business. Returns the number of claims
-        rewritten. Mutates the claim dicts in ``pairs`` in place."""
+        claim it cited the entry for, ONE claim's value is replaced with
+        the entry text — the extractor's entity/attribute are kept
+        (slotting is what it is good at; wording is not).
+
+        Which claim: among the scalar claims citing the entry whose target
+        slot is empty or already a constraint (``_carrier_slot_eligible``),
+        the one whose content tokens overlap the rule text most, and only
+        if at least one token overlaps — a claim about something else
+        entirely is never hijacked, whatever position it has. Position
+        in extractor output decides nothing. If no claim is eligible the
+        carrier REFUSES and the guard reports the miss (flag-not-fail):
+        an entry with no scalar claim, or whose only claims target
+        occupied non-constraint slots, is left for the reader. Returns
+        the number of claims rewritten; mutates the claim dicts in
+        ``pairs`` in place."""
         idx_of = {id(e): i for i, e in enumerate(entries)}
         by_src: dict[int, list[dict]] = {}
         for c, _sid, se in pairs:
@@ -1423,15 +1447,30 @@ class DreamOps:
             scalars = [c for c in claims if c.get("op") not in ("add", "remove")]
             if any(contains_verbatim(c.get("value"), text) for c in scalars):
                 continue
-            scalar = scalars[0] if scalars else None
-            if scalar is None:
+            rule_tokens = content_tokens(text)
+            best, best_overlap = None, 0
+            for c in scalars:
+                overlap = len(rule_tokens & content_tokens(
+                    f"{c.get('attribute', '')} {c.get('value', '')}"))
+                if overlap <= best_overlap:
+                    continue           # ties keep the earlier candidate
+                if not self._carrier_slot_eligible(c.get("entity", ""),
+                                                   c.get("attribute", "")):
+                    continue
+                best, best_overlap = c, overlap
+            if best is None:
+                logger.info("dream: constraint entry %s has no eligible carrier "
+                            "claim (none overlaps the rule on an empty or "
+                            "constraint slot); left for the guard",
+                            e.get("db_id") if e.get("db_id") is not None else i)
                 continue
             logger.info("dream: constraint entry %s carried verbatim onto "
-                        "%s.%s (extractor value %r replaced)",
+                        "%s.%s (extractor value %r replaced; %d overlapping "
+                        "tokens)",
                         e.get("db_id") if e.get("db_id") is not None else i,
-                        scalar.get("entity"), scalar.get("attribute"),
-                        scalar.get("value"))
-            scalar["value"] = text
+                        best.get("entity"), best.get("attribute"),
+                        best.get("value"), best_overlap)
+            best["value"] = text
             rewritten += 1
         return rewritten
 

@@ -144,7 +144,12 @@ def test_rebuild_fact_ranking_matches_service_fusion(seeded_service):
     regression-gate run proved why this must be pinned: the gate 'passed'
     the BM25 channel without ever executing it, because the rebuild had its
     own dense-only ranking. Any fusion change must land in both places or
-    this test goes red."""
+    this test goes red.
+
+    Scope since schema v35: the service also pins in-scope constraint
+    facts ahead of the fusion; the rebuild does not mirror that, so this
+    lockstep is asserted on an UNLABELLED bank (as every bench bank is)
+    and says nothing about a labelled one."""
     import sys as _sys
     from pathlib import Path as _Path
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))

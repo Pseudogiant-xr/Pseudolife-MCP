@@ -410,7 +410,15 @@ def _entity_in_query(entity: str | None, query: str | None) -> bool:
     separators folded to one hyphen) and the entity must occur as a
     hyphen-bounded run — so ``payments db`` matches ``payments-db`` but
     ``db`` does not match ``payments-database``. No embedding pass; the
-    cost is one string scan per constraint-labelled fact."""
+    cost is one string scan per constraint-labelled fact.
+
+    Known limit: a RAW-STRING test — it does not resolve graph aliases,
+    so a constraint written under an alias that was later folded into
+    another canonical name is pinned by ``memory_recall`` (whose seeds
+    resolve through the vocabulary) but not here. The one-line fix is to
+    resolve ``r.entity`` through ``graph.alias_canonical_map`` once per
+    ``cortex_search``; that helper arrives with PR #243 and this lands
+    first, so it is a follow-up, not a silent gap."""
     from pseudolife_memory.memory.cortex import _norm_key
     e = _norm_key(entity or "")
     if not e:
@@ -2778,7 +2786,8 @@ class MemoryService(DreamOps):
             # TypeRetrieve (arXiv 2608.22752): in-scope CONSTRAINT facts are
             # pinned ahead of the cosine ranking, inside the same top_k.
             if getattr(self.config.memory.cortex, "pin_constraints", True):
-                entries = self._pin_constraint_facts(query, emb, entries, top_k)
+                entries = self._pin_constraint_facts(query, emb, entries, top_k,
+                                                     min_score)
             _demote_stale(entries, self._stale_policy)
             self._annotate_evidence_supersession(entries)
             from pseudolife_memory.memory.cortex import _norm_key
@@ -2808,19 +2817,26 @@ class MemoryService(DreamOps):
         return d
 
     def _pin_constraint_facts(self, query: str, emb, entries: list[dict],
-                              top_k: int) -> list[dict]:
+                              top_k: int, min_score: float = 0.0) -> list[dict]:
         """TypeRetrieve (arXiv 2608.22752) for the cortex block. Caller
         holds the lock.
 
         In scope = the query names the fact's entity (``_entity_in_query``
         — one string scan per constraint-labelled current scalar; no
         second embedding pass, no index to keep fresh). In-scope
-        constraints go FIRST, marked ``pinned: True``, whatever their
-        cosine; the ranked list fills the rest of the SAME ``top_k`` budget
-        (a pin displaces the weakest ranked fact rather than growing the
-        payload). A pinned fact that never made the ranked list is served
-        in the identical shape with its true cosine as ``score``, so the
-        reader can see that it was pinned, not ranked. No constraint
+        constraints go FIRST, marked ``pinned: True``, ahead of better-
+        scoring ranked facts — but pinning is exemption from RANKING, not
+        from relevance: a pin must clear the caller's ``min_score`` floor
+        (``memory_search`` passes ``guard_min_score``, whose whole job is
+        to stop weak facts being asserted as canonical), pins take at most
+        ``max(1, top_k // 2)`` of the budget so the ranked answer always
+        keeps the rest, and among pins the best cosine wins the slots
+        (the least relevant rules are dropped, not the newest). The
+        peer review of 2026-09-02 reproduced the unbounded version: six
+        rules on one entity displaced the whole block at cosine ~0.37
+        against a 0.5 floor. A pinned fact that never made the ranked
+        list is served in the identical shape with its true cosine as
+        ``score``, so the reader can see that it was pinned. No constraint
         labels in the bank → the input is returned untouched, so an
         unlabelled bank is served byte-identically. Set members carry no
         labels in v1 and are never pinned. Runs BEFORE ``_demote_stale``
@@ -2837,18 +2853,32 @@ class MemoryService(DreamOps):
         if not pins:
             return entries
         k = max(1, int(top_k))
-        pins = pins[:k]
+        cap = max(1, k // 2)
+        floor = float(min_score or 0.0)
         keyed = {(e["entity"], e["attribute"]): e for e in entries
                  if e.get("kind") != "set"}
         q = emb.detach().reshape(1, -1).to("cpu", torch.float32)
+        scored: list[tuple[float, int, Any]] = []
+        for i, r in enumerate(pins):
+            d = keyed.get((r.entity, r.attribute))
+            if d is not None:
+                score = float(d["score"])
+            elif r.embedding is not None:
+                v = r.embedding.detach().reshape(1, -1).to("cpu", torch.float32)
+                score = float(torch.nn.functional.cosine_similarity(q, v).item())
+            else:
+                score = 0.0
+            if score < floor:
+                continue
+            scored.append((score, i, r))
+        scored.sort(key=lambda t: (-t[0], t[1]))   # best cosine, then record order
+        pins = [r for _s, _i, r in scored[:cap]]
+        if not pins:
+            return entries
         pinned: list[dict] = []
-        for r in pins:
+        for score, _i, r in scored[:cap]:
             d = keyed.get((r.entity, r.attribute))
             if d is None:
-                score = 0.0
-                if r.embedding is not None:
-                    v = r.embedding.detach().reshape(1, -1).to("cpu", torch.float32)
-                    score = float(torch.nn.functional.cosine_similarity(q, v).item())
                 d = self._scalar_fact_entry(r, score)
             d["pinned"] = True
             pinned.append(d)
@@ -3598,7 +3628,10 @@ class MemoryService(DreamOps):
                  "rank": rank,
                  "score": f.get("score"),
                  "kind": f.get("kind", "scalar"),
-                 "contested": bool(f.get("contested", False))}
+                 "contested": bool(f.get("contested", False)),
+                 # v35: a pinned fact sits at rank 0 by policy, not by
+                 # score — a reranker trained on this log must know.
+                 "pinned": bool(f.get("pinned", False))}
                 for rank, f in enumerate(facts)
             ]
             with self._lock:

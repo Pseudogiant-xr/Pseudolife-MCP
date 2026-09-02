@@ -92,7 +92,11 @@ def test_knob_off_restores_plain_ranking(svc):
     assert not any("pinned" in e for e in out)
 
 
-def test_pins_stay_inside_the_top_k_budget(svc):
+def test_pins_take_at_most_half_the_budget_best_cosine_first(svc):
+    """Peer review major (2026-09-02): the first cut let >= k in-scope
+    constraints displace the ENTIRE ranked block. Pins now get at most
+    k // 2 slots, ordered by cosine (the least relevant rules are the ones
+    dropped, not the newest), and the ranked facts keep the rest."""
     _seed(svc)
     for i in range(6):
         svc.cortex_write("payments-db", f"rule-{i}",
@@ -100,7 +104,28 @@ def test_pins_stay_inside_the_top_k_budget(svc):
                          support="user")
     out = svc.cortex_search(QUERY, top_k=5, min_score=0.0)["entries"]
     assert len(out) == 5
-    assert all(e["pinned"] is True for e in out)
+    pinned = [e for e in out if e.get("pinned")]
+    assert len(pinned) == 2
+    assert out[:2] == pinned
+    assert pinned[0]["score"] >= pinned[1]["score"]
+    assert out[2]["attribute"] == "host"          # the ranked answer survives
+    assert not any(e.get("pinned") for e in out[2:])
+
+
+def test_pins_respect_the_callers_relevance_floor(svc):
+    """memory_search passes guard_min_score so weak facts are never
+    asserted as canonical; a pin must clear the same floor — pinning is
+    exemption from RANKING, not from relevance."""
+    _seed(svc)
+    base = svc.cortex_search(QUERY, top_k=5, min_score=0.0)["entries"]
+    pin = next(e for e in base if e.get("pinned"))
+    host = next(e for e in base if e["attribute"] == "host")
+    assert host["score"] > pin["score"]
+    floor = (pin["score"] + host["score"]) / 2
+    out = svc.cortex_search(QUERY, top_k=5, min_score=floor)["entries"]
+    assert not any(e.get("pinned") for e in out)
+    assert out[0]["attribute"] == "host"
+    assert all(e["score"] >= floor for e in out)
 
 
 def test_scope_test_is_separator_insensitive_and_word_bounded():

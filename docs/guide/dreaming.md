@@ -516,13 +516,18 @@ is therefore treated as zero-distortion by the dream:
 
 - **The carrier (TypeCompact).** Among the claims the extractor cites
   the entry for, at least one scalar claim must contain the entry's text
-  verbatim (whitespace-collapsed, case-preserving). If none does, the
-  first scalar claim's *value* is replaced with the entry text — the
-  extractor's entity and attribute are kept (slotting is what it is good
-  at; wording is not), sibling claims are left alone. Member (`op`)
-  claims are never carriers. The derived fact inherits the source's
-  labels, so it reads back as `distortion_tolerance: constraint` and is
-  pinned in recall.
+  verbatim (whitespace-collapsed, case-preserving). If none does, ONE
+  claim's *value* is replaced with the entry text: the claim whose
+  content tokens overlap the rule most (at least one must), and only if
+  its target slot is empty or already holds a constraint — a standing
+  non-constraint fact is never overwritten and a claim about something
+  else is never hijacked, whatever position it has in extractor output.
+  The extractor's entity and attribute are kept (slotting is what it is
+  good at; wording is not), sibling claims are left alone, member (`op`)
+  claims are never carriers, and with no eligible claim the carrier
+  refuses and leaves the miss to the guard. Only the carrier earns
+  `distortion_tolerance: constraint` (and the pin in recall); a
+  paraphrased sibling is an observation and inherits its slot's label.
 - **The guard verifier.** After the claims loop, every constraint entry
   in the processed window must have a derived item carrying its text
   verbatim (a parked contender counts; so does a slot the same entry

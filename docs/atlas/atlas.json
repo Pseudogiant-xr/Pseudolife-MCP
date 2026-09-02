@@ -581,7 +581,7 @@
     "Seed entities → depth-1 graph expansion per hop, re-query each hop",
     "Hub-gating avoids degree blowup; Mechanical or LLM controllers",
     "Promoted from an evals harness into the memory_recall tool",
-  "v35: a seed entity's constraint facts are pinned first (survive the per-entity fact cap); hop-discovered entities are context, not scope"
+    "v35: a seed entity's constraint facts are pinned first (survive the per-entity fact cap); hop-discovered entities are context, not scope"
    ]
   },
   {
@@ -597,7 +597,7 @@
     "Provenance tiers user > action > agent, + contender parking on conflict",
     "dedup_siblings: paraphrase-cluster merge via union-find",
     "Per-fact freshness_class (v23) · set-valued slots (v26) · epistemic stance (v29, latest-asserting-write, never a ranking input) · asserted_at/age on recall",
-  "v35 label pair: authority (speech act — directive/observation/quoted, a separate axis from the origin TIER) + distortion_tolerance (constraint…episodic); inherit-unless-restated via _pick (INHERIT sentinel, None clears); constraint is the ONE label ranking reads (cortex_search._pin_constraint_facts, recall seeds)",
+    "v35 label pair: authority (speech act — directive/observation/quoted, a separate axis from the origin TIER) + distortion_tolerance (constraint…episodic); inherit-unless-restated via _pick (INHERIT sentinel, None clears); constraint is the ONE label ranking reads (cortex_search._pin_constraint_facts, recall seeds)",
     "Aggregate-total guard on member adds; cortex_search groups sets, opt-in BM25 fusion ships off (0.12)"
    ]
   },
@@ -685,7 +685,7 @@
     "Claim op:add/remove routes to set members; op prompt block shipped 2026-08-01 (v5, count-exclusion repaired the KU-negative v0)",
     "Write gates: literal_violations (digit fidelity, enforce) · span_unbacked (quote-vs-cited-note containment, ships off) — fidelity checks, never trust checks",
     "run_sweep_once also rides: need-based deep tick + autonomous Step-C judge (judge_merges, shadow/auto-reject, v30)",
-  "v35 TypeCompact: a constraint-labelled source's text is carried verbatim onto a derived scalar claim (_apply_constraint_carrier); post-dream guard reports constraint entries with no verbatim carrier (constraint_misses — flag, cursor advances); derived facts take the SOURCE entry's labels, never extractor output; quoted sources are low-trust for the two-man rule"
+    "v35 TypeCompact: a constraint-labelled source's text is carried verbatim onto a derived scalar claim (_apply_constraint_carrier); post-dream guard reports constraint entries with no verbatim carrier (constraint_misses — flag, cursor advances); derived facts take the SOURCE entry's labels, never extractor output; quoted sources are low-trust for the two-man rule"
    ]
   },
   {

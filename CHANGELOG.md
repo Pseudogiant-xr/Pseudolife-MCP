@@ -37,7 +37,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     hand-labelled hits; the shipped rule fires on ~1.6% of facts at ~0.86
     precision and on 1 of 836 entries; the rejected variants (any deontic
     word anywhere: 36% of entries; mid-sentence never/always: 0.53; an
-    attribute-name rule: 0.63) are recorded beside it in
+    attribute-name rule: 0.52) are recorded beside it in
     `evals/results/label-heuristic-audit-20260902.json`. No backfill.
   - **Inherit unless restated.** `memory_supersede` and
     `memory_consolidate` carry the strictest label across the entries they
@@ -52,9 +52,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     byte-identical (the `stance` precedent); the compact projections
     re-select the keys explicitly (the chip 4.1 whitelist lesson).
 - **Dream (TypeCompact).** A `constraint` source entry is zero-distortion:
-  if no scalar claim citing it contains its text verbatim, the first scalar
-  claim's value is replaced with the entry text (entity/attribute kept,
-  siblings untouched, member ops never carriers). A **post-dream guard
+  if no scalar claim citing it contains its text verbatim, ONE claim's
+  value is replaced with the entry text — the claim whose tokens overlap
+  the rule most, and only if its target slot is empty or already a
+  constraint; a standing non-constraint fact is never overwritten, a
+  claim about something else is never hijacked, and with no eligible
+  claim the carrier refuses and the guard reports (the pre-review cut
+  took the extractor's FIRST claim by position — the peer review
+  reproduced it superseding a correct unrelated fact with the rule text).
+  Only the verbatim carrier earns the `constraint` class; paraphrased
+  siblings inherit the slot's label (entity/attribute kept, member ops
+  never carriers). A **post-dream guard
   verifier** then reports every constraint entry in the window with no
   verbatim derived item — `constraint_verbatim` / `constraint_misses` on
   the run result, `constraint_missed` on the run row, WARNING in the log.
@@ -65,13 +73,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   relayed it — the label only ever demotes). Ships inert on an unlabelled
   bank; extraction-ladder paired arms are GATE-PENDING (see the PR).
 - **Recall (TypeRetrieve).** In-scope `constraint` facts are pinned AHEAD of
-  the cosine ranking, marked `pinned: true`, inside the same `top_k`
-  budget. In scope = the query names the fact's entity (`memory_search`'s
+  the cosine ranking, marked `pinned: true` — exemption from ranking, not
+  from relevance: a pin must clear the caller's `min_score` floor, pins
+  take at most half of `top_k` so the ranked answer keeps the rest, and
+  the best cosine wins the pin slots (the peer review reproduced the
+  unbounded cut: six rules on one entity displaced the whole block at
+  cosine ~0.37 against a 0.5 floor). In scope = the query names the fact's entity (`memory_search`'s
   cortex block; separator-insensitive, word-bounded) or the entity is a
   seed of the walk (`memory_recall`; the pin also survives the per-entity
   fact cap). Kill switch `memory.cortex.pin_constraints` (Console: Cortex
   → Pin constraint facts). Retrieval-affecting only when labels exist —
-  an unlabelled bank is served byte-identically, pinned by test.
+  an unlabelled bank is served byte-identically, pinned by test. The
+  cortex-block scope test is a raw-string match and does not resolve
+  graph aliases (follow-up once PR #243's alias map lands); the served-
+  facts training log records `pinned` so a reranker never learns a
+  policy pin as a score. The offline `rebuild_contexts.py` mirror does
+  not pin, so its lockstep with the service now holds for unlabelled
+  banks only — a labelled bench bank needs `pin_constraints=false` or
+  a recorded heuristic fire rate beside the result.
 - Served text: the CAPTURE section names the two labels (funded by two
   trims; the block stays under its budget).
 
