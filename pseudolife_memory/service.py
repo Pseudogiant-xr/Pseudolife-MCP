@@ -2171,6 +2171,34 @@ class MemoryService(DreamOps):
             self._slot_read_errors += 1
             logger.warning("slot-read telemetry failed", exc_info=True)
 
+    def _alias_retry_names(self, entity: str, node: dict) -> list[str]:
+        """Names to retry a slot miss under after ``entity`` itself: the
+        node's canonical, then its aliases in ``find_entity``'s order —
+        minus any alias that is some OTHER entity's canonical.
+        ``find_entity`` resolves canonical-first, so such an alias row never
+        resolves to this node and a record under that name belongs to the
+        other entity (``graph_alias`` never checks the entities table, and
+        a lesson about an alias used to mint one). Dropping it is the same
+        drop ``graph.alias_canonical_map`` makes for the graph read
+        surfaces, so lookup and attachment agree. Dedup is on the cortex
+        key (``_norm_key``), the space the retry actually probes — a
+        canonical whose graph norm equals the query's but whose cortex key
+        differs (``host:port`` vs ``host-port``) is still worth one probe.
+        Cost: one indexed query, only when the node has aliases. Caller
+        holds the lock."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        aliases = [a for a in (node.get("aliases") or ()) if a]
+        shadowed = (self._storage.canonical_names_among(aliases)
+                    if aliases else set())
+        seen = {_norm_key(entity)}
+        out: list[str] = []
+        for c in (node.get("canonical"), *aliases):
+            if not c or c in shadowed or _norm_key(c) in seen:
+                continue
+            seen.add(_norm_key(c))
+            out.append(c)
+        return out
+
     def cortex_lookup(self, entity: str, attribute: str,
                       track: bool = True) -> dict[str, Any] | None:
         """Exact slot lookup — the one ``current`` fact, or ``None``.
@@ -2190,8 +2218,11 @@ class MemoryService(DreamOps):
         direct hit, canonical, aliases (``find_entity``'s alias order), so a
         canonical-keyed record wins over an alias-keyed one at the same
         attribute; the served record keeps its OWN slot key, which is where
-        its traces, contenders and ``correct_with`` live. One ``find_entity``
-        call per miss — the aliases ride along in its result, never a
+        its traces, contenders and ``correct_with`` live. An alias that is
+        also another entity's canonical is skipped — ``find_entity`` would
+        resolve it to that entity, so a record under it is theirs (see
+        ``_alias_retry_names``). One ``find_entity`` call per miss plus,
+        only when the node has aliases, one indexed shadow probe — never a
         per-alias storage query. Aliases are graph norms
         (``graph.norm_name``), so a record whose entity the cortex normalizer
         keeps distinct (``host:port`` vs ``host-port``) is not reached this
@@ -2207,19 +2238,16 @@ class MemoryService(DreamOps):
             self._ensure_init()
             assert self._cortex is not None
             rec = self._cortex.lookup(entity, attribute)
-            # Retry list on a miss: the canonical, then the node's aliases,
-            # all from the ONE find_entity call. Dedup on the graph norm so
-            # the query name is never retried under another spelling.
+            # Retry list on a miss: the canonical, then the node's aliases
+            # that find_entity would actually resolve here (see
+            # _alias_retry_names) — one find_entity call plus, only when
+            # the node has aliases, one indexed shadow probe.
             names = [entity]
             if rec is None and self._storage is not None:
                 from pseudolife_memory.graph import norm_name
                 node = self._storage.find_entity(norm_name(entity))
                 if node is not None:
-                    seen = {norm_name(entity)}
-                    for c in (node.get("canonical"), *(node.get("aliases") or ())):
-                        if c and norm_name(c) not in seen:
-                            seen.add(norm_name(c))
-                            names.append(c)
+                    names.extend(self._alias_retry_names(entity, node))
                     for name in names[1:]:
                         rec = self._cortex.lookup(name, attribute)
                         if rec is not None:
@@ -2945,17 +2973,24 @@ class MemoryService(DreamOps):
         if self._storage is None:
             return
         from pseudolife_memory.graph import norm_name
-        st = self._storage
         tn = norm_name(task)
         if not tn:
             return
-        tid = st.ensure_entity(tn, display=task.strip(), etype="task-type")
+        # Resolve through the alias table before upserting by canonical:
+        # ensure_entity alone minted a fresh canonical for a name that was
+        # already an alias (a lesson about "pr-235" after that node was
+        # folded into "PR #235"), and that shadow then out-resolved the
+        # alias everywhere find_entity is consulted — the graph detached
+        # the surviving node's alias-keyed facts while cortex_lookup's
+        # retry, before it learned to skip shadowed aliases, kept serving
+        # them. Same alias-aware find-then-create every other write uses.
+        tid = self._resolve_or_create_entity(task, etype="task-type")["id"]
         if not about:
             return
         an = norm_name(about)
         if not an or an == tn:
             return
-        oid = st.ensure_entity(an, display=about.strip())
+        oid = self._resolve_or_create_entity(about)["id"]
         relation = "avoids" if polarity == "-" else "prefers"
         self._graph.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
 
@@ -3335,12 +3370,13 @@ class MemoryService(DreamOps):
                 node = self._storage.find_entity(norm_name(name))
                 if node is not None:
                     display = node["display"]
-                    keys.add(_norm_key(node.get("canonical") or ""))
-                    # Same find_entity result, no extra query: a merge folds
-                    # the absorbed canonical into these aliases without
-                    # rewriting the records written under it.
-                    keys.update(_norm_key(a) for a in node.get("aliases") or ()
-                                if a)
+                    # Canonical plus the aliases find_entity resolves to
+                    # this node (a merge folds the absorbed canonical into
+                    # them without rewriting the records written under it);
+                    # an alias shadowed by another entity's canonical is
+                    # that entity's history, not this one's.
+                    keys.update(_norm_key(n) for n in
+                                self._alias_retry_names(name, node))
             events: list[dict] = []
             # 1. canonical fact history — assertions and supersessions.
             for r in self._cortex.records:

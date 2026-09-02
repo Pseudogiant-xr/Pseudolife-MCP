@@ -149,3 +149,77 @@ def test_chain_includes_alias_keyed_slot_history(pg_conn, pg_url, tmp_path):
     via_alias = svc.chain("pr-235")
     assert [(e["kind"], e["summary"]) for e in via_alias["events"]
             if e["kind"] in ("fact_set", "superseded")] == facts
+
+
+# ── shadowed alias: a name that is BOTH an alias here and a canonical elsewhere
+#
+# graph_alias never checks the entities table, and a lesson about an alias
+# used to mint a canonical of the same name, so the alias table can carry a
+# row find_entity will never resolve (canonical wins). Serving through such
+# a row would hand out ANOTHER entity's fact; graph.alias_canonical_map
+# drops exactly these, and the lookup retry must agree with it.
+
+
+def _shadowed_alias(svc):
+    """``gpu-rig`` is an entity with facts of its own AND an alias of
+    ``dev-box``. ``find_entity("gpu-rig")`` resolves canonical-first, so the
+    alias row is dead for resolution — nothing of gpu-rig's is dev-box's."""
+    svc.cortex_write("gpu-rig", "owner", "ops-team", support="user")
+    svc.set_add("gpu-rig", "tags", "loud")
+    svc.cortex_write("dev-box", "location", "lab", support="user")
+    svc.graph_alias("dev-box", "gpu-rig")
+    assert svc.entity_ref("gpu-rig")["canonical"] == "gpu-rig"
+    assert "gpu-rig" in svc.entity_ref("dev-box")["aliases"]
+
+
+def test_cortex_lookup_declines_alias_shadowed_by_another_canonical(
+        pg_conn, pg_url, tmp_path):
+    """Neither the scalar retry nor the set fallback may serve a fact
+    through an alias that is some other entity's canonical — and the graph
+    side, which attaches facts through the same precedence, agrees."""
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    _shadowed_alias(svc)
+
+    assert svc.cortex_lookup("dev-box", "owner") is None
+    assert svc.cortex_lookup("dev-box", "tags") is None
+    node = next(n for n in svc.graph_neighborhood("dev-box", depth=1)["nodes"]
+                if n["canonical"] == "dev-box")
+    assert [f["attribute"] for f in node["facts"]] == ["location"]
+    # The shadowing entity still serves its own facts under its own name.
+    assert svc.cortex_lookup("gpu-rig", "owner")["value"] == "ops-team"
+    assert svc.cortex_lookup("gpu-rig", "tags")["kind"] == "set"
+
+
+def test_chain_declines_alias_shadowed_by_another_canonical(
+        pg_conn, pg_url, tmp_path):
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    _shadowed_alias(svc)
+
+    out = svc.chain("dev-box")
+    assert [e["summary"] for e in out["events"] if e["kind"] == "fact_set"] == [
+        "location = lab"]
+
+
+def test_lesson_about_an_alias_does_not_mint_a_shadowing_entity(
+        pg_conn, pg_url, tmp_path):
+    """``lesson_write`` (the dream's writer, fed by ``memory_outcome``'s
+    ``about``) upserted the object entity by canonical with no alias check,
+    so a lesson about a merged-away name minted a fresh canonical that
+    shadowed the alias: from then on the graph detached the fact from the
+    surviving node while the lookup retry kept serving it. The object must
+    resolve through the alias table like every other write."""
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    svc.cortex_write("pr-235", "branch", "fix/recall-alias-keyed-facts",
+                     support="user")
+    _merge_alias_into_canonical(svc)
+
+    svc.lesson_write("review a pull request", "approach",
+                     "read the diff before the description", about="pr-235")
+
+    node = svc.entity_ref("pr-235")
+    assert node["canonical"] == "pr-#235", "a shadowing canonical was minted"
+    edges = svc.graph_neighborhood("PR #235", depth=1)["edges"]
+    assert any(e["relation"] == "prefers" and e["dst"] == "PR #235"
+               for e in edges), edges
+    # ...so the fact stays reachable under the display name afterwards.
+    assert svc.cortex_lookup("PR #235", "branch")["entity"] == "pr-235"

@@ -33,11 +33,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `chain()` adds the node's aliases to its slot-key set, so the
     assertion / supersession history written under the folded name shows
     under the surviving node whichever name reaches it.
-  - Cost is unchanged: one `find_entity` call per miss — the aliases ride
-    along in its result — and no per-alias storage query. Aliases are
-    graph norms, so a record whose entity `cortex._norm_key` keeps distinct
-    from its graph norm (`host:port` vs `host-port`) is still not reached
-    this way, the limit the canonical retry has always had.
+  - **An alias that is also another entity's canonical is skipped.** The
+    alias table can carry such a row (`memory_alias` never checks the
+    entities table), and `find_entity` resolves canonical-first, so that
+    alias never resolves to this node — a record under that name is the
+    other entity's. The retry drops it, exactly as `graph.alias_canonical_map`
+    drops it for the graph read surfaces, so lookup and attachment agree
+    instead of disagreeing in opposite directions. Found by the #244
+    pre-merge review, which reproduced `memory_fact_get("dev-box", "owner")`
+    serving `gpu-rig`'s fact after `memory_alias("dev-box", "gpu-rig")`
+    while `memory_graph("dev-box")` correctly attached nothing.
+  - **A lesson about an alias no longer mints a shadowing entity.**
+    `_link_lesson_graph` (the dream's `lesson_write`, fed by
+    `memory_outcome`'s `about`) upserted the task and object entities by
+    canonical with no alias check, so one lesson about `pr-235` after that
+    node was folded into `PR #235` minted a fresh `pr-235` canonical — from
+    then on the graph detached the surviving node's alias-keyed facts, and
+    a retry that did not skip shadowed aliases would have kept serving
+    them. Both entities now resolve through the alias table first
+    (`_resolve_or_create_entity`, the find-then-create graph writes use;
+    its exact-match slot-key fold now applies to lesson subjects too).
+    Pre-existing, but this pair of changes makes the alias table
+    load-bearing for serving, so it ships here.
+  - Cost: one `find_entity` call per miss plus, only when the node has
+    aliases, one indexed probe (`canonical_names_among`) — still no
+    per-alias storage query. The set-slot check runs `slot_kind` once per
+    name in the list, and `slot_kind` scans the record list for a slot
+    with neither a current scalar nor current members, so a miss on a
+    node with K aliases costs 1+K scans where it cost at most 2 —
+    microseconds at the live bank's size. Aliases are graph norms, so a
+    record whose entity `cortex._norm_key` keeps distinct from its graph
+    norm (`host:port` vs `host-port`) is still not reached this way, the
+    limit the canonical retry has always had.
   - This widens the resolution surface the 2026-07-27 bank curation
     trimmed: back then, leak-shaped aliases (`canonical-suffix`) let an
     alias with no fact at an attribute silently serve the canonical's. The
@@ -48,8 +75,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     matter, not a lookup one.
   - Not changed: `memory_fact_get`'s `contenders` and the empty-slot
     `candidates` still key on the queried name (and, for candidates, its
-    canonical), and slot-mode `memory_history(entity, attribute)` does no
-    alias resolution in either direction.
+    canonical), slot-mode `memory_history(entity, attribute)` does no
+    alias resolution in either direction, and `memory_alias` still accepts
+    an alias equal to another entity's canonical — the shadow state stays
+    creatable by hand; refusing it, or treating it as a merge, is a tool
+    behaviour change for a separate decision.
 
 ### Fixed (2026-09-02 — recall serves the facts of a merged-away name)
 
