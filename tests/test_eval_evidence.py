@@ -758,6 +758,211 @@ CLAIMS.append(Claim(
     stated=0.0, places=4))
 
 
+CCS = RESULTS + "contiguity-cue-split-20260904.json"
+# ── cue-gated contiguity: the Phase-1 follow-up (2026-09-04) ─────────────
+# An OFFLINE composite over the same aggp1-variants rows, so every number
+# below is a re-read of already-judged verdicts rather than a fresh run.
+# That is exactly why it needs pinning: nothing else would contradict it.
+# The CHANGELOG carries the argument, the evals README the tables; both
+# are guarded, because a reader meets the number in whichever they open.
+
+
+def _cue(*path) -> Callable[[dict], float]:
+    def get(d: dict) -> float:
+        node = d["cues"]
+        for k in path:
+            node = node[k]
+        return node
+    return get
+
+
+def _ccs(arm: str, *path) -> Callable[[dict], float]:
+    def get(d: dict) -> float:
+        node = d["variants"][arm]
+        for k in path:
+            node = node[k]
+        return node
+    return get
+
+
+_CCS_CHANGELOG = [
+    # (id, needle, value, stated, places)
+    ("ccs-cue-any-rate",
+     "engine's own `any` gate fires on 0.702 of the 500 questions (recall",
+     _cue("fire_rate", "any"), 0.702, 3),
+    ("ccs-cue-weak-recall",
+     "0.947 on the weak types, precision 0.718, and 0.692 on",
+     _cue("confusion_vs_weak_types", "recall_on_weak"), 0.947, 3),
+    ("ccs-cue-weak-precision",
+     "0.947 on the weak types, precision 0.718, and 0.692 on",
+     _cue("confusion_vs_weak_types", "precision_for_weak"), 0.718, 3),
+    ("ccs-cue-ku-rate",
+     "0.947 on the weak types, precision 0.718, and 0.692 on",
+     _cue("confusion_vs_weak_types", "knowledge_update_fire_rate"),
+     0.692, 3),
+    ("ccs-cue-date-rate",
+     "predicate fires 0.000 times, LongMemEval keeps the date out of the",
+     _cue("fire_rate", "date"), 0.0, 3),
+    ("ccs-ctg-fired-delta",
+     "hybrid is -0.114 on cue-fired rows (n=351, p 0.00000) against -0.047",
+     _ccs("hybrid_ctg", "split", "cue_fired", "delta"), -0.114, 3),
+    ("ccs-ctg-fired-p",
+     "hybrid is -0.114 on cue-fired rows (n=351, p 0.00000) against -0.047",
+     _ccs("hybrid_ctg", "split", "cue_fired", "p"), 0.0, 5),
+    ("ccs-ctg-fired-n",
+     "hybrid is -0.114 on cue-fired rows (n=351, p 0.00000) against -0.047",
+     _ccs("hybrid_ctg", "split", "cue_fired", "n"), 351, 0),
+    ("ccs-ctg-quiet-delta",
+     "hybrid is -0.114 on cue-fired rows (n=351, p 0.00000) against -0.047",
+     _ccs("hybrid_ctg", "split", "cue_quiet", "delta"), -0.047, 3),
+    ("ccs-ctg-quiet-p",
+     "where the cue is quiet (n=149, p 0.18170), and on the weak types the",
+     _ccs("hybrid_ctg", "split", "cue_quiet", "p"), 0.18170, 5),
+    ("ccs-ctg-quiet-n",
+     "where the cue is quiet (n=149, p 0.18170), and on the weak types the",
+     _ccs("hybrid_ctg", "split", "cue_quiet", "n"), 149, 0),
+    ("ccs-ctg-weak-fired-delta",
+     "two splits are indistinguishable (-0.147 fired vs -0.143 quiet). The",
+     _ccs("hybrid_ctg", "split_weak_types", "cue_fired", "delta"),
+     -0.147, 3),
+    ("ccs-ctg-weak-quiet-delta",
+     "two splits are indistinguishable (-0.147 fired vs -0.143 quiet). The",
+     _ccs("hybrid_ctg", "split_weak_types", "cue_quiet", "delta"),
+     -0.143, 3),
+    ("ccs-gated-overall-acc",
+     "gated composite therefore scores 0.584 overall and 0.320 on the weak",
+     _ccs("hybrid_ctg", "gated", "overall", "gated_acc"), 0.584, 3),
+    ("ccs-gated-weak-acc",
+     "gated composite therefore scores 0.584 overall and 0.320 on the weak",
+     _ccs("hybrid_ctg", "gated", "weak_types", "gated_acc"), 0.320, 3),
+    ("ccs-hybrid-overall-acc",
+     "types against vanilla hybrid's 0.664 / 0.459 (-0.080 and -0.139, both",
+     _ccs("hybrid_ctg", "gated", "overall", "hybrid_acc"), 0.664, 3),
+    ("ccs-hybrid-weak-acc",
+     "types against vanilla hybrid's 0.664 / 0.459 (-0.080 and -0.139, both",
+     _ccs("hybrid_ctg", "gated", "weak_types", "hybrid_acc"), 0.459, 3),
+    ("ccs-gated-overall-delta",
+     "types against vanilla hybrid's 0.664 / 0.459 (-0.080 and -0.139, both",
+     _ccs("hybrid_ctg", "gated", "overall", "vs_hybrid", "delta"),
+     -0.080, 3),
+    ("ccs-gated-weak-delta",
+     "types against vanilla hybrid's 0.664 / 0.459 (-0.080 and -0.139, both",
+     _ccs("hybrid_ctg", "gated", "weak_types", "vs_hybrid", "delta"),
+     -0.139, 3),
+    ("ccs-gated-weak-p",
+     "  p 0.00000), buying +0.008 of the 0.147 weak-type hole while adding 254",
+     _ccs("hybrid_ctg", "gated", "weak_types", "vs_hybrid", "p"), 0.0, 5),
+    ("ccs-ctg-turns-added",
+     "so on cue-fired rows contiguity adds a mean 1.46 turns and *displaces*",
+     _ccs("hybrid_ctg", "context_effect", "cue_fired", "mean_turns_added"),
+     1.46, 2),
+    ("ccs-ctg-turns-displaced",
+     "the same 1.46 ranked hits. Lever 5 of the fresh-eyes review is closed",
+     _ccs("hybrid_ctg", "context_effect", "cue_fired",
+          "mean_turns_displaced"), 1.46, 2),
+    ("ccs-tl-gated-overall",
+     "(0.640 / 0.447) because the timeline channel is already cue-gated in",
+     _ccs("hybrid_tl", "gated", "overall", "gated_acc"), 0.640, 3),
+    ("ccs-tl-gated-weak",
+     "(0.640 / 0.447) because the timeline channel is already cue-gated in",
+     _ccs("hybrid_tl", "gated", "weak_types", "gated_acc"), 0.447, 3),
+    ("ccs-tl-gated-equals-ungated",
+     "(0.640 / 0.447) because the timeline channel is already cue-gated in",
+     _ccs("hybrid_tl", "gated", "weak_types", "ungated_acc"), 0.447, 3),
+]
+for _cid, _needle, _val, _stated, _places in _CCS_CHANGELOG:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(CCS,),
+        value=_val, stated=_stated, places=_places))
+
+# The noise floor is a SUM across the four variant arms, so it gets its
+# own accessor: 522 identical-context arm-rows, zero verdict flips.
+CLAIMS.append(Claim(
+    id="ccs-noise-identical-rows", doc=CHANGELOG,
+    needle="the engine, and 522 arm-rows whose served context was byte-identical",
+    artifacts=(CCS,),
+    value=lambda d: sum(v["noise_control"]["identical_context_rows"]
+                        for v in d["variants"].values()),
+    stated=522, places=0))
+CLAIMS.append(Claim(
+    id="ccs-noise-disagreements", doc=CHANGELOG,
+    needle="arm — produced zero verdict disagreements, so the splits carry no",
+    artifacts=(CCS,),
+    value=lambda d: sum(v["noise_control"]["verdict_disagreements"]
+                        for v in d["variants"].values()),
+    stated=0, places=0))
+
+# The evals README's two tables. The gated-arm table publishes accuracy,
+# weak-type accuracy, the UNGATED weak comparison (what gating bought)
+# and the token cost, so all four cells of each row pin.
+_CCS_GATED_ROWS = [
+    ("hybrid_ctg", "| `hybrid_ctg` gated | 0.584 | 0.320 | 0.312 | 1096.4 |",
+     0.584, 0.320, 0.312, 1096.4),
+    ("hybrid_tl", "| `hybrid_tl` gated | 0.640 | 0.447 | 0.447 | 803.4 |",
+     0.640, 0.447, 0.447, 803.4),
+    ("hybrid_enum", "| `hybrid_enum` gated | 0.626 | 0.387 | 0.387 | 857.5 |",
+     0.626, 0.387, 0.387, 857.5),
+    ("hybrid_all", "| `hybrid_all` gated | 0.546 | 0.293 | 0.282 | 1089.0 |",
+     0.546, 0.293, 0.282, 1089.0),
+]
+for _arm, _needle, _ov, _wk, _uw, _tok in _CCS_GATED_ROWS:
+    for _suffix, _val, _stated, _places in [
+        ("overall", _ccs(_arm, "gated", "overall", "gated_acc"), _ov, 3),
+        ("weak", _ccs(_arm, "gated", "weak_types", "gated_acc"), _wk, 3),
+        ("ungated-weak",
+         _ccs(_arm, "gated", "weak_types", "ungated_acc"), _uw, 3),
+        ("tokens",
+         _ccs(_arm, "gated", "overall", "gated_context_tokens"), _tok, 1),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"ccs-readme-{_arm}-{_suffix}", doc=EVALS, needle=_needle,
+            artifacts=(CCS,), value=_val, stated=_stated, places=_places))
+
+CLAIMS.append(Claim(
+    id="ccs-readme-vanilla-tokens", doc=EVALS,
+    needle="| vanilla `hybrid` | 0.664 | 0.459 | \u2014 | 842.1 |",
+    artifacts=(CCS,),
+    value=_ccs("hybrid_ctg", "gated", "overall", "hybrid_context_tokens"),
+    stated=842.1, places=1))
+
+# The per-type cue fire-rate table: the two weak types the knobs target
+# and the knowledge-update row the cue must NOT fire on.
+for _type, _needle, _temporal, _agg, _any in [
+    ("multi-session", "| multi-session | 133 | 0.256 | 0.887 | 0.940 |",
+     0.256, 0.887, 0.940),
+    ("temporal-reasoning",
+     "| temporal-reasoning | 133 | 0.820 | 0.421 | 0.955 |",
+     0.820, 0.421, 0.955),
+    ("knowledge-update",
+     "| knowledge-update | 78 | 0.321 | 0.538 | 0.692 |",
+     0.321, 0.538, 0.692),
+]:
+    for _cue_name, _stated in [("temporal", _temporal),
+                               ("aggregation", _agg), ("any", _any)]:
+        CLAIMS.append(Claim(
+            id=f"ccs-readme-fire-{_type}-{_cue_name}", doc=EVALS,
+            needle=_needle, artifacts=(CCS,),
+            value=_cue("by_type", _type, _cue_name),
+            stated=_stated, places=3))
+
+
+# A narrower gate does not save contiguity either: the README states the
+# temporal-only and aggregation-only gates land at the same place, above
+# the `any` gate and below vanilla hybrid. Both cue keys pin, because the
+# sentence claims they AGREE and one drifting would make it false.
+_CCS_NARROW_NEEDLE = (
+    "lands at **0.616** overall and **0.376** on the weak types \u2014 better")
+for _cue_key in ("temporal", "aggregation"):
+    for _slice, _stated, _places in [("overall_acc", 0.616, 3),
+                                     ("weak_acc", 0.376, 3)]:
+        CLAIMS.append(Claim(
+            id=f"ccs-readme-narrow-{_cue_key}-{_slice}", doc=EVALS,
+            needle=_CCS_NARROW_NEEDLE, artifacts=(CCS,),
+            value=(lambda c, s: lambda d: d["variants"]["hybrid_ctg"]
+                   ["gated_by_cue"][c][s])(_cue_key, _slice),
+            stated=_stated, places=_places))
+
+
 EV2 = RESULTS + "compare-ev2-{}-pairs.json"
 EV2_SUMMARY = RESULTS + "longmemeval-all-oracle-qwen-27b-ev2-sep-0804.summary.json"
 # ── the separate-pass events gate result (2026-08-05) ────────────────────

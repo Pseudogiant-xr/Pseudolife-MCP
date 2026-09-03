@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-09-04 — cue-gating does not rescue contiguity; eval-only)
+
+- **The 2026-08-04 Phase-1 knobs lose hardest exactly where the engine's
+  own cue detector fires, so gating them on it cannot help.** The
+  Phase-1 gates applied contiguity/timeline/enum to every query;
+  `evals/contiguity_cue_split.py` re-reads the same
+  `aggp1-variants-0803` rows offline (no new answer or judge calls) and
+  builds the gated policy explicitly — vanilla `hybrid` where the cue is
+  quiet, the variant where it fires — from verdicts that were already
+  judged. Detectors are imported from
+  `pseudolife_memory/memory/cms.py` (`has_temporal_cue`,
+  `has_aggregation_cue`, `has_date_cue`), never re-implemented. The
+  engine's own `any` gate fires on 0.702 of the 500 questions (recall
+  0.947 on the weak types, precision 0.718, and 0.692 on
+  knowledge-update — the type contiguity must not disturb; the date
+  predicate fires 0.000 times, LongMemEval keeps the date out of the
+  question text). Contiguity's paired delta against the same-run vanilla
+  hybrid is -0.114 on cue-fired rows (n=351, p 0.00000) against -0.047
+  where the cue is quiet (n=149, p 0.18170), and on the weak types the
+  two splits are indistinguishable (-0.147 fired vs -0.143 quiet). The
+  gated composite therefore scores 0.584 overall and 0.320 on the weak
+  types against vanilla hybrid's 0.664 / 0.459 (-0.080 and -0.139, both
+  p 0.00000), buying +0.008 of the 0.147 weak-type hole while adding 254
+  context tokens. Mechanism: the served memory block is a fixed top-k,
+  so on cue-fired rows contiguity adds a mean 1.46 turns and *displaces*
+  the same 1.46 ranked hits. Lever 5 of the fresh-eyes review is closed
+  negative; no defaults change.
+  Validity: `hybrid_tl` gated equals `hybrid_tl` ungated to the digit
+  (0.640 / 0.447) because the timeline channel is already cue-gated in
+  the engine, and 522 arm-rows whose served context was byte-identical
+  to vanilla hybrid's — answered and judged independently, one call per
+  arm — produced zero verdict disagreements, so the splits carry no
+  measurement noise to net out. Caveat, stated at the claim: a single
+  replicate from 2026-08-03 on the retired Qwen3.6 judge, and a
+  composite of already-judged arms is not a run — a gated knob would
+  still need its own judged run before shipping.
+  Artifact `evals/results/contiguity-cue-split-20260904.json`; section
+  "Cue-gated contiguity" in `evals/README.md`.
+
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 
 ### Fixed (2026-09-04 — the Console's digest length default matches the daemon's)
