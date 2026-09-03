@@ -2433,6 +2433,13 @@ for _cid, _needle, _art, _val, _stated, _places in [
      _paired("hybrid", "rows_context_differs"), 30, 0),
     ("chip5-beam-context-rows-cortex", _CHIP5_CTX, BEAM_CHIP5_PAIRED,
      _paired("cortex", "rows_context_differs"), 30, 0),
+    # The two chats are the whole mechanism story (constraint label ->
+    # recall pin -> different served context), so the sentence naming
+    # them is pinned, not only the row count.
+    ("chip5-beam-context-chats", "all sit in chats 13 and 15",
+     BEAM_CHIP5_PAIRED,
+     lambda d: float(sorted(d["chats_with_context_diff"]) == ["13", "15"]),
+     1, 0),
     ("chip5-labels-constraint", _CHIP5_LABELS, BEAM_CHIP5_LABELS,
      lambda d: d["distortion_tolerance"]["constraint"], 3, 0),
     ("chip5-labels-quoted", _CHIP5_LABELS, BEAM_CHIP5_LABELS,

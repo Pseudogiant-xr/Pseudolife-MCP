@@ -84,7 +84,7 @@ def main() -> int:
         for arm in arms:
             if a.get("contexts", {}).get(arm) != b.get("contexts", {}).get(arm):
                 c[arm] += 1
-    out["chats_with_context_diff"] = {c: v for c, v in sorted(by_chat.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else kv[0])
+    out["chats_with_context_diff"] = {c: v for c, v in sorted(by_chat.items(), key=lambda kv: (0, int(kv[0]), "") if kv[0].isdigit() else (1, 0, kv[0]))
                                       if any(v.values())}
     Path(args.out).write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: out[k] for k in ("paired_rows", "unpaired", "arms", "chats_with_context_diff")}, indent=2))
