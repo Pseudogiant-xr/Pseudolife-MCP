@@ -2526,6 +2526,19 @@ for _cid, _needle, _art, _val, _stated, _places in [
         value=_val, stated=_stated, places=_places))
 
 
+# The evals README's judge-ladder section (v0.15.0 docs pass) restates the
+# effort ladder's truncation finding; a restatement is a claim like any
+# other, so it is pinned to the same artifact as the CHANGELOG row above.
+CLAIMS.append(Claim(
+    id="judge-xhigh-truncated-accepts-evals", doc=EVALS,
+    needle="run truncated all 30 true-accept rows at the default budget",
+    artifacts=(JUDGE_EFFORT,),
+    value=lambda d: sum(1 for r in d["arms"]["qwen-27b-xhigh"]["per_row"]
+                        if r["label"] == "accept"
+                        and all(v is None for v in r["votes"])),
+    stated=30, places=0))
+
+
 def test_beam_range_quotes_match_the_committed_verdict():
     """The evals README quotes three sweep ranges; they must be the
     verdict file's, not a recollection of it."""
