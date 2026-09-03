@@ -1,0 +1,486 @@
+"""What an AGENT pays, in context, to use this memory — measured.
+
+Every "fewer tokens" figure this project has published measures *served
+benchmark context*: the passage an answerer model reads to answer a
+LongMemEval question (``ladder_sweep.py``'s ``tokens_per_query``,
+``longmemeval_bench.py``'s ``context_tokens``). None of them measures the
+other side of the wire — what a real MCP client reads back from a tool
+call, and pays for on every single call, forever.
+
+This ledger measures that side, in four parts:
+
+1. **manifest** — the tool descriptions and inputSchema param descriptions
+   a non-deferring client eats once per session, per toolset tier. Measured
+   through the same ``mcp.list_tools()`` + ``_visible_tool_names`` path
+   ``tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets``
+   meters, so the two can never disagree.
+2. **session_start** — ``web/session_hook.MEMORY_LOOP_BLOCK``, injected once
+   per session by the hook.
+3. **search / fact_get / recall** — the per-call response payloads, for real
+   queries against a live bank.
+
+Method (the honest caveats, because the numbers are bank-specific):
+
+* The bank is whatever daemon ``--base`` points at; totals scale with its
+  entry sizes. The artifact records ``bank`` (entry count) so a rerun on a
+  different bank is not mistaken for a regression.
+* Queries are a fixed, committed list of 15 dev-session questions rather
+  than a sample of the ``retrieval_events`` table. The table would be more
+  representative and is deliberately not used: this is a public repo, real
+  queries carry paths and names, and the ledger has to be re-runnable by
+  anyone.
+* Payloads are fetched ONCE, raw, from the daemon's read-only REST
+  (``/api/search``, ``/api/recall``, ``/api/facts``), then projected offline
+  through the MCP layer's own pure helpers (``mcp_server._project_search``,
+  ``_lean_fact_record``, the ``_cap_recall_*`` family). Before/after is
+  therefore exactly paired — same bytes in, two projections out — and one
+  read of the bank serves both arms.
+* Sizes are chars of the compact JSON encoding an MCP client receives
+  (``separators=(",", ":")``, ``ensure_ascii=False``) and approx tokens are
+  ``chars // 4``, the convention in ``ladder_sweep.approx_tokens``.
+
+Usage::
+
+    python evals/agent_token_ledger.py \
+        --daemon http://127.0.0.1:8765 \
+        --out evals/results/agent-token-ledger-20260904.json
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import importlib
+import json
+import os
+import re
+import statistics
+import sys
+import tempfile
+import urllib.parse
+import urllib.request
+from datetime import date
+from typing import Any
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO not in sys.path:
+    sys.path.insert(0, REPO)
+
+
+# ── size conventions ──────────────────────────────────────────────────────
+
+def wire(obj: Any) -> str:
+    """The JSON an MCP client actually receives for this object."""
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"),
+                      default=str)
+
+
+def approx_tokens(text: str) -> int:
+    """chars // 4 — the same rough conversion ``ladder_sweep`` publishes."""
+    return max(1, len(text or "") // 4)
+
+
+def sized(obj: Any) -> dict[str, int]:
+    s = wire(obj)
+    return {"chars": len(s), "approx_tokens": approx_tokens(s)}
+
+
+def _stats(values: list[float]) -> dict[str, float]:
+    if not values:
+        return {"mean": 0.0, "median": 0.0, "p90": 0.0, "max": 0.0}
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, int(round(0.9 * (len(ordered) - 1))))
+    return {"mean": round(statistics.fmean(values), 1),
+            "median": round(statistics.median(values), 1),
+            "p90": round(float(ordered[idx]), 1),
+            "max": round(float(ordered[-1]), 1)}
+
+
+# ── the fixed query set ───────────────────────────────────────────────────
+# Fifteen questions in the shape a coding session actually asks a memory:
+# a current value, a past decision, a procedure, a failure, a constraint.
+QUERIES: list[str] = [
+    "what port does the bench postgres listen on",
+    "how do I deploy the daemon",
+    "why is the recency boost disabled",
+    "what did the flat band ablation conclude",
+    "which judge model do the evals use",
+    "how does the dream cursor advance",
+    "what breaks when two dreams run concurrently",
+    "what is the current schema version and what did it add",
+    "how are constraint facts pinned in retrieval",
+    "what happened with the retrieval event log",
+    "which extractor is deployed for consolidation",
+    "how do I run the full test suite",
+    "what is the release procedure for pypi",
+    "why did the cascade number get retired",
+    "how does supersession order writes",
+]
+
+# Relational questions — the shape ``memory_recall`` exists for.
+RECALL_QUESTIONS: list[str] = [
+    "what does the daemon ultimately run on",
+    "how does the console reach the bank",
+    "what depends on the embedding model",
+    "how does a memory become a canonical fact",
+    "what does the shim connect to",
+]
+
+# ── PII hygiene (public repo) ─────────────────────────────────────────────
+# The artifact records slot NAMES from a live bank. Anything that looks like
+# a home path, an address or a credential is replaced rather than committed.
+_UNSAFE = re.compile(
+    r"(?:[A-Za-z]:\\\\?Users|/home/|/Users/|@[\w.-]+\.\w+|\b\d{1,3}(?:\.\d{1,3}){3}\b"
+    r"|\bsk-[A-Za-z0-9]|\bghp_|\bBearer\b)", re.IGNORECASE)
+
+
+def safe_label(s: str) -> str:
+    s = " ".join((s or "").split())
+    return "<redacted>" if _UNSAFE.search(s) else s
+
+
+# ── daemon REST (read-only) ───────────────────────────────────────────────
+
+class Daemon:
+    def __init__(self, base: str, token: str | None) -> None:
+        self.base = base.rstrip("/")
+        self.token = token
+
+    def get(self, path: str, **params: Any) -> dict:
+        url = f"{self.base}{path}"
+        if params:
+            url += "?" + urllib.parse.urlencode(
+                {k: v for k, v in params.items() if v is not None})
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+
+def read_token() -> str | None:
+    """The daemon bearer, from the environment or ops/.env. Never printed,
+    never written to the artifact."""
+    tok = os.environ.get("PSEUDOLIFE_MCP_TOKEN")
+    if tok:
+        return tok.strip() or None
+    env = os.path.join(REPO, "ops", ".env")
+    if os.path.exists(env):
+        for line in open(env, encoding="utf-8", errors="ignore"):
+            k, _, v = line.strip().partition("=")
+            if k.strip() == "PSEUDOLIFE_MCP_TOKEN":
+                return v.strip().strip('"').strip("'") or None
+    return None
+
+
+# ── the MCP projection layer, loaded without touching a bank ──────────────
+
+def load_mcp():
+    """Import ``mcp_server`` bound to a throwaway file-mode data dir. Only
+    the pure projection helpers and the tool manifest are used; the service
+    singleton is never initialised, so nothing here can reach the live
+    bank."""
+    os.environ["PSEUDOLIFE_MCP_DATA_DIR"] = tempfile.mkdtemp(
+        prefix="agent-token-ledger-")
+    os.environ.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
+    os.environ.setdefault("PSEUDOLIFE_MCP_TOOLSET", "full")
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    return mod
+
+
+# ── 1. the tool manifest ──────────────────────────────────────────────────
+
+def measure_manifest(mod) -> dict[str, Any]:
+    tools = asyncio.run(mod.mcp.list_tools())
+    desc = {t.name: len(t.description or "") for t in tools}
+    params: dict[str, int] = {}
+    for t in tools:
+        props = (t.input_schema or {}).get("properties", {}) or {}
+        params[t.name] = sum(len(p.get("description") or "")
+                             for p in props.values())
+    out: dict[str, Any] = {}
+    for tier in ("minimal", "core", "full"):
+        names = mod._visible_tool_names(tier)
+        d = sum(desc[n] for n in names)
+        p = sum(params[n] for n in names)
+        out[tier] = {
+            "tools": len(names),
+            "description_chars": d,
+            "param_description_chars": p,
+            "chars": d + p,
+            "approx_tokens": approx_tokens("x" * (d + p)),
+        }
+    return out
+
+
+# ── 2. the served session-start block ─────────────────────────────────────
+
+def measure_session_block() -> dict[str, Any]:
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    return sized(MEMORY_LOOP_BLOCK) | {"raw_chars": len(MEMORY_LOOP_BLOCK)}
+
+
+# ── 3. memory_search ──────────────────────────────────────────────────────
+
+def _split_search(payload: dict) -> dict[str, int]:
+    """Where a served ``memory_search`` payload's bytes actually go."""
+    entries = payload.get("entries", []) or []
+    text_chars = sum(len(wire(e.get("text", ""))) for e in entries)
+    sup_chars = sum(len(wire(e.get("superseded_by_text", "")))
+                    for e in entries if e.get("superseded_by_text"))
+    entries_chars = len(wire(entries))
+    cortex_chars = len(wire(payload.get("cortex", []) or []))
+    events_chars = len(wire(payload["events"])) if payload.get("events") else 0
+    total = len(wire(payload))
+    return {
+        "total_chars": total,
+        "entries_chars": entries_chars,
+        "entries_text_chars": text_chars,
+        "entries_superseded_text_chars": sup_chars,
+        "entries_other_chars": entries_chars - text_chars - sup_chars,
+        "cortex_chars": cortex_chars,
+        "events_chars": events_chars,
+        "envelope_chars": total - entries_chars - cortex_chars - events_chars,
+        "count": len(entries),
+        "cortex_count": len(payload.get("cortex", []) or []),
+        "approx_tokens": approx_tokens("x" * total),
+    }
+
+
+def project_search(mod, raw: dict, *, compact: bool, top_k: int) -> dict:
+    """Reproduce the MCP payload for one raw ``/api/search`` response.
+
+    ``/api/search`` returns exactly the two inputs the tool's projection
+    consumes: the raw service result and, under ``cortex``, the unprojected
+    cortex-search entries. The projection itself is the tool's own
+    ``_project_search``, so the entries side is exact.
+
+    The cortex narrowing (cut b) is the one APPROXIMATION here, and it is
+    only exact on an unlabelled bank. ``/api/search`` fetches its facts at
+    a hardcoded ``top_k=5`` (``web/routes.py``), so the narrow arm slices
+    that list to ``min(5, top_k)`` rather than re-running
+    ``cortex_search`` at the narrower width the way ``memory_search``
+    does. Those differ when constraint pinning is in play:
+    ``_pin_constraint_facts`` budgets pins at ``max(1, top_k // 2)``, so a
+    real ``top_k=3`` call would allow one pin where a width-5 fetch
+    allowed two, and the slice would keep the extra pin instead of a
+    ranked fact. On the measured bank they cannot differ — 0 of 5,483
+    current facts carry a ``distortion_tolerance`` label (checked
+    2026-09-04), so ``_pin_constraint_facts`` returns its input untouched
+    and the slice is the same set in the same order. Re-check that before
+    reading the narrow arm on a labelled bank.
+    """
+    payload = json.loads(json.dumps(raw, default=str))
+    facts = payload.pop("cortex", []) or []
+    if compact:
+        facts = facts[:min(5, max(1, top_k))]
+    return mod._project_search(
+        payload, facts, compact=True,
+        text_chars=(600 if compact else None))
+
+
+def measure_search(mod, dm: Daemon, top_k: int) -> dict[str, Any]:
+    rows = []
+    entry_text_lengths: list[float] = []
+    for q in QUERIES:
+        raw = dm.get("/api/search", q=q, top_k=top_k)
+        before = _split_search(project_search(
+            mod, raw, compact=False, top_k=top_k))
+        after = _split_search(project_search(
+            mod, raw, compact=True, top_k=top_k))
+        # Raw per-entry text length — what the ``entry_text_chars`` cap is
+        # chosen against. Taken from the untruncated arm, in characters of
+        # the text itself rather than of its JSON encoding.
+        entry_text_lengths += [
+            float(len(e.get("text") or ""))
+            for e in project_search(mod, raw, compact=False,
+                                    top_k=top_k).get("entries", [])]
+        rows.append({"query": q, "before": before, "after": after})
+    agg: dict[str, Any] = {}
+    for arm in ("before", "after"):
+        agg[arm] = {
+            k: _stats([r[arm][k] for r in rows])
+            for k in ("total_chars", "entries_chars", "entries_text_chars",
+                      "entries_other_chars", "cortex_chars", "events_chars")
+        }
+        agg[arm]["total_approx_tokens"] = _stats(
+            [r[arm]["approx_tokens"] for r in rows])
+    cap = 600
+    return {"top_k": top_k, "queries": len(rows), "per_query": rows,
+            "aggregate": agg,
+            "entry_text": {
+                "entries": len(entry_text_lengths),
+                "raw_chars": _stats(entry_text_lengths),
+                "over_600": sum(1 for n in entry_text_lengths if n > cap),
+                "share_over_600": round(
+                    sum(1 for n in entry_text_lengths if n > cap)
+                    / max(1, len(entry_text_lengths)), 3),
+            }}
+
+
+# ── 4. memory_fact_get ────────────────────────────────────────────────────
+
+def measure_fact_get(mod, dm: Daemon, slots: list[tuple[str, str]],
+                     records: dict[tuple[str, str], dict]) -> dict[str, Any]:
+    rows = []
+    for ent, attr in slots:
+        rec = records[(ent, attr)]
+        before = len(wire(rec))
+        after = len(wire(mod._lean_fact_record(rec)))
+        rows.append({
+            "slot": safe_label(f"{ent} | {attr}"),
+            "before_chars": before, "after_chars": after,
+            "before_approx_tokens": approx_tokens("x" * before),
+            "after_approx_tokens": approx_tokens("x" * after),
+            "keys_before": len(rec), "keys_after": len(
+                mod._lean_fact_record(rec)),
+        })
+    return {"slots": len(rows), "per_slot": rows,
+            "aggregate": {
+                "before": _stats([r["before_chars"] for r in rows]),
+                "after": _stats([r["after_chars"] for r in rows])}}
+
+
+def pick_slots(dm: Daemon, n: int = 5) -> tuple[list[tuple[str, str]],
+                                                dict[tuple[str, str], dict]]:
+    """Five real slots, chosen deterministically: the widest current facts
+    in ``(entity, attribute)`` order, so a rerun on the same bank picks the
+    same five and the record projection is exercised at its real width."""
+    dump = dm.get("/api/facts", limit=2000)
+    rows = [r for r in dump.get("entries", []) if r.get("kind") != "member"]
+    rows.sort(key=lambda r: (-len(wire(r)), r.get("entity", ""),
+                             r.get("attribute", "")))
+    picked = rows[:n]
+    slots = [(r["entity"], r["attribute"]) for r in picked]
+    return slots, {(r["entity"], r["attribute"]): r for r in picked}
+
+
+# ── 5. memory_recall ──────────────────────────────────────────────────────
+
+def project_recall(mod, raw: dict, *, verbose: bool = False) -> dict:
+    """The MCP-side capping/compaction of one raw ``service.recall``
+    result, lifted from ``memory_recall``'s body (which is not itself
+    callable without a service)."""
+    out = json.loads(json.dumps(raw, default=str))
+    entity_hop = out.get("entity_hop") or {}
+    seed_text_count = out.get("seed_text_count")
+    top_k = 5
+    if seed_text_count is None:
+        seed_text_count = min(top_k, len(out.get("texts", [])))
+    capped = mod._cap_recall_entities(out.get("entities", []), entity_hop)
+    capped = [{**e, "facts": (e.get("facts") or [])[
+        :mod._RECALL_MAX_FACTS_PER_ENTITY]} for e in capped]
+    surviving = {e.get("entity") for e in capped}
+    out["entities"] = capped
+    out["edges"] = mod._cap_recall_edges(
+        out.get("edges", []), out.get("edge_hop", []), surviving)
+    out["texts"] = mod._cap_recall_texts(
+        out.get("texts", []), seed_text_count, top_k)
+    for k in ("entity_hop", "edge_hop", "seed_text_count"):
+        out.pop(k, None)
+    if not verbose:
+        out["entities"] = [
+            {"entity": n.get("entity"),
+             "facts": [mod._compact_recall_fact(f) for f in n.get("facts", [])]}
+            for n in out["entities"]]
+        out["edges"] = [{"src": e.get("src"), "relation": e.get("relation"),
+                         "dst": e.get("dst")} for e in out["edges"]]
+        out["texts"] = [mod._compact_recall_text(t) for t in out["texts"]]
+    return out
+
+
+def measure_recall(mod, dm: Daemon, hops: int = 3) -> dict[str, Any]:
+    """Response size plus the number of ``service.search`` calls one recall
+    issues.
+
+    The call count is derived, not instrumented: ``recall.run_recall`` does
+    exactly one seed search, then one search per entity newly discovered on
+    each hop (``MechanicalController.next_queries`` emits one query per
+    newly-seen entity, and every emitted query is searched). So
+    ``searches = 1 + |{e : entity_hop[e] >= 1}|`` — read off the raw
+    response, which still carries ``entity_hop`` before the MCP layer pops
+    it. Graph calls are one per expanded frontier entity and are not
+    counted here.
+    """
+    rows = []
+    for q in RECALL_QUESTIONS:
+        raw = dm.get("/api/recall", q=q, hops=hops, top_k=5)
+        hop = raw.get("entity_hop") or {}
+        searches = 1 + sum(1 for h in hop.values() if (h or 0) >= 1)
+        payload = project_recall(mod, raw)
+        rows.append({
+            "question": q,
+            "hops": hops,
+            "iterations": raw.get("iterations", 0),
+            "entities": len(payload.get("entities", [])),
+            "service_search_calls": searches,
+            **{k: v for k, v in sized(payload).items()},
+            "verbose_chars": len(wire(project_recall(mod, raw, verbose=True))),
+        })
+    return {"questions": len(rows), "per_question": rows,
+            "aggregate": {
+                "service_search_calls": _stats(
+                    [r["service_search_calls"] for r in rows]),
+                "chars": _stats([r["chars"] for r in rows])}}
+
+
+# ── main ──────────────────────────────────────────────────────────────────
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--daemon", default="http://127.0.0.1:8765")
+    ap.add_argument("--top-k", type=int, default=8,
+                    help="memory_search top_k (the tool default).")
+    ap.add_argument("--narrow-top-k", type=int, default=3,
+                    help="Second search pass, to price the cortex-block "
+                         "narrowing (cut b), which is inert at top_k >= 5.")
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+
+    out_path = args.out or os.path.join(
+        REPO, "evals", "results",
+        f"agent-token-ledger-{date.today():%Y%m%d}.json")
+
+    mod = load_mcp()
+    dm = Daemon(args.daemon, read_token())
+    stats = dm.get("/api/stats")
+
+    slots, records = pick_slots(dm)
+    ledger = {
+        "generated": date.today().isoformat(),
+        "bank": {"entries": stats.get("total_memories"),
+                 "preset": stats.get("preset")},
+        "convention": {
+            "chars": "compact JSON as an MCP client receives it "
+                     "(separators=(',',':'), ensure_ascii=False)",
+            "approx_tokens": "chars // 4 (evals/ladder_sweep.approx_tokens)",
+        },
+        "manifest": measure_manifest(mod),
+        "session_start_block": measure_session_block(),
+        "search": measure_search(mod, dm, args.top_k),
+        "search_narrow": measure_search(mod, dm, args.narrow_top_k),
+        "fact_get": measure_fact_get(mod, dm, slots, records),
+        "recall": measure_recall(mod, dm),
+    }
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(ledger, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+    s = ledger["search"]["aggregate"]
+    print(f"wrote {out_path}")
+    print(f"manifest full: {ledger['manifest']['full']['chars']} chars "
+          f"(~{ledger['manifest']['full']['approx_tokens']} tok)")
+    print(f"session block: {ledger['session_start_block']['chars']} chars")
+    print(f"search top_k={args.top_k} mean total: "
+          f"{s['before']['total_chars']['mean']} -> "
+          f"{s['after']['total_chars']['mean']} chars")
+    print(f"fact_get mean: "
+          f"{ledger['fact_get']['aggregate']['before']['mean']} -> "
+          f"{ledger['fact_get']['aggregate']['after']['mean']} chars")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

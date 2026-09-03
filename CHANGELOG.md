@@ -6,6 +6,67 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-04 — measure what the AGENT pays, then cut it)
+- **Every "fewer tokens" number this project has published measures served
+  *benchmark* context — the passage an answerer model reads — and nothing
+  had ever measured what an MCP client reads back from a tool call and pays
+  for on every call.** New `evals/agent_token_ledger.py` measures it:
+  the per-tier tool manifest, the served session-start block, and the
+  `memory_search` / `memory_fact_get` / `memory_recall` response payloads
+  for 15 fixed dev-session queries against a live bank. Raw payloads are
+  read once from the daemon's read-only REST and projected offline through
+  the MCP layer's own helpers, so before/after is exactly paired. Artifact:
+  `evals/results/agent-token-ledger-20260904.json` (1,298-entry bank,
+  `preset: flat`); every published cell is pinned in
+  `tests/test_eval_evidence.py`; the section is
+  `evals/README.md` → "Agent-side token ledger".
+  - What a session pays before asking anything: manifest **6,923 chars
+    (~1,730 tok) minimal / 13,984 core / 22,627 full**, plus **7,643 chars
+    (~1,910 tok)** of served session-start block.
+  - What one `memory_search` cost at the default `top_k=8`: **14,577 chars
+    mean** (median 14,881, p90 18,803), of which entry `text` alone was
+    **64%**.
+  - `memory_fact_get` on the five widest slots: **1,424 chars mean**.
+  - Not fixed, and the largest finding: a 3-hop `memory_recall` issues
+    **35 `service.search` calls on average, up to 66** on one question.
+    The response is already capped; the call amplification is untouched.
+- **Three payload cuts, behind one knob (`memory.mcp.compact_payloads`,
+  default on; `False` restores the previous payloads verbatim).** Console
+  knobs registered under a new "MCP payloads" group.
+  - `memory_search` entry `text` is truncated to
+    `memory.mcp.entry_text_chars` (default 600) with a `truncated: true`
+    marker, and the tool description points at `memory_get` for the whole
+    text — the shape `memory_recall` has used for its supporting texts
+    since 2026-07-10. `superseded_by_text` is capped on the same terms.
+    Mean payload **14,577 → 8,734 chars (−40%)**; entry text 9,374 → 4,550.
+  - The cortex block follows the caller: `min(5, top_k)` facts instead of
+    a hardcoded 5. Inert at the default `top_k=8`; at `top_k=3` the block
+    goes 1,847 → 1,098 chars and the whole call 6,959 → 3,840 (−45%).
+    The narrowing is passed *into* `cortex_search` rather than sliced off
+    its output, so constraint pinning re-budgets with it and pinned facts
+    stay at the head.
+  - `memory_fact_get` serves the acting subset by default — entity,
+    attribute, value, kind/members, confidence, origin, asserted_at/age,
+    freshness_class, stale, the currency and label flags, `correct_with`,
+    `entity_ref`, `contenders` — and moves provenance, support,
+    writer/session id, tx/valid time, polarity, status and the supersession
+    chain behind a new `verbose=True`. **1,424 → 764 chars mean (−46%).**
+    The served-absent-when-default rule (PR #245) holds: the keys that
+    remain are byte-identical.
+- **No ranking, `min_score` or service behaviour changed.** All three cuts
+  are projections in `mcp_server.py`, above `service.*`; the eval harness
+  calls the service directly and cannot see them — pinned by
+  `tests/test_agent_payload_budget.py::test_eval_harness_does_not_read_the_mcp_projection`,
+  which allows exactly two exceptions (this ledger and the existing
+  `recall_cap_probe.py`, both payload probes). No eval number moves, so
+  `regression_gate.ps1` was not run.
+- `memory_search`'s cortex-first block moved out of the tool body into the
+  pure `mcp_server._project_search`, so the ledger can reproduce the served
+  shape from raw service output without a live service and without a second
+  copy to drift. Behaviour-preserving, pinned byte-identical against a
+  pre-refactor snapshot by
+  `tests/test_agent_payload_budget.py::test_legacy_payloads_survive_the_projection_refactor`.
+
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 
 ### Fixed (2026-09-04 — the Console's digest length default matches the daemon's)

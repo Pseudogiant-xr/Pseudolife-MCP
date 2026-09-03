@@ -301,6 +301,26 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   shows the wrapper there — a known P2 cost to weigh before ever
   flipping the default.
 
+- **Compact MCP payloads on** (`memory.mcp.compact_payloads = true`,
+  `memory.mcp.entry_text_chars = 600`) — the payload an MCP client reads
+  *back* from a tool call, shaped for its context window: a
+  `memory_search` hit's `text` is truncated to `entry_text_chars` and
+  marked `truncated: true` (`memory_get` returns the full text, and
+  `superseded_by_text` is capped on the same terms); the cortex block
+  serves `min(5, top_k)` facts, so a narrow search stops paying for five;
+  and `memory_fact_get` serves the acting subset — value, kind/members,
+  confidence, origin, `asserted_at`/`age`, freshness, the currency and
+  label flags, `correct_with`, `entity_ref`, `contenders` — moving
+  provenance, support, writer/session id, tx/valid time and the
+  supersession chain behind `verbose=True`. Measured on the 2026-09-04
+  agent token ledger (`evals/agent_token_ledger.py`): a default
+  `top_k=8` search fell from 14,577 to 8,734 chars mean, `memory_fact_get`
+  from 1,424 to 764. These are PROJECTIONS above the service layer —
+  ranking, `min_score` and every benchmark number are unaffected. Set
+  `compact_payloads: false` to restore the pre-2026-09-04 payloads
+  verbatim; raise `entry_text_chars` for long-form corpora where the tail
+  of a note carries the answer.
+
 ## Toolset tiers
 
 Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
