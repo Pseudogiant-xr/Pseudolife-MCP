@@ -145,6 +145,13 @@ def test_gated_off_capabilities_stay_out_of_console():
         # separate decision after the gate-3 friction estimate.
         "memory.dream.quarantine_low_trust",
         "memory.dream.trusted_sources",
+        # Candidate-pool shape (2026-09-04). Both ship at today's behaviour
+        # and neither has been through the judged gate — which, as
+        # evals/README.md records, cannot even reach them until a
+        # --phase extract run is done. Surfacing a live retrieval-ranking
+        # switch on that basis is exactly what this list forbids.
+        "memory.search.candidate_pool_multiplier",
+        "memory.search.fusion",
     ):
         assert path not in _BY_PATH, f"gated-off knob surfaced: {path}"
 

@@ -374,7 +374,51 @@ def build_service(tmp_dir: Path):
     svc.config.memory.dream.known_facts_window = WINDOW
     if LITERAL_GATE is not None:
         svc.config.memory.dream.literal_gate = LITERAL_GATE
+    apply_pool_env(svc.config.memory.search)
     return svc
+
+
+def pool_env_knobs() -> dict:
+    """Associative candidate-pool knob state, for stamping into artifacts.
+
+    Same contract as ``longmemeval_bench.bench_env_knobs``: a judged run
+    whose retrieval config cannot be audited afterwards is exactly the
+    failure PR #165 closed for the answerer/judge side. ``None`` means the
+    shipped default was in force.
+    """
+    return {
+        "candidate_pool_multiplier": (
+            os.environ.get("PSEUDOLIFE_BENCH_POOL_MULT", "").strip() or None),
+        "fusion": (
+            os.environ.get("PSEUDOLIFE_BENCH_FUSION", "").strip() or None),
+    }
+
+
+def apply_pool_env(search_cfg) -> None:
+    """Apply the associative candidate-pool env overrides to a bench config.
+
+    The ONLY sanctioned way to run a judged eval with these knobs on: they
+    live in ``memory.search``, which ``rebuild_contexts.py`` cannot reach
+    (it rebuilds the CORTEX fact ranking offline and copies the associative
+    ``rag`` context verbatim), so a knob change here is only measured by a
+    full ``--phase extract`` re-run. Invalid values are a hard error, not a
+    silent fall-back to the default — a typo'd multiplier that quietly
+    served the shipped config would mislabel the whole campaign.
+
+        PSEUDOLIFE_BENCH_POOL_MULT=4  PSEUDOLIFE_BENCH_FUSION=rrf
+    """
+    knobs = pool_env_knobs()
+    mult = knobs["candidate_pool_multiplier"]
+    if mult is not None:
+        if not mult.isdigit() or int(mult) < 1:
+            sys.exit(f"PSEUDOLIFE_BENCH_POOL_MULT={mult!r}: want an int >= 1")
+        search_cfg.candidate_pool_multiplier = int(mult)
+    fusion = knobs["fusion"]
+    if fusion is not None:
+        if fusion not in ("weighted_sum", "rrf"):
+            sys.exit(f"PSEUDOLIFE_BENCH_FUSION={fusion!r}: want "
+                     "'weighted_sum' or 'rrf'")
+        search_cfg.fusion = fusion
 
 
 def ingest(svc) -> None:

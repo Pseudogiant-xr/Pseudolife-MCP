@@ -808,9 +808,11 @@ class RecallConfig:
 @dataclass
 class SearchConfig:
     """Aggregation-aware retrieval knobs (Phase 1, spec
-    2026-08-03-aggregation-aware-recall-design.md). Both default OFF until
-    the preregistered gates pass; the eval harness pins its control arm to
-    vanilla retrieval via per-call overrides regardless of these values."""
+    2026-08-03-aggregation-aware-recall-design.md) plus the candidate-pool
+    shape knobs added 2026-09-04. All default OFF (or to the shipped
+    behaviour) until the preregistered gates pass; the eval harness pins
+    its control arm to vanilla retrieval via per-call overrides regardless
+    of these values."""
 
     # Temporal-contiguity expansion (EM-LLM, arXiv:2407.09450): each search
     # hit also surfaces up to N temporal neighbors per side — same episode,
@@ -834,6 +836,43 @@ class SearchConfig:
     #   "quarantine" — a stale record's ``value`` is replaced by a wrapper
     #                  and the original moves to ``last_known_value``
     stale_policy: str = "annotate"
+    # Retrieve-then-rerank width. Each band's DENSE candidate pool becomes
+    # ``top_k * candidate_pool_multiplier`` (band-size capped); the final
+    # truncation to ``top_k`` is unchanged. 1 (default) is the shipped
+    # path, byte-identical to the pre-knob code and pinned by
+    # tests/test_retrieval_pool.py::
+    # test_multiplier_one_matches_captured_prechange_output.
+    #
+    # Why this is a knob at all: under ``miras.preset = "flat"`` (the
+    # default since 2026-08-15) there is ONE band, so the dense pool for
+    # the whole bank was exactly the served width — BM25 fusion, the slot
+    # pool and the cross-encoder all re-ranked a set that dense retrieval
+    # had already cut to size, and the reranker's ``top_n = 20`` budget
+    # never saw more than ~11 candidates. Not a tuned constant: no value
+    # above 1 has passed the judged regression gate, so it ships at 1.
+    candidate_pool_multiplier: int = 1
+    # How the dense / slot / BM25 / timeline channels are merged.
+    #   "weighted_sum" — today's behaviour: BM25 contributes
+    #                    ``weight x normalised`` additively to the dense
+    #                    score and every channel's score is then raw-sorted
+    #                    together, despite the scales being incommensurate
+    #                    (cosine, 0.55-0.95 slot confidence, 0.3 x
+    #                    normalised BM25).
+    #   "rrf"          — reciprocal rank fusion over the four channels'
+    #                    RANK lists, which needs no shared scale. Source
+    #                    and supersession multipliers stay ranking-only
+    #                    modifiers, applied to the fused score; recency
+    #                    rides inside the dense channel's own rank order.
+    # Ships "weighted_sum" for the same reason as the multiplier above.
+    #
+    # CAUTION — "rrf" changes the SCALE of every served score, not just the
+    # order: a fused score is a sum of 1/(60 + rank) terms, so it tops out
+    # around 0.05 where a cosine reaches 1.0. Any threshold tuned on the
+    # cosine scale reads every result as weak. In particular set
+    # ``memory.search_confidence_floor = 0`` (its default) before enabling
+    # rrf, or memory_search abstains on everything; the same hazard the
+    # reranker's ``skip_margin`` comment documents, in the other direction.
+    fusion: str = "weighted_sum"
 
 
 @dataclass

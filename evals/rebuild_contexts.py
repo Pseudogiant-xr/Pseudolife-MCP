@@ -18,6 +18,16 @@ carried-over verdicts.
 Then:
     python evals/longmemeval_bench.py --dataset s --extractor qwen-27b \
         --tag diag-knobs --phase answer
+
+SCOPE — ASSOCIATIVE knobs are NOT covered here. This rebuilds the CORTEX
+fact ranking only. Anything under ``memory.search`` (the candidate-pool
+multiplier, the fusion mode) changes ``cms.retrieve``, whose output reaches
+the ``rag`` context and the hybrid arm's raw-memory block — both of which
+this script copies verbatim from the source run, because no band state was
+dumped. ``evals/regression_gate.ps1`` runs this as its stage 1, so a GREEN
+GATE SAYS NOTHING about those knobs: measuring them needs a full
+``--phase extract`` with ``PSEUDOLIFE_BENCH_POOL_MULT`` /
+``PSEUDOLIFE_BENCH_FUSION`` set (``ladder_sweep.apply_pool_env``).
 """
 from __future__ import annotations
 

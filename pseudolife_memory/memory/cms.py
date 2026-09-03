@@ -630,6 +630,8 @@ class ContinuumMemorySystem:
                 "min_logical_turn": min_logical_turn,
             },
             "tiers": [],
+            # Filled by retrieve(): pool width, fusion mode, cut position.
+            "candidate_pool": {},
             "chain_residual": {"enabled": False, "synthetic_hits": []},
             "bm25": {"fired": False, "hits": []},
             "reference_pool": [],
@@ -731,6 +733,52 @@ class ContinuumMemorySystem:
         k = top_k or self.config.top_k
         ref_k = getattr(self.config, "ref_top_k", 3)
 
+        # ── Candidate-pool shape (2026-09-04) ────────────────────────────
+        # Resolved HERE rather than beside the channels that read them,
+        # because the dense width has to be known before the band walk and
+        # the cut position before the merge. ``getattr`` guards mirror the
+        # bm25/reranker idiom below: eval harnesses pass config objects
+        # predating the ``search`` block.
+        search_cfg = getattr(self.config, "search", None)
+        # max(1, …): a 0 or negative multiplier would silently narrow the
+        # pool below the served width — fail safe to the shipped default
+        # instead, and say so in ``params`` so the log is not a lie.
+        pool_mult = max(1, int(
+            getattr(search_cfg, "candidate_pool_multiplier", 1) or 1))
+        fusion_mode = str(getattr(search_cfg, "fusion", "weighted_sum")
+                          or "weighted_sum")
+        if fusion_mode not in ("weighted_sum", "rrf"):
+            raise ValueError(
+                f"memory.search.fusion: unknown mode {fusion_mode!r} "
+                "(expected 'weighted_sum' or 'rrf')")
+        # Reciprocal rank fusion's smoothing constant. 60 is the value from
+        # the method's original publication (Cormack, Clarke & Buettcher,
+        # SIGIR 2009, "Reciprocal Rank Fusion outperforms Condorcet and
+        # individual Rank Learning Methods") and the de-facto standard in
+        # every hybrid-search implementation since; it is NOT tuned here,
+        # and no local measurement justifies moving it.
+        RRF_K = 60
+        # Dense pool per band. ``band.retrieve`` already caps at band size,
+        # and the cosine matmul runs over every entry regardless of top_k —
+        # widening costs only a wider ``torch.topk`` selection, not a
+        # second pass over the bank.
+        pool_k = k * pool_mult
+        pool_size = 0
+        rerank_enabled = (
+            rerank
+            if rerank is not None
+            else getattr(self.config.reranker, "enabled", False)
+            if hasattr(self.config, "reranker")
+            else False
+        )
+        # Today's order is truncate-then-rerank: the cross-encoder's
+        # ``top_n`` (20) budget only ever saw the ~k+ref_k entries that
+        # survived the cut. That stays the default — flipping it under
+        # multiplier 1 would change the shipped path, which this change
+        # deliberately does not. With a widened pool the reranker sees the
+        # fused pool BEFORE the cut, which is the point of widening it.
+        rerank_before_cut = bool(pool_mult > 1 and rerank_enabled)
+
         # v0.7.3: superseded entries are included in retrieval by
         # default. ``memory.hide_superseded`` (config field + console
         # knob, default False) restores the v0.7.2-and-earlier filter.
@@ -778,6 +826,17 @@ class ContinuumMemorySystem:
         # the serve and any offline replay. Built unconditionally: a dict of
         # floats per *kept* candidate, nothing recomputed.
         comps: dict[str, dict] = {}
+        # Per-channel RANK lists for reciprocal rank fusion, in the order
+        # each channel produced them. Built unconditionally (four list
+        # appends) so the weighted-sum path is unchanged and the rrf path
+        # has nothing to recompute. The dense list carries ``relevance``
+        # (recency-modified cosine), NOT ``adjusted`` — the source and
+        # supersession multipliers are applied once, at fusion time, so
+        # rrf never double-counts them.
+        dense_rank_src: list[tuple[str, float]] = []
+        slot_rank_order: list[str] = []
+        bm25_rank_order: list[str] = []
+        timeline_rank_order: list[str] = []
 
         for depth, band in enumerate(self.bands):
             if band_filter is not None and band.name not in band_filter:
@@ -804,7 +863,8 @@ class ContinuumMemorySystem:
                 # config-driven: 1h chat default, 24h in the MCP build.
                 half_life = self.config.recency_base_half_life_s * (2.0 ** depth)
 
-            band_result = band.retrieve(query_embedding, top_k=k)
+            band_result = band.retrieve(query_embedding, top_k=pool_k)
+            pool_size = max(pool_size, len(band_result.entries))
             tier_trace: dict | None = None
             if _trace is not None:
                 tier_trace = {
@@ -889,6 +949,7 @@ class ContinuumMemorySystem:
                 # ranking score. ``adjusted`` still drives ordering.
                 if relevance >= MIN_SCORE:
                     neural.append((entry, adjusted, surprise))
+                    dense_rank_src.append((entry.text, float(relevance)))
                     seen_texts.add(entry.text)
                     hit_band_names.add(band.name)
                     comps[entry.text] = {
@@ -945,6 +1006,10 @@ class ContinuumMemorySystem:
                 if explicit_floor and score < MIN_SCORE:
                     continue
                 neural.append((entry, score, surprise))
+                # ``_slot_query_pool`` returns its hits already ranked
+                # (confidence, then the index ordinal's deterministic
+                # tie-break), so its emission order IS the rank list.
+                slot_rank_order.append(entry.text)
                 seen_texts.add(entry.text)
                 # Slot hits carry their own 0.55-0.95 confidence scale, not a
                 # cosine — logged under its own key so a learned head never
@@ -977,11 +1042,9 @@ class ContinuumMemorySystem:
             else False
         )
         # ── Pool 1.9: timeline channel resolution (agg-recall Phase 1) ───────
-        # Resolved here (before BM25 runs) because both lexical channels
-        # share one candidate pool. ``getattr`` guards mirror the bm25/
-        # reranker idiom: eval harnesses pass config objects predating the
-        # ``search`` block.
-        search_cfg = getattr(self.config, "search", None)
+        # Resolved before BM25 runs because both lexical channels share one
+        # candidate pool. ``search_cfg`` was resolved with the pool-shape
+        # knobs above.
         timeline_enabled = (
             timeline
             if timeline is not None
@@ -1027,11 +1090,31 @@ class ContinuumMemorySystem:
                     e.text: s for e, s in norm_hits if s >= bm25_cfg.min_score
                 }
 
-                # Boost entries already in the neural pool.
+                # The lexical RANK list, for reciprocal rank fusion: the
+                # gated hits in BM25's own descending order. Under "rrf"
+                # this list — not the weighted sum below — is the channel's
+                # entire contribution.
+                bm25_rank_order = [e.text for e, s in norm_hits
+                                   if s >= bm25_cfg.min_score]
+
+                # Boost entries already in the neural pool. Skipped under
+                # "rrf": adding ``weight x normalised`` to a cosine is the
+                # weighted-sum fusion, and doing it as well as the rank
+                # fusion would count the lexical channel twice. The
+                # ``comps`` write below is instrumentation and happens
+                # either way.
+                #
+                # Honest note: this guard does not currently change any
+                # output — RRF replaces every pre-fusion score, so the boost
+                # is dead there (verified 2026-09-04 by removing the guard:
+                # tests/test_retrieval_pool.py stays green). It is kept
+                # because the exclusivity is the design, and the first
+                # future reader of the pre-fusion score under "rrf" would
+                # otherwise silently get a double-counted lexical channel.
                 boosted: list[tuple[MemoryEntry, float, float]] = []
                 for entry, score, surprise in neural:
                     boost = bm25_lookup.get(entry.text, 0.0)
-                    if boost > 0.0:
+                    if boost > 0.0 and fusion_mode == "weighted_sum":
                         boosted.append((entry, score + bm25_cfg.weight * boost, surprise))
                     else:
                         boosted.append((entry, score, surprise))
@@ -1136,6 +1219,7 @@ class ContinuumMemorySystem:
                     "band": entry.bank,
                 }
                 via_map[entry.text] = "timeline"
+                timeline_rank_order.append(entry.text)
                 if entry.bank:
                     hit_band_names.add(entry.bank)
                 injected_n += 1
@@ -1148,8 +1232,58 @@ class ContinuumMemorySystem:
                            else "no_candidates_after_filters"),
             }
 
+        if fusion_mode == "rrf":
+            # ── Reciprocal rank fusion ───────────────────────────────────
+            # The four channels score on incommensurate scales (cosine,
+            # 0.55-0.95 slot confidence, weight x normalised BM25); RRF
+            # merges their RANK lists instead, so no scale has to be
+            # reconciled. Each channel contributes 1/(RRF_K + rank).
+            #
+            # Ranking-only modifiers stay ranking-only: the source and
+            # supersession multipliers are applied as a final MULTIPLICATIVE
+            # adjustment on the fused score, not as a rank penalty. A rank
+            # penalty would move an entry a whole position regardless of how
+            # close the fused scores were — turning a tie-break into a hard
+            # demotion, and leaving "a rank in WHICH list?" undefined for an
+            # entry that only one channel found. Multiplying preserves
+            # today's semantics: wide fused gaps are untouched, near-ties go
+            # to the user-authored / current-state entry. Recency needs no
+            # such step — it rides inside ``relevance``, which IS the dense
+            # channel's rank order.
+            #
+            # ``min_score`` is deliberately NOT re-applied here. It is a
+            # contract over each channel's own scale (the dense floor gates
+            # cosines above; the explicit floor gates ``weight x normalised``
+            # injections at their channel), and a fused score of ~0.03 has no
+            # meaning against a 0.25 cosine floor — comparing them would empty
+            # every result set and would drop lexical-only hits on a gate they
+            # were never scored by.
+            dense_ranked = [t for t, _ in sorted(
+                dense_rank_src, key=lambda p: p[1], reverse=True)]
+            fused_scores: dict[str, float] = {}
+            for order in (dense_ranked, slot_rank_order,
+                          bm25_rank_order, timeline_rank_order):
+                for rank0, text in enumerate(order):
+                    fused_scores[text] = (fused_scores.get(text, 0.0)
+                                          + 1.0 / (RRF_K + rank0 + 1))
+            neural = [
+                # Multipliers read off the LIVE entry, at query time, exactly
+                # as the weighted-sum path does — supersession can be flipped
+                # between two queries on the same CMS and must move the entry.
+                (entry,
+                 fused_scores.get(entry.text, 0.0) * _source_mult(entry)
+                 * (SUPERSEDED_SCORE_MULT if entry.superseded_at is not None
+                    else 1.0),
+                 surprise)
+                for entry, _score, surprise in neural
+            ]
+
+        # Stable sort: ties keep insertion order, which is the band walk by
+        # depth then the band's own ranking, then slot, then BM25, then
+        # timeline — the tie-break determinism the raw sort provided before.
         neural.sort(key=lambda x: x[1], reverse=True)
-        neural = neural[:k]
+        if not rerank_before_cut:
+            neural = neural[:k]
 
         # Update per-tier instrumentation. ``hit_band_names`` is the set of
         # tiers that contributed at least one entry to the *post-merge*
@@ -1195,13 +1329,9 @@ class ContinuumMemorySystem:
         # attend over. Falls through silently if the reranker is unavailable
         # (no model loaded, hub down) so retrieval never breaks because of
         # an optional component.
-        rerank_enabled = (
-            rerank
-            if rerank is not None
-            else getattr(self.config.reranker, "enabled", False)
-            if hasattr(self.config, "reranker")
-            else False
-        )
+        # ``rerank_enabled`` was resolved with the pool-shape knobs above —
+        # the cut position depends on it.
+        #
         # Knob snapshot for the retrieval log. ``fired``/``skip_reason``
         # explain the per-entry ``ce: None`` a reader will meet below.
         rerank_log: dict = {
@@ -1320,6 +1450,32 @@ class ContinuumMemorySystem:
             # text, or nothing to rerank.
             rerank_log["skip_reason"] = "unavailable"
 
+        if rerank_before_cut:
+            # Deferred cut: the reranker — not the bi-encoder — chooses which
+            # MEMORIES survive, but the reference pool's slots are reserved,
+            # not raced for. A plain ``combined[:k + len(ref_pool)]`` would
+            # drop reference documents outright whenever the widened neural
+            # pool alone fills the budget, because ``combined`` is
+            # ``neural + ref_pool`` CONCATENATED and the refs trail
+            # positionally — inverting Pool 2's standing guarantee that
+            # reference documents can never be displaced by memories. Same
+            # output cardinality as the default path (``neural[:k] +
+            # ref_pool``), and the post-rerank ORDER is preserved for both
+            # kinds, including any interleaving the cross-encoder produced
+            # (which the default path also allows). When the pass did not
+            # fire (no model, margin gate) the widened pool is still sorted,
+            # so this is exactly the default path's result.
+            ref_texts = {e.text for e, _, _ in ref_pool}
+            kept: list[tuple[MemoryEntry, float, float]] = []
+            n_mem = 0
+            for item in combined:
+                if item[0].text in ref_texts:
+                    kept.append(item)
+                elif n_mem < k:
+                    kept.append(item)
+                    n_mem += 1
+            combined = kept
+
         # Knobs in force for THIS query — config is mutable at runtime, so
         # a training reader cannot recover them from today's config.
         params: dict = {
@@ -1339,6 +1495,17 @@ class ContinuumMemorySystem:
                 getattr(self.config, "recency_base_half_life_s", 0.0)),
             "hide_superseded": hide_superseded,
             "bm25": {"enabled": bool(bm25_enabled)},
+            # Candidate-pool shape. ``pool_size`` is the widest dense pool
+            # any queried band actually returned (band-size capped), not the
+            # requested ``k x multiplier`` — an offline reader needs to know
+            # what the fusion ranked over, not what was asked for.
+            "candidate_pool": {
+                "multiplier": int(pool_mult),
+                "pool_size": int(pool_size),
+                "fusion": fusion_mode,
+                "rerank_position": (
+                    "before_cut" if rerank_before_cut else "after_cut"),
+            },
             "reranker": rerank_log,
             "timeline": {"enabled": bool(timeline_enabled),
                          "fired": bool(timeline_fired)},
@@ -1364,6 +1531,7 @@ class ContinuumMemorySystem:
             })
 
         if _trace is not None:
+            _trace["candidate_pool"] = dict(params["candidate_pool"])
             _trace["final_topk"] = [
                 {
                     "text_preview": e.text[:120] + ("…" if len(e.text) > 120 else ""),

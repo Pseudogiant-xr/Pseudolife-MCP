@@ -2885,3 +2885,67 @@ CLAIMS.append(Claim(
         "A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["bad"]),
     stated=0, places=0))
 
+
+# -- retrieval-pool probe (2026-09-04) ------------------------------------
+# A retrieval PROXY, not a judged number - but it is published as a table,
+# so it is backed like any other. Every cell reports the same recall, which
+# is exactly the kind of "did anyone actually run this?" claim the two
+# audits found unbacked; the latency column is pinned too, because a rerun
+# that moves it must move the doc.
+POOL_PROBE = RESULTS + "retrieval-pool-probe-20260904.json"
+
+
+def _pool(mult: int, fusion: str, rerank: str, field: str):
+    def read(doc):
+        cell = next(c for c in doc["cells"]
+                    if c["multiplier"] == mult and c["fusion"] == fusion
+                    and c["reranker"] == rerank)
+        return float(cell[field])
+    return read
+
+
+_POOL_ROWS = [
+    # (multiplier, fusion, reranker, verbatim README row, recall, churn, ms)
+    (1, "weighted_sum", "off",
+     "| 1 | weighted_sum | off | 0.700 | 0.300 | \u2014 (baseline) | 52 ms |",
+     0.700, None, 52),
+    (1, "weighted_sum", "on",
+     "| 1 | weighted_sum | on  | 0.700 | 0.300 | 0.000 | 112 ms |",
+     0.700, 0.000, 112),
+    (1, "rrf", "off",
+     "| 1 | rrf | off | 0.700 | 0.300 | 0.183 | 55 ms |", 0.700, 0.183, 55),
+    (1, "rrf", "on",
+     "| 1 | rrf | on  | 0.700 | 0.300 | 0.183 | 214 ms |", 0.700, 0.183, 214),
+    (4, "weighted_sum", "off",
+     "| 4 | weighted_sum | off | 0.700 | 0.300 | 0.283 | 48 ms |",
+     0.700, 0.283, 48),
+    (4, "weighted_sum", "on",
+     "| 4 | weighted_sum | on  | 0.700 | 0.300 | 0.283 | 373 ms |",
+     0.700, 0.283, 373),
+    (4, "rrf", "off",
+     "| 4 | rrf | off | 0.700 | 0.300 | 0.317 | 75 ms |", 0.700, 0.317, 75),
+    (4, "rrf", "on",
+     "| 4 | rrf | on  | 0.700 | 0.300 | 0.333 | 560 ms |",
+     0.700, 0.333, 560),
+]
+
+for _m, _f, _r, _needle, _recall, _churn, _ms in _POOL_ROWS:
+    _slug = f"{_m}-{_f}-{_r}"
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-recall", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "recall_at_6"),
+        stated=_recall, places=3))
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-stale", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "stale_leak"),
+        stated=0.300, places=3))
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-latency", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "latency_ms"),
+        stated=_ms, places=0))
+    if _churn is not None:
+        CLAIMS.append(Claim(
+            id=f"pool-probe-{_slug}-churn", doc=EVALS, needle=_needle,
+            artifacts=(POOL_PROBE,),
+            value=_pool(_m, _f, _r, "churn_vs_shipped"),
+            stated=_churn, places=3))

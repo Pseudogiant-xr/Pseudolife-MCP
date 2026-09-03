@@ -6,6 +6,59 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-04 — a real retrieve-then-rerank shape, shipped OFF)
+
+- **The engine had no candidate pool.** Under the shipped `preset: flat`
+  there is one band, so `cms.retrieve`'s dense pool for the whole bank was
+  exactly the served width (`top_k`, default 8) — BM25 fusion, the slot
+  pool and the cross-encoder all re-ranked a set that dense retrieval had
+  already cut to size, and the reranker's `top_n = 20` budget never saw
+  more than ~11 candidates. Three knobs give it the retrieve-then-rerank
+  shape properly. **All three ship at their current behaviour**; none has
+  passed the judged regression gate, so nothing changes by default.
+  - `memory.search.candidate_pool_multiplier` (default `1`) — each band's
+    dense pool becomes `top_k * multiplier`, band-size capped. The final
+    truncation to `top_k` does not move. At `1` the path is byte-identical
+    to the pre-change code, pinned against a captured golden in
+    `tests/test_retrieval_pool.py`.
+  - `memory.search.fusion` (default `"weighted_sum"`) — `"rrf"` merges the
+    dense / slot / BM25 / timeline channels by reciprocal rank fusion
+    (`k = 60`, the constant from Cormack et al., SIGIR 2009) instead of
+    raw-sorting four incommensurate score scales together. Source and
+    supersession stay ranking-only modifiers, applied multiplicatively to
+    the fused score; recency rides inside the dense channel's own rank
+    order. `min_score` keeps its per-channel meaning — the dense floor
+    gates cosines before fusion, so a lexical-only hit is never dropped by
+    a cosine gate, and the ~0.03-scale fused score is never compared to it.
+  - **Rerank-then-cut** — with a widened pool AND the reranker enabled, the
+    cross-encoder now sees the fused pool *before* the truncation to
+    `top_k`. Under multiplier `1` the old truncate-then-rerank order is
+    kept exactly. The deferred cut reserves the reference pool's slots
+    rather than slicing positionally: `combined` is `neural + ref_pool`
+    concatenated, so a plain slice of a widened pool would have dropped
+    reference documents outright and inverted Pool 2's standing guarantee
+    that memories can never displace them. Caught by the pre-commit review
+    pass, pinned by `test_deferred_cut_still_reserves_the_reference_pool_slots`.
+  - `explain=True` traces and the retrieval log's `params` both carry a
+    `candidate_pool` block (multiplier, effective pool size after the band
+    cap, fusion mode, rerank position).
+- **Offline retrieval-proxy probe** — `evals/retrieval_pool_probe.py`
+  (CPU-only, no Postgres/GPU/judge) scores recall@6 of the gold-bearing
+  turn over the `ladder_sweep` knowledge-update corpus buried in 400 real
+  conversational turns, across the full multiplier x fusion x reranker
+  grid. Artifact: `evals/results/retrieval-pool-probe-20260904.json`.
+  **Null result**: recall@6 is 0.700 and stale leak 0.300 in all eight
+  cells, with the same three misses; the knobs move 18–33% of the served
+  set and cost 48ms → 560ms per query at multiplier 4 with the reranker on.
+  A proxy, not a verdict — only the judged gate decides these.
+- **Sanctioned bench override** — `PSEUDOLIFE_BENCH_POOL_MULT` /
+  `PSEUDOLIFE_BENCH_FUSION`, applied by `ladder_sweep.build_service` and
+  stamped into every summary's `bench_env` (the PR #165 contract). Note the
+  scope: `evals/regression_gate.ps1` rebuilds contexts with
+  `rebuild_contexts.py`, which rebuilds the *cortex* ranking and copies the
+  associative context verbatim — **a green gate says nothing about these
+  knobs**. Measuring them needs a full `--phase extract` re-run.
+
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 
 ### Fixed (2026-09-04 — the Console's digest length default matches the daemon's)

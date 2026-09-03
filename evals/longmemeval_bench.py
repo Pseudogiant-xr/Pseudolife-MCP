@@ -64,7 +64,8 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import hybrid_context  # noqa: E402
-from ladder_sweep import approx_tokens, build_service, probe  # noqa: E402
+from ladder_sweep import (approx_tokens, build_service,  # noqa: E402
+                          pool_env_knobs, probe)
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 import answerability_probe  # noqa: E402
 import leak_check  # noqa: E402
@@ -210,6 +211,13 @@ def bench_env_knobs() -> dict:
         or None,
         "sampler": os.environ.get("PSEUDOLIFE_BENCH_SAMPLER", "").strip()
         or None,
+        # Associative retrieval knobs (memory.search). Applied by
+        # ladder_sweep.build_service, which every bench service goes
+        # through; None means the shipped default. They reach ONLY the
+        # arms that call svc.search() (rag, hybrid's raw-turn block), and
+        # only on a --phase extract run — rebuild_contexts.py copies the
+        # associative context verbatim and cannot honour them.
+        "candidate_pool": pool_env_knobs(),
     }
 
 
