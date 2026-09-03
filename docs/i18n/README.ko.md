@@ -1,8 +1,8 @@
-<!-- i18n-sync: v9 -->
+<!-- i18n-sync: v10 -->
 
 # Pseudolife-MCP
 
-[영어 원본 README](../../README.md)와 동기화됨 — synced: v9 (2026-08-31)
+[영어 원본 README](../../README.md)와 동기화됨 — synced: v10 (2026-09-04)
 
 **Claude Code, Codex, 그리고 그 밖의 MCP 클라이언트를 위한 영구적인 장기 메모리.**
 
@@ -29,8 +29,40 @@
 
 ## 빠른 시작
 
-Docker와 Claude Code, Codex, 또는 둘 다가 필요합니다. 클론부터 첫 메모리 저장까지
-명령 한 줄이면 충분합니다 (Claude가 기본 클라이언트입니다):
+명령 두 줄이면 충분합니다. Docker도, 따로 구성할 데이터베이스도, 컨테이너
+런타임도 필요 없습니다:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+Claude Code 대신 Codex를 쓴다면 — 형태는 동일합니다:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+codex mcp add pseudolife-memory -- pseudolife-mcp
+```
+
+이후 두 코딩 에이전트 중 어느 쪽에서든 *"내 스테이징 박스는 haze-02라고
+기억해줘"*라고 말하면 — 며칠 후 새 세션에서 *"스테이징 박스가 뭐였지?"*라고
+물었을 때 메모리에서 답을 가져옵니다. Cortex Console
+(`http://127.0.0.1:8765/ui/`)에서 모든 내용을 둘러볼 수 있습니다.
+
+첫 세션에서 데몬이 자동으로 시작되며, 내장형 PostgreSQL을 프로비저닝하고
+임베딩 모델을 내려받습니다 — 이는 일회성 단계입니다. Lite 구성에는 드림
+추출기(extractor)가 포함되어 있지 않아 정규화된 사실이 저절로 생성되지
+않습니다: 이 경로에서는 OpenAI 호환 엔드포인트가 설정되기 전까지
+`memory_fact_set`만이 유일한 코텍스(cortex) 기록자입니다.
+
+### 영구 보존 티어 — Docker
+
+장기간 운영되는 뱅크(bank)를 원한다면: 위 내용 전체에 더해 번들 추출기, 외부
+볼륨, 상태 점검이 적용된 서비스, 백업/롤백 도구가 포함됩니다. Docker와
+MCP를 지원하는 코딩 에이전트가 최소 하나 필요합니다 — Claude Code, Codex,
+Gemini CLI는 엔드투엔드로 연결되어 있으며, 그 외의 에이전트에는 바로
+붙여넣을 수 있는 설정을 제공합니다. 클론부터 첫 메모리 저장까지 명령
+한 줄이면 충분합니다:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -39,6 +71,8 @@ ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
 # Both:  add --client both  / -Client both
+# Gemini: add --client gemini — or several: --client claude,codex,gemini
+# Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
 설치 스크립트는 필수 구성 요소를 점검하고(누락된 항목이 있으면 정확한 해결
@@ -61,16 +95,13 @@ MCP 서버 자체는 설치 스크립트가 등록하므로, 플러그인이 도
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-Codex는 서버를 직접 등록합니다:
-
-```bash
-codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-```
-
-이후 두 코딩 에이전트 중 어느 쪽에서든 *"내 스테이징 박스는 haze-02라고
-기억해줘"*라고 말하면 — 며칠 후 새 세션에서 *"스테이징 박스가 뭐였지?"*라고
-물었을 때 메모리에서 답을 가져옵니다. Cortex Console
-(`http://127.0.0.1:8765/ui/`)에서 모든 내용을 둘러볼 수 있습니다.
+Codex — 설치 스크립트의 기본값(shim 모드)은 Claude에 사용하는 것과 동일한
+stdio shim을 연결하며, Docker 티어에서 `PSEUDOLIFE_MCP_NO_SPAWN=1`을 설정해
+Codex 세션이 동시에 실행 중인 Claude 세션의 에피소드를 물려받지 않고 자신만의
+정체성(identity)을 갖도록 합니다. 정확한 명령어, 직접 HTTP로 연결하는 대안,
+기본값이 아닌 포트/토큰 설정은
+[README — 코딩 에이전트에 연결하기](../../README.md#wire-into-your-coding-agent)
+문서를 참고하세요.
 
 ## 동작 방식
 
