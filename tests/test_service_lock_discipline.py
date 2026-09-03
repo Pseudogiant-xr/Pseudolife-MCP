@@ -109,6 +109,7 @@ CALLER_HOLDS_LOCK = {
     # sweep).
     "_file_analyzer_duplicates",
     "_sweep_unreachable_orphans",
+    "_record_store_decision",
     "_unreachable_orphans",
     # Alias retry list for a slot miss (one storage probe for shadowed
     # aliases) — reached only from cortex_lookup and chain(), both locked.

@@ -15,7 +15,7 @@ queue per tick (`memory.deep_dream.judge_batch`), each mode-gated:
 | merge proposals | `judge_mode` (`off` / `shadow` / `auto-reject` / `auto`) | single reject >= 0.8; two-vote reject (second opinion) >= 0.7 mean; `auto` only: two-vote accept on a non-`low_differential` row >= 0.6 mean, and only when the second opinion came from a different model (`judge_second_model`) |
 | link proposals | `link_judge_mode` | accept >= `link_accept_min_confidence` becomes a live edge, `decided_by='dream-judge'`; reject >= `link_reject_min_confidence`; a retype is recorded (`judge_relation`) for a reviewer to apply |
 | junk proposals | `junk_judge_mode` | keep >= `junk_keep_min_confidence`; delete >= `junk_delete_min_confidence` only under the evidence bar (degree <= `junk_max_auto_degree`, at most one fact slot) |
-| lesson / world duplicates | `curation_judge_mode` | `auto-distinct`: the reversible dismissal; `auto`: also forget the losing slot after folding the carry-over into the surviving lesson |
+| lesson / world duplicates | `curation_judge_mode` | `auto-distinct`: the reversible dismissal; `auto`: also retire the losing slot (reversible — `restore_slot` / `POST /api/lessons/restore`) after folding the carry-over into the surviving lesson |
 | link candidates (Step C) | `candidate_judge_mode` (`off` / `shadow` / `auto`) | one slice per tick after each deep apply: `propose` files an edge proposal (source `deep-dream-judge`), `dismiss` marks the pair distinct (for the merge analyzer too); every judged pair is memoised for `candidate_rejudge_days` |
 
 **Turning it all off:** `memory.deep_dream.judges_enabled: false` stops
@@ -23,11 +23,11 @@ every judge stage in one move (the mechanical tick keeps running;
 `analyzer_file_duplicates` and `orphan_sweep` have their own switches, and
 `dream.enabled: false` stops the sweep timer but not a manual deep apply).
 A judge that is about to delete or fold writes the graph snapshot first
-(the snapshot covers the five graph tables only — a curation `auto` forget
-removes a lesson/world row the snapshot does not hold, which is one reason
-that mode ships off and is recommended against until forgets retire
-instead of delete); each judge applies at most one `judge_batch` slice per
-tick, which is also the rate limit. Merge rows judged before this build
+(the snapshot covers the five graph tables only; a curation `auto` forget
+does not need it — since 2026-09-03 a forget retires the row with a
+`store_decisions` audit entry and `lesson_restore` / `world_restore` undo
+it); each judge applies at most one `judge_batch` slice per tick, which is
+also the rate limit. Merge rows judged before this build
 carry the judge's CONFIGURED model name; second opinions stamp the SERVED
 name, so the distinct-model check also refuses a second opinion from the
 same extractor object or the same configured name — a dated served id for
@@ -36,8 +36,10 @@ one physical model cannot pass as a second model. **Day-one behaviour on an exis
 2026-08-30) and `judge_second_opinion` defaulting on, the reject gate
 widens from single-vote >= 0.8 to ALSO two agreeing votes at mean >= 0.7
 without any config edit — measured 8/8 on the 2026-09-02 rows — and a
-wrong auto-reject also writes `dismissed_pairs`, which has no expiry and
-no un-dismiss route (a SQL delete of the row is the only undo). Read the
+wrong reject — auto or human; since 2026-09-03 every merge reject writes
+the canonical pair so the verdict outlives its proposal row — also writes
+`dismissed_pairs`, which has no expiry and no un-dismiss route (a SQL
+delete of the row is the only undo). Read the
 orphan census before switching the sweep on: `memory_dream(action="deep")`
 reports `would_orphan_count` / `would_orphan`.
 
@@ -177,7 +179,9 @@ No merge proposal is filed whose side is junk-flagged.
   CASCADE and the same non-reversibility as a merge — read the reason and the
   display name before accepting, and prefer leaving it pending when unsure.
 - **A real entity** → `memory_graph_review(action="reject_entity",
-  proposal_id=...)` — keeps the entity and closes the proposal.
+  proposal_id=...)` — keeps the entity, closes the proposal, and records a
+  `junk:<canonical>` keep tombstone in `dismissed_pairs` so the name is
+  never re-filed or auto-deleted after a re-mint.
 - **Unsure** → leave pending; it costs nothing but a queue slot.
 
 ## 3c. Step C — settle lesson/world duplicate listings (this session)
@@ -186,7 +190,11 @@ Judge each `lesson_duplicates` / `world_duplicates` pair from the values shown
 lessons and source_url for world facts). Nothing is ever auto-deleted:
 - **Duplicate** → keep the better-keyed slot; drop the other via
   `memory_forget(scope="lesson"|"world", ...)` (or re-write the surviving
-  slot first to fold in anything the dropped one added).
+  slot first to fold in anything the dropped one added). A forget RETIRES
+  the slot (row kept, audit row in `store_decisions`): undo it with
+  `memory_graph_review(action="restore_slot", store=..., src="entity|attribute")`
+  or `POST /api/lessons/restore` / `POST /api/world/restore`;
+  `GET /api/curation/retired` lists what is currently retired.
 - **Distinct** → `memory_graph_review(action="dismiss_slot_pair",
   store="lesson"|"world", src=<a_key>, dst=<b_key>)` (REST equivalent:
   `POST /api/curation/dismiss-duplicate`) — the pair is persisted

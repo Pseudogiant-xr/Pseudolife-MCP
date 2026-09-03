@@ -306,6 +306,17 @@ KNOBS: list[dict[str, Any]] = [
              "the mechanical tick keeps running. The two apply-time "
              "mechanics keep their own switches (analyzer_file_duplicates, "
              "orphan_sweep)."},
+    {"path": "memory.deep_dream.judge_snippet_max_chars", "group": "Deep dream",
+     "label": "Merge-judge snippet chars", "type": "int", "default": 240,
+     "min": 0, "max": 20000, "step": 100, "restart": False,
+     "help": "Per-snippet cap on the evidence the merge judge reads, "
+             "separate from the review surfaces' snippet_max_chars. 0 = "
+             "unbounded. Leave at 240 (the cap every published judge number "
+             "was measured at): the 2026-09-03 ladder rerun at 3000 chars "
+             "made the judge accept more and be wrong more often (accept "
+             "precision 0.70 vs 0.85; two-vote auto-fold 6/7 vs 4/4; "
+             "evals/results/queue-judge-ladder-20260903-fulllen.json). "
+             "Raise it only behind a new ladder run."},
     {"path": "memory.deep_dream.judge_second_opinion", "group": "Deep dream",
      "label": "Merge judge second opinion", "type": "bool", "default": True,
      "restart": False,

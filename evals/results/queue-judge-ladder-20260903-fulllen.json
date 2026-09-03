@@ -1,0 +1,948 @@
+{
+ "data": "queue_judge_eval_20260902.json",
+ "arms": {
+  "opus-r2-fulllen": {
+   "arm": "opus-r2-fulllen",
+   "model": "claude-opus-5",
+   "base_url": "http://127.0.0.1:8082/v1",
+   "replicates": 2,
+   "batch": 8,
+   "max_tokens": 2048,
+   "seed": 20260902,
+   "snippet_chars": 3000,
+   "data": "queue_judge_eval_20260903_fulllen.json",
+   "data_sha256": "5999adf523356aa7eb5c3177819d14a588bfb627fa5138beca8310af30e81f7f",
+   "gates": {
+    "reject_gate": 0.8,
+    "reject_gate_2": 0.7,
+    "accept_gate": 0.6,
+    "link_gate": 0.8,
+    "junk_gate": 0.85,
+    "junk_keep_gate": 0.8,
+    "candidate_gate": 0.6,
+    "distinct_gate": 0.8,
+    "forget_gate": 0.9
+   },
+   "queues": {
+    "merges": {
+     "rows": 63,
+     "decided": 57,
+     "accept_precision": {
+      "n": 30,
+      "bad": 9,
+      "precision": 0.7
+     },
+     "reject_precision": {
+      "n": 27,
+      "bad": 2,
+      "precision": 0.9259
+     },
+     "auto_reject_single": {
+      "n": 0,
+      "bad": 0,
+      "precision": null
+     },
+     "two_vote_reject": {
+      "n": 7,
+      "bad": 0,
+      "precision": 1.0
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 7,
+      "bad": 1,
+      "precision": 0.8571
+     },
+     "two_vote_accept_any": {
+      "n": 24,
+      "bad": 4,
+      "precision": 0.8333
+     },
+     "per_row": [
+      {
+       "id": 1930,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.8
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.9
+        }
+       ]
+      },
+      {
+       "id": 1931,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 1932,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.85
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.9
+        }
+       ]
+      },
+      {
+       "id": 1935,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.65
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 1936,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.7
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.72
+        }
+       ]
+      },
+      {
+       "id": 1941,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.88
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.85
+        }
+       ]
+      },
+      {
+       "id": 1943,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.7
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.85
+        }
+       ]
+      },
+      {
+       "id": 1944,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.75
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.72
+        }
+       ]
+      },
+      {
+       "id": 1946,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.72
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 1947,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 1952,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.7
+        }
+       ]
+      },
+      {
+       "id": 1953,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 1954,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.5
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.5
+        }
+       ]
+      },
+      {
+       "id": 1955,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.5
+        },
+        {
+         "verdict": "leave",
+         "confidence": 0.5
+        }
+       ]
+      },
+      {
+       "id": 1960,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.7
+        }
+       ]
+      },
+      {
+       "id": 1962,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.75
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.65
+        }
+       ]
+      },
+      {
+       "id": 1966,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 1969,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.5
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 2004,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.62
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 2007,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.75
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.7
+        }
+       ]
+      },
+      {
+       "id": 2008,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.7
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.65
+        }
+       ]
+      },
+      {
+       "id": 2015,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.7
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.7
+        }
+       ]
+      },
+      {
+       "id": 2016,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.65
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.65
+        }
+       ]
+      },
+      {
+       "id": 2017,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.62
+        }
+       ]
+      },
+      {
+       "id": 2022,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.85
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.82
+        }
+       ]
+      },
+      {
+       "id": 2024,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.57
+        }
+       ]
+      },
+      {
+       "id": 2027,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.72
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.72
+        }
+       ]
+      },
+      {
+       "id": 2028,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 2036,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.68
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.7
+        }
+       ]
+      },
+      {
+       "id": 2043,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.85
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.72
+        }
+       ]
+      },
+      {
+       "id": 2049,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.82
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 2050,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.5
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 2055,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 2056,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.7
+        }
+       ]
+      },
+      {
+       "id": 2057,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.72
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.75
+        }
+       ]
+      },
+      {
+       "id": 2058,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 2059,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.62
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.62
+        }
+       ]
+      },
+      {
+       "id": 2060,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.5
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 2066,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.72
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.78
+        }
+       ]
+      },
+      {
+       "id": 2067,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.52
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 2112,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.68
+        }
+       ]
+      },
+      {
+       "id": 2113,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.65
+        }
+       ]
+      },
+      {
+       "id": 2121,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.52
+        }
+       ]
+      },
+      {
+       "id": 2122,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 2123,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.68
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 2124,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.68
+        }
+       ]
+      },
+      {
+       "id": 2130,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 2131,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.65
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 2137,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.58
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.5
+        }
+       ]
+      },
+      {
+       "id": 2138,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.5
+        }
+       ]
+      },
+      {
+       "id": 2143,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        }
+       ]
+      },
+      {
+       "id": 2145,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.75
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.75
+        }
+       ]
+      },
+      {
+       "id": 2157,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.68
+        }
+       ]
+      },
+      {
+       "id": 2212,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.5
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.5
+        }
+       ]
+      },
+      {
+       "id": 2215,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.85
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.82
+        }
+       ]
+      },
+      {
+       "id": 2217,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.65
+        }
+       ]
+      },
+      {
+       "id": 2220,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.7
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.68
+        }
+       ]
+      },
+      {
+       "id": 2221,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.65
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 2222,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.7
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.78
+        }
+       ]
+      },
+      {
+       "id": 2226,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.72
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.55
+        }
+       ]
+      },
+      {
+       "id": 2232,
+       "label": "accept",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.85
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.85
+        }
+       ]
+      },
+      {
+       "id": 2275,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "accept",
+         "confidence": 0.6
+        },
+        {
+         "verdict": "accept",
+         "confidence": 0.62
+        }
+       ]
+      },
+      {
+       "id": 2279,
+       "label": "reject",
+       "votes": [
+        {
+         "verdict": "reject",
+         "confidence": 0.72
+        },
+        {
+         "verdict": "reject",
+         "confidence": 0.75
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ }
+}

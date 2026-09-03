@@ -69,6 +69,9 @@ EXPORTED_TABLES = (
     # v35: the store-curation judge's verdict memo travels like
     # dismissed_pairs — a settled pair stays settled on the target bank.
     "curation_judgments",
+    # v37: the retire/restore audit is the only copy of a retired lesson or
+    # world fact once compaction has purged the row — it travels with them.
+    "store_decisions",
 )
 
 # Operational, not knowledge: the dream pre-image journal only exists to

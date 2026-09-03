@@ -244,6 +244,63 @@ def test_review_payload_carries_the_shadow_verdict(svc):
 
 # ── evidence-quality signal in the judge payload (2026-08-21 shadow) ─────
 
+def test_format_judge_proposal_default_is_byte_identical_and_snippet_chars_lifts_it():
+    """Absent key -> the frozen 240-char serialization (every published
+    judge number keeps its exact prompt); ``snippet_chars`` on the proposal
+    lifts the cap (0 = unbounded) so the sweep's judge reads full evidence."""
+    from pseudolife_memory.memory.dream import format_judge_proposal
+    long = "x" * 600
+    base = {"n": 1, "from": {"display": "a", "snippets": [long]},
+            "into": {"display": "b", "snippets": [long]}, "reason": "t"}
+    plain = format_judge_proposal(dict(base))
+    assert "x" * 240 in plain and "x" * 241 not in plain
+    assert "snippet_chars" not in plain
+    full = format_judge_proposal({**base, "snippet_chars": 0})
+    assert "x" * 600 in full
+    capped = format_judge_proposal({**base, "snippet_chars": 300})
+    assert "x" * 300 in capped and "x" * 301 not in capped
+    assert format_judge_proposal({**base, "snippet_chars": 240}) == plain
+
+
+def test_judge_reads_full_length_evidence(svc):
+    """The 2026-09-02 panel judged merge snippets clipped to 240 chars at
+    BUILD time (305/309 were exactly 240) — the judge path builds its
+    evidence at ``judge_snippet_max_chars`` and stamps the cap on each
+    proposal; the dry-run/Console listing keeps ``snippet_max_chars``."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "shadow"
+    # The default stays the frozen 240 (the 2026-09-03 ladder measured
+    # 3000 as worse on the auto-fold path); the knob is exercised here.
+    assert cfg.judge_snippet_max_chars == 240
+    cfg.judge_snippet_max_chars = 3000
+    body = " ".join(f"detail{i}" for i in range(80))          # > 240 chars
+    svc.store(f"alpha svc handles the alpha path. {body}", source="t")
+    svc.store(f"alpha service is the alpha daemon. {body}", source="t")
+    pid = _propose(svc, "alpha svc", "alpha service")
+
+    class _Capture:
+        model = "stub"
+        proposals = []
+
+        def judge_merges(self, proposals):
+            self.proposals.extend(proposals)
+            return [{"n": p["n"], "verdict": "leave", "confidence": 0.5,
+                     "note": ""} for p in proposals]
+
+    judge = _Capture()
+    assert svc.deep_dream_judge(judge)["judged"] == 1
+    p = judge.proposals[0]
+    assert p["snippet_chars"] == cfg.judge_snippet_max_chars == 3000
+    snips = p["from"]["snippets"] + p["into"]["snippets"]
+    assert snips and max(len(x) for x in snips) > 240
+    # the review surface keeps its own (shorter) cap
+    cfg.snippet_max_chars = 40
+    listed = next(m for m in svc.deep_dream(apply=False)["merge_proposals"]
+                  if m["id"] == pid)
+    shown = listed["from"]["snippets"] + listed["into"]["snippets"]
+    assert shown and all(len(x) <= 40 for x in shown)
+
+
 def test_format_judge_proposal_marks_low_differential():
     from pseudolife_memory.memory.dream import format_judge_proposal
 

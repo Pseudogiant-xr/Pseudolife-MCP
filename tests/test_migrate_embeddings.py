@@ -490,7 +490,7 @@ def test_apply_crash_after_two_tables_keeps_entries_armed_then_resumes(
     ).fetchone()
     # Literal pin, bump alongside SCHEMA_META_VERSION -- see the other
     # tests/test_schema_version.py CURRENT_SCHEMA pin, same convention.
-    assert meta[0] == 36
+    assert meta[0] == 37
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +604,7 @@ def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
     meta = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
-    assert meta[0] == 36
+    assert meta[0] == 37
 
     # Write-path fidelity, at least one row per table (MINOR 4): the real
     # pipeline test above spent its cost without collecting this evidence

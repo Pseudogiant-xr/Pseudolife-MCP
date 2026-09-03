@@ -33,8 +33,9 @@ ORIGIN = "source"
 class WorldRecord:
     """One canonical world fact at a slot, with citation + freshness.
 
-    ``status`` is ``current`` | ``superseded`` (no contender state — world facts have
-    a single provenance tier). Superseded records are kept for audit / revert.
+    ``status`` is ``current`` | ``superseded`` | ``retired`` (no contender state —
+    world facts have a single provenance tier). Superseded and retired records
+    are kept for audit / revert (``retire`` / ``restore``).
     """
 
     entity: str
@@ -255,11 +256,71 @@ class WorldCortexStore:
             }
         return removed
 
+    def retire(self, entity: str, attribute: str | None = None, *,
+               now: float | None = None) -> list:
+        """Retire the CURRENT record(s) at an entity, or at one exact slot:
+        ``status='retired'``, ``superseded_at`` stamped, the record KEPT
+        (compaction's keep-newest-N rule applies to it like any non-live
+        record). The reversible forget; ``forget`` is the hard delete.
+        Returns the retired records."""
+        t = time.time() if now is None else float(now)
+        ne = _norm_key(entity)
+        na = _norm_key(attribute) if attribute is not None else None
+        out = []
+        for r in self.records:
+            ke, ka = r.key
+            if (r.status == "current" and ke == ne
+                    and (na is None or ka == na)):
+                r.status = "retired"
+                r.superseded_at = t
+                self.dirty_slots.add(r.key)
+                out.append(r)
+        if out:
+            self._current = {
+                r.key: i for i, r in enumerate(self.records) if r.status == "current"
+            }
+        return out
+
+    def restore(self, entity: str, attribute: str | None = None) -> list:
+        """Bring back the newest retired record at an entity, or at one
+        exact slot — only for slots with no current record (a slot written
+        again since the retire keeps its new value). Flips status and
+        clears ``superseded_at`` ONLY: ``asserted_at`` / ``last_confirmed``
+        and the writer stamps stay, so read-time staleness (a lesson whose
+        subject's facts changed while it was retired) is still visible.
+        Returns the restored records."""
+        ne = _norm_key(entity)
+        na = _norm_key(attribute) if attribute is not None else None
+        best: dict[tuple[str, str], object] = {}
+        for r in self.records:
+            ke, ka = r.key
+            if (r.status != "retired" or ke != ne
+                    or (na is not None and ka != na)
+                    or r.key in self._current):
+                continue
+            b = best.get(r.key)
+            if b is None or ((r.superseded_at or 0.0), r.asserted_at) > (
+                    (b.superseded_at or 0.0), b.asserted_at):
+                best[r.key] = r
+        out = []
+        for r in best.values():
+            r.status = "current"
+            r.superseded_at = None
+            self.dirty_slots.add(r.key)
+            out.append(r)
+        if out:
+            self._current = {
+                r.key: i for i, r in enumerate(self.records) if r.status == "current"
+            }
+        return out
+
     def stats(self) -> dict:
         cur = sum(1 for r in self.records if r.status == "current")
+        retired = sum(1 for r in self.records if r.status == "retired")
         return {
             "total_records": len(self.records),
             "current": cur,
-            "superseded": len(self.records) - cur,
+            "superseded": len(self.records) - cur - retired,
+            "retired": retired,
             "slots": len(self._current),
         }

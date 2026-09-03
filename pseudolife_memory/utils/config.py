@@ -490,6 +490,19 @@ class DeepDreamConfig:
     # (evals/judge_ladder.py, evals/queue_judge_ladder.py).
     judge_mode: str = "shadow"           # off | shadow | auto-reject | auto
     judge_batch: int = 8                 # proposals judged per sweep (one model call)
+    # Per-snippet cap on the evidence the MERGE JUDGE reads, separate from
+    # the review surfaces' snippet_max_chars. 0 = unbounded. Default = the
+    # frozen 240 the published judge numbers were measured at, ON PURPOSE:
+    # the 2026-09-03 ladder rerun with the same 63 rows at 3000 chars
+    # (their source entries run p50 1299 / p95 2765 / max 4282 chars;
+    # evals/results/queue-judge-ladder-20260903-fulllen.json) made Opus
+    # accept more and be wrong more often — accept precision 0.70 vs 0.85,
+    # the two-vote auto-fold gate 6/7 vs 4/4, replicate disagreement 6/63
+    # vs 2/63 — while rejects stayed clean. Longer evidence is not better
+    # evidence for this judge; raise it only behind a new ladder run. Note
+    # the low_differential stamp is computed from the truncated texts, so
+    # the cap also moves the auto-accept gate's precondition.
+    judge_snippet_max_chars: int = 240
     judge_reject_min_confidence: float = 0.8
     judge_url: str = ""                  # optional OpenAI-compatible override endpoint; empty = the dream extractor
     judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)

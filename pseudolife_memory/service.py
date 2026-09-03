@@ -318,6 +318,42 @@ def _slot_key(entity_norm: str, attribute_norm: str) -> str:
     return f"{entity_norm.replace('|', '-')}|{attribute_norm.replace('|', '-')}"
 
 
+# Junk KEEP tombstones (2026-09-03): a junk proposal rejected as "keep" is
+# recorded in dismissed_pairs as the namespaced self-pair
+# ("junk:<canonical>", "junk:<canonical>") — the rejected entity_proposals
+# row CASCADEs away with its entity, and a re-mint of the same name used to
+# be re-filed and re-judged as if no verdict existed. Keyed on the STORED
+# canonical like every other graph dismissal.
+_JUNK_KEEP_PREFIX = "junk:"
+
+
+def _junk_keep_key(canonical: str) -> str:
+    return _JUNK_KEEP_PREFIX + canonical
+
+
+def _kept_junk_norms(dismissed: set[tuple[str, str]]) -> set[str]:
+    """Canonicals a junk proposal was rejected (kept) for."""
+    n = len(_JUNK_KEEP_PREFIX)
+    return {a[n:] for a, b in dismissed
+            if a == b and a.startswith(_JUNK_KEEP_PREFIX)}
+
+
+def _world_record_snapshot(rec) -> dict[str, Any]:
+    """The verbatim fields of a WorldRecord for the retire/restore audit —
+    no read-time decay or stale policy applied (the snapshot must restore
+    exactly what was retired)."""
+    return {
+        "entity": rec.entity, "attribute": rec.attribute, "value": rec.value,
+        "polarity": rec.polarity, "status": rec.status,
+        "confidence": round(float(rec.confidence), 4), "origin": rec.origin,
+        "source_url": rec.source_url, "source_quote": rec.source_quote,
+        "freshness_class": rec.freshness_class,
+        "retrieved_at": rec.retrieved_at, "content_hash": rec.content_hash,
+        "source_doc_id": rec.source_doc_id, "asserted_at": rec.asserted_at,
+        "last_confirmed": rec.last_confirmed,
+    }
+
+
 def _store_dismissed(dismissed: set[tuple[str, str]], store: str) -> set[tuple[str, str]]:
     """The subset of dismissed_pairs rows belonging to ``store``'s namespace,
     with the prefix stripped back to bare slot keys."""
@@ -3058,14 +3094,63 @@ class MemoryService(DreamOps):
             _demote_stale(rows, self._stale_policy)
             return {"count": len(rows), "entries": rows}
 
-    def world_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:
+    def world_forget(self, entity: str, attribute: str | None = None, *,
+                     decided_by: str = "human",
+                     reason: str | None = None) -> dict[str, Any]:
+        """Retire the current world fact(s) at an entity or one slot — the
+        rows stay (status ``retired``) and an FK-free ``store_decisions``
+        row carries who, why, and the verbatim record; ``world_restore``
+        is the undo. ``removed`` is kept for callers of the old hard-delete
+        contract and counts the retired records."""
+        import time as _t
         with self._lock:
             self._ensure_init()
             assert self._world is not None
-            removed = self._world.forget(entity, attribute)
-            if removed:
+            now = _t.time()
+            recs = self._world.retire(entity, attribute, now=now)
+            if recs:
+                for r in recs:
+                    self._record_store_decision(
+                        "world", r, "retire", decided_by, reason, now)
                 self._save_world()
-            return {"removed": removed, "entity": entity, "attribute": attribute}
+            return {"removed": len(recs), "retired": len(recs),
+                    "entity": entity, "attribute": attribute}
+
+    def world_restore(self, entity: str, attribute: str | None = None, *,
+                      decided_by: str = "human") -> dict[str, Any]:
+        """Undo a ``world_forget``: bring the newest retired record back at
+        every retired slot of the entity (or the one slot) that is not live
+        again. Once compaction has purged the retired row, the audit
+        snapshot is re-written instead (``source: audit_snapshot``)."""
+        import time as _t
+        from pseudolife_memory.memory.cortex import _norm_key
+        with self._lock:
+            self._ensure_init()
+            assert self._world is not None
+            now = _t.time()
+            recs = self._world.restore(entity, attribute)
+            if recs:
+                for r in recs:
+                    self._record_store_decision(
+                        "world", r, "restore", decided_by, None, now)
+                self._save_world()
+            # Slots the in-memory pass could not cover (compaction purged
+            # the retired row) fall back to their audit snapshot in the
+            # SAME call — "every retired slot" is the contract, and the two
+            # populations coexist under a whole-entity restore.
+            ne = _norm_key(entity)
+            na = _norm_key(attribute) if attribute is not None else None
+            live = {k for k in self._world._current
+                    if k[0] == ne and (na is None or k[1] == na)}
+            snaps = [] if self._storage is None else [
+                d for d in self._storage.retired_slots("world", entity_norm=ne)
+                if (na is None or d["attribute_norm"] == na) and d.get("record")
+                and (d["entity_norm"], d["attribute_norm"]) not in live]
+        entries = [_world_record_to_dict(r, stale_policy=self._stale_policy)
+                   for r in recs]
+        return self._restore_result(
+            "world", recs, entries, snaps, decided_by, live,
+            {"entity": entity, "attribute": attribute})
 
     # ------------------------------------------------------------------
     # Procedural / outcome memory — lessons (schema v10)
@@ -3131,6 +3216,7 @@ class MemoryService(DreamOps):
                      polarity: str = "+", confidence: float = 0.6,
                      origin: str = "agent",
                      provenance: set[str] | list[str] | None = None,
+                     support: set[str] | list[str] | None = None,
                      now: float | None = None,
                      valid_time: float | None = None) -> dict[str, Any]:
         """Write / confirm / supersede a lesson at the ``(task, aspect)`` slot and
@@ -3147,7 +3233,8 @@ class MemoryService(DreamOps):
             action, rec = self._lessons.write_fact(
                 task, aspect, lesson, emb, about=about, outcome=outcome,
                 polarity=polarity, confidence=confidence, origin=origin,
-                provenance=provenance, now=now, valid_time=valid_time,
+                provenance=provenance, support=support, now=now,
+                valid_time=valid_time,
                 hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
             self._link_lesson_graph(task, rec.about, rec.polarity)
             self._save_lessons()
@@ -3361,14 +3448,187 @@ class MemoryService(DreamOps):
                     f"facts about {name} changed since this lesson")
         return rows
 
-    def lesson_forget(self, task: str, aspect: str | None = None) -> dict[str, Any]:
+    def lesson_forget(self, task: str, aspect: str | None = None, *,
+                      decided_by: str = "human",
+                      reason: str | None = None) -> dict[str, Any]:
+        """Retire the current lesson(s) at a task or one ``(task, aspect)``
+        slot — the rows stay (status ``retired``) and an FK-free
+        ``store_decisions`` row carries who, why, and the verbatim record;
+        ``lesson_restore`` is the undo. The 2026-09-02 triage hard-deleted
+        three lessons nothing could bring back — a forget is now reversible
+        by construction. ``removed`` is kept for callers of the old contract
+        and counts the retired records. Best-effort like every store write:
+        the in-memory retire lands first, then the audit row, then the
+        per-slot sync — a persistence failure raises ``PersistenceError``
+        and the in-memory state stands until the next successful sync."""
+        import time as _t
         with self._lock:
             self._ensure_init()
             assert self._lessons is not None
-            removed = self._lessons.forget(task, aspect)
-            if removed:
+            now = _t.time()
+            recs = self._lessons.retire(task, aspect, now=now)
+            if recs:
+                for r in recs:
+                    self._record_store_decision(
+                        "lesson", r, "retire", decided_by, reason, now)
                 self._save_lessons()
-            return {"removed": removed, "task": task, "aspect": aspect}
+            return {"removed": len(recs), "retired": len(recs),
+                    "task": task, "aspect": aspect}
+
+    def lesson_restore(self, task: str, aspect: str | None = None, *,
+                       decided_by: str = "human") -> dict[str, Any]:
+        """Undo a ``lesson_forget``: bring the newest retired record back at
+        every retired slot of the task (or the one slot) that is not live
+        again — provenance, stamps and embedding intact. Once compaction
+        has purged the retired row, the audit snapshot is re-written
+        through ``lesson_write`` instead (``source: audit_snapshot``)."""
+        import time as _t
+        from pseudolife_memory.memory.cortex import _norm_key
+        with self._lock:
+            self._ensure_init()
+            assert self._lessons is not None
+            now = _t.time()
+            recs = self._lessons.restore(task, aspect)
+            if recs:
+                for r in recs:
+                    self._record_store_decision(
+                        "lesson", r, "restore", decided_by, None, now)
+                    self._link_lesson_graph(r.entity, r.about, r.polarity)
+                self._save_lessons()
+            # Slots the in-memory pass could not cover (compaction purged
+            # the retired row) fall back to their audit snapshot in the
+            # SAME call — "every retired slot" is the contract, and the two
+            # populations coexist under a whole-task restore.
+            ne = _norm_key(task)
+            na = _norm_key(aspect) if aspect is not None else None
+            live = {k for k in self._lessons._current
+                    if k[0] == ne and (na is None or k[1] == na)}
+            snaps = [] if self._storage is None else [
+                d for d in self._storage.retired_slots("lesson", entity_norm=ne)
+                if (na is None or d["attribute_norm"] == na) and d.get("record")
+                and (d["entity_norm"], d["attribute_norm"]) not in live]
+        entries = [_lesson_record_to_dict(r) for r in recs]
+        return self._restore_result(
+            "lesson", recs, entries, snaps, decided_by, live,
+            {"task": task, "aspect": aspect})
+
+    def _restore_result(self, store: str, recs: list, entries: list[dict],
+                        snaps: list[dict], decided_by: str, live: set,
+                        label: dict[str, Any]) -> dict[str, Any]:
+        """Combine the in-memory restore with the snapshot fallback for the
+        slots it could not cover. Lock-free (the fallback writes through
+        the locked store writers). ``source`` is ``retired_record``,
+        ``audit_snapshot`` or ``mixed``."""
+        fb = (self._restore_from_snapshot(store, snaps, decided_by)
+              if snaps else {"restored": 0, "entries": []})
+        total = len(recs) + fb["restored"]
+        if not total:
+            return {"restored": 0, **label,
+                    "reason": "slot_live" if live else "nothing_retired"}
+        source = ("retired_record" if not fb["restored"]
+                  else "audit_snapshot" if not recs else "mixed")
+        return {"restored": total, "source": source, **label,
+                "entries": entries + fb["entries"]}
+
+    def _record_store_decision(self, store: str, rec, action: str,
+                               decided_by: str | None, reason: str | None,
+                               now: float) -> None:
+        """Audit row for a lesson/world retire or restore, carrying the
+        verbatim record. Caller holds the lock; no-op in file mode."""
+        if self._storage is None:
+            return
+        snapshot = ({**_lesson_record_to_dict(rec), "support": sorted(rec.support)}
+                    if store == "lesson" else _world_record_snapshot(rec))
+        ne, na = rec.key
+        self._storage.record_store_decision(
+            store, ne, na, action, decided_by=decided_by, reason=reason,
+            record=snapshot, now=now)
+
+    def _restore_from_snapshot(self, store: str, snaps: list[dict],
+                               decided_by: str) -> dict[str, Any]:
+        """Re-write retired slots from their audit snapshots — the fallback
+        once compaction has purged the retired rows. Lock-free: the store
+        writers take the lock themselves, so a concurrent write landing on
+        the slot between the caller's slot check and the write here is
+        superseded by the snapshot value (narrow; the retired-record path
+        under the lock has no such window). What a snapshot restore cannot
+        bring back: the HLC / writer / session / tx_time / valid_time
+        stamps (re-minted at write time) and, for world facts, polarity
+        (``world_write`` has none; no negative world facts exist)."""
+        import time as _t
+        restored: list[dict] = []
+        for d in snaps:
+            rec = d["record"]
+            if store == "lesson":
+                out = self.lesson_write(
+                    rec["task"], rec["aspect"], rec["lesson"],
+                    about=rec.get("about"),
+                    outcome=rec.get("outcome") or "success",
+                    polarity=rec.get("polarity") or "+",
+                    confidence=float(rec.get("confidence") or 0.6),
+                    origin=rec.get("origin") or "agent",
+                    provenance=rec.get("provenance") or None,
+                    support=rec.get("support") or None)
+            else:
+                # world_write has no polarity parameter: a negative world
+                # fact (none exist today) would come back positive here.
+                out = self.world_write(
+                    rec["entity"], rec["attribute"], rec["value"],
+                    confidence=float(rec.get("confidence") or 0.7),
+                    source_url=rec.get("source_url") or "",
+                    source_quote=rec.get("source_quote") or "",
+                    freshness_class=rec.get("freshness_class") or "volatile",
+                    retrieved_at=rec.get("retrieved_at"),
+                    content_hash=rec.get("content_hash"),
+                    source_doc_id=rec.get("source_doc_id"))
+            if out.get("action") == "rejected":
+                continue
+            restored.append(d)
+        with self._lock:
+            self._ensure_init()
+            if self._storage is not None:
+                now = _t.time()
+                for d in restored:
+                    self._storage.record_store_decision(
+                        store, d["entity_norm"], d["attribute_norm"],
+                        "restore", decided_by=decided_by,
+                        reason="from audit snapshot", record=d["record"],
+                        now=now)
+        return {"restored": len(restored), "source": "audit_snapshot",
+                "entries": [d["record"] for d in restored]}
+
+    def curation_retired(self, store: str | None = None,
+                         limit: int = 100) -> dict[str, Any]:
+        """Slots a forget retired that are still retired (newest first),
+        with who/why and the verbatim record — the listing behind the
+        restore route. ``store`` None = both stores."""
+        if store is not None and store not in _CURATION_STORES:
+            return {"error": "bad_store", "store": store,
+                    "stores": list(_CURATION_STORES)}
+        stores = (store,) if store else _CURATION_STORES
+        with self._lock:
+            self._ensure_init()
+            rows: list[dict] = []
+            if self._storage is not None:
+                for st in stores:
+                    rows.extend(self._storage.retired_slots(st, limit=limit))
+            # A retired slot the dream re-minted is live again (the common
+            # case for lessons): nothing writes a decision row for that, so
+            # the listing checks the live slot index the way restore does —
+            # a restore there could only answer ``slot_live``.
+            live: set[tuple] = set()
+            if self._lessons is not None:
+                live |= {("lesson", *k) for k in self._lessons._current}
+            if self._world is not None:
+                live |= {("world", *k) for k in self._world._current}
+            rows = [d for d in rows
+                    if (d["store"], d["entity_norm"], d["attribute_norm"]) not in live]
+        rows.sort(key=lambda d: (-float(d["decided_at"]), -int(d["id"])))
+        rows = rows[: max(0, int(limit))]
+        for d in rows:      # the key restore_slot / the routes take back
+            d["key"] = _slot_key(d["entity_norm"], d["attribute_norm"])
+        return {"count": len(rows), "entries": rows, "store": store,
+                "limit": limit}
 
     def _synthesized_lesson_duplicate(self, task: str, aspect: str,
                                       lesson: str, polarity: str,
@@ -6208,13 +6468,35 @@ class MemoryService(DreamOps):
             prop = self._storage.get_entity_proposal(proposal_id)
             ok = self._storage.set_entity_proposal_status(
                 proposal_id, "rejected", decided_by=decided_by, decided_at=now)
-            if ok and prop is not None and prop.get("kind") == "merge":
-                disp = {e["id"]: e["display"]
-                        for e in self._storage.load_graph()["entities"]}
-                self._storage.record_merge_decision(
-                    proposal_id, disp.get(prop["entity_id"], "?"),
-                    disp.get(prop["into_id"], "?"), "rejected",
-                    prop.get("score"), prop.get("reason"), decided_by, now)
+            if ok and prop is not None:
+                g = self._storage.load_graph()
+                disp = {e["id"]: e["display"] for e in g["entities"]}
+                canon = {e["id"]: e["canonical"] for e in g["entities"]}
+                # The verdict outlives the row: entity_proposals CASCADEs
+                # with its entity, so the durable record is the FK-free
+                # merge_decisions row plus a TEXT-keyed tombstone in
+                # dismissed_pairs (stored canonicals, the key every filing
+                # gate consults) — a merge reject means "distinct", a junk
+                # reject means "keep", and neither is re-filed after the
+                # entity churns and re-mints.
+                if prop.get("kind") == "merge":
+                    self._storage.record_merge_decision(
+                        proposal_id, disp.get(prop["entity_id"], "?"),
+                        disp.get(prop["into_id"], "?"), "rejected",
+                        prop.get("score"), prop.get("reason"), decided_by, now)
+                    a = canon.get(prop["entity_id"])
+                    b = canon.get(prop["into_id"])
+                    if a and b and a != b:
+                        self._storage.dismiss_pair(a, b)
+                elif prop.get("kind") == "junk":
+                    self._storage.record_merge_decision(
+                        proposal_id, disp.get(prop["entity_id"], "?"), None,
+                        "rejected", prop.get("score"),
+                        f"junk keep: {prop.get('reason')}", decided_by, now)
+                    c = canon.get(prop["entity_id"])
+                    if c:
+                        self._storage.dismiss_pair(_junk_keep_key(c),
+                                                   _junk_keep_key(c))
         return {"rejected": ok, "id": proposal_id}
 
     def _recall_vocab(self) -> list[str]:

@@ -1129,9 +1129,11 @@ def memory_forget(
     tag: Annotated[str | None, Field(
         description="memory scope: delete entries carrying this tag.")] = None,
 ) -> dict[str, Any]:
-    """Hard-delete from one memory store. Cleanup for junk/test data — no
-    audit trail. For "now wrong, keep history" use ``memory_fact_set``
-    (facts) or ``memory_supersede`` (memories) instead.
+    """Forget from one memory store. ``memory`` and ``fact`` hard-delete
+    (cleanup for junk/test data — no audit trail); ``world`` and ``lesson``
+    RETIRE the slot with an audit row, undone by ``memory_graph_review(
+    action="restore_slot")``. For "now wrong, keep history" use
+    ``memory_fact_set`` (facts) or ``memory_supersede`` (memories) instead.
 
     ``scope="memory"`` needs at least one of ``text``/``substring``/
     ``source``/``episode``/``tag``, and those OR-combine — ANY match
@@ -1153,8 +1155,8 @@ def memory_forget(
         if scope == "fact":
             return service.cortex_forget(entity, attribute)
         if scope == "world":
-            return service.world_forget(entity, attribute)
-        return service.lesson_forget(entity, attribute)
+            return service.world_forget(entity, attribute, decided_by="agent")
+        return service.lesson_forget(entity, attribute, decided_by="agent")
     return {"error": "unknown_scope",
             "scopes": ["memory", "fact", "world", "lesson"]}
 
@@ -1241,7 +1243,7 @@ def _coerce_id_list(value: Any) -> list[int] | None:
 @_tool()
 def memory_graph_review(
     action: Literal["list", "propose", "relate", "dismiss_pair",
-                    "dismiss_slot_pair", "accept_link", "reject_link",
+                    "dismiss_slot_pair", "restore_slot", "accept_link", "reject_link",
                     "accept_merge", "accept_junk", "reject_entity"] = "list",
     proposal_id: Annotated[int | None, Field(
         description="Id actions: the one proposal to settle.")] = None,
@@ -1256,7 +1258,7 @@ def memory_graph_review(
     src: Annotated[str | None, Field(
         description="relate/dismiss_pair: the first entity. "
                     'dismiss_slot_pair: an "entity|attribute" key from the '
-                    "deep response.")] = None,
+                    "deep response; restore_slot: retired key or entity.")] = None,
     dst: Annotated[str | None, Field(
         description="relate/dismiss_pair: the second entity. "
                     'dismiss_slot_pair: an "entity|attribute" key from the '
@@ -1265,8 +1267,8 @@ def memory_graph_review(
         description="relate: the edge relation to write, from the graph "
                     "vocabulary.")] = None,
     store: Annotated[str | None, Field(
-        description='dismiss_slot_pair: which duplicate listing the keys '
-                    'came from — "lesson" or "world".')] = None,
+        description='dismiss_slot_pair / restore_slot: which store the key '
+                    'belongs to — "lesson" or "world".')] = None,
 ) -> dict[str, Any]:
     """Work the graph review queue — deep-dream proposals that need a
     verdict before they touch the graph.
@@ -1278,6 +1280,8 @@ def memory_graph_review(
             ``relation`` edge and dismisses the pair.
         ``dismiss_pair``: mark ``src``/``dst`` genuinely distinct.
         ``dismiss_slot_pair``: same for lesson/world duplicate listings.
+        ``restore_slot``: undo a lesson/world forget (forgets retire, never
+            delete) — ``store`` + ``src`` (the retired key).
         ``accept_link``/``reject_link``: settle an edge proposal by id.
         ``accept_merge``: fold a near-duplicate into its twin.
         ``accept_junk``: delete an over-extraction artifact.
@@ -1312,6 +1316,16 @@ def memory_graph_review(
                               "'entity|attribute' keys from the deep response"}
         return service.curation_dismiss_duplicate(
             store, *src.split("|", 1), *dst.split("|", 1))
+    if action == "restore_slot":
+        if store not in ("lesson", "world") or not src:
+            return {"error": "store_src_required",
+                    "detail": "store='lesson'|'world'; src is the retired "
+                              "'entity|attribute' key (or a bare entity to "
+                              "restore every retired aspect of it)"}
+        ent, _, attr = src.partition("|")
+        fn = (service.lesson_restore if store == "lesson"
+              else service.world_restore)
+        return fn(ent, attr or None, decided_by="agent")
     handlers = {
         "accept_link": service.graph_accept_proposal,
         "reject_link": service.graph_reject_proposal,
@@ -1326,7 +1340,7 @@ def memory_graph_review(
     if handler is None:
         return {"error": "unknown_action",
                 "actions": ["list", "propose", "relate", "dismiss_pair",
-                            "dismiss_slot_pair", "accept_link", "reject_link",
+                            "dismiss_slot_pair", "restore_slot", "accept_link", "reject_link",
                             "accept_merge", "accept_junk", "reject_entity"]}
     batch = _coerce_id_list(proposal_ids)
     if batch:

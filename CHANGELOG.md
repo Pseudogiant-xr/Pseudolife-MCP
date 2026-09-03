@@ -6,6 +6,71 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-03 — forgets retire instead of delete; verdicts outlive their rows; schema v37)
+- **A forgotten lesson or world fact was gone for good — the 2026-09-02
+  review-queue triage hard-deleted eleven lessons, three of which carried
+  guidance no survivor had, and nothing in the bank could bring them
+  back.** `memory_forget(scope="lesson"|"world")` — and the store-curation
+  judge's `auto` forget — now RETIRES the slot: the row stays with
+  `status='retired'`, an FK-free `store_decisions` audit row (v37) records
+  who decided, why, and the verbatim record, and `lesson_restore` /
+  `world_restore` undo it — from the retired record while it exists
+  (provenance, stamps and embedding intact, so a lesson whose subject
+  changed while retired still comes back flagged `re_verify`), from the
+  audit snapshot once compaction has purged it (`memory.compaction`
+  treats a retired row like any other non-live record); a whole-entity
+  restore covers both populations in one call (`source: mixed`).
+  Surfaces: `memory_graph_review(action="restore_slot", store=,
+  src="entity|attribute")`, `POST /api/lessons/restore`,
+  `POST /api/world/restore`, and `GET /api/curation/retired` for what is
+  currently retired (each entry carries the `key` restore takes).
+  `memory_forget(scope="fact")` and `scope="memory"` are unchanged (hard
+  delete). The three lost lessons themselves were re-minted by the
+  2026-09-02 09:58 dream from the re-seeded outcome signals (804-806 →
+  lessons 2450-2452 at their original slots); no restore was needed.
+- **A rejected merge proposal ("distinct") or a rejected junk proposal
+  ("keep") vanished with its `entity_proposals` row the moment either
+  entity was deleted — a re-mint of the same name was re-filed and
+  re-judged as if no verdict existed.** Both rejects now write a
+  text-keyed tombstone that every filing gate already consults: a merge
+  reject writes the pair's STORED canonicals to `dismissed_pairs` (whoever
+  decided it — human, agent or dream-judge; the judge path no longer adds
+  its own display-keyed dismissal afterwards), a junk reject writes the
+  namespaced `junk:<canonical>` self-pair plus a `merge_decisions` audit
+  row, and the junk detector never files or auto-deletes a kept name
+  again. Consequence, stated plainly: a human or agent `reject_entity` on
+  a merge now means what the judge's auto-reject has meant since v30 —
+  the pair is dismissed everywhere `dismissed_pairs` is consulted,
+  including link-candidate generation — and `dismissed_pairs` still has
+  no un-dismiss route beyond a SQL delete. The Step-B alias scan also
+  re-checks the pair on the resolved entities' stored canonicals (its
+  name-keyed check missed display-enriched entities).
+- **The merge judge read evidence clipped to 240 characters at build time
+  — 305 of the 309 snippets the 2026-09-02 panel judged were exactly 240
+  chars, cut mid-word — and the assumption was that longer evidence would
+  judge better. It measured worse.** The judge's evidence cap is now its
+  own knob, `memory.deep_dream.judge_snippet_max_chars`, built on the
+  judge path and stamped on each proposal (`format_judge_proposal` keeps
+  the frozen 240-char serialization when the key is absent, so every
+  published judge number keeps its exact prompt; the review surfaces keep
+  `snippet_max_chars`). `evals/queue_judge_fulllen_pack.py` recovered the
+  2026-09-02 pack at full length by prefix match against the bank (305/305
+  clipped merge snippets, uniquely; source entries p50 1299 / p95 2765 /
+  max 4282 chars) and `evals/queue_judge_ladder.py` (new `--data` /
+  `--snippet-chars`) re-judged the same 63 rows with Opus at 3000 chars
+  (`evals/results/queue-judge-ladder-20260903-fulllen.json`): accept
+  precision fell to 0.70 (from 0.85 on clipped evidence), the two-vote
+  auto-fold gate passed 6/7 (4/4 clipped, so one bad fold), rejects stayed
+  clean (7/7 two-vote), and replicate disagreement rose to 6/63 rows (from
+  2/63) — the delta is within a noisier control, so this is "not better",
+  not "worse". The default therefore stays **240**; raise it only behind a
+  new ladder run. Note the `low_differential` stamp is computed from the
+  truncated texts, so the cap also moves the auto-accept precondition.
+- Schema **v37**: `store_decisions` (`store`, `entity_norm`,
+  `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB,
+  `decided_at`). Additive/idempotent; the table starts empty on an existing
+  bank. `memory_stats`-level store stats gain `retired`.
+
 ### Added (2026-09-02 — every review queue gets a judge; schema v36)
 - **The graph review queue kept refilling between human visits — merge
   proposals below the auto-reject gate, junk proposals the zero-structure

@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 36
+SCHEMA_META_VERSION = 37
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -153,7 +153,14 @@ CREATE TABLE IF NOT EXISTS entity_kinds (
 -- duplicate analyzer is stateless token-Jaccard, so its false positives
 -- (postgres vs postgres.py) re-flagged forever; a dismissed pair is stored
 -- normalized with a_norm < b_norm and skipped on every later analysis. Kept
--- by name (no entity FK) so a dismissal survives entity churn.
+-- by name (no entity FK) so a dismissal survives entity churn. Namespaces
+-- sharing the table (norm names strip ":" so they never collide):
+-- "lesson:<key>" / "world:<key>" slot-pair dismissals (store curation), and
+-- since v37 the "junk:<canonical>" SELF-pair — a junk proposal rejected as
+-- "keep", written here because the rejected entity_proposals row CASCADEs
+-- away with its entity and a re-mint of the same name was re-filed and
+-- re-judged as if no verdict existed. Merge rejects write the canonical
+-- pair here too (same reason), whoever decided them.
 CREATE TABLE IF NOT EXISTS dismissed_pairs (
   a_norm TEXT NOT NULL,
   b_norm TEXT NOT NULL,
@@ -401,6 +408,7 @@ BENCH_RESET_TABLES = (
     # Declared by the additive-migration tail of ensure_schema, not SCHEMA_SQL.
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
     "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",
+    "store_decisions",
 )
 
 # The dimension every embedding column is declared at (schema v25). Not
@@ -914,6 +922,35 @@ def ensure_schema(conn) -> dict:
             "CREATE UNIQUE INDEX IF NOT EXISTS lessons_slot_current_uq "
             "ON lessons (entity_norm, attribute_norm) WHERE status = 'current'"
         )
+        # v37 additive (retire-not-delete, 2026-09-03): the FK-free audit of
+        # lesson/world forgets and restores. A forget now RETIRES the slot's
+        # current rows (status 'retired', rows kept; compaction's existing
+        # keep-newest-N rule applies) instead of deleting them, and this
+        # table carries who decided, why, and the verbatim record — so a
+        # restore still works after compaction has purged the retired row,
+        # and an unattended curation forget is never an invisible deletion
+        # (the 2026-09-02 triage hard-deleted three lessons nothing could
+        # bring back). No FK on purpose: the rows it describes are exactly
+        # the ones that get purged.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS store_decisions (
+              id             BIGSERIAL PRIMARY KEY,
+              store          TEXT NOT NULL,
+              entity_norm    TEXT NOT NULL,
+              attribute_norm TEXT NOT NULL,
+              action         TEXT NOT NULL,
+              decided_by     TEXT,
+              reason         TEXT,
+              record         JSONB,
+              decided_at     DOUBLE PRECISION NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS store_decisions_slot_idx "
+            "ON store_decisions (store, entity_norm, attribute_norm, "
+            "decided_at DESC)")
         cur.execute(
             """
             INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)

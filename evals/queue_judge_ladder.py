@@ -66,9 +66,22 @@ def _split(s, sep):
 
 # ── row shaping: the frozen evidence pack -> the shipped judge inputs ──────
 
+# The merge judge's per-snippet evidence cap. None = the frozen 240-char
+# serialization (every published number's exact prompt), which is ALSO the
+# shipped deep_dream.judge_snippet_max_chars default (read it from
+# utils/config.py, never from a note). Pass --snippet-chars only to measure
+# a different cap on a pack whose snippets were built at full length
+# (evals/queue_judge_fulllen_pack.py) — the 2026-09-03 run at 3000 is
+# evals/results/queue-judge-ladder-20260903-fulllen.json.
+SNIPPET_CHARS: int | None = None
+
+
 def shape_merge(r, n):
-    return {"n": n, "from": r["from"], "into": r["into"], "reason": r.get("reason"),
-            "score": r.get("score"), "low_differential": r.get("low_differential")}
+    out = {"n": n, "from": r["from"], "into": r["into"], "reason": r.get("reason"),
+           "score": r.get("score"), "low_differential": r.get("low_differential")}
+    if SNIPPET_CHARS is not None:
+        out["snippet_chars"] = SNIPPET_CHARS
+    return out
 
 
 def shape_link(r, n):
@@ -290,6 +303,13 @@ def main() -> None:
                          "--out (never silent: a canonical result file is "
                          "not overwritten on a rerun by default)")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument("--data", type=Path, default=DATA,
+                    help="evidence pack to replay (default: the frozen "
+                         "2026-09-02 pack)")
+    ap.add_argument("--snippet-chars", type=int, default=None,
+                    help="merge-judge per-snippet cap stamped on each "
+                         "proposal (0 = unbounded); omit for the frozen "
+                         "240-char serialization")
     # Gates mirror DeepDreamConfig defaults; pass the deployed values.
     ap.add_argument("--reject-gate", type=float, default=0.8)
     ap.add_argument("--reject-gate-2", type=float, default=0.7)
@@ -302,7 +322,9 @@ def main() -> None:
     ap.add_argument("--forget-gate", type=float, default=0.9)
     args = ap.parse_args()
 
-    raw = DATA.read_bytes()
+    global SNIPPET_CHARS
+    SNIPPET_CHARS = args.snippet_chars
+    raw = args.data.read_bytes()
     data = json.loads(raw.decode("utf-8"))
     ex = OpenAICompatExtractor(args.base_url, args.model,
                                max_tokens=args.max_tokens,
@@ -310,7 +332,8 @@ def main() -> None:
     result = {"arm": args.arm, "model": args.model, "base_url": args.base_url,
               "replicates": args.replicates, "batch": args.batch,
               "max_tokens": args.max_tokens, "seed": args.seed,
-              "data": DATA.name,
+              "snippet_chars": args.snippet_chars,
+              "data": args.data.name,
               "data_sha256": __import__("hashlib").sha256(raw).hexdigest(),
               "gates": {k: v for k, v in vars(args).items()
                         if k.endswith("gate") or k.endswith("gate_2")},

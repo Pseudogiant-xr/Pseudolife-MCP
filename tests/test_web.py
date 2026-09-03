@@ -215,6 +215,11 @@ def test_graph_review_route(svc):
      {"store": "lesson", "a_entity": "deploy daemon", "a_attribute": "approach",
       "b_entity": "deploy host", "b_attribute": "pitfall"},
      {"dismissed": True}),
+    # Retire-not-delete (2026-09-03): the undo for a lesson/world forget.
+    ("/api/lessons/restore", {"task": "deploy daemon", "aspect": "approach"},
+     {"restored": 1, "store": "lesson"}),
+    ("/api/world/restore", {"entity": "acme", "attribute": "ceo"},
+     {"restored": 1, "store": "world"}),
 ])
 def test_post_verdict_route_dispatches_and_returns_the_service_result(
         svc, path, body, expected):
@@ -702,5 +707,12 @@ def test_graph_route_nodes_carry_timestamps(svc):
 def test_curation_duplicates_route(svc):
     out = ConsoleRoutes(svc).dispatch("GET", "/api/curation/duplicates", {}, {})
     assert "lesson_duplicates" in out and "world_duplicates" in out
+
+
+def test_curation_retired_route_passes_store_and_limit(svc):
+    out = ConsoleRoutes(svc).dispatch(
+        "GET", "/api/curation/retired", {"store": "lesson", "limit": "5"}, {})
+    assert out["store"] == "lesson" and out["limit"] == 5
+    assert "entries" in out
 
 

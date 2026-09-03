@@ -1688,6 +1688,66 @@ class PostgresStorage:
                 (store, a, b, verdict, keep, fold, confidence, note, model, at))
         return True
 
+    # ── store decisions: retire/restore audit for lessons + world (v37) ───
+
+    _STORE_DECISION_COLS = ("id", "store", "entity_norm", "attribute_norm",
+                            "action", "decided_by", "reason", "record",
+                            "decided_at")
+
+    def record_store_decision(self, store: str, entity_norm: str,
+                              attribute_norm: str, action: str, *,
+                              decided_by: str | None, reason: str | None,
+                              record: dict | None, now: float) -> int:
+        """Durable, FK-free audit row for a lesson/world retire or restore.
+        ``record`` is the verbatim slot record (embedding excluded) — the
+        restore fallback once compaction has purged the retired row."""
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO store_decisions (store, entity_norm, "
+                " attribute_norm, action, decided_by, reason, record, "
+                " decided_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+                "RETURNING id",
+                (store, entity_norm, attribute_norm, action, decided_by,
+                 reason, Jsonb(record) if record is not None else None,
+                 now)).fetchone()
+        return int(row[0])
+
+    def store_decisions(self, store: str, *, entity_norm: str | None = None,
+                        attribute_norm: str | None = None,
+                        limit: int = 500) -> list[dict]:
+        """Retire/restore audit rows for ``store``, newest first."""
+        cols = self._STORE_DECISION_COLS
+        sql = f"SELECT {', '.join(cols)} FROM store_decisions WHERE store = %s"
+        params: list = [store]
+        if entity_norm is not None:
+            sql += " AND entity_norm = %s"
+            params.append(entity_norm)
+        if attribute_norm is not None:
+            sql += " AND attribute_norm = %s"
+            params.append(attribute_norm)
+        sql += " ORDER BY decided_at DESC, id DESC LIMIT %s"
+        params.append(int(limit))
+        return [dict(zip(cols, r))
+                for r in self.conn.execute(sql, params).fetchall()]
+
+    def retired_slots(self, store: str, *, entity_norm: str | None = None,
+                      limit: int = 100) -> list[dict]:
+        """Slots whose LATEST decision is a retire — still retired, whether
+        or not compaction has since purged the row. Newest first."""
+        cols = self._STORE_DECISION_COLS
+        sql = (f"SELECT DISTINCT ON (entity_norm, attribute_norm) "
+               f"{', '.join(cols)} FROM store_decisions WHERE store = %s")
+        params: list = [store]
+        if entity_norm is not None:
+            sql += " AND entity_norm = %s"
+            params.append(entity_norm)
+        sql += " ORDER BY entity_norm, attribute_norm, decided_at DESC, id DESC"
+        rows = [dict(zip(cols, r))
+                for r in self.conn.execute(sql, params).fetchall()]
+        out = [d for d in rows if d["action"] == "retire"]
+        out.sort(key=lambda d: (-float(d["decided_at"]), -int(d["id"])))
+        return out[: max(0, int(limit))]
+
     def curation_judgments(self, store: str) -> dict[tuple[str, str], dict]:
         """``{(a_key, b_key): {verdict, keep, fold, confidence, note, model,
         judged_at}}`` for one store, keys sorted."""
