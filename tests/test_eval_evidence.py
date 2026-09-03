@@ -2303,6 +2303,14 @@ _BEAM_VERDICT_QUOTES = [
 # decomposition. Both are pinned to the artifact.
 LABEL_AUDIT = RESULTS + "label-heuristic-audit-20260902.json"
 LABELS_PY = "pseudolife_memory/memory/labels.py"
+# 2026-09-03: the rule stopped reading "a must-read" / "materials are a
+# must" as deontics. The CHANGELOG's 2026-09-02 entry keeps quoting the
+# pre-fix artifact (retired at its site); the module docstring and the
+# 2026-09-03 Fixed entry quote the re-measurement — live bank, the same
+# dump under the pre-fix rule, and the chip-5 BEAM chat-text replay.
+LABEL_AUDIT_0903 = RESULTS + "label-heuristic-audit-20260903.json"
+LABEL_AUDIT_0903_PREFIX = RESULTS + "label-heuristic-audit-20260903-prefix-rule.json"
+LABEL_AUDIT_0903_BEAM = RESULTS + "label-heuristic-audit-20260903-beam-chip5.json"
 _LA_SHIPPED = lambda d: d["distortion_tolerance_variants"][  # noqa: E731
     "shipped_strong_or_framing_or_opener_cap400"]
 for _cid, _doc, _needle, _val, _stated, _places in [
@@ -2329,27 +2337,93 @@ for _cid, _doc, _needle, _val, _stated, _places in [
      "attribute-name rule: 0.52",
      lambda d: d["distortion_tolerance_variants"][
          "attribute_name_rule_increment"]["precision"], 0.52, 2),
-    ("label-audit-doc-shipped-hits", LABELS_PY,
-     "shipped rule fires on 86 facts (1.6%) of which 74 read as a genuine rule",
-     lambda d: _LA_SHIPPED(d)["fact_hits"], 86, 0),
-    ("label-audit-doc-shipped-genuine", LABELS_PY,
-     "shipped rule fires on 86 facts (1.6%) of which 74 read as a genuine rule",
-     lambda d: _LA_SHIPPED(d)["judged_genuine"], 74, 0),
-    ("label-audit-doc-strong-genuine", LABELS_PY, "63 of 74",
-     lambda d: _LA_SHIPPED(d)["decomposition"]["strong_deontic_or_framing"][
-         "judged_genuine"], 63, 0),
-    ("label-audit-doc-strong-hits", LABELS_PY, "63 of 74",
-     lambda d: _LA_SHIPPED(d)["decomposition"]["strong_deontic_or_framing"][
-         "fact_hits"], 74, 0),
-    ("label-audit-doc-opener-genuine", LABELS_PY, "11 of 12",
-     lambda d: _LA_SHIPPED(d)["decomposition"]["imperative_opener_increment"][
-         "judged_genuine"], 11, 0),
-    ("label-audit-doc-opener-hits", LABELS_PY, "11 of 12",
-     lambda d: _LA_SHIPPED(d)["decomposition"]["imperative_opener_increment"][
-         "fact_hits"], 12, 0),
 ]:
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(LABEL_AUDIT,),
+        value=_val, stated=_stated, places=_places))
+
+_LA_STRONG = lambda d: _LA_SHIPPED(d)["decomposition"][  # noqa: E731
+    "strong_deontic_or_framing"]
+_LA_OPENER = lambda d: _LA_SHIPPED(d)["decomposition"][  # noqa: E731
+    "imperative_opener_increment"]
+_LA_DOC_SHIPPED = ("fires on 86 facts (1.6%) of which 73 read as a genuine "
+                   "rule (0.85)")
+_LA_FIX_LIVE = "86 fact hits, 73 genuine, 0.85;"
+_LA_FIX_PREFIX = "the pre-fix rule on the same dump: 88 hits, 73 genuine, 0.83"
+_LA_FIX_PARTS = "Strong-deontic part 62 of 75, opener increment"
+_LA_FIX_BEAM = "8 hits, 8 genuine"
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # the module docstring (re-measured)
+    ("label-fix-doc-shipped-hits", LABELS_PY, _LA_DOC_SHIPPED,
+     LABEL_AUDIT_0903, lambda d: _LA_SHIPPED(d)["fact_hits"], 86, 0),
+    ("label-fix-doc-shipped-genuine", LABELS_PY, _LA_DOC_SHIPPED,
+     LABEL_AUDIT_0903, lambda d: _LA_SHIPPED(d)["judged_genuine"], 73, 0),
+    ("label-fix-doc-shipped-precision", LABELS_PY, _LA_DOC_SHIPPED,
+     LABEL_AUDIT_0903, lambda d: _LA_SHIPPED(d)["precision"], 0.85, 2),
+    ("label-fix-doc-strong", LABELS_PY, "62 of 75",
+     LABEL_AUDIT_0903, lambda d: _LA_STRONG(d)["judged_genuine"], 62, 0),
+    ("label-fix-doc-strong-hits", LABELS_PY, "62 of 75",
+     LABEL_AUDIT_0903, lambda d: _LA_STRONG(d)["fact_hits"], 75, 0),
+    ("label-fix-doc-opener", LABELS_PY, "11 of 11",
+     LABEL_AUDIT_0903, lambda d: _LA_OPENER(d)["judged_genuine"], 11, 0),
+    ("label-fix-doc-opener-hits", LABELS_PY, "11 of 11",
+     LABEL_AUDIT_0903, lambda d: _LA_OPENER(d)["fact_hits"], 11, 0),
+    ("label-fix-doc-entries", LABELS_PY, "and on 1 of 869 entries",
+     LABEL_AUDIT_0903, lambda d: _LA_SHIPPED(d)["entry_hits"], 1, 0),
+    ("label-fix-doc-entries-total", LABELS_PY, "and on 1 of 869 entries",
+     LABEL_AUDIT_0903, lambda d: d["sample"]["current_entries"], 869, 0),
+    ("label-fix-doc-beam-hits", LABELS_PY, "fires\non 8 values, all 8",
+     LABEL_AUDIT_0903_BEAM, lambda d: _LA_SHIPPED(d)["fact_hits"], 8, 0),
+    ("label-fix-doc-beam-genuine", LABELS_PY, "fires\non 8 values, all 8",
+     LABEL_AUDIT_0903_BEAM, lambda d: _LA_SHIPPED(d)["judged_genuine"], 8, 0),
+    # the CHANGELOG Fixed entry
+    ("label-fix-live-hits", CHANGELOG, _LA_FIX_LIVE,
+     LABEL_AUDIT_0903, lambda d: _LA_SHIPPED(d)["fact_hits"], 86, 0),
+    ("label-fix-live-genuine", CHANGELOG, _LA_FIX_LIVE,
+     LABEL_AUDIT_0903, lambda d: _LA_SHIPPED(d)["judged_genuine"], 73, 0),
+    ("label-fix-live-precision", CHANGELOG, _LA_FIX_LIVE,
+     LABEL_AUDIT_0903, lambda d: _LA_SHIPPED(d)["precision"], 0.85, 2),
+    ("label-fix-prefix-hits", CHANGELOG, _LA_FIX_PREFIX,
+     LABEL_AUDIT_0903_PREFIX, lambda d: _LA_SHIPPED(d)["fact_hits"], 88, 0),
+    ("label-fix-prefix-genuine", CHANGELOG, _LA_FIX_PREFIX,
+     LABEL_AUDIT_0903_PREFIX, lambda d: _LA_SHIPPED(d)["judged_genuine"],
+     73, 0),
+    ("label-fix-prefix-precision", CHANGELOG, _LA_FIX_PREFIX,
+     LABEL_AUDIT_0903_PREFIX, lambda d: _LA_SHIPPED(d)["precision"], 0.83, 2),
+    ("label-fix-strong", CHANGELOG, _LA_FIX_PARTS,
+     LABEL_AUDIT_0903, lambda d: _LA_STRONG(d)["judged_genuine"], 62, 0),
+    ("label-fix-strong-hits", CHANGELOG, _LA_FIX_PARTS,
+     LABEL_AUDIT_0903, lambda d: _LA_STRONG(d)["fact_hits"], 75, 0),
+    ("label-fix-opener", CHANGELOG, "11 of 11, still 1 of 869 entries",
+     LABEL_AUDIT_0903, lambda d: _LA_OPENER(d)["judged_genuine"], 11, 0),
+    ("label-fix-opener-hits", CHANGELOG, "11 of 11, still 1 of 869 entries",
+     LABEL_AUDIT_0903, lambda d: _LA_OPENER(d)["fact_hits"], 11, 0),
+    ("label-fix-entries", CHANGELOG, "11 of 11, still 1 of 869 entries",
+     LABEL_AUDIT_0903, lambda d: _LA_SHIPPED(d)["entry_hits"], 1, 0),
+    ("label-fix-sample-entries", CHANGELOG, "(869 entries / 5,435 facts,",
+     LABEL_AUDIT_0903, lambda d: d["sample"]["current_entries"], 869, 0),
+    ("label-fix-sample-facts", CHANGELOG, "(869 entries / 5,435 facts,",
+     LABEL_AUDIT_0903, lambda d: d["sample"]["current_facts"], 5435, 0),
+    ("label-fix-beam-hits", CHANGELOG, _LA_FIX_BEAM,
+     LABEL_AUDIT_0903_BEAM, lambda d: _LA_SHIPPED(d)["fact_hits"], 8, 0),
+    ("label-fix-beam-genuine", CHANGELOG, _LA_FIX_BEAM,
+     LABEL_AUDIT_0903_BEAM, lambda d: _LA_SHIPPED(d)["judged_genuine"], 8, 0),
+    ("label-fix-beam-strong-zero", CHANGELOG, _LA_FIX_BEAM,
+     LABEL_AUDIT_0903_BEAM, lambda d: _LA_STRONG(d)["fact_hits"], 0, 0),
+    ("label-fix-beam-facts", CHANGELOG, "(1,099 facts of chat text,",
+     LABEL_AUDIT_0903_BEAM, lambda d: d["sample"]["current_facts"], 1099, 0),
+    ("label-fix-beam-superset", CHANGELOG, "Of the 16 superset hits the 8 non-genuine",
+     LABEL_AUDIT_0903_BEAM,
+     lambda d: d["distortion_tolerance_variants"]["audited_superset_cap400"][
+         "fact_hits"], 16, 0),
+    ("label-fix-beam-superset-nongenuine", CHANGELOG,
+     "Of the 16 superset hits the 8 non-genuine", LABEL_AUDIT_0903_BEAM,
+     lambda d: (d["distortion_tolerance_variants"]["audited_superset_cap400"][
+         "fact_hits"] - d["distortion_tolerance_variants"][
+         "audited_superset_cap400"]["judged_genuine"]), 8, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
 

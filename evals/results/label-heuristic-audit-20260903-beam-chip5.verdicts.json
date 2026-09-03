@@ -1,0 +1,15 @@
+{
+  "what": "sha1-12 of entity/attribute/value for every fact hit of the audited superset rule on the chip-5 BEAM 100K bank dump (evals/results/banks/beam-100K-qwen-27b-chip5-b16, 1099 current facts) that the 2026-09-03 hand-labelling judged a GENUINE RULE: a standing instruction to the assistant ('always include X when asked about Y') is one; a report of the past ('never paid off') and 'must' as a noun or adjective ('a must-read series', 'materials are a must') are not. Keys only. Consumed by evals/label_heuristic_audit.py --facts.",
+  "date": "2026-09-03",
+  "audited_superset_hits": 16,
+  "genuine": [
+    "1cd90b518571",
+    "3ae142621dad",
+    "424227dd9dba",
+    "498145f44b80",
+    "54695d3536c0",
+    "5d6e1b53045c",
+    "7399042f15df",
+    "b89353bad8ff"
+  ]
+}

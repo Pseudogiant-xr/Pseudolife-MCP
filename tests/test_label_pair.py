@@ -67,6 +67,30 @@ def svc(pristine_service):
     # first-person habit is a preference, not a rule
     ("I always take the train to work", None),
     ("I never eat before noon", None),
+    # "must" as a noun or an adjective is not a deontic (2026-09-03: both
+    # constraint fires on the chip-5 BEAM bank were this form — "a
+    # must-read series", "quick-dry materials are a must" — and the one
+    # live-bank hit of the form was hand-judged not a rule)
+    ("can you help me find a must-read series that I could discuss "
+     "with him and the group", None),
+    ("I've heard quick-dry materials are a must, so what are some good "
+     "options?", None),
+    ("all three are agent-must-invoke subsystems with no behavioral "
+     "trigger", None),
+    ("the must-have list for the trip is packed", None),
+    ("Backups are a must before any rollback", None),
+    # the deontic verb, hyphen-free, still fires around the same words
+    ("quick-dry materials must be used for the May trip", "constraint"),
+    ("you must not delete a must-read from the list", "constraint"),
+    # irregular past forms after an opener are description, not instruction
+    ("never paid off any personal loans", None),
+    ("Always ran the suite before merging, until the hook broke", None),
+    ("Never said which retailer he preferred", None),
+    # a standing instruction to the assistant still fires (BEAM's
+    # instruction-following preferences are exactly this form)
+    ("always include deployment timestamps when asked about release "
+     "details", "constraint"),
+    ("Never run docker compose down -v", "constraint"),
     ("", None),
 ])
 def test_distortion_heuristic_is_form_based_and_conservative(text, want):

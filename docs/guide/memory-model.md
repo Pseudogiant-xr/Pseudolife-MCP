@@ -159,8 +159,12 @@ imperative text (`must`, `shall`, `forbidden`, `rule:`, or an opener like
 `Never run …`), `quoted` on an explicit reporting construction
 (`according to`, `per the`, `the docs say`), and `directive` on an
 instruction addressed to the reader — measured on the live bank before
-shipping (`evals/results/label-heuristic-audit-20260902.json`). The
-other four fidelity classes are accepted explicitly and carried.
+shipping (`evals/results/label-heuristic-audit-20260902.json`) and
+re-measured on 2026-09-03 after `must` as a noun or adjective ("a
+must-read series") stopped counting as a deontic
+(`label-heuristic-audit-20260903.json`, plus the chat-text replay in
+`label-heuristic-audit-20260903-beam-chip5.json`). The other four
+fidelity classes are accepted explicitly and carried.
 Neither label ever feeds confidence or supersession routing; a
 `constraint` label is the one label retrieval *ranks* on. Served only
 when set, so an unlabelled record's payload is byte-identical to before.

@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-03 — the label heuristic no longer reads "a must-read" as a rule)
+- **Two of the three `constraint` labels the chip-5 BEAM gate produced
+  were chat text with `must` as a noun or an adjective** — "a must-read
+  series", "quick-dry materials are a must" — and the recall pin then
+  served those turns ahead of the ranking (the mechanism behind every
+  context diff in the chip-5 paired run; see the gate note in the
+  2026-09-02 entry below). The strong-deontic rule in
+  `pseudolife_memory/memory/labels.py` now takes `must` only as the verb:
+  not after an article (`a must`, `the must`) and not hyphenated
+  (`must-read`, `must-have`). The imperative-opener rule also stops at an
+  unambiguous irregular past form (`never paid off …`, `always ran …`);
+  forms that double as imperatives (`put`, `read`, `run`, `set`) stay
+  bare. Re-measured with `evals/label_heuristic_audit.py`, which gained a
+  facts-only mode (`--facts` without `--entries`) for bank dumps that have
+  no entries table:
+  - live bank, 2026-09-03 (869 entries / 5,435 facts, scored against the
+    2026-09-02 hand verdicts, so a hit added since counts as not genuine
+    and the precision is a floor): 86 fact hits, 73 genuine, 0.85;
+    the pre-fix rule on the same dump: 88 hits, 73 genuine, 0.83 — the
+    two hits removed ("agent-must-invoke", "always ran") had both been
+    judged not a rule. Strong-deontic part 62 of 75, opener increment
+    11 of 11, still 1 of 869 entries.
+    `evals/results/label-heuristic-audit-20260903.json` (pre-fix:
+    `label-heuristic-audit-20260903-prefix-rule.json`).
+  - chip-5 BEAM bank (1,099 facts of chat text, every superset hit
+    hand-judged): 8 hits, 8 genuine — all standing instructions to the
+    assistant ("always include time zones when asked about meeting
+    times"); the two `must`-noun fires and "never paid off any personal
+    loans" are gone. Of the 16 superset hits the 8 non-genuine are
+    attribute-name matches (`event-planning-rule`, `work-rest-rule`)
+    and the three above — the attribute-name variant rejected on
+    2026-09-02 stays rejected. `evals/results/label-heuristic-audit-20260903-beam-chip5.json`
+    (+ `.verdicts.json`, keys only).
+  No backfill and nothing to unlabel: the live bank carries no
+  `constraint`-labelled row at all yet (checked 2026-09-03; auto labels
+  only began with the v35 deploy), and the chip-5 bench bank was
+  throwaway.
+
 ### Added (2026-09-03 — the merge judge's second model is a Console knob)
 - **Making the merge judge's second opinion a genuinely independent vote
   needed a container edit and a daemon restart.** `judge_mode` `"auto"`
@@ -267,6 +305,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     word anywhere: 36% of entries; mid-sentence never/always: 0.53; an
     attribute-name rule: 0.52) are recorded beside it in
     `evals/results/label-heuristic-audit-20260902.json`. No backfill.
+    (Re-measured 2026-09-03 after the `must`-noun fix — see the Fixed
+    entry above; these are the pre-fix numbers.)
   - **Inherit unless restated.** `memory_supersede` and
     `memory_consolidate` carry the strictest label across the entries they
     retire (quoted beats directive; a constraint anywhere in the cluster
