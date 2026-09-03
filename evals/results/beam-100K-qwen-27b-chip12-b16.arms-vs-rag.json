@@ -3,6 +3,7 @@
     "cortex": {
       "ci95_halfwidth": 0.0485,
       "context_chars_mean": 2207,
+      "context_tokens_mean": 551,
       "delta_vs_control": -0.3595,
       "full_marks_rows": 87,
       "losses": 240,
@@ -27,6 +28,7 @@
     "hybrid": {
       "ci95_halfwidth": 0.0285,
       "context_chars_mean": 24398,
+      "context_tokens_mean": 6099,
       "delta_vs_control": -0.0199,
       "full_marks_rows": 177,
       "losses": 71,
@@ -51,6 +53,7 @@
     "nomem": {
       "ci95_halfwidth": 0.0479,
       "context_chars_mean": 0,
+      "context_tokens_mean": 1,
       "delta_vs_control": -0.4612,
       "full_marks_rows": 62,
       "losses": 281,
@@ -75,6 +78,7 @@
     "refind": {
       "ci95_halfwidth": 0.0362,
       "context_chars_mean": 41757,
+      "context_tokens_mean": 10439,
       "delta_vs_control": -0.0152,
       "full_marks_rows": 180,
       "losses": 90,
@@ -99,6 +103,7 @@
   },
   "control": "rag",
   "control_context_chars_mean": 22158,
+  "control_context_tokens_mean": 5539,
   "control_mean": 0.6425,
   "control_types": {
     "abstention": 0.725,

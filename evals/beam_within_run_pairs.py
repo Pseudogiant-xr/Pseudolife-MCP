@@ -12,6 +12,9 @@ the comparison a five-arm run exists to make. Per arm it writes:
   * mean served-context characters per question where the row persisted
     the arm's context (``contexts[arm]``), so a turn-matched comparison can
     say how far it is from character-matched
+  * mean served-context TOKENS per question, in the harness's len//4
+    approximation — the units every published context cost is quoted in,
+    so accuracy and cost read off one table instead of two artifacts
 
 Usage (tags resolve against evals/results/):
 
@@ -52,6 +55,24 @@ def _context_chars(row: dict, arm: str) -> int | None:
     return len(str(ctx))
 
 
+def _context_tokens(row: dict, arm: str) -> int | None:
+    """The arm's served-context size in the harness's approximate tokens.
+
+    Prefers the ``{arm}_context_tokens`` the adapter records (BEAM rows
+    written from 2026-09-04); older rows are re-estimated from the
+    persisted characters with the SAME rule the adapter applies —
+    ``max(1, chars // 4)`` (ladder_sweep.approx_tokens; deliberately
+    duplicated rather than imported, because that module pulls torch and
+    this script is stdlib-only by design). The floor of 1 is why a
+    served-nothing arm reads 1 token beside 0 characters.
+    """
+    recorded = row.get(f"{arm}_context_tokens")
+    if recorded is not None:
+        return int(recorded)
+    chars = _context_chars(row, arm)
+    return None if chars is None else max(1, chars // 4)
+
+
 def _perm_p(deltas: list[float], perms: int, seed: int) -> float:
     """Two-sided sign-flip permutation p for mean(deltas) != 0."""
     observed = abs(statistics.fmean(deltas))
@@ -85,6 +106,10 @@ def pair_run(rows: list[dict], arms: list[str], perms: int = PERMS,
                   if c is not None]
     out["control_context_chars_mean"] = (
         round(statistics.fmean(ctrl_chars)) if ctrl_chars else None)
+    ctrl_tokens = [t for t in (_context_tokens(r, CONTROL) for r in rows)
+                   if t is not None]
+    out["control_context_tokens_mean"] = (
+        round(statistics.fmean(ctrl_tokens)) if ctrl_tokens else None)
     for arm in arms:
         key = f"{arm}_score"
         paired = [(r[key], r[ctrl_key]) for r in rows if key in r]
@@ -101,6 +126,8 @@ def pair_run(rows: list[dict], arms: list[str], perms: int = PERMS,
                 types[r["type"]].append(r[key])
         chars = [c for c in (_context_chars(r, arm) for r in rows)
                  if c is not None]
+        tokens = [t for t in (_context_tokens(r, arm) for r in rows)
+                  if t is not None]
         out["arms"][arm] = {
             "n": n,
             "mean": round(statistics.fmean(a for a, _ in paired), 4),
@@ -115,6 +142,8 @@ def pair_run(rows: list[dict], arms: list[str], perms: int = PERMS,
                       for t, v in sorted(types.items())},
             "context_chars_mean": (round(statistics.fmean(chars))
                                    if chars else None),
+            "context_tokens_mean": (round(statistics.fmean(tokens))
+                                    if tokens else None),
         }
     return out
 

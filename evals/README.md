@@ -379,6 +379,48 @@ it recomputes reproduce that run's published table exactly (rag 0.859,
 hybrid 0.8333, cortex 0.6667). Artifact:
 `longmemeval-ku-oracle-qwen-27b-ceiling-e2e.leakcheck.json`.
 
+### Token-matched rag arms — `--rag-lite-top-k` / `--rag-budget-tokens` (added 2026-09-04, not yet run)
+
+Every comparison this harness has published so far scores a ~100-token fact
+context (`cortex`) against a ~1,200-token raw-turn context (`rag`), and
+reports the accuracy gap and the token gap as two separate findings — when
+they are one trade-off. Nobody had ever run a **token-matched
+non-consolidating comparator**, so "the fact spine costs 0.19 accuracy" has
+never been read against "…and what does plain RAG score if you give it the
+fact spine's tokens?". These arms answer exactly that: the rag control's
+*identical* retrieval, ranking, formatting, answer prompt and judge, served
+at a narrower budget and nothing else changed.
+
+| arm | flag | context |
+|-----|------|---------|
+| `rag1`, `rag2`, … | `--rag-lite-top-k 1,2` | the first K turns of the rag control's own ranking |
+| `ragb<N>` | `--rag-budget-tokens N` | the rag ranking truncated to the turns that fit N approximate tokens (`len//4`) — matches a fact-spine budget exactly instead of by turn count |
+
+Both knobs live in `build_contexts`, which BOTH harnesses call, so the
+LongMemEval bench and the BEAM adapter cannot drift into serving them
+differently — the same single-implementation contract `serve_comparator_arms`
+carries for the ReFind and no-memory arms. Each arm is a **strict prefix** of
+`contexts["rag"]` by construction (same list, same separator), pinned by
+`tests/test_rag_lite_arms.py`; a width at or above the control's is rejected
+rather than serving a copy of the control under a second name. The budget arm
+measures its budget on the **joined block** — the same string whose
+`approx_tokens` the row records — and always serves at least one turn, so on a
+question whose top-ranked turn alone exceeds the budget it overshoots rather
+than turning into a second no-memory control. The contexts are persisted like
+every other arm, `replicate.py agg`/`compare`/`strip_judged` read the arms off
+the rows, and a baseline that predates them does not fail the gate for their
+presence.
+
+Adding them to an **already-extracted** run needs `evals/rag_lite_rebuild.py`,
+not `--phase answer` (which only answers already-persisted keys) and not
+`rebuild_contexts.py` (which copies the rag context verbatim; the fact-bank
+dumps do not contain the ranked turn list, and splitting the persisted block
+back into turns recovers it for only 6 of the 78 `ceiling-v38` rows, because
+turn texts contain blank lines). The rebuild re-ingests the static haystack on
+the CPU, re-runs the control's pinned search, and refuses to write unless the
+re-derived rag context matches the judged one byte for byte. Planned runs and
+their expected costs: `docs/runbooks/raglite-runs-20260904.md`.
+
 Model roles are split so extraction quality is the **only** variable:
 
 - **Extractor** (varies): `gemma-e2b` (the smallest ladder-verified sidecar

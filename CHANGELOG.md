@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
+- **Every memory-vs-RAG comparison this project has published scored a
+  ~100-token fact context against a ~1,200-token raw-turn context and reported
+  the two gaps separately**, so nobody could say what plain RAG scores at the
+  fact spine's token budget. Two new bench knobs serve exactly that
+  comparator: `--rag-lite-top-k 1,2` adds arms `rag1`/`rag2` (the rag control's
+  own ranking truncated to the first K turns) and `--rag-budget-tokens N` adds
+  `ragb<N>` (truncated to the turns that fit N approximate tokens, so a run can
+  match a fact-spine budget exactly rather than by turn count). Both live in
+  `build_contexts`, which the LongMemEval bench and the BEAM adapter both call,
+  so the harnesses cannot serve them differently; each arm is a strict prefix
+  of the rag context by construction and a width at or above the control's is
+  rejected. Off by default: no new context keys, not one extra model call,
+  every prior artifact byte-identical.
+- **The BEAM adapter now records `{arm}_context_tokens` on every row** and
+  reports a `context_tokens` mean per arm and per question type. Until now BEAM
+  recorded characters only, which left every accuracy-vs-cost read on that
+  benchmark to be eyeballed across two artifacts.
+  `evals/beam_within_run_pairs.py` carries `context_tokens_mean` beside
+  `context_chars_mean` (the committed `chip12-b16` pairing artifact was
+  regenerated to add the column — every pre-existing value is unchanged; its
+  rag control served 5,539 tokens/question against the cortex arm's 551).
+  `report()` also discovers knob-minted arms from the rows, so a run no longer
+  reports fewer arms than it answered.
+- **`evals/rag_lite_rebuild.py`** adds these arms to an already-extracted
+  LongMemEval run without re-paying extraction. Neither existing path can:
+  `--phase answer` only answers already-persisted context keys, and
+  `rebuild_contexts.py` copies the rag context verbatim while the fact-bank
+  dumps hold no turn list. The rebuild re-ingests the static haystack on the
+  CPU, re-runs the control's pinned search, and refuses to write unless the
+  re-derived rag context matches the judged one byte for byte (verified 5/5 on
+  `ceiling-v38`). Planned runs, budgets and expected durations:
+  `docs/runbooks/raglite-runs-20260904.md`. No run has been executed.
+
+
 ### Changed (2026-09-04 — the abstention headline is bounded by the no-memory floor)
 - **README and `evals/README.md` presented BEAM-100K abstention (fact
   spine 0.950 vs naive RAG 0.775) as "the one decisive win".** The

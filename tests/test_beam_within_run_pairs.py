@@ -54,6 +54,16 @@ def test_artifact_shape_matches_docs():
     # The no-memory floor is served nothing, by construction.
     assert d["arms"]["nomem"]["context_chars_mean"] == 0
     assert d["arms"]["nomem"]["types"]["abstention"] == 1.0
+    # Cost beside accuracy in the same table (2026-09-04): the fact spine
+    # is served an order of magnitude fewer tokens than the rag control it
+    # is scored against, which is the trade-off the arm table exists to
+    # show. The estimator floors at 1, so the served-nothing arm reads 1.
+    assert d["control_context_tokens_mean"] == 5539
+    assert d["arms"]["cortex"]["context_tokens_mean"] == 551
+    assert d["arms"]["nomem"]["context_tokens_mean"] == 1
+    for arm in ARMS:
+        a = d["arms"][arm]
+        assert a["context_tokens_mean"] == max(1, a["context_chars_mean"] // 4)
 
 
 def test_pair_run_on_a_tiny_run_is_exact():
