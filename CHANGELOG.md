@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-04 — offline retrieval replay and graph ablation harnesses; eval-only)
+- **`evals/retrieval_telemetry_review.py`, `evals/retrieval_replay.py` and
+  `evals/graph_ablation.py`** — three read-only harnesses over a restored
+  copy of a bank, answering "does the learned reranker have training signal
+  yet?", "what do the shipped ranking knobs do on the queries agents really
+  asked?", and "does `memory_recall`'s graph expansion earn its cost?".
+  All three refuse to run against `pseudolife_memory` or
+  `pseudolife_memory_bench`, force CPU, disable the retrieval log so a
+  replay cannot append to the log it is replaying, and emit aggregates only
+  (entity names pass a tracked-tree check first; no query or entry text).
+  No shipped code path changes. Artifacts:
+  `evals/results/retrieval-telemetry-review-20260904.json`,
+  `retrieval-replay-20260904.json`, `graph-ablation-20260904.json`.
+
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 
 ### Fixed (2026-09-04 — the Console's digest length default matches the daemon's)

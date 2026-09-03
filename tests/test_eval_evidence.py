@@ -2885,3 +2885,112 @@ CLAIMS.append(Claim(
         "A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["bad"]),
     stated=0, places=0))
 
+# ── the 2026-09-04 retrieval-telemetry / replay campaign (evals/README) ──
+# The telemetry review's headline is a COUNT, not an accuracy: how many
+# logged retrieval events carry a downstream label. It is pinned like any
+# other published number because the Phase-1 go/no-go rests on it, and a
+# rerun against a later bank would move it silently otherwise.
+TELEMETRY_REVIEW = RESULTS + "retrieval-telemetry-review-20260904.json"
+RETRIEVAL_REPLAY = RESULTS + "retrieval-replay-20260904.json"
+GRAPH_ABLATION = RESULTS + "graph-ablation-20260904.json"
+
+_TELEM_NEEDLE = "| **events with any downstream signal** | **1** (0.074%) |"
+CLAIMS.append(Claim(
+    id="telemetry-labelled-events", doc=EVALS, needle=_TELEM_NEEDLE,
+    artifacts=(TELEMETRY_REVIEW,),
+    value=lambda d: d["labels"]["events_with_any_downstream_signal"],
+    stated=1, places=0))
+CLAIMS.append(Claim(
+    id="telemetry-logged-events", doc=EVALS,
+    needle="| logged events | 1349 |", artifacts=(TELEMETRY_REVIEW,),
+    value=lambda d: d["events"]["n_events"], stated=1349, places=0))
+CLAIMS.append(Claim(
+    id="telemetry-explicit-reinforcements", doc=EVALS,
+    needle="| `entries.explicit_reinforcements`, bank-wide sum | **0** |",
+    artifacts=(TELEMETRY_REVIEW,),
+    value=lambda d: d["bank"]["entries_explicit_reinforcements_total"],
+    stated=0, places=0))
+
+
+def _replay(arm: str, metric: str):
+    return lambda d: d["results"]["logged-top1"]["arms"][arm][metric]
+
+
+def _dig(d: dict, path: tuple[str, ...]):
+    for k in path:
+        d = d[k]
+    return d
+
+
+for _arm, _needle, _mrr, _h1 in [
+    ("shipped",
+     "| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 |",
+     0.784, 0.668),
+    ("bm25_off",
+     "| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 |",
+     0.689, 0.544),
+    ("rerank_on",
+     "| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 |",
+     0.606, 0.368),
+]:
+    CLAIMS.append(Claim(
+        id=f"replay-{_arm}-mrr", doc=EVALS, needle=_needle,
+        artifacts=(RETRIEVAL_REPLAY,), value=_replay(_arm, "mrr"),
+        stated=_mrr, places=3))
+    CLAIMS.append(Claim(
+        id=f"replay-{_arm}-hit1", doc=EVALS, needle=_needle,
+        artifacts=(RETRIEVAL_REPLAY,), value=_replay(_arm, "hit@1"),
+        stated=_h1, places=3))
+
+# The graph shape and the recall-vs-search price. The published cost
+# ratios are the headline of lever 6, so both are pinned; the hit-rate
+# column is deliberately NOT pinned as a quality claim (both arms are at
+# the ceiling, which the prose says outright).
+_GRAPH_SHAPE_NEEDLE = "| entities | 5504 |"
+for _cid, _path, _stated in [
+    ("graph-entities", ("graph_shape", "entities"), 5504),
+    ("graph-edges-live", ("graph_shape", "edges_live"), 4020),
+    ("graph-dead-weight", ("graph_shape", "dead_weight_entities", "count"),
+     421),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS,
+        needle=(_GRAPH_SHAPE_NEEDLE if _cid == "graph-entities"
+                else "| edges (live / all versions) | 4020 / 4247 |"
+                if _cid == "graph-edges-live"
+                else "| dead weight (only `part-of` edges, no current fact)"
+                     " | 421 |"),
+        artifacts=(GRAPH_ABLATION,),
+        value=(lambda p: lambda d: _dig(d, p))(_path),
+        stated=_stated, places=0))
+
+_REL = ("ablation", "relational_questions", "summary")
+CLAIMS.append(Claim(
+    id="graph-recall-chars-ratio", doc=EVALS,
+    needle="27× the characters at 74× the wall time",
+    artifacts=(GRAPH_ABLATION,),
+    value=lambda d: _dig(d, _REL + ("chars_ratio_recall_over_search",)),
+    stated=27, places=0))
+CLAIMS.append(Claim(
+    id="graph-recall-time-ratio", doc=EVALS,
+    needle="27× the characters at 74× the wall time",
+    artifacts=(GRAPH_ABLATION,),
+    value=lambda d: _dig(d, _REL + ("time_ratio_recall_over_search",)),
+    stated=74, places=0))
+CLAIMS.append(Claim(
+    id="graph-arrivals-added", doc=EVALS,
+    needle="Of the 524\nentities `recall` added beyond its seeds",
+    artifacts=(GRAPH_ABLATION,),
+    value=lambda d: _dig(d, _REL + ("arrivals_total", "added")),
+    stated=524, places=0))
+for _cid, _key, _stated in [("hub", "via_hub", 520),
+                            ("part-of", "via_part_of", 225),
+                            ("domain", "via_domain", 299),
+                            ("unlinked", "unlinked", 0)]:
+    CLAIMS.append(Claim(
+        id=f"graph-arrivals-{_cid}", doc=EVALS,
+        needle="| unlinked (came from the re-query, not an edge) | 0 | 0% |",
+        artifacts=(GRAPH_ABLATION,),
+        value=(lambda k: lambda d: _dig(d, _REL + ("arrivals_total", k)))(_key),
+        stated=_stated, places=0))
+
