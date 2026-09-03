@@ -226,7 +226,7 @@ Expect roughly 2-4 minutes for a ~4k-text bank on CPU.
 Each of the four tables (`facts`, `world_facts`, `lessons`, `entries` — in
 that order, entries deliberately last) migrates in its own transaction;
 `SCHEMA_META_VERSION` is stamped only after all four succeed — the script
-stamps whatever the constant currently is (v30 as of this writing), not
+stamps whatever the constant currently is (v37 as of this writing), not
 literally 25. If it
 fails partway, already-migrated tables stay committed and the daemon's
 dimension guard (below) will keep refusing to boot until you re-run this
@@ -245,6 +245,14 @@ the daemon container (`--no-deps` — Postgres and the extractor sidecar are
 untouched). `-Tag pre-v25-embedding` names the rollback image tag `update.ps1`
 stamps on the *current* (pre-deploy) image before rebuilding — that tag is
 the rollback anchor referenced below.
+
+Since 2026-08-25 `update.ps1` will **refuse** to move that tag when the
+running daemon's image is not the one the version tag points at (a build
+that ran without a completed deploy) — it warns loudly, keeps the existing
+rollback tags, and prints rollback instructions that match what actually
+exists. If you see that refusal, do not proceed with the migration until
+you know which image is the last-good one; `-ForceRollbackTag` overrides it
+only when you are sure.
 
 **That anchor expires, silently, in two more deploys.** `update.ps1` step 2b
 calls `ops/prune-rollbacks.ps1`, which matches *every* tag containing `-pre-`

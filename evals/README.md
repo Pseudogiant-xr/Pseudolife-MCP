@@ -719,6 +719,61 @@ test over the 78 questions:
 
 ---
 
+# Review-queue judge ladders (`judge_ladder.py`, `queue_judge_ladder.py`)
+
+Two harnesses answer "can a judge model reproduce the ratified human panel"
+for the daemon's autonomous review-queue judging (2026-09-02 — every queue
+the Console's Atlas Review view surfaces now gets a shadow/auto-gated
+verdict from the SHIPPED judge code path itself, not a separate scorer).
+
+`judge_ladder.py` runs `OpenAICompatExtractor.judge_merges` against the
+frozen `judge_eval_20260816.json` fixture and scores reject/accept
+precision — the Phase-1 gate that decided `judge_mode: shadow` is the only
+safe out-of-the-box default. `--caution` (added 2026-08-31) stamps the
+production low-differential caution line on flagged rows and reports
+paired flagged/clean-subset metrics; `--max-tokens` (default 400) raises
+the verdict budget for high-reasoning-effort arms — the 2026-08-31 xhigh
+run truncated all 30 true-accept rows at the default budget.
+
+`queue_judge_ladder.py` (2026-09-02) extends the same idea to every queue
+the sweep now judges: merges, links, junk, candidates, and store curation.
+It replays the shipped `judge_merges`/`judge_links`/`judge_junk`/
+`judge_candidates`/`judge_slot_pairs` prompts against a blind-panel pack
+and simulates each shipped auto-gate. The evidence pack itself is PRIVATE
+(freezes bank text, lives outside the tree under gitignored `evals/data/`);
+what's committed is the scrubbed derivative
+`evals/results/queue-judge-panel-20260902.json` (labels, gates, per-row
+votes, no bank text) and the harness's own output
+(`evals/results/queue-judge-ladder-20260902.json`). `--data`/
+`--snippet-chars` (added 2026-09-03) reran the merge judge at full-length
+(uncapped) evidence instead of the shipped 240-char cap — accept precision
+fell to 0.70 (from 0.85 clipped), so the default cap stays 240
+(`evals/results/queue-judge-ladder-20260903-fulllen.json`).
+
+First run (`opus-r2`, claude-opus-5, two replicates,
+`evals/results/queue-judge-ladder-20260902.json`): merge two-vote reject
+8/8, two-vote non-low-differential accept 4/4; link auto-accept 4/4,
+auto-reject 5/5; junk auto-delete-under-the-evidence-bar 6/6, auto-keep
+7/7; candidate auto-propose 7/8, auto-dismiss 15/16; curation
+auto-distinct 21/21 — while duplicate keep-side precision is only 0.5625,
+which is why curation's `auto` (as opposed to `auto-distinct`) forgetting
+mode ships off. `tests/test_eval_evidence.py` pins every number here to
+its artifact.
+
+**Companion: the v35 write-time label heuristic.**
+`evals/label_heuristic_audit.py` (schema v35,
+`pseudolife_memory/memory/labels.py`) measures the deterministic
+`authority`/`distortion_tolerance` form heuristic against hand verdicts.
+On the live bank (2026-09-03, 869 entries / 5,435 current facts) the
+shipped rule fires on 86 facts, of which 73 read as a genuine rule (0.85
+precision), on 1 of 869 entries; on the chip-5 BEAM chat-text bank (1,099
+current facts) it fires on 8 values, all 8 genuine. Artifacts:
+`evals/results/label-heuristic-audit-20260902.json` (pre-fix),
+`-20260903.json`, `-20260903-prefix-rule.json` (rejected variant), and
+`-20260903-beam-chip5.json`.
+
+---
+
 # BEAM long-term-memory benchmark (`beam_adapter.py`)
 
 The second external benchmark, and the one that keeps LongMemEval honest:
@@ -981,6 +1036,24 @@ Caveats that bound all of the above: single replicate per configuration
 reader sweep is 116 of 400 rows, chats 1–7, so per-type rows are n=10–12
 and directional only; a CLI answerer/judge is not bit-reproducible; and
 only the 100K tier has been run — 500K/1M/10M are unmeasured.
+
+**Regression gate for the v35 label carrier (2026-09-03).** Two paired
+checks confirmed the write-time `authority`/`distortion_tolerance` labels
+(and their `constraint`-carrier dream logic) don't move numbers where no
+label fires. `ladder_pair_compare.py` re-ran the extraction ladder's
+deterministic metrics (`gold_recoverable`/`stale_leak`/`tokens_per_query`)
+pre- and post-#245 on the unlabelled ladder corpus and found them
+verdict-identical on both rungs, as predicted
+(`evals/results/ladder-chip5-paired-verdict.json`).
+`beam_cross_run_paired.py` paired the full BEAM 100K run at the matched
+16/16 budget against the 2026-09-02 pre-#245 baseline on all 400
+questions: the identical-input `rag` control moved 0.0000, hybrid
++0.0004±0.0014, cortex +0.0036±0.0029 — every delta inside the control's
+own noise. The 30 rows whose served context differed all sit in the two
+chats where the write-time heuristic labelled a slot `constraint` (3 of
+1099 facts; `quoted` fired on 11), confirming the recall pin is the only
+thing the label change touched
+(`evals/results/beam-100K-qwen-27b-chip5-b16.vs-chip12-b16.paired.json`).
 
 Bank dumps and served contexts persist per run under
 `evals/results/banks/beam-<tier>-<extractor>-<tag>/` (gitignored), so a
@@ -1642,3 +1715,31 @@ its control) makes all these paired comparisons exact on the reproducible
 q8_0 server. The shipped extraction prompt still carries **no** op block:
 v5 is the shipping candidate, pending a ladder rung run and an explicit
 reversal of the hold decision.
+
+---
+
+# Smaller probes
+
+Five tracked scripts, each answering one narrow question, without their
+own section above:
+
+- `beam_attrib_ablation.py` (2026-08-24) — re-answers a BEAM run's
+  persisted contexts with the pre-Phase-1 answer prompt, holding the turn
+  budget and ordinals fixed, to isolate the prompt term from the budget
+  term in the Phase-1 delta.
+- `digest_sidecar_probe.py` (2026-08-24/27) — generates session digests
+  against a configured extractor endpoint for human review, gating
+  `memory.dream.digest_enabled` on whether a small CPU sidecar's narrative
+  prose is actually usable.
+- `recall_cap_probe.py` (2026-08-25) — a synthetic-graph, DB-free
+  measurement backing the `memory_recall` output-cap size claim (issue
+  #186), reproducing the shape of the live audit without a daemon or bank
+  (`evals/results/recall-cap-186-payload-probe.json`).
+- `snippet_differential_replay.py` (2026-08-30) — replays a bank's pending
+  merge proposals through the real snippet-attachment path, before/after,
+  to measure low-differential evidence share
+  (`evals/results/snippet-differential-live-20260830.json`).
+- `queue_judge_fulllen_pack.py` (2026-09-03) — rebuilds a queue-judge
+  evidence pack with full-length merge snippets, recovering the
+  2026-09-02 panel's 240-char-clipped rows by prefix match against the
+  bank they were built from, feeding the fulllen ladder rerun above.

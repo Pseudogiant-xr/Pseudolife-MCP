@@ -155,6 +155,14 @@ start. Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
 `--max-world N` (default 3 each). The briefing content is also available on
 demand via the CLI or the Console's `/api/briefing` route.
 
+This installs the *briefing* and the per-turn discipline line — not the
+identity registration. `pseudolife-mcp briefing` reads `/api/briefing` and
+forwards no session id, and no SessionEnd hook is written, so an install
+wired this way has no hook-registered identity (tier 3) and no hook-driven
+episode close: the idle reaper closes the episode instead, and the
+briefing's `episode="<id>"` handle is the concurrency-correct attribution
+channel. For the full lifecycle, use the plugin.
+
 ## Episodes + tags
 
 An *episode* is a bracketed working session. While an episode is open,

@@ -294,8 +294,8 @@ if [ -z "$EXTRACTOR" ]; then
     echo "  1) sonnet-only      — lightest: Claude shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
     echo "  2) sonnet-fallback  — Claude shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
     echo "  3) sidecar          — bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
-    echo "  4) codex-fallback   — Codex (ChatGPT-plan) shim primary, sidecar auto-fallback (extraction quality unmeasured — see docs/guide/dreaming.md)"
-    echo "  5) codex-only       — Codex shim only; sidecar never built (quality unmeasured; dreams pause when the shim is down)"
+    echo "  4) codex-fallback   — Codex (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling — see docs/guide/dreaming.md)"
+    echo "  5) codex-only       — Codex shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
     while [ -z "$EXTRACTOR" ]; do
         printf "Choose 1/2/3/4/5: "
         read -r choice

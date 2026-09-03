@@ -103,6 +103,16 @@ Not every claim deserves to become canonical. Three mechanisms decide:
   claim parks as a contender, promotable only by an explicit human resolve
   or an independent second witness
   ([dreaming](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in)).
+- **Authority, distinct from provenance.** `origin` (user/action/agent)
+  says *who* wrote a claim; a separate write-time `authority` label
+  (`directive`/`observation`/`quoted`) says *how* it was said — a quoted
+  third-party remark is demoted to a contender by the two-man rule rather
+  than landing as a standing fact, even from a `user`-origin write. Paired
+  with a `distortion_tolerance` class
+  (`constraint`/`procedural`/`belief`/`preference`/`episodic`), a
+  `constraint`-labelled rule survives consolidation verbatim rather than
+  being paraphrased at the same rate as an episodic log line
+  ([memory model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35)).
 
 The sweep did not find this combination elsewhere — the usual arrangement
 is an LLM judging which of two conflicting values is newer or more

@@ -246,6 +246,19 @@
    ]
   },
   {
+   "id": "transfer",
+   "g": "transport",
+   "x": 330,
+   "y": 560,
+   "t": "transfer_cli.py",
+   "s": "pseudolife-mcp export / import · logical bank transfer",
+   "p": "pseudolife_memory/transfer_cli.py",
+   "d": [
+    "ZIP of JSONL (one per table) + manifest — decoupled from Postgres major version and deployment tier, unlike pg_dump's physical backup",
+    "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim"
+   ]
+  },
+  {
    "id": "daemon",
    "g": "daemon",
    "x": 760,
@@ -653,6 +666,19 @@
    "d": [
     "Duck-typed over cortex / world / lessons",
     "Keeps newest per slot past min_age; rides EVERY sweep tick"
+   ]
+  },
+  {
+   "id": "labels",
+   "g": "engine",
+   "x": 1420,
+   "y": 1170,
+   "t": "labels.py",
+   "s": "write-time authority + distortion_tolerance (v35)",
+   "p": "pseudolife_memory/memory/labels.py",
+   "d": [
+    "Deterministic form heuristic, never a model call: authority (directive/observation/quoted) is orthogonal to the origin TIER; distortion_tolerance (constraint…episodic) says how exactly a claim must survive consolidation",
+    "Measured on the live bank (2026-09-03): fires on 86 of 5,435 current facts, 73 judged genuine (0.85 precision) — evals/label_heuristic_audit.py"
    ]
   },
   {

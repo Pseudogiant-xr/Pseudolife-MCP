@@ -83,9 +83,9 @@ that checkout's location changes** — `Register-ScheduledTask -Force`
 overwrites the existing registration in place, so re-running is always
 safe.
 
-This is currently the single most likely way this feature quietly stops
-working: nothing fails loudly if the registered task's target no longer
-exists, it just never runs again.
+This and the MSIX `pwsh.exe` resolution below are the two ways this
+feature quietly stops working: nothing fails loudly if the registered
+task's target no longer exists, it just never runs again.
 
 **Check whether it's actually running:**
 
@@ -102,6 +102,18 @@ Get-ScheduledTaskInfo -TaskName 'Pseudolife-MCP Docker cache retention'
   task was registered this week, this is exactly what you should see.
 - Any *other* non-zero `LastTaskResult`, paired with a real `LastRunTime`,
   means the script threw or exited non-zero on that invocation.
+- `LastTaskResult` of **`2147942402`** (`0x80070002`, file not found) with a
+  real `LastRunTime` means Task Scheduler could not find `pwsh.exe` at all:
+  the action was registered as a bare `pwsh.exe`, which resolves against the
+  MACHINE path, and a Store/MSIX PowerShell 7 install does not appear there.
+  The task registers, reports Ready, and fires on schedule while every run
+  dies before the retention script starts — found live 2026-08-20 with the
+  cache at 23.6 GB against its 20 GB ceiling. Fixed 2026-08-20 (the installer
+  now registers an absolute path, preferring the stable per-user app-execution
+  alias `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe` over the versioned
+  package directory, which changes on every Store update). **A registration
+  made before that date keeps the defect — re-run
+  `ops\install-cache-retention.ps1` once to pick up the fix.**
 - `LastRunTime` should be within the last week once the task has run at all;
   right after a Sunday the machine was off for, expect it shortly after the
   next boot instead, courtesy of `StartWhenAvailable`.

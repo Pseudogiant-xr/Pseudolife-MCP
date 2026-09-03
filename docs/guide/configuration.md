@@ -161,6 +161,17 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   distinct sessions (once ≥8 sessions are on record) — static-context
   ("promote to CLAUDE.md") candidates; vet against the cortex before
   promoting, since the log counts serves before the handler's fact-dedup.
+- **Engram cross-index on** (`memory.traces.enabled = true`, schema v13) —
+  the dream links each consolidated fact-slot to the dense episodes it came
+  from. Forwards, that link is where a fact came from: `memory_get`'s
+  `consolidated_into` / `source_entries`. Backwards, it powers two
+  read-time cautions: `re_verify` on served facts and `derived_flagged` on
+  `memory_supersede` (see [Memory model](memory-model.md#how-current-is-this-fact)).
+  Set `false` to silence both — the read surfaces stop paying for the
+  cross-index query but otherwise serve exactly as before.
+  `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
+  MTT-retention weight this same cross-index feeds; `0.0` is today's
+  eviction behavior unchanged.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.

@@ -43,6 +43,19 @@ delete of the row is the only undo). Read the
 orphan census before switching the sweep on: `memory_dream(action="deep")`
 reports `would_orphan_count` / `would_orphan`.
 
+**How much evidence the merge judge reads** is its own knob,
+`memory.deep_dream.judge_snippet_max_chars` (Console: Deep dream →
+Merge-judge snippet chars), separate from the review surfaces'
+`snippet_max_chars`. Leave it at **240** — the cap every published judge
+number was measured at. The 2026-09-03 rerun of the same 63 rows at 3000
+chars made Opus accept more and be wrong more often (accept precision 0.70
+vs 0.85, the two-vote auto-fold gate 6/7 vs 4/4, replicate disagreement
+6/63 vs 2/63) while rejects stayed clean
+(`evals/results/queue-judge-ladder-20260903-fulllen.json`). Note the
+`low_differential` stamp is computed from the truncated texts, so the cap
+also moves the auto-accept precondition. Raise it only behind a new ladder
+run.
+
 Every verdict is recorded on the row (`judge` / `judge2` blocks in the
 review payloads; `curation_judgments` for slot pairs) whatever the mode, so
 what is left pending is exactly what the judges could not settle: below-gate

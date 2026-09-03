@@ -2836,11 +2836,12 @@ class DreamOps:
     def deep_dream_judge_links(self, extractor=None, *,
                                limit: int | None = None) -> dict[str, Any]:
         """Judge a bounded batch of not-yet-judged pending LINK proposals,
-        recording each verdict on the row (schema v35). In ``auto``:
-        accept / retype at/above ``link_accept_min_confidence`` promote the
-        edge (origin ``action``, the retype with the judge's relation);
-        reject at/above ``link_reject_min_confidence`` marks the row
-        rejected. Never raises into the sweep."""
+        recording each verdict on the row (schema v36). In ``auto``:
+        accept at/above ``link_accept_min_confidence`` promotes the edge
+        (origin ``action``); reject at/above ``link_reject_min_confidence``
+        marks the row rejected. A retype is recorded (``judge_relation``)
+        but never auto-applied — see the comment at the retype branch
+        below. Never raises into the sweep."""
         import time as _t
         cfg = self.config.memory.deep_dream
         if not cfg.judges_enabled:

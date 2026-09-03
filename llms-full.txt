@@ -39,9 +39,10 @@ What you get:
   slot (or a member set, for slots that hold many concurrent values);
   corrections supersede rather than silently overwrite, and the full
   version history survives.
-- **Dreams** — a bundled extractor (or a Claude model via your Max plan)
-  consolidates the memory stream into facts and a knowledge graph while
-  you're not looking.
+- **Dreams** — a bundled local extractor, or any OpenAI-compatible endpoint
+  (a Claude model on your Max plan, a GPT-5.6 model on a ChatGPT plan, LM
+  Studio, Ollama, vLLM), consolidates the memory stream into facts and a
+  knowledge graph while you're not looking.
 - **Lessons from its own work** — successes, dead-ends, and your corrections
   become do/avoid guidance surfaced at the start of every session.
 - **A web console to watch it think** — the Cortex Console above, plus cited
@@ -329,15 +330,15 @@ is agent context every session, so it stays lean.
 
 | Tool | Purpose |
 |------|---------|
-| `memory_store(text, source?, tags?, origin?, episode?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`) |
+| `memory_store(text, source?, tags?, origin?, episode?, authority?, distortion_tolerance?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`); `authority`/`distortion_tolerance` label the speech act and how exactly it must survive — `auto` (default) is a deterministic form heuristic, no model call, and both labels are inherited through supersession unless restated |
 | `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits, each dated (`asserted_at` / `last_confirmed` / human `age`, plus `stale` when it has rotted); `explain=True` attaches a ranking trace |
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
-| `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history |
+| `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history; the result's `derived_flagged` names the canonical facts the dream built on what was corrected (flagged, never rewritten) |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
-| `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind |
+| `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_set_add(entity, attribute, member)` / `memory_set_remove(entity, attribute, member)` | Add/confirm or retract one member of a set-valued slot (many concurrent values, e.g. tags — not one NOW value); a scalar there converts to a set one-way on first `memory_set_add`, except a number-led aggregate scalar ("32", "$1,500"), which is protected — the add parks as a contender instead. Read with `memory_fact_get`, which returns `{kind: "set", members, removed}` for these slots |
 | `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
@@ -346,9 +347,9 @@ is agent context every session, so it stays lean.
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
-| `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console) |
-| `memory_session_title(title)` | Name THIS session's auto-opened episode (default titles are generic) |
-| `memory_episode_start(title, hint?)` / `memory_episode_end()` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id |
+| `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
+| `memory_session_title(title, episode?)` | Name THIS session's auto-opened episode (default titles are generic); `episode` is your session handle from the briefing — concurrent sessions share one HTTP connection, so pass it to land the rename on your own episode |
+| `memory_episode_start(title, hint?, episode?)` / `memory_episode_end(episode?)` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id; `episode` is your session handle so the nest/pop lands in your own tree when several sessions run concurrently |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
 | `memory_consolidation_candidates(query?, episode?, ...)` | Cluster near-duplicate memories ripe for consolidation |
 | `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
@@ -870,6 +871,10 @@ vanilla ES modules + vendored OFL fonts served straight from the daemon.
 Developing the UI? A fixture-backed dev server (no Postgres, no torch)
 renders the real frontend against canned data:
 `python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
+Its payloads self-announce (`"fixtures": true` on `/health`), and the
+topbar shows a "DEMO DATA — fixture server, not a real bank" chip in
+place of the live chip, so a fixture run is never mistaken for a real
+bank.
 
 ## Capabilities at a glance
 
@@ -938,6 +943,18 @@ pseudolife-mcp-daemon`).
   header when a token is set. The daemon preloads the embedder on a warmup
   thread at start (~5–10 s); a very early first call can race it and take a
   few seconds.
+- **Tools vanish after an upgrade / the client log says "Connection
+  closed"**: the shim's registered command can live outside the repo venv,
+  and the MCP SDK v2 migration set an `mcp>=2.1` floor — an older SDK in
+  that environment crashes the shim on start. The shim detects this and
+  prints the interpreter path and the exact fix on stderr: `pip install -U
+  "mcp>=2.1,<3"` in that interpreter, or re-run the installer (which
+  registers the project venv's shim).
+- **A harness "removed tools" notice is not an outage.** A resumed session
+  can carry a larger tool roster in its transcript than the current
+  [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —
+  that's a visibility filter, not a disconnect. Make one `memory_search`
+  call before concluding the MCP is down.
 
 ## Uninstall
 
@@ -1138,6 +1155,48 @@ filled-in `memory_fact_set(...)` the reading agent can run the moment it
 verifies the value, re-asserting or correcting at the same slot. The
 `stale: true` flag is the louder, later signal (twice the TTL);
 `correct_with` fires earlier so drift gets fixed at first contact.
+
+**`re_verify` / `re_verify_reason`** is a third, independent signal — a
+*retract-direction* read of the engram cross-index (schema v13;
+`memory.traces.enabled`, on by default — see
+[Built-in defaults](configuration.md#built-in-defaults-tuned-for-claudes-use-case)).
+Where the fields above say a fact is old, `re_verify` says a fact's
+*evidence* moved: a served fact whose source memories were superseded
+(corrected) *after* the fact was last confirmed carries `re_verify: true`
+plus a `re_verify_reason` naming how many source memories were corrected
+since. It surfaces on `memory_fact_get`, `memory_search`'s cortex block,
+and `memory_recall`; on a set-valued slot the comparison is against the
+newest member's confirmation stamp, since a set is served as one grouped
+answer. It is a flag, never a cascade, and deliberately not routed into a
+`correct_with` call: keyed on `last_confirmed`, a slot re-asserted long
+after its retracted contributor still fires it, which on a mature bank is
+common — on the live bank on 2026-09-02 roughly a quarter of current facts
+stood on a source memory contradicted since they were last confirmed.
+Routing that into the same call `correct_with` tells the reader
+to run *now* would turn a common, weak signal into a standing instruction
+to rewrite a quarter of the cortex every session. Re-asserting or
+re-confirming the slot moves `last_confirmed` forward and clears the flag.
+
+The **active** affordance for retracted evidence lives on the correction
+itself: `memory_supersede`'s result carries `derived_flagged` — the
+canonical facts (slots) the dream built on the memories just corrected.
+They are named, not touched: nothing is rewritten, the caller decides
+whether each derivation still holds. Each row carries `has_current_value`
+(a slot with no live value is still blast radius worth seeing, just
+nothing to go re-check), the list is capped at 50 entries with live slots
+first, and `derived_flagged_truncated` / `derived_flagged_total` say
+whether a correction reached further than the cap.
+
+Both signals are **best-effort**, on purpose: they are derived at read
+time from evidence that still exists, so losing the evidence loses the
+flag. `memory_traces.entry_id` is `ON DELETE CASCADE`, a true-drop
+capacity eviction hard-deletes the entry row, and a superseded entry is
+the top eviction candidate (contradiction decay multiplies its surprise by
+0.3) — so a flag can appear and later vanish with no re-verification
+having happened, and `memory_delete`, the strongest retraction of all,
+raises no flag at any point. Both are gated on `memory.traces.enabled`;
+turning it off silences both without changing anything else about how
+facts are served.
 
 Since 2026-07-25 **raw band entries follow the same slot rule.** When a
 stored memory and an earlier one assert different values — or opposite
@@ -1407,6 +1466,18 @@ own knowledge; your own cortex/episodic facts stay the highest-trust ground
 truth. `memory_search` surfaces matching world facts in a separate block,
 and the Console's world view (`/api/world`) lists them all for audit.
 
+**Retiring a world fact is reversible (schema v37).**
+`memory_forget(scope="world", ...)` retires the slot rather than deleting
+it: the row's `status` becomes `retired` and an FK-free `store_decisions`
+row records who, why, and the verbatim record. The undo is
+`memory_graph_review(action="restore_slot", store="world",
+src="entity|attribute")` — restoring from the retired row while it still
+exists, or from the audit snapshot once compaction has purged it; a bare
+entity in `src` (no `|attribute`) restores every retired aspect of that
+entity. `GET /api/curation/retired` lists what's currently retired across
+both stores, and the Console's undo route is `POST /api/world/restore`.
+Only `scope="memory"` and `scope="fact"` still hard-delete.
+
 > The world cortex here is populated **manually** via `memory_world_set`.
 > The live-web `research_ingest` action (fetch + distil cited world facts
 > automatically) is an agent-side capability that depends on the agent's
@@ -1449,6 +1520,18 @@ Lessons are also **traversable in the graph**: a task-type becomes an
 `memory_graph("deploy engine to host")` shows what to reach for and what to
 avoid. Retrieval is embedding-on-query (mirrors `memory_world_search`); the
 graph edges power structured traversal.
+
+**Retiring a lesson is reversible (schema v37).**
+`memory_forget(scope="lesson", ...)` retires the slot rather than deleting
+it: the row's `status` becomes `retired` and an FK-free `store_decisions`
+row records who, why, and the verbatim record. The undo is
+`memory_graph_review(action="restore_slot", store="lesson",
+src="entity|attribute")` — restoring from the retired row while it still
+exists, or from the audit snapshot once compaction has purged it; a bare
+entity in `src` (no `|attribute`) restores every retired aspect of that
+entity. `GET /api/curation/retired` lists what's currently retired across
+both stores, and the Console's undo route is `POST /api/lessons/restore`.
+Only `scope="memory"` and `scope="fact"` still hard-delete.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,
@@ -1741,6 +1824,13 @@ Also useful for state-probe queries where recency bias is unwelcome:
 memory_search("current Python version", disable_recency_boost=True)
 ```
 
+Beyond one call, every `memory_search` also appends a row to the retrieval
+event log (query, the ranked served list, the ranking components and the
+knobs in force) and bumps a per-slot read counter, which `memory_stats`'
+`read_audit` section summarises — see
+[Configuration](configuration.md#built-in-defaults-tuned-for-claudes-use-case)
+for both kill switches.
+
 ## Knowledge graph (ontology-lite)
 
 The cortex's canonical facts are joined to a typed entity graph
@@ -1760,6 +1850,16 @@ NetworkX derived read-model built on demand — behind a swappable
 `GraphStore` interface. There is no AGE/Cypher dependency; `memory_graph`
 serves multi-hop queries (neighborhood + derived/inverse edges + shortest
 path).
+
+A merge folds the absorbed node's canonical into the survivor's aliases
+without rewriting the cortex records written under it. Since 2026-09-02
+both directions resolve: `memory_graph`, `memory_recall` and the dossier
+attach an alias-keyed fact to the surviving node, and `memory_fact_get` /
+`memory_history`'s chain view reach a record under the node's canonical or
+any of its aliases. An alias that is also another entity's canonical is
+skipped — that record belongs to the other entity. Slot-mode
+`memory_history(entity, attribute)` is the one surface that still does no
+alias resolution.
 
 ## memory_recall (multi-hop retrieval)
 
@@ -1783,7 +1883,11 @@ kept bounded separately — see Return shape below.
 **How it works.** `memory_recall` searches for a seed entity in the query,
 then walks its graph neighbourhood one hop per iteration (up to `hops`,
 capped at 5), accumulating bridging entities, facts, edges, and paths. It
-is **read-only** — it never writes to the bank or the graph.
+never creates or modifies a memory, fact or edge — the only writes on the
+path are telemetry: its seed searches append to the retrieval event log
+(`memory.retrieval_log.enabled`) like any other `memory_search`. The facts
+it attaches to a neighbourhood are deliberately *not* counted as slot
+reads: they are context, not a direct answer.
 
 ### Constraint pinning (schema v35)
 
@@ -1797,7 +1901,8 @@ matches `payments-db`, and the entity must occur as a separator-bounded
 run, so `db` does not match `payments-database`; a raw-string test — it
 does not resolve graph aliases, so a constraint written under an alias
 later folded into another name is pinned by `memory_recall` but not by
-the cortex block until the alias map lands with PR #243); in `memory_recall`, the
+the cortex block, a known open follow-up now that
+`graph.alias_canonical_map` exists); in `memory_recall`, the
 fact's entity is a **seed** of the walk (hop 0 — the entities the query
 itself resolved to; hop-discovered entities are context, not scope, and
 keep record order). Pinning is exemption from ranking, not from
@@ -1818,7 +1923,17 @@ outranks the pin. The labels themselves are described in
 
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
-`paths`, supporting `texts`, and `iterations`.
+`paths`, supporting `texts`, and `iterations`. A served fact that stands on
+a memory corrected since the fact was last confirmed carries `re_verify:
+true` plus `re_verify_reason` — see below.
+
+**Re-verify: a flag, not a cascade.** The `re_verify` marker above appears
+on `memory_search`'s cortex block, `memory_fact_get`, and `memory_recall`
+(the default `verbose=False` projection carries it too). It is
+best-effort, computed at read time from evidence that still exists:
+`memory_traces.entry_id` is `ON DELETE CASCADE`, so a capacity eviction of
+the source entry loses the trail before it ever flags anything. Full
+contract: [memory model](memory-model.md#how-current-is-this-fact).
 
 **Output caps (issue #186).** A plain 3-hop query on a hub entity can
 return dozens of entities/edges and every matched entry's full text —
@@ -2497,19 +2612,27 @@ human. `judge_mode: auto` goes one step further and folds a pair when two
 independent accepts agree on a row that is not `low_differential` at mean
 >= `judge_accept_min_confidence` — the only path that ever auto-applies an
 accept. Since 2026-09-02 the other queues have judges too, each riding the
-same sweep as a bounded batch and each defaulting to `shadow`: the **link
-judge** (`link_judge_mode`; `auto` promotes accept/retype verdicts to live
-edges and rejects the rest at their gates — edges are reversible, which is
-why this queue may run auto), the **junk judge** (`junk_judge_mode`; `auto`
-deletes only under an evidence bar), the **store-curation judge**
-(`curation_judge_mode`; `auto-distinct` applies the reversible dismissal,
-`auto` also retires — never deletes — the losing duplicate slot after folding its carry-over
-into the survivor), and the **Step-C candidate judge**
-(`candidate_judge_mode`; files proposals and dismisses co-mention pairs once
-per deep apply). Two mechanical additions stop the queues refilling: each
-apply files the Console's live analyzer duplicate findings into the merge
-and link queues (`analyzer_file_duplicates`) and deletes week-old entities
-that carry no evidence and no mention at all (`orphan_sweep`). Which models
+same sweep as a bounded batch, all but one defaulting to `shadow`: the
+**link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
+edges and applies rejects, each at its own gate — a *retype* is only
+recorded, with its corrected relation on the row, for a reviewer to apply,
+because the first ladder scored the judge's relation choice at 0/1; edges
+are reversible, which is why this queue may run auto), the **junk judge**
+(`junk_judge_mode`; `auto` deletes only under an evidence bar), the
+**store-curation judge** (`curation_judge_mode`; `auto-distinct` applies
+the reversible dismissal, `auto` also retires — never deletes — the losing
+duplicate slot after folding its carry-over into the survivor), and the
+**Step-C candidate judge** (`candidate_judge_mode`, defaulting to `off`;
+after each deep apply, works through that apply's candidates one
+`judge_batch` slice per sweep tick — `propose` files an edge proposal and
+`dismiss` marks the pair distinct, and every judged pair is memoised for
+`candidate_rejudge_days`). Two mechanical additions stop the queues
+refilling: each apply files the Console's live analyzer duplicate findings
+into the merge and link queues (`analyzer_file_duplicates`, on by default)
+and — once you switch it on — deletes week-old entities that carry no
+evidence and no mention at all (`orphan_sweep`, off by default, at most
+`orphan_max_per_apply` per pass: it is the one destructive switch that
+would fire on the first apply after an upgrade). Which models
 judge reliably is measured, not assumed: `evals/judge_ladder.py` scores the
 merge judge against ratified triage verdicts
 (`evals/results/judge-ladder-20260816.json`) and `evals/queue_judge_ladder.py`
@@ -2790,6 +2913,14 @@ start. Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
 `--max-world N` (default 3 each). The briefing content is also available on
 demand via the CLI or the Console's `/api/briefing` route.
 
+This installs the *briefing* and the per-turn discipline line — not the
+identity registration. `pseudolife-mcp briefing` reads `/api/briefing` and
+forwards no session id, and no SessionEnd hook is written, so an install
+wired this way has no hook-registered identity (tier 3) and no hook-driven
+episode close: the idle reaper closes the episode instead, and the
+briefing's `episode="<id>"` handle is the concurrency-correct attribution
+channel. For the full lifecycle, use the plugin.
+
 ## Episodes + tags
 
 An *episode* is a bracketed working session. While an episode is open,
@@ -2994,6 +3125,17 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   distinct sessions (once ≥8 sessions are on record) — static-context
   ("promote to CLAUDE.md") candidates; vet against the cortex before
   promoting, since the log counts serves before the handler's fact-dedup.
+- **Engram cross-index on** (`memory.traces.enabled = true`, schema v13) —
+  the dream links each consolidated fact-slot to the dense episodes it came
+  from. Forwards, that link is where a fact came from: `memory_get`'s
+  `consolidated_into` / `source_entries`. Backwards, it powers two
+  read-time cautions: `re_verify` on served facts and `derived_flagged` on
+  `memory_supersede` (see [Memory model](memory-model.md#how-current-is-this-fact)).
+  Set `false` to silence both — the read surfaces stop paying for the
+  cross-index query but otherwise serve exactly as before.
+  `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
+  MTT-retention weight this same cross-index feeds; `0.0` is today's
+  eviction behavior unchanged.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -3573,13 +3715,31 @@ each platform supports:
    prompt (recall before review, status questions are memory questions,
    log outcomes). Claude Code only.
 
+## One more axis: who dreams
+
+The provider that *talks* to the bank and the model that *consolidates* it
+are separate choices, and the installer wires both. `--extractor` /
+`-Extractor` takes `sidecar` (the bundled CPU model, the default),
+`sonnet-fallback` / `sonnet-only` (a Claude Max plan via the CLI shim), or
+`codex-fallback` / `codex-only` (a ChatGPT plan via the Codex CLI shim) —
+independently of `--client`. Any OpenAI-compatible endpoint works without a
+shim at all. See [Dreaming](dreaming.md) for the wiring and the measured
+extraction quality per model.
+
 ## Claude Code
 
 Full parity. The [plugin](../../plugin/README.md) is the recommended
-hooks/commands layer; `ops/install-hook.*` wires the same hooks for
-non-plugin installs. The MCP transport comes from the installer either way
-(stdio shim by default), registered with `PSEUDOLIFE_WRITER_ID=claude-code`
-so writes are attributed per provider.
+hooks/commands layer — it is the only path that registers the session
+identity with the daemon (SessionStart forwards Claude Code's own
+`session_id`) and closes the episode on SessionEnd. `ops/install-hook.*`
+is the non-plugin fallback: it installs the SessionStart briefing
+(`pseudolife-mcp briefing --hook-json`) and the per-turn discipline line,
+but no SessionEnd hook and no identity registration — those sessions fall
+back to the shim header or idle-gap sessionization (see
+[Episodes](episodes.md#session-lifecycle--daemon-owned-episodes)). The MCP
+transport comes from the installer either way (stdio shim by default),
+registered with `PSEUDOLIFE_WRITER_ID=claude-code` so writes are
+attributed per provider.
 
 Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 [the AGENTS.md standard](#the-agentsmd-standard) for the one-line bridge.
@@ -4336,6 +4496,16 @@ Not every claim deserves to become canonical. Three mechanisms decide:
   claim parks as a contender, promotable only by an explicit human resolve
   or an independent second witness
   ([dreaming](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in)).
+- **Authority, distinct from provenance.** `origin` (user/action/agent)
+  says *who* wrote a claim; a separate write-time `authority` label
+  (`directive`/`observation`/`quoted`) says *how* it was said — a quoted
+  third-party remark is demoted to a contender by the two-man rule rather
+  than landing as a standing fact, even from a `user`-origin write. Paired
+  with a `distortion_tolerance` class
+  (`constraint`/`procedural`/`belief`/`preference`/`episodic`), a
+  `constraint`-labelled rule survives consolidation verbatim rather than
+  being paraphrased at the same rate as an episodic log line
+  ([memory model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35)).
 
 The sweep did not find this combination elsewhere — the usual arrangement
 is an LLM judging which of two conflicting values is newer or more
@@ -4591,14 +4761,16 @@ mitigation that is off by default is a mitigation you have not got yet.
 | **Provenance tiers** (`user` > `action` > `agent` origin on every write) | A planted `agent`-origin claim cannot silently supersede a user-stated value. Keys on *who asserted*, not on what the text says | On |
 | **Contender parking** | A conflicting value is parked *against* the **slot** rather than taking `current`: `memory_fact_get` shows both, `memory_search` flags the slot `contested`, and `memory_fact_resolve` settles it. Poison must win an explicit decision, not a similarity contest | On |
 | **Consolidation quarantine** (the two-man rule, `memory.dream.quarantine_low_trust`) | The dream's privilege-escalation step: an untrusted agent-tier claim parks as a **contender** instead of taking `current`, promotable only by an explicit human resolve or an independent second witness | **Off** — opt-in |
-| **Human-reviewed merge queue** | Entity-level poisoning: folding a hostile entity into a trusted one would inherit its facts. Merges are **proposals** carrying their evidence; **merge vetoes** block bad **fold directions** at filing; accept/reject writes an audit-stamped `merge_decisions` row (`decided_by=agent` over MCP, `human` via the Console). A background judge's verdict is a lead, never a decision | On (review required; nothing auto-folds) |
+| **Human-reviewed merge queue** | Entity-level poisoning: folding a hostile entity into a trusted one would inherit its facts. Merges are **proposals** carrying their evidence; **merge vetoes** block bad **fold directions** at filing; accept/reject writes an audit-stamped `merge_decisions` row (`decided_by=agent` over MCP, `human` via the Console). By default (`judge_mode: shadow`) a background judge's verdict is a lead, never a decision; the opt-in `judge_mode: auto` folds a pair only when two accepts from DIFFERENT models agree on a non-low-differential row — measured 6/6 on one distinct-model pairing of the 2026-09-02 panel (n=6; not itself a recommendation to flip the default) | On (review required by default; `auto` is opt-in) |
+| **Review-queue judges** (links, junk, lesson/world duplicates, deep-dream link candidates) | Same class of risk, scoped narrower: `link_judge_mode`'s `auto` accepts/rejects edge proposals (reversible via `memory_graph_unrelate`/supersede); `junk_judge_mode`'s `auto` deletes only under a structural evidence bar (degree <= 2, at most one fact slot); `curation_judge_mode`'s `auto-distinct` is a reversible dismissal, its `auto` retires (not deletes) the losing lesson/world slot; `candidate_judge_mode` turns deep-dream link candidates into filed proposals or dismissed pairs | `shadow` for links/junk/curation (verdict recorded, nothing applied); `candidate_judge_mode` off |
+| **Unreachable-orphan sweep** (`orphan_sweep`) | Deletes entities carrying no evidence at all (no edge, fact, lesson, alias, scope or proposal) once older than `orphan_min_age_days`, capped per pass — the one review-queue mechanism that is a plain delete, not a judged accept/reject | Off — the one destructive default that would fire unattended on the first apply after an upgrade |
 | **Dream rollback journal** (schema v27) | Blast radius of one bad consolidation pass. Every dream records a run row plus a per-claim pre-image of what each slot held before the write; `memory_dream(action="rollback")` replays it to revert the latest committed pass | On |
 | **Engram cross-index** | Attribution and cleanup: every cortex fact links back to the source entries that produced it, so a bad fact is traceable to the entry that fed it and the rest of that entry's output can be found | On |
 | **Supersession history** (**HLC**-ordered) | Audit. Nothing is silently overwritten, so "when did this value change, and which writer changed it" is answerable after the fact via `memory_history` | On |
 | **Writer keying / per-principal tokens** | Narrows the blast radius of a leaked credential: a matched per-principal token *becomes* its caller's writer id, where the singular shared token's holder may assert any writer via `X-PL-Writer` | Single token / open loopback |
 | **Source exclusion from consolidation** (`memory.dream.exclude_sources`, default `consolidation` / `reflection` / `status` / `log` / `digest`) | Keeps high-volume, low-value chatter out of the dream's input entirely — those entries stay searchable but are never mined for facts or graph edges, shrinking the surface that can reach canonical authority | On |
 | **Serving-side quarantine** (`stale_policy`: `annotate` \| `demote` \| `quarantine`) | Not poisoning per se, but the same family: a fact past twice its TTL is flagged `stale`, can be demoted below fresh records, or — at `quarantine` — has its `value` replaced by a wrapper with the original moved to `last_known_value`, so a rotted value cannot be read as current. `stale: true` means *re-verify at the source*, never "the value is wrong" | `annotate` (flag only) |
-| **`memory_forget` + engram links** | Remediation. Deletion is the only reliable remedy; the links tell you what else to retire | On |
+| **`memory_forget` + engram links** | Remediation. `scope="memory"`/`"fact"` hard-delete; `scope="lesson"`/`"world"` retire (status flips, row kept with a `store_decisions` audit trail, undoable via `restore_slot` until compaction purges it) — a poisoned lesson/world fact is contained, not purged, until then. The links tell you what else to retire | On |
 
 Two of these deserve their exact claim restated, because overselling them
 would be the same failure this page is about:

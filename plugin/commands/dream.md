@@ -96,14 +96,20 @@ leads, read the evidence, and disagree freely.
    - **A real thing that merely looks thin** — short, weakly-connected names
      are often legitimate ("Go", "uv"):
      `memory_graph_review(action="reject_entity", proposal_id=...)`.
-   - **Unsure**: leave it pending for the Atlas queue. Deletion is the one
-     irreversible verdict in this flow.
+   - **Unsure**: leave it pending for the Atlas queue. Junk deletion is the
+     one irreversible verdict in this flow — the step-1 snapshot is the
+     only undo (lesson/world forgets below are reversible; see step 6).
 6. Triage the returned `lesson_duplicates` / `world_duplicates` (cross-key
    near-duplicate slots in the lesson / world stores; listing-only — the
    dream never deletes them). Judge from the per-side values:
    - **Duplicate**: keep the better-keyed slot and drop the other via
      `memory_forget(scope="lesson"|"world", ...)`, folding anything the
-     dropped slot added into the survivor first.
+     dropped slot added into the survivor first. This now RETIRES the
+     slot rather than deleting it (row kept, `store_decisions` audit
+     row) — a wrong call is undoable with
+     `memory_graph_review(action="restore_slot", store="lesson"|"world",
+     src="<entity>|<attribute>")`, so lean toward acting rather than
+     leaving a genuine duplicate pending.
    - **Distinct**: `memory_graph_review(action="dismiss_slot_pair",
      store="lesson"|"world", src=<a_key>, dst=<b_key>)` so the pair
      never re-lists.
