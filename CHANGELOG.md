@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-03 — labelled claims, judged review queues, and reversible forgets
+
 ### Fixed (2026-09-03 — the label heuristic no longer reads "a must-read" as a rule)
 - **Two of the three `constraint` labels the chip-5 BEAM gate produced
   were chat text with `must` as a noun or an adjective** — "a must-read
