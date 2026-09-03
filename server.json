@@ -7,12 +7,12 @@
     "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP",
     "source": "github"
   },
-  "version": "0.14.0",
+  "version": "0.15.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "pseudolife-mcp",
-      "version": "0.14.0",
+      "version": "0.15.0",
       "transport": {
         "type": "stdio"
       }

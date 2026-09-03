@@ -51,13 +51,31 @@ each platform supports:
    prompt (recall before review, status questions are memory questions,
    log outcomes). Claude Code only.
 
+## One more axis: who dreams
+
+The provider that *talks* to the bank and the model that *consolidates* it
+are separate choices, and the installer wires both. `--extractor` /
+`-Extractor` takes `sidecar` (the bundled CPU model, the default),
+`sonnet-fallback` / `sonnet-only` (a Claude Max plan via the CLI shim), or
+`codex-fallback` / `codex-only` (a ChatGPT plan via the Codex CLI shim) —
+independently of `--client`. Any OpenAI-compatible endpoint works without a
+shim at all. See [Dreaming](dreaming.md) for the wiring and the measured
+extraction quality per model.
+
 ## Claude Code
 
 Full parity. The [plugin](../../plugin/README.md) is the recommended
-hooks/commands layer; `ops/install-hook.*` wires the same hooks for
-non-plugin installs. The MCP transport comes from the installer either way
-(stdio shim by default), registered with `PSEUDOLIFE_WRITER_ID=claude-code`
-so writes are attributed per provider.
+hooks/commands layer — it is the only path that registers the session
+identity with the daemon (SessionStart forwards Claude Code's own
+`session_id`) and closes the episode on SessionEnd. `ops/install-hook.*`
+is the non-plugin fallback: it installs the SessionStart briefing
+(`pseudolife-mcp briefing --hook-json`) and the per-turn discipline line,
+but no SessionEnd hook and no identity registration — those sessions fall
+back to the shim header or idle-gap sessionization (see
+[Episodes](episodes.md#session-lifecycle--daemon-owned-episodes)). The MCP
+transport comes from the installer either way (stdio shim by default),
+registered with `PSEUDOLIFE_WRITER_ID=claude-code` so writes are
+attributed per provider.
 
 Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 [the AGENTS.md standard](#the-agentsmd-standard) for the one-line bridge.

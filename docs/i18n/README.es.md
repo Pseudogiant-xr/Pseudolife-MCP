@@ -1,8 +1,8 @@
-<!-- i18n-sync: v9 -->
+<!-- i18n-sync: v10 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v9 (2026-08-31)
+> Traducción del [README](../../README.md) canónico — sincronizado: v10 (2026-09-04)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -33,8 +33,42 @@ Lo que obtienes:
 
 ## Inicio rápido
 
-Requiere Docker y Claude Code, Codex, o ambos. Un solo comando desde el
-clone hasta el primer recuerdo (Claude es el cliente por defecto):
+Dos comandos. Sin Docker, sin base de datos que configurar, sin runtime de
+contenedores:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+Codex en lugar de Claude Code — misma forma:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+codex mcp add pseudolife-memory -- pseudolife-mcp
+```
+
+Luego, en cualquiera de los dos agentes de codificación: *"recuerda que mi
+servidor de staging es haze-02"* — y en una sesión nueva, días después,
+*"¿cuál es el servidor de staging?"* obtiene la respuesta de vuelta desde
+la memoria. Explora todo en la Cortex Console en
+`http://127.0.0.1:8765/ui/`.
+
+La primera sesión inicia automáticamente el daemon, que aprovisiona un
+PostgreSQL embebido y descarga el modelo de embeddings — un paso único.
+Lite no incluye ningún **extractor** de sueños, así que los hechos
+canónicos no aparecen por sí solos: en esta vía, `memory_fact_set` es el
+único escritor del **cortex**, hasta que se configure un endpoint
+compatible con OpenAI.
+
+### Nivel duradero — Docker
+
+Para un banco duradero: todo lo anterior, más el extractor incluido,
+volúmenes externos, servicios con verificación de salud, y herramientas de
+respaldo y reversión. Requiere Docker y al menos un agente de codificación
+compatible con MCP — Claude Code, Codex y Gemini CLI están integrados de
+extremo a extremo; cualquier otro recibe una configuración lista para
+pegar. Un solo comando desde el clone hasta el primer recuerdo:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -43,6 +77,8 @@ ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
 # Both:  add --client both  / -Client both
+# Gemini: add --client gemini — or several: --client claude,codex,gemini
+# Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
 El instalador comprueba los requisitos previos (mostrando una línea exacta
@@ -67,17 +103,13 @@ registra el instalador, así que el plugin nunca duplica sus herramientas:
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-Codex registra el servidor directamente:
-
-```bash
-codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-```
-
-Luego, en cualquiera de los dos agentes de codificación: *"recuerda que mi
-servidor de staging es haze-02"* — y en una sesión nueva, días después,
-*"¿cuál es el servidor de staging?"* obtiene la respuesta de vuelta desde
-la memoria. Explora todo en la Cortex Console en
-`http://127.0.0.1:8765/ui/`.
+Codex — la opción por defecto del instalador (modo shim) conecta el mismo
+shim stdio que usa para Claude, manteniendo `PSEUDOLIFE_MCP_NO_SPAWN=1`
+activo en el nivel Docker para que una sesión de Codex tenga su propia
+identidad en lugar de heredar el episodio de una sesión de Claude
+concurrente. Los comandos exactos, la alternativa de HTTP directo y los
+puertos/tokens no predeterminados:
+[README — Conectar tu agente de codificación](../../README.md#wire-into-your-coding-agent).
 
 ## Cómo funciona
 

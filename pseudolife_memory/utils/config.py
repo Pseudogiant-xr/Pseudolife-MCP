@@ -463,7 +463,7 @@ class DeepDreamConfig:
     max_fallback_mentions: int = 30
     merge_min_similarity: float = 0.90   # cosine floor for a near-dup MERGE candidate (vs a link)
     junk_max_degree: int = 1             # junk entities must be this weakly connected to be flagged
-    max_support_overlap: float = 0.8     # Jaccard on supporting-entry sets at/above which a pair is co-occurrence
+    max_support_overlap: float = 0.8     # containment (|shared| / min(|a|,|b|)) on supporting-entry sets at/above which a pair is co-occurrence
     snippet_max_chars: int = 240         # per-snippet truncation in the deep response
     snapshot_keep: int = 10              # graph-snapshot undo files kept under data_dir/graph_snapshots
     curation_min_similarity: float = 0.80  # cosine floor for a lesson/world cross-key duplicate listing; slot embeddings include the key text, so even a verbatim-duplicate value at a different key lands near ~0.82
@@ -567,7 +567,8 @@ class DeepDreamConfig:
     curation_rejudge_days: float = 30.0  # a judged pair is not re-sent sooner
     # Step-C candidate judge: turns the deep dream's link CANDIDATES into
     # filed proposals (then settled by the link judge) or dismissed pairs.
-    # Runs once per deep apply.
+    # One judge_batch slice per sweep tick, after each deep apply -- not
+    # once per apply.
     candidate_judge_mode: str = "off"    # off | shadow | auto
     candidate_min_confidence: float = 0.6
     candidate_rejudge_days: float = 30.0  # a judged pair (any verdict) is not re-sent sooner

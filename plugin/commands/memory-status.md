@@ -14,7 +14,9 @@ Report the state of the Pseudolife memory stack:
    flag it), the reference bank (`reference_bank_size` /
    `reference_document_count`), and `communities`. Flag
    `weights_reset: true` if present — it means the store's counters
-   restarted fresh.
+   restarted fresh. If `read_audit` is present, note its
+   `entries.never_read_pct` as a coverage signal — the old-and-unread
+   tail, not the young entries that are expected to be unread yet.
 3. Call `memory_dream(action="status")` for consolidation state: `backlog`,
    `idle_seconds`, `would_fire`, `dream_cursor` (how far consolidation has
    got), and any pending outcome inference. Fact/lesson counts and dream

@@ -65,6 +65,8 @@ modified or deleted by the migration.
 
 ## Known launch gotchas
 
-Two bugs were found and fixed during the live cutover (2026-08-14, see the
-CHANGELOG and `ops/migrate-pg18.ps1`'s history): run the script only from a
-tree at or past that fix (`00cea780`).
+Three bugs were found and fixed after this runbook was written (two during
+the live cutover on 2026-08-14, `00cea780`; a third on 2026-08-25,
+`a58c3c42`, where the cutover dump was guarded by gzip's exit status rather
+than pg_dump's — the same `pipefail` defect as `ops/backup.ps1`'s). Run the
+script only from a tree at or past `a58c3c42`.

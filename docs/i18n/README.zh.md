@@ -1,8 +1,8 @@
-<!-- i18n-sync: v9 -->
+<!-- i18n-sync: v10 -->
 
 # Pseudolife-MCP
 
-[英文版 README](../../README.md) · 已同步:v9 (2026-08-31)
+[英文版 README](../../README.md) · 已同步:v10 (2026-09-04)
 
 **为 Claude Code、Codex 及其他 MCP 客户端提供持久的长期记忆。**
 
@@ -18,7 +18,27 @@
 
 ## 快速开始
 
-需要 Docker,以及 Claude Code、Codex,或两者皆可。从克隆仓库到获得第一条记忆,只需一条命令(默认客户端为 Claude):
+只需两条命令。无需 Docker,无需搭建数据库,也无需容器运行时:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+如果使用 Codex 而非 Claude Code——步骤相同:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+codex mcp add pseudolife-memory -- pseudolife-mcp
+```
+
+之后,在任意一种编码智能体中说一句:*“记住我的 staging 服务器是 haze-02”*——几天后开启一个全新会话,再问一句:*“哪台是 staging 服务器?”*,答案就会从记忆中被找回。你可以在 Cortex Console(`http://127.0.0.1:8765/ui/`)中浏览一切。
+
+第一次会话会自动启动守护进程,由它配置一个内嵌的 PostgreSQL 并下载嵌入模型——这是一次性步骤。Lite 版本不附带梦境**提取器**,因此规范事实不会自动出现:在这条路径下,`memory_fact_set` 是唯一的**cortex**写入方式,直到配置了兼容 OpenAI 的接口端点为止。
+
+### 持久层——Docker
+
+若需要长期存续的记忆库:在上述一切的基础上,还包括内置提取器、外部卷、带健康检查的服务,以及备份/回滚工具。需要 Docker,以及至少一个支持 MCP 的编码智能体——Claude Code、Codex 与 Gemini CLI 已完成端到端接入;其他智能体则可获得可直接粘贴使用的配置。从克隆仓库到获得第一条记忆,只需一条命令:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -27,6 +47,8 @@ ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
 # Both:  add --client both  / -Client both
+# Gemini: add --client gemini — or several: --client claude,codex,gemini
+# Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
 安装脚本会检查前置依赖(缺少什么就打印一行明确的修复命令),并询问使用哪种梦境提取器——通过你的 Max 套餐调用某个 Claude 模型(安装最轻量)、使用 Claude shim 并以内置本地模型作为自动回退、在 ChatGPT 套餐上以同样的两种方式使用 GPT-5.6 模型(通过 Codex CLI),或者单独使用内置的本地模型(完全不需要任何套餐)。随后它会启动整套服务,为所选客户端完成接入(会话开始时的简报钩子——它会在每次会话中传递记忆循环指导——以及 MCP 传输注册),并对守护进程做健康检查。该脚本是幂等的:随时可以重复执行;`--extractor <mode>` 可用于切换提取器配置。
@@ -38,13 +60,7 @@ ops\install.ps1         # Windows (pwsh 7+)
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-Codex 则直接注册该服务器:
-
-```bash
-codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-```
-
-之后,在任意一种编码智能体中说一句:*“记住我的 staging 服务器是 haze-02”*——几天后开启一个全新会话,再问一句:*“哪台是 staging 服务器?”*,答案就会从记忆中被找回。你可以在 Cortex Console(`http://127.0.0.1:8765/ui/`)中浏览一切。
+Codex——安装脚本默认(shim 模式)会为其接入与 Claude 相同的 stdio shim,并在 Docker 层保持设置 `PSEUDOLIFE_MCP_NO_SPAWN=1`,使 Codex 会话拥有独立身份,而不会继承并发 Claude 会话的会话片段。具体命令、直接 HTTP 接入的替代方案,以及非默认端口/令牌配置,参见:[README——接入你的编码智能体](../../README.md#wire-into-your-coding-agent)。
 
 ## 工作原理
 

@@ -259,12 +259,14 @@ KNOBS: list[dict[str, Any]] = [
              "backfills all history, digest_max_per_cycle (4) episodes per "
              "dream."},
     {"path": "memory.dream.digest_target_chars", "group": "Dream",
-     "label": "Digest length target (chars)", "type": "int", "default": 800,
+     "label": "Digest length target (chars)", "type": "int", "default": 1200,
      "min": 200, "max": 4000, "step": 100, "restart": False,
-     "help": "Prose length target passed to the digest prompt (the bundled "
-             "E4B sidecar overshoots it ~1.8x in practice — 2026-08-27 "
-             "probe). 800 doubles the ~400-char distillation shape from the "
-             "2026-08-22 BEAM competitor analysis for our smaller top-k."},
+     "help": "Prose length target passed to the digest prompt. Re-targeted "
+             "from 800 to 1200 after the 2026-08-27 sidecar probe (9 "
+             "digests, 3 runs): the extractor wrote 1019-1908 chars against "
+             "the 800 target, and the overrun carried retrievable specifics "
+             "(versions, deadline changes, error names) — the target now "
+             "states the observed natural length instead of fighting it."},
     {"path": "memory.dream.digest_context_chars", "group": "Dream",
      "label": "Digest context cap (chars)", "type": "int", "default": 24000,
      "min": 1000, "max": 200000, "step": 1000, "restart": False,

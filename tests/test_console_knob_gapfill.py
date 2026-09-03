@@ -95,7 +95,7 @@ def test_session_digest_knobs_surfaced_default_off():
     assert knob["restart"] is False
 
     target = _knob("memory.dream.digest_target_chars")
-    assert target["type"] == "int" and target["default"] == 800
+    assert target["type"] == "int" and target["default"] == 1200
     assert target["restart"] is False
     ctx = _knob("memory.dream.digest_context_chars")
     assert ctx["type"] == "int" and ctx["default"] == 24000

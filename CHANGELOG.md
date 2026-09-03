@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
+
+### Fixed (2026-09-04 — the Console's digest length default matches the daemon's)
+- **The Console offered `800` as the reset value for `memory.dream.digest_target_chars`
+  while the daemon has shipped `1200` since 2026-08-27**, so a "reset to default"
+  click silently lowered the target and the knob's help text argued for a
+  number the code no longer used. The registry default is `1200` and its help
+  names the measurement (the 2026-08-27 sidecar probe: 9 digests, 3 runs,
+  1019–1908 chars written against an 800 target). Found by the release
+  docs-currency pass: the registry test checked that every knob path resolves,
+  not that its default agrees with the dataclass. The same pass re-synced the
+  five translated front doors (i18n source v10): their Quickstart still said
+  the project requires Docker, six weeks after the pip-lite path became the
+  English README's first install.
+
 ### Fixed (2026-09-03 — the label heuristic no longer reads "a must-read" as a rule)
 - **Two of the three `constraint` labels the chip-5 BEAM gate produced
   were chat text with `must` as a noun or an adjective** — "a must-read
@@ -121,7 +136,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Schema **v37**: `store_decisions` (`store`, `entity_norm`,
   `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB,
   `decided_at`). Additive/idempotent; the table starts empty on an existing
-  bank. `memory_stats`-level store stats gain `retired`.
+  bank. The lesson and world stores' own `stats()` gain a `retired` count
+  (`memory_stats` does not surface those store sections — corrected
+  2026-09-04 at the release docs pass; the original note said it did).
 
 ### Added (2026-09-02 — every review queue gets a judge; schema v36)
 - **The graph review queue kept refilling between human visits — merge

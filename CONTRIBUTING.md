@@ -40,7 +40,7 @@ The documented invocation is offline + deterministic — both embedders must
 already be in the HuggingFace cache:
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q -n 2 --dist loadfile
 ```
 
 Two models are load-bearing, and a missing one is a hard failure under those
@@ -50,8 +50,12 @@ paths). A first run *without* the offline vars downloads both — budget about
 1.2 GB. Budget for a slow suite too: real CPU embeds put a warm local run at
 ~437s, up from 238s on the pre-v25 ONNX path.
 
-All tests must pass. CI runs exactly this on every PR. If you add behavior,
-add a test; if you fix a bug, add the test that would have caught it.
+All tests must pass. CI's two full-suite lanes run this exact invocation
+(`-n 2 --dist loadfile` shards whole files across two workers so
+module-scoped fixtures keep their semantics); a third lane
+(`test-lite-windows`) runs a narrower fixed file list. If you add
+behavior, add a test; if you fix a bug, add the test that would have
+caught it.
 
 ## If you run a live bank
 

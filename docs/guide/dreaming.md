@@ -639,19 +639,27 @@ human. `judge_mode: auto` goes one step further and folds a pair when two
 independent accepts agree on a row that is not `low_differential` at mean
 >= `judge_accept_min_confidence` — the only path that ever auto-applies an
 accept. Since 2026-09-02 the other queues have judges too, each riding the
-same sweep as a bounded batch and each defaulting to `shadow`: the **link
-judge** (`link_judge_mode`; `auto` promotes accept/retype verdicts to live
-edges and rejects the rest at their gates — edges are reversible, which is
-why this queue may run auto), the **junk judge** (`junk_judge_mode`; `auto`
-deletes only under an evidence bar), the **store-curation judge**
-(`curation_judge_mode`; `auto-distinct` applies the reversible dismissal,
-`auto` also retires — never deletes — the losing duplicate slot after folding its carry-over
-into the survivor), and the **Step-C candidate judge**
-(`candidate_judge_mode`; files proposals and dismisses co-mention pairs once
-per deep apply). Two mechanical additions stop the queues refilling: each
-apply files the Console's live analyzer duplicate findings into the merge
-and link queues (`analyzer_file_duplicates`) and deletes week-old entities
-that carry no evidence and no mention at all (`orphan_sweep`). Which models
+same sweep as a bounded batch, all but one defaulting to `shadow`: the
+**link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
+edges and applies rejects, each at its own gate — a *retype* is only
+recorded, with its corrected relation on the row, for a reviewer to apply,
+because the first ladder scored the judge's relation choice at 0/1; edges
+are reversible, which is why this queue may run auto), the **junk judge**
+(`junk_judge_mode`; `auto` deletes only under an evidence bar), the
+**store-curation judge** (`curation_judge_mode`; `auto-distinct` applies
+the reversible dismissal, `auto` also retires — never deletes — the losing
+duplicate slot after folding its carry-over into the survivor), and the
+**Step-C candidate judge** (`candidate_judge_mode`, defaulting to `off`;
+after each deep apply, works through that apply's candidates one
+`judge_batch` slice per sweep tick — `propose` files an edge proposal and
+`dismiss` marks the pair distinct, and every judged pair is memoised for
+`candidate_rejudge_days`). Two mechanical additions stop the queues
+refilling: each apply files the Console's live analyzer duplicate findings
+into the merge and link queues (`analyzer_file_duplicates`, on by default)
+and — once you switch it on — deletes week-old entities that carry no
+evidence and no mention at all (`orphan_sweep`, off by default, at most
+`orphan_max_per_apply` per pass: it is the one destructive switch that
+would fire on the first apply after an upgrade). Which models
 judge reliably is measured, not assumed: `evals/judge_ladder.py` scores the
 merge judge against ratified triage verdicts
 (`evals/results/judge-ladder-20260816.json`) and `evals/queue_judge_ladder.py`

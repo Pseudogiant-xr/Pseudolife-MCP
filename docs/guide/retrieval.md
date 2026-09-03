@@ -192,6 +192,13 @@ Also useful for state-probe queries where recency bias is unwelcome:
 memory_search("current Python version", disable_recency_boost=True)
 ```
 
+Beyond one call, every `memory_search` also appends a row to the retrieval
+event log (query, the ranked served list, the ranking components and the
+knobs in force) and bumps a per-slot read counter, which `memory_stats`'
+`read_audit` section summarises — see
+[Configuration](configuration.md#built-in-defaults-tuned-for-claudes-use-case)
+for both kill switches.
+
 ## Knowledge graph (ontology-lite)
 
 The cortex's canonical facts are joined to a typed entity graph
@@ -211,6 +218,16 @@ NetworkX derived read-model built on demand — behind a swappable
 `GraphStore` interface. There is no AGE/Cypher dependency; `memory_graph`
 serves multi-hop queries (neighborhood + derived/inverse edges + shortest
 path).
+
+A merge folds the absorbed node's canonical into the survivor's aliases
+without rewriting the cortex records written under it. Since 2026-09-02
+both directions resolve: `memory_graph`, `memory_recall` and the dossier
+attach an alias-keyed fact to the surviving node, and `memory_fact_get` /
+`memory_history`'s chain view reach a record under the node's canonical or
+any of its aliases. An alias that is also another entity's canonical is
+skipped — that record belongs to the other entity. Slot-mode
+`memory_history(entity, attribute)` is the one surface that still does no
+alias resolution.
 
 ## memory_recall (multi-hop retrieval)
 
@@ -234,7 +251,11 @@ kept bounded separately — see Return shape below.
 **How it works.** `memory_recall` searches for a seed entity in the query,
 then walks its graph neighbourhood one hop per iteration (up to `hops`,
 capped at 5), accumulating bridging entities, facts, edges, and paths. It
-is **read-only** — it never writes to the bank or the graph.
+never creates or modifies a memory, fact or edge — the only writes on the
+path are telemetry: its seed searches append to the retrieval event log
+(`memory.retrieval_log.enabled`) like any other `memory_search`. The facts
+it attaches to a neighbourhood are deliberately *not* counted as slot
+reads: they are context, not a direct answer.
 
 ### Constraint pinning (schema v35)
 
@@ -248,7 +269,8 @@ matches `payments-db`, and the entity must occur as a separator-bounded
 run, so `db` does not match `payments-database`; a raw-string test — it
 does not resolve graph aliases, so a constraint written under an alias
 later folded into another name is pinned by `memory_recall` but not by
-the cortex block until the alias map lands with PR #243); in `memory_recall`, the
+the cortex block, a known open follow-up now that
+`graph.alias_canonical_map` exists); in `memory_recall`, the
 fact's entity is a **seed** of the walk (hop 0 — the entities the query
 itself resolved to; hop-discovered entities are context, not scope, and
 keep record order). Pinning is exemption from ranking, not from
@@ -269,7 +291,17 @@ outranks the pin. The labels themselves are described in
 
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
-`paths`, supporting `texts`, and `iterations`.
+`paths`, supporting `texts`, and `iterations`. A served fact that stands on
+a memory corrected since the fact was last confirmed carries `re_verify:
+true` plus `re_verify_reason` — see below.
+
+**Re-verify: a flag, not a cascade.** The `re_verify` marker above appears
+on `memory_search`'s cortex block, `memory_fact_get`, and `memory_recall`
+(the default `verbose=False` projection carries it too). It is
+best-effort, computed at read time from evidence that still exists:
+`memory_traces.entry_id` is `ON DELETE CASCADE`, so a capacity eviction of
+the source entry loses the trail before it ever flags anything. Full
+contract: [memory model](memory-model.md#how-current-is-this-fact).
 
 **Output caps (issue #186).** A plain 3-hop query on a hub entity can
 return dozens of entities/edges and every matched entry's full text —

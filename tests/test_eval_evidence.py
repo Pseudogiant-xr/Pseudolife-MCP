@@ -2526,6 +2526,19 @@ for _cid, _needle, _art, _val, _stated, _places in [
         value=_val, stated=_stated, places=_places))
 
 
+# The evals README's judge-ladder section (v0.15.0 docs pass) restates the
+# effort ladder's truncation finding; a restatement is a claim like any
+# other, so it is pinned to the same artifact as the CHANGELOG row above.
+CLAIMS.append(Claim(
+    id="judge-xhigh-truncated-accepts-evals", doc=EVALS,
+    needle="run truncated all 30 true-accept rows at the default budget",
+    artifacts=(JUDGE_EFFORT,),
+    value=lambda d: sum(1 for r in d["arms"]["qwen-27b-xhigh"]["per_row"]
+                        if r["label"] == "accept"
+                        and all(v is None for v in r["votes"])),
+    stated=30, places=0))
+
+
 def test_beam_range_quotes_match_the_committed_verdict():
     """The evals README quotes three sweep ranges; they must be the
     verdict file's, not a recollection of it."""
@@ -2671,4 +2684,204 @@ CLAIMS.append(Claim(
     needle="precision was 0.5625", artifacts=(LADDER_0902,),
     value=_ladder("curation", "duplicate_keep_precision", "precision"),
     stated=0.5625, places=4))
+
+
+# ── docs-currency pass (2026-09-04, v0.15.0): the same review-queue judge
+# and v35-label numbers, re-stated in evals/README.md's own prose and in
+# docs/guide/security-posture.md's mechanism table. Same artifacts, new
+# needles — the CHANGELOG rows above guard the historical entry, these
+# guard the pages a reader actually lands on.
+SECURITY = "docs/guide/security-posture.md"
+
+for _cid, _needle, _val, _stated, _places in [
+    ("evals-queue-ladder-merge-two-vote-reject-n",
+     "merge two-vote reject\n8/8, two-vote non-low-differential accept 4/4;",
+     _ladder("merges", "two_vote_reject", "n"), 8, 0),
+    ("evals-queue-ladder-merge-two-vote-reject-bad",
+     "merge two-vote reject\n8/8, two-vote non-low-differential accept 4/4;",
+     _ladder("merges", "two_vote_reject", "bad"), 0, 0),
+    ("evals-queue-ladder-merge-two-vote-accept-n",
+     "merge two-vote reject\n8/8, two-vote non-low-differential accept 4/4;",
+     _ladder("merges", "two_vote_accept_not_lowdiff", "n"), 4, 0),
+    ("evals-queue-ladder-merge-two-vote-accept-bad",
+     "merge two-vote reject\n8/8, two-vote non-low-differential accept 4/4;",
+     _ladder("merges", "two_vote_accept_not_lowdiff", "bad"), 0, 0),
+    ("evals-queue-ladder-link-accept-n", "link auto-accept 4/4,\nauto-reject 5/5;",
+     _ladder("links", "auto_accept", "n"), 4, 0),
+    ("evals-queue-ladder-link-accept-bad", "link auto-accept 4/4,\nauto-reject 5/5;",
+     _ladder("links", "auto_accept", "bad"), 0, 0),
+    ("evals-queue-ladder-link-reject-n", "link auto-accept 4/4,\nauto-reject 5/5;",
+     _ladder("links", "auto_reject", "n"), 5, 0),
+    ("evals-queue-ladder-link-reject-bad", "link auto-accept 4/4,\nauto-reject 5/5;",
+     _ladder("links", "auto_reject", "bad"), 0, 0),
+    ("evals-queue-ladder-junk-delete-n",
+     "auto-delete-under-the-evidence-bar 6/6, auto-keep\n7/7;",
+     _ladder("junk", "auto_delete_under_bar", "n"), 6, 0),
+    ("evals-queue-ladder-junk-delete-bad",
+     "auto-delete-under-the-evidence-bar 6/6, auto-keep\n7/7;",
+     _ladder("junk", "auto_delete_under_bar", "bad"), 0, 0),
+    ("evals-queue-ladder-junk-keep-n",
+     "auto-delete-under-the-evidence-bar 6/6, auto-keep\n7/7;",
+     _ladder("junk", "auto_keep", "n"), 7, 0),
+    ("evals-queue-ladder-candidate-propose-n",
+     "candidate auto-propose 7/8, auto-dismiss 15/16;",
+     _ladder("candidates", "auto_propose", "n"), 8, 0),
+    ("evals-queue-ladder-candidate-propose-bad",
+     "candidate auto-propose 7/8, auto-dismiss 15/16;",
+     _ladder("candidates", "auto_propose", "bad"), 1, 0),
+    ("evals-queue-ladder-candidate-dismiss-n",
+     "candidate auto-propose 7/8, auto-dismiss 15/16;",
+     _ladder("candidates", "auto_dismiss", "n"), 16, 0),
+    ("evals-queue-ladder-candidate-dismiss-bad",
+     "candidate auto-propose 7/8, auto-dismiss 15/16;",
+     _ladder("candidates", "auto_dismiss", "bad"), 1, 0),
+    ("evals-queue-ladder-curation-distinct-n", "curation\nauto-distinct 21/21",
+     _ladder("curation", "auto_distinct", "n"), 21, 0),
+    ("evals-queue-ladder-curation-distinct-bad", "curation\nauto-distinct 21/21",
+     _ladder("curation", "auto_distinct", "bad"), 0, 0),
+    ("evals-queue-ladder-curation-keep-precision",
+     "keep-side precision is only 0.5625,",
+     _ladder("curation", "duplicate_keep_precision", "precision"), 0.5625, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(LADDER_0902,),
+        value=_val, stated=_stated, places=_places))
+
+CLAIMS.append(Claim(
+    id="evals-fulllen-accept-precision", doc=EVALS,
+    needle="accept precision\nfell to 0.70 (from 0.85 clipped)",
+    artifacts=(LADDER_0903,),
+    value=_ladder_0903("accept_precision", "precision"),
+    stated=0.70, places=2))
+CLAIMS.append(Claim(
+    id="evals-fulllen-accept-precision-clipped", doc=EVALS,
+    needle="accept precision\nfell to 0.70 (from 0.85 clipped)",
+    artifacts=(LADDER_0902,),
+    value=_ladder("merges", "accept_precision", "precision"),
+    stated=0.85, places=2))
+
+# The v35 label-heuristic companion paragraph on the same page (86/73/0.85
+# on the live bank, 8/8 on the chip-5 BEAM chat-text bank) — LABEL_AUDIT_0903
+# and LABEL_AUDIT_0903_BEAM, _LA_SHIPPED already defined above.
+_EVALS_LA_LIVE = "shipped rule fires on 86 facts, of which 73 read as a genuine rule (0.85\nprecision), on 1 of 869 entries;"
+for _cid, _val, _stated, _places in [
+    ("evals-label-fix-live-hits", lambda d: _LA_SHIPPED(d)["fact_hits"], 86, 0),
+    ("evals-label-fix-live-genuine", lambda d: _LA_SHIPPED(d)["judged_genuine"], 73, 0),
+    ("evals-label-fix-live-precision", lambda d: _LA_SHIPPED(d)["precision"], 0.85, 2),
+    ("evals-label-fix-live-entries", lambda d: _LA_SHIPPED(d)["entry_hits"], 1, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_EVALS_LA_LIVE, artifacts=(LABEL_AUDIT_0903,),
+        value=_val, stated=_stated, places=_places))
+
+CLAIMS.append(Claim(
+    id="evals-label-fix-live-sample-entries", doc=EVALS,
+    needle="On the live bank (2026-09-03, 869 entries / 5,435 current facts)",
+    artifacts=(LABEL_AUDIT_0903,),
+    value=lambda d: d["sample"]["current_entries"], stated=869, places=0))
+CLAIMS.append(Claim(
+    id="evals-label-fix-live-sample-facts", doc=EVALS,
+    needle="On the live bank (2026-09-03, 869 entries / 5,435 current facts)",
+    artifacts=(LABEL_AUDIT_0903,),
+    value=lambda d: d["sample"]["current_facts"], stated=5435, places=0))
+
+_EVALS_LA_BEAM = "1,099\ncurrent facts) it fires on 8 values, all 8 genuine."
+CLAIMS.append(Claim(
+    id="evals-label-fix-beam-hits", doc=EVALS, needle=_EVALS_LA_BEAM,
+    artifacts=(LABEL_AUDIT_0903_BEAM,),
+    value=lambda d: _LA_SHIPPED(d)["fact_hits"], stated=8, places=0))
+CLAIMS.append(Claim(
+    id="evals-label-fix-beam-genuine", doc=EVALS, needle=_EVALS_LA_BEAM,
+    artifacts=(LABEL_AUDIT_0903_BEAM,),
+    value=lambda d: _LA_SHIPPED(d)["judged_genuine"], stated=8, places=0))
+CLAIMS.append(Claim(
+    id="evals-label-fix-beam-facts", doc=EVALS, needle=_EVALS_LA_BEAM,
+    artifacts=(LABEL_AUDIT_0903_BEAM,),
+    value=lambda d: d["sample"]["current_facts"], stated=1099, places=0))
+
+# The chip-5 paired regression-gate paragraph (evals/README.md, mirrors the
+# CHANGELOG entry) — LADDER_CHIP5 / BEAM_CHIP5_PAIRED, _rung_identical /
+# _paired already defined above.
+CLAIMS.append(Claim(
+    id="evals-chip5-ladder-floor-identical", doc=EVALS,
+    needle="verdict-identical on both rungs, as predicted",
+    artifacts=(LADDER_CHIP5,), value=_rung_identical("floor"),
+    stated=1, places=0))
+CLAIMS.append(Claim(
+    id="evals-chip5-ladder-qwen-identical", doc=EVALS,
+    needle="verdict-identical on both rungs, as predicted",
+    artifacts=(LADDER_CHIP5,), value=_rung_identical("qwen-27b"),
+    stated=1, places=0))
+
+_EVALS_CHIP5_QUESTIONS = ("run at the matched\n16/16 budget against the "
+                          "2026-09-02 pre-#245 baseline on all 400\n"
+                          "questions:")
+CLAIMS.append(Claim(
+    id="evals-chip5-beam-paired-rows", doc=EVALS,
+    needle=_EVALS_CHIP5_QUESTIONS, artifacts=(BEAM_CHIP5_PAIRED,),
+    value=lambda d: d["paired_rows"], stated=400, places=0))
+
+_EVALS_CHIP5_RAG = "the identical-input `rag` control moved 0.0000, hybrid"
+CLAIMS.append(Claim(
+    id="evals-chip5-beam-rag-delta", doc=EVALS, needle=_EVALS_CHIP5_RAG,
+    artifacts=(BEAM_CHIP5_PAIRED,), value=_paired("rag", "delta_mean"),
+    stated=0.0, places=4))
+
+_EVALS_CHIP5_DELTAS = "\n+0.0004±0.0014, cortex +0.0036±0.0029 — every delta"
+CLAIMS.append(Claim(
+    id="evals-chip5-beam-hybrid-delta", doc=EVALS, needle=_EVALS_CHIP5_DELTAS,
+    artifacts=(BEAM_CHIP5_PAIRED,), value=_paired("hybrid", "delta_mean"),
+    stated=0.0004, places=4))
+CLAIMS.append(Claim(
+    id="evals-chip5-beam-hybrid-se", doc=EVALS, needle=_EVALS_CHIP5_DELTAS,
+    artifacts=(BEAM_CHIP5_PAIRED,), value=_paired("hybrid", "delta_se"),
+    stated=0.0014, places=4))
+CLAIMS.append(Claim(
+    id="evals-chip5-beam-cortex-delta", doc=EVALS, needle=_EVALS_CHIP5_DELTAS,
+    artifacts=(BEAM_CHIP5_PAIRED,), value=_paired("cortex", "delta_mean"),
+    stated=0.0036, places=4))
+CLAIMS.append(Claim(
+    id="evals-chip5-beam-cortex-se", doc=EVALS, needle=_EVALS_CHIP5_DELTAS,
+    artifacts=(BEAM_CHIP5_PAIRED,), value=_paired("cortex", "delta_se"),
+    stated=0.0029, places=4))
+
+_EVALS_CHIP5_CTX = "The 30 rows whose served context differed all sit"
+CLAIMS.append(Claim(
+    id="evals-chip5-beam-context-rows-hybrid", doc=EVALS,
+    needle=_EVALS_CHIP5_CTX, artifacts=(BEAM_CHIP5_PAIRED,),
+    value=_paired("hybrid", "rows_context_differs"), stated=30, places=0))
+CLAIMS.append(Claim(
+    id="evals-chip5-beam-context-rows-cortex", doc=EVALS,
+    needle=_EVALS_CHIP5_CTX, artifacts=(BEAM_CHIP5_PAIRED,),
+    value=_paired("cortex", "rows_context_differs"), stated=30, places=0))
+
+_EVALS_CHIP5_LABELS = "(3 of\n1099 facts; `quoted` fired on 11)"
+CLAIMS.append(Claim(
+    id="evals-chip5-labels-constraint", doc=EVALS, needle=_EVALS_CHIP5_LABELS,
+    artifacts=(BEAM_CHIP5_LABELS,),
+    value=lambda d: d["distortion_tolerance"]["constraint"],
+    stated=3, places=0))
+CLAIMS.append(Claim(
+    id="evals-chip5-labels-quoted", doc=EVALS, needle=_EVALS_CHIP5_LABELS,
+    artifacts=(BEAM_CHIP5_LABELS,),
+    value=lambda d: d["authority"]["quoted"], stated=11, places=0))
+
+# docs/guide/security-posture.md's merge-queue row: the ONE distinct-model
+# (shadow Opus + Fable) two-vote accept pairing, from the panel's own
+# merge_gate_table — 6/6, the number the CHANGELOG's "Evidence honesty"
+# note (2026-09-02 entry) says is the fair one to quote unqualified.
+CLAIMS.append(Claim(
+    id="security-merge-queue-two-vote-accept-n", doc=SECURITY,
+    needle="measured 6/6 on one distinct-model pairing of the 2026-09-02 panel",
+    artifacts=(PANEL_0902,),
+    value=lambda d: d["merge_gate_table"][
+        "A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["n"],
+    stated=6, places=0))
+CLAIMS.append(Claim(
+    id="security-merge-queue-two-vote-accept-bad", doc=SECURITY,
+    needle="measured 6/6 on one distinct-model pairing of the 2026-09-02 panel",
+    artifacts=(PANEL_0902,),
+    value=lambda d: len(d["merge_gate_table"][
+        "A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["bad"]),
+    stated=0, places=0))
 
