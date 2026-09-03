@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-09-04 — a query-shape router does not beat the commit-gated cascade)
+- **The engine concatenates channels for every query, and the question was
+  whether routing by question shape would serve better answers on fewer
+  tokens. It would not.** `evals/router_offline.py` re-aggregates three
+  already-judged runs offline — no new answer or judge calls, no GPU — into
+  arm/type tables, an oracle-by-type bound, a per-question ceiling, and
+  cross-validated cheap routers over surface features of the question text
+  (`evals/results/router-offline-20260904.json`, seeded and byte-reproducible;
+  the section is `evals/README.md` → "Offline routing analysis").
+  - The preregistered bar — a cross-validated router beating the best single
+    arm by >= 3 points at no more served cost, on BOTH benchmarks — fails,
+    and so does the oracle bound. Realizable gains: **+0.002** on LongMemEval
+    (500 q, at 327 fewer tokens) and **+0.008** on BEAM 100K (400 q, at 671
+    MORE context chars). A router with perfect knowledge of the question type
+    reaches +0.024 (LongMemEval, under the bar) and +0.046 (BEAM, at more
+    cost).
+  - The best router found is the cascade restated: on LongMemEval it predicts
+    "cascade" on 500 of 500 questions and lands exactly on the shipped
+    0.690 / 883 tokens. Question type IS predictable from surface text (0.654
+    and 0.652 by 5-fold CV against 0.266 / 0.100 majority), but the per-type
+    arm differences are smaller than the classifier's error cost — routing
+    through a predicted type scores BELOW the best single arm on all three
+    slices.
+  - Per-question ceilings say the channels do genuinely disagree: 0.778
+    (LongMemEval-500), 0.789 (BEAM-400), 0.962 (the 78-question
+    knowledge-update slice, three channels; 0.936 for rag∪cortex on the same
+    rows). Any approach to that ceiling needs a signal from the retrieved
+    evidence — the cascade's abstention gate is one, and it is the one that
+    works — not from the question's wording.
+  - Only 2 of the 4 question types the two benchmarks share agree on a best
+    arm (knowledge-update and preference: yes; temporal-reasoning and
+    multi-session: no), which is a second reason not to ship a type table.
+  - Framing: offline re-use of judged verdicts, a single replicate per source
+    run, a local judge; the oracle rows are fit on the questions they score
+    and are bounds, not results. Pinned by `tests/test_eval_evidence.py`;
+    `tests/test_router_offline.py` covers the script on a fixture and
+    regenerates the artifact.
+
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 
 ### Fixed (2026-09-04 — the Console's digest length default matches the daemon's)

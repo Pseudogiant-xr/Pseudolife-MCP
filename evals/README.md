@@ -1718,6 +1718,182 @@ reversal of the hold decision.
 
 ---
 
+# Offline routing analysis (`router_offline.py`)
+
+The engine concatenates channels for every query — the hybrid arm serves a
+cortex fact block plus the top-k raw entries, whatever the question. The
+only routing policy that has ever won a measurement is the commit-gated
+cascade (serve cortex when it commits, else rag). This script asks whether
+a router that reads the QUESTION SHAPE could beat that, and answers it
+without a GPU: it re-aggregates the per-question verdicts that three
+already-judged runs left behind.
+
+**What these numbers are.** Offline re-use of judged verdicts. No new
+answer calls, no new judge calls, a single replicate per source run, and a
+local judge in every case. The oracle rows are fit on the very questions
+they score, so they are BOUNDS on what a router could reach, never shipped
+results. The realizable rows are 5-fold cross-validated by question — a
+prediction always comes from a model that never saw that question — but
+they still inherit the source runs' judge and era.
+
+```bash
+python evals/router_offline.py --out evals/results/router-offline-20260904.json
+```
+
+Deterministic and seeded (`SEED = 0`): two runs produce byte-identical
+JSON, and `tests/test_router_offline.py` regenerates the committed
+artifact and compares it.
+
+## Sources and cost units
+
+| tag | rows | source artifact | cost column |
+| --- | --- | --- | --- |
+| LME-500 | 500 | `longmemeval-all-oracle-qwen-27b-alltypes-0803.jsonl` | real `*_context_tokens` |
+| LME-KU78 | 78 | `longmemeval-ku-oracle-qwen-27b-ceiling-v38.jsonl` | real `*_context_tokens` |
+| BEAM-400 | 400 | `beam-100K-qwen-27b-chip12-b16.jsonl` | context **characters** |
+
+BEAM rows carry no token column, so cost there is the length of
+`contexts[arm]` in characters; the ratio column divides by a flat 4
+chars/token and is labelled `est_tokens` in the artifact. The two units are
+never mixed. LongMemEval scores are binary judge verdicts; BEAM scores are
+the paper-faithful float rubric means.
+
+The cascade arm is not re-implemented here — `replicate.cortex_commits` and
+its cost rule are imported, and a test asserts the derived arm matches
+`replicate.cascade_correct` / `cascade_context_tokens` row by row. As a
+sanity gate the script also recomputes each run's published per-arm table
+from the rows: LME-500 reproduces its summary exactly (max score delta
+0.0000), LME-KU78 and BEAM-400 to within the summaries' own rounding
+(< 5e-4). If that gate ever drifts, nothing below it is trustworthy.
+
+## LongMemEval, 500 questions, six types
+
+Accuracy and mean served tokens side by side, plus accuracy per 1k tokens
+so the trade is one number rather than two.
+
+| policy | accuracy | mean tokens | acc / 1k tok |
+| --- | --- | --- | --- |
+| cortex only | 0.416 | 158 | 2.629 |
+| hybrid (facts + top-k) | 0.664 | 842 | 0.789 |
+| **rag — best single arm** | **0.688** | 1210 | 0.569 |
+| cascade (shipped policy) | 0.690 | 883 | 0.782 |
+| oracle by type (arms + cascade) | 0.712 | 893 | 0.797 |
+| oracle per question (ceiling) | 0.778 | 419 | 1.857 |
+| best cross-validated router | 0.690 | 883 | 0.782 |
+| router via predicted type | 0.686 | 1002 | 0.685 |
+| two-stage: cascade, then router | 0.690 | 883 | 0.782 |
+| two-stage, token-greedy labels | 0.656 | 667 | 0.983 |
+
+The oracle-by-type bound is **+0.024** over the best single arm, at 316
+fewer tokens. The best realizable router is **+0.002** — and it gets there
+by predicting "cascade" on 500 of 500 questions, i.e. by rediscovering the
+policy already shipped. Its agreement with the oracle-by-type choice is
+0.156.
+
+## BEAM 100K, 400 questions, ten types
+
+| policy | score | mean chars | score / 1k est-tok |
+| --- | --- | --- | --- |
+| no memory | 0.181 | 0 | n/a |
+| cortex only | 0.283 | 2 207 | 0.513 |
+| cascade | 0.552 | 14 294 | 0.154 |
+| hybrid | 0.623 | 24 398 | 0.102 |
+| refind | 0.627 | 41 757 | 0.060 |
+| **rag — best single arm** | **0.642** | 22 158 | 0.116 |
+| oracle by type (arms + cascade) | 0.683 | 22 861 | 0.120 |
+| oracle by type (+ the no-memory arm) | 0.688 | 22 635 | 0.122 |
+| oracle per question (ceiling) | 0.789 | 17 672 | 0.179 |
+| best cross-validated router | 0.651 | 22 829 | 0.114 |
+| router via predicted type | 0.620 | 27 780 | 0.089 |
+| two-stage: cascade, then router | 0.554 | 14 364 | 0.154 |
+
+Here the oracle-by-type bound is larger — **+0.046** — but it costs 477
+chars MORE than rag, not fewer, because the types it moves off rag it moves
+onto refind and hybrid, both of which serve more context. The best
+realizable router recovers **+0.008** of that, also at more cost. The
+cascade is not the strong policy on BEAM that it is on LongMemEval: cortex
+alone scores 0.283 there, so committing to it costs 0.09.
+
+## LongMemEval knowledge-update, 78 questions (ceiling-v38)
+
+| policy | accuracy | mean tokens | acc / 1k tok |
+| --- | --- | --- | --- |
+| cortex only | 0.667 | 97 | 6.894 |
+| hybrid | 0.846 | 731 | 1.157 |
+| cascade | 0.846 | 389 | 2.173 |
+| **rag — best single arm** | **0.859** | 1184 | 0.725 |
+| oracle by type | 0.859 | 1184 | 0.725 |
+| oracle per question (ceiling) | 0.962 | 318 | 3.021 |
+| two-stage: cascade, then router | 0.846 | 382 | 2.212 |
+
+This slice is one question type, so a type router is degenerate on it by
+construction — the oracle-by-type row is the best single arm, exactly. It
+is here for the per-question ceiling: **0.962** over the three channels,
+against 0.936 for the rag∪cortex union on the same rows. (The 0.949 union
+published in the guide is a different run — the e2e ceiling — and a
+two-channel union; the two are not interchangeable.)
+
+## Why the routers do not reach the bound
+
+The question type IS partly predictable from surface text — 0.654 on
+LME-500 and 0.652 on BEAM-400 by 5-fold CV, against majority baselines of
+0.266 and 0.100. The gap is not in the classifier. It is that
+
+- the per-type best-arm differences are small (LME-500: +0.024 for a
+  perfect type oracle), so a classifier at 0.65 gives most of that back on
+  its mistakes — `router_via_type` scores BELOW the best single arm on
+  every dataset; and
+- the per-question best-arm label is dominated by ties. Trained on it, both
+  models collapse: 493/500 rag under accuracy-first tie-breaking on
+  LME-500, or 475/500 cortex under cost-first, which trades 0.25 accuracy
+  for the tokens.
+
+The token-greedy variants are the one place a router earns something real,
+and it is a cost win, not an accuracy win: two-stage with cost-first labels
+serves LongMemEval at 0.656 on 667 tokens (0.983 acc/1k) against rag's
+0.688 on 1210 (0.569). That is the same trade the cascade already makes,
+made harder.
+
+## Robustness across benchmarks
+
+Of the four question types the two benchmarks share, the oracle's best-arm
+choice agrees on **two**:
+
+| LongMemEval type | BEAM type | LME best | BEAM best | agree |
+| --- | --- | --- | --- | --- |
+| knowledge-update | knowledge_update | cascade | cascade | yes |
+| single-session-preference | preference_following | rag | rag | yes |
+| temporal-reasoning | temporal_reasoning | hybrid | refind | no |
+| multi-session | multi_session_reasoning | rag | hybrid | no |
+
+A per-type choice that flips between benchmarks is a property of the
+benchmark, not of the question shape, and cannot be shipped.
+
+## Verdict
+
+The criterion, fixed before the numbers were read and recorded in the
+artifact: a cross-validated router must beat the best single arm by at
+least 3 points at no more served cost, on BOTH benchmarks.
+
+**It fails, and so does the oracle bound.** The realizable gains are +0.002
+(LongMemEval, at 327 fewer tokens) and +0.008 (BEAM, at 671 MORE chars).
+Even a router with perfect knowledge of the question type would fall short:
++0.024 on LongMemEval is under the bar, and BEAM's +0.046 comes at more
+cost. The per-question ceilings — 0.778 and 0.789, +0.090 and +0.147 over
+the best single arm — say the channels genuinely disagree and a *perfect*
+selector would be worth a great deal; they also say the signal that picks
+correctly is not in the question's surface form.
+
+Read against the cascade: on LongMemEval the shipped cascade already sits
+at 0.690/883 tokens, which the best router matches exactly and no router
+beats. The gain is in the cascade already. A query-shape router is not
+worth building; if the per-question ceiling is to be approached, the
+selector needs a signal from the retrieved evidence (the cascade's
+abstention gate is one such signal, and it is the one that works), not from
+the question text.
+
+---
+
 # Smaller probes
 
 Five tracked scripts, each answering one narrow question, without their

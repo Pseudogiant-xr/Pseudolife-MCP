@@ -2885,3 +2885,229 @@ CLAIMS.append(Claim(
         "A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["bad"]),
     stated=0, places=0))
 
+# ── offline routing analysis (2026-09-04, evals/README.md) ───────────────
+# Lever-4 question: is a query-shape router worth building, or is the gain
+# already in the commit-gated cascade? Answered offline from three
+# already-judged runs — no new answer or judge calls — so every number in
+# that section is a re-aggregation of ONE artifact, pinned here.
+ROUTER = RESULTS + "router-offline-20260904.json"
+
+
+def _r_arm(ds: str, arm: str, field: str):
+    return lambda d: d["datasets"][ds]["arms"][arm][field]
+
+
+def _r_pol(ds: str, key: str, field: str):
+    return lambda d: d["datasets"][ds]["policies"][key][field]
+
+
+def _r_verdict(ds: str, field: str):
+    return lambda d: d["verdict"][ds][field]
+
+
+# (needle, dataset, kind, key, stated score / cost / ratio) — one table row
+# each, pinned on all three published columns so a partial edit fails.
+_ROUTER_ROWS = [
+    # LongMemEval, 500 questions
+    ("| cortex only | 0.416 | 158 | 2.629 |",
+     "LME-500", "arms", "cortex", 0.416, 158, 2.629),
+    ("| hybrid (facts + top-k) | 0.664 | 842 | 0.789 |",
+     "LME-500", "arms", "hybrid", 0.664, 842, 0.789),
+    ("| **rag — best single arm** | **0.688** | 1210 | 0.569 |",
+     "LME-500", "arms", "rag", 0.688, 1210, 0.569),
+    ("| cascade (shipped policy) | 0.690 | 883 | 0.782 |",
+     "LME-500", "arms", "cascade", 0.690, 883, 0.782),
+    ("| oracle by type (arms + cascade) | 0.712 | 893 | 0.797 |",
+     "LME-500", "policies", "oracle_by_type[with_cascade]",
+     0.712, 893, 0.797),
+    ("| oracle per question (ceiling) | 0.778 | 419 | 1.857 |",
+     "LME-500", "policies", "oracle_per_question[base]", 0.778, 419, 1.857),
+    ("| best cross-validated router | 0.690 | 883 | 0.782 |",
+     "LME-500", "policies", "router[with_cascade|logreg|acc]",
+     0.690, 883, 0.782),
+    ("| router via predicted type | 0.686 | 1002 | 0.685 |",
+     "LME-500", "policies", "router_via_type[base|logreg]",
+     0.686, 1002, 0.685),
+    ("| two-stage: cascade, then router | 0.690 | 883 | 0.782 |",
+     "LME-500", "policies", "two_stage[tree_d3|acc]", 0.690, 883, 0.782),
+    ("| two-stage, token-greedy labels | 0.656 | 667 | 0.983 |",
+     "LME-500", "policies", "two_stage[tree_d3|cheap]", 0.656, 667, 0.983),
+    # BEAM 100K, 400 questions (cost in context CHARACTERS)
+    ("| cortex only | 0.283 | 2 207 | 0.513 |",
+     "BEAM-400", "arms", "cortex", 0.283, 2207, 0.513),
+    ("| cascade | 0.552 | 14 294 | 0.154 |",
+     "BEAM-400", "arms", "cascade", 0.552, 14294, 0.154),
+    ("| hybrid | 0.623 | 24 398 | 0.102 |",
+     "BEAM-400", "arms", "hybrid", 0.623, 24398, 0.102),
+    ("| refind | 0.627 | 41 757 | 0.060 |",
+     "BEAM-400", "arms", "refind", 0.627, 41757, 0.060),
+    ("| **rag — best single arm** | **0.642** | 22 158 | 0.116 |",
+     "BEAM-400", "arms", "rag", 0.642, 22158, 0.116),
+    ("| oracle by type (arms + cascade) | 0.683 | 22 861 | 0.120 |",
+     "BEAM-400", "policies", "oracle_by_type[with_cascade]",
+     0.683, 22861, 0.120),
+    ("| oracle by type (+ the no-memory arm) | 0.688 | 22 635 | 0.122 |",
+     "BEAM-400", "policies", "oracle_by_type[with_nomem]",
+     0.688, 22635, 0.122),
+    ("| oracle per question (ceiling) | 0.789 | 17 672 | 0.179 |",
+     "BEAM-400", "policies", "oracle_per_question[with_nomem]",
+     0.789, 17672, 0.179),
+    ("| best cross-validated router | 0.651 | 22 829 | 0.114 |",
+     "BEAM-400", "policies", "router[with_nomem|logreg|acc]",
+     0.651, 22829, 0.114),
+    ("| router via predicted type | 0.620 | 27 780 | 0.089 |",
+     "BEAM-400", "policies", "router_via_type[base|logreg]",
+     0.620, 27780, 0.089),
+    ("| two-stage: cascade, then router | 0.554 | 14 364 | 0.154 |",
+     "BEAM-400", "policies", "two_stage[tree_d3|acc]", 0.554, 14364, 0.154),
+    # LongMemEval knowledge-update, 78 questions (ceiling-v38)
+    ("| cortex only | 0.667 | 97 | 6.894 |",
+     "LME-KU78", "arms", "cortex", 0.667, 97, 6.894),
+    ("| hybrid | 0.846 | 731 | 1.157 |",
+     "LME-KU78", "arms", "hybrid", 0.846, 731, 1.157),
+    ("| cascade | 0.846 | 389 | 2.173 |",
+     "LME-KU78", "arms", "cascade", 0.846, 389, 2.173),
+    ("| **rag — best single arm** | **0.859** | 1184 | 0.725 |",
+     "LME-KU78", "arms", "rag", 0.859, 1184, 0.725),
+    ("| oracle per question (ceiling) | 0.962 | 318 | 3.021 |",
+     "LME-KU78", "policies", "oracle_per_question[base]", 0.962, 318, 3.021),
+    ("| two-stage: cascade, then router | 0.846 | 382 | 2.212 |",
+     "LME-KU78", "policies", "two_stage[tree_d3|acc]", 0.846, 382, 2.212),
+]
+
+for _needle, _ds, _kind, _key, _score, _cost, _ratio in _ROUTER_ROWS:
+    _get = _r_arm if _kind == "arms" else _r_pol
+    _slug = f"router-{_ds.lower()}-{_kind}-{_key}".replace(" ", "")
+    CLAIMS.append(Claim(
+        id=f"{_slug}-score", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_get(_ds, _key, "score"), stated=_score, places=3))
+    CLAIMS.append(Claim(
+        id=f"{_slug}-cost", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_get(_ds, _key, "cost"), stated=float(_cost), places=0))
+    CLAIMS.append(Claim(
+        id=f"{_slug}-ratio", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_get(_ds, _key, "score_per_1k_tokens"), stated=_ratio,
+        places=3))
+
+# The no-memory arm serves nothing, so its ratio column reads "n/a".
+CLAIMS.append(Claim(
+    id="router-beam-nomem-score", doc=EVALS,
+    needle="| no memory | 0.181 | 0 | n/a |", artifacts=(ROUTER,),
+    value=_r_arm("BEAM-400", "nomem", "score"), stated=0.181, places=3))
+CLAIMS.append(Claim(
+    id="router-beam-nomem-cost", doc=EVALS,
+    needle="| no memory | 0.181 | 0 | n/a |", artifacts=(ROUTER,),
+    value=_r_arm("BEAM-400", "nomem", "cost"), stated=0.0, places=0))
+
+# The sanity gate the whole section rests on: the script must reproduce
+# each source run's own published per-arm table before anything else in it
+# means anything.
+CLAIMS.append(Claim(
+    id="router-sanity-lme500-exact", doc=EVALS,
+    needle="from the rows: LME-500 reproduces its summary exactly (max score delta",
+    artifacts=(ROUTER,),
+    value=lambda d: d["datasets"]["LME-500"]["sanity_vs_summary"][
+        "max_score_delta"], stated=0.0, places=4))
+
+# The verdict paragraph and the deltas quoted around the tables.
+_ROUTER_SCALARS = [
+    ("router-lme-oracle-gain",
+     "The oracle-by-type bound is **+0.024** over the best single arm, at 316",
+     _r_verdict("LME-500", "oracle_by_type_gain"), 0.024, 3),
+    ("router-lme-oracle-cost-saved",
+     "The oracle-by-type bound is **+0.024** over the best single arm, at 316",
+     lambda d: abs(d["verdict"]["LME-500"]["oracle_by_type_cost_delta"]),
+     316.0, 0),
+    ("router-lme-realizable-gain",
+     "fewer tokens. The best realizable router is **+0.002** — and it gets there",
+     _r_verdict("LME-500", "realizable_gain"), 0.002, 3),
+    ("router-lme-router-all-cascade",
+     'by predicting "cascade" on 500 of 500 questions, i.e. by rediscovering the',
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "router[with_cascade|logreg|acc]"]["arm_share"]["cascade"],
+     500, 0),
+    ("router-lme-router-agreement",
+     "Its agreement with the oracle-by-type choice is",
+     _r_pol("LME-500", "router[with_cascade|logreg|acc]",
+            "agree_with_oracle_by_type"), 0.156, 3),
+    ("router-beam-oracle-gain",
+     "Here the oracle-by-type bound is larger — **+0.046** — but it costs 477",
+     _r_verdict("BEAM-400", "oracle_by_type_gain"), 0.046, 3),
+    ("router-beam-oracle-cost-added",
+     "Here the oracle-by-type bound is larger — **+0.046** — but it costs 477",
+     _r_verdict("BEAM-400", "oracle_by_type_cost_delta"), 477.0, 0),
+    ("router-beam-realizable-gain",
+     "realizable router recovers **+0.008** of that, also at more cost. The",
+     _r_verdict("BEAM-400", "realizable_gain"), 0.008, 3),
+    ("router-beam-cascade-cost",
+     "alone scores 0.283 there, so committing to it costs 0.09.",
+     lambda d: (d["verdict"]["BEAM-400"]["best_single_score"]
+                - d["verdict"]["BEAM-400"]["cascade_score"]), 0.09, 2),
+    ("router-lme-typepred",
+     "LME-500 and 0.652 on BEAM-400 by 5-fold CV, against majority baselines of",
+     lambda d: d["datasets"]["LME-500"]["type_predictability"]["logreg"][
+         "cv_accuracy"], 0.654, 3),
+    ("router-beam-typepred",
+     "LME-500 and 0.652 on BEAM-400 by 5-fold CV, against majority baselines of",
+     lambda d: d["datasets"]["BEAM-400"]["type_predictability"]["logreg"][
+         "cv_accuracy"], 0.652, 3),
+    ("router-lme-typepred-majority",
+     "0.266 and 0.100. The gap is not in the classifier. It is that",
+     lambda d: d["datasets"]["LME-500"]["type_predictability"]["logreg"][
+         "majority_baseline"], 0.266, 3),
+    ("router-beam-typepred-majority",
+     "0.266 and 0.100. The gap is not in the classifier. It is that",
+     lambda d: d["datasets"]["BEAM-400"]["type_predictability"]["logreg"][
+         "majority_baseline"], 0.100, 3),
+    ("router-lme-collapse-rag",
+     "models collapse: 493/500 rag under accuracy-first tie-breaking on",
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "router[base|tree_d3|acc]"]["arm_share"]["rag"], 493, 0),
+    ("router-lme-collapse-cortex",
+     "LME-500, or 475/500 cortex under cost-first, which trades 0.25 accuracy",
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "router[base|tree_d3|cheap]"]["arm_share"]["cortex"], 475, 0),
+    ("router-robustness-agree",
+     "choice agrees on **two**:",
+     lambda d: d["robustness"]["type_pairs"]["n_agree"], 2, 0),
+    ("router-robustness-pairs",
+     "choice agrees on **two**:",
+     lambda d: d["robustness"]["type_pairs"]["n_pairs"], 4, 0),
+    ("router-verdict-lme-realizable",
+     "(LongMemEval, at 327 fewer tokens) and +0.008 (BEAM, at 671 MORE chars).",
+     _r_verdict("LME-500", "realizable_gain"), 0.002, 3),
+    ("router-verdict-lme-tokens-saved",
+     "(LongMemEval, at 327 fewer tokens) and +0.008 (BEAM, at 671 MORE chars).",
+     lambda d: abs(d["verdict"]["LME-500"]["realizable_cost_delta"]),
+     327.0, 0),
+    ("router-verdict-beam-chars-added",
+     "(LongMemEval, at 327 fewer tokens) and +0.008 (BEAM, at 671 MORE chars).",
+     _r_verdict("BEAM-400", "realizable_cost_delta"), 671.0, 0),
+    ("router-ceiling-gain-lme",
+     "the best single arm — say the channels genuinely disagree and a *perfect*",
+     _r_verdict("LME-500", "ceiling_gain"), 0.090, 3),
+    ("router-ceiling-gain-beam",
+     "the best single arm — say the channels genuinely disagree and a *perfect*",
+     _r_verdict("BEAM-400", "ceiling_gain"), 0.147, 3),
+    ("router-cascade-unbeaten",
+     "at 0.690/883 tokens, which the best router matches exactly and no router",
+     _r_arm("LME-500", "cascade", "score"), 0.690, 3),
+]
+
+for _cid, _needle, _value, _stated, _places in _ROUTER_SCALARS:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_value, stated=float(_stated), places=_places))
+
+# The KU-78 per-question ceiling is quoted beside the rag-union figure on
+# the SAME rows, so the union is pinned against the rows themselves — the
+# guide's 0.949 is a different run and a two-channel union, and the doc
+# says so.
+CLAIMS.append(Claim(
+    id="router-ku78-two-channel-union", doc=EVALS,
+    needle="against 0.936 for the rag∪cortex union on the same rows.",
+    artifacts=(V38_ROWS_JSONL,),
+    value=lambda rows: (sum(1 for r in rows
+                            if r["rag_correct"] or r["cortex_correct"])
+                        / len(rows)),
+    stated=0.936, places=3))
