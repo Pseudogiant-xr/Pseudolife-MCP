@@ -1,0 +1,138 @@
+{
+  "what": "write-time label heuristic fire rate on the chip5-b16 BEAM bank (schema v35 labels.py), recorded beside the result per the #245 CHANGELOG note; values omitted, slots listed",
+  "generated_at": "2026-09-03T08:00:01",
+  "run": "beam-100K-qwen-27b-chip5-b16",
+  "chats": 20,
+  "facts_current_dumped": 1099,
+  "authority": {
+    "None": 1088,
+    "quoted": 11
+  },
+  "distortion_tolerance": {
+    "None": 1096,
+    "constraint": 3
+  },
+  "fire_rate": {
+    "authority_quoted": 0.01,
+    "distortion_constraint": 0.0027
+  },
+  "labelled_slots": [
+    {
+      "chat": 7,
+      "entity": "user",
+      "attribute": "mentor feedback",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 7,
+      "entity": "user",
+      "attribute": "reference-management-tool",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 9,
+      "entity": "user",
+      "attribute": "personal-statement-feedback-date",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 9,
+      "entity": "user",
+      "attribute": "personal-statement-feedback-source",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 11,
+      "entity": "darryl",
+      "attribute": "met-wyatt-at",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 11,
+      "entity": "darryl",
+      "attribute": "met-wyatt-on",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 11,
+      "entity": "darryl",
+      "attribute": "team-meeting-scheduled-for",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 13,
+      "entity": "Montserrat Readers Facebook group",
+      "attribute": "moderator",
+      "authority": null,
+      "distortion_tolerance": "constraint",
+      "value_is_raw_turn": true
+    },
+    {
+      "chat": 13,
+      "entity": "user",
+      "attribute": "preferred-book-retailer",
+      "authority": null,
+      "distortion_tolerance": "constraint",
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 15,
+      "entity": "Montserrat",
+      "attribute": "may-humidity",
+      "authority": null,
+      "distortion_tolerance": "constraint",
+      "value_is_raw_turn": true
+    },
+    {
+      "chat": 19,
+      "entity": "montserrat",
+      "attribute": "guardianship-approval-requirement",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 19,
+      "entity": "user",
+      "attribute": "location",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 19,
+      "entity": "user",
+      "attribute": "name",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    },
+    {
+      "chat": 19,
+      "entity": "user",
+      "attribute": "occupation",
+      "authority": "quoted",
+      "distortion_tolerance": null,
+      "value_is_raw_turn": false
+    }
+  ],
+  "context_diff_chats_vs_chip12": {
+    "13": 20,
+    "15": 10
+  },
+  "note": "served contexts differed from chip12-b16 only in the two chats carrying a constraint label (13, 15) \u2014 the recall pin; the four quoted-only chats (7, 9, 11, 19) served byte-identical contexts"
+}

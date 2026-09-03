@@ -2353,6 +2353,105 @@ for _cid, _doc, _needle, _val, _stated, _places in [
         value=_val, stated=_stated, places=_places))
 
 
+# ── the chip-5 paired gates (CHANGELOG, 2026-09-03) ────────────────────────
+# PR #245 shipped with its extraction-ladder arms GATE-PENDING; the gates
+# ran 2026-09-03 and the CHANGELOG entry now quotes them. The ladder
+# verdict and the BEAM paired comparison are committed beside the runs
+# they were computed from, and the per-run summaries are pinned too, so
+# the paired file, the rows and the summaries cannot drift apart.
+LADDER_CHIP5 = RESULTS + "ladder-chip5-paired-verdict.json"
+BEAM_CHIP5_PAIRED = _BEAM + "chip5-b16.vs-chip12-b16.paired.json"
+BEAM_CHIP5 = _BEAM + "chip5-b16.summary.json"
+BEAM_CHIP12 = _BEAM + "chip12-b16.summary.json"
+BEAM_CHIP5_LABELS = _BEAM + "chip5-b16.labels.json"
+_LADDER_IDENT = "verdict-identical on both rungs"
+_LADDER_FLOOR = "(floor gold 0.1 / stale 0.1 / 3.4 tok per query;"
+_LADDER_QWEN = "qwen-27b gold 1.0 / stale 0.0 / 13.4 tok per query"
+_CHIP5_RAG = "the identical-input `rag` control moved 0.0000 (0 rows);"
+_CHIP5_HYBRID = "hybrid +0.0004 ± 0.0014 (0.6226 → 0.6230);"
+_CHIP5_CORTEX = "cortex +0.0036 ± 0.0029 (0.2829 → 0.2866)"
+_CHIP5_CTX = "The 30 rows whose served context differs"
+_CHIP5_LABELS = "(3 of 1099 facts; `quoted` 11 of 1099)"
+
+
+def _rung_metric(rung: str, metric: str) -> Callable[[dict], float]:
+    return lambda d: d["rungs"][rung]["metrics"][metric]["post"]
+
+
+def _rung_identical(rung: str) -> Callable[[dict], float]:
+    return lambda d: float(d["rungs"][rung]["identical"])
+
+
+def _paired(arm: str, key: str) -> Callable[[dict], float]:
+    return lambda d: d["arms"][arm][key]
+
+
+def _beam_score(arm: str) -> Callable[[dict], float]:
+    return lambda d: d["arms"][arm]["score"]
+
+
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("chip5-ladder-floor-identical", _LADDER_IDENT, LADDER_CHIP5,
+     _rung_identical("floor"), 1, 0),
+    ("chip5-ladder-qwen-identical", _LADDER_IDENT, LADDER_CHIP5,
+     _rung_identical("qwen-27b"), 1, 0),
+    ("chip5-ladder-floor-gold", _LADDER_FLOOR, LADDER_CHIP5,
+     _rung_metric("floor", "gold_recoverable"), 0.1, 1),
+    ("chip5-ladder-floor-stale", _LADDER_FLOOR, LADDER_CHIP5,
+     _rung_metric("floor", "stale_leak"), 0.1, 1),
+    ("chip5-ladder-floor-tokens", _LADDER_FLOOR, LADDER_CHIP5,
+     _rung_metric("floor", "tokens_per_query"), 3.4, 1),
+    ("chip5-ladder-qwen-gold", _LADDER_QWEN, LADDER_CHIP5,
+     _rung_metric("qwen-27b", "gold_recoverable"), 1.0, 1),
+    ("chip5-ladder-qwen-stale", _LADDER_QWEN, LADDER_CHIP5,
+     _rung_metric("qwen-27b", "stale_leak"), 0.0, 1),
+    ("chip5-ladder-qwen-tokens", _LADDER_QWEN, LADDER_CHIP5,
+     _rung_metric("qwen-27b", "tokens_per_query"), 13.4, 1),
+    ("chip5-beam-paired-rows", "paired on all 400 questions",
+     BEAM_CHIP5_PAIRED, lambda d: d["paired_rows"], 400, 0),
+    ("chip5-beam-rag-delta", _CHIP5_RAG, BEAM_CHIP5_PAIRED,
+     _paired("rag", "delta_mean"), 0.0, 4),
+    ("chip5-beam-rag-moved", _CHIP5_RAG, BEAM_CHIP5_PAIRED,
+     _paired("rag", "rows_moved"), 0, 0),
+    ("chip5-beam-hybrid-delta", _CHIP5_HYBRID, BEAM_CHIP5_PAIRED,
+     _paired("hybrid", "delta_mean"), 0.0004, 4),
+    ("chip5-beam-hybrid-se", _CHIP5_HYBRID, BEAM_CHIP5_PAIRED,
+     _paired("hybrid", "delta_se"), 0.0014, 4),
+    ("chip5-beam-hybrid-a", _CHIP5_HYBRID, BEAM_CHIP12,
+     _beam_score("hybrid"), 0.6226, 4),
+    ("chip5-beam-hybrid-b", _CHIP5_HYBRID, BEAM_CHIP5,
+     _beam_score("hybrid"), 0.6230, 4),
+    ("chip5-beam-cortex-delta", _CHIP5_CORTEX, BEAM_CHIP5_PAIRED,
+     _paired("cortex", "delta_mean"), 0.0036, 4),
+    ("chip5-beam-cortex-se", _CHIP5_CORTEX, BEAM_CHIP5_PAIRED,
+     _paired("cortex", "delta_se"), 0.0029, 4),
+    ("chip5-beam-cortex-a", _CHIP5_CORTEX, BEAM_CHIP12,
+     _beam_score("cortex"), 0.2829, 4),
+    ("chip5-beam-cortex-b", _CHIP5_CORTEX, BEAM_CHIP5,
+     _beam_score("cortex"), 0.2866, 4),
+    ("chip5-beam-context-rows-hybrid", _CHIP5_CTX, BEAM_CHIP5_PAIRED,
+     _paired("hybrid", "rows_context_differs"), 30, 0),
+    ("chip5-beam-context-rows-cortex", _CHIP5_CTX, BEAM_CHIP5_PAIRED,
+     _paired("cortex", "rows_context_differs"), 30, 0),
+    # The two chats are the whole mechanism story (constraint label ->
+    # recall pin -> different served context), so the sentence naming
+    # them is pinned, not only the row count.
+    ("chip5-beam-context-chats", "all sit in chats 13 and 15",
+     BEAM_CHIP5_PAIRED,
+     lambda d: float(sorted(d["chats_with_context_diff"]) == ["13", "15"]),
+     1, 0),
+    ("chip5-labels-constraint", _CHIP5_LABELS, BEAM_CHIP5_LABELS,
+     lambda d: d["distortion_tolerance"]["constraint"], 3, 0),
+    ("chip5-labels-quoted", _CHIP5_LABELS, BEAM_CHIP5_LABELS,
+     lambda d: d["authority"]["quoted"], 11, 0),
+    ("chip5-labels-facts", _CHIP5_LABELS, BEAM_CHIP5_LABELS,
+     lambda d: d["facts_current_dumped"], 1099, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+
 def test_beam_range_quotes_match_the_committed_verdict():
     """The evals README quotes three sweep ranges; they must be the
     verdict file's, not a recollection of it."""
