@@ -75,3 +75,15 @@ def test_pair_run_on_a_tiny_run_is_exact():
     assert x["context_chars_mean"] == 3
     assert d["control_context_chars_mean"] == 2
     assert x["perm_p"] == 1.0
+
+
+def test_perm_p_is_small_for_a_one_sided_run():
+    # Eight rows all favouring the arm by a full point: the permutation
+    # loop runs (mean != 0), and only the all-same-sign draws reach the
+    # observed statistic, so p sits near 2/2^8 plus the +1 smoothing.
+    rows = [{"type": "t", "rag_score": 0.0, "x_score": 1.0}
+            for _ in range(8)]
+    x = pair_run(rows, ["x"], perms=2000, seed=0)["arms"]["x"]
+    assert x["delta_vs_control"] == 1.0
+    assert 0.0 < x["perm_p"] < 0.05
+    assert x["context_chars_mean"] is None

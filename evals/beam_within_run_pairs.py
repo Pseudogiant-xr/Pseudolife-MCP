@@ -61,8 +61,9 @@ def _perm_p(deltas: list[float], perms: int, seed: int) -> float:
     hits = 0
     n = len(deltas)
     for _ in range(perms):
-        flipped = sum(d if rng.random() < 0.5 else -d for d in deltas)
-        if abs(flipped / n) >= observed:
+        flipped = statistics.fmean(
+            d if rng.random() < 0.5 else -d for d in deltas)
+        if abs(flipped) >= observed:
             hits += 1
     return (hits + 1) / (perms + 1)
 
@@ -99,8 +100,8 @@ def pair_run(rows: list[dict], arms: list[str], perms: int = PERMS,
         for r in rows:
             if key in r:
                 types[r["type"]].append(r[key])
-        chars = [c for c in (_context_chars(r, arm) for r in rows)
-                 if c is not None]
+        chars = [c for c in (_context_chars(r, arm) for r in rows
+                             if key in r) if c is not None]
         out["arms"][arm] = {
             "n": n,
             "mean": round(statistics.fmean(a for a, _ in paired), 4),
@@ -141,8 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     result = pair_run(rows, [a for a in args.arms.split(",") if a],
                       perms=args.perms, seed=args.seed)
     result["source"] = src.name
-    out_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n",
-                        encoding="utf-8")
+    with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(json.dumps({k: v for k, v in result.items()
                       if k not in ("control_types",)}, indent=2))
     return 0
