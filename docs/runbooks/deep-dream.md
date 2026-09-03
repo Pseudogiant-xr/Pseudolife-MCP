@@ -12,7 +12,7 @@ queue per tick (`memory.deep_dream.judge_batch`), each mode-gated:
 
 | queue | knob | what `auto` applies |
 |---|---|---|
-| merge proposals | `judge_mode` (`off` / `shadow` / `auto-reject` / `auto`) | single reject >= 0.8; two-vote reject (second opinion) >= 0.7 mean; `auto` only: two-vote accept on a non-`low_differential` row >= 0.6 mean, and only when the second opinion came from a different model (`judge_second_model`) |
+| merge proposals | `judge_mode` (`off` / `shadow` / `auto-reject` / `auto`) | single reject >= 0.8; two-vote reject (second opinion) >= 0.7 mean; `auto` only: two-vote accept on a non-`low_differential` row >= 0.6 mean, and only when the second opinion came from a different model (`judge_second_model`; Console: Deep dream → Merge judge second model, live) |
 | link proposals | `link_judge_mode` | accept >= `link_accept_min_confidence` becomes a live edge, `decided_by='dream-judge'`; reject >= `link_reject_min_confidence`; a retype is recorded (`judge_relation`) for a reviewer to apply |
 | junk proposals | `junk_judge_mode` | keep >= `junk_keep_min_confidence`; delete >= `junk_delete_min_confidence` only under the evidence bar (degree <= `junk_max_auto_degree`, at most one fact slot) |
 | lesson / world duplicates | `curation_judge_mode` | `auto-distinct`: the reversible dismissal; `auto`: also retire the losing slot (reversible — `restore_slot` / `POST /api/lessons/restore`) after folding the carry-over into the surviving lesson |

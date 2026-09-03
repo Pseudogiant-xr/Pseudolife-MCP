@@ -324,6 +324,20 @@ KNOBS: list[dict[str, Any]] = [
              "(optionally judge_second_model) after its first verdict sat "
              "below the single-vote gate; the two-vote gates above apply "
              "only when this is on."},
+    {"path": "memory.deep_dream.judge_second_model", "group": "Deep dream",
+     "label": "Merge judge second model", "type": "string", "default": None,
+     "restart": False,
+     "suggestions": ["claude-fable-5", "claude-opus-5", "claude-sonnet-5",
+                     "gpt-5.6-terra", "gpt-5.6-luna"],
+     "help": "Model for the merge judge's SECOND opinion, served by the same "
+             "endpoint as the first (judge_url, else the dream extractor; the "
+             "CLI shims honour claude-* / gpt-* names per request). Empty = "
+             "the same model in a fresh batch, which is enough to double-check "
+             "a reject but never authorizes a fold: \"auto\" accepts require "
+             "the two opinions to come from DIFFERENT models (2026-09-02 "
+             "panel: claude-fable-5 as the second voter went 6/6 accepts, 8/8 "
+             "rejects on the 63-row ladder). Read on every sweep batch; each "
+             "second opinion is one call to this model."},
     {"path": "memory.deep_dream.link_judge_mode", "group": "Deep dream",
      "label": "Link judge", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "shadow",

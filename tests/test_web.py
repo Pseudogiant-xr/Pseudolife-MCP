@@ -48,6 +48,23 @@ def test_write_config_roundtrip_live(svc):
         assert yaml.safe_load(f)["memory"]["top_k"] == 11
 
 
+def test_write_config_judge_second_model_is_live(svc):
+    # 2026-09-03: the merge judge reads judge_second_model from
+    # service.config on every batch, so the knob must live-mutate (no
+    # restart) and persist; empty clears it back to same-model second
+    # opinions (which never authorize a fold).
+    res = config_io.write_config(
+        svc, {"memory.deep_dream.judge_second_model": "claude-fable-5"})
+    assert "memory.deep_dream.judge_second_model" in res["applied"]
+    assert res["restart_required"] == []
+    assert svc.config.memory.deep_dream.judge_second_model == "claude-fable-5"
+    with open(res["config_path"], encoding="utf-8") as f:
+        assert (yaml.safe_load(f)["memory"]["deep_dream"]["judge_second_model"]
+                == "claude-fable-5")
+    res = config_io.write_config(svc, {"memory.deep_dream.judge_second_model": ""})
+    assert not svc.config.memory.deep_dream.judge_second_model
+
+
 def test_write_config_restart_classification(svc):
     res = config_io.write_config(svc, {"memory.dream.sweep_interval_seconds": 300})
     assert "memory.dream.sweep_interval_seconds" in res["restart_required"]

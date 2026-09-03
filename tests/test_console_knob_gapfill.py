@@ -199,3 +199,17 @@ def test_review_queue_judge_knobs():
     # The one destructive switch ships OFF (review finding, 2026-09-02).
     orphan = _knob("memory.deep_dream.orphan_sweep")
     assert orphan["type"] == "bool" and orphan["default"] is False
+
+
+def test_judge_second_model_knob():
+    # 2026-09-03: the merge judge's second-opinion model was a config-file
+    # field only, so the one flip that makes the two-vote gates a
+    # two-MODEL check (judge_mode "auto" refuses same-model accepts by
+    # design) needed a container edit and a restart. The judge reads it
+    # from service.config on every batch, so it is a live string knob like
+    # extractor_model_override, with the same suggestion list shape.
+    knob = _knob("memory.deep_dream.judge_second_model")
+    assert knob["type"] == "string" and knob["default"] is None
+    assert knob["restart"] is False and knob["group"] == "Deep dream"
+    assert "claude-fable-5" in knob["suggestions"]
+    assert "different" in knob["help"].lower()   # says why it exists
