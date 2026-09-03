@@ -299,7 +299,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the SOURCE entry's labels, never anything the extractor wrote; a `quoted`
   source is low-trust for the two-man rule (parks as a contender, whoever
   relayed it — the label only ever demotes). Ships inert on an unlabelled
-  bank; extraction-ladder paired arms are GATE-PENDING (see the PR).
+  bank. The gates it was held on ran 2026-09-03 and passed:
+  - **Extraction ladder, paired arms** — the pre-#245 tree (`f80105b4`)
+    against master (`f723306e`), same harness, same corpus, same
+    reproducible Qwen3.8 endpoint: verdict-identical on both rungs
+    (floor gold 0.1 / stale 0.1 / 3.4 tok per query;
+    qwen-27b gold 1.0 / stale 0.0 / 13.4 tok per query; every
+    consolidation tally equal). `evals/results/ladder-chip5-paired-verdict.json`,
+    written by `evals/ladder_pair_compare.py` over the four committed
+    `<rung>-chip5-{pre,post}.json` rung files.
+  - **BEAM 100K at the matched 16/16 budget**, paired on all 400 questions
+    against the 2026-09-02 pre-#245 baseline run at `ddf86d42` (the #241
+    merge): the identical-input `rag` control moved 0.0000 (0 rows);
+    hybrid +0.0004 ± 0.0014 (0.6226 → 0.6230);
+    cortex +0.0036 ± 0.0029 (0.2829 → 0.2866) — every delta inside the
+    control's noise, no finding. The 30 rows whose served context differs
+    all sit in chats 13 and 15, the two chats where the write-time
+    heuristic labelled a slot `constraint` (3 of 1099 facts; `quoted` 11 of 1099)
+    and the recall pin then served those facts ahead of the ranking. All
+    three `constraint` fires are false positives on conversational prose
+    (a moderator, a preferred retailer, a month's humidity), so the
+    heuristic is due a tweak before chip 5 publishes a number.
+    `evals/results/beam-100K-qwen-27b-chip5-b16.vs-chip12-b16.paired.json`,
+    written by `evals/beam_cross_run_paired.py` over the two committed runs
+    (`beam-100K-qwen-27b-chip{12,5}-b16.{jsonl,summary.json}`); label fire
+    rates in `beam-100K-qwen-27b-chip5-b16.labels.json`.
+  - `evals/regression_gate.ps1` (the LME arm-1 slice, two replicates)
+    passed after the BEAM run; its artifacts stay gitignored by the gate's
+    own convention, so no number from it is published here.
 - **Recall (TypeRetrieve).** In-scope `constraint` facts are pinned AHEAD of
   the cosine ranking, marked `pinned: true` — exemption from ranking, not
   from relevance: a pin must clear the caller's `min_score` floor, pins
