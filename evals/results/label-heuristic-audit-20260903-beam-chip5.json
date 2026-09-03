@@ -1,0 +1,67 @@
+{
+  "date": "2026-09-03",
+  "generated_by": "evals/label_heuristic_audit.py",
+  "what": "Precision audit of the auto label heuristics (pseudolife_memory/memory/labels.py) against a bank dump; counts and hand verdicts only, no bank text.",
+  "sample": {
+    "current_entries": 0,
+    "current_facts": 1099
+  },
+  "method": "Every fact hit of the AUDITED SUPERSET rule (strong deontic | rule framing | never/always/do-not imperative anywhere | attribute name in {rule,constraint,policy,requirement,invariant,discipline}; value <= 400 chars) was hand-labelled genuine-rule vs descriptive; the verdict file holds the sha1-12 keys of the genuine ones. Each variant is scored as the fraction of ITS hits judged genuine; shipped hits outside the audited set are reported as unaudited, never as genuine.",
+  "distortion_tolerance_variants": {
+    "loose_any_deontic_word_anywhere_no_cap": {
+      "entry_hits": 0,
+      "entry_hit_rate": null,
+      "fact_hits": 22,
+      "note": "rejected: status narratives with one 'must'"
+    },
+    "audited_superset_cap400": {
+      "fact_hits": 16,
+      "judged_genuine": 8,
+      "precision": 0.5,
+      "note": "the hand-labelled set"
+    },
+    "imperative_never_always_do_not_anywhere": {
+      "fact_hits": 9,
+      "judged_genuine": 8,
+      "precision": 0.89,
+      "note": "rejected"
+    },
+    "attribute_name_rule_increment": {
+      "fact_hits": 5,
+      "judged_genuine": 0,
+      "precision": 0.0,
+      "note": "rejected"
+    },
+    "shipped_strong_or_framing_or_opener_cap400": {
+      "fact_hits": 8,
+      "judged_genuine": 8,
+      "precision": 1.0,
+      "fact_hit_rate": 0.0073,
+      "unaudited_hits": 0,
+      "entry_hits": 0,
+      "entry_hit_rate": null,
+      "decomposition": {
+        "strong_deontic_or_framing": {
+          "fact_hits": 0,
+          "judged_genuine": 0,
+          "precision": null
+        },
+        "imperative_opener_increment": {
+          "fact_hits": 8,
+          "judged_genuine": 8,
+          "precision": 1.0
+        }
+      }
+    }
+  },
+  "authority_heuristic": {
+    "gate": "same 400-char rule-sized gate as distortion_tolerance",
+    "entries_gated": {},
+    "entries_ungated": {},
+    "facts": {
+      "None": 1091,
+      "directive": 8
+    }
+  },
+  "blast_radius_note": "No backfill ships: existing rows stay NULL. These counts are what a hypothetical auto-labelling of the dumped bank WOULD pin."
+}

@@ -12,7 +12,9 @@ Inputs (dev-only; the dump is never committed):
 
   --dsn        read-only SELECT of current entries + facts straight from a
                bank (default: the Docker-tier bench server DSN); or
-  --entries / --facts   JSONL dumps ({"text"} / {"entity","attribute","value"})
+  --entries / --facts   JSONL dumps ({"text"} / {"entity","attribute","value"});
+               --facts alone audits a facts-only dump (a BEAM bank dump has
+               no entries table) and reports the entry metrics as null
   --verdicts   the committed hand-verdict file: sha1-12 of
                "entity\\x1fattribute\\x1fvalue" for every fact hit of the
                AUDITED SUPERSET rule that a human judged a genuine rule
@@ -134,6 +136,7 @@ def audit(entries: list[dict], facts: list[dict], genuine: set[str],
                  if not (_P_FRAMING.search(f["value"]) or _P_STRONG.search(f["value"])
                          or _p_imperative(f["value"]))]
     entry_hits = [e for e in entries if infer_distortion_tolerance(e["text"]) == "constraint"]
+    n_entries = len(entries) or None   # facts-only dump: entry rates are null
     unaudited = [f for f in shipped if verdict_key(f) not in audited]
     auth_e = {}
     auth_e_ungated = {}
@@ -161,7 +164,8 @@ def audit(entries: list[dict], facts: list[dict], genuine: set[str],
         "distortion_tolerance_variants": {
             "loose_any_deontic_word_anywhere_no_cap": {
                 "entry_hits": sum(1 for e in entries if _LOOSE.search(e["text"])),
-                "entry_hit_rate": round(sum(1 for e in entries if _LOOSE.search(e["text"])) / len(entries), 4),
+                "entry_hit_rate": (round(sum(1 for e in entries if _LOOSE.search(e["text"])) / n_entries, 4)
+                                   if n_entries else None),
                 "fact_hits": sum(1 for f in facts if _LOOSE.search(f["value"])),
                 "note": "rejected: status narratives with one 'must'"},
             "audited_superset_cap400": {**score(superset, genuine), "note": "the hand-labelled set"},
@@ -172,7 +176,7 @@ def audit(entries: list[dict], facts: list[dict], genuine: set[str],
                 "fact_hit_rate": round(len(shipped) / len(facts), 4),
                 "unaudited_hits": len(unaudited),
                 "entry_hits": len(entry_hits),
-                "entry_hit_rate": round(len(entry_hits) / len(entries), 4),
+                "entry_hit_rate": round(len(entry_hits) / n_entries, 4) if n_entries else None,
                 "decomposition": {
                     "strong_deontic_or_framing": score(strong, genuine),
                     "imperative_opener_increment": score(opener, genuine),
@@ -197,8 +201,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--date", default=_dt.date.today().isoformat())
     ap.add_argument("--force", action="store_true", help="overwrite an existing artifact")
     a = ap.parse_args(argv)
-    if a.entries and a.facts:
-        entries, facts = load_jsonl(a.entries), load_jsonl(a.facts)
+    if a.facts:
+        entries = load_jsonl(a.entries) if a.entries else []
+        facts = load_jsonl(a.facts)
     else:
         entries, facts = dump_bank(a.dsn or DEFAULT_DSN)
     with open(a.verdicts, encoding="utf-8") as fh:

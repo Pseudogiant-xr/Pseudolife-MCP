@@ -35,18 +35,27 @@ Both labels are set at write time and carried through supersession:
 The ``auto`` default is a DETERMINISTIC form heuristic, never a model
 call — the store path stays fast, and a label derived from the writer's
 own text is not steerable by anything but that text. It is conservative
-by construction: measured against the live bank on 2026-09-02 (836
-current entries, 5,267 current facts; every fact hit hand-labelled), the
-shipped rule fires on 86 facts (1.6%) of which 74 read as a genuine rule
-(0.86) — the strong-deontic part (must / shall / forbidden / mandatory /
-rule: framing) 63 of 74, the imperative-opener increment (Never / Always /
-Do not + a bare verb) 11 of 12 — and on 1 of 836 entries. The same words
-used descriptively mid-sentence ("never instantiated", "always falls
-back") scored 0.53 and are excluded, as is the bare "no X" opener and any
-attribute-name signal. Under ``auto`` only ``constraint`` is ever asserted
-— it is the one value with a consumer in this change; the other four are
-accepted explicitly and carried. The numbers live in
-evals/results/label-heuristic-audit-20260902.json.
+by construction: measured against the live bank on 2026-09-03 (869
+current entries, 5,435 current facts; fact hits scored against the
+2026-09-02 hand verdicts, so a hit added since carries no verdict and
+counts as not genuine — the precision is a floor), the shipped rule
+fires on 86 facts (1.6%) of which 73 read as a genuine rule (0.85) — the
+strong-deontic part (must / shall / forbidden / mandatory / rule:
+framing) 62 of 75, the imperative-opener increment (Never / Always / Do
+not + a bare verb) 11 of 11 — and on 1 of 869 entries. On chat-style
+text (the chip-5 BEAM bank, 1,099 facts, every hit hand-judged) it fires
+on 8 values, all 8 standing instructions to the assistant. The same
+words used descriptively mid-sentence ("never instantiated", "always
+falls back") scored 0.53 and are excluded, as is the bare "no X" opener,
+any attribute-name signal, ``must`` as a noun or adjective ("a must-read
+series", "materials are a must" — the 2026-09-03 fix; both chip-5 BEAM
+false positives were this form) and an irregular past form after an
+opener ("never paid off"). Under ``auto`` only ``constraint`` is ever
+asserted — it is the one value with a consumer in this change; the other
+four are accepted explicitly and carried. The numbers live in
+evals/results/label-heuristic-audit-20260903.json and
+label-heuristic-audit-20260903-beam-chip5.json; the 2026-09-02 pre-fix
+audit (label-heuristic-audit-20260902.json) stays beside them.
 """
 from __future__ import annotations
 
@@ -78,8 +87,20 @@ class _Inherit:
 
 INHERIT: Final = _Inherit()
 
+# "must" only as the deontic verb. Preceded by an article ("a must",
+# "the must") it is a noun, and hyphenated ("must-read", "must-have") an
+# adjective; neither is a rule. Measured 2026-09-03: both constraint fires
+# on the chip-5 BEAM bank were this form ("a must-read series", "materials
+# are a must"), and the one live-bank hit of the form ("agent-must-invoke")
+# had been hand-judged not a rule, so the exclusion removes only false
+# positives on both corpora (evals/results/label-heuristic-audit-20260903*.json).
+# Known limit, deliberately not chased: the article check is fixed-width,
+# so "an absolute must" (an adjective between) still reads as the verb;
+# neither corpus carries that form, and a wider check would have to
+# special-case "the daemon must be restarted", the canonical positive.
 _STRONG = re.compile(
-    r"\b(must(?:\s+not|n't)?|shall(?:\s+not)?|forbidden|prohibited|"
+    r"\b((?<!\ba\s)(?<!\ban\s)(?<!\bthe\s)must(?!-)(?:\s+not|n't)?|"
+    r"shall(?:\s+not)?|forbidden|prohibited|"
     r"non-negotiable|no exceptions|under no circumstances|hard rule|"
     r"standing (?:rule|instruction)|mandatory)\b", re.I)
 _FRAMING = re.compile(
@@ -102,6 +123,26 @@ _NOT_BARE = frozenset({
     "actually", "just", "only", "even", "also", "not", "resident",
     "visible", "reached", "gone", "true", "false", "up", "out",
 })
+# Irregular past forms the -ed test cannot see ("never paid off", "always
+# ran the suite"): a report of what happened, not an instruction. Only
+# forms that are never a bare imperative are listed; put / read / run /
+# set / cut / hit / let stay bare because "Never put ..." is a rule, and
+# so does found ("Never found a company without a co-founder").
+# Measured 2026-09-03: one live-bank opener hit ("ran", hand-judged not a
+# rule) and one chip-5 BEAM value ("never paid off any personal loans").
+_IRREGULAR_PAST = frozenset({
+    "ate", "arose", "awoke", "became", "began", "bought", "broke",
+    "brought", "built", "came", "caught", "chose", "dealt", "did", "done",
+    "drank", "drew", "drove", "fed", "fell", "felt", "flew", "forgave",
+    "forgot", "fought", "froze", "gave", "got", "gotten", "grew",
+    "held", "kept", "knew", "laid", "led", "left", "lost", "made", "meant",
+    "met", "mistook", "overcame", "paid", "ran", "rode", "rose", "said",
+    "sang", "sank", "sat", "shook", "shrank", "slept", "slid", "sold",
+    "sought", "spent", "spoke", "stole", "stood", "struck", "stuck",
+    "swam", "taught", "threw", "thought", "told", "took", "tore",
+    "understood", "undertook", "went", "withdrew", "woke", "won", "wore",
+    "wrote",
+})
 _FIRST_PERSON_HABIT = re.compile(
     r"\bi (?:always|never|usually|prefer|like|tend to)\b", re.I)
 # Reported speech: an explicit reporting construction whose subject is a
@@ -123,7 +164,7 @@ _ADDRESSED = re.compile(
 
 def _bare_verb(word: str) -> bool:
     w = word.lower()
-    if w in _NOT_BARE:
+    if w in _NOT_BARE or w in _IRREGULAR_PAST:
         return False
     if w.endswith(("ed", "en", "ing", "ly")):
         return False
