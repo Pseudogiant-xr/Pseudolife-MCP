@@ -2486,7 +2486,7 @@ shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
 (`decided_by='dream-judge'`, pair dismissed). A row whose first verdict sat
 below that gate gets a **second opinion** on a later sweep
-(`judge_second_opinion`, optionally `judge_second_model`) — a fresh batch,
+(`judge_second_opinion`, optionally `judge_second_model` — both Console knobs) — a fresh batch,
 so an independent sample: two rejects at mean >= `judge_reject_min_confidence_2`
 apply, a disagreement stamps `split` on the note and leaves the row for a
 human. `judge_mode: auto` goes one step further and folds a pair when two

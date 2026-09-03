@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-03 — the merge judge's second model is a Console knob)
+- **Making the merge judge's second opinion a genuinely independent vote
+  needed a container edit and a daemon restart.** `judge_mode` `"auto"`
+  refuses to fold on two same-model accepts by design, so the only flip
+  that arms the two-vote accept gate is `memory.deep_dream.judge_second_model`
+  — and it was a config-file field only (`POST /api/config` rejected it as
+  an unknown knob). It is now a live string knob in the Console's Deep
+  dream group ("Merge judge second model", suggestions `claude-fable-5`,
+  `claude-opus-5`, `claude-sonnet-5`, `gpt-5.6-terra`, `gpt-5.6-luna`),
+  read on every sweep batch like the other judge knobs; empty keeps the
+  same-model second opinion. Served by the same endpoint as the first
+  opinion (`judge_url`, else the dream extractor), whose CLI shims honour
+  `claude-*` / `gpt-*` names per request. No behaviour change until set.
+
 ### Changed (2026-09-03 — forgets retire instead of delete; verdicts outlive their rows; schema v37)
 - **A forgotten lesson or world fact was gone for good — the 2026-09-02
   review-queue triage hard-deleted eleven lessons, three of which carried

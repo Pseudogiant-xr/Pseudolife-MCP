@@ -534,7 +534,9 @@ class DeepDreamConfig:
     # enough to double-check a reject but not to authorize a fold: "auto"
     # accepts require a DIFFERENT model here (with claude-fable-5 as the
     # second model the same 63 rows gave 6/6 accepts, 8/8 rejects).
-    judge_second_model: str = ""         # empty = same endpoint, fresh batch
+    # str | None: the Console setter clears a string knob to None (config_io
+    # _coerce); every reader tests truthiness, so "" and None mean the same.
+    judge_second_model: str | None = ""  # empty = same endpoint, fresh batch
     judge_reject_min_confidence_2: float = 0.7   # two-vote mean gate
     judge_accept_min_confidence: float = 0.6     # two-vote mean gate ("auto" only)
     # Link judge over pending edge_proposals. Edges are reversible
