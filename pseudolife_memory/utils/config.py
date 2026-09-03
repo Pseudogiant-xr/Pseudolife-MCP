@@ -803,6 +803,44 @@ class RecallConfig:
     hub_percentile: float = 95.0
     hub_floor: int = 8
     expand_budget: int = 0   # per-hop expansion cap; 0 = unlimited
+    # Search fan-out caps. Measured 2026-09-04, `evals/recall_fanout_bench.py`
+    # on a restored copy of the live bank (1,296 entries, 5,504 entities,
+    # flat preset; 20 relational questions, CPU, top_k=6, hops=3 —
+    # `evals/results/recall-fanout-cap-20260904.json`): the uncapped walk
+    # issued a mean of 89.15 `service.search` calls per recall (max 205)
+    # and took 25.25 s (max 57.67 s), against 0.26 s for a plain search on
+    # the same questions. Two live recall calls timed out at the MCP layer
+    # that morning. The cause is structural: one re-query per newly
+    # discovered entity per hop on a star-shaped graph (degree p50 1 /
+    # p95 5 / max 132), so one hub's ring prices the whole call.
+    #
+    # Per hop, re-query only the top-N newly discovered entities (seed-hit
+    # mentions first, then lowest degree); the rest are still returned as
+    # entities with their facts. 6 is above that degree p95 of 5, so a
+    # typical spoke's whole neighborhood is still re-queried and only hub
+    # rings are cut. At 6 the same 20 questions cost a mean of 12.40
+    # searches / 4.166 s with no expected target lost. 0 = unlimited
+    # (pre-2026-09-04 behavior).
+    max_searches_per_hop: int = 6
+    # Hard ceiling per recall call, seed search included; on reaching it
+    # the walk stops and the response carries `truncated: true` +
+    # `searches_issued`. A full 3-hop walk under the per-hop cap above
+    # costs at most 1 + 6 + 6 + 6 = 19, so this is a backstop for deeper
+    # `hops` and for a raised per-hop cap, not the binding constraint —
+    # it did not fire on any of the 20 questions. 0 = no ceiling.
+    max_total_searches: int = 20
+    # Wall-clock fail-soft: past this the walk returns what it has with
+    # `truncated: true` instead of running on. Above the 7.51 s worst
+    # capped call measured above and well inside the MCP client timeout
+    # the two live calls hit. 0 = no budget.
+    time_budget_seconds: float = 20.0
+    # `part-of` is this bank's filler relation — 19% of live edges, and
+    # 1,046 of the 1,763 entities the 2026-09-04 run's recalls added
+    # arrived through `part-of` alone. When True, such an entity is still
+    # returned with its facts but never spends a search. Default False:
+    # the knob exists so the eval can measure what dropping those
+    # re-queries costs before any default changes.
+    skip_part_of_expansion: bool = False
 
 
 @dataclass

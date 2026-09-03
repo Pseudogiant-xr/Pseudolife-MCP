@@ -1808,7 +1808,10 @@ def memory_recall(
     (currently 5). A fact carrying ``re_verify`` stands on a memory that
     has since been corrected — the value still stands, but check it before
     acting. A seed entity's ``constraint`` facts come first, marked
-    ``pinned``. Details: docs/guide/retrieval.md.
+    ``pinned``. ``truncated: true`` (with ``searches_issued``) means a
+    search ceiling or time budget stopped the walk early, so the
+    neighborhood is partial — narrow the question or lower ``hops``.
+    Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
     entity_hop = out.get("entity_hop") or {}
@@ -1828,7 +1831,12 @@ def memory_recall(
     out["texts"] = _cap_recall_texts(
         out.get("texts", []), seed_text_count, top_k)
     # Internal bookkeeping only — stale once entities/edges are capped
-    # above, and not part of the documented return shape.
+    # above, and not part of the documented return shape. ``truncated`` /
+    # ``searches_issued`` are deliberately NOT popped: the output caps
+    # below make a partial walk indistinguishable from a complete one by
+    # size, so the flag is the only signal the caller has. The service
+    # sets them only when a ceiling actually bound, which keeps an
+    # untruncated response byte-identical to the pre-cap one.
     out.pop("entity_hop", None)
     out.pop("edge_hop", None)
     out.pop("seed_text_count", None)

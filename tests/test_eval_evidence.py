@@ -2885,3 +2885,134 @@ CLAIMS.append(Claim(
         "A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["bad"]),
     stated=0, places=0))
 
+
+
+# ── the recall fan-out caps (2026-09-04) ─────────────────────────────────
+# CPU-only paired run on a restored copy of the live bank: the same 20
+# relational questions with the search caps off and on. The claim that
+# matters is the honesty one — no expected target the uncapped walk found
+# was lost — so `targets_lost` is pinned as a count beside the speedups.
+FANOUT_CAP = RESULTS + "recall-fanout-cap-20260904.json"
+_FANOUT_SEARCHES = "mean\n    89.15 → 12.40 and max 205 → 19"
+_FANOUT_WALL = "recall wall mean 25.25 s → 4.166 s and\n    max 57.67 s → 7.51 s"
+_FANOUT_CHARS = "served characters mean 178,110 → 77,546"
+_FANOUT_LOSS = "20/20 in both arms with **no target lost**"
+for _cid, _needle, _val, _stated, _places in [
+    ("fanout-searches-before", _FANOUT_SEARCHES,
+     lambda d: d["before"]["summary"]["searches_issued"]["mean"], 89.15, 2),
+    ("fanout-searches-after", _FANOUT_SEARCHES,
+     lambda d: d["after"]["summary"]["searches_issued"]["mean"], 12.40, 2),
+    ("fanout-searches-max-before", _FANOUT_SEARCHES,
+     lambda d: d["before"]["summary"]["searches_issued"]["max"], 205, 0),
+    ("fanout-searches-max-after", _FANOUT_SEARCHES,
+     lambda d: d["after"]["summary"]["searches_issued"]["max"], 19, 0),
+    ("fanout-wall-before", _FANOUT_WALL,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["mean"], 25.25, 3),
+    ("fanout-wall-after", _FANOUT_WALL,
+     lambda d: d["after"]["summary"]["recall_wall_s"]["mean"], 4.166, 3),
+    ("fanout-wall-max-before", _FANOUT_WALL,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["max"], 57.67, 2),
+    ("fanout-wall-max-after", _FANOUT_WALL,
+     lambda d: d["after"]["summary"]["recall_wall_s"]["max"], 7.51, 2),
+    ("fanout-chars-before", _FANOUT_CHARS,
+     lambda d: d["before"]["summary"]["recall_served_chars"]["mean"],
+     178110.3, 1),
+    ("fanout-chars-after", _FANOUT_CHARS,
+     lambda d: d["after"]["summary"]["recall_served_chars"]["mean"],
+     77546.4, 1),
+    ("fanout-hits-before", _FANOUT_LOSS,
+     lambda d: d["before"]["summary"]["recall_expected_hits"], 20, 0),
+    ("fanout-hits-after", _FANOUT_LOSS,
+     lambda d: d["after"]["summary"]["recall_expected_hits"], 20, 0),
+    ("fanout-targets-lost", _FANOUT_LOSS,
+     lambda d: len(d["targets_lost"]), 0, 0),
+    ("fanout-n", "20 relational questions — the twelve",
+     lambda d: d["n_questions"], 20, 0),
+    ("fanout-texts-before", "2,116 texts → 558",
+     lambda d: d["structural_identity"]["texts_total_before"], 2116, 0),
+    ("fanout-texts-after", "2,116 texts → 558",
+     lambda d: d["structural_identity"]["texts_total_after"], 558, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(FANOUT_CAP,),
+        value=_val, stated=_stated, places=_places))
+
+# The same run's evals/README table, plus the structural-identity row that
+# says WHY no target was lost: the caps bound searches, not expansion.
+_FANOUT_README_SEARCHES = "searches issued  mean     89.15      12.40"
+_FANOUT_README_WALL = "recall wall (s)  mean     25.25        4.166"
+_FANOUT_README_TEXTS = "2,116 texts before, 558 after"
+_FANOUT_README_STRUCT = ("identical on all 20 questions"
+                         "\n  (`structural_identity`)")
+for _cid, _needle, _val, _stated, _places in [
+    ("fanout-readme-searches-before", _FANOUT_README_SEARCHES,
+     lambda d: d["before"]["summary"]["searches_issued"]["mean"], 89.15, 2),
+    ("fanout-readme-searches-after", _FANOUT_README_SEARCHES,
+     lambda d: d["after"]["summary"]["searches_issued"]["mean"], 12.40, 2),
+    ("fanout-readme-wall-before", _FANOUT_README_WALL,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["mean"], 25.25, 3),
+    ("fanout-readme-wall-after", _FANOUT_README_WALL,
+     lambda d: d["after"]["summary"]["recall_wall_s"]["mean"], 4.166, 3),
+    ("fanout-readme-texts-before", _FANOUT_README_TEXTS,
+     lambda d: d["structural_identity"]["texts_total_before"], 2116, 0),
+    ("fanout-readme-texts-after", _FANOUT_README_TEXTS,
+     lambda d: d["structural_identity"]["texts_total_after"], 558, 0),
+    ("fanout-readme-entities-identical", _FANOUT_README_STRUCT,
+     lambda d: d["structural_identity"][
+         "questions_with_different_entity_count"], 0, 0),
+    ("fanout-readme-edges-identical", _FANOUT_README_STRUCT,
+     lambda d: d["structural_identity"][
+         "questions_with_different_edge_count"], 0, 0),
+    ("fanout-readme-part-of-arrivals", "1,046 of the 1,763 added",
+     lambda d: d["after"]["summary"]["arrivals_total"]["via_part_of"],
+     1046, 0),
+    ("fanout-readme-added-arrivals", "1,046 of the 1,763 added",
+     lambda d: d["after"]["summary"]["arrivals_total"]["added"], 1763, 0),
+    ("fanout-readme-search-hits", "found 18 of the 20 targets",
+     lambda d: d["after"]["summary"]["search_expected_hits"], 18, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(FANOUT_CAP,),
+        value=_val, stated=_stated, places=_places))
+
+# The retrieval guide restates the same run's headline pair; a restatement
+# is a claim like any other.
+_FANOUT_GUIDE_BEFORE = "mean of 89.15 searches and 25.25 s per call (max 205 and\n57.67 s)"
+_FANOUT_GUIDE_AFTER = "call to 12.40 searches and 4.166 s"
+for _cid, _needle, _val, _stated, _places in [
+    ("fanout-guide-searches-before", _FANOUT_GUIDE_BEFORE,
+     lambda d: d["before"]["summary"]["searches_issued"]["mean"], 89.15, 2),
+    ("fanout-guide-wall-before", _FANOUT_GUIDE_BEFORE,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["mean"], 25.25, 3),
+    ("fanout-guide-searches-max-before", _FANOUT_GUIDE_BEFORE,
+     lambda d: d["before"]["summary"]["searches_issued"]["max"], 205, 0),
+    ("fanout-guide-wall-max-before", _FANOUT_GUIDE_BEFORE,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["max"], 57.67, 2),
+    ("fanout-guide-searches-after", _FANOUT_GUIDE_AFTER,
+     lambda d: d["after"]["summary"]["searches_issued"]["mean"], 12.40, 2),
+    ("fanout-guide-wall-after", _FANOUT_GUIDE_AFTER,
+     lambda d: d["after"]["summary"]["recall_wall_s"]["mean"], 4.166, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=RETRIEVAL_GUIDE, needle=_needle, artifacts=(FANOUT_CAP,),
+        value=_val, stated=_stated, places=_places))
+
+# The hit CHANNEL — the power of the targets_lost check. Only a target
+# carried by `texts` could be lost (the entity sets are identical before
+# and after by construction), so the entity/texts split is what says
+# whether a clean `targets_lost` means anything.
+_FANOUT_CHANNELS_CH = "**3 of the 20** arrived on `texts` (17 on `entity`)"
+_FANOUT_CHANNELS_EV = "17 targets arrived on `entity` (where the check has no"
+for _cid, _doc, _needle, _val, _stated in [
+    ("fanout-channel-texts-changelog", CHANGELOG, _FANOUT_CHANNELS_CH,
+     lambda d: d["after"]["summary"]["hit_channels"]["texts"], 3),
+    ("fanout-channel-entity-changelog", CHANGELOG, _FANOUT_CHANNELS_CH,
+     lambda d: d["after"]["summary"]["hit_channels"]["entity"], 17),
+    ("fanout-channel-texts-evals", EVALS, _FANOUT_CHANNELS_EV,
+     lambda d: d["before"]["summary"]["hit_channels"]["texts"], 3),
+    ("fanout-channel-entity-evals", EVALS, _FANOUT_CHANNELS_EV,
+     lambda d: d["before"]["summary"]["hit_channels"]["entity"], 17),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(FANOUT_CAP,),
+        value=_val, stated=_stated, places=0))

@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-04 — `memory_recall` costs a bounded number of searches)
+- **A 3-hop `memory_recall` could issue hundreds of searches and take over a
+  minute**, because the walk re-queried every newly discovered entity on every
+  hop and this graph is a star (5,504 entities, degree p50 1 / p95 5 / max
+  132) — so one hub's ring set the price of the whole call. Two live recall
+  calls timed out at the MCP layer on the morning of 2026-09-04. The walk now
+  spends a bounded search budget:
+  - `memory.recall.max_searches_per_hop` (default 6, above the graph's degree
+    p95 of 5): per hop, re-query only the top N newly discovered entities —
+    ranked by mentions in the seed search hits, then by lowest degree, then by
+    name. The rest are still returned as entities with their facts; only the
+    extra search is dropped.
+  - `memory.recall.max_total_searches` (default 20) and
+    `memory.recall.time_budget_seconds` (default 20.0): hard ceilings over the
+    whole call, seed search included. Reaching either stops the walk and the
+    response carries `truncated: true` and `searches_issued: N` — it never
+    raises, so a slow neighborhood degrades instead of timing out. Both fields
+    are served only when a ceiling actually bound, so an untruncated response
+    is byte-identical to the pre-cap one (pinned in `tests/test_recall.py`
+    against the response captured verbatim at 7595ce6f).
+  - `memory.recall.skip_part_of_expansion` (default False, eval-only): an
+    entity reached only through `part-of` edges is returned with its facts but
+    never spends a search. Default-off — the knob exists to measure what
+    dropping those re-queries costs before any default changes.
+
+  All four are in the Console's Recall group. Graph expansion is deliberately
+  untouched (it is already bounded by the hub gate and `max_entities`), so the
+  caps cost supporting `texts` and nothing structural.
+  - Measured with `evals/recall_fanout_bench.py` on a restored copy of the
+    live bank (1,296 entries; 20 relational questions — the twelve the
+    2026-09-04 graph-ablation probe ran plus eight new; CPU only; the BEFORE
+    arm on a `git archive` export of the pre-change tree, so the artifact
+    records a commit per arm;
+    `evals/results/recall-fanout-cap-20260904.json`): searches per call mean
+    89.15 → 12.40 and max 205 → 19; recall wall mean 25.25 s → 4.166 s and
+    max 57.67 s → 7.51 s; served characters mean 178,110 → 77,546. Expected
+    targets found 20/20 in both arms with **no target lost**, and entity, edge
+    and iteration counts identical on all 20 questions — the entire saving is
+    supporting text (2,116 texts → 558), which the MCP layer already caps at 6.
+    Because the entity sets are identical by construction, only a target
+    carried by `texts` could have been lost, and the artifact records how many
+    were: **3 of the 20** arrived on `texts` (17 on `entity`), so the check had
+    power on three questions and all three survived.
+    Honest limit: the per-hop cap alone bounds a 3-hop walk at 19 searches, so
+    the total ceiling and the time budget never fired in this run and are
+    pinned by unit tests rather than by it.
+
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 
 ### Fixed (2026-09-04 — the Console's digest length default matches the daemon's)

@@ -1332,6 +1332,80 @@ loop+graph (A)        1.000        1.0     1.0     1.0     3.0    137.4    69.1
 
 ---
 
+# Recall fan-out cap (`recall_fanout_bench.py`)
+
+Does bounding `memory_recall`'s search fan-out cost it any answers? The walk
+as shipped issued one seed search plus one re-query per newly discovered
+entity per hop, which on a star-shaped graph is the whole cost of the call.
+`memory.recall.max_searches_per_hop` / `max_total_searches` /
+`time_budget_seconds` bound it; this harness runs the same 20 relational
+questions with the caps off and on, against a **restored copy** of the live
+bank (never the live bank, never the shared bench DB — `guard_dsn` refuses
+both), and records per question: searches issued, wall time, served
+characters, whether the expected entity surfaced, and how the added entities
+arrived (hub / `part-of` / domain relation).
+
+```
+# one arm per invocation
+python evals/recall_fanout_bench.py --arm before --dsn postgresql://.../pseudolife_memory_replay_YYYYMMDD --out before.json
+python evals/recall_fanout_bench.py --arm after  --dsn postgresql://.../pseudolife_memory_replay_YYYYMMDD --out after.json
+# pair them into the committed artifact
+python evals/recall_fanout_bench.py --combine before.json after.json --out evals/results/recall-fanout-cap-20260904.json
+```
+
+Question set: the twelve relational questions the 2026-09-04 graph-ablation
+probe ran (`evals/graph_ablation.py`, landing separately) plus eight written
+for this bench, n=20. Every `expect` string also
+occurs in the tracked repo tree, so the artifact carries no bank-private
+names, and no query or entry text is emitted.
+
+## Findings — 2026-09-04 (`recall-fanout-cap-20260904.json`)
+
+Restored copy of the live bank (1,296 entries, 5,504 entities, flat preset),
+CPU only, `top_k=6`, `hops=3`. BEFORE is the pre-change package (the knobs do
+not exist in it at all); AFTER is the shipped defaults 6 / 20 / 20.0 s.
+
+```
+metric (per call)        before      after     ratio
+searches issued  mean     89.15      12.40      7.2x fewer
+                 median   58         13
+                 max     205         19
+recall wall (s)  mean     25.25        4.166     6.1x faster
+                 median   16.38        4.49
+                 max      57.67        7.51
+served chars     mean  178,110     77,546      2.3x smaller
+expected targets found    20/20      20/20
+```
+
+- **Nothing was lost, and the check could have failed.** `targets_lost` is
+  empty: every expected target the uncapped walk surfaced, the capped walk
+  surfaced too. Read that with the mechanism in mind — the caps bound the
+  SEARCH budget and deliberately leave graph expansion alone, so the entity,
+  edge and iteration counts are identical on all 20 questions
+  (`structural_identity`) and the only channel that could lose a target is
+  `texts`. `hit_channels` says how much of the question set actually rode
+  that channel: 17 targets arrived on `entity` (where the check has no
+  power) and **3 on `texts`** (where it does). Those three survived the cut
+  — the finding is about three questions, not twenty.
+- **The whole saving is supporting text.** 2,116 texts before, 558 after. The
+  MCP layer caps `texts` at 6 anyway, so the character figure above is the
+  service-level payload, not what a model sees — the honest headline is the
+  wall time and the search count.
+- **The per-hop cap does the work; the ceiling is a backstop.** With
+  `max_searches_per_hop=6` and `hops=3` a full walk costs at most
+  1 + 6 + 6 + 6 = 19 searches, so `max_total_searches=20` never fired on these
+  questions (`truncated_calls: 0` in both arms) and neither did the 20 s
+  budget. The ceiling and the budget are pinned by unit tests
+  (`tests/test_recall.py`), not by this run.
+- **Search is still 16x cheaper.** Plain `memory_search` on the same questions
+  is 0.26 s and 7,789 chars per call and found 18 of the 20 targets; recall
+  buys the last two, and now costs 4.2 s instead of 25.3 s to do it.
+- The eval-only `skip_part_of_expansion` knob is not exercised in this run;
+  `arrivals_total` records the shape it targets (1,046 of the 1,763 added
+  entities arrived via `part-of` alone, identically in both arms).
+
+---
+
 # Relation-extraction benchmark (`relation_extraction_bench.py`)
 
 Dev-only. Answers the Phase-2 question the fact-ladder never did: **how good is

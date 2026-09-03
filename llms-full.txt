@@ -1958,6 +1958,30 @@ deep-hop entities still present in the result
 graph than the live audit's, so the two byte counts aren't comparable
 to each other, only each to its own before/after.
 
+**Search fan-out caps (2026-09-04).** The output caps above bound what
+comes *back*; these bound what the walk *spends*. Each hop re-queried every
+newly discovered entity by name, so on a star-shaped graph one hub's ring
+set the price of the whole call — measured on a restored copy of the live
+bank at a mean of 89.15 searches and 25.25 s per call (max 205 and
+57.67 s), enough that two live calls timed out at the MCP layer that
+morning. Three knobs bound it, all in the Console's Recall group:
+`memory.recall.max_searches_per_hop` (default 6) re-queries only the top N
+newly discovered entities per hop — ranked by mentions in the seed hits,
+then by lowest degree — while still returning the rest as entities with
+their facts; `max_total_searches` (default 20) and `time_budget_seconds`
+(default 20.0) are hard ceilings over the whole call including the seed
+search. Hitting either stops the walk and adds `truncated: true` and
+`searches_issued: N` to the response instead of raising, and those two
+fields are absent when neither bound, so a complete walk's response is
+unchanged. Graph expansion is deliberately untouched (the hub gate and
+`max_entities` already bound it): on the paired 20-question run
+(`evals/recall_fanout_bench.py`,
+`evals/results/recall-fanout-cap-20260904.json`) the caps took the mean
+call to 12.40 searches and 4.166 s with the entity, edge and iteration
+counts identical on every question and no expected target lost. A fourth
+knob, `skip_part_of_expansion`, is eval-only and default-off: it drops the
+re-query for entities reached only through `part-of` edges.
+
 **`low_confidence: true`** means no seed entity matched the query — the
 graph had no starting point. In that case fall back to `memory_search`.
 
