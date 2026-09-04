@@ -63,7 +63,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--extractor` (default `qwen-27b`, plus a no-LLM `floor` rung for CPU
   plumbing checks) and `--limit`; the run probes its endpoint before
   anything is ingested and is resumable per question, because it shares
-  the GPU. No numbers yet: the GPU run has not happened.
+  the GPU. It has since run — see the `Measured` entry below, which
+  supersedes this bullet's "no numbers yet".
+- **Measured (2026-09-05) — the fact spine keeps the current value at a
+  fraction of the characters, and the run still cannot test the premise.**
+  On the 23 derived LongMemEval questions with `qwen-27b` extraction
+  (`epistemic-bench-lme-qwen27b-20260905`), the cortex arm serves the
+  current value on 21 of 23 questions — `update_following` 0.913 against
+  rag's and hybrid's 1.000 — while serving 410.0 characters against rag's
+  5253.3, i.e. 7.8% of the width. It served a superseded value with no
+  replacement present once (`stale_serving` 0.043, the only such event
+  the bench has recorded on any source); rag and hybrid never did, because
+  they carry BOTH values on 22 of 23 questions (hybrid 23 of 23) out of a
+  bank holding 23.2 turns against `rag_top_k` 6. `retraction_handling` is
+  0.348 for rag and hybrid on correction phrasing that never announces
+  itself as one (the cortex 0.000 is the entry-channel construction, not
+  a result). `staleness_marking` and `abstention_support` report `n: 0`.
+  **So this validates the plumbing and the width/coverage trade, not the
+  premise**: the two dimensions where the spine should differentiate are
+  ungradable here, and `stale_serving` has now failed to be testable on
+  both sources. The preregistered verdict from the synthetic cell — the
+  premise is not supported — stands; testing it needs a purpose-built
+  corpus with dated TTL updates, never-stated slots, and a haystack big
+  enough that retrieval must choose between the old turn and the new one.
+  Spec amendment A6; table and read in `evals/README.md`.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

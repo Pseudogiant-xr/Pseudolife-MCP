@@ -1077,6 +1077,76 @@ context-not-answers framing, the perfect-extraction ceiling, the cascade
 proxy, the structural floor on D3/D5 for raw-turn arms, and the
 payload-only stale flag.
 
+#### LongMemEval source (2026-09-05)
+
+`epistemic-bench-lme-qwen27b-20260905` — the first run on a bank an
+extractor actually built. The 23 derived knowledge-update questions, one
+fresh bank per question through `longmemeval_bench.ingest_and_dream`,
+extracted by `qwen-27b` (826.4s of extraction across the slice),
+`--contexts-only`, `stale_policy` at its `annotate` default:
+
+```bash
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --contexts-only --extractor qwen-27b --tag lme-qwen27b-20260905
+```
+
+| dimension | rag | cortex | hybrid | cascade | nomem | n |
+|-----------|-----|--------|--------|---------|-------|---|
+| `update_following` ↑ | 1.000 | 0.913 | 1.000 | 0.913 | 0.000 | 23 |
+| `stale_serving` ↓ | 0.000 | 0.043 | 0.000 | 0.043 | 0.000 | 23 |
+| `staleness_marking` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+| `abstention_support` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+| `retraction_handling` ↑ | 0.348 | 0.000 | 0.348 | 0.000 | 0.000 | 23 |
+| `answer_coverage` | 1.000 | 0.913 | 1.000 | 0.913 | 0.000 | 23 |
+| context chars (mean) | 5253.3 | 410.0 | 5697.3 | 410.0 | 0.0 | |
+
+The two `n/a` rows report `n: 0` and a NULL rate in the artifact, never a
+0.0 — a reader would take a 0.0 for a failing arm. `staleness_marking` is
+ungradable because LongMemEval carries no `freshness_class` and no TTL, so
+no slot can be past 2×TTL. `abstention_support` is ungradable because the
+knowledge-update type contains no question whose answer was never stated.
+
+**The read: this run validates the plumbing and the width/coverage trade,
+not the premise.**
+
+- **rag saturates, so D1 and D2 carry no signal for the raw-turn arms
+  here.** Each bank holds 23.2 turns on average against `rag_top_k` 6, so
+  a quarter of the entire bank is served on every question. The rag
+  context carries the current value on 23 of 23, and carries *both* the
+  current value and the superseded one on 22 of 23 (hybrid: 23 of 23) —
+  so the superseded-only case D2 exists to catch happens zero times. Same
+  failure as the synthetic source, for the same reason, now on a real
+  haystack: on an oracle slice the defect cannot arise.
+- **The spine serves the current value in 21 of 23 questions at 7.8% of
+  rag's characters** — 410.0 against 5253.3 — and served a superseded
+  value with no replacement present once (1 of 23). That trade is the one
+  thing this run measures cleanly, and because the bank was built the real
+  way it is a claim about the deployed pipeline, retrieval *and*
+  extraction together, not about the representation's ceiling.
+- **The two dimensions where the spine is expected to differentiate are
+  not gradable on this source at all.** D3 and D4 are the marker
+  dimensions — the ones the synthetic cell showed the spine wins
+  structurally — and both report `n: 0` here. Whatever epistemic
+  advantage the spine has, LongMemEval cannot see it.
+- **D5's cortex 0.000 is the construction, not a result.** The slot is
+  synthetic, so only the entry channel grades and the cortex arm serves no
+  entries. rag/hybrid's 0.348 *is* a real measurement of that entry
+  mechanism — contradiction detection firing on correction phrasing that
+  never announces itself as a correction, where the synthetic source's
+  explicit corrections scored 0.600 / 0.400. The two are reported apart
+  and never pooled (`caveats.correction_is_implicit`).
+
+**The premise test therefore still rests on the synthetic source, where
+E2 failed.** Neither source has produced a corpus on which `stale_serving`
+can fire: the synthetic generator hands the agent both values, and the LME
+oracle slice hands it both values out of a 23-turn bank. Testing the
+premise needs a corpus neither of them is — dated updates carrying TTL
+semantics so D3 grades instead of reporting `n: 0`, never-stated slots so
+D4 does, and for D2 a haystack large enough that retrieval must *choose*
+between the old turn and the new one rather than serving both. That is a
+purpose-built corpus, not another slice of an existing benchmark. The
+synthetic verdict above stands unchanged.
+
 # Review-queue judge ladders (`judge_ladder.py`, `queue_judge_ladder.py`)
 
 Two harnesses answer "can a judge model reproduce the ratified human panel"

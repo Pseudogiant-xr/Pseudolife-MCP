@@ -463,3 +463,56 @@ That is a real gap in the serving path, not an artefact of the metric.
   `meta` recording the extractor and its URL, the derivation file and the
   git rev it was derived at, the dataset, the counts, the serving widths
   against per-question bank size, and `longmemeval_bench.bench_env_knobs()`.
+
+- **A6 (2026-09-05) — the LongMemEval slice ran, and it does not settle
+  the premise.** `epistemic-bench-lme-qwen27b-20260905`: all 23 derived
+  questions, `--contexts-only`, `qwen-27b` extraction (826.4s), one fresh
+  bank per question. The table is in `evals/README.md`; here is what it
+  does to sections 5 and 6, expectation by expectation. Section 8 is not
+  edited — the synthetic verdict stands as written.
+
+  - **E1 held, and again uselessly.** `hybrid` 1.000 ≥ `cortex` 0.913 and
+    `rag` 1.000 > `nomem` 0.000, so the ordering is not falsified — but
+    `rag` = `hybrid` = 1.000 makes the `hybrid ≥ rag` half a tie, and the
+    only arm below 1.000 is the one that had to pass through an
+    extractor. E1's falsification condition ("rag matches or beats
+    cortex") is *met on the numbers* and is not being read as
+    falsification, because on this slice rag is saturated rather than
+    accurate: each bank holds 23.2 turns and `rag_top_k` is 6, so a
+    quarter of the whole bank is served on every question. A saturated
+    control cannot falsify anything, which is itself the finding.
+  - **E2 — no signal, again, and for the same mechanical reason.**
+    `stale_serving` is 0.000 for rag and hybrid; the rag context carries
+    the current value *and* a superseded one on 22 of 23 questions
+    (hybrid 23 of 23), so the defect has no opportunity to occur. Section
+    6's falsification criterion 1 needs rag's defect rate to be within
+    noise of cortex's *when the defect is possible*; here it is not
+    possible on either source. `cortex` is 0.043 — one question of 23
+    where a superseded value reached the context with no replacement.
+    That is the only D2 event the bench has ever recorded, and it is on
+    the spine's side of the ledger, not rag's.
+  - **E3 and E4 — not gradable.** Both report `n: 0` (section 4). The two
+    marker dimensions the synthetic cell used to separate the arms cannot
+    be scored on LongMemEval at all, so this source cannot contribute to
+    E6's "at least one of E3/E5" clause through E3.
+  - **E5 held, on the entry channel only.** `rag` = `hybrid` = 0.348,
+    non-zero as predicted, so contradiction detection fires on natural
+    correction phrasing that never announces itself as a correction — the
+    synthetic source's explicit corrections scored 0.600 / 0.400 and the
+    two are never pooled. `cortex` 0.000 is the construction described
+    above, not a result, and must not be read as an E5 failure.
+  - **E6 — unchanged.** The premise is supported only if E2 holds and a
+    marker dimension holds. E2 has now failed to be testable on both
+    sources, and on this one no marker dimension is gradable. This run
+    therefore validates the plumbing (the real ingest-and-dream path
+    scores end to end) and the width/coverage trade (the current value in
+    21 of 23 questions at 7.8% of rag's characters — 410.0 against
+    5253.3), and says nothing about the premise.
+
+  **What a corpus that could test the premise would need**, stated so the
+  next attempt does not repeat this one: dated updates carrying TTL
+  semantics, so D3 grades instead of reporting `n: 0`; never-stated slots,
+  so D4 grades; and for D2 a haystack large enough that retrieval must
+  choose between the old turn and the new one instead of serving both.
+  No existing benchmark slice has all three — this is a purpose-built
+  corpus, and building it is the open item.
