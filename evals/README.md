@@ -1734,7 +1734,12 @@ local judge in every case. The oracle rows are fit on the very questions
 they score, so they are BOUNDS on what a router could reach, never shipped
 results. The realizable rows are 5-fold cross-validated by question — a
 prediction always comes from a model that never saw that question — but
-they still inherit the source runs' judge and era.
+they still inherit the source runs' judge and era. The "best" realizable
+router is the maximum over the sixteen cross-validated configurations the
+script tries (two feature sets, two models, two label policies, plus the
+type-prediction and two-stage variants), so its number carries the usual
+select-the-best optimism; the verdict does not depend on it, because that
+maximum still fails the preregistered bar on both benchmarks.
 
 ```bash
 python evals/router_offline.py --out evals/results/router-offline-20260904.json
