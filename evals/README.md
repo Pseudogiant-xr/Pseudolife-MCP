@@ -1143,7 +1143,8 @@ noise. Neither RAG delta clears p < 0.05 at n=78 — rrf's -0.115 lands at
 p 0.0506, a hair outside — so the individually-significant claim is not
 available. What *is* available is the pattern: every arm that moves at
 all moves down, under both knobs, while the turn-serving arms' context
-cost rises by between a third and a half (the token columns above). A
+cost rises by 36-54% (the token columns above: +35.6% to +53.7% on
+rag/hybrid/cascade, cortex unchanged). A
 knob that costs that much more context to lose 0.115 on its primary arm
 does not need a tighter p-value to be declined.
 

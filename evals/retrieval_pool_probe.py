@@ -3,9 +3,11 @@
 
 **This is a proxy, not a verdict.** It measures whether the gold-bearing
 turn reaches the served window under each knob setting — nothing about
-whether an answerer then gets the question right. Only the judged
-regression gate (``evals/regression_gate.ps1``) counts, and these knobs
-have not passed it; they ship OFF.
+whether an answerer then gets the question right. The judged verdict
+is a full ``--phase extract`` run with the sanctioned env overrides, NOT
+``evals/regression_gate.ps1`` — its stage 1 cannot reach ``memory.search``
+(see "Scope warning" in ``evals/README.md``). That run happened on
+2026-09-04 and the knobs lost; they ship OFF.
 
 What it does
 ------------
@@ -252,8 +254,10 @@ def main() -> int:
             "Retrieval proxy, NOT a verdict: recall@6 of the gold-bearing "
             "turn in the served window, on a 10-question synthetic corpus "
             "buried in real conversational turns. It says nothing about "
-            "answered accuracy. Only the judged regression gate "
-            "(evals/regression_gate.ps1) decides these knobs; they ship OFF."),
+            "answered accuracy. These knobs are decided by a judged "
+            "--phase extract run, not by evals/regression_gate.ps1, whose "
+            "stage 1 cannot reach memory.search; the 2026-09-04 judged run "
+            "went against them and they ship OFF."),
         "corpus": {
             "source": "evals/ladder_sweep.py PAIRS + DISTRACTORS",
             "haystack_source": (str(hay_dir.relative_to(repo))

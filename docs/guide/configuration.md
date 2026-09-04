@@ -289,8 +289,8 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   incommensurate channel scores) exists and is settable, and it **lost**
   its judged run: on the LongMemEval knowledge-update oracle slice
   (2026-09-04, n=78) multiplier 4 cost naive RAG 0.115 accuracy under
-  `rrf` and 0.077 under `weighted_sum`, while serving between a third
-  and a half more context tokens. Table, caveats and artifacts in
+  `rrf` and 0.077 under `weighted_sum`, while serving 36-54% more
+  context tokens on every arm that serves turns. Table, caveats and artifacts in
   `evals/README.md` ("Judged verdict (2026-09-04)"). CAUTION if you
   enable `rrf` anyway: it changes the SCALE of every served score to
   ~0.016-0.05, so `memory.search_confidence_floor` must stay 0, and
