@@ -448,3 +448,386 @@ def test_a_prompt_file_reaches_the_extractor_with_the_hints_appended(
     assert system == text + _vocab_hint(["vocab-term"]) + _facts_hint(
         [("e", "a", "v")])
     assert sent[0]["messages"][1]["content"] == "[1] note one"
+
+
+# ── set-valued slots (review fold, 2026-09-05) ───────────────────────────
+#
+# The first cut of the guard covered SCALAR writes only: ``op: "add"``
+# routed to ``set_add(..., origin="assistant")`` and ``add_member`` never
+# consulted the tier ladder, so an assistant-stated claim silently
+# one-way-converted a user's scalar into a set and landed as a current
+# member; ``set_remove`` took no origin at all, so an assistant claim could
+# retract a user's member. The property the guard is supposed to have is
+# "an assistant-origin write may never change a non-assistant current value
+# OR member set", and these pin it on the member model too.
+
+def _member_claim(value, op, *, speaker=None, entity="the-quillon-larder",
+                  attribute="menu"):
+    c = {"entity": entity, "attribute": attribute, "value": value,
+         "confidence": 0.9, "origin": "agent", "source": 0, "op": op}
+    if speaker is not None:
+        c["speaker"] = speaker
+    return c
+
+
+def test_an_assistant_add_does_not_convert_a_user_scalar(svc):
+    """The scalar→set conversion is one-way and destroys the user's value as
+    a scalar. An assistant-stated member add must not be able to trigger it."""
+    svc.cortex_write("the-quillon-larder", "menu", "seasonal tasting menu",
+                     support="user", provenance=["seed"])
+    svc.store("The Quillon Larder also serves an ember-plum tart",
+              source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("ember-plum tart", "add", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert got["kind"] == "scalar"
+    assert got["value"] == "seasonal tasting menu"
+    assert got["origin"] == "user"
+    assert [c["value"] for c in svc.cortex_contenders(
+        "the-quillon-larder", "menu")["contenders"]] == ["ember-plum tart"]
+
+
+def test_an_assistant_add_parks_against_a_user_origin_member_set(svc):
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store("The Quillon Larder also serves an ember-plum tart",
+              source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("ember-plum tart", "add", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert [m["value"] for m in got["members"]] == ["kaya toast"]
+    assert [c["value"] for c in svc.cortex_contenders(
+        "the-quillon-larder", "menu")["contenders"]] == ["ember-plum tart"]
+
+
+def test_an_assistant_add_fills_an_empty_slot(svc):
+    """Same rule as the scalar path: nothing is being taken from anyone, so
+    the claim is written — at the ``assistant`` origin."""
+    svc.store("The Quillon Larder serves an ember-plum tart", source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("ember-plum tart", "add", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert [m["value"] for m in got["members"]] == ["ember-plum tart"]
+    assert [m["origin"] for m in got["members"]] == ["assistant"]
+
+
+def test_an_assistant_add_joins_an_all_assistant_member_set(svc):
+    """The guard is one-directional here too: a set the assistant alone
+    built is the assistant's to extend."""
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="assistant")
+    svc.store("The Quillon Larder also serves an ember-plum tart",
+              source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("ember-plum tart", "add", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert sorted(m["value"] for m in got["members"]) == [
+        "ember-plum tart", "kaya toast"]
+    assert svc.cortex_contenders(
+        "the-quillon-larder", "menu")["contenders"] == []
+
+
+def test_an_assistant_add_of_an_existing_user_member_confirms_it(svc):
+    """Corroboration is not a change to the member set — the same rule the
+    scalar path already follows (``_confirm`` runs before the guard)."""
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store("The Quillon Larder serves kaya toast", source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("kaya toast", "add", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert [m["value"] for m in got["members"]] == ["kaya toast"]
+    assert [m["origin"] for m in got["members"]] == ["user"]
+    assert svc.cortex_contenders(
+        "the-quillon-larder", "menu")["contenders"] == []
+
+
+def test_an_assistant_remove_of_a_user_member_is_dropped(svc):
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store("The Quillon Larder no longer serves kaya toast", source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("kaya toast", "remove", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert [m["value"] for m in got["members"]] == ["kaya toast"]
+    assert got["removed"] == []
+
+
+def test_an_assistant_remove_of_an_assistant_member_is_allowed(svc):
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="assistant")
+    svc.store("The Quillon Larder no longer serves kaya toast", source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("kaya toast", "remove", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert got["members"] == []
+    assert [m["value"] for m in got["removed"]] == ["kaya toast"]
+
+
+def test_a_user_speaker_remove_still_retracts_a_user_member(svc):
+    """``speaker: "user"`` is never a demotion — the claim stays an ordinary
+    agent-tier write, and agent-tier removes are unguarded as before."""
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store("The Quillon Larder no longer serves kaya toast", source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("kaya toast", "remove", speaker="user")]))
+
+    assert svc.cortex_lookup("the-quillon-larder", "menu")["members"] == []
+
+
+def test_the_set_guard_holds_with_protect_provenance_off(svc):
+    """Same trade as the scalar guard: the bench turns ``protect_provenance``
+    off to isolate extraction quality, and the assistant guard is not part
+    of that trade."""
+    svc.config.memory.cortex.protect_provenance = False
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store("The Quillon Larder also serves an ember-plum tart",
+              source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("ember-plum tart", "add", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert [m["value"] for m in got["members"]] == ["kaya toast"]
+
+
+def test_supersede_keeps_the_legacy_set_behaviour(svc):
+    """The naive arm: the label is never applied, so member ops route as
+    ordinary agent-tier dream claims — conversion and retraction included."""
+    svc.config.memory.dream.assistant_claims = "supersede"
+    svc.cortex_write("the-quillon-larder", "menu", "seasonal tasting menu",
+                     support="user", provenance=["seed"])
+    svc.store("The Quillon Larder also serves an ember-plum tart",
+              source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("ember-plum tart", "add", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert got["kind"] == "set"
+    assert sorted(m["value"] for m in got["members"]) == [
+        "ember-plum tart", "seasonal tasting menu"]
+
+    svc.set_add("kedai-sembilir", "menu", "kaya toast", origin="user")
+    svc.store("Kedai Sembilir no longer serves kaya toast", source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("kaya toast", "remove", speaker="assistant",
+                      entity="kedai-sembilir")]))
+    assert svc.cortex_lookup("kedai-sembilir", "menu")["members"] == []
+
+
+def test_drop_writes_no_member_and_retracts_none(svc):
+    svc.config.memory.dream.assistant_claims = "drop"
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store("The Quillon Larder also serves an ember-plum tart",
+              source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("ember-plum tart", "add", speaker="assistant"),
+        _member_claim("kaya toast", "remove", speaker="assistant")]))
+
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert [m["value"] for m in got["members"]] == ["kaya toast"]
+    assert svc.cortex_contenders(
+        "the-quillon-larder", "menu")["contenders"] == []
+
+
+@pytest.mark.parametrize("policy", ["contender", "supersede", "drop"])
+def test_a_speakerless_set_claim_writes_exactly_as_before(svc, policy):
+    """Behaviour-neutrality extended to the member model: the shipped prompt
+    emits no ``speaker``, so conversion and retraction must still happen
+    under every policy value."""
+    svc.config.memory.dream.assistant_claims = policy
+
+    svc.cortex_write("the-quillon-larder", "menu", "seasonal tasting menu",
+                     support="user", provenance=["seed"])
+    svc.store("The Quillon Larder also serves an ember-plum tart",
+              source="agent")
+    svc.dream_run(StubExtractor([_member_claim("ember-plum tart", "add")]))
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert got["kind"] == "set"
+    assert sorted(m["value"] for m in got["members"]) == [
+        "ember-plum tart", "seasonal tasting menu"]
+
+    svc.set_add("kedai-sembilir", "menu", "kaya toast", origin="user")
+    svc.store("Kedai Sembilir no longer serves kaya toast", source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("kaya toast", "remove", entity="kedai-sembilir")]))
+    assert svc.cortex_lookup("kedai-sembilir", "menu")["members"] == []
+
+
+def test_a_set_slot_contender_cannot_be_resolved_in_either_direction(svc):
+    """Characterisation, not a fix (2026-09-05 review). The guard parks
+    through the SCALAR contender machinery, and ``CortexStore.resolve``
+    refuses any slot holding current members in BOTH directions — so an
+    assistant contender parked against a live member set can be read but
+    neither promoted nor rejected. Only promotion needs that refusal;
+    narrowing it is a decision about the review queue's contract and was
+    deliberately left outside this fold. Pinned here so the limit is a
+    watched fact rather than a surprise, and so narrowing it later is a
+    conscious edit to this test."""
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store("The Quillon Larder also serves an ember-plum tart",
+              source="agent")
+    svc.dream_run(StubExtractor([
+        _member_claim("ember-plum tart", "add", speaker="assistant")]))
+    assert [c["value"] for c in svc.cortex_contenders(
+        "the-quillon-larder", "menu")["contenders"]] == ["ember-plum tart"]
+
+    for accept in (True, False):
+        res = svc.cortex_resolve("the-quillon-larder", "menu", accept=accept)
+        assert res["resolved"] is False and res["reason"] == "slot_holds_set"
+
+    # Nothing moved in either direction: the user's member is still the
+    # only current one, and the contender is still parked.
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert [m["value"] for m in got["members"]] == ["kaya toast"]
+    assert [c["value"] for c in svc.cortex_contenders(
+        "the-quillon-larder", "menu")["contenders"]] == ["ember-plum tart"]
+
+
+# ── the same guard, at the engine boundary ───────────────────────────────
+
+def test_add_member_refuses_to_convert_a_non_assistant_scalar():
+    store = CortexStore()
+    emb = _unit(3)
+    store.write_fact(Slot("larder", "menu", "seasonal tasting menu"), emb,
+                     support="user", now=1000.0)
+    res = store.add_member(Slot("larder", "menu", "ember-plum tart"),
+                           _unit(4), support="assistant", now=1001.0)
+
+    assert res.action == "contested"
+    assert store.slot_kind("larder", "menu") == "scalar"
+    assert store.lookup("larder", "menu").value == "seasonal tasting menu"
+    assert [c.value for c in store.contenders_for("larder", "menu")] == [
+        "ember-plum tart"]
+
+
+def test_add_member_parks_against_a_non_assistant_member_set():
+    store = CortexStore()
+    store.add_member(Slot("larder", "menu", "kaya toast"), _unit(3),
+                     support="user", now=1000.0)
+    res = store.add_member(Slot("larder", "menu", "ember-plum tart"),
+                           _unit(4), support="assistant", now=1001.0)
+
+    assert res.action == "contested"
+    assert [m.value for m in store.members("larder", "menu")] == ["kaya toast"]
+
+
+def test_remove_member_refuses_an_assistant_retraction_of_a_user_member():
+    store = CortexStore()
+    store.add_member(Slot("larder", "menu", "kaya toast"), _unit(3),
+                     support="user", now=1000.0)
+    res = store.remove_member("larder", "menu", "kaya toast",
+                              support="assistant", now=1001.0)
+
+    assert res.action == "member_remove_refused"
+    assert [m.value for m in store.members("larder", "menu")] == ["kaya toast"]
+    assert store.members("larder", "menu")[0].status == "current"
+
+
+def test_remove_member_without_a_support_argument_is_unguarded():
+    """The MCP tool and the rollback replay call it positionally, with no
+    origin — an explicit human retraction is never second-guessed."""
+    store = CortexStore()
+    store.add_member(Slot("larder", "menu", "kaya toast"), _unit(3),
+                     support="user", now=1000.0)
+    assert store.remove_member(
+        "larder", "menu", "kaya toast", now=1001.0).action == "member_removed"
+
+
+# ── the worked examples must not name anything the bench measures ────────
+#
+# Review finding, 2026-09-05: the first cut of these prompts built its
+# worked example around "Miss Bee Providore ... Bandung", which is the gold
+# answer of LongMemEval question ``c4f10528`` — a single-session-assistant
+# question in the measured slice, and a counted win for cortex, hybrid and
+# cascade in BOTH variants. The prompt was handing the model an answer.
+# These two tests are the guard that makes the class un-repeatable: every
+# capitalised word in a worked example must be a registered invented token
+# (or ordinary sentence English), and no registered token may occur
+# anywhere in either dataset file.
+
+# Ordinary sentence-initial / pronoun capitals that carry no identity. Any
+# OTHER capitalised word must be registered in EXAMPLE_TOKENS, which is what
+# forces the dataset check below to see it.
+_SENTENCE_CAPITALS = frozenset({"Example", "Notes", "Output", "For", "I"})
+
+
+def _gen_module():
+    import importlib
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    return importlib.import_module("gen_assistant_facts_prompts")
+
+
+def _example_blocks():
+    g = _gen_module()
+    return {"naive": g.NAIVE_EXAMPLE, "provenance": g.PROVENANCE_EXAMPLE}
+
+
+@pytest.mark.parametrize("which", ["naive", "provenance"])
+def test_every_proper_noun_in_a_worked_example_is_a_registered_token(which):
+    """Structural half of the guard — runs with or without the datasets. A
+    new proper noun in an example cannot reach the prompt files without
+    being registered, and registering it is what subjects it to the
+    dataset check below."""
+    import re
+
+    block = _example_blocks()[which]
+    for token in _gen_module().EXAMPLE_TOKENS:
+        block = block.replace(token, " ")
+    leftovers = sorted({
+        m.group(0) for m in re.finditer(r"[A-Z][A-Za-z]*", block)
+        if m.group(0) not in _SENTENCE_CAPITALS
+    })
+    assert leftovers == [], (
+        f"unregistered proper noun(s) in the {which} example: {leftovers} — "
+        "add them to EXAMPLE_TOKENS (which grep-checks them against the "
+        "LongMemEval datasets) or rewrite the example")
+
+
+@pytest.mark.parametrize("dataset", ["longmemeval_oracle.json",
+                                     "longmemeval_s_cleaned.json"])
+def test_no_worked_example_token_occurs_in_the_measured_dataset(dataset):
+    """Evidence half of the guard. Streamed in chunks with an overlap — the
+    ``_s`` file is ~277 MB and must not be read into RAM whole. Skipped when
+    the (gitignored) data is absent; the structural test above still runs."""
+    from pathlib import Path
+
+    path = (Path(__file__).resolve().parents[1] / "evals" / "data" / dataset)
+    if not path.exists():
+        pytest.skip(f"{dataset} not present (evals/data is gitignored)")
+
+    tokens = [t.encode("utf-8") for t in _gen_module().EXAMPLE_TOKENS]
+    assert tokens, "EXAMPLE_TOKENS is empty — the guard would be vacuous"
+    overlap = max(len(t) for t in tokens)
+    counts = {t: 0 for t in tokens}
+    prev = b""
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(8 << 20)
+            if not chunk:
+                break
+            buf = prev + chunk
+            for t in tokens:
+                counts[t] += buf.count(t)
+            prev = buf[-overlap:]
+    hits = {t.decode(): n for t, n in counts.items() if n}
+    assert hits == {}, (
+        f"worked-example token(s) occur in {dataset}: {hits} — the prompt is "
+        "naming content the bench measures; re-cut the example on invented "
+        "names")
+
+
+def test_every_registered_token_is_actually_used_by_a_prompt_file():
+    """A registry that has drifted away from the examples guards nothing."""
+    from pathlib import Path
+
+    prompts = Path(__file__).resolve().parents[1] / "evals" / "prompts"
+    text = "".join(
+        (prompts / name).read_text(encoding="utf-8")
+        for name in ("assistant_facts_naive.txt",
+                     "assistant_facts_provenance.txt"))
+    unused = [t for t in _gen_module().EXAMPLE_TOKENS if t not in text]
+    assert unused == [], f"EXAMPLE_TOKENS entries no example uses: {unused}"

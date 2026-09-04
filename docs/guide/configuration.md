@@ -300,6 +300,22 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   a populated reference bank (its raw cosines are not rescaled and
   outrank every memory once the reranker fires). Neither combination has
   been measured.
+- **Assistant-stated claims parked, not adopted**
+  (`memory.dream.assistant_claims = "contender"`) — what a dream claim
+  labelled `speaker: "assistant"` becomes: `contender` writes it at the
+  floor `assistant` provenance tier (it may fill an empty slot, but
+  against a value or member set of any other origin it parks as a
+  contender, and it ranks below user-origin facts at equal similarity),
+  `supersede` treats it as an ordinary agent-tier dream claim, and `drop`
+  discards it. An unrecognised value falls back to `contender` — a typo
+  must not open the overwrite path. **Inert with the shipped extraction
+  prompt**, which never asks for a `speaker` field: with no label on the
+  claim the knob is never consulted at any setting, so all three values
+  are today's behaviour on a shipped install. It is settable only for the
+  prompt-variant experiment in `evals/README.md` ("Assistant-stated
+  facts"), and it is deliberately **not** on the Console for the same
+  reason as the candidate-pool knobs: adoption of either variant is gated
+  on the extraction ladder, which has not been run on them.
 - **Staleness served as annotation** (`memory.search.stale_policy =
   "annotate"`) — stale records (past 2×TTL for their freshness class)
   carry `effective_confidence`/`stale` flags and nothing more, today's

@@ -1156,10 +1156,18 @@ class DreamOps:
                             "for %s.%s", ent, attr)
                     elif res["action"] == "contested":
                         logger.info(
-                            "dream: member add parked by aggregate guard "
-                            "for %s.%s", ent, attr)
+                            "dream: member add parked by %s guard for %s.%s",
+                            "assistant-origin"
+                            if claim_origin == "assistant" else "aggregate",
+                            ent, attr)
                 elif op == "remove":
-                    res = self.set_remove(ent, attr, c["value"])
+                    res = self.set_remove(ent, attr, c["value"],
+                                          origin=claim_origin)
+                    if res["action"] == "member_remove_refused":
+                        logger.info(
+                            "dream: dropping assistant-stated retraction of "
+                            "a member backed by a stronger tier for %s.%s "
+                            "= %r", ent, attr, c["value"])
                 else:
                     # Consolidation quarantine (two-man rule): route the
                     # scalar claim BEFORE the write. Scope v1 is scalars
@@ -1273,7 +1281,8 @@ class DreamOps:
                         raise
                 tally[res["action"]] = tally.get(res["action"], 0) + 1
                 if res["action"] not in ("member_invalid", "member_capped",
-                                         "member_not_found"):
+                                         "member_not_found",
+                                         "member_remove_refused"):
                     _mark_carried(c, src_entry)   # contested still exists
                 # Journal the write with its ACTUAL returned action —
                 # immediately, per claim (crash-durable; a buffered journal
@@ -1283,7 +1292,7 @@ class DreamOps:
                 # has a reversal for it).
                 if (run_id is not None and res["action"] not in
                         ("member_invalid", "member_capped",
-                         "member_not_found")):
+                         "member_not_found", "member_remove_refused")):
                     journal_row = {
                         "seq": run_seq, "entity": ent, "attribute": attr,
                         "entity_norm": _norm_key(ent),
@@ -1760,12 +1769,19 @@ class DreamOps:
                             else:
                                 outcome = "partial:set_retained"
                     elif action == "member_removed":
-                        self.set_add(
+                        res = self.set_add(
                             row["entity"], row["attribute"],
                             row["prev_value"],
                             confidence=float(row["prev_confidence"] or 0.55),
                             origin=row["prev_support"] or "agent")
-                        outcome = "reverted"
+                        # Re-adding an assistant-origin member into a set
+                        # that has since gained a stronger-tier member parks
+                        # it as a contender instead (add_member's guard).
+                        # Nothing is restored, so say so rather than
+                        # reporting a revert that did not happen.
+                        outcome = ("partial:member_not_restored"
+                                   if res["action"] == "contested"
+                                   else "reverted")
                     elif action == "member_confirmed":
                         outcome = "skipped:confirmed"
             except Exception as exc:  # noqa: BLE001 — keep unwinding

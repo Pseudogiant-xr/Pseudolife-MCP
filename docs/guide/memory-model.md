@@ -392,7 +392,13 @@ written only by a dream whose extraction prompt asks for a `speaker` label
 (`memory.dream.assistant_claims`, default `contender`). It may fill an empty
 slot, but against a current value of any other origin it always parks as a
 contender — that rule is not gated on `protect_provenance` below — and it
-ranks after user-origin facts at equal similarity. Nothing supersedes *it*
+ranks after user-origin facts at equal similarity. The same rule covers
+**scalar and set-valued slots**: an assistant claim cannot trigger the
+one-way scalar→set conversion, cannot join a member set that carries any
+non-assistant member (it parks as a contender), and cannot retract a
+member another tier added (the retraction is dropped, `action:
+"member_remove_refused"`). It may fill an empty slot, extend a set it
+alone built, and retract its own members. Nothing supersedes *it*
 in return: an assistant-origin value is replaced by any later write.
 Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
 for assistant-stated facts lifts the fact-only arm on

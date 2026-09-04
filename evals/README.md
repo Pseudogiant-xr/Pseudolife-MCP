@@ -475,6 +475,22 @@ overwriting a user-stated one costs nothing measurable. **No shipped
 default changed**: adopting either prompt is a separate decision, and it is
 gated on the extraction ladder, which has not been run on them.
 
+> **CONTAMINATED — PENDING RERUN** (found 2026-09-05 in merge review).
+> The worked example in both prompt variants was built around **Miss Bee
+> Providore** in **Bandung** — the gold answer of LongMemEval question
+> `c4f10528`, which is a `single-session-assistant` question *in the very
+> slice these runs measure*, and a counted win for `cortex`, `hybrid` and
+> `cascade` in both variants. Every number in this section was measured
+> with that string sitting in the extraction prompt. Nothing here is
+> deleted — the three run artifacts stay committed, and the tables stay —
+> but read them against the leave-one-out row in
+> "[Contamination and the leave-one-out read](#contamination-and-the-leave-one-out-read)"
+> below, and treat the headline as provisional. The example has been
+> re-cut on invented names (`evals/gen_assistant_facts_prompts.py`, with a
+> guard test that greps every example token against both dataset files),
+> and both variants are being re-run on the full slice under the tags
+> `assist-prov2` / `assist-naive2`. **Those numbers will replace these.**
+
 #### The diagnosis
 
 On the six-type oracle run
@@ -485,7 +501,7 @@ On the six-type oracle run
 the 56** SSA sessions and **12 of the 30** SSP sessions consolidated with
 `claims == 0`. Replayed
 against the reproducible server, the extractor returns a well-formed
-`{"claims": []}` in ~1.5 s for sessions whose whole answer lives in an
+`{"claims": []}` for sessions whose whole answer lives in an
 assistant turn (a restaurant recommendation, a description of a children's
 book). No code filters assistant turns — the shipped claims prompt asks for
 "durable, current-state facts … skip narrative, opinions" and every worked
@@ -569,6 +585,9 @@ tests and not a comparison of two different benches.
 #### Per-type accuracy
 
 `assist-base` here is the 2026-09-04 baseline; `rag` is the control arm.
+Both measured columns are CONTAMINATED-PENDING-RERUN (see the banner
+above): `c4f10528`, one of the 56 SSA questions, is the gold the prompt
+example named.
 
 | question type (n) | arm | `assist-base` | `assist-prov` | `assist-naive` |
 |---|---|---|---|---|
@@ -666,10 +685,102 @@ draw of 10,000 reached the observed delta.
 | single-session-preference (30) | hybrid | +0.033 | 1.00 | 4 / 3 |
 | single-session-preference (30) | cascade | −0.100 | 0.24 | 0 / 3 |
 
+#### Contamination and the leave-one-out read
+
+What leaked. `evals/gen_assistant_facts_prompts.py` built both worked
+examples around a made-up brunch recommendation that used a REAL name:
+"For brunch in Bandung I'd suggest Miss Bee Providore on Jalan Progo".
+`Miss Bee Providore` is the gold answer of `c4f10528`
+("…that restaurant in Cihampelas Walk that serves a great Nasi Goreng?"),
+one of the 56 `single-session-assistant` questions scored above. Any model
+reading the prompt saw the answer to one measured question before it saw
+the session.
+
+What it can and cannot explain. `c4f10528` is a **win** for `cortex`,
+`hybrid` and `cascade` in both variants against `assist-base`, so it is
+counted in every headline delta. Dropping that one question from the
+paired comparisons (recomputed from the `win_qids` / `loss_qids` in the
+committed `compare-assist-*-single-session-assistant-pairs.json`, over
+n = 55 instead of 56):
+
+| comparison | arm | Δ (56 q) | Δ without `c4f10528` (55 q) |
+|---|---|---|---|
+| `assist-prov` vs `assist-base` | cortex | +0.4643 | +0.4545 |
+| `assist-prov` vs `assist-base` | hybrid | +0.0536 | +0.0364 |
+| `assist-prov` vs `assist-base` | cascade | +0.0357 | +0.0182 |
+| `assist-naive` vs `assist-base` | cortex | +0.4464 | +0.4364 |
+| `assist-naive` vs `assist-base` | hybrid | +0.0179 | **0.0000** |
+| `assist-naive` vs `assist-base` | cascade | +0.0179 | **0.0000** |
+| either vs base | rag (control) | 0.000 | 0.000 |
+
+The same drop applied to the SSA accuracies themselves (56 q → 55 q):
+
+| arm | `assist-base` | `assist-prov` | `assist-naive` |
+|---|---|---|---|
+| cortex | 0.0536 → 0.0545 | 0.5179 → 0.5091 | 0.5000 → 0.4909 |
+| hybrid | 0.9107 → 0.9273 | 0.9643 → 0.9636 | 0.9286 → 0.9273 |
+| rag (control) | 0.9107 → 0.9273 | 0.9107 → 0.9273 | 0.9107 → 0.9273 |
+
+Note the last row: the `rag` control gets `c4f10528` **wrong in all three
+runs**, while `cortex` gets it right in both variants. A fact-only arm
+beating raw turns is the whole point of the recovery, so that pattern is
+not by itself evidence of the leak — but on this one question the model
+had the gold string in its extraction prompt, so this particular win
+cannot be attributed to the memory and is the reason the whole section is
+re-running.
+
+So the **recovery finding survives**: the fact-only arm still gains ~0.44
+to ~0.45 on `single-session-assistant`, on 24-25 questions won against
+zero lost, and one leaked question cannot carry that. What does **not**
+survive is the naive arm's already-marginal `hybrid` and `cascade` gains
+on this type, which go to exactly zero — they were that one question.
+`prov`'s hybrid gain drops from 3 questions to 2 and stays
+non-significant. None of the guard-vs-naive comparisons involve
+`c4f10528` at all (it is neither a win nor a loss in any of them), so the
+"the guard costs nothing measurable" read is untouched by the leak.
+
+What did NOT happen. The example's invented values (`Jalan Progo`,
+`smoked-beef bowl`) appear **0 times** in either run's rows, so no
+fabricated content was injected into any bank — this is entity-name
+priming, not content injection. The one qualification, found while
+checking: the example's attribute name `signature dish` does appear once
+in each run, both times on `c4f10528` itself, where the extractor minted
+`Miss Bee Providore — signature dish: Miss Bee's Nasi Goreng` from the
+session's own text. The value is the session's; the attribute schema is
+the prompt's. Note also that the bench's own gold-answer leak check
+(`leak_check`, SR-TTT) reported `n_leaked: 0` on both runs and could not
+have caught this: it checks whether a gold answer appears in a served
+*context*, not in the extraction *prompt*.
+
+The re-run. Same slice, same instrument, the re-cut prompts, new tags so
+nothing canonical is overwritten (from the repo root, with the
+reproducible q8_0 server up via `Start-Qwen`):
+
+```bash
+export PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender
+PYTHONPATH=. python evals/longmemeval_bench.py \
+  --extractor qwen-27b --dataset oracle \
+  --types single-session-assistant,single-session-preference,knowledge-update \
+  --system-prompt-file evals/prompts/assistant_facts_provenance.txt \
+  --tag assist-prov2 --report
+
+export PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=supersede
+PYTHONPATH=. python evals/longmemeval_bench.py \
+  --extractor qwen-27b --dataset oracle \
+  --types single-session-assistant,single-session-preference,knowledge-update \
+  --system-prompt-file evals/prompts/assistant_facts_naive.txt \
+  --tag assist-naive2 --report
+```
+
+`assist-base` does not need re-running: it uses the shipped prompt, which
+never carried the example. The prompt file paths are unchanged — the
+generator rewrote them in place.
+
 #### The read
 
 Stated plainly, because the result is not the one the change was designed
-to argue for:
+to argue for. **Every number below predates the contamination fix above**
+— the leave-one-out row is what qualifies it until the re-run lands:
 
 - **Both variants recover `single-session-assistant`**, from 0.054 to
   0.518 (`assist-prov`) and 0.500 (`assist-naive`) on the fact-only arm —

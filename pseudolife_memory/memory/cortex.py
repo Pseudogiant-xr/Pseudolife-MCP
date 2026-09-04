@@ -331,7 +331,8 @@ class CortexRecord:
 
     @property
     def origin(self) -> str:
-        """Strongest tier that backs this fact (user > action > agent), or ""."""
+        """Strongest tier that backs this fact
+        (user > action > agent > assistant), or ""."""
         for tier in SUPPORT_PRECEDENCE:
             if tier in self.support:
                 return tier
@@ -345,10 +346,14 @@ class WriteResult:
     action: str
     # write_fact: "inserted" | "confirmed" | "superseded" | "contested"
     # add_member: "member_added" | "member_confirmed" | "member_capped" |
-    #             "member_invalid" | "contested" (aggregate-conversion guard
-    #             parked the add as a contender) | "confirmed" (the add
-    #             equalled the protected aggregate scalar)
-    # remove_member: "member_removed" | "member_not_found"
+    #             "member_invalid" | "contested" (the aggregate-conversion
+    #             guard or the assistant-origin guard parked the add as a
+    #             contender) | "confirmed" (the add equalled the protected
+    #             aggregate scalar, or an assistant add equalled a
+    #             stronger-tier scalar)
+    # remove_member: "member_removed" | "member_not_found" |
+    #                "member_remove_refused" (assistant-origin retraction of
+    #                a member some other tier put there)
     record: CortexRecord
 
 
@@ -694,11 +699,14 @@ class CortexStore:
         """Add (or confirm) a member of the set-valued slot ``(slot.entity,
         slot.attribute)``.
 
-        Unlike :meth:`write_fact`, members are never contested; conflicting
-        adds either confirm an existing member or insert a new one — there is
-        no contender path for members (v1 decision; a differing value at an
-        already-populated set slot is simply a second current member, not a
-        dispute to resolve). Dedup is exact normalised-value match OR cosine
+        Unlike :meth:`write_fact`, an ordinary add is never contested;
+        conflicting adds either confirm an existing member or insert a new
+        one — there is no contender path for members (v1 decision; a
+        differing value at an already-populated set slot is simply a second
+        current member, not a dispute to resolve). The two exceptions below
+        (the aggregate guard and the assistant-origin guard) park through
+        the SCALAR contender machinery precisely because the member model
+        has none of its own. Dedup is exact normalised-value match OR cosine
         similarity >= ``MEMBER_DEDUP_COSINE`` against an existing current
         member. A scalar record already occupying the slot is converted
         one-way to a member first (the scalar row survives as an
@@ -717,6 +725,27 @@ class CortexStore:
         :meth:`write_fact`'s own confirm branch — confidence/provenance/
         support only; tx_time/hlc/writer are not advanced) rather than
         parking a contender identical to itself.
+
+        Second exception, same shape: an ``assistant``-origin add
+        (``support == "assistant"``) never changes a slot some other tier
+        holds — not the scalar it would convert, and not a member set that
+        carries any non-assistant member. It parks as a contender (reason
+        ``member_add_blocked_assistant``) instead, so an assistant-stated
+        member is auditable without being canonical. The guard is
+        one-directional: a slot whose current value/members are ALL
+        assistant-origin is the assistant's to convert and extend, and any
+        stronger tier writes through it untouched.
+
+        Know what parking against a SET costs, because this reuses the
+        scalar guard's ``_contend`` rather than inventing a member
+        contender path: :meth:`resolve` refuses any slot holding current
+        members, in BOTH directions, so such a contender can be read
+        (``memory_fact_get``, the review queue) but neither promoted nor
+        rejected. It clears only when a later contending value at the same
+        slot supersedes it. Only promotion actually needs that refusal —
+        see :meth:`resolve`, where the asymmetry is flagged as a
+        deliberately un-taken change.
+
         Beyond ``MAX_CURRENT_MEMBERS`` current members, further adds are
         dropped (``"member_capped"``).
 
@@ -742,6 +771,9 @@ class CortexStore:
                 kind="member",
             ))
         emb = embedding.detach().to("cpu", torch.float32).clone()
+        # Normalised once here, not per-branch: the assistant guards below
+        # read it before the aggregate branch's own use of it.
+        sup = _norm_support(support)
         # Scalar at this slot -> one-way conversion (spec rule 1), UNLESS the
         # scalar is a number-led aggregate ("total species: 32"): converting
         # destroys a stated total that no enumeration of members recovers
@@ -762,16 +794,41 @@ class CortexStore:
                     # scalar re-assertion through write_fact's stamped path.
                     cur.last_confirmed = t
                     cur.provenance |= {p for p in provenance if p}
-                    sup = _norm_support(support)
                     if sup:
                         cur.support.add(sup)
                     cur.confidence = min(
                         1.0, max(self._reinforce(cur.confidence), float(confidence)))
                     return WriteResult("confirmed", cur)
                 return self._contend(cur, slot, emb, confidence,
-                                     {p for p in provenance if p}, t,
-                                     _norm_support(support),
+                                     {p for p in provenance if p}, t, sup,
                                      "member_add_blocked_aggregate",
+                                     cur.slot_embedding,
+                                     writer_id=writer_id,
+                                     session_id=session_id,
+                                     hlc=hlc, tx_time=t, valid_time=t)
+            if sup == "assistant" and cur.origin != "assistant":
+                # The scalar/set conversion is one-way and takes the
+                # current value out of ``_current`` — an assistant-stated
+                # member must never be able to trigger it against a value
+                # some other tier put there. Same rule, same machinery and
+                # the same deliberate independence from
+                # ``protect_provenance`` as the scalar guard in
+                # :meth:`write_fact`.
+                self.dirty_slots.add(key)
+                if _norm_value(slot.value) == _norm_value(cur.value):
+                    # Corroboration, not conflict — never park a contender
+                    # identical to the value it contends with (the
+                    # aggregate guard's own rule).
+                    cur.last_confirmed = t
+                    cur.provenance |= {p for p in provenance if p}
+                    cur.support.add(sup)
+                    cur.confidence = min(
+                        1.0, max(self._reinforce(cur.confidence),
+                                 float(confidence)))
+                    return WriteResult("confirmed", cur)
+                return self._contend(cur, slot, emb, confidence,
+                                     {p for p in provenance if p}, t, sup,
+                                     "member_add_blocked_assistant",
                                      cur.slot_embedding,
                                      writer_id=writer_id,
                                      session_id=session_id,
@@ -819,6 +876,20 @@ class CortexStore:
                 m.provenance |= {p for p in provenance if p}
                 m.confidence = min(1.0, max(m.confidence, float(confidence)))
                 return WriteResult("member_confirmed", m)
+        if sup == "assistant" and any(m.origin != "assistant" for m in members):
+            # Joining a set some other tier built CHANGES that set, so it
+            # parks. Runs after the dedup loop on purpose: re-stating a
+            # member that is already there is corroboration and confirms it
+            # (the scalar path's ``_confirm``-before-guard order), and only
+            # a genuinely new member is a change. An empty slot has no
+            # members to protect and falls through to the insert below.
+            self.dirty_slots.add(key)
+            return self._contend(None, slot, emb, confidence,
+                                 {p for p in provenance if p}, t, sup,
+                                 "member_add_blocked_assistant",
+                                 None, writer_id=writer_id,
+                                 session_id=session_id,
+                                 hlc=hlc, tx_time=t, valid_time=t)
         if len(members) >= MAX_CURRENT_MEMBERS:
             # Rejected: return an unpersisted record carrying the OFFENDING
             # value (never an unrelated existing member), and log it against
@@ -891,13 +962,22 @@ class CortexStore:
 
     def remove_member(
         self, entity: str, attribute: str, member: str, *,
-        now: float | None = None,
+        now: float | None = None, support: str | None = None,
     ) -> WriteResult:
         """Retract one current member by normalised-value match. The row is
         kept (``status`` -> ``"removed"``, ``superseded_at`` stamped) as the
         audit trail, same idiom as scalar supersession — never hard-deleted.
         Returns ``"member_not_found"`` (record not persisted anywhere) when no
-        current member at the slot matches."""
+        current member at the slot matches.
+
+        ``support`` is the retracting write's provenance tier, and only the
+        ``assistant`` floor is consulted: an assistant-stated retraction of a
+        member some other tier put there is REFUSED
+        (``"member_remove_refused"``, nothing mutated) — removal is the one
+        member operation with no contender to park in, so the guard drops it
+        rather than parking. An assistant may retract its own members. Every
+        other caller (the MCP tool, the rollback replay) passes nothing and is
+        unguarded, exactly as before."""
         t = time.time() if now is None else float(now)
         key = (_norm_key(entity), _norm_key(attribute))
         nv = _norm_value(member)
@@ -910,6 +990,12 @@ class CortexStore:
             return WriteResult("member_not_found", CortexRecord(
                 entity=entity, attribute=attribute, value=member, kind="member",
             ))
+        if (_norm_support(support) == "assistant"
+                and self.records[idxs[pos]].origin != "assistant"):
+            # Nothing is mutated and no dirty_slots write is scheduled: the
+            # refusal must be a true no-op, or a persistence pass would
+            # rewrite a slot this call never touched.
+            return WriteResult("member_remove_refused", self.records[idxs[pos]])
         self.dirty_slots.add(key)
         idx = idxs.pop(pos)
         rec = self.records[idx]
@@ -1111,6 +1197,19 @@ class CortexStore:
         :meth:`add_member`/:meth:`remove_member` like every other write to a
         set slot. Refused (``WriteResult("refused", contender)``) without
         touching any state; nothing is marked dirty.
+
+        That refusal covers ``accept=False`` too, and only ``accept=True``
+        needs it: retiring a contender never touches ``_current`` or
+        ``_members``. Left as-is deliberately (2026-09-05 review) rather
+        than narrowed to the accept branch — it is pre-existing behaviour
+        with its own pin (``test_cortex_sets`` Item 3, whose docstring says
+        "promotable/retirable"), and narrowing it is a decision about the
+        review queue's contract, not part of the assistant-guard fold. It
+        matters more than it used to: the assistant guard parks against a
+        live member set (:meth:`add_member`), so once a ``speaker``-labelled
+        extraction prompt is adopted this stops being the rare
+        parked-then-converted race and becomes the routine outcome — an
+        operator would then have no way to dismiss such a contender.
         """
         key = (_norm_key(entity), _norm_key(attribute))
         t = time.time() if now is None else float(now)

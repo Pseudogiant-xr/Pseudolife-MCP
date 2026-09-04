@@ -2268,18 +2268,28 @@ class MemoryService(DreamOps):
                 "members_count": len(self._cortex.members(entity, attribute)),
             }
 
-    def set_remove(self, entity: str, attribute: str, member: str) -> dict[str, Any]:
+    def set_remove(self, entity: str, attribute: str, member: str,
+                   origin: str | None = None) -> dict[str, Any]:
         """Retract one current member of a set-valued slot (audit row kept,
         ``status`` -> ``"removed"``). Persists via the same per-slot
         write-through path ``cortex_write`` uses.
 
+        ``origin`` is the retracting write's provenance tier. Only the
+        ``assistant`` floor is consulted: an assistant-stated retraction of a
+        member some other tier put there is refused
+        (``"member_remove_refused"``), so an assistant-origin claim can never
+        take a member out of the user's set. Callers that pass nothing (the
+        MCP tool, the dream rollback replay) are unguarded exactly as before.
+
         Returns ``{"action", "entity", "attribute", "member", "members_count"}``
-        — ``action`` is ``"member_removed"`` or ``"member_not_found"``.
+        — ``action`` is ``"member_removed"``, ``"member_not_found"`` or
+        ``"member_remove_refused"``.
         """
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
-            res = self._cortex.remove_member(entity, attribute, member)
+            res = self._cortex.remove_member(entity, attribute, member,
+                                             support=origin)
             self._save_cortex()
             return {
                 "action": res.action,

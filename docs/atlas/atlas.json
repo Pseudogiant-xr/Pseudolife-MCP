@@ -608,7 +608,7 @@
    "p": "pseudolife_memory/memory/cortex.py",
    "d": [
     "(entity, attribute) → ONE current value; supersede, never overwrite",
-    "Provenance tiers user > action > agent, + contender parking on conflict",
+    "Provenance tiers user > action > agent > assistant, + contender parking on conflict; the assistant floor tier parks against ANY other origin (scalar AND set-valued slots) and is not gated on protect_provenance",
     "dedup_siblings: paraphrase-cluster merge via union-find",
     "Per-fact freshness_class (v23) · set-valued slots (v26) · epistemic stance (v29, latest-asserting-write, never a ranking input) · asserted_at/age on recall",
     "v35 label pair: authority (speech act — directive/observation/quoted, a separate axis from the origin TIER) + distortion_tolerance (constraint…episodic); inherit-unless-restated via _pick (INHERIT sentinel, None clears); constraint is the ONE label ranking reads (cortex_search._pin_constraint_facts, recall seeds)",

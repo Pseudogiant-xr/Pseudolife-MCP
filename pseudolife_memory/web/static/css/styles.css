@@ -316,6 +316,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
 .badge.user { color:var(--c-world); border-color:color-mix(in srgb,var(--c-world) 40%,transparent); }
 .badge.action { color:var(--c-graph); border-color:color-mix(in srgb,var(--c-graph) 40%,transparent); }
 .badge.agent { color:var(--ink-2); }
+.badge.assistant { color:var(--ink-3); }  /* floor tier: dimmer than agent */
 .badge.pos { color:var(--c-world); border-color:color-mix(in srgb,var(--c-world) 40%,transparent); }
 .badge.neg { color:var(--c-danger); border-color:color-mix(in srgb,var(--c-danger) 40%,transparent); }
 .badge.contested { color:var(--c-warn); border-color:color-mix(in srgb,var(--c-warn) 45%,transparent); background:color-mix(in srgb,var(--c-warn) 12%,transparent); }

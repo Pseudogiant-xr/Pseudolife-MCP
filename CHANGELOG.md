@@ -57,7 +57,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the knob to a bench run (`ladder_sweep.build_service`) and rides into the
   summary as `bench_env.dream.assistant_claims`; an invalid value aborts
   the run rather than silently serving the default, as for the pool knobs.
-- **Measured (2026-09-05).** Asking the extractor for assistant-stated
+- **Measured (2026-09-05) — CONTAMINATED, PENDING RERUN.** The worked
+  example in both prompt variants named `Miss Bee Providore` in `Bandung`,
+  which is the gold answer of LongMemEval question `c4f10528` — a
+  `single-session-assistant` question inside the measured slice, and a
+  counted win for `cortex`/`hybrid`/`cascade` in both variants. Every
+  number in this bullet was measured with that string in the prompt. The
+  artifacts stay committed and the leave-one-out arithmetic is in
+  `evals/README.md` ("Contamination and the leave-one-out read"): the
+  recovery finding survives (SSA `cortex` +0.464 → **+0.455** for `prov`,
+  +0.446 → **+0.436** for `naive`), the naive arm's marginal SSA
+  `hybrid`/`cascade` gains go to **exactly 0.0000**, and the
+  guard-vs-naive comparisons are untouched (`c4f10528` is neither a win
+  nor a loss in any of them). The example has been re-cut on invented
+  names and both variants are being re-run under the tags `assist-prov2` /
+  `assist-naive2`; **those numbers will replace these**. What follows is
+  the original text, kept so the superseded claim is legible where it was
+  made. Asking the extractor for assistant-stated
   facts works, and the guard that stops those facts overwriting the user's
   costs nothing we can measure. On the LongMemEval oracle slice
   `single-session-assistant` + `single-session-preference` +
@@ -86,6 +102,68 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   prompt emits no `speaker`, so every mechanism above stays inert — and
   **adoption of either prompt is gated on the extraction ladder**
   (`evals/ladder_sweep.py`), which has not been run on them.
+
+### Fixed (2026-09-05 — merge-review fold on the assistant-turn provenance work)
+- **The assistant guard did not cover set-valued slots.** A dream claim
+  labelled `speaker: "assistant"` with `op: "add"` routed to `set_add`,
+  and `CortexStore.add_member` never consulted the tier ladder: at the
+  default policy an assistant-stated claim silently one-way-converted a
+  **user-origin scalar** into a set and landed as a current member (no
+  contender, no tier check), and `set_remove` took no origin at all, so an
+  assistant claim could **retract a user's member**. The property the
+  guard is documented to have — an assistant-origin write may never change
+  a non-assistant current value *or member set* — is now true on the
+  member model too: `op: "add"` against a slot whose scalar or members
+  carry any non-assistant origin parks as a contender
+  (`member_add_blocked_assistant`, the same `_contend` path the scalar
+  guard uses); an add on an empty slot writes at the `assistant` origin; a
+  re-stated member that is already there still confirms (corroboration is
+  not a change); an assistant-origin `op: "remove"` of a member another
+  tier added is dropped and logged (`member_remove_refused`), while it may
+  still retract its own. `supersede` keeps the legacy behaviour and `drop`
+  writes nothing, both unchanged, and a **speakerless** claim — every
+  shipped extraction — converts and retracts exactly as before under all
+  three policies. Note the one honest limit, which the review corrected on
+  its way in: the member model has no contender path of its own, so this
+  parks through the scalar one, and `resolve` refuses **any** slot holding
+  current members in **both** directions — such a contender can be read
+  but neither promoted nor rejected, and clears only when a later
+  contending value supersedes it. Only promotion needs that refusal;
+  narrowing it to the accept branch is a decision about the review queue's
+  contract and was deliberately left out of this fold, flagged in
+  `CortexStore.resolve` and pinned by
+  `test_a_set_slot_contender_cannot_be_resolved_in_either_direction`.
+  Related: the dream
+  rollback's `member_removed` reversal now reports
+  `partial:member_not_restored` instead of claiming a revert when the
+  re-add parks.
+- **The prompt variants' worked example named a benchmark gold answer.**
+  `evals/gen_assistant_facts_prompts.py` built both examples around "Miss
+  Bee Providore … Bandung", the gold of LongMemEval `c4f10528` — a
+  question in the very slice the variants were measured on. The example is
+  re-cut on invented names (a made-up cafe on an invented street in an
+  invented town), both prompt files are regenerated, and
+  `tests/test_assistant_provenance.py` now carries the guard that makes
+  the class un-repeatable: every capitalised word in a worked example must
+  be a registered `EXAMPLE_TOKENS` entry (or ordinary sentence English),
+  and every registered token is grepped against `longmemeval_oracle.json`
+  and `longmemeval_s_cleaned.json` and must occur zero times. The three
+  affected run artifacts are marked CONTAMINATED-PENDING-RERUN in
+  `evals/README.md` and above, with the leave-one-out arithmetic; none is
+  deleted. The bench's own `leak_check` reported `n_leaked: 0` on both
+  runs and could not have caught this — it checks served contexts, not the
+  extraction prompt.
+- **Smaller review items.** An unbacked "~1.5 s" extraction figure in
+  `evals/README.md` is dropped in favour of the pinned 2.05 s median two
+  paragraphs below it; `CortexStore.origin`'s docstring and the System
+  Atlas `cortex.py` card said "user > action > agent" and now name the
+  fourth tier (the atlas card also gained the set-slot coverage, and the
+  README capabilities table two rows); the Console rendered an `assistant`
+  origin badge in the **agent** CSS class, which showed a weaker tier in a
+  stronger tier's styling — it has its own dimmer class now; and
+  `memory.dream.assistant_claims` is documented in
+  `docs/guide/configuration.md` beside the other deliberately-gated knobs,
+  stating that it is inert with the shipped prompt and Console-hidden.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

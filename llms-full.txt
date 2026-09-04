@@ -891,8 +891,8 @@ bank.
 | Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
 | Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
-| Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
-| Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
+| Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender); an `assistant`-origin add cannot convert or join another tier's set, and cannot retract another tier's member |
+| Provenance contenders | Tier-rank guard `user > action > agent > assistant`; `memory_fact_resolve` |
 | Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
 | Write-time labels | `authority` (`directive` / `observation` / `quoted` — the speech act, orthogonal to the `origin` tier) and `distortion_tolerance` (`constraint` / `procedural` / `belief` / `preference` / `episodic`) on entries and facts, set at write time (explicit, or a deterministic heuristic under `auto`) and inherited through supersession unless restated. A `constraint` source is carried verbatim through the dream (with a post-dream guard) and pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` when the query names its entity; a `quoted` source is low-trust for the two-man rule (schema v35) |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
@@ -1442,7 +1442,13 @@ written only by a dream whose extraction prompt asks for a `speaker` label
 (`memory.dream.assistant_claims`, default `contender`). It may fill an empty
 slot, but against a current value of any other origin it always parks as a
 contender — that rule is not gated on `protect_provenance` below — and it
-ranks after user-origin facts at equal similarity. Nothing supersedes *it*
+ranks after user-origin facts at equal similarity. The same rule covers
+**scalar and set-valued slots**: an assistant claim cannot trigger the
+one-way scalar→set conversion, cannot join a member set that carries any
+non-assistant member (it parks as a contender), and cannot retract a
+member another tier added (the retraction is dropped, `action:
+"member_remove_refused"`). It may fill an empty slot, extend a set it
+alone built, and retract its own members. Nothing supersedes *it*
 in return: an assistant-origin value is replaced by any later write.
 Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
 for assistant-stated facts lifts the fact-only arm on
@@ -3328,6 +3334,22 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   a populated reference bank (its raw cosines are not rescaled and
   outrank every memory once the reranker fires). Neither combination has
   been measured.
+- **Assistant-stated claims parked, not adopted**
+  (`memory.dream.assistant_claims = "contender"`) — what a dream claim
+  labelled `speaker: "assistant"` becomes: `contender` writes it at the
+  floor `assistant` provenance tier (it may fill an empty slot, but
+  against a value or member set of any other origin it parks as a
+  contender, and it ranks below user-origin facts at equal similarity),
+  `supersede` treats it as an ordinary agent-tier dream claim, and `drop`
+  discards it. An unrecognised value falls back to `contender` — a typo
+  must not open the overwrite path. **Inert with the shipped extraction
+  prompt**, which never asks for a `speaker` field: with no label on the
+  claim the knob is never consulted at any setting, so all three values
+  are today's behaviour on a shipped install. It is settable only for the
+  prompt-variant experiment in `evals/README.md` ("Assistant-stated
+  facts"), and it is deliberately **not** on the Console for the same
+  reason as the candidate-pool knobs: adoption of either variant is gated
+  on the extraction ladder, which has not been run on them.
 - **Staleness served as annotation** (`memory.search.stale_policy =
   "annotate"`) — stale records (past 2×TTL for their freshness class)
   carry `effective_confidence`/`stale` flags and nothing more, today's
@@ -4863,7 +4885,7 @@ mitigation that is off by default is a mitigation you have not got yet.
 
 | Mechanism | Poisoning step it mitigates | Default |
 |---|---|---|
-| **Provenance tiers** (`user` > `action` > `agent` > `assistant` origin on every write) | A planted `agent`-origin claim cannot silently supersede a user-stated value. `assistant` is the floor tier — a fact the assistant itself stated in a turn, reachable only from a dream whose extraction prompt asks for a `speaker` label — and it cannot supersede a value of **any** other origin: it parks as a contender, and that rule is not gated on `protect_provenance`. Keys on *who asserted*, not on what the text says | On |
+| **Provenance tiers** (`user` > `action` > `agent` > `assistant` origin on every write) | A planted `agent`-origin claim cannot silently supersede a user-stated value. `assistant` is the floor tier — a fact the assistant itself stated in a turn, reachable only from a dream whose extraction prompt asks for a `speaker` label — and it cannot supersede a value of **any** other origin: it parks as a contender, and that rule is not gated on `protect_provenance`. The rule covers **scalar and set-valued slots** alike — an assistant claim cannot convert a scalar slot to a set, cannot join a member set any other tier built (it parks), and cannot retract a member it did not put there (the retraction is dropped). Keys on *who asserted*, not on what the text says | On |
 | **Contender parking** | A conflicting value is parked *against* the **slot** rather than taking `current`: `memory_fact_get` shows both, `memory_search` flags the slot `contested`, and `memory_fact_resolve` settles it. Poison must win an explicit decision, not a similarity contest | On |
 | **Consolidation quarantine** (the two-man rule, `memory.dream.quarantine_low_trust`) | The dream's privilege-escalation step: an untrusted agent-tier claim parks as a **contender** instead of taking `current`, promotable only by an explicit human resolve or an independent second witness | **Off** — opt-in |
 | **Human-reviewed merge queue** | Entity-level poisoning: folding a hostile entity into a trusted one would inherit its facts. Merges are **proposals** carrying their evidence; **merge vetoes** block bad **fold directions** at filing; accept/reject writes an audit-stamped `merge_decisions` row (`decided_by=agent` over MCP, `human` via the Console). By default (`judge_mode: shadow`) a background judge's verdict is a lead, never a decision; the opt-in `judge_mode: auto` folds a pair only when two accepts from DIFFERENT models agree on a non-low-differential row — measured 6/6 on one distinct-model pairing of the 2026-09-02 panel (n=6; not itself a recommendation to flip the default) | On (review required by default; `auto` is opt-in) |

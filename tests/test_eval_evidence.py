@@ -5549,3 +5549,101 @@ for _cid, _doc, _needle, _art, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
         stated=_stated, places=_places))
+
+
+# ── the leave-one-out read after the prompt-contamination finding ────────
+# Merge review, 2026-09-05: the prompt variants' worked example named
+# `Miss Bee Providore`, the gold of `c4f10528` — an SSA question inside
+# the measured slice. Both docs now publish the same numbers with that one
+# question dropped, recomputed here from the artifacts' own qid lists and
+# rows rather than restated, so the qualification is as backed as the
+# claim it qualifies.
+_LOO_Q = "c4f10528"
+
+
+def _loo_delta(arm: str):
+    """Paired delta over n-1, with `c4f10528` removed from both qid lists."""
+    def go(d):
+        won = set(d["paired"]["a_vs_b"][arm]["win_qids"]) - {_LOO_Q}
+        lost = set(d["paired"]["a_vs_b"][arm]["loss_qids"]) - {_LOO_Q}
+        return (len(won) - len(lost)) / (int(d["n"]) - 1)
+    return go
+
+
+def _ssa_acc(arm: str, *, drop_leaked: bool):
+    def go(rows):
+        ssa = [r for r in rows if r["question_type"] == _SSA
+               and not (drop_leaked and r["question_id"] == _LOO_Q)]
+        return sum(1 for r in ssa if r[f"{arm}_correct"]) / len(ssa)
+    return go
+
+
+for _cid, _needle, _pair, _arm, _full, _loo in [
+    ("assist-loo-prov-cortex",
+     "| `assist-prov` vs `assist-base` | cortex | +0.4643 | +0.4545 |",
+     "prov-vs-base", "cortex", 0.4643, 0.4545),
+    ("assist-loo-prov-hybrid",
+     "| `assist-prov` vs `assist-base` | hybrid | +0.0536 | +0.0364 |",
+     "prov-vs-base", "hybrid", 0.0536, 0.0364),
+    ("assist-loo-prov-cascade",
+     "| `assist-prov` vs `assist-base` | cascade | +0.0357 | +0.0182 |",
+     "prov-vs-base", "cascade", 0.0357, 0.0182),
+    ("assist-loo-naive-cortex",
+     "| `assist-naive` vs `assist-base` | cortex | +0.4464 | +0.4364 |",
+     "naive-vs-base", "cortex", 0.4464, 0.4364),
+    ("assist-loo-naive-hybrid",
+     "| `assist-naive` vs `assist-base` | hybrid | +0.0179 | **0.0000** |",
+     "naive-vs-base", "hybrid", 0.0179, 0.0),
+    ("assist-loo-naive-cascade",
+     "| `assist-naive` vs `assist-base` | cascade | +0.0179 | **0.0000** |",
+     "naive-vs-base", "cascade", 0.0179, 0.0),
+    ("assist-loo-rag",
+     "| either vs base | rag (control) | 0.000 | 0.000 |",
+     "prov-vs-base", "rag", 0.0, 0.0),
+]:
+    _art = _as_cmp(_pair, _SSA)
+    CLAIMS.append(Claim(
+        id=_cid + "-full", doc=EVALS, needle=_needle, artifacts=(_art,),
+        value=_as_pair(_arm, "delta"), stated=_full,
+        places=(3 if _cid == "assist-loo-rag" else 4)))
+    CLAIMS.append(Claim(
+        id=_cid + "-loo", doc=EVALS, needle=_needle, artifacts=(_art,),
+        value=_loo_delta(_arm), stated=_loo,
+        places=(3 if _cid == "assist-loo-rag" else 4)))
+
+for _arm, _needle, _cells in [
+    ("cortex",
+     "| cortex | 0.0536 → 0.0545 | 0.5179 → 0.5091 | 0.5000 → 0.4909 |",
+     ((AS_BASE_ROWS, 0.0536, 0.0545), (AS_PROV_ROWS, 0.5179, 0.5091),
+      (AS_NAIVE_ROWS, 0.5000, 0.4909))),
+    ("hybrid",
+     "| hybrid | 0.9107 → 0.9273 | 0.9643 → 0.9636 | 0.9286 → 0.9273 |",
+     ((AS_BASE_ROWS, 0.9107, 0.9273), (AS_PROV_ROWS, 0.9643, 0.9636),
+      (AS_NAIVE_ROWS, 0.9286, 0.9273))),
+    ("rag",
+     "| rag (control) | 0.9107 → 0.9273 | 0.9107 → 0.9273 | 0.9107 → 0.9273 |",
+     ((AS_BASE_ROWS, 0.9107, 0.9273), (AS_PROV_ROWS, 0.9107, 0.9273),
+      (AS_NAIVE_ROWS, 0.9107, 0.9273))),
+]:
+    for _tag, (_rows, _full, _loo) in zip(("base", "prov", "naive"), _cells):
+        CLAIMS.append(Claim(
+            id=f"assist-looacc-{_arm}-{_tag}-full", doc=EVALS,
+            needle=_needle, artifacts=(_rows,),
+            value=_ssa_acc(_arm, drop_leaked=False), stated=_full, places=4))
+        CLAIMS.append(Claim(
+            id=f"assist-looacc-{_arm}-{_tag}-loo", doc=EVALS,
+            needle=_needle, artifacts=(_rows,),
+            value=_ssa_acc(_arm, drop_leaked=True), stated=_loo, places=4))
+
+for _cid, _needle, _pair, _arm, _stated, _places in [
+    ("assist-cl-loo-prov", "+0.464 → **+0.455** for `prov`,",
+     "prov-vs-base", "cortex", 0.455, 3),
+    ("assist-cl-loo-naive", "+0.446 → **+0.436** for `naive`)",
+     "naive-vs-base", "cortex", 0.436, 3),
+    ("assist-cl-loo-zero", "gains go to **exactly 0.0000**",
+     "naive-vs-base", "hybrid", 0.0, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle,
+        artifacts=(_as_cmp(_pair, _SSA),), value=_loo_delta(_arm),
+        stated=_stated, places=_places))
