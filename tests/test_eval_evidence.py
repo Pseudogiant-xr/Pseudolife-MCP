@@ -1806,6 +1806,137 @@ for _cid, _needle, _val, _stated, _places in [
         value=_val, stated=_stated, places=_places))
 
 
+# The forgetting sweep (evals/README.md, 2026-09-05): the follow-up the
+# distractor probe's interpretation rule called for. Every published cell of
+# the arm x scale x capacity table is pinned, plus the four gate deltas and
+# the survival numbers that explain them.
+SWEEP = RESULTS + "forgetting-sweep-probe-20260905.json"
+
+
+def _cell(capacity: str, scale: str, arm: str, field: str = "evidence_in_top6_mean"):
+    return lambda d: d["cells"][capacity][scale][arm][field]
+
+
+# The table rows: needle is the whole markdown row, so a rewrite that drops
+# any cell fails here rather than quietly stopping guarding.
+for _cap, _scale, _row in [
+    ("C1", "1x", "| C1 | 1x | 488.3 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 |"),
+    ("C1", "3x", "| C1 | 3x | 1464.8 | 0.7583 | 0.1528 | 0.0807 | 0.1528 | 0.4216 | 0.9030 |"),
+    ("C1", "7x", "| C1 | 7x | 3418.0 | 0.6840 | 0.0465 | 0.0064 | 0.0465 | 0.1390 | 0.9063 |"),
+    ("C1", "15x", "| C1 | 15x | 7324.2 | 0.5969 | 0.0192 | 0.0000 | 0.0192 | 0.0710 | 0.9191 |"),
+    ("C1", "31x", "| C1 | 31x | 15136.7 | 0.5130 | 0.0000 | 0.0000 | 0.0000 | 0.0198 | 0.9121 |"),
+    ("C3", "7x", "| C3 | 7x | 3418.0 | 0.6840 | 0.2736 | 0.0791 | 0.2736 | 0.3522 | 0.8571 |"),
+    ("C3", "15x", "| C3 | 15x | 7324.2 | 0.5969 | 0.0652 | 0.0064 | 0.0652 | 0.1491 | 0.8752 |"),
+    ("C3", "31x", "| C3 | 31x | 15136.7 | 0.5130 | 0.0454 | 0.0000 | 0.0454 | 0.0845 | 0.8666 |"),
+]:
+    _cells = [c.strip() for c in _row.strip("|").split("|")]
+    CLAIMS.append(Claim(
+        id=f"sweep-{_cap}-{_scale}-pool", doc=EVALS, needle=_row,
+        artifacts=(SWEEP,), value=_cell(_cap, _scale, "none", "n_pool_entries_mean"),
+        stated=float(_cells[2]), places=1))
+    for _arm, _stated in zip(
+            ("none", "balanced", "recency_heavy", "surprise_heavy", "random",
+             "oracle"), _cells[3:]):
+        CLAIMS.append(Claim(
+            id=f"sweep-{_cap}-{_scale}-{_arm}", doc=EVALS, needle=_row,
+            artifacts=(SWEEP,), value=_cell(_cap, _scale, _arm),
+            stated=float(_stated), places=4))
+
+# The swept pool sizes quoted under the table.
+for _cid, _needle, _cap, _stated in [
+    ("sweep-c1-kept", "488.3 entries at every scale under C1", "C1", 488.3),
+    ("sweep-c3-kept", "and 1464.8 under C3.)", "C3", 1464.8),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_cell(_cap, "15x", "balanced", "n_pool_entries_mean"),
+        stated=_stated, places=1))
+
+# Gate deltas and p-values.
+for _cid, _needle, _val, _stated, _places in [
+    ("sweep-gf0-cells", "all 390 question × scale cells",
+     lambda d: float(d["control"]["n_cells_checked"]), 390.0, 0),
+    ("sweep-gf1-balanced", "**−0.5777 (balanced)",
+     lambda d: d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"], -0.5777, 4),
+    ("sweep-gf1-recency", "−0.5969 (recency_heavy)",
+     lambda d: d["gates"]["G-F1"]["arms"]["recency_heavy"]["delta_mean"], -0.5969, 4),
+    ("sweep-gf1-surprise", "−0.5777\n  (surprise_heavy)",
+     lambda d: d["gates"]["G-F1"]["arms"]["surprise_heavy"]["delta_mean"], -0.5777, 4),
+    ("sweep-gf2-delta", "**+0.3222, p < 0.0001**",
+     lambda d: d["gates"]["G-F2"]["delta_mean"], 0.3222, 4),
+    ("sweep-gf3-balanced", "−0.0518 (p 0.0329)",
+     lambda d: d["gates"]["G-F3"]["arms"]["balanced"]["delta_mean"], -0.0518, 4),
+    ("sweep-gf3-balanced-p", "−0.0518 (p 0.0329)",
+     lambda d: d["gates"]["G-F3"]["arms"]["balanced"]["p"], 0.0329, 4),
+    ("sweep-gf3-recency", "−0.0710\n  (p 0.0002)",
+     lambda d: d["gates"]["G-F3"]["arms"]["recency_heavy"]["delta_mean"], -0.0710, 4),
+    ("sweep-gf3-recency-p", "−0.0710\n  (p 0.0002)",
+     lambda d: d["gates"]["G-F3"]["arms"]["recency_heavy"]["p"], 0.0002, 4),
+    ("sweep-gf4-sanity", "1x evidence-in-top-6 = 0.8299",
+     lambda d: d["gates"]["G-F4"]["evidence_in_top6_mean"], 0.8299, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_val, stated=_stated, places=_places))
+
+# Evidence survival at the gate cell — the mechanism sentence.
+for _arm, _needle, _stated in [
+    ("balanced", "0.0214 (balanced and surprise_heavy)", 0.0214),
+    ("surprise_heavy", "0.0214 (balanced and surprise_heavy)", 0.0214),
+    ("recency_heavy", "0.0000\n(recency_heavy)", 0.0000),
+    ("random", "0.0727 (random)", 0.0727),
+    ("oracle", "1.0000 (`none` and `oracle`)", 1.0000),
+]:
+    CLAIMS.append(Claim(
+        id=f"sweep-survival-{_arm}", doc=EVALS, needle=_needle,
+        artifacts=(SWEEP,),
+        value=_cell("C1", "15x", _arm, "evidence_survival_mean"),
+        stated=_stated, places=4))
+
+# The latency pair quoted beside the quality cliff.
+for _cid, _needle, _arm, _field, _stated in [
+    ("sweep-bm25-unswept", "from 812 ms unswept to 29 ms at C1", "none",
+     "bm25_latency_ms_median", 812.0),
+    ("sweep-bm25-swept", "from 812 ms unswept to 29 ms at C1", "balanced",
+     "bm25_latency_ms_median", 29.0),
+    ("sweep-select-unswept", "from 1052 ms to 44 ms", "none",
+     "select_topk_latency_ms_median", 1052.0),
+    ("sweep-select-swept", "from 1052 ms to 44 ms", "balanced",
+     "select_topk_latency_ms_median", 44.0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_cell("C1", "15x", _arm, _field), stated=_stated, places=0))
+
+# The mechanism sentence's corpus rates, in both docs that state them. These
+# are NOT derivable from the sweep artifact — it records retrieval metrics,
+# not supersession counts — so they carry their own committed artifact,
+# written by `forgetting_sweep_probe.py --corpus-props`.
+SWEEP_CORPUS = RESULTS + "forgetting-sweep-corpus-props-20260905.json"
+for _doc, _tag, _needle in [
+    (EVALS, "readme",
+     "**247 of 286 gold-evidence entries (0.8636) are flagged\nsuperseded**, against a 0.7341 base rate over 38,086 entries"),
+    (CHANGELOG, "changelog",
+     "247 of 286 gold-evidence entries\n  (0.8636) in this corpus are flagged superseded against a 0.7341 base\n  rate"),
+]:
+    for _field, _stated, _places in [
+        ("evidence_superseded_rate", 0.8636, 4),
+        ("n_evidence_superseded", 247, 0),
+        ("n_evidence_entries", 286, 0),
+        ("superseded_rate", 0.7341, 4),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"sweep-corpus-{_tag}-{_field}", doc=_doc, needle=_needle,
+            artifacts=(SWEEP_CORPUS,),
+            value=(lambda f: lambda d: float(d[f]))(_field),
+            stated=_stated, places=_places))
+CLAIMS.append(Claim(
+    id="sweep-corpus-readme-n-entries", doc=EVALS,
+    needle="0.7341 base rate over 38,086 entries",
+    artifacts=(SWEEP_CORPUS,), value=lambda d: float(d["n_entries"]),
+    stated=38086, places=0))
+
+
 # The judge-model ladder's published auto-reject precisions (CHANGELOG,
 # 2026-08-16): the measured floor for the autonomous Step-C judge.
 JUDGE_LADDER = RESULTS + "judge-ladder-20260816.json"

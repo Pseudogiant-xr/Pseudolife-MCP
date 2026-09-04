@@ -255,6 +255,36 @@ def test_surprise_reconstruction_is_clamped_into_the_unit_interval():
     assert 0.0 <= got[1] <= 1.0
 
 
+# ── corpus properties (the mechanism number the docs publish) ─────────────
+
+def test_corpus_properties_counts_superseded_evidence_separately():
+    """The published mechanism sentence is "gold evidence is superseded more
+    often than an average turn", so the two rates must be computed over
+    different denominators, not the same one."""
+    dumps = {
+        "q1": {"bands": [{"entries": [
+            entry("a", superseded=True), entry("b"), entry("c"),
+            entry("d", superseded=True)]}]},
+        "q2": {"bands": [{"entries": [entry("e"), entry("f", superseded=True)]}]},
+    }
+    props = fsp.corpus_properties(dumps, {"q1": {"a", "b"}, "q2": {"f"}})
+    assert props["n_questions"] == 2
+    assert props["n_entries"] == 6
+    assert props["n_superseded"] == 3
+    assert props["superseded_rate"] == pytest.approx(0.5)
+    assert props["n_evidence_entries"] == 3
+    assert props["n_evidence_superseded"] == 2
+    assert props["evidence_superseded_rate"] == pytest.approx(0.6667, abs=1e-4)
+
+
+def test_corpus_properties_survives_an_evidence_free_question():
+    dumps = {"q1": {"bands": [{"entries": [entry("a"), entry("b")]}]}}
+    props = fsp.corpus_properties(dumps, {})
+    assert props["n_evidence_entries"] == 0
+    assert props["evidence_superseded_rate"] is None
+    assert props["superseded_rate"] == pytest.approx(0.0)
+
+
 # ── dump-directory resolution ─────────────────────────────────────────────
 # The 2026-08-15 artifact was NOT produced from the directory
 # `distractor_scale_probe.DUMP_DIR` names: that one holds the retired 384-d

@@ -278,6 +278,22 @@ The prediction is that this shows up as policy arms below the random
 floor. If it does not, the prediction was wrong and the artifact will say
 so.
 
+> **Correction (2026-09-05, same day):** the two rates in the paragraph
+> above were read off the *retired 384-d replay* — the same wrong
+> directory the amendment at the top of this spec describes, measured
+> before that problem was found. On the v25 dumps the experiment
+> actually ran on, the rates are **0.7341** over all 38,086 entries
+> (27,959 superseded) and **0.8636** over the 286 gold-evidence entries
+> (247 superseded): the supersession flags come from contradiction
+> detection at ingest, which is embedding-dependent, so a different
+> backbone flags different entries. The direction is unchanged and the
+> gap is wider, so the prediction it grounds stands as written. Both
+> corrected numbers are backed by
+> `evals/results/forgetting-sweep-corpus-props-20260905.json`
+> (`forgetting_sweep_probe.py --corpus-props`); the stale pair is left
+> visible above rather than edited away, because what a preregistration
+> is for is showing what was believed before the run.
+
 ## Caveats stated up front
 
 - **The corpus makes supersession adversarial.** LongMemEval

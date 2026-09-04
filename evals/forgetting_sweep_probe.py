@@ -95,9 +95,10 @@ CAVEATS = [
     "onto surprise_heavy's ordering.",
     "surprise_score reconstructed as 1 - max cosine to the prior entries of "
     "the entry's OWN dump (1.0 for the first), i.e. MIRASBand.compute_surprise "
-    "verbatim. Exact for these dumps: one flat band, flat_cap 5250 vs ~470-520 "
-    "stored (no eviction during the replay), turns_stored == entry count (the "
-    "novelty gate rejected nothing). Per-dump, not per-pool: the concatenated "
+    "verbatim. Exact for these dumps: one flat band, flat_cap 5250 vs 396-550 "
+    "stored (no eviction during the replay), turns_stored == entry count in all "
+    "78 (the novelty gate rejected nothing). Per-dump, not per-pool: the "
+    "concatenated "
     "pool never existed live, so per-dump surprise is the only value that was "
     "ever real.",
     "reinforcements = 0 and retention_boost = 0.0 (never dumped). The MTT term "
@@ -116,18 +117,21 @@ CAVEATS = [
     "behaviour, and the pool construction places the anchor's own dump first, "
     "so that arm deletes the anchor's own turns first - a construction "
     "artifact, not a policy verdict.",
-    "Corpus property (measured before the expected ordering was written): 180 "
-    "of 286 gold-evidence entries (0.629) carry superseded_at against a 0.457 "
-    "base rate over 38086 entries. source_weighted_score multiplies a "
-    "superseded entry by 0.05, below every live entry, so all three shipped "
-    "policies delete gold evidence first on this corpus.",
+    "Corpus property (forgetting-sweep-corpus-props-20260905.json): 247 of 286 "
+    "gold-evidence entries (0.8636) carry superseded_at against a 0.7341 base "
+    "rate over 38086 entries. source_weighted_score multiplies a superseded "
+    "entry by 0.05, below every live entry, so all three shipped policies "
+    "delete gold evidence first on this corpus. (The preregistration first "
+    "stated 0.629/0.457 - those were read off the retired 384-d replay before "
+    "the dump-directory problem was found; the direction is unchanged and the "
+    "gap is wider.)",
     "Distractors are foreign haystacks (inherited from 2026-08-15): maximally "
     "off-topic, hence the easiest possible material for a sweep to drop. A "
     "sweep that cannot beat 'none' here will not beat it on realistic "
     "near-duplicate chatter.",
     "Retrieval proxy, not a judged verdict: evidence-in-top-6 is what reaches "
     "the served window, not what an answerer then gets right.",
-    "Single embedder/backbone (v25, 384-d), like every conclusion from this "
+    "Single embedder/backbone (v25, 1024-d), like every conclusion from this "
     "dump family. Both capacities are aggressive (7% and 20% of the 15x pool); "
     "nothing here speaks to a capacity set just below the accumulated size.",
 ]
@@ -378,6 +382,40 @@ def _aggregate(rows: list[dict]) -> dict:
     return out
 
 
+def corpus_properties(dumps: dict[str, dict],
+                      evidence_by_id: dict[str, set[str]]) -> dict:
+    """The corpus fact that explains the result, as a checkable number.
+
+    ``source_weighted_score`` multiplies a superseded entry by 0.05, below
+    every live entry — so the shipped policies delete superseded material
+    first. On a knowledge-update corpus the gold-evidence turn is
+    disproportionately the one a later turn superseded, which is what turns
+    "evict the cheapest" into "evict the answer". This measures both rates
+    so the mechanism sentence in the docs is backed rather than asserted.
+    """
+    n_entries = n_superseded = n_evidence = n_evidence_superseded = 0
+    for qid, dump in dumps.items():
+        evidence = evidence_by_id.get(qid, set())
+        for band in dump["bands"]:
+            for e in band["entries"]:
+                superseded = e["superseded_at"] is not None
+                n_entries += 1
+                n_superseded += superseded
+                if e["text"] in evidence:
+                    n_evidence += 1
+                    n_evidence_superseded += superseded
+    return {
+        "n_questions": len(dumps),
+        "n_entries": n_entries,
+        "n_superseded": n_superseded,
+        "superseded_rate": round(n_superseded / n_entries, 4) if n_entries else None,
+        "n_evidence_entries": n_evidence,
+        "n_evidence_superseded": n_evidence_superseded,
+        "evidence_superseded_rate":
+            round(n_evidence_superseded / n_evidence, 4) if n_evidence else None,
+    }
+
+
 def check_out_path(path: Path, force: bool) -> None:
     """Never overwrite a canonical result file on a rerun (house rule)."""
     if path.exists() and not force:
@@ -447,12 +485,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dumps", type=Path, default=None,
                     help="band-state dump directory (default: the 1024-d v25 "
                          "replay under results/banks, auto-identified)")
+    ap.add_argument("--corpus-props", type=Path, default=None,
+                    help="write only the corpus-property artifact (superseded "
+                         "rates over all entries and over gold evidence) and "
+                         "exit; no re-selection, seconds not minutes")
     ap.add_argument("--limit", type=int, default=0,
                     help="only the first N questions (smoke runs; the control "
                          "gate still checks every question it ran)")
     args = ap.parse_args(argv)
 
-    check_out_path(args.out, args.force)          # before any work
+    out_path = args.corpus_props or args.out
+    check_out_path(out_path, args.force)          # before any work
 
     repo_root = Path(__file__).resolve().parents[1]
     t_start = time.perf_counter()
@@ -476,9 +519,25 @@ def main(argv: list[str] | None = None) -> int:
 
     sorted_ids = sorted(dumps.keys())
     n_ids = len(sorted_ids)
-    if n_ids != 78:
-        sys.exit(f"expected 78 questions, found {n_ids}")
+    if n_ids != N_QUESTIONS:
+        sys.exit(f"expected {N_QUESTIONS} questions, found {n_ids}")
     id_pos = {qid: i for i, qid in enumerate(sorted_ids)}
+
+    evidence_by_id = {
+        qid: _evidence_texts(questions[qid]) & {e["text"] for e in
+                                                d["bands"][0]["entries"]}
+        for qid, d in dumps.items()
+    }
+
+    if args.corpus_props is not None:
+        props = dict(corpus_properties(dumps, evidence_by_id),
+                     spec=SPEC, dump_dir=dump_dir.name, dataset="s",
+                     runtime_s=round(time.perf_counter() - t_start, 1))
+        args.corpus_props.parent.mkdir(parents=True, exist_ok=True)
+        args.corpus_props.write_text(json.dumps(props, indent=2), encoding="utf-8")
+        print(json.dumps(props, indent=2))
+        print(f"\nwrote {args.corpus_props}")
+        return 0
 
     print("reconstructing per-dump surprise "
           "(MIRASBand.compute_surprise replay)...", flush=True)
@@ -491,9 +550,8 @@ def main(argv: list[str] | None = None) -> int:
 
     for qi, qid in enumerate(run_ids):
         dump = dumps[qid]
-        q = questions[qid]
         own_entries = dump["bands"][0]["entries"]
-        evidence = _evidence_texts(q) & {e["text"] for e in own_entries}
+        evidence = evidence_by_id[qid]
         if not evidence:
             sys.exit(f"question {qid} has no gold-evidence turn present in "
                      "its own dump — statistics require 78 paired questions")

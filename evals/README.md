@@ -1415,6 +1415,134 @@ Bank dumps and served contexts persist per run under
 serving-knob rerun or a re-judge recomposes from persisted state instead of
 re-paying the ~5h ingest/extraction phase.
 
+## Forgetting sweep (`forgetting_sweep_probe.py`, 2026-09-05)
+
+The distractor-scale probe (`distractor_scale_probe.py`, 2026-08-15,
+preregistered in
+`docs/superpowers/specs/2026-08-15-distractor-scale-probe-preregistration.md`)
+measured what accumulation costs: evidence-in-top-6 falls 0.830 (1x) →
+0.597 (15x) → 0.513 (31x) as the pool grows, while nothing ever evicts on
+the flat default. It left its own follow-up open in as many words — no
+experiment had forced eviction and asked *which* victims to pick, or
+whether not evicting at all beats picking badly. **This probe answers
+that, and the answer is that keeping everything wins.**
+
+Same construction, CPU only, no GPU/judge/daemon: the same 78
+knowledge-update dumps, the same RNG-free rotation, the same
+`band_ablation.select_topk` mirror (flat, recency off, BM25 on), the same
+five scales. The only new step is a **sweep** that reduces the pooled bank
+to a capacity `C` before selection.
+
+```bash
+python evals/forgetting_sweep_probe.py     # writes results/forgetting-sweep-probe-20260905.json
+python evals/forgetting_sweep_probe.py --dumps <band-state-dir> --limit 3
+```
+
+| arm | evicts |
+|---|---|
+| `none` | nothing — the distractor probe's own numbers, reproduced as the control |
+| `balanced` / `recency_heavy` / `surprise_heavy` | the lowest `RetentionPolicy.source_weighted_score`, the shipped `_evict_one` scoring, called offline |
+| `random` | uniformly at random, seeded — the floor a policy must beat |
+| `oracle` | never a gold-evidence entry, randomly among the rest — the ceiling victim choice can reach |
+
+Capacities are per question: **C1** = that question's 1x pool size
+(~490), **C3** = its 3x pool size (~1,470). A scale already at or below
+the capacity is a no-op and is reported as one.
+
+**Result — `results/forgetting-sweep-probe-20260905.json`,
+evidence-in-top-6 (n=78, mean pool size in the second column):**
+
+| capacity | scale | pool | `none` | `balanced` | `recency_heavy` | `surprise_heavy` | `random` | `oracle` |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1x | 488.3 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 |
+| C1 | 3x | 1464.8 | 0.7583 | 0.1528 | 0.0807 | 0.1528 | 0.4216 | 0.9030 |
+| C1 | 7x | 3418.0 | 0.6840 | 0.0465 | 0.0064 | 0.0465 | 0.1390 | 0.9063 |
+| C1 | 15x | 7324.2 | 0.5969 | 0.0192 | 0.0000 | 0.0192 | 0.0710 | 0.9191 |
+| C1 | 31x | 15136.7 | 0.5130 | 0.0000 | 0.0000 | 0.0000 | 0.0198 | 0.9121 |
+| C3 | 7x | 3418.0 | 0.6840 | 0.2736 | 0.0791 | 0.2736 | 0.3522 | 0.8571 |
+| C3 | 15x | 7324.2 | 0.5969 | 0.0652 | 0.0064 | 0.0652 | 0.1491 | 0.8752 |
+| C3 | 31x | 15136.7 | 0.5130 | 0.0454 | 0.0000 | 0.0454 | 0.0845 | 0.8666 |
+
+(C1/1x, C3/1x and C3/3x are capacity no-ops — the pool is already at or
+under C, so every arm returns the control's numbers. The swept pool holds
+488.3 entries at every scale under C1, and 1464.8 under C3.)
+
+**Verdict against the preregistered bars**
+(`docs/superpowers/specs/2026-09-05-forgetting-sweep-preregistration.md`;
+the gate cell is C1/15x, paired sign-flip permutation, 10k perms, seed 0):
+
+- **G-F0 (control): PASS, exactly.** The `none` arm reproduces the
+  2026-08-15 artifact across all 390 question × scale cells on pool size,
+  evidence-in-top-6, -top-3, any-served and rank-of-first-evidence.
+  Latency is excluded as machine-dependent.
+- **G-F1 (does a shipped sweep pay?): NO, by a mile.** The bar was
+  ≥ +0.05 with p < 0.05; the measured deltas against no sweep are
+  **−0.5777 (balanced), −0.5969 (recency_heavy), −0.5777
+  (surprise_heavy), all p < 0.0001**. Sweeping to a lean bank costs about
+  three times what accumulating to 15x costs.
+- **G-F2 (is victim choice worth anything?): YES.** `oracle − none` =
+  **+0.3222, p < 0.0001**, and the oracle at 0.9191 beats even the
+  undiluted 1x bank's 0.8299 — thinning a pool helps when you thin the
+  right entries. The loss is in the scores, not in forgetting.
+- **G-F3 (do the shipped scores beat coin-flipping?): NO.** All three sit
+  significantly **below** the random floor: −0.0518 (p 0.0329), −0.0710
+  (p 0.0002), −0.0518 (p 0.0329).
+- **G-F4 (sanity): PASS** — 1x evidence-in-top-6 = 0.8299, above the 0.5
+  floor inherited from the distractor probe's G-D3.
+
+**Why the shipped policies lose to a coin flip.**
+`RetentionPolicy.source_weighted_score` multiplies a superseded entry's
+score by 0.05, putting every superseded entry below every live one — and
+on this corpus **247 of 286 gold-evidence entries (0.8636) are flagged
+superseded**, against a 0.7341 base rate over 38,086 entries
+(`results/forgetting-sweep-corpus-props-20260905.json`, written by
+`forgetting_sweep_probe.py --corpus-props`). The policies
+delete the answer first, by design. Evidence survival at C1/15x makes it
+concrete: 0.0214 (balanced and surprise_heavy), 0.0000
+(recency_heavy), 0.0727 (random), 1.0000 (`none` and `oracle`). This is a
+finding about `source_weighted_score` on knowledge-update material, not
+an argument that the multiplier is wrong in general — it was added
+because a correction was scoring below the stale fact it replaced
+(`miras/protocols.py`).
+
+**Every preregistered expectation held**, including the two stated as
+analytic consequences of the dumps carrying no `access_count`:
+`balanced` and `surprise_heavy` are identical to four decimal places at
+every cell (both reduce to a strictly increasing function of surprise),
+and `recency_heavy` degenerates to a positional policy that deletes the
+anchor's own turns first — a construction artifact, called out in the
+spec before the run, not a verdict on that policy.
+
+**The sweep is a large latency win and it does not matter.** Median BM25
+build+score at 15x falls from 812 ms unswept to 29 ms at C1, and
+`select_topk` from 1052 ms to 44 ms. The quality cliff arrives long before
+the latency ceiling does, which is the same conclusion the distractor
+probe's G-D2 reached from the other direction. Read those four as ratios,
+not constants: the probe was run twice and every quality number came back
+bit-identical while the latency medians moved 10-20% with machine load,
+which is why the control gate excludes them.
+
+Caveats, all preregistered: six substitutions the dumps force (chiefly
+`access_count = 0`, never dumped; surprise reconstructed exactly as
+`MIRASBand.compute_surprise` over each dump's own insertion order);
+distractors are foreign haystacks, i.e. the easiest possible material for
+a sweep to identify, so a sweep that loses here loses on realistic
+near-duplicate chatter too; both capacities are aggressive (7% and 20% of
+the 15x pool), so nothing here speaks to a capacity set just below the
+accumulated size; a retrieval proxy, not a judged run; single backbone
+(v25, 1024-d).
+
+**Note for anyone re-running the distractor probe**: its `DUMP_DIR`
+constant names `results/banks/s-qwen-27b-ablbands-flat`, which on a tree
+carrying both replays is the retired 384-d MiniLM dump — through it, 11
+of 30 checked cells reproduce the published numbers and no `select_topk`
+knob closes the gap. The v25 replay the artifact was measured on is
+1024-d and lives in a sibling directory whose suffix is machine-local, so
+the sweep probe resolves the directory by backbone dimension, preset and
+"nothing was evicted during the replay", and records its choice in the
+artifact. Those dumps are gitignored: a fresh worktree must link or copy
+them from the main checkout.
+
 ---
 
 # Lesson-synthesis benchmark (`lesson_synthesis_bench.py`)

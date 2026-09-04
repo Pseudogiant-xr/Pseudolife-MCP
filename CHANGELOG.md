@@ -6,6 +6,77 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-09-05 — a bank that forgets is worse than one that just grows; eval-only)
+
+- **The question was whether sweeping an accumulated bank back down to a
+  lean one beats letting it grow, and the answer is no — every eviction
+  policy this project ships loses to no sweep at all, and loses to
+  deleting at random.** The 2026-08-15 distractor-scale probe measured
+  what accumulation costs (evidence-in-top-6 0.830 at 1x → 0.597 at 15x)
+  and left its own follow-up open in as many words: no experiment had
+  forced eviction and asked which victims to pick, or whether not
+  evicting beats picking badly. `evals/forgetting_sweep_probe.py` runs
+  it, inheriting the distractor probe's construction wholesale (same 78
+  knowledge-update dumps, same RNG-free rotation, same
+  `band_ablation.select_topk` mirror, same five scales) and varying only
+  a sweep applied to the pool before selection. Six arms — `none`, the
+  three shipped retention policies scored through the real
+  `RetentionPolicy.source_weighted_score`, a seeded `random` floor and an
+  evidence-preserving `oracle` ceiling — at two per-question capacities,
+  the 1x pool size (C1, ~490 entries) and the 3x one (C3, ~1,470).
+  Eviction is one stable selection rather than a pop loop, because the
+  scores do not depend on which entries remain.
+  At the preregistered gate cell (C1, 15x, evidence-in-top-6, n=78,
+  paired sign-flip permutation, 10k perms, seed 0): **oracle 0.9191, no
+  sweep 0.5969, random 0.0710, balanced 0.0192, surprise_heavy 0.0192,
+  recency_heavy 0.0000.** No shipped arm meets the +0.05 bar — they come
+  in at **−0.5777 / −0.5969 / −0.5777 against no sweep, all p < 0.0001**,
+  so sweeping costs roughly three times what accumulating to 15x costs
+  — and all three sit *significantly below the random floor*
+  (−0.0518 p 0.0329, −0.0710 p 0.0002, −0.0518 p 0.0329). Mechanism:
+  `source_weighted_score` puts every superseded entry below every live
+  one at a ×0.05 multiplier, and 247 of 286 gold-evidence entries
+  (0.8636) in this corpus are flagged superseded against a 0.7341 base
+  rate, so the policies delete the answer first. That is a finding about
+  the multiplier on knowledge-update material, not an argument it is
+  wrong in general — it exists because corrections were being evicted
+  before the stale facts they replaced.
+  Victim choice is not the hopeless part: **oracle − none = +0.3222,
+  p < 0.0001**, and the oracle's 0.9191 beats even the undiluted 1x
+  bank's 0.8299, so thinning helps when the right entries are thinned.
+  Validity: the `none` arm reproduces the 2026-08-15 artifact **exactly
+  across all 390 question × scale cells** on every published field
+  (latency excluded as machine-dependent) — an exact control was a
+  preregistered abort condition, not a nice-to-have. Every preregistered
+  expectation held, including two stated as analytic consequences of the
+  dumps carrying no `access_count`: `balanced` and `surprise_heavy` are
+  identical to four decimals everywhere, and `recency_heavy` degenerates
+  to a positional policy. Caveats, all preregistered: six substitutions
+  the band-state dumps force; foreign-haystack distractors, i.e. the
+  easiest material a sweep could hope to identify; two aggressive
+  capacities (7% and 20% of the 15x pool), so nothing here speaks to a
+  capacity set just below the accumulated size; a retrieval proxy, not a
+  judged run; single backbone (v25, 1024-d). CPU only, 1,040 s, no
+  defaults change.
+  Spec `docs/superpowers/specs/2026-09-05-forgetting-sweep-preregistration.md`,
+  artifact `evals/results/forgetting-sweep-probe-20260905.json`, section
+  "Forgetting sweep" in `evals/README.md`.
+- **The distractor-scale probe cannot regenerate its own published
+  artifact**, found while building the control above and recorded in the
+  new spec's amendment. Its `DUMP_DIR` constant names
+  `evals/results/banks/s-qwen-27b-ablbands-flat`, which on a tree
+  carrying both replays holds the retired 384-d MiniLM dump: through it
+  11 of 30 checked cells reproduce, and no `select_topk` knob closes the
+  gap. The v25 replay the artifact was measured on is 1024-d and sits in
+  a sibling directory whose suffix is machine-local; through it, 40 of 40
+  reproduce. The sweep probe therefore resolves its dumps by backbone
+  dimension, preset and "nothing was evicted during the replay", and
+  records the choice in its artifact. Nothing is changed in
+  `distractor_scale_probe.py` here — auditing the other consumers of that
+  constant is a follow-up. Worth noting why it went unnoticed: the probe
+  refuses to overwrite an existing result file, so the guard that
+  protects canonical numbers also hid that they had stopped reproducing.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported
