@@ -1721,10 +1721,15 @@ reversal of the hold decision.
 # Retrieval telemetry, offline replay, and the graph ablation (2026-09-04)
 
 Three read-only harnesses over a **restored copy** of a live bank. None of
-them touches `pseudolife_memory` or the shared `pseudolife_memory_bench` —
-each refuses those two database names outright — and each forces CPU and
-sets `memory.retrieval_log.enabled = False` so a replay cannot append to
-the log it is replaying.
+them touches `pseudolife_memory` or the shared `pseudolife_memory_bench`:
+each refuses those two database names outright, in either DSN spelling and
+regardless of case. `retrieval_telemetry_review.py` goes no further than
+that — it is plain SQL over the log tables, loads no model and never opens
+the search path. The two that do search (`retrieval_replay.py`,
+`graph_ablation.py`) build a `MemoryService` against the restored copy and
+then force `embedding.device = "cpu"` and
+`memory.retrieval_log.enabled = False`, so a replay cannot append to the
+log it is replaying.
 
 Restore recipe (the 2026-09-04 run used
 `pseudolife_memory_replay_20260904` on the bench Postgres):

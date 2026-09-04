@@ -41,9 +41,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   yet?", "what do the shipped ranking knobs do on the queries agents really
   asked?", and "does `memory_recall`'s graph expansion earn its cost?".
   All three refuse to run against `pseudolife_memory` or
-  `pseudolife_memory_bench`, force CPU, disable the retrieval log so a
-  replay cannot append to the log it is replaying, and emit aggregates only
-  (entity names pass a tracked-tree check first; no query or entry text).
+  `pseudolife_memory_bench` and emit aggregates only (entity names pass a
+  tracked-tree check first; no query or entry text). The two that search
+  (`retrieval_replay.py`, `graph_ablation.py`) additionally force CPU and
+  disable the retrieval log, so a replay cannot append to the log it is
+  replaying; `retrieval_telemetry_review.py` is plain SQL over the log
+  tables and never loads a model or touches the search path.
   No shipped code path changes. Artifacts:
   `evals/results/retrieval-telemetry-review-20260904.json`,
   `retrieval-replay-20260904.json`, `graph-ablation-20260904.json`.
