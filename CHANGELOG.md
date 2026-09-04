@@ -22,13 +22,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     MORE context chars). A router with perfect knowledge of the question type
     reaches +0.024 (LongMemEval, under the bar) and +0.046 (BEAM, at more
     cost).
-  - The best router found is the cascade restated: on LongMemEval it predicts
-    "cascade" on 500 of 500 questions and lands exactly on the shipped
-    0.690 / 883 tokens. Question type IS predictable from surface text (0.654
-    and 0.652 by 5-fold CV against 0.266 / 0.100 majority), but the per-type
-    arm differences are smaller than the classifier's error cost — routing
-    through a predicted type scores BELOW the best single arm on all three
-    slices.
+  - The best router found is the cascade restated: on LongMemEval the winning
+    configuration is the two-stage one, which serves cortex on the 193
+    questions where cortex commits and rag on the other 307, landing exactly
+    on the shipped 0.690 / 883 tokens. Question type IS predictable from
+    surface text (0.654 and 0.652 by 5-fold CV against 0.266 / 0.100
+    majority), but the per-type arm differences are smaller than the
+    classifier's error cost — routing through a predicted type scores BELOW
+    the best single arm on all three slices.
   - Per-question ceilings say the channels do genuinely disagree: 0.778
     (LongMemEval-500), 0.789 (BEAM-400), 0.962 (the 78-question
     knowledge-update slice, three channels; 0.936 for rag∪cortex on the same
@@ -38,6 +39,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Only 2 of the 4 question types the two benchmarks share agree on a best
     arm (knowledge-update and preference: yes; temporal-reasoning and
     multi-session: no), which is a second reason not to ship a type table.
+  - Written after review: the `acc` label policy ranked the arms over the
+    WHOLE dataset before cross-validation split it, so a tied row's training
+    label depended on a statistic that included its own held-out fold. The
+    ranking is now recomputed inside each training fold, as
+    `router_via_type`'s per-fold mapping always was. No headline moves — the
+    realizable gains, the oracle bounds, the ceilings, the type-prediction
+    accuracies and the verdict are identical before and after — but WHICH
+    configuration attains the LongMemEval maximum does. The single-stage
+    `router[with_cascade|logreg|acc]` fell from 0.690 / 883 tokens, where it
+    had predicted "cascade" on 500 of 500 rows, to 0.678 / 1009; that
+    collapse was itself the leak, since rag and the cascade sit 0.002 apart
+    and the ranking separating them was borrowed from the test rows. The
+    maximum passed to the two-stage variant at the same 0.690 / 883. On the
+    78-question slice the best realizable row moved from 0.859 (gain 0.000)
+    to 0.846 (gain -0.013); no published figure quotes it. BEAM's published
+    numbers are untouched.
   - Framing: offline re-use of judged verdicts, a single replicate per source
     run, a local judge; the oracle rows are fit on the questions they score
     and are bounds, not results. Pinned by `tests/test_eval_evidence.py`;

@@ -434,8 +434,8 @@
           "score_per_1k_tokens": 0.673961792493291
         },
         "router[with_cascade|tree_d3|acc]": {
-          "score": 0.69,
-          "cost": 882.35,
+          "score": 0.678,
+          "cost": 1005.184,
           "model": "tree_d3",
           "label_policy": "acc",
           "candidates": [
@@ -445,24 +445,29 @@
             "cascade"
           ],
           "arm_share": {
-            "cascade": 499,
-            "hybrid": 1
+            "cascade": 302,
+            "hybrid": 2,
+            "rag": 196
           },
-          "agree_with_oracle_by_type": 0.156,
+          "agree_with_oracle_by_type": 0.226,
           "confusion_vs_oracle_by_type": {
             "cascade": {
-              "cascade": 78
+              "cascade": 46,
+              "rag": 32
             },
             "hybrid": {
-              "cascade": 259
+              "cascade": 160,
+              "hybrid": 1,
+              "rag": 98
             },
             "rag": {
-              "cascade": 162,
-              "hybrid": 1
+              "cascade": 96,
+              "hybrid": 1,
+              "rag": 66
             }
           },
-          "est_tokens": 882.35,
-          "score_per_1k_tokens": 0.7820026066753556
+          "est_tokens": 1005.184,
+          "score_per_1k_tokens": 0.674503374506558
         },
         "router[with_cascade|tree_d3|cheap]": {
           "score": 0.564,
@@ -523,8 +528,8 @@
           "score_per_1k_tokens": 0.6871176522741378
         },
         "router[with_cascade|logreg|acc]": {
-          "score": 0.69,
-          "cost": 882.56,
+          "score": 0.678,
+          "cost": 1008.926,
           "model": "logreg",
           "label_policy": "acc",
           "candidates": [
@@ -534,22 +539,26 @@
             "cascade"
           ],
           "arm_share": {
-            "cascade": 500
+            "cascade": 300,
+            "rag": 200
           },
-          "agree_with_oracle_by_type": 0.156,
+          "agree_with_oracle_by_type": 0.226,
           "confusion_vs_oracle_by_type": {
             "cascade": {
-              "cascade": 78
+              "cascade": 46,
+              "rag": 32
             },
             "hybrid": {
-              "cascade": 259
+              "cascade": 158,
+              "rag": 101
             },
             "rag": {
-              "cascade": 163
+              "cascade": 96,
+              "rag": 67
             }
           },
-          "est_tokens": 882.56,
-          "score_per_1k_tokens": 0.7818165337200871
+          "est_tokens": 1008.926,
+          "score_per_1k_tokens": 0.6720017127123298
         },
         "router[with_cascade|logreg|cheap]": {
           "score": 0.59,
@@ -790,8 +799,8 @@
           "score_per_1k_tokens": 0.742304391194414
         },
         "router[base|tree_d3|acc]": {
-          "score": 0.8589743589743589,
-          "cost": 1162.7692307692307,
+          "score": 0.8205128205128205,
+          "cost": 1084.0,
           "model": "tree_d3",
           "label_policy": "acc",
           "candidates": [
@@ -800,18 +809,18 @@
             "hybrid"
           ],
           "arm_share": {
-            "hybrid": 5,
-            "rag": 73
+            "hybrid": 20,
+            "rag": 58
           },
-          "agree_with_oracle_by_type": 0.9358974358974359,
+          "agree_with_oracle_by_type": 0.7435897435897436,
           "confusion_vs_oracle_by_type": {
             "rag": {
-              "hybrid": 5,
-              "rag": 73
+              "hybrid": 20,
+              "rag": 58
             }
           },
-          "est_tokens": 1162.7692307692307,
-          "score_per_1k_tokens": 0.7387315868395519
+          "est_tokens": 1084.0,
+          "score_per_1k_tokens": 0.7569306462295391
         },
         "router[base|tree_d3|cheap]": {
           "score": 0.6666666666666666,
@@ -858,8 +867,8 @@
           "score_per_1k_tokens": 0.742304391194414
         },
         "router[base|logreg|acc]": {
-          "score": 0.8589743589743589,
-          "cost": 1180.871794871795,
+          "score": 0.8205128205128205,
+          "cost": 1102.1025641025642,
           "model": "logreg",
           "label_policy": "acc",
           "candidates": [
@@ -868,18 +877,18 @@
             "hybrid"
           ],
           "arm_share": {
-            "hybrid": 1,
-            "rag": 77
+            "hybrid": 16,
+            "rag": 62
           },
-          "agree_with_oracle_by_type": 0.9871794871794872,
+          "agree_with_oracle_by_type": 0.7948717948717948,
           "confusion_vs_oracle_by_type": {
             "rag": {
-              "hybrid": 1,
-              "rag": 77
+              "hybrid": 16,
+              "rag": 62
             }
           },
-          "est_tokens": 1180.871794871795,
-          "score_per_1k_tokens": 0.727406957050419
+          "est_tokens": 1102.1025641025642,
+          "score_per_1k_tokens": 0.7444976967102508
         },
         "router[base|logreg|cheap]": {
           "score": 0.6666666666666666,
@@ -943,8 +952,8 @@
           "score_per_1k_tokens": 1.0827235736863243
         },
         "router[with_cascade|tree_d3|acc]": {
-          "score": 0.8589743589743589,
-          "cost": 1162.7692307692307,
+          "score": 0.8205128205128205,
+          "cost": 1086.5897435897436,
           "model": "tree_d3",
           "label_policy": "acc",
           "candidates": [
@@ -954,18 +963,20 @@
             "cascade"
           ],
           "arm_share": {
-            "hybrid": 5,
-            "rag": 73
+            "cascade": 2,
+            "hybrid": 17,
+            "rag": 59
           },
-          "agree_with_oracle_by_type": 0.9358974358974359,
+          "agree_with_oracle_by_type": 0.7564102564102564,
           "confusion_vs_oracle_by_type": {
             "rag": {
-              "hybrid": 5,
-              "rag": 73
+              "cascade": 2,
+              "hybrid": 17,
+              "rag": 59
             }
           },
-          "est_tokens": 1162.7692307692307,
-          "score_per_1k_tokens": 0.7387315868395519
+          "est_tokens": 1086.5897435897436,
+          "score_per_1k_tokens": 0.7551266016943153
         },
         "router[with_cascade|tree_d3|cheap]": {
           "score": 0.8461538461538461,
@@ -1017,8 +1028,8 @@
           "score_per_1k_tokens": 1.0827235736863243
         },
         "router[with_cascade|logreg|acc]": {
-          "score": 0.8589743589743589,
-          "cost": 1180.871794871795,
+          "score": 0.8205128205128205,
+          "cost": 1102.1025641025642,
           "model": "logreg",
           "label_policy": "acc",
           "candidates": [
@@ -1028,18 +1039,18 @@
             "cascade"
           ],
           "arm_share": {
-            "hybrid": 1,
-            "rag": 77
+            "hybrid": 16,
+            "rag": 62
           },
-          "agree_with_oracle_by_type": 0.9871794871794872,
+          "agree_with_oracle_by_type": 0.7948717948717948,
           "confusion_vs_oracle_by_type": {
             "rag": {
-              "hybrid": 1,
-              "rag": 77
+              "hybrid": 16,
+              "rag": 62
             }
           },
-          "est_tokens": 1180.871794871795,
-          "score_per_1k_tokens": 0.727406957050419
+          "est_tokens": 1102.1025641025642,
+          "score_per_1k_tokens": 0.7444976967102508
         },
         "router[with_cascade|logreg|cheap]": {
           "score": 0.8333333333333334,
@@ -1559,8 +1570,8 @@
           "score_per_1k_tokens": 0.0824707687680141
         },
         "router[base|tree_d3|acc]": {
-          "score": 0.6478170000000003,
-          "cost": 23354.8,
+          "score": 0.6484420000000003,
+          "cost": 23361.3225,
           "model": "tree_d3",
           "label_policy": "acc",
           "candidates": [
@@ -1570,18 +1581,18 @@
             "refind"
           ],
           "arm_share": {
-            "hybrid": 3,
-            "rag": 374,
+            "hybrid": 4,
+            "rag": 373,
             "refind": 23
           },
-          "agree_with_oracle_by_type": 0.4975,
+          "agree_with_oracle_by_type": 0.5,
           "confusion_vs_oracle_by_type": {
             "cortex": {
               "rag": 40
             },
             "hybrid": {
-              "hybrid": 2,
-              "rag": 61,
+              "hybrid": 3,
+              "rag": 60,
               "refind": 17
             },
             "rag": {
@@ -1594,8 +1605,8 @@
               "refind": 2
             }
           },
-          "est_tokens": 5838.7,
-          "score_per_1k_tokens": 0.11095226677171292
+          "est_tokens": 5840.330625,
+          "score_per_1k_tokens": 0.11102830329918185
         },
         "router[base|tree_d3|cheap]": {
           "score": 0.5585137500000001,
@@ -1789,8 +1800,8 @@
           "score_per_1k_tokens": 0.08464336996904898
         },
         "router[with_cascade|tree_d3|acc]": {
-          "score": 0.6478170000000003,
-          "cost": 23354.8,
+          "score": 0.6484420000000003,
+          "cost": 23361.3225,
           "model": "tree_d3",
           "label_policy": "acc",
           "candidates": [
@@ -1801,11 +1812,11 @@
             "cascade"
           ],
           "arm_share": {
-            "hybrid": 3,
-            "rag": 374,
+            "hybrid": 4,
+            "rag": 373,
             "refind": 23
           },
-          "agree_with_oracle_by_type": 0.3975,
+          "agree_with_oracle_by_type": 0.4,
           "confusion_vs_oracle_by_type": {
             "cascade": {
               "rag": 40
@@ -1814,8 +1825,8 @@
               "rag": 40
             },
             "hybrid": {
-              "hybrid": 2,
-              "rag": 61,
+              "hybrid": 3,
+              "rag": 60,
               "refind": 17
             },
             "rag": {
@@ -1828,8 +1839,8 @@
               "refind": 2
             }
           },
-          "est_tokens": 5838.7,
-          "score_per_1k_tokens": 0.11095226677171292
+          "est_tokens": 5840.330625,
+          "score_per_1k_tokens": 0.11102830329918185
         },
         "router[with_cascade|tree_d3|cheap]": {
           "score": 0.6423057500000001,
@@ -2050,8 +2061,8 @@
           "score_per_1k_tokens": 0.08361877550884926
         },
         "router[with_nomem|tree_d3|acc]": {
-          "score": 0.6478170000000003,
-          "cost": 23354.8,
+          "score": 0.6484420000000003,
+          "cost": 23427.5,
           "model": "tree_d3",
           "label_policy": "acc",
           "candidates": [
@@ -2063,9 +2074,9 @@
             "cascade"
           ],
           "arm_share": {
-            "hybrid": 3,
-            "rag": 374,
-            "refind": 23
+            "hybrid": 4,
+            "rag": 372,
+            "refind": 24
           },
           "agree_with_oracle_by_type": 0.3975,
           "confusion_vs_oracle_by_type": {
@@ -2073,8 +2084,8 @@
               "rag": 40
             },
             "hybrid": {
-              "hybrid": 2,
-              "rag": 61,
+              "hybrid": 3,
+              "rag": 60,
               "refind": 17
             },
             "nomem": {
@@ -2082,16 +2093,16 @@
             },
             "rag": {
               "hybrid": 1,
-              "rag": 155,
-              "refind": 4
+              "rag": 154,
+              "refind": 5
             },
             "refind": {
               "rag": 78,
               "refind": 2
             }
           },
-          "est_tokens": 5838.7,
-          "score_per_1k_tokens": 0.11095226677171292
+          "est_tokens": 5856.875,
+          "score_per_1k_tokens": 0.11071467292711562
         },
         "router[with_nomem|tree_d3|cheap]": {
           "score": 0.5766445000000001,
@@ -2390,7 +2401,7 @@
       "best_single_cost": 1209.654,
       "cascade_score": 0.69,
       "cascade_cost": 882.56,
-      "best_realizable_router": "router[with_cascade|logreg|acc]",
+      "best_realizable_router": "two_stage[logreg|acc]",
       "best_realizable_score": 0.69,
       "best_realizable_cost": 882.56,
       "realizable_gain": 0.0020000000000000018,
@@ -2409,11 +2420,11 @@
       "best_single_cost": 1184.128205128205,
       "cascade_score": 0.8461538461538461,
       "cascade_cost": 389.3974358974359,
-      "best_realizable_router": "router[base|logreg|acc]",
-      "best_realizable_score": 0.8589743589743589,
-      "best_realizable_cost": 1180.871794871795,
-      "realizable_gain": 0.0,
-      "realizable_cost_delta": -3.256410256410163,
+      "best_realizable_router": "router[with_cascade|tree_d3|cheap]",
+      "best_realizable_score": 0.8461538461538461,
+      "best_realizable_cost": 402.55128205128204,
+      "realizable_gain": -0.012820512820512775,
+      "realizable_cost_delta": -781.5769230769231,
       "best_oracle_by_type": "oracle_by_type[base]",
       "oracle_by_type_gain": 0.0,
       "oracle_by_type_cost_delta": 0.0,

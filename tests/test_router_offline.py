@@ -153,6 +153,41 @@ def test_acc_labels_break_ties_toward_the_strongest_arm():
     assert labels[1] != "cortex"
 
 
+def test_acc_labels_rank_the_arms_within_the_rows_they_are_given():
+    """The `acc` tie-break ranks arms by mean score, and the cross-validated
+    callers hand it a TRAINING FOLD. If that ranking were taken over the
+    whole dataset instead, a held-out row would help decide the label it is
+    later scored against — the leak this fixture demonstrates.
+
+    Over all four rows rag and hybrid tie at 0.75 and rag keeps its place,
+    so the all-arms-right row is labelled rag. Over rows 2-4 alone hybrid
+    is strictly the strongest arm, so the same row must be labelled hybrid.
+    """
+    ds = _fixture()
+    cands = ("rag", "cortex", "hybrid")
+    assert ro._labels(ds, cands, "acc")[1] == "rag"
+    assert ro._labels(ds, cands, "acc", rows=list(ds.records[1:]))[0] \
+        == "hybrid"
+
+
+def test_cv_predict_takes_labels_from_the_training_fold_only():
+    """The callable form of `labels` must be asked for the train indices of
+    each fold and never for a test index."""
+    feats = [ro.features(f"question number {i} about the thing?")
+             for i in range(30)]
+    seen: list[tuple[int, ...]] = []
+
+    def label_fn(idx):
+        seen.append(tuple(idx))
+        return ["rag" if i % 3 else "cortex" for i in idx]
+
+    preds = ro._cv_predict(feats, label_fn, "tree_d3")
+    assert len(preds) == 30
+    assert len(seen) == ro.N_FOLDS
+    for fold in seen:
+        assert len(fold) == 24          # 30 rows, 5 folds, 24 train each
+
+
 def test_unknown_label_policy_is_rejected():
     with pytest.raises(ValueError):
         ro._labels(_fixture(), ("rag", "cortex"), "whatever")

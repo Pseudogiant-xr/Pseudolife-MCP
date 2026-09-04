@@ -268,28 +268,46 @@ def features(question: str) -> list[float]:
                      float(question.count("?"))]
 
 
-def _labels(ds: Dataset, candidates: tuple[str, ...],
-            policy: str) -> list[str]:
+def _labels(ds: Dataset, candidates: tuple[str, ...], policy: str,
+            rows: list[Record] | None = None) -> list[str]:
     """Per-question training label = the arm a token-aware oracle would
     pick. `cheap` breaks score ties toward the cheaper arm on THAT question;
-    `acc` breaks them toward the globally strongest arm, which keeps the
+    `acc` breaks them toward the strongest arm overall, which keeps the
     router from collapsing onto cortex whenever every arm happens to be
-    right."""
+    right.
+
+    `rows` restricts BOTH the records labelled and the arm ranking `acc`
+    ties are broken by. The cross-validated callers pass a training fold,
+    so "strongest arm overall" means strongest ON THE TRAINING FOLD: a
+    held-out question never contributes to the statistic that decides its
+    own label. (`router_via_type` has always recomputed its per-fold
+    `oracle_by_type` mapping this way; this makes `acc` consistent with it.)
+    """
+    records = ds.records if rows is None else tuple(rows)
     if policy == "cheap":
-        return [_pick(r.score, r.cost, candidates) for r in ds.records]
+        return [_pick(r.score, r.cost, candidates) for r in records]
     if policy != "acc":
         raise ValueError(f"unknown label policy {policy!r}")
     order = {a: i for i, a in enumerate(
         sorted(candidates,
-               key=lambda a: -_mean([r.score[a] for r in ds.records])))}
+               key=lambda a: -_mean([r.score[a] for r in records])))}
     return [min(candidates, key=lambda a: (-r.score[a], order[a], a))
-            for r in ds.records]
+            for r in records]
 
 
 def _cv_predict(feats, labels, model: str):
     """5-fold CV over QUESTIONS: every prediction comes from a model that
-    never saw that question. Seeded; sklearn's tree and lbfgs solver are
-    deterministic at a fixed seed."""
+    never saw that question.
+
+    `labels` is either one label per row, or a callable taking a fold's
+    TRAINING row indices and returning that fold's labels. The callable
+    form exists so a label policy that depends on a dataset-wide statistic
+    (the `acc` tie-break ranking) computes that statistic inside the
+    training fold instead of over the whole dataset.
+
+    Seeded; sklearn's tree and lbfgs solver are deterministic at a fixed
+    seed.
+    """
     import numpy as np
     from sklearn.dummy import DummyClassifier
     from sklearn.linear_model import LogisticRegression
@@ -299,13 +317,22 @@ def _cv_predict(feats, labels, model: str):
     from sklearn.tree import DecisionTreeClassifier
 
     X = np.asarray(feats, dtype=float)
-    y = np.asarray(labels, dtype=object)
-    if len(y) < 2:
-        return [str(v) for v in y]
-    preds = np.empty(len(y), dtype=object)
-    for train, test in KFold(n_splits=min(N_FOLDS, len(y)), shuffle=True,
+    n = len(X)
+    if callable(labels):
+        label_fn = labels
+    else:
+        _fixed = list(labels)
+
+        def label_fn(idx, _fixed=_fixed):
+            return [_fixed[i] for i in idx]
+
+    if n < 2:
+        return [str(v) for v in label_fn(list(range(n)))]
+    preds = np.empty(n, dtype=object)
+    for train, test in KFold(n_splits=min(N_FOLDS, n), shuffle=True,
                              random_state=SEED).split(X):
-        if len(set(y[train])) < 2:
+        y_train = np.asarray(label_fn(list(train)), dtype=object)
+        if len(set(y_train.tolist())) < 2:
             est = DummyClassifier(strategy="most_frequent")
         elif model == "tree_d3":
             est = DecisionTreeClassifier(max_depth=3, random_state=SEED)
@@ -315,7 +342,7 @@ def _cv_predict(feats, labels, model: str):
                 LogisticRegression(max_iter=2000, random_state=SEED))
         else:
             raise ValueError(f"unknown model {model!r}")
-        est.fit(X[train], y[train])
+        est.fit(X[train], y_train)
         preds[test] = est.predict(X[test])
     return [str(p) for p in preds]
 
@@ -356,8 +383,15 @@ def _confusion(pred: list[str], ref: list[str]) -> dict:
 def cheap_router(ds: Dataset, candidates: tuple[str, ...],
                  model: str, policy: str) -> dict:
     feats = [features(r.question) for r in ds.records]
-    labels = _labels(ds, candidates, policy)
-    preds = _cv_predict(feats, labels, model)
+    # Labels go in as a per-fold callable, not a precomputed list: the
+    # `acc` tie-break ranks arms by mean score, and that ranking has to be
+    # recomputed inside each training fold or a held-out question helps
+    # decide the label it is later scored against.
+    preds = _cv_predict(
+        feats,
+        lambda idx: _labels(ds, candidates, policy,
+                            rows=[ds.records[i] for i in idx]),
+        model)
     by_type = oracle_by_type(ds, candidates)["choice"]
     result = _serve(ds, preds)
     result.update({
@@ -432,8 +466,12 @@ def two_stage_router(ds: Dataset, rows_commit: list[bool],
                    cost_to_tokens=ds.cost_to_tokens, arms=ds.arms,
                    records=tuple(ds.records[i] for i in rest_idx))
     feats = [features(r.question) for r in rest.records]
-    labels = _labels(rest, candidates, policy)
-    preds = _cv_predict(feats, labels, model) if rest.records else []
+    # per-fold labels, for the reason given in `cheap_router`
+    preds = (_cv_predict(
+        feats,
+        lambda idx: _labels(rest, candidates, policy,
+                            rows=[rest.records[i] for i in idx]),
+        model) if rest.records else [])
     pred_by_idx = dict(zip(rest_idx, preds))
     served: list[tuple[float, float]] = []
     arm_share: dict[str, int] = {"cortex(commit)": 0}

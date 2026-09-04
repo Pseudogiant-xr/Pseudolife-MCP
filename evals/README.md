@@ -1735,11 +1735,16 @@ they score, so they are BOUNDS on what a router could reach, never shipped
 results. The realizable rows are 5-fold cross-validated by question — a
 prediction always comes from a model that never saw that question — but
 they still inherit the source runs' judge and era. The "best" realizable
-router is the maximum over the sixteen cross-validated configurations the
-script tries (two feature sets, two models, two label policies, plus the
-type-prediction and two-stage variants), so its number carries the usual
-select-the-best optimism; the verdict does not depend on it, because that
-maximum still fails the preregistered bar on both benchmarks.
+router is a maximum over every cross-validated configuration the script
+tries, so it carries the usual select-the-best optimism. There is one
+feature representation throughout (`FEATURE_NAMES`); what varies is the
+candidate ARM set, crossed with two classifiers (`tree_d3`, `logreg`) and
+two label policies, plus the type-prediction and two-stage variants. That
+is **16** configurations on LongMemEval-500 and on the 78-question slice —
+two candidate sets each — and **22** on BEAM-400, which has three because
+BEAM also carries a no-memory arm. So the optimism is largest on the
+benchmark carrying the larger headline gain. The verdict does not depend
+on it: the maximum still fails the preregistered bar on both benchmarks.
 
 ```bash
 python evals/router_offline.py --out evals/results/router-offline-20260904.json
@@ -1790,10 +1795,14 @@ so the trade is one number rather than two.
 | two-stage, token-greedy labels | 0.656 | 667 | 0.983 |
 
 The oracle-by-type bound is **+0.024** over the best single arm, at 316
-fewer tokens. The best realizable router is **+0.002** — and it gets there
-by predicting "cascade" on 500 of 500 questions, i.e. by rediscovering the
-policy already shipped. Its agreement with the oracle-by-type choice is
-0.156.
+fewer tokens. The best realizable router is **+0.002**, and it is the
+shipped policy in a different shape: the two-stage variant serves cortex on
+the 193 questions where cortex commits and rag on the other 307, landing on
+0.690 at 883 tokens — the cascade's own score and cost, to the digit. A
+router that reads only the question's shape does not get there. The best
+single-stage one ties the best single arm at 0.688 on 1205 tokens, and the
+two variants free to pick the cascade as well tie at 0.678, on 1005 and
+1009 tokens, agreeing with the oracle-by-type choice on 0.226 of questions.
 
 ## BEAM 100K, 400 questions, ten types
 
