@@ -1,0 +1,497 @@
+{
+  "source_db": "pseudolife_memory_replay_20260904",
+  "config_seed": "deployed-config.yaml",
+  "top_k": 6,
+  "hub_degree_p95": 5.0,
+  "graph_shape": {
+    "entities": 5504,
+    "edges_all_versions": 4247,
+    "edges_live": 4020,
+    "edges_by_relation": {
+      "prefers": 929,
+      "part-of": 765,
+      "uses": 736,
+      "configures": 272,
+      "depends-on": 272,
+      "related-to": 181,
+      "implements": 181,
+      "avoids": 162,
+      "tests": 148,
+      "runs-on": 139,
+      "stores-data-in": 116,
+      "hosts": 70,
+      "superseded-by": 49
+    },
+    "part_of_share": 0.1903,
+    "degree_p50": 1.0,
+    "degree_p95": 5.0,
+    "degree_max": 132,
+    "top_degree_nodes": [
+      {
+        "entity": "pseudolife-mcp",
+        "degree": 132
+      },
+      {
+        "entity": "daemon",
+        "degree": 64
+      },
+      {
+        "entity": "pseudolife-daemon",
+        "degree": 52
+      },
+      {
+        "entity": "ops-update-ps1",
+        "degree": 49
+      },
+      {
+        "entity": "cortex-console",
+        "degree": 34
+      },
+      {
+        "entity": "memory-deep-dream",
+        "degree": 30
+      },
+      {
+        "entity": "<redacted>",
+        "degree": 29
+      },
+      {
+        "entity": "stalker-2",
+        "degree": 27
+      },
+      {
+        "entity": "cortex",
+        "degree": 26
+      },
+      {
+        "entity": "dream-extractor",
+        "degree": 24
+      },
+      {
+        "entity": "re-evidence-hub",
+        "degree": 24
+      },
+      {
+        "entity": "<redacted>",
+        "degree": 23
+      },
+      {
+        "entity": "gnd-share",
+        "degree": 22
+      },
+      {
+        "entity": "hermes",
+        "degree": 22
+      },
+      {
+        "entity": "<redacted>",
+        "degree": 22
+      },
+      {
+        "entity": "shim",
+        "degree": 22
+      },
+      {
+        "entity": "pseudolife-memory",
+        "degree": 20
+      },
+      {
+        "entity": "chronicle-events",
+        "degree": 19
+      },
+      {
+        "entity": "<redacted>",
+        "degree": 19
+      },
+      {
+        "entity": "graph-review-py",
+        "degree": 19
+      }
+    ],
+    "entities_with_no_live_edge": 1156,
+    "dead_weight_entities": {
+      "count": 421,
+      "definition": "linked only by part-of edges AND holding no current fact"
+    },
+    "comparator_coverage": {
+      "threshold_entries": 5,
+      "mentioned_5plus_without_a_node": [
+        "naive rag",
+        "titans"
+      ],
+      "detail": [
+        {
+          "term": "naive rag",
+          "entries_mentioning": 16,
+          "has_node": false
+        },
+        {
+          "term": "rag",
+          "entries_mentioning": 263,
+          "has_node": true
+        },
+        {
+          "term": "longmemeval",
+          "entries_mentioning": 61,
+          "has_node": true
+        },
+        {
+          "term": "mem0",
+          "entries_mentioning": 7,
+          "has_node": true
+        },
+        {
+          "term": "zep",
+          "entries_mentioning": 5,
+          "has_node": true
+        },
+        {
+          "term": "memgpt",
+          "entries_mentioning": 1,
+          "has_node": false
+        },
+        {
+          "term": "letta",
+          "entries_mentioning": 3,
+          "has_node": true
+        },
+        {
+          "term": "graphrag",
+          "entries_mentioning": 0,
+          "has_node": false
+        },
+        {
+          "term": "cognee",
+          "entries_mentioning": 25,
+          "has_node": true
+        },
+        {
+          "term": "hipporag",
+          "entries_mentioning": 0,
+          "has_node": false
+        },
+        {
+          "term": "a-mem",
+          "entries_mentioning": 0,
+          "has_node": false
+        },
+        {
+          "term": "memory bank",
+          "entries_mentioning": 11,
+          "has_node": true
+        },
+        {
+          "term": "chromadb",
+          "entries_mentioning": 13,
+          "has_node": true
+        },
+        {
+          "term": "pgvector",
+          "entries_mentioning": 18,
+          "has_node": true
+        },
+        {
+          "term": "bm25",
+          "entries_mentioning": 49,
+          "has_node": true
+        },
+        {
+          "term": "titans",
+          "entries_mentioning": 21,
+          "has_node": false
+        },
+        {
+          "term": "beam",
+          "entries_mentioning": 91,
+          "has_node": true
+        },
+        {
+          "term": "lme",
+          "entries_mentioning": 69,
+          "has_node": true
+        }
+      ]
+    }
+  },
+  "ablation": {
+    "relational_questions": {
+      "n_asked": 8,
+      "n_available": 30,
+      "summary": {
+        "n": 8,
+        "search": {
+          "mean_served_chars": 6931.5,
+          "median_served_chars": 6825,
+          "mean_wall_s": 0.4386,
+          "median_wall_s": 0.4467,
+          "expected_hit_rate": 1.0
+        },
+        "recall": {
+          "mean_served_chars": 184640.8,
+          "median_served_chars": 217161,
+          "mean_wall_s": 32.4351,
+          "median_wall_s": 34.5941,
+          "expected_hit_rate": 1.0
+        },
+        "recall_only_hits": 0,
+        "search_only_hits": 0,
+        "low_confidence_recalls": 0,
+        "arrivals_total": {
+          "added": 524,
+          "via_part_of": 225,
+          "via_domain": 299,
+          "via_hub": 520,
+          "unlinked": 0
+        },
+        "chars_ratio_recall_over_search": 26.638,
+        "time_ratio_recall_over_search": 73.951
+      },
+      "per_question": [
+        {
+          "case": "relational",
+          "expect": "daemon",
+          "search": {
+            "wall_s": 0.4467261000027065,
+            "served_chars": 5799,
+            "n_entries": 6,
+            "expected_hit": true
+          },
+          "recall": {
+            "wall_s": 44.55048019999958,
+            "served_chars": 217161,
+            "n_entities": 82,
+            "n_edges": 217,
+            "n_texts": 132,
+            "low_confidence": false,
+            "expected_hit": true,
+            "arrivals": {
+              "added": 80,
+              "via_part_of": 20,
+              "via_domain": 60,
+              "via_hub": 80,
+              "unlinked": 0
+            }
+          }
+        },
+        {
+          "case": "relational",
+          "expect": "ops-update-ps1",
+          "search": {
+            "wall_s": 0.4758125999942422,
+            "served_chars": 5517,
+            "n_entries": 6,
+            "expected_hit": true
+          },
+          "recall": {
+            "wall_s": 34.59410690000368,
+            "served_chars": 258348,
+            "n_entities": 66,
+            "n_edges": 191,
+            "n_texts": 185,
+            "low_confidence": false,
+            "expected_hit": true,
+            "arrivals": {
+              "added": 65,
+              "via_part_of": 11,
+              "via_domain": 54,
+              "via_hub": 65,
+              "unlinked": 0
+            }
+          }
+        },
+        {
+          "case": "relational",
+          "expect": "cortex-console",
+          "search": {
+            "wall_s": 0.651244200002111,
+            "served_chars": 9155,
+            "n_entries": 6,
+            "expected_hit": true
+          },
+          "recall": {
+            "wall_s": 50.667399199999636,
+            "served_chars": 141632,
+            "n_entities": 87,
+            "n_edges": 225,
+            "n_texts": 83,
+            "low_confidence": false,
+            "expected_hit": true,
+            "arrivals": {
+              "added": 83,
+              "via_part_of": 39,
+              "via_domain": 44,
+              "via_hub": 83,
+              "unlinked": 0
+            }
+          }
+        },
+        {
+          "case": "relational",
+          "expect": "claude-code",
+          "search": {
+            "wall_s": 0.4053178999965894,
+            "served_chars": 6196,
+            "n_entries": 6,
+            "expected_hit": true
+          },
+          "recall": {
+            "wall_s": 32.02894450000167,
+            "served_chars": 75990,
+            "n_entities": 50,
+            "n_edges": 153,
+            "n_texts": 29,
+            "low_confidence": false,
+            "expected_hit": true,
+            "arrivals": {
+              "added": 48,
+              "via_part_of": 11,
+              "via_domain": 37,
+              "via_hub": 44,
+              "unlinked": 0
+            }
+          }
+        },
+        {
+          "case": "relational",
+          "expect": "service-py",
+          "search": {
+            "wall_s": 0.4340100999979768,
+            "served_chars": 8195,
+            "n_entries": 6,
+            "expected_hit": true
+          },
+          "recall": {
+            "wall_s": 73.02009009999892,
+            "served_chars": 522376,
+            "n_entities": 183,
+            "n_edges": 522,
+            "n_texts": 351,
+            "low_confidence": false,
+            "expected_hit": true,
+            "arrivals": {
+              "added": 182,
+              "via_part_of": 133,
+              "via_domain": 49,
+              "via_hub": 182,
+              "unlinked": 0
+            }
+          }
+        },
+        {
+          "case": "relational",
+          "expect": "daemon",
+          "search": {
+            "wall_s": 0.25974690000293776,
+            "served_chars": 6981,
+            "n_entries": 6,
+            "expected_hit": true
+          },
+          "recall": {
+            "wall_s": 21.518682399997488,
+            "served_chars": 241498,
+            "n_entities": 66,
+            "n_edges": 191,
+            "n_texts": 168,
+            "low_confidence": false,
+            "expected_hit": true,
+            "arrivals": {
+              "added": 65,
+              "via_part_of": 11,
+              "via_domain": 54,
+              "via_hub": 65,
+              "unlinked": 0
+            }
+          }
+        },
+        {
+          "case": "relational",
+          "expect": "tools",
+          "search": {
+            "wall_s": 0.5136371999979019,
+            "served_chars": 6825,
+            "n_entries": 6,
+            "expected_hit": true
+          },
+          "recall": {
+            "wall_s": 1.3040097999983118,
+            "served_chars": 12760,
+            "n_entities": 2,
+            "n_edges": 1,
+            "n_texts": 11,
+            "low_confidence": false,
+            "expected_hit": true,
+            "arrivals": {
+              "added": 1,
+              "via_part_of": 0,
+              "via_domain": 1,
+              "via_hub": 1,
+              "unlinked": 0
+            }
+          }
+        },
+        {
+          "case": "relational",
+          "expect": "qwen3-8",
+          "search": {
+            "wall_s": 0.3221934999965015,
+            "served_chars": 6784,
+            "n_entries": 6,
+            "expected_hit": true
+          },
+          "recall": {
+            "wall_s": 1.797385200006829,
+            "served_chars": 7361,
+            "n_entities": 50,
+            "n_edges": 0,
+            "n_texts": 6,
+            "low_confidence": false,
+            "expected_hit": true,
+            "arrivals": {
+              "added": 0,
+              "via_part_of": 0,
+              "via_domain": 0,
+              "via_hub": 0,
+              "unlinked": 0
+            }
+          }
+        }
+      ]
+    },
+    "logged_queries": {
+      "n_sampled": 4,
+      "summary": {
+        "n": 4,
+        "search": {
+          "mean_served_chars": 6649.2,
+          "median_served_chars": 8124,
+          "mean_wall_s": 0.3894,
+          "median_wall_s": 0.4155,
+          "expected_hit_rate": 1.0
+        },
+        "recall": {
+          "mean_served_chars": 74185.5,
+          "median_served_chars": 131722,
+          "mean_wall_s": 44.266,
+          "median_wall_s": 26.4205,
+          "expected_hit_rate": 1.0
+        },
+        "recall_only_hits": 0,
+        "search_only_hits": 0,
+        "low_confidence_recalls": 0,
+        "arrivals_total": {
+          "added": 308,
+          "via_part_of": 136,
+          "via_domain": 172,
+          "via_hub": 306,
+          "unlinked": 0
+        },
+        "chars_ratio_recall_over_search": 11.157,
+        "time_ratio_recall_over_search": 113.677
+      }
+    }
+  },
+  "caveat": "the bank has grown since the logged events were served, so the logged arm's absolute hit rates are indicative; search and recall see the identical restored bank, so the paired comparison is the valid read",
+  "privacy": "entity names appear only when they also occur in the tracked repo tree; no query or entry text",
+  "redaction_note": "one hostname-shaped entity name in graph_shape.top_degree_nodes was redacted to <redacted> by hand on 2026-09-04. The redactor emits a name only when it also occurs in the tracked repo tree; this one occurred there via a judge-eval fixture built from real bank memories, so the check vouched for it. No measured field changed - the degree beside it is the degree that was measured.",
+  "config_seed_note": "the run predates the fix that records the config file NAME instead of its path; this ONE provenance string was rewritten to the value the current code emits, because an absolute path embeds the maintainer's OS username. No measured field was touched."
+}

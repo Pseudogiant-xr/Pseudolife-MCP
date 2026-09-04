@@ -1,0 +1,130 @@
+{
+  "source_db": "pseudolife_memory_replay_20260904",
+  "config_seed": "deployed-config.yaml",
+  "top_k": 6,
+  "limit": 250,
+  "n_logged_events": 1349,
+  "n_use_rows": 1,
+  "results": {
+    "logged-top1": {
+      "n_cases": 250,
+      "arms": {
+        "shipped": {
+          "n": 250,
+          "mrr": 0.7837,
+          "hit@1": 0.668,
+          "hit@3": 0.888,
+          "hit@6": 0.948,
+          "median_latency_s": 0.3046,
+          "mean_latency_s": 0.3955,
+          "rank_histogram": {
+            "0": 167,
+            "1": 45,
+            "2": 10,
+            "3": 6,
+            "4": 3,
+            "5": 6,
+            "miss": 13
+          },
+          "query_embedding_cache_cleared": false
+        },
+        "bm25_off": {
+          "n": 250,
+          "mrr": 0.6894,
+          "hit@1": 0.544,
+          "hit@3": 0.812,
+          "hit@6": 0.92,
+          "median_latency_s": 0.1403,
+          "mean_latency_s": 0.1622,
+          "rank_histogram": {
+            "0": 136,
+            "1": 49,
+            "2": 18,
+            "3": 11,
+            "4": 13,
+            "5": 3,
+            "miss": 20
+          },
+          "query_embedding_cache_cleared": true
+        },
+        "rerank_on": {
+          "n": 250,
+          "mrr": 0.6056,
+          "hit@1": 0.368,
+          "hit@3": 0.852,
+          "hit@6": 0.948,
+          "median_latency_s": 0.6941,
+          "mean_latency_s": 0.7773,
+          "rank_histogram": {
+            "0": 92,
+            "1": 82,
+            "2": 39,
+            "3": 16,
+            "4": 2,
+            "5": 6,
+            "miss": 13
+          },
+          "query_embedding_cache_cleared": true
+        },
+        "pool_fusion": {
+          "skipped": true,
+          "available": false,
+          "knobs_found": [],
+          "reason": "no candidate-pool/fusion knobs on this checkout's memory.search config \u2014 arm skipped"
+        }
+      }
+    },
+    "uses": {
+      "n_cases": 1,
+      "arms": {
+        "shipped": {
+          "n": 1,
+          "mrr": 1.0,
+          "hit@1": 1.0,
+          "hit@3": 1.0,
+          "hit@6": 1.0,
+          "median_latency_s": 0.4285,
+          "mean_latency_s": 0.4285,
+          "rank_histogram": {
+            "0": 1
+          },
+          "query_embedding_cache_cleared": true
+        },
+        "bm25_off": {
+          "n": 1,
+          "mrr": 0.25,
+          "hit@1": 0.0,
+          "hit@3": 0.0,
+          "hit@6": 1.0,
+          "median_latency_s": 0.2368,
+          "mean_latency_s": 0.2368,
+          "rank_histogram": {
+            "3": 1
+          },
+          "query_embedding_cache_cleared": true
+        },
+        "rerank_on": {
+          "n": 1,
+          "mrr": 1.0,
+          "hit@1": 1.0,
+          "hit@3": 1.0,
+          "hit@6": 1.0,
+          "median_latency_s": 0.6112,
+          "mean_latency_s": 0.6112,
+          "rank_histogram": {
+            "0": 1
+          },
+          "query_embedding_cache_cleared": true
+        },
+        "pool_fusion": {
+          "skipped": true,
+          "available": false,
+          "knobs_found": [],
+          "reason": "no candidate-pool/fusion knobs on this checkout's memory.search config \u2014 arm skipped"
+        }
+      }
+    }
+  },
+  "caveat": "the bank has GROWN since these events were logged, so absolute MRR/hit@k are indicative only; the valid read is the paired comparison across arms on the identical restored bank. The logged-top* label sources measure AGREEMENT WITH THE SHIPPED RANKER's own past head, not relevance.",
+  "privacy": "aggregates and ids only; no query or entry text"
+}

@@ -151,7 +151,6 @@ def _perm_p(deltas: list[float], perms: int, seed: int) -> float:
         return 1.0
     rng = random.Random(seed)
     hits = 0
-    n = len(deltas)
     for _ in range(perms):
         flipped = statistics.fmean(
             d if rng.random() < 0.5 else -d for d in deltas)
@@ -195,6 +194,12 @@ def pair_run(rows: list[dict], arms: list[str], perms: int = PERMS,
         s = _score(r, CONTROL, score_key)
         ctrl_scores.append(s)
         ctrl_types[r[type_key]].append(s)
+    # Over ALL rows, deliberately: the control is the run's fixed
+    # reference and every committed arm scores every row. An arm's own
+    # "mean" below is over the rows THAT arm scored, so on a run with
+    # partial arm coverage delta_vs_control (a per-row paired mean) would
+    # not equal mean - control_mean. The paired delta is the trustworthy
+    # one; the two means are context.
     out["control_mean"] = round(statistics.fmean(ctrl_scores), 4)
     out["control_types"] = {
         t: round(statistics.fmean(v), 4) for t, v in sorted(ctrl_types.items())}

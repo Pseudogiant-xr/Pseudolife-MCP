@@ -1,0 +1,166 @@
+{
+  "generated_for": "learned-reranker Phase 1 go/no-go",
+  "source_db": "pseudolife_memory_replay_20260904",
+  "read_only": true,
+  "bank": {
+    "entries": 1296,
+    "entries_access_count_total": 11540,
+    "entries_explicit_reinforcements_total": 0,
+    "current_facts": 5483,
+    "slot_reads_rows": 605,
+    "slot_reads_total": 807,
+    "slot_reads_rows_nonzero": 605
+  },
+  "events": {
+    "n_events": 1349,
+    "by_day": [
+      {
+        "day": "2026-08-20",
+        "events": 548,
+        "distinct_sessions": 7
+      },
+      {
+        "day": "2026-08-21",
+        "events": 4,
+        "distinct_sessions": 3
+      },
+      {
+        "day": "2026-08-23",
+        "events": 4,
+        "distinct_sessions": 0
+      },
+      {
+        "day": "2026-08-24",
+        "events": 6,
+        "distinct_sessions": 4
+      },
+      {
+        "day": "2026-08-25",
+        "events": 12,
+        "distinct_sessions": 4
+      },
+      {
+        "day": "2026-08-26",
+        "events": 6,
+        "distinct_sessions": 2
+      },
+      {
+        "day": "2026-08-27",
+        "events": 7,
+        "distinct_sessions": 3
+      },
+      {
+        "day": "2026-08-28",
+        "events": 17,
+        "distinct_sessions": 5
+      },
+      {
+        "day": "2026-08-29",
+        "events": 9,
+        "distinct_sessions": 2
+      },
+      {
+        "day": "2026-08-30",
+        "events": 25,
+        "distinct_sessions": 8
+      },
+      {
+        "day": "2026-08-31",
+        "events": 24,
+        "distinct_sessions": 7
+      },
+      {
+        "day": "2026-09-01",
+        "events": 24,
+        "distinct_sessions": 8
+      },
+      {
+        "day": "2026-09-02",
+        "events": 76,
+        "distinct_sessions": 7
+      },
+      {
+        "day": "2026-09-03",
+        "events": 587,
+        "distinct_sessions": 5
+      }
+    ],
+    "distinct_sessions": 60,
+    "distinct_episodes": 101,
+    "served_len_distribution": {
+      "1": 146,
+      "2": 16,
+      "3": 88,
+      "4": 9,
+      "5": 812,
+      "6": 93,
+      "7": 1,
+      "8": 148,
+      "10": 31,
+      "12": 2,
+      "15": 3
+    },
+    "zero_result_events": 0,
+    "mean_served_len": 4.941,
+    "params_coverage": {
+      "rows": 790,
+      "pct": 58.56
+    },
+    "served_facts_coverage": {
+      "rows": 160,
+      "pct": 11.86,
+      "total_facts_served": 798,
+      "mean_facts_per_covered_row": 4.987
+    }
+  },
+  "uses": {
+    "n_uses": 1,
+    "by_via": {
+      "get": 1
+    },
+    "served_rank_histogram": {
+      "rank_0": 1
+    },
+    "detail": [
+      {
+        "event_id": 6,
+        "entry_id": 784,
+        "used_via": "get",
+        "served_rank": 0,
+        "served_len": 8,
+        "latency_s": 72.0
+      }
+    ]
+  },
+  "labels": {
+    "events_with_any_downstream_signal": 1,
+    "events_with_any_downstream_signal_pct": 0.074,
+    "top1_consumed": 1,
+    "top1_consumed_pct_of_events_with_a_top1": 0.074,
+    "top3_consumed": 1,
+    "top3_consumed_pct_of_events_with_a_top3": 0.074,
+    "served_id_join": {
+      "served_ids_still_in_entries": 6666,
+      "served_ids_dangling": 0
+    },
+    "note": "consumption = a retrieval_uses row or entries.explicit_reinforcements > 0; entries.access_count is a SERVE counter (cms.py bumps it on every merged result set) and is deliberately excluded"
+  },
+  "verdict": {
+    "phase1_labelled_event_target": 300,
+    "labelled_events": 1,
+    "logged_events": 1349,
+    "trainable": false,
+    "shortfall": 299
+  },
+  "signal_taxonomy": {
+    "consumption": [
+      "retrieval_uses",
+      "entries.explicit_reinforcements"
+    ],
+    "serve_count_only": [
+      "entries.access_count (cms.py:1398, bumped for every entry in a merged result set)",
+      "slot_reads.read_count (service.py _track_slot_reads: 'count each slot SERVED as an answer')"
+    ]
+  },
+  "privacy": "aggregates and ids only; no query or entry text"
+}

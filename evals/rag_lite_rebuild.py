@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -88,6 +89,11 @@ def rederive_raw_texts(q: dict) -> list[str]:
         return [e.get("text", "") for e in got.get("entries", [])]
     finally:
         svc.flush()
+        # One bank per question, and a 500-row rebuild would otherwise
+        # leave 500 of them behind in the temp area. ignore_errors because
+        # a bank the service still holds open must not fail the rebuild —
+        # the run's result is the artifact, not the scratch directory.
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -116,9 +122,12 @@ def main(argv: list[str] | None = None) -> int:
                          "adds arms ragb100, ragb400")
     ap.add_argument("--limit", type=int, default=None,
                     help="stop after N rows (a fidelity smoke; every row "
-                         "written is stamped partial=true and the progress "
-                         "denominator is the limited slice, so the short "
-                         "file cannot be mistaken for a complete run)")
+                         "written is stamped partial=true, which the "
+                         "bench's --report carries into the summary as "
+                         "partial: true, and the progress denominator is "
+                         "the limited slice — so neither the short file "
+                         "nor its summary can be mistaken for a complete "
+                         "run)")
     args = ap.parse_args(argv)
 
     top_ks = lmb.parse_rag_lite_top_ks(args.rag_lite_top_k)
