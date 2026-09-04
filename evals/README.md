@@ -819,8 +819,9 @@ judged locally or by an Opus-class CLI judge. Cognee's 0.79 is also a
 ## Comparator arms — ReFind and no-memory (added 2026-09-01)
 
 Two opt-in arms, both adopted from the 2026-09-01 briefing-backlog triage.
-Both have been **smoke-run only** (below): the plumbing is validated, and
-**no arm comparison from either harness is a measurement yet**.
+Both were smoke-run first (below) and then measured at the full 100K tier
+on 2026-09-02 — the five-arm table further down is the first real
+comparison; on LongMemEval they remain smoke-only.
 
 | arm | flag | context | measures |
 |-----|------|---------|----------|
@@ -904,6 +905,54 @@ against the rag control's ~14.2k (hybrid sits at ~16.1k), because the loop
 tends to select longer turns. A future run reading a refind-vs-rag delta
 should say so, or add a character-matched variant.
 
+### Full tier, 2026-09-02 — the first five-arm measurement
+
+`beam-100K-qwen-27b-chip12-b16.summary.json` (rows in the `.jsonl` beside
+it): 20 chats, 400 questions, every arm at a matched 16-turn budget,
+reproducible Qwen3.8 answerer and judge, **one replicate**. The `rag` and
+`hybrid` rows reproduce the committed `p1-b16` run at a paired delta of
+exactly 0.0000 over all 400 rows
+(`beam-100K-qwen-27b-p1-b16.vs-chip12-b16.paired.json`; the chip-5
+comparison beside it carries the same control at 0.0000), so the
+cross-arm deltas below sit on a zero instrument-noise floor. The paired
+column is written by `evals/beam_within_run_pairs.py` into
+`beam-100K-qwen-27b-chip12-b16.arms-vs-rag.json` (sign-flip permutation,
+10k draws, seed 0, so the smallest reportable p is 1/10001; the CI is
+1.96 × SE over the 400 per-row deltas).
+
+| arm | score | vs rag, paired | served chars/q |
+|---|---:|---|---:|
+| rag | 0.6425 | control | 22,158 |
+| refind | 0.6272 | −0.0152 ± 0.0362 (p 0.41) | 41,757 |
+| hybrid | 0.6226 | −0.0199 ± 0.0285 (p 0.18) | 24,398 |
+| cortex | 0.2829 | −0.3595 ± 0.0485 (p < 0.0001) | 2,207 |
+| nomem | 0.1812 | −0.4612 ± 0.0479 (p < 0.0001) | 0 |
+
+Two findings, both of which bound earlier readings on this page:
+
+- **The no-memory floor is not diffuse, and on abstention it wins.**
+  `nomem` is exactly zero on 7 of the 10 types and scores 1.000 on
+  abstention, 0.469 on preference_following and 0.344 on
+  instruction_following. On abstention that beats every memory arm
+  (cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575): refusing is the
+  correct answer there, and an arm served nothing always refuses.
+  62 of 400 rows score full marks with an empty context. Any BEAM number,
+  ours or a vendor's, carries this floor — and the cortex arm's abstention
+  lead, the number this page and the README used to call the fact spine's
+  one decisive win, is a calibration property of a small context, not
+  evidence that memory recalled anything.
+- **The agentic lexical loop does not beat naive cosine RAG.** `refind`
+  served 1.9× the characters (41,757 vs 22,158 mean characters per
+  question) for a delta that is negative and not significant. It sits above
+  the control on three of the ten types, but only contradiction_resolution
+  (0.616 vs 0.500) clears the judge-transfer floor this page reports
+  (mean |item delta| 0.073); temporal_reasoning (0.669 vs 0.644) and
+  event_ordering (0.496 vs 0.472) sit inside it. The arms are matched by
+  turn count, not characters — the asymmetry the smoke flagged — so read
+  the refind row as "more text, same score".
+
+The LongMemEval side of these arms is still smoke-only.
+
 ### Gold-answer leak check (`leak_check.py`)
 
 The [SR-TTT retraction](https://arxiv.org/abs/2603.06642) came down to the
@@ -940,9 +989,9 @@ Beside those, the report carries each arm's mean over only the 190 rows
 the check could examine: **rag 0.4789, cortex 0.1759, hybrid 0.4229**.
 That is a different slice of the same run, not a correction to it — and
 the gap is a fact about where each arm earns its score, not about
-leakage. The rubric-only types it drops include abstention, which is the
-cortex arm's one decisive win (0.950 above), so removing them costs that
-arm the most.
+leakage. The rubric-only types it drops include abstention, the cortex
+arm's best type (0.950 above — and see the no-memory floor in the
+five-arm table), so removing them costs that arm the most.
 
 ### Memory-only answerability + pathway evidence (`answerability_probe.py`)
 
@@ -1024,7 +1073,7 @@ small to read as measurement.
 
 | finding | evidence |
 |---|---|
-| **The fact spine's one decisive win is abstention.** On BEAM's abstention questions the cortex arm scores **0.950** against naive RAG's 0.775 — a small curated fact context refuses where a raw-turn context confabulates. The number is **identical under two independent judges** (local Qwen3.8 and an Opus-class CLI judge over the same recorded answers), which is what makes it the most transferable claim the memory has. | `beam-100K-qwen-27b-beam100k-qwen38.summary.json`, `beam-100K-qwen-27b-beam100k-qwen38.rejudge-opus5.summary.json` |
+| **Abstention is the fact spine's best type — and a no-memory arm beats it there.** On BEAM's abstention questions the cortex arm scores **0.950** against naive RAG's 0.775 — a small curated fact context refuses where a raw-turn context confabulates — and the number is **identical under two independent judges** (local Qwen3.8 and an Opus-class CLI judge over the same recorded answers). The 2026-09-02 five-arm run bounds it: on the same 40 questions an arm served no memory scores 1.000, so this is a calibration property of a small context, not evidence of recall. Retired as "the one decisive win" on 2026-09-04. | `beam-100K-qwen-27b-beam100k-qwen38.summary.json`, `beam-100K-qwen-27b-beam100k-qwen38.rejudge-opus5.summary.json`, `beam-100K-qwen-27b-chip12-b16.summary.json` |
 | **Budget-matched, the hybrid arm ties the raw-turn control — it does not lose.** The hybrid arm (facts + turns) historically served 3 raw turns against rag's 6; at a matched 16/16 budget with the Phase-1 fixes, rag 0.6425 vs hybrid 0.6226 (−0.020 ± 0.029, a wash). Earlier "hybrid loses" readings were the halved turn window. | `beam-100K-qwen-27b-p1-b16.summary.json`, `beam-reader-volume-grid-verdict.json` |
 | **Judge transfer on BEAM is small — measured, not assumed.** Re-judging 400 identical responses with an Opus-class judge moved rag −0.002, cortex +0.007, hybrid −0.016, against a same-judge stability floor of mean \|item delta\| 0.073. Deltas below that floor are not findings. | `beam-100K-qwen-27b-beam100k-qwen38.rejudge-opus5.summary.json` |
 | **Most of the gap to published leaderboard numbers is the reading stack, not the memory layer.** Context volume dominates: widening naive-RAG context from 6 to 48 turns (roughly the published systems' budget) is +0.186 ± 0.041 and takes a local 27B reader to 0.665 full-tier, while swapping in a frontier reader over byte-identical contexts adds only ~+0.04 (not significant at 48 turns). | `beam-readersweep-verdict.json`, `beam-reader-volume-grid-verdict.json` |

@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-04 — the abstention headline is bounded by the no-memory floor)
+- **README and `evals/README.md` presented BEAM-100K abstention (fact
+  spine 0.950 vs naive RAG 0.775) as "the one decisive win".** The
+  budget-matched five-arm run of 2026-09-02
+  (`evals/results/beam-100K-qwen-27b-chip12-b16.summary.json`, committed
+  with PR #249 but never read into the docs) scores the no-memory arm at 1.000
+  on the same 40 questions: refusing is the correct answer there and an
+  empty context always refuses. Both sites now state the number as a
+  calibration property with the floor beside it, and the comparator-arms
+  section of `evals/README.md` — which still said the ReFind and no-memory
+  arms were "smoke-run only" — carries the full-tier five-arm table. The
+  paired column of that table is a new committed artifact
+  (`…chip12-b16.arms-vs-rag.json`) written by `evals/beam_within_run_pairs.py`
+  and pinned by a regeneration test. Docs, one eval script and evidence
+  pins only; no engine change.
+
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 
 ### Fixed (2026-09-04 — the Console's digest length default matches the daemon's)

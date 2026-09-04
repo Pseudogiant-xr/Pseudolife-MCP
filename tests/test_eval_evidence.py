@@ -2539,6 +2539,135 @@ CLAIMS.append(Claim(
     stated=30, places=0))
 
 
+
+# ── the 2026-09-02 five-arm BEAM run bounds the abstention headline ──────
+# README + evals/README stated the cortex arm's 0.950 on BEAM abstention as
+# the fact spine's one decisive win; the budget-matched five-arm run scores
+# the no-memory arm at 1.000 there. Retired as a headline 2026-09-04; the
+# numbers stay, with the floor pinned beside them. The paired column comes
+# from the within-run pairing artifact (evals/beam_within_run_pairs.py).
+BEAM_CHIP12_PAIRS = _BEAM + "chip12-b16.arms-vs-rag.json"
+BEAM_P1B16_VS_CHIP12 = _BEAM + "p1-b16.vs-chip12-b16.paired.json"
+
+
+def _beam_type(arm: str, qtype: str) -> Callable[[dict], float]:
+    return lambda d: d["types"][qtype][arm]
+
+
+def _pairs(arm: str, key: str) -> Callable[[dict], float]:
+    return lambda d: float(d["arms"][arm][key])
+
+
+_NOMEM_ABSTAIN = _beam_type("nomem", "abstention")
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("beam-abstain-nomem-readme-teaser", READ_ME,
+     "an arm served no memory at all scores 1.000",
+     BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-abstain-nomem-readme-body", READ_ME,
+     "a no-memory arm scores 1.000", BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-abstain-nomem-evals-finding", EVALS,
+     "an arm served no memory scores 1.000",
+     BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-abstain-nomem-changelog", CHANGELOG,
+     "scores the no-memory arm at 1.000",
+     BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-abstain-nomem-evals-table", EVALS,
+     "scores 1.000 on\n  abstention", BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-nomem-pref-evals", EVALS, "0.469 on preference_following",
+     BEAM_CHIP12, _beam_type("nomem", "preference_following"), 0.469, 3),
+    ("beam-nomem-instr-evals", EVALS, "0.344 on\n  instruction_following",
+     BEAM_CHIP12, _beam_type("nomem", "instruction_following"), 0.344, 3),
+    ("beam-abstain-cortex-evals-table", EVALS,
+     "(cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575)",
+     BEAM_CHIP12, _beam_type("cortex", "abstention"), 0.950, 3),
+    ("beam-abstain-rag-evals-table", EVALS,
+     "(cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575)",
+     BEAM_CHIP12, _beam_type("rag", "abstention"), 0.725, 3),
+    ("beam-abstain-hybrid-evals-table", EVALS,
+     "(cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575)",
+     BEAM_CHIP12, _beam_type("hybrid", "abstention"), 0.650, 3),
+    ("beam-abstain-refind-evals-table", EVALS,
+     "(cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575)",
+     BEAM_CHIP12, _beam_type("refind", "abstention"), 0.575, 3),
+    ("beam-refind-contradiction-evals", EVALS,
+     "(0.616 vs 0.500) clears the judge-transfer floor",
+     BEAM_CHIP12, _beam_type("refind", "contradiction_resolution"), 0.616, 3),
+    ("beam-rag-contradiction-evals", EVALS,
+     "(0.616 vs 0.500) clears the judge-transfer floor",
+     BEAM_CHIP12, _beam_type("rag", "contradiction_resolution"), 0.500, 3),
+    ("beam-chip12-rag-score", EVALS, "| rag | 0.6425 |",
+     BEAM_CHIP12, _beam_score("rag"), 0.6425, 4),
+    ("beam-chip12-refind-score", EVALS, "| refind | 0.6272 |",
+     BEAM_CHIP12, _beam_score("refind"), 0.6272, 4),
+    ("beam-chip12-hybrid-score", EVALS, "| hybrid | 0.6226 |",
+     BEAM_CHIP12, _beam_score("hybrid"), 0.6226, 4),
+    ("beam-chip12-cortex-score", EVALS, "| cortex | 0.2829 |",
+     BEAM_CHIP12, _beam_score("cortex"), 0.2829, 4),
+    ("beam-chip12-nomem-score", EVALS, "| nomem | 0.1812 |",
+     BEAM_CHIP12, _beam_score("nomem"), 0.1812, 4),
+    ("beam-chip12-refind-delta", EVALS, "−0.0152 ± 0.0362 (p 0.41)",
+     BEAM_CHIP12_PAIRS, _pairs("refind", "delta_vs_control"), -0.0152, 4),
+    ("beam-chip12-refind-ci", EVALS, "−0.0152 ± 0.0362 (p 0.41)",
+     BEAM_CHIP12_PAIRS, _pairs("refind", "ci95_halfwidth"), 0.0362, 4),
+    ("beam-chip12-refind-p", EVALS, "−0.0152 ± 0.0362 (p 0.41)",
+     BEAM_CHIP12_PAIRS, _pairs("refind", "perm_p"), 0.41, 2),
+    ("beam-chip12-hybrid-delta", EVALS, "−0.0199 ± 0.0285 (p 0.18)",
+     BEAM_CHIP12_PAIRS, _pairs("hybrid", "delta_vs_control"), -0.0199, 4),
+    ("beam-chip12-hybrid-ci", EVALS, "−0.0199 ± 0.0285 (p 0.18)",
+     BEAM_CHIP12_PAIRS, _pairs("hybrid", "ci95_halfwidth"), 0.0285, 4),
+    ("beam-chip12-hybrid-p", EVALS, "−0.0199 ± 0.0285 (p 0.18)",
+     BEAM_CHIP12_PAIRS, _pairs("hybrid", "perm_p"), 0.18, 2),
+    ("beam-chip12-cortex-delta", EVALS, "−0.3595 ± 0.0485 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("cortex", "delta_vs_control"), -0.3595, 4),
+    ("beam-chip12-cortex-ci", EVALS, "−0.3595 ± 0.0485 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("cortex", "ci95_halfwidth"), 0.0485, 4),
+    ("beam-chip12-cortex-p", EVALS, "−0.3595 ± 0.0485 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("cortex", "perm_p"), 0.0001, 4),
+    ("beam-chip12-nomem-delta", EVALS, "−0.4612 ± 0.0479 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("nomem", "delta_vs_control"), -0.4612, 4),
+    ("beam-chip12-nomem-ci", EVALS, "−0.4612 ± 0.0479 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("nomem", "ci95_halfwidth"), 0.0479, 4),
+    ("beam-chip12-nomem-p", EVALS, "−0.4612 ± 0.0479 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("nomem", "perm_p"), 0.0001, 4),
+    ("beam-chip12-nomem-full-marks", EVALS, "62 of 400 rows score full marks",
+     BEAM_CHIP12_PAIRS, _pairs("nomem", "full_marks_rows"), 62, 0),
+    ("beam-chip12-refind-chars", EVALS,
+     "(41,757 vs 22,158 mean characters",
+     BEAM_CHIP12_PAIRS, _pairs("refind", "context_chars_mean"), 41757, 0),
+    ("beam-chip12-rag-chars", EVALS,
+     "(41,757 vs 22,158 mean characters",
+     BEAM_CHIP12_PAIRS, lambda d: float(d["control_context_chars_mean"]),
+     22158, 0),
+    ("beam-chip12-refind-temporal", EVALS,
+     "temporal_reasoning (0.669 vs 0.644)",
+     BEAM_CHIP12, _beam_type("refind", "temporal_reasoning"), 0.669, 3),
+    ("beam-chip12-rag-temporal", EVALS,
+     "temporal_reasoning (0.669 vs 0.644)",
+     BEAM_CHIP12, _beam_type("rag", "temporal_reasoning"), 0.644, 3),
+    ("beam-chip12-refind-ordering", EVALS,
+     "event_ordering (0.496 vs 0.472)",
+     BEAM_CHIP12, _beam_type("refind", "event_ordering"), 0.496, 3),
+    ("beam-chip12-rag-ordering", EVALS,
+     "event_ordering (0.496 vs 0.472)",
+     BEAM_CHIP12, _beam_type("rag", "event_ordering"), 0.472, 3),
+    ("beam-abstain-rag-readme-fivearm", READ_ME, "(rag 0.725 there;",
+     BEAM_CHIP12, _beam_type("rag", "abstention"), 0.725, 3),
+    ("beam-chip12-p1b16-rag-control", EVALS,
+     "exactly 0.0000 over all 400 rows",
+     BEAM_P1B16_VS_CHIP12, _paired("rag", "delta_mean"), 0.0, 4),
+    ("beam-chip12-p1b16-hybrid-control", EVALS,
+     "exactly 0.0000 over all 400 rows",
+     BEAM_P1B16_VS_CHIP12, _paired("hybrid", "delta_mean"), 0.0, 4),
+    ("beam-chip12-hybrid-chars", EVALS, "| hybrid | 0.6226 | −0.0199 ± 0.0285 (p 0.18) | 24,398 |",
+     BEAM_CHIP12_PAIRS, _pairs("hybrid", "context_chars_mean"), 24398, 0),
+    ("beam-chip12-cortex-chars", EVALS, "| cortex | 0.2829 | −0.3595 ± 0.0485 (p < 0.0001) | 2,207 |",
+     BEAM_CHIP12_PAIRS, _pairs("cortex", "context_chars_mean"), 2207, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+
 def test_beam_range_quotes_match_the_committed_verdict():
     """The evals README quotes three sweep ranges; they must be the
     verdict file's, not a recollection of it."""
