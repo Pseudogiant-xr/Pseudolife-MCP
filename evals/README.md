@@ -799,6 +799,101 @@ test over the 78 questions:
   tables now show. The v2 figures remain the same-stack baseline for
   everything else measured on the TurboQuant fork.
 
+## Cue-gated contiguity (offline re-read of `aggp1-variants-0803`)
+
+**2026-09-04 — no new answer or judge calls.** The 2026-08-04 Phase-1
+gates applied four retrieval knobs to *every* query and all four lost on
+the weak types; contiguity lost hardest (−0.147). This asks the obvious
+follow-up: would contiguity have helped if it fired only where the
+engine's own aggregation/temporal **cue** detector says the query is
+asking about order or counts? The run persisted per-arm contexts,
+judged verdicts and token counts for all 500 questions, so a gated
+policy — vanilla `hybrid` where the cue is off, the variant where it is
+on — is a composite of verdicts that were *already judged*.
+`evals/contiguity_cue_split.py` builds it, importing
+`has_temporal_cue` / `has_aggregation_cue` / `has_date_cue` from
+`pseudolife_memory/memory/cms.py` rather than re-implementing them
+(artifact `contiguity-cue-split-20260904.json`; paired sign-flip
+permutation, 10k draws, seed 0, the same `_perm_p` `compare_arms.py`
+uses).
+
+**The cue is not selective enough to gate on.** `any` (temporal OR
+aggregation OR date — the engine's own chronicle-serving gate) fires on
+**0.702** of the 500 questions: recall **0.947** on the weak types, but
+precision only **0.718**, and it fires on **0.692** of knowledge-update
+questions — the type contiguity must not disturb. The date predicate
+fires **0.000** times: LongMemEval carries the date in a separate field,
+never in the question text.
+
+| type | n | temporal | aggregation | any |
+|---|---|---|---|---|
+| multi-session | 133 | 0.256 | 0.887 | 0.940 |
+| temporal-reasoning | 133 | 0.820 | 0.421 | 0.955 |
+| knowledge-update | 78 | 0.321 | 0.538 | 0.692 |
+| single-session-user | 70 | 0.243 | 0.200 | 0.429 |
+| single-session-assistant | 56 | 0.196 | 0.107 | 0.268 |
+| single-session-preference | 30 | 0.000 | 0.000 | 0.000 |
+
+**Contiguity loses hardest exactly where the cue fires**, which is the
+one shape gating cannot rescue. Paired against the same-run vanilla
+hybrid, split on the `any` cue:
+
+| arm | slice | n | delta vs hybrid | 95% CI | p |
+|---|---|---|---|---|---|
+| `hybrid_ctg` | all, cue fired | 351 | −0.114 | [−0.153, −0.075] | 0.00000 |
+| `hybrid_ctg` | all, cue quiet | 149 | −0.047 | [−0.107, +0.013] | 0.18170 |
+| `hybrid_ctg` | weak types, cue fired | 252 | −0.147 | [−0.199, −0.094] | 0.00000 |
+| `hybrid_ctg` | weak types, cue quiet | 14 | −0.143 | [−0.423, +0.137] | 0.61820 |
+
+The gated composites, against vanilla hybrid (0.664 overall / 0.459 weak)
+and the naive-RAG control (0.688 / 0.515):
+
+| gated arm | overall | weak types | ungated weak | overall tokens |
+|---|---|---|---|---|
+| `hybrid_ctg` gated | 0.584 | 0.320 | 0.312 | 1096.4 |
+| `hybrid_tl` gated | 0.640 | 0.447 | 0.447 | 803.4 |
+| `hybrid_enum` gated | 0.626 | 0.387 | 0.387 | 857.5 |
+| `hybrid_all` gated | 0.546 | 0.293 | 0.282 | 1089.0 |
+| vanilla `hybrid` | 0.664 | 0.459 | — | 842.1 |
+
+Gating buys contiguity **+0.008** on the weak types (0.312 → 0.320) out
+of a 0.147 hole, and still costs −0.139 against vanilla hybrid there
+(p 0.00000) and −0.080 overall (p 0.00000) — while adding **254 context
+tokens** overall and 378 on the weak types. `hybrid_tl` gated is
+*identical* to `hybrid_tl` ungated because the timeline channel is
+already cue-gated inside the engine (`timeline_fired` in `cms.py`,
+whose `has_temporal_cue` trigger is a strict subset of the `any`
+gate used here, so the two policies serve the same context on every
+row); that agreement is the check that the imported predicates
+behave here the way they do in production.
+
+A narrower gate does not save it either. Gating contiguity on the
+temporal predicate alone, or on the aggregation predicate alone,
+lands at **0.616** overall and **0.376** on the weak types — better
+than the `any` gate, still well under vanilla hybrid's 0.664 / 0.459
+(the artifact's `gated_by_cue` block carries all four gates per arm).
+
+**Why contiguity hurts is displacement, not dilution.** The served
+memory block is a fixed top-k (3 turns), so a neighbor turn does not
+extend the context — it *evicts* a ranked hit. On cue-fired rows
+`hybrid_ctg` adds a mean **1.46** turns and displaces the same **1.46**
+(333 of the 351 cue-fired rows lose at least one ranked
+hit), while the token count rises 362: neighbor turns are longer *and* worse.
+
+**Measurement floor.** Across the four variants, **522 arm-rows** served
+a context byte-identical to the vanilla hybrid one and were answered and
+judged independently anyway (the bench makes one answer call per arm, no
+caching). **Zero** disagreed — the reproducible q8_0 serving path, so the
+splits above carry no answerer/judge noise to net out.
+
+Caveats, in full: a single replicate from 2026-08-03 on the **retired
+Qwen3.6 judge**, so every number inherits that instrument; a composite of
+two already-judged arms is not a run; and a gated knob that had looked
+promising here would still need its own judged run before shipping. It
+did not look promising. **Verdict: gating does not rescue contiguity** —
+the cue fires on 70% of questions, and the losses are concentrated
+inside the fired set.
+
 ---
 
 # Review-queue judge ladders (`judge_ladder.py`, `queue_judge_ladder.py`)
