@@ -1191,6 +1191,71 @@ def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _parse_used_ids(value: Any) -> tuple[list[int], int]:
+    """Entry ids an agent says it used, from whatever shape a client sent.
+
+    Wider than :func:`_coerce_id_list` (which is all-or-nothing) because
+    this list is typed by a model mid-sentence, and the label is worth more
+    than the strictness: accepted are a real list of ints, a list of
+    int-like strings, a JSON-encoded list (Claude Code stringifies list
+    params — reconfirmed 2026-07-19 on the stdio shim), a comma- or
+    space-separated string, and a bare id. Returns ``(ids, ignored)`` — ids
+    deduped in first-seen order, and the count of tokens that were not
+    integers, so the caller can say so instead of silently dropping them.
+    """
+    import json
+
+    items: list[Any]
+    if isinstance(value, (list, tuple)):
+        items = list(value)
+    elif isinstance(value, bool) or value is None:
+        return [], 0
+    elif isinstance(value, int):
+        items = [value]
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return [], 0
+        try:
+            decoded: Any = json.loads(text)
+        except ValueError:
+            decoded = None
+        if isinstance(decoded, (list, tuple)):
+            items = list(decoded)
+        elif isinstance(decoded, int) and not isinstance(decoded, bool):
+            items = [decoded]
+        else:
+            items = text.strip("[]() ").replace(",", " ").split()
+    else:
+        return [], 0
+
+    ids: list[int] = []
+    ignored = 0
+    seen: set[int] = set()
+    for item in items:
+        if isinstance(item, bool):
+            ignored += 1
+            continue
+        if isinstance(item, int):
+            n = item
+        elif isinstance(item, str):
+            token = item.strip().strip("\"'")
+            if not token:
+                continue
+            try:
+                n = int(token)
+            except ValueError:
+                ignored += 1
+                continue
+        else:
+            ignored += 1
+            continue
+        if n not in seen:
+            seen.add(n)
+            ids.append(n)
+    return ids, ignored
+
+
 @_tool(tier="minimal")
 def memory_outcome(
     task: Annotated[str, Field(
@@ -1207,16 +1272,31 @@ def memory_outcome(
                     "inferred from the outcome.")] = None,
     episode: Annotated[str | None, Field(
         description="Episode handle for attribution.")] = None,
+    used_ids: Annotated[list[int] | str | None, Field(
+        description="Ids of the search hits you actually used, e.g. "
+                    "[1421, 903] — the relevance label.")] = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
     corrected. Dream synthesises signals into lessons surfaced next
-    session; logging stops repeated mistakes.
+    session; logging stops repeated mistakes. Pass ``used_ids`` with the
+    ids of the memories that mattered: only the caller knows which
+    retrieved entries the work actually turned on.
 
-    Returns: ``{recorded, signal_id, task, outcome}``; needs Postgres.
+    Returns: ``{recorded, signal_id, task, outcome}``, plus
+    ``used_ids_recorded`` / ``used_ids_unmatched`` when ``used_ids`` is
+    given; needs Postgres.
     """
-    return service.record_outcome(
+    ids, ignored = _parse_used_ids(used_ids)
+    out = service.record_outcome(
         task, outcome, about=about, detail=detail, polarity=polarity,
-        episode=episode)
+        episode=episode, used_ids=ids or None)
+    if ignored:
+        out["used_ids_ignored"] = ignored
+    if used_ids is not None and not ids:
+        # Refuse the label, never the signal: a malformed used_ids must not
+        # cost the outcome the whole convention exists to capture.
+        out["used_ids_reason"] = "no usable entry ids"
+    return out
 
 
 @_tool(tier="core")

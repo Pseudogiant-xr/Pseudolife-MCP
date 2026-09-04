@@ -2221,7 +2221,7 @@ that only mean **served**, which is the distinction the raw numbers hide:
 
 | counter | what it actually means |
 | --- | --- |
-| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced |
+| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced (`used_via` `get` / `reinforce`), or named by the agent in `memory_outcome(used_ids=...)` (`outcome`) |
 | `entries.explicit_reinforcements` | consumption — moves only on `memory_reinforce` |
 | `entries.access_count` | **serve count** — `cms.py` bumps it for every entry in a merged result set |
 | `slot_reads.read_count` | **serve count** — `_track_slot_reads`: "count each slot SERVED as an answer" |
@@ -2272,6 +2272,20 @@ Option 2 is the one worth shipping: it is a single optional list
 parameter, it is written by the agent that just used the memories, and it
 labels the whole served set rather than the one id someone happened to
 dereference.
+
+**Shipped 2026-09-05.** `memory_outcome(..., used_ids=[...])` credits each
+id to the most recent event in the session window that served it, writing
+the ordinary `retrieval_uses` row under `used_via="outcome"` — so
+`retrieval_replay.py`'s `uses` label source and this script's `by_via`
+breakdown pick it up with no harness change, and the two dereference vias
+stay distinguishable from the asserted one. No schema bump: the audit
+trail is that row plus the `episode_id` / `created_at` both tables already
+carry, and nothing is appended to the signal's `detail` prose. The result
+reports `used_ids_recorded` and `used_ids_unmatched`, because an id no
+event served must not read the same as a landed label. Whether agents
+actually pass it is the open question — the served session-start block
+(`MEMORY_LOOP_BLOCK`) now asks for it in the REFLECT beat, and the next
+telemetry review measures the answer against the 1 label above.
 
 ## `retrieval_replay.py` — the shipped knobs on the queries agents really asked
 
@@ -2712,7 +2726,11 @@ text, so the escaping is not paid. (Its JSON size, 7,644, is in the artifact
 under `chars` for comparability and is not the cost.) The block is capped at
 `HOOK_CONTEXT_MAX_CHARS - 2,000` = 7,500 raw chars by
 `tests/test_plugin_packaging.py`, which is why it is the one surface here
-with almost no headroom.
+with almost no headroom. (Both rows above are the 2026-09-04 run. The
+2026-09-05 `used_ids` change re-priced them slightly — the block to 7,488
+raw chars, and the manifest by the new parameter's 81-char description in
+all three tiers — without a rerun of this ledger, which needs the live
+daemon.)
 
 ## What a call costs — before and after the cuts
 

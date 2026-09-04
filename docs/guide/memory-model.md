@@ -455,7 +455,8 @@ Capture is cheap and in-session; synthesis is single-writer (the dream):
 # during a task, log what happened — this writes a SIGNAL, not a lesson:
 memory_outcome("deploy engine to host", "failure",
                about="tar --same-owner", detail="chown errors aborted the extract")
-memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
+memory_outcome("deploy engine to host", "success", about="tar --no-same-owner",
+               used_ids=[1421, 903])   # the search hits the work turned on
 # user corrections are auto-captured when a user-tier memory_fact_set supersedes a value.
 
 # the dream later distils accumulated signals into durable lessons; recall them at task start:
@@ -489,6 +490,14 @@ entity in `src` (no `|attribute`) restores every retired aspect of that
 entity. `GET /api/curation/retired` lists what's currently retired across
 both stores, and the Console's undo route is `POST /api/lessons/restore`.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
+
+`used_ids` is a second, unrelated payload riding the same call: the ids of
+the `memory_search` hits the work actually turned on. Each one credits the
+serving `retrieval_events` row with a `retrieval_uses` label
+(`used_via="outcome"`) — the relevance signal a learned reranker trains on,
+which otherwise only `memory_get` / `memory_reinforce` produce. Nothing is
+written to the signal itself; the result reports `used_ids_recorded` and
+`used_ids_unmatched` (ids no search in the window served).
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,

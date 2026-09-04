@@ -3178,7 +3178,8 @@ class MemoryService(DreamOps):
     def record_outcome(self, task: str, outcome: str, about: str | None = None,
                        detail: str | None = None, polarity: str | None = None,
                        origin: str = "action",
-                       episode: str | None = None) -> dict[str, Any]:
+                       episode: str | None = None,
+                       used_ids: list[int] | None = None) -> dict[str, Any]:
         """Record a cheap in-session outcome signal (success | failure |
         correction). Single-writer: this never writes a lesson — the dream
         synthesises lessons from the accumulated signals.
@@ -3187,7 +3188,18 @@ class MemoryService(DreamOps):
         prefix (>=8 chars) — attributes this signal to that episode instead
         of the global current one. An unknown/closed/ambiguous handle
         degrades silently: the signal is still recorded, and
-        ``"episode_warning"`` is added to the result."""
+        ``"episode_warning"`` is added to the result.
+
+        ``used_ids``: entry ids the caller actually reasoned from. Each one
+        credits the most recent search in this session that served it with
+        a ``retrieval_uses`` row under ``used_via="outcome"`` — the same
+        table ``memory_get`` / ``memory_reinforce`` write to, so the replay
+        and telemetry harnesses read it unchanged. Nothing is written on
+        ``outcome_signals`` itself: the label's audit trail is that row plus
+        the ``episode_id`` / ``created_at`` both tables already carry, so
+        this costs no schema bump and no prose in ``detail``. Reported back
+        as ``used_ids_recorded`` (ids credited to an event) and
+        ``used_ids_unmatched`` (ids no event in the window served)."""
         # Refuse — never coerce — an unknown outcome: silently mapping e.g.
         # "failed" to "success" would invert a dead-end into a do-this lesson.
         if outcome not in ("success", "failure", "correction"):
@@ -3209,7 +3221,42 @@ class MemoryService(DreamOps):
             out = {"recorded": True, "signal_id": sid, "task": task, "outcome": outcome}
             if episode_warning:
                 out["episode_warning"] = "unknown or closed episode handle"
+            if used_ids:
+                out.update(self._label_used_entries(used_ids))
             return out
+
+    def _label_used_entries(self, used_ids: list[int]) -> dict[str, Any]:
+        """Credit each id in ``used_ids`` to the search that served it.
+
+        Returns the reporting keys for :meth:`record_outcome`. An id the
+        window never served is reported rather than dropped: a silent zero
+        reads the same as a landed label, and the whole point of the
+        parameter is that the caller can tell."""
+        if not self.config.memory.retrieval_log.enabled:
+            return {"used_ids_recorded": 0,
+                    "used_ids_reason": "retrieval log disabled"}
+        credited, unmatched = 0, []
+        seen: set[int] = set()
+        for raw in used_ids:
+            try:
+                entry_id = int(raw)
+            except (TypeError, ValueError):
+                # Belt and braces: the MCP layer parses and counts junk
+                # (``used_ids_ignored``) before it gets here. A direct
+                # service caller's bad element is skipped, not raised —
+                # this rides an outcome that must be recorded regardless.
+                continue
+            if entry_id in seen:
+                continue
+            seen.add(entry_id)
+            if self._record_retrieval_use(entry_id, "outcome") is None:
+                unmatched.append(entry_id)
+            else:
+                credited += 1
+        out: dict[str, Any] = {"used_ids_recorded": credited}
+        if unmatched:
+            out["used_ids_unmatched"] = unmatched
+        return out
 
     def lesson_write(self, task: str, aspect: str, lesson: str, *,
                      about: str | None = None, outcome: str = "success",
@@ -3981,22 +4028,30 @@ class MemoryService(DreamOps):
             self._retrieval_log_errors += 1
             logger.warning("served-facts attach failed", exc_info=True)
 
-    def _record_retrieval_use(self, entry_id: int, used_via: str) -> None:
+    def _record_retrieval_use(self, entry_id: int,
+                              used_via: str) -> int | None:
         """Implicit relevance label (schema v31): the most recent search in
         this session that served ``entry_id`` gains a ``retrieval_uses``
         row. Never raises: a label failure must not break the fetch it
-        rides on."""
+        rides on.
+
+        Returns the event id credited, or None when nothing in the window
+        served this entry (also when logging is off or a label failed) —
+        the ``used_ids`` reporting reads it; the get/reinforce callers
+        ignore it."""
         cfg = self.config.memory.retrieval_log
         if self._storage is None or not cfg.enabled:
-            return
+            return None
         try:
             _, session_id = self._resolve_writer()
-            self._storage.record_retrieval_use(
+            event_id, _rows = self._storage.credit_retrieval_use(
                 int(entry_id), session_id, used_via,
                 float(cfg.use_window_seconds))
+            return event_id
         except Exception:  # noqa: BLE001
             self._retrieval_log_errors += 1
             logger.warning("retrieval-use label failed", exc_info=True)
+            return None
 
     def prune_retrieval_log(self) -> int:
         """Drop retrieval events older than the configured retention (their
