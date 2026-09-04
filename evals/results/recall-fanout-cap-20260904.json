@@ -1,0 +1,401 @@
+{
+  "bench": "recall fan-out cap (memory.recall.max_*_searches)",
+  "date": "2026-09-04",
+  "source_db": "pseudolife_memory_replay_20260904",
+  "n_questions": 20,
+  "question_set": "12 questions from the 2026-09-04 graph-ablation probe's slice (evals/graph_ablation.py, landing separately) + 8 written for this bench",
+  "honesty_check": "targets_lost is the check that matters, and its POWER is bounded: the caps leave graph expansion alone, so the entity sets are identical before and after (structural_identity) and only a target carried by `texts` could be lost. Read hit_channels in each arm's summary \u2014 a run where every target arrived on `entity` is a run the check could not have failed.",
+  "before": {
+    "caps": {
+      "max_searches_per_hop": "(absent \u2014 pre-change package)",
+      "max_total_searches": "(absent \u2014 pre-change package)",
+      "time_budget_seconds": "(absent \u2014 pre-change package)",
+      "skip_part_of_expansion": "(absent \u2014 pre-change package)"
+    },
+    "code_commit": "7595ce6f (git archive of HEAD)",
+    "summary": {
+      "hit_channels": {
+        "entity": 17,
+        "texts": 3
+      },
+      "n": 20,
+      "searches_issued": {
+        "mean": 89.15,
+        "median": 58,
+        "max": 205,
+        "total": 1783
+      },
+      "recall_wall_s": {
+        "mean": 25.25,
+        "median": 16.3759,
+        "max": 57.6699,
+        "total": 504.994
+      },
+      "recall_served_chars": {
+        "mean": 178110.3,
+        "median": 141632,
+        "max": 522376,
+        "total": 3562206
+      },
+      "search_wall_s": {
+        "mean": 0.245,
+        "median": 0.2388,
+        "max": 0.3004,
+        "total": 4.894
+      },
+      "search_served_chars": {
+        "mean": 7789.0,
+        "median": 8143,
+        "max": 11031,
+        "total": 155780
+      },
+      "recall_expected_hits": 20,
+      "search_expected_hits": 18,
+      "truncated_calls": 0,
+      "low_confidence_calls": 0,
+      "arrivals_total": {
+        "added": 1763,
+        "via_part_of": 1046,
+        "via_domain": 717,
+        "via_hub": 1729,
+        "unlinked": 0
+      }
+    }
+  },
+  "after": {
+    "caps": {
+      "max_searches_per_hop": 6,
+      "max_total_searches": 20,
+      "time_budget_seconds": 20.0,
+      "skip_part_of_expansion": false
+    },
+    "code_commit": "7595ce6f+dirty",
+    "summary": {
+      "hit_channels": {
+        "entity": 17,
+        "texts": 3
+      },
+      "n": 20,
+      "searches_issued": {
+        "mean": 12.4,
+        "median": 13,
+        "max": 19,
+        "total": 248
+      },
+      "recall_wall_s": {
+        "mean": 4.166,
+        "median": 4.4859,
+        "max": 7.5135,
+        "total": 83.311
+      },
+      "recall_served_chars": {
+        "mean": 77546.4,
+        "median": 76137,
+        "max": 134061,
+        "total": 1550928
+      },
+      "search_wall_s": {
+        "mean": 0.255,
+        "median": 0.2471,
+        "max": 0.3281,
+        "total": 5.097
+      },
+      "search_served_chars": {
+        "mean": 7789.0,
+        "median": 8143,
+        "max": 11031,
+        "total": 155780
+      },
+      "recall_expected_hits": 20,
+      "search_expected_hits": 18,
+      "truncated_calls": 0,
+      "low_confidence_calls": 0,
+      "arrivals_total": {
+        "added": 1763,
+        "via_part_of": 1046,
+        "via_domain": 717,
+        "via_hub": 1729,
+        "unlinked": 0
+      }
+    }
+  },
+  "deltas": {
+    "mean_searches": -76.75,
+    "max_searches": -186,
+    "mean_wall_s": -21.084,
+    "mean_served_chars": -100563.9,
+    "expected_hits": 0
+  },
+  "structural_identity": {
+    "questions_with_different_entity_count": 0,
+    "questions_with_different_edge_count": 0,
+    "questions_with_different_iteration_count": 0,
+    "texts_total_before": 2116,
+    "texts_total_after": 558
+  },
+  "targets_lost": [],
+  "targets_gained": [],
+  "per_question": [
+    {
+      "q": "what does the pseudolife daemon depend on",
+      "expect": "daemon",
+      "searches_before": 81,
+      "searches_after": 7,
+      "wall_s_before": 22.21,
+      "wall_s_after": 1.8867,
+      "chars_before": 217161,
+      "chars_after": 68941,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what process owns the memory bank volumes",
+      "expect": "pseudolife-daemon",
+      "searches_before": 8,
+      "searches_after": 8,
+      "wall_s_before": 2.4067,
+      "wall_s_after": 2.1329,
+      "chars_before": 41246,
+      "chars_after": 41246,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "where does the backup script write its artifacts",
+      "expect": "ops-backup-ps1",
+      "searches_before": 10,
+      "searches_after": 10,
+      "wall_s_before": 3.3889,
+      "wall_s_after": 3.4548,
+      "chars_before": 62496,
+      "chars_after": 62496,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "which service does the Cortex Console talk to",
+      "expect": "cortex-console",
+      "searches_before": 84,
+      "searches_after": 7,
+      "wall_s_before": 22.6923,
+      "wall_s_after": 2.4051,
+      "chars_before": 141632,
+      "chars_after": 66749,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "which component owns the cortex fact store",
+      "expect": "cortex",
+      "searches_before": 195,
+      "searches_after": 13,
+      "wall_s_before": 57.6699,
+      "wall_s_after": 3.7937,
+      "chars_before": 313075,
+      "chars_after": 113744,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does the codex shim connect to",
+      "expect": "codex-shim",
+      "searches_before": 58,
+      "searches_after": 7,
+      "wall_s_before": 15.8118,
+      "wall_s_after": 2.1204,
+      "chars_before": 70748,
+      "chars_after": 29207,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does service.py implement",
+      "expect": "service-py",
+      "searches_before": 183,
+      "searches_after": 13,
+      "wall_s_before": 50.6029,
+      "wall_s_after": 4.7106,
+      "chars_before": 522376,
+      "chars_after": 124075,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what hosts the postgres container",
+      "expect": "postgres",
+      "searches_before": 51,
+      "searches_after": 19,
+      "wall_s_before": 16.3759,
+      "wall_s_after": 7.5135,
+      "chars_before": 124238,
+      "chars_after": 83836,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does memory_search depend on",
+      "expect": "memory-search",
+      "searches_before": 52,
+      "searches_after": 13,
+      "wall_s_before": 14.8076,
+      "wall_s_after": 3.7279,
+      "chars_before": 163302,
+      "chars_after": 82189,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does the Sonnet shim implement",
+      "expect": "evals-sonnet-shim-py",
+      "searches_before": 49,
+      "searches_after": 13,
+      "wall_s_before": 13.5247,
+      "wall_s_after": 5.1399,
+      "chars_before": 94642,
+      "chars_after": 52267,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "which eval run used chip12-b16",
+      "expect": "chip12-b16",
+      "searches_before": 205,
+      "searches_after": 19,
+      "wall_s_before": 57.6405,
+      "wall_s_after": 6.7654,
+      "chars_before": 333590,
+      "chars_after": 134061,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does the BEAM 100k run measure",
+      "expect": "beam-100k-run",
+      "searches_before": 192,
+      "searches_after": 19,
+      "wall_s_before": 55.1314,
+      "wall_s_after": 5.5748,
+      "chars_before": 212593,
+      "chars_after": 119513,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does the regression gate compare against",
+      "expect": "regression-gate",
+      "searches_before": 1,
+      "searches_after": 1,
+      "wall_s_before": 1.1734,
+      "wall_s_after": 1.7552,
+      "chars_before": 8352,
+      "chars_after": 8352,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "which runtime serves the qwen bench model",
+      "expect": "llama-cpp",
+      "searches_before": 15,
+      "searches_after": 15,
+      "wall_s_before": 4.2374,
+      "wall_s_after": 5.0172,
+      "chars_before": 51624,
+      "chars_after": 51624,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what is the system atlas built from",
+      "expect": "system-atlas",
+      "searches_before": 29,
+      "searches_after": 19,
+      "wall_s_before": 9.6823,
+      "wall_s_after": 6.5567,
+      "chars_before": 89202,
+      "chars_after": 76137,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does the review queue hold",
+      "expect": "review-queue",
+      "searches_before": 175,
+      "searches_after": 13,
+      "wall_s_before": 46.7907,
+      "wall_s_after": 3.5947,
+      "chars_before": 329263,
+      "chars_after": 120005,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "which GPU runs the local evals",
+      "expect": "4090",
+      "searches_before": 27,
+      "searches_after": 19,
+      "wall_s_before": 7.8729,
+      "wall_s_after": 5.7411,
+      "chars_before": 85417,
+      "chars_after": 67660,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does the CHANGELOG track for each release",
+      "expect": "changelog-md",
+      "searches_before": 175,
+      "searches_after": 13,
+      "wall_s_before": 48.8361,
+      "wall_s_after": 4.4859,
+      "chars_before": 412845,
+      "chars_after": 115641,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "where do the container images get published",
+      "expect": "ghcr",
+      "searches_before": 1,
+      "searches_after": 1,
+      "wall_s_before": 1.2218,
+      "wall_s_after": 1.741,
+      "chars_before": 8513,
+      "chars_after": 8513,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    },
+    {
+      "q": "what does memory_recall walk over",
+      "expect": "memory-recall",
+      "searches_before": 192,
+      "searches_after": 19,
+      "wall_s_before": 52.9172,
+      "wall_s_after": 5.1934,
+      "chars_before": 279891,
+      "chars_after": 124672,
+      "hit_before": true,
+      "hit_after": true,
+      "truncated_after": false
+    }
+  ],
+  "privacy": "no entity names beyond the question set's own ``expect`` strings, all of which occur in the tracked repo tree; no query or entry text from the bank"
+}

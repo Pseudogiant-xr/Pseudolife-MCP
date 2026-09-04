@@ -894,7 +894,7 @@
      "pseudolife-mcp"
     ],
     "snippets": [
-     "Hermes model \"router\" architecture (brendan-hermes box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,",
+     "Hermes model \"router\" architecture (<redacted-host> box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,",
      "Claude Code skill/plugin curation on THIS PC (~/.claude), 2026-06-20. Setup was over-plugined: 37 official plugins (anthropics/claude-plugins-official) + ~52 gstack skills in ~/.claude/skills/ + anthropic-skills. APPLIED (reversible): disab"
     ]
    },
@@ -1424,7 +1424,7 @@
     ],
     "snippets": [
      "Homelab CPU inference box \"Local-Models\" (10.0.0.130, Proxmox LXC, root login): AMD Ryzen 7 5800X3D = 8 physical cores / 16 logical, 40GB RAM, NO GPU (CPU-only), llama.cpp build 8905. Runs two systemd-managed llama-server instances: llam",
-     "Hermes model \"router\" architecture (brendan-hermes box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,"
+     "Hermes model \"router\" architecture (<redacted-host> box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,"
     ]
    },
    "reason": "dream-alias: 'RFC 9955' ~ '4090' (cosine 0.67)",
@@ -1840,7 +1840,7 @@
     ],
     "snippets": [
      "Hermes 27B memory-robustness fix applied 2026-06-05 (root cause: SOUL.md had contradictory memory instructions - lines 4-56 said 'environment facts live in MEMORY.md / trust files over memory / add to MEMORY.md' while line 57 bolted on the ",
-     "Hermes model \"router\" architecture (brendan-hermes box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,"
+     "Hermes model \"router\" architecture (<redacted-host> box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,"
     ]
    },
    "into": {
@@ -2117,7 +2117,7 @@
      "pseudolife-mcp"
     ],
     "snippets": [
-     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on brendan-hermes, backup lm_proxy.j",
+     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on <redacted-host>, backup lm_proxy.j",
      "PseudoLife-MCP extractor-ladder benchmark (2026-06-18, branch feat/pluggable-llm-extraction, evals/ladder_sweep.py). SHIPPED FIX (memory/dream.py OpenAICompatExtractor): reasoning models (Qwen3.6) burned the whole max_tokens budget on a <th"
     ]
    },
@@ -2146,7 +2146,7 @@
      "pseudolife-mcp"
     ],
     "snippets": [
-     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on brendan-hermes, backup lm_proxy.j",
+     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on <redacted-host>, backup lm_proxy.j",
      "PseudoLife-MCP extractor-ladder benchmark (2026-06-18, branch feat/pluggable-llm-extraction, evals/ladder_sweep.py). SHIPPED FIX (memory/dream.py OpenAICompatExtractor): reasoning models (Qwen3.6) burned the whole max_tokens budget on a <th"
     ]
    },
@@ -2157,7 +2157,7 @@
      "hermes-infra"
     ],
     "snippets": [
-     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on brendan-hermes, backup lm_proxy.j",
+     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on <redacted-host>, backup lm_proxy.j",
      "PseudoLife-MCP extractor-ladder benchmark (2026-06-18, branch feat/pluggable-llm-extraction, evals/ladder_sweep.py). SHIPPED FIX (memory/dream.py OpenAICompatExtractor): reasoning models (Qwen3.6) burned the whole max_tokens budget on a <th"
     ]
    },
@@ -2490,7 +2490,7 @@
      "hermes-infra"
     ],
     "snippets": [
-     "Hermes live shakedown 2026-08-06 (hermes v0.20.0 on brendan-hermes, Bonsai-27B via lm-proxy) — HEADLINE FINDING: the pseudolife provider's dream/consolidation pass has been effectively inert since 2026-06-12. Evidence from /root/.hermes/pse"
+     "Hermes live shakedown 2026-08-06 (hermes v0.20.0 on <redacted-host>, Bonsai-27B via lm-proxy) — HEADLINE FINDING: the pseudolife provider's dream/consolidation pass has been effectively inert since 2026-06-12. Evidence from /root/.hermes/pse"
     ]
    },
    "reason": "dream-alias: 'hpke crate' ~ 'hermes-live-shakedown' (cosine 0.66)",
@@ -2657,8 +2657,8 @@
      "hermes-infra"
     ],
     "snippets": [
-     "Hermes fix deployment 2026-08-06 (follow-up to the shakedown findings), all on brendan-hermes, repo commit 7b18dd1: (1) live-backend .pth restored (venv path site-packages/hermes_live_backend.pth, 2 lines) and made update-proof — post-updat",
-     "Hermes fix deployment 2026-08-06 (follow-up to the shakedown findings), all on brendan-hermes, repo commit 7b18dd1: (1) live-backend .pth restored (venv path site-packages/hermes_live_backend.pth, 2 lines) and made update-proof — post-updat"
+     "Hermes fix deployment 2026-08-06 (follow-up to the shakedown findings), all on <redacted-host>, repo commit 7b18dd1: (1) live-backend .pth restored (venv path site-packages/hermes_live_backend.pth, 2 lines) and made update-proof — post-updat",
+     "Hermes fix deployment 2026-08-06 (follow-up to the shakedown findings), all on <redacted-host>, repo commit 7b18dd1: (1) live-backend .pth restored (venv path site-packages/hermes_live_backend.pth, 2 lines) and made update-proof — post-updat"
     ]
    },
    "reason": "write-dedup: 'mcp_client' ~ 'hermes-mcp-client'",
@@ -3465,7 +3465,7 @@
      "hermes-infra"
     ],
     "snippets": [
-     "Qwen/Bonsai agent-driven bank-correction shakedown 2026-08-06 (hermes v0.20.0, Ternary-Bonsai-27B primary, brendan-hermes): the full recall->verify->correct->consolidate loop WORKS end-to-end with the local 27B driving. (1) lm-network audit"
+     "Qwen/Bonsai agent-driven bank-correction shakedown 2026-08-06 (hermes v0.20.0, Ternary-Bonsai-27B primary, <redacted-host>): the full recall->verify->correct->consolidate loop WORKS end-to-end with the local 27B driving. (1) lm-network audit"
     ]
    },
    "reason": "dream-alias: 'dev-box' ~ 'user-machine' (cosine 0.72)",
@@ -3563,8 +3563,8 @@
      "windows-env"
     ],
     "snippets": [
-     "SUPERSEDES the 2026-06-24 mitigation status (RestartNotificationsAllowed2=1 + NoAutoRebootWithLoggedOnUsers=1): those proved insufficient — KB5121003 still force-rebooted PSEUDO-PC at 06:29 on 2026-08-14 while idle. New fix applied 2026-08-",
-     "SUPERSEDES the 2026-06-24 mitigation status (RestartNotificationsAllowed2=1 + NoAutoRebootWithLoggedOnUsers=1): those proved insufficient — KB5121003 still force-rebooted PSEUDO-PC at 06:29 on 2026-08-14 while idle. New fix applied 2026-08-"
+     "SUPERSEDES the 2026-06-24 mitigation status (RestartNotificationsAllowed2=1 + NoAutoRebootWithLoggedOnUsers=1): those proved insufficient — KB5121003 still force-rebooted <redacted-host> at 06:29 on 2026-08-14 while idle. New fix applied 2026-08-",
+     "SUPERSEDES the 2026-06-24 mitigation status (RestartNotificationsAllowed2=1 + NoAutoRebootWithLoggedOnUsers=1): those proved insufficient — KB5121003 still force-rebooted <redacted-host> at 06:29 on 2026-08-14 while idle. New fix applied 2026-08-"
     ]
    },
    "into": {
@@ -3574,8 +3574,8 @@
      "windows-env"
     ],
     "snippets": [
-     "User runs Windows 11 on PC \"PSEUDO-PC\" (user <user>) and does not want unattended overnight Windows Update reboots. Their active hours are auto-managed (SmartActiveHoursState=1, set to 11:00–05:00), so updates reboot in the 05:00–11:00 gap; ",
-     "On 2026-06-24, to stop overnight Windows Update reboots on PSEUDO-PC, set two registry values under HKLM\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings: RestartNotificationsAllowed2=1 (notify when restart required, was unset) and IsContinuous"
+     "User runs Windows 11 on PC \"<redacted-host>\" (user <user>) and does not want unattended overnight Windows Update reboots. Their active hours are auto-managed (SmartActiveHoursState=1, set to 11:00–05:00), so updates reboot in the 05:00–11:00 gap; ",
+     "On 2026-06-24, to stop overnight Windows Update reboots on <redacted-host>, set two registry values under HKLM\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings: RestartNotificationsAllowed2=1 (notify when restart required, was unset) and IsContinuous"
     ]
    },
    "reason": "dream-alias: 'windows-auto-reboot-mitigation' ~ 'Windows Update' (cosine 0.71)",

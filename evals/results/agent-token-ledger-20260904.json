@@ -1,0 +1,1256 @@
+{
+  "generated": "2026-09-04",
+  "bank": {
+    "entries": 1298,
+    "preset": "flat"
+  },
+  "convention": {
+    "chars": "compact JSON as an MCP client receives it (separators=(',',':'), ensure_ascii=False)",
+    "approx_tokens": "chars // 4 (evals/ladder_sweep.approx_tokens)"
+  },
+  "manifest": {
+    "minimal": {
+      "tools": 9,
+      "description_chars": 4644,
+      "param_description_chars": 2279,
+      "chars": 6923,
+      "approx_tokens": 1730
+    },
+    "core": {
+      "tools": 22,
+      "description_chars": 8951,
+      "param_description_chars": 5033,
+      "chars": 13984,
+      "approx_tokens": 3496
+    },
+    "full": {
+      "tools": 35,
+      "description_chars": 14445,
+      "param_description_chars": 8182,
+      "chars": 22627,
+      "approx_tokens": 5656
+    }
+  },
+  "session_start_block": {
+    "chars": 7643,
+    "approx_tokens": 1910,
+    "raw_chars": 7491
+  },
+  "search": {
+    "top_k": 8,
+    "queries": 15,
+    "per_query": [
+      {
+        "query": "what port does the bench postgres listen on",
+        "before": {
+          "total_chars": 16144,
+          "entries_chars": 14473,
+          "entries_text_chars": 10954,
+          "entries_superseded_text_chars": 2650,
+          "entries_other_chars": 869,
+          "cortex_chars": 1562,
+          "events_chars": 0,
+          "envelope_chars": 109,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 4036
+        },
+        "after": {
+          "total_chars": 8122,
+          "entries_chars": 6451,
+          "entries_text_chars": 4257,
+          "entries_superseded_text_chars": 1206,
+          "entries_other_chars": 988,
+          "cortex_chars": 1562,
+          "events_chars": 0,
+          "envelope_chars": 109,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2030
+        }
+      },
+      {
+        "query": "how do I deploy the daemon",
+        "before": {
+          "total_chars": 9511,
+          "entries_chars": 7402,
+          "entries_text_chars": 6124,
+          "entries_superseded_text_chars": 529,
+          "entries_other_chars": 749,
+          "cortex_chars": 1742,
+          "events_chars": 0,
+          "envelope_chars": 367,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2377
+        },
+        "after": {
+          "total_chars": 7261,
+          "entries_chars": 5152,
+          "entries_text_chars": 3789,
+          "entries_superseded_text_chars": 529,
+          "entries_other_chars": 834,
+          "cortex_chars": 1742,
+          "events_chars": 0,
+          "envelope_chars": 367,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 1815
+        }
+      },
+      {
+        "query": "why is the recency boost disabled",
+        "before": {
+          "total_chars": 15360,
+          "entries_chars": 13369,
+          "entries_text_chars": 10072,
+          "entries_superseded_text_chars": 2408,
+          "entries_other_chars": 889,
+          "cortex_chars": 1892,
+          "events_chars": 0,
+          "envelope_chars": 99,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 3840
+        },
+        "after": {
+          "total_chars": 8696,
+          "entries_chars": 6705,
+          "entries_text_chars": 4506,
+          "entries_superseded_text_chars": 1208,
+          "entries_other_chars": 991,
+          "cortex_chars": 1892,
+          "events_chars": 0,
+          "envelope_chars": 99,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2174
+        }
+      },
+      {
+        "query": "what did the flat band ablation conclude",
+        "before": {
+          "total_chars": 17239,
+          "entries_chars": 15607,
+          "entries_text_chars": 11879,
+          "entries_superseded_text_chars": 3046,
+          "entries_other_chars": 682,
+          "cortex_chars": 1526,
+          "events_chars": 0,
+          "envelope_chars": 106,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 4309
+        },
+        "after": {
+          "total_chars": 9087,
+          "entries_chars": 7455,
+          "entries_text_chars": 4826,
+          "entries_superseded_text_chars": 1811,
+          "entries_other_chars": 818,
+          "cortex_chars": 1526,
+          "events_chars": 0,
+          "envelope_chars": 106,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2271
+        }
+      },
+      {
+        "query": "which judge model do the evals use",
+        "before": {
+          "total_chars": 14881,
+          "entries_chars": 12548,
+          "entries_text_chars": 8739,
+          "entries_superseded_text_chars": 3100,
+          "entries_other_chars": 709,
+          "cortex_chars": 2233,
+          "events_chars": 0,
+          "envelope_chars": 100,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 3720
+        },
+        "after": {
+          "total_chars": 9586,
+          "entries_chars": 7253,
+          "entries_text_chars": 4614,
+          "entries_superseded_text_chars": 1811,
+          "entries_other_chars": 828,
+          "cortex_chars": 2233,
+          "events_chars": 0,
+          "envelope_chars": 100,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2396
+        }
+      },
+      {
+        "query": "how does the dream cursor advance",
+        "before": {
+          "total_chars": 15326,
+          "entries_chars": 13371,
+          "entries_text_chars": 10049,
+          "entries_superseded_text_chars": 2489,
+          "entries_other_chars": 833,
+          "cortex_chars": 1856,
+          "events_chars": 0,
+          "envelope_chars": 99,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 3831
+        },
+        "after": {
+          "total_chars": 8959,
+          "entries_chars": 7004,
+          "entries_text_chars": 4829,
+          "entries_superseded_text_chars": 1206,
+          "entries_other_chars": 969,
+          "cortex_chars": 1856,
+          "events_chars": 0,
+          "envelope_chars": 99,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2239
+        }
+      },
+      {
+        "query": "what breaks when two dreams run concurrently",
+        "before": {
+          "total_chars": 19018,
+          "entries_chars": 15427,
+          "entries_text_chars": 9987,
+          "entries_superseded_text_chars": 4465,
+          "entries_other_chars": 975,
+          "cortex_chars": 2322,
+          "events_chars": 1149,
+          "envelope_chars": 120,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 4754
+        },
+        "after": {
+          "total_chars": 11920,
+          "entries_chars": 8329,
+          "entries_text_chars": 4823,
+          "entries_superseded_text_chars": 2412,
+          "entries_other_chars": 1094,
+          "cortex_chars": 2322,
+          "events_chars": 1149,
+          "envelope_chars": 120,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2980
+        }
+      },
+      {
+        "query": "what is the current schema version and what did it add",
+        "before": {
+          "total_chars": 12116,
+          "entries_chars": 10208,
+          "entries_text_chars": 7699,
+          "entries_superseded_text_chars": 1899,
+          "entries_other_chars": 610,
+          "cortex_chars": 1513,
+          "events_chars": 0,
+          "envelope_chars": 395,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 3029
+        },
+        "after": {
+          "total_chars": 8663,
+          "entries_chars": 6755,
+          "entries_text_chars": 4818,
+          "entries_superseded_text_chars": 1208,
+          "entries_other_chars": 729,
+          "cortex_chars": 1513,
+          "events_chars": 0,
+          "envelope_chars": 395,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2165
+        }
+      },
+      {
+        "query": "how are constraint facts pinned in retrieval",
+        "before": {
+          "total_chars": 18803,
+          "entries_chars": 16527,
+          "entries_text_chars": 11271,
+          "entries_superseded_text_chars": 4454,
+          "entries_other_chars": 802,
+          "cortex_chars": 2166,
+          "events_chars": 0,
+          "envelope_chars": 110,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 4700
+        },
+        "after": {
+          "total_chars": 10343,
+          "entries_chars": 8067,
+          "entries_text_chars": 4832,
+          "entries_superseded_text_chars": 2297,
+          "entries_other_chars": 938,
+          "cortex_chars": 2166,
+          "events_chars": 0,
+          "envelope_chars": 110,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2585
+        }
+      },
+      {
+        "query": "what happened with the retrieval event log",
+        "before": {
+          "total_chars": 11880,
+          "entries_chars": 10382,
+          "entries_text_chars": 8807,
+          "entries_superseded_text_chars": 932,
+          "entries_other_chars": 643,
+          "cortex_chars": 1390,
+          "events_chars": 0,
+          "envelope_chars": 108,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2970
+        },
+        "after": {
+          "total_chars": 7449,
+          "entries_chars": 5951,
+          "entries_text_chars": 4569,
+          "entries_superseded_text_chars": 603,
+          "entries_other_chars": 779,
+          "cortex_chars": 1390,
+          "events_chars": 0,
+          "envelope_chars": 108,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 1862
+        }
+      },
+      {
+        "query": "which extractor is deployed for consolidation",
+        "before": {
+          "total_chars": 10386,
+          "entries_chars": 8291,
+          "entries_text_chars": 7610,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 681,
+          "cortex_chars": 1984,
+          "events_chars": 0,
+          "envelope_chars": 111,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2596
+        },
+        "after": {
+          "total_chars": 7315,
+          "entries_chars": 5220,
+          "entries_text_chars": 4420,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 800,
+          "cortex_chars": 1984,
+          "events_chars": 0,
+          "envelope_chars": 111,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 1828
+        }
+      },
+      {
+        "query": "how do I run the full test suite",
+        "before": {
+          "total_chars": 13130,
+          "entries_chars": 11212,
+          "entries_text_chars": 5471,
+          "entries_superseded_text_chars": 5001,
+          "entries_other_chars": 740,
+          "cortex_chars": 1545,
+          "events_chars": 0,
+          "envelope_chars": 373,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 3282
+        },
+        "after": {
+          "total_chars": 8399,
+          "entries_chars": 6481,
+          "entries_text_chars": 3752,
+          "entries_superseded_text_chars": 1870,
+          "entries_other_chars": 859,
+          "cortex_chars": 1545,
+          "events_chars": 0,
+          "envelope_chars": 373,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2099
+        }
+      },
+      {
+        "query": "what is the release procedure for pypi",
+        "before": {
+          "total_chars": 13238,
+          "entries_chars": 10585,
+          "entries_text_chars": 8573,
+          "entries_superseded_text_chars": 1196,
+          "entries_other_chars": 816,
+          "cortex_chars": 2274,
+          "events_chars": 0,
+          "envelope_chars": 379,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 3309
+        },
+        "after": {
+          "total_chars": 8757,
+          "entries_chars": 6104,
+          "entries_text_chars": 4566,
+          "entries_superseded_text_chars": 603,
+          "entries_other_chars": 935,
+          "cortex_chars": 2274,
+          "events_chars": 0,
+          "envelope_chars": 379,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2189
+        }
+      },
+      {
+        "query": "why did the cascade number get retired",
+        "before": {
+          "total_chars": 14764,
+          "entries_chars": 12517,
+          "entries_text_chars": 10111,
+          "entries_superseded_text_chars": 1673,
+          "entries_other_chars": 733,
+          "cortex_chars": 2143,
+          "events_chars": 0,
+          "envelope_chars": 104,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 3691
+        },
+        "after": {
+          "total_chars": 8543,
+          "entries_chars": 6296,
+          "entries_text_chars": 4824,
+          "entries_superseded_text_chars": 603,
+          "entries_other_chars": 869,
+          "cortex_chars": 2143,
+          "events_chars": 0,
+          "envelope_chars": 104,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 2135
+        }
+      },
+      {
+        "query": "how does supersession order writes",
+        "before": {
+          "total_chars": 16856,
+          "entries_chars": 15201,
+          "entries_text_chars": 13256,
+          "entries_superseded_text_chars": 1272,
+          "entries_other_chars": 673,
+          "cortex_chars": 1555,
+          "events_chars": 0,
+          "envelope_chars": 100,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 4214
+        },
+        "after": {
+          "total_chars": 7902,
+          "entries_chars": 6247,
+          "entries_text_chars": 4831,
+          "entries_superseded_text_chars": 607,
+          "entries_other_chars": 809,
+          "cortex_chars": 1555,
+          "events_chars": 0,
+          "envelope_chars": 100,
+          "count": 8,
+          "cortex_count": 5,
+          "approx_tokens": 1975
+        }
+      }
+    ],
+    "aggregate": {
+      "before": {
+        "total_chars": {
+          "mean": 14576.8,
+          "median": 14881,
+          "p90": 18803.0,
+          "max": 19018.0
+        },
+        "entries_chars": {
+          "mean": 12474.7,
+          "median": 12548,
+          "p90": 15607.0,
+          "max": 16527.0
+        },
+        "entries_text_chars": {
+          "mean": 9373.5,
+          "median": 9987,
+          "p90": 11879.0,
+          "max": 13256.0
+        },
+        "entries_other_chars": {
+          "mean": 760.3,
+          "median": 740,
+          "p90": 889.0,
+          "max": 975.0
+        },
+        "cortex_chars": {
+          "mean": 1846.9,
+          "median": 1856,
+          "p90": 2274.0,
+          "max": 2322.0
+        },
+        "events_chars": {
+          "mean": 76.6,
+          "median": 0,
+          "p90": 0.0,
+          "max": 1149.0
+        },
+        "total_approx_tokens": {
+          "mean": 3643.9,
+          "median": 3720,
+          "p90": 4700.0,
+          "max": 4754.0
+        }
+      },
+      "after": {
+        "total_chars": {
+          "mean": 8733.5,
+          "median": 8663,
+          "p90": 10343.0,
+          "max": 11920.0
+        },
+        "entries_chars": {
+          "mean": 6631.3,
+          "median": 6481,
+          "p90": 8067.0,
+          "max": 8329.0
+        },
+        "entries_text_chars": {
+          "mean": 4550.4,
+          "median": 4614,
+          "p90": 4831.0,
+          "max": 4832.0
+        },
+        "entries_other_chars": {
+          "mean": 882.7,
+          "median": 859,
+          "p90": 991.0,
+          "max": 1094.0
+        },
+        "cortex_chars": {
+          "mean": 1846.9,
+          "median": 1856,
+          "p90": 2274.0,
+          "max": 2322.0
+        },
+        "events_chars": {
+          "mean": 76.6,
+          "median": 0,
+          "p90": 0.0,
+          "max": 1149.0
+        },
+        "total_approx_tokens": {
+          "mean": 2182.9,
+          "median": 2165,
+          "p90": 2585.0,
+          "max": 2980.0
+        }
+      }
+    },
+    "entry_text": {
+      "entries": 120,
+      "raw_chars": {
+        "mean": 1168.2,
+        "median": 1146.0,
+        "p90": 1790.0,
+        "max": 2302.0
+      },
+      "over_600": 106,
+      "share_over_600": 0.883
+    }
+  },
+  "search_narrow": {
+    "top_k": 3,
+    "queries": 15,
+    "per_query": [
+      {
+        "query": "what port does the bench postgres listen on",
+        "before": {
+          "total_chars": 7002,
+          "entries_chars": 5331,
+          "entries_text_chars": 3246,
+          "entries_superseded_text_chars": 1741,
+          "entries_other_chars": 344,
+          "cortex_chars": 1562,
+          "events_chars": 0,
+          "envelope_chars": 109,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1750
+        },
+        "after": {
+          "total_chars": 3220,
+          "entries_chars": 2218,
+          "entries_text_chars": 1237,
+          "entries_superseded_text_chars": 603,
+          "entries_other_chars": 378,
+          "cortex_chars": 893,
+          "events_chars": 0,
+          "envelope_chars": 109,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 805
+        }
+      },
+      {
+        "query": "how do I deploy the daemon",
+        "before": {
+          "total_chars": 4851,
+          "entries_chars": 2742,
+          "entries_text_chars": 2445,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 297,
+          "cortex_chars": 1742,
+          "events_chars": 0,
+          "envelope_chars": 367,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1212
+        },
+        "after": {
+          "total_chars": 3568,
+          "entries_chars": 2114,
+          "entries_text_chars": 1783,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 331,
+          "cortex_chars": 1087,
+          "events_chars": 0,
+          "envelope_chars": 367,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 892
+        }
+      },
+      {
+        "query": "why is the recency boost disabled",
+        "before": {
+          "total_chars": 9136,
+          "entries_chars": 7145,
+          "entries_text_chars": 5607,
+          "entries_superseded_text_chars": 1183,
+          "entries_other_chars": 355,
+          "cortex_chars": 1892,
+          "events_chars": 0,
+          "envelope_chars": 99,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 2284
+        },
+        "after": {
+          "total_chars": 4159,
+          "entries_chars": 2818,
+          "entries_text_chars": 1809,
+          "entries_superseded_text_chars": 603,
+          "entries_other_chars": 406,
+          "cortex_chars": 1242,
+          "events_chars": 0,
+          "envelope_chars": 99,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 1039
+        }
+      },
+      {
+        "query": "what did the flat band ablation conclude",
+        "before": {
+          "total_chars": 6957,
+          "entries_chars": 5325,
+          "entries_text_chars": 3443,
+          "entries_superseded_text_chars": 1631,
+          "entries_other_chars": 251,
+          "cortex_chars": 1526,
+          "events_chars": 0,
+          "envelope_chars": 106,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1739
+        },
+        "after": {
+          "total_chars": 3781,
+          "entries_chars": 2714,
+          "entries_text_chars": 1809,
+          "entries_superseded_text_chars": 603,
+          "entries_other_chars": 302,
+          "cortex_chars": 961,
+          "events_chars": 0,
+          "envelope_chars": 106,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 945
+        }
+      },
+      {
+        "query": "which judge model do the evals use",
+        "before": {
+          "total_chars": 8241,
+          "entries_chars": 5908,
+          "entries_text_chars": 3192,
+          "entries_superseded_text_chars": 2435,
+          "entries_other_chars": 281,
+          "cortex_chars": 2233,
+          "events_chars": 0,
+          "envelope_chars": 100,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 2060
+        },
+        "after": {
+          "total_chars": 4743,
+          "entries_chars": 3347,
+          "entries_text_chars": 1809,
+          "entries_superseded_text_chars": 1206,
+          "entries_other_chars": 332,
+          "cortex_chars": 1296,
+          "events_chars": 0,
+          "envelope_chars": 100,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 1185
+        }
+      },
+      {
+        "query": "how does the dream cursor advance",
+        "before": {
+          "total_chars": 8222,
+          "entries_chars": 6267,
+          "entries_text_chars": 3449,
+          "entries_superseded_text_chars": 2489,
+          "entries_other_chars": 329,
+          "cortex_chars": 1856,
+          "events_chars": 0,
+          "envelope_chars": 99,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 2055
+        },
+        "after": {
+          "total_chars": 4537,
+          "entries_chars": 3395,
+          "entries_text_chars": 1809,
+          "entries_superseded_text_chars": 1206,
+          "entries_other_chars": 380,
+          "cortex_chars": 1043,
+          "events_chars": 0,
+          "envelope_chars": 99,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 1134
+        }
+      },
+      {
+        "query": "what breaks when two dreams run concurrently",
+        "before": {
+          "total_chars": 10218,
+          "entries_chars": 6627,
+          "entries_text_chars": 4290,
+          "entries_superseded_text_chars": 1956,
+          "entries_other_chars": 381,
+          "cortex_chars": 2322,
+          "events_chars": 1149,
+          "envelope_chars": 120,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 2554
+        },
+        "after": {
+          "total_chars": 6109,
+          "entries_chars": 3450,
+          "entries_text_chars": 1812,
+          "entries_superseded_text_chars": 1206,
+          "entries_other_chars": 432,
+          "cortex_chars": 1390,
+          "events_chars": 1149,
+          "envelope_chars": 120,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 1527
+        }
+      },
+      {
+        "query": "what is the current schema version and what did it add",
+        "before": {
+          "total_chars": 5175,
+          "entries_chars": 3267,
+          "entries_text_chars": 3070,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 197,
+          "cortex_chars": 1513,
+          "events_chars": 0,
+          "envelope_chars": 395,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1293
+        },
+        "after": {
+          "total_chars": 2958,
+          "entries_chars": 2059,
+          "entries_text_chars": 1811,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 248,
+          "cortex_chars": 779,
+          "events_chars": 0,
+          "envelope_chars": 120,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 739
+        }
+      },
+      {
+        "query": "how are constraint facts pinned in retrieval",
+        "before": {
+          "total_chars": 7985,
+          "entries_chars": 5709,
+          "entries_text_chars": 3942,
+          "entries_superseded_text_chars": 1441,
+          "entries_other_chars": 326,
+          "cortex_chars": 2166,
+          "events_chars": 0,
+          "envelope_chars": 110,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1996
+        },
+        "after": {
+          "total_chars": 4863,
+          "entries_chars": 3281,
+          "entries_text_chars": 1813,
+          "entries_superseded_text_chars": 1091,
+          "entries_other_chars": 377,
+          "cortex_chars": 1472,
+          "events_chars": 0,
+          "envelope_chars": 110,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 1215
+        }
+      },
+      {
+        "query": "what happened with the retrieval event log",
+        "before": {
+          "total_chars": 5623,
+          "entries_chars": 4125,
+          "entries_text_chars": 3921,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 204,
+          "cortex_chars": 1390,
+          "events_chars": 0,
+          "envelope_chars": 108,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1405
+        },
+        "after": {
+          "total_chars": 2994,
+          "entries_chars": 2071,
+          "entries_text_chars": 1816,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 255,
+          "cortex_chars": 815,
+          "events_chars": 0,
+          "envelope_chars": 108,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 748
+        }
+      },
+      {
+        "query": "which extractor is deployed for consolidation",
+        "before": {
+          "total_chars": 5090,
+          "entries_chars": 2995,
+          "entries_text_chars": 2754,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 241,
+          "cortex_chars": 1984,
+          "events_chars": 0,
+          "envelope_chars": 111,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1272
+        },
+        "after": {
+          "total_chars": 2907,
+          "entries_chars": 1675,
+          "entries_text_chars": 1400,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 275,
+          "cortex_chars": 1121,
+          "events_chars": 0,
+          "envelope_chars": 111,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 726
+        }
+      },
+      {
+        "query": "how do I run the full test suite",
+        "before": {
+          "total_chars": 7134,
+          "entries_chars": 5216,
+          "entries_text_chars": 2807,
+          "entries_superseded_text_chars": 2107,
+          "entries_other_chars": 302,
+          "cortex_chars": 1545,
+          "events_chars": 0,
+          "envelope_chars": 373,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1783
+        },
+        "after": {
+          "total_chars": 3700,
+          "entries_chars": 2775,
+          "entries_text_chars": 1819,
+          "entries_superseded_text_chars": 603,
+          "entries_other_chars": 353,
+          "cortex_chars": 827,
+          "events_chars": 0,
+          "envelope_chars": 98,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 925
+        }
+      },
+      {
+        "query": "what is the release procedure for pypi",
+        "before": {
+          "total_chars": 4973,
+          "entries_chars": 2320,
+          "entries_text_chars": 1986,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 334,
+          "cortex_chars": 2274,
+          "events_chars": 0,
+          "envelope_chars": 379,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1243
+        },
+        "after": {
+          "total_chars": 3264,
+          "entries_chars": 1917,
+          "entries_text_chars": 1549,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 368,
+          "cortex_chars": 1243,
+          "events_chars": 0,
+          "envelope_chars": 104,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 816
+        }
+      },
+      {
+        "query": "why did the cascade number get retired",
+        "before": {
+          "total_chars": 6904,
+          "entries_chars": 4657,
+          "entries_text_chars": 4347,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 310,
+          "cortex_chars": 2143,
+          "events_chars": 0,
+          "envelope_chars": 104,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1726
+        },
+        "after": {
+          "total_chars": 3572,
+          "entries_chars": 2170,
+          "entries_text_chars": 1809,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 361,
+          "cortex_chars": 1298,
+          "events_chars": 0,
+          "envelope_chars": 104,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 893
+        }
+      },
+      {
+        "query": "how does supersession order writes",
+        "before": {
+          "total_chars": 6879,
+          "entries_chars": 5224,
+          "entries_text_chars": 4970,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 254,
+          "cortex_chars": 1555,
+          "events_chars": 0,
+          "envelope_chars": 100,
+          "count": 3,
+          "cortex_count": 5,
+          "approx_tokens": 1719
+        },
+        "after": {
+          "total_chars": 3217,
+          "entries_chars": 2119,
+          "entries_text_chars": 1814,
+          "entries_superseded_text_chars": 0,
+          "entries_other_chars": 305,
+          "cortex_chars": 998,
+          "events_chars": 0,
+          "envelope_chars": 100,
+          "count": 3,
+          "cortex_count": 3,
+          "approx_tokens": 804
+        }
+      }
+    ],
+    "aggregate": {
+      "before": {
+        "total_chars": {
+          "mean": 6959.3,
+          "median": 6957,
+          "p90": 9136.0,
+          "max": 10218.0
+        },
+        "entries_chars": {
+          "mean": 4857.2,
+          "median": 5224,
+          "p90": 6627.0,
+          "max": 7145.0
+        },
+        "entries_text_chars": {
+          "mean": 3564.6,
+          "median": 3443,
+          "p90": 4970.0,
+          "max": 5607.0
+        },
+        "entries_other_chars": {
+          "mean": 293.7,
+          "median": 302,
+          "p90": 355.0,
+          "max": 381.0
+        },
+        "cortex_chars": {
+          "mean": 1846.9,
+          "median": 1856,
+          "p90": 2274.0,
+          "max": 2322.0
+        },
+        "events_chars": {
+          "mean": 76.6,
+          "median": 0,
+          "p90": 0.0,
+          "max": 1149.0
+        },
+        "total_approx_tokens": {
+          "mean": 1739.4,
+          "median": 1739,
+          "p90": 2284.0,
+          "max": 2554.0
+        }
+      },
+      "after": {
+        "total_chars": {
+          "mean": 3839.5,
+          "median": 3572,
+          "p90": 4863.0,
+          "max": 6109.0
+        },
+        "entries_chars": {
+          "mean": 2541.5,
+          "median": 2218,
+          "p90": 3395.0,
+          "max": 3450.0
+        },
+        "entries_text_chars": {
+          "mean": 1726.6,
+          "median": 1809,
+          "p90": 1816.0,
+          "max": 1819.0
+        },
+        "entries_other_chars": {
+          "mean": 340.2,
+          "median": 353,
+          "p90": 406.0,
+          "max": 432.0
+        },
+        "cortex_chars": {
+          "mean": 1097.7,
+          "median": 1087,
+          "p90": 1390.0,
+          "max": 1472.0
+        },
+        "events_chars": {
+          "mean": 76.6,
+          "median": 0,
+          "p90": 0.0,
+          "max": 1149.0
+        },
+        "total_approx_tokens": {
+          "mean": 959.5,
+          "median": 893,
+          "p90": 1215.0,
+          "max": 1527.0
+        }
+      }
+    },
+    "entry_text": {
+      "entries": 45,
+      "raw_chars": {
+        "mean": 1184.3,
+        "median": 1144.0,
+        "p90": 1790.0,
+        "max": 2241.0
+      },
+      "over_600": 41,
+      "share_over_600": 0.911
+    }
+  },
+  "fact_get": {
+    "slots": 5,
+    "per_slot": [
+      {
+        "slot": "deployment status | status",
+        "before_chars": 1707,
+        "after_chars": 674,
+        "before_approx_tokens": 426,
+        "after_approx_tokens": 168,
+        "keys_before": 25,
+        "keys_after": 11
+      },
+      {
+        "slot": "0-11-0-cpu-torch-fix | deploy-status",
+        "before_chars": 1412,
+        "after_chars": 770,
+        "before_approx_tokens": 353,
+        "after_approx_tokens": 192,
+        "keys_before": 25,
+        "keys_after": 11
+      },
+      {
+        "slot": "c2-set-valued-slots-gate | next-steps",
+        "before_chars": 1374,
+        "after_chars": 633,
+        "before_approx_tokens": 343,
+        "after_approx_tokens": 158,
+        "keys_before": 27,
+        "keys_after": 13
+      },
+      {
+        "slot": "/api endpoint | security_vulnerability",
+        "before_chars": 1335,
+        "after_chars": 919,
+        "before_approx_tokens": 333,
+        "after_approx_tokens": 229,
+        "keys_before": 25,
+        "keys_after": 11
+      },
+      {
+        "slot": "c2-set-valued-slots-gate | benchmark-validity",
+        "before_chars": 1290,
+        "after_chars": 823,
+        "before_approx_tokens": 322,
+        "after_approx_tokens": 205,
+        "keys_before": 27,
+        "keys_after": 13
+      }
+    ],
+    "aggregate": {
+      "before": {
+        "mean": 1423.6,
+        "median": 1374,
+        "p90": 1707.0,
+        "max": 1707.0
+      },
+      "after": {
+        "mean": 763.8,
+        "median": 770,
+        "p90": 919.0,
+        "max": 919.0
+      }
+    }
+  },
+  "recall": {
+    "questions": 5,
+    "per_question": [
+      {
+        "question": "what does the daemon ultimately run on",
+        "hops": 3,
+        "iterations": 1,
+        "entities": 10,
+        "service_search_calls": 66,
+        "chars": 5971,
+        "approx_tokens": 1492,
+        "verbose_chars": 11153
+      },
+      {
+        "question": "how does the console reach the bank",
+        "hops": 3,
+        "iterations": 1,
+        "entities": 10,
+        "service_search_calls": 57,
+        "chars": 4728,
+        "approx_tokens": 1182,
+        "verbose_chars": 11599
+      },
+      {
+        "question": "what depends on the embedding model",
+        "hops": 3,
+        "iterations": 0,
+        "entities": 10,
+        "service_search_calls": 1,
+        "chars": 2194,
+        "approx_tokens": 548,
+        "verbose_chars": 5277
+      },
+      {
+        "question": "how does a memory become a canonical fact",
+        "hops": 3,
+        "iterations": 0,
+        "entities": 10,
+        "service_search_calls": 1,
+        "chars": 2131,
+        "approx_tokens": 532,
+        "verbose_chars": 9190
+      },
+      {
+        "question": "what does the shim connect to",
+        "hops": 3,
+        "iterations": 2,
+        "entities": 10,
+        "service_search_calls": 50,
+        "chars": 5339,
+        "approx_tokens": 1334,
+        "verbose_chars": 10593
+      }
+    ],
+    "aggregate": {
+      "service_search_calls": {
+        "mean": 35.0,
+        "median": 50,
+        "p90": 66.0,
+        "max": 66.0
+      },
+      "chars": {
+        "mean": 4072.6,
+        "median": 4728,
+        "p90": 5971.0,
+        "max": 5971.0
+      }
+    }
+  }
+}
