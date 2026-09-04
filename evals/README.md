@@ -1363,7 +1363,28 @@ names, and no query or entry text is emitted.
 
 Restored copy of the live bank (1,296 entries, 5,504 entities, flat preset),
 CPU only, `top_k=6`, `hops=3`. BEFORE is the pre-change package (the knobs do
-not exist in it at all); AFTER is the shipped defaults 6 / 20 / 20.0 s.
+not exist in it at all); AFTER ran the caps at 6 / 20 / 20.0 s.
+
+The AFTER arm's `code_commit` is `7595ce6f+dirty` — the working tree of the
+branch before it was committed, so the arm is pinned by the artifact's `caps`
+block rather than by a commit hash. Two edits landed after the run and neither
+can move its numbers: the `skip_part_of_expansion` induced-subgraph fix is
+inert with that knob off (`False` in the recorded `caps`), and the
+negative-value normalisation of the three numeric knobs is a no-op for the
+positive values recorded. The shipped `max_total_searches` default was later
+raised from the 20 recorded here to 31 (a backstop above `1 + 6 x 5`, the most
+the per-hop cap can spend at the tool's maximum `hops=5`); at `hops=3` a full
+walk costs at most 19, the ceiling never fired in either arm, and the numbers
+below stand unchanged.
+
+Reruns meant to be reproducible should pin the AFTER arm's budget off with
+`--time-budget-seconds 0`. A wall-clock budget makes the walk
+machine-dependent — the same question can truncate on slow hardware and not on
+fast — so leaving the 20.0 s default in place means a rerun that disagrees
+cannot be told apart from a real regression. (The BEFORE arm is unaffected:
+`apply_arm` forces every cap off for it.) The run below kept the 20.0 s
+default and it never fired, which the artifact records as
+`truncated_calls: 0`.
 
 ```
 metric (per call)        before      after     ratio
@@ -1393,10 +1414,14 @@ expected targets found    20/20      20/20
   wall time and the search count.
 - **The per-hop cap does the work; the ceiling is a backstop.** With
   `max_searches_per_hop=6` and `hops=3` a full walk costs at most
-  1 + 6 + 6 + 6 = 19 searches, so `max_total_searches=20` never fired on these
-  questions (`truncated_calls: 0` in both arms) and neither did the 20 s
-  budget. The ceiling and the budget are pinned by unit tests
-  (`tests/test_recall.py`), not by this run.
+  1 + 6 + 6 + 6 = 19 searches, so the `max_total_searches=20` this run used
+  never fired on these questions (`truncated_calls: 0` in both arms) and
+  neither did the 20 s budget. The shipped default has since been raised to
+  **31** so the ceiling is a backstop at every `hops` the tool accepts
+  (clamped 1..5, where the per-hop cap can spend 1 + 6 x 5 = 31) rather than
+  binding at 4 and 5 hops; at `hops=3` that changes nothing here. The ceiling
+  and the budget are pinned by unit tests (`tests/test_recall.py`), not by
+  this run.
 - **Search is still 16x cheaper.** Plain `memory_search` on the same questions
   is 0.26 s and 7,789 chars per call and found 18 of the 20 targets; recall
   buys the last two, and now costs 4.2 s instead of 25.3 s to do it.

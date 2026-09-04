@@ -824,11 +824,16 @@ class RecallConfig:
     max_searches_per_hop: int = 6
     # Hard ceiling per recall call, seed search included; on reaching it
     # the walk stops and the response carries `truncated: true` +
-    # `searches_issued`. A full 3-hop walk under the per-hop cap above
-    # costs at most 1 + 6 + 6 + 6 = 19, so this is a backstop for deeper
-    # `hops` and for a raised per-hop cap, not the binding constraint —
-    # it did not fire on any of the 20 questions. 0 = no ceiling.
-    max_total_searches: int = 20
+    # `searches_issued`. Sized to be a genuine backstop rather than a
+    # binding constraint: `memory_recall` advertises `hops` clamped to
+    # 1..5, and a full 5-hop walk under the per-hop cap above costs at
+    # most 1 + 6 x 5 = 31, so at 31 no request the tool accepts can be cut
+    # by this ceiling — only a raised per-hop cap can reach it. (It was 20
+    # when the 2026-09-04 run above was measured; that run was hops=3, cost
+    # at most 19 searches, and never tripped the ceiling on any of the 20
+    # questions, so the artifact's numbers are unchanged by this default.)
+    # 0 = no ceiling.
+    max_total_searches: int = 31
     # Wall-clock fail-soft: past this the walk returns what it has with
     # `truncated: true` instead of running on. Above the 7.51 s worst
     # capped call measured above and well inside the MCP client timeout

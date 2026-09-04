@@ -336,12 +336,20 @@ morning. Three knobs bound it, all in the Console's Recall group:
 `memory.recall.max_searches_per_hop` (default 6) re-queries only the top N
 newly discovered entities per hop — ranked by mentions in the seed hits,
 then by lowest degree — while still returning the rest as entities with
-their facts; `max_total_searches` (default 20) and `time_budget_seconds`
+their facts; `max_total_searches` (default 31) and `time_budget_seconds`
 (default 20.0) are hard ceilings over the whole call including the seed
-search. Hitting either stops the walk and adds `truncated: true` and
-`searches_issued: N` to the response instead of raising, and those two
-fields are absent when neither bound, so a complete walk's response is
-unchanged. Graph expansion is deliberately untouched (the hub gate and
+search. 31 is deliberately a backstop, not a working limit: `hops` is
+clamped to 1..5, so the most the per-hop cap can spend is
+1 + 6 x 5 = 31 and no request the tool accepts is cut by the ceiling —
+only a raised `max_searches_per_hop` reaches it. Hitting either ceiling
+stops the walk and adds `truncated: true` and `searches_issued: N` to the
+response instead of raising, and those two fields are absent when neither
+bound, so a complete walk's response is unchanged. `truncated` claims only
+what it knows: some re-queries, and possibly deeper hops, were skipped, so
+supporting texts and deeper entities may be missing — a ceiling that trips
+inside the last permitted hop's re-queries leaves that hop's entities and
+edges complete and cuts only `texts`. Graph expansion is deliberately
+untouched (the hub gate and
 `max_entities` already bound it): on the paired 20-question run
 (`evals/recall_fanout_bench.py`,
 `evals/results/recall-fanout-cap-20260904.json`) the caps took the mean

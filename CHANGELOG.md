@@ -18,14 +18,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     ranked by mentions in the seed search hits, then by lowest degree, then by
     name. The rest are still returned as entities with their facts; only the
     extra search is dropped.
-  - `memory.recall.max_total_searches` (default 20) and
+  - `memory.recall.max_total_searches` (default 31) and
     `memory.recall.time_budget_seconds` (default 20.0): hard ceilings over the
     whole call, seed search included. Reaching either stops the walk and the
     response carries `truncated: true` and `searches_issued: N` — it never
     raises, so a slow neighborhood degrades instead of timing out. Both fields
     are served only when a ceiling actually bound, so an untruncated response
     is byte-identical to the pre-cap one (pinned in `tests/test_recall.py`
-    against the response captured verbatim at 7595ce6f).
+    against the response captured verbatim at 7595ce6f). 31 is a genuine
+    backstop rather than a working limit: `hops` is clamped to 1..5 and the
+    per-hop cap can spend at most 1 + 6 x 5 = 31, so no request the tool
+    accepts is cut by the ceiling — only a raised `max_searches_per_hop`
+    reaches it. (The measured run below used the first-cut default of 20 at
+    `hops=3`, where a full walk costs at most 19 and the ceiling never fired,
+    so raising it to 31 leaves every number in
+    `evals/results/recall-fanout-cap-20260904.json` unchanged and the artifact
+    is not re-run or edited. Pinned by
+    `tests/test_recall.py::test_default_ceiling_is_a_backstop_at_the_max_advertised_hops`.)
+    `truncated` asserts only what it knows: some re-queries, and possibly
+    deeper hops, were skipped, so supporting texts and deeper entities may be
+    missing — it does not claim the entity/edge set is partial, because a
+    ceiling that trips inside the last permitted hop's re-queries leaves that
+    hop's expansion already complete.
   - `memory.recall.skip_part_of_expansion` (default False, eval-only): an
     entity reached only through `part-of` edges is returned with its facts but
     never spends a search. Default-off — the knob exists to measure what

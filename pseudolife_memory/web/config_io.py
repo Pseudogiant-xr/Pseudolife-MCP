@@ -543,11 +543,13 @@ KNOBS: list[dict[str, Any]] = [
              "(seed-hit mentions first, then lowest degree). The rest are "
              "still returned with their facts. 0 = unlimited."},
     {"path": "memory.recall.max_total_searches", "group": "Recall",
-     "label": "Search ceiling per call", "type": "int", "default": 20,
+     "label": "Search ceiling per call", "type": "int", "default": 31,
      "min": 0, "max": 200, "step": 1, "restart": False,
      "help": "Hard cap on searches per recall call, seed search included. "
              "On reaching it the walk stops and the response is flagged "
-             "truncated. 0 = no ceiling."},
+             "truncated. 31 = 1 + 6 x 5, a backstop above the most the "
+             "per-hop cap can spend at the tool's max 5 hops. "
+             "0 = no ceiling."},
     {"path": "memory.recall.time_budget_seconds", "group": "Recall",
      "label": "Recall time budget (s)", "type": "float", "default": 20.0,
      "min": 0.0, "max": 300.0, "step": 1.0, "restart": False,

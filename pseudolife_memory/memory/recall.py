@@ -329,8 +329,12 @@ def recall_state_to_dict(state: RecallState, query: str, hops: int) -> dict[str,
     }
     # Served only when a hard ceiling actually cut the walk short: a
     # complete walk's response stays byte-identical to the pre-cap one
-    # (the served-absent-when-default convention), and a caller seeing
-    # ``truncated`` knows the entity/edge set is partial and what it cost.
+    # (the served-absent-when-default convention). The flag asserts only
+    # what it knows — some re-queries, and possibly deeper hops, were
+    # skipped, so supporting texts and deeper entities may be missing. It
+    # does NOT mean the returned entity/edge set is partial: a ceiling
+    # tripping inside the re-query loop of the last permitted hop leaves
+    # that hop's graph expansion already complete and cuts only ``texts``.
     if state.truncated:
         out["truncated"] = True
         out["searches_issued"] = state.searches_issued

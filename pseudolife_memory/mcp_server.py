@@ -1809,8 +1809,9 @@ def memory_recall(
     has since been corrected — the value still stands, but check it before
     acting. A seed entity's ``constraint`` facts come first, marked
     ``pinned``. ``truncated: true`` (with ``searches_issued``) means a
-    search ceiling or time budget stopped the walk early, so the
-    neighborhood is partial — narrow the question or lower ``hops``.
+    search ceiling or time budget stopped the walk early: some re-queries,
+    and possibly deeper hops, were skipped, so supporting texts and deeper
+    entities may be missing — narrow the question or lower ``hops``.
     Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)

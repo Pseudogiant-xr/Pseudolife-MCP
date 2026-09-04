@@ -783,6 +783,23 @@ def _star_vocab(n: int = 10) -> list[str]:
     return ["hub"] + [f"spoke{i:02d}" for i in range(n)]
 
 
+def _layers(width: int = 8, depth: int = 5, relation: str = "depends-on"):
+    """A graph wide at EVERY hop: ``depth`` layers of ``width`` nodes, with
+    node j of layer k linked to node j of layer k+1, so each hop discovers
+    exactly ``width`` new entities and each hop spends its full per-hop
+    re-query allowance. ``_star`` is only wide at hop 1."""
+    edges = [("hub", relation, f"L1_{j:02d}") for j in range(width)]
+    for k in range(1, depth):
+        edges += [(f"L{k}_{j:02d}", relation, f"L{k + 1}_{j:02d}")
+                  for j in range(width)]
+    return _FakeSvc(["hub relates to many things"], edges)
+
+
+def _layers_vocab(width: int = 8, depth: int = 5) -> list[str]:
+    return ["hub"] + [f"L{k}_{j:02d}"
+                      for k in range(1, depth + 1) for j in range(width)]
+
+
 def test_max_searches_per_hop_caps_requeries_but_keeps_entities():
     svc = _CountingSvc(_star(10))
     st = rc.run_recall(svc.search, svc.graph, _star_vocab(10), "about hub",
@@ -935,16 +952,39 @@ def test_recall_config_fanout_cap_defaults():
     from pseudolife_memory.utils.config import RecallConfig
     c = RecallConfig()
     assert c.max_searches_per_hop == 6
-    assert c.max_total_searches == 20
+    assert c.max_total_searches == 31
     assert c.time_budget_seconds == 20.0
     assert c.skip_part_of_expansion is False
+
+
+def test_default_ceiling_is_a_backstop_at_the_max_advertised_hops():
+    """``memory_recall`` clamps ``hops`` to 1..5, so a ceiling that calls
+    itself a backstop has to sit above what the per-hop cap can spend at
+    5 hops: 1 + 6 x 5 = 31. At the first-cut default of 20 a 5-hop request
+    silently ran four hops and came back flagged ``truncated`` — a working
+    limit dressed as a backstop (2026-09-04 review finding 1). This walks
+    the widest shape the defaults allow (8 new entities per hop, every
+    hop) and pins that nothing is cut."""
+    from pseudolife_memory.utils.config import RecallConfig
+    cfg = RecallConfig()
+    svc = _CountingSvc(_layers())
+    st = rc.run_recall(svc.search, svc.graph, _layers_vocab(), "about hub",
+                       rc.MechanicalController(), hops=5,
+                       max_searches_per_hop=cfg.max_searches_per_hop,
+                       max_total_searches=cfg.max_total_searches,
+                       time_budget_seconds=cfg.time_budget_seconds)
+    # Every hop ran, and each spent its full per-hop allowance.
+    assert st.iterations == 5
+    assert st.searches_issued == 1 + cfg.max_searches_per_hop * 5
+    assert st.truncated is False
+    assert "L5_00" in st.entities          # the deepest layer was reached
 
 
 def test_fanout_caps_are_exposed_in_the_console_config_registry():
     from pseudolife_memory.web.config_io import KNOBS
     paths = {row["path"]: row for row in KNOBS}
     for name, default in (("max_searches_per_hop", 6),
-                          ("max_total_searches", 20),
+                          ("max_total_searches", 31),
                           ("time_budget_seconds", 20.0),
                           ("skip_part_of_expansion", False)):
         row = paths[f"memory.recall.{name}"]
