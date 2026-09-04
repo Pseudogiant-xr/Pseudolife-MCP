@@ -10,6 +10,7 @@ control's context — which is what most of this file pins.
 from __future__ import annotations
 
 import json
+import warnings
 import sys
 from pathlib import Path
 
@@ -116,6 +117,39 @@ def test_budget_arm_bounds_the_number_the_row_records(rag_lite_off):
     judged = _answer_with_stub(row)
     assert judged["ragb32_context_tokens"] <= 32
     assert ctx["ragb32"].count("\n\n") == 4          # five turns, not six
+
+
+def test_the_budget_arm_says_so_out_loud_when_it_overshoots(rag_lite_off):
+    """Overshoot is the COMMON case on LongMemEval, not an edge case.
+
+    Measured on the committed raglite-v38 run: at a 100-token budget the
+    arm served a mean 219.2 tokens over 78 questions and exceeded the
+    budget on 36 of them, because one raw LongMemEval turn is already
+    ~200 tokens. A budget arm that silently serves 2.2x its name is not
+    a token-matched comparator, so the code says so where it happens.
+    """
+    lmb.RAG_BUDGET_TOKENS = 1
+    with pytest.warns(UserWarning, match="exceeds its budget"):
+        lmb.build_contexts(_StubSvc(), "q?")
+
+
+def test_a_budget_that_fits_warns_about_nothing(rag_lite_off):
+    lmb.RAG_BUDGET_TOKENS = 100000
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        lmb.build_contexts(_StubSvc(), "q?")
+
+
+def test_budget_overshoot_counts_the_rows_that_missed(rag_lite_off):
+    """The per-arm column both harnesses' summaries carry, so a reader of
+    the artifact meets the overshoot without recomputing it."""
+    rows = [{"ragb100_context_tokens": 219},
+            {"ragb100_context_tokens": 74},
+            {"ragb100_context_tokens": 388}]
+    assert lmb.budget_overshoot(rows, "ragb100") == 2
+    # non-budget arms have no budget to miss
+    assert lmb.budget_overshoot(rows, "rag1") is None
+    assert lmb.budget_overshoot(rows, "cortex") is None
 
 
 def test_whole_ranking_fits_when_the_budget_is_generous(rag_lite_off):
@@ -246,9 +280,24 @@ def test_question_rates_and_permutation_take_a_rag_lite_arm():
     assert replicate.paired_permutation(a, b, n=200)["delta"] == 1.0
 
 
+# Every artifact family allowed to mint ``rag<N>_``/``ragb<N>_`` row keys.
+# The point of the check below is that no PRE-EXISTING family reuses this
+# vocabulary for something else — not that nothing uses it, because this
+# branch's own runs do.
+_RAG_LITE_FAMILIES = (
+    # beam_reader_sweep.py, which predates these arms (rag6/rag16/rag48).
+    "beam-readersweep-",
+    # This branch's rag-lite runs, written by longmemeval_bench.py /
+    # beam_adapter.py / rag_lite_rebuild.py.
+    "longmemeval-ku-oracle-qwen-27b-raglite-",
+    "longmemeval-all-oracle-qwen-27b-raglite-",
+    "beam-100K-qwen-27b-raglite-",
+)
+
+
 def test_rag_lite_names_collide_with_nothing_but_the_reader_sweep():
     """PR #236's check, re-run over the whole tree: these arm names mint row
-    keys (rag1_correct, ragb300_score, ...) and a collision with an unrelated
+    keys (rag1_correct, ragb400_score, ...) and a collision with an unrelated
     key would average two different things into one column.
 
     The ONE pre-existing user of ``rag<N>`` is beam_reader_sweep.py
@@ -256,23 +305,33 @@ def test_rag_lite_names_collide_with_nothing_but_the_reader_sweep():
     first N turns of one ranked serve — so the vocabulary is shared, not
     collided. Its artifacts are a separate file family
     (``beam-readersweep-*``) written by a separate harness, so no single
-    file ever mixes the two. What this pins is that no LongMemEval or
-    beam_adapter artifact carries such a key, and that ``ragb<N>`` is new.
+    file ever mixes the two.
+
+    What this pins is that the vocabulary stays confined to
+    ``_RAG_LITE_FAMILIES``: the reader sweep plus the rag-lite runs that
+    deliberately serve these arms. Any OTHER artifact carrying such a key
+    is a collision — a run that minted ``rag1_`` for something else, or a
+    tag that fell outside the naming convention these arms are read under.
     """
     import re
     pattern = re.compile(r'"(rag\d+|ragb\d+)_')
-    hits, budget_hits = set(), set()
+    hits = set()
     for path in (REPO / "evals" / "results").glob("*.jsonl"):
         with path.open(encoding="utf-8") as fh:
             for line in fh:
-                for name in pattern.findall(line):
+                if pattern.search(line):
                     hits.add(path.name)
-                    if name.startswith("ragb"):
-                        budget_hits.add(path.name)
-                if hits and path.name in hits:
                     break
-    assert budget_hits == set()
-    assert all(name.startswith("beam-readersweep-") for name in hits), hits
+    stray = {name for name in hits
+             if not name.startswith(_RAG_LITE_FAMILIES)}
+    assert stray == set(), stray
+    # ``ragb<N>`` is genuinely new in this branch: only the rag-lite runs
+    # carry it, never the reader sweep.
+    budget = {name for name in hits
+              if re.search(r'"ragb\d+_',
+                           (REPO / "evals" / "results" / name)
+                           .read_text(encoding="utf-8"))}
+    assert all("raglite" in name for name in budget), budget
 
 
 # ── the offline rebuild onto an already-extracted run ─────────────────────
@@ -286,8 +345,11 @@ def test_the_persisted_rag_block_does_not_split_back_into_its_turns():
     """
     path = (REPO / "evals" / "results"
             / "longmemeval-ku-oracle-qwen-27b-ceiling-v38.jsonl")
-    if not path.exists():                          # pragma: no cover
-        pytest.skip("ceiling-v38 rows not checked out")
+    # Committed, so this is a hard requirement rather than a skip: the "6 of
+    # the 78" figure is published in evals/README.md and the runbook, and a
+    # skip would leave both numbers unguarded on any machine that happened
+    # not to have the file.
+    assert path.exists(), f"{path.name} is committed evidence; it must exist"
     rows = [json.loads(line) for line in
             path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(rows) == 78
@@ -297,11 +359,11 @@ def test_the_persisted_rag_block_does_not_split_back_into_its_turns():
 
 
 
-def _rebuild_fixture(tmp_path, monkeypatch, raw_texts):
+def _rebuild_fixture(tmp_path, monkeypatch, raw_texts, slug="ku"):
     pytest.importorskip("torch")
     import rag_lite_rebuild as rlr
 
-    src = tmp_path / "longmemeval-ku-oracle-qwen-27b-src.jsonl"
+    src = tmp_path / f"longmemeval-{slug}-oracle-qwen-27b-src.jsonl"
     row = {"question_id": "q1", "question": "which bike?",
            "contexts": {"rag": "\n\n".join(raw_texts), "cortex": "f",
                         "hybrid": "h"},
@@ -352,6 +414,69 @@ def test_rebuild_refuses_to_overwrite_its_source(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="must differ"):
         rlr.main(["--src-tag", "src", "--out-tag", "src",
                   "--rag-lite-top-k", "1"])
+
+
+def test_rebuild_slug_all_resolves_both_filenames(tmp_path, monkeypatch):
+    """The 500-question sweeps carry the ``all`` slug.
+
+    This was a separate wrapper module (``rag_lite_rebuild_all.py``) that
+    monkeypatched ``lmb.out_file`` globally and had no test at all. The
+    slug is an option now, and what it has to get right is BOTH ends: a
+    source resolved under ``all`` and a destination written under ``all``.
+    A half-applied slug would read the 500-question run and write a file
+    the ``ku`` readers would then pick up.
+    """
+    raw = ["turn one " + "a" * 60, "turn two " + "b" * 60]
+    rlr = _rebuild_fixture(tmp_path, monkeypatch, raw, slug="all")
+    rlr.main(["--slug", "all", "--src-tag", "src", "--out-tag", "out",
+              "--rag-lite-top-k", "1"])
+    assert (tmp_path / "longmemeval-all-oracle-qwen-27b-out.jsonl").exists()
+    assert not (tmp_path / "longmemeval-ku-oracle-qwen-27b-out.jsonl").exists()
+    # and the default is still ku, so no existing invocation moves
+    assert rlr.main.__module__ == "rag_lite_rebuild"
+
+
+def test_rebuild_default_slug_is_ku(tmp_path, monkeypatch):
+    rlr = _rebuild_fixture(tmp_path, monkeypatch, ["a" * 40, "b" * 40])
+    rlr.main(["--src-tag", "src", "--out-tag", "out",
+              "--rag-lite-top-k", "1"])
+    assert (tmp_path / "longmemeval-ku-oracle-qwen-27b-out.jsonl").exists()
+
+
+def test_rebuild_limit_stamps_partial_and_counts_the_limited_slice(
+        tmp_path, monkeypatch, capsys):
+    """``--limit`` writes a SHORT file under a perfectly normal name.
+
+    Nothing downstream could tell it apart from a complete run, and the
+    progress line read ``[1/78]`` — a denominator the run never intended
+    to reach. Rows written under a limit carry ``partial: true`` and the
+    denominator is the limited slice.
+    """
+    raw = ["turn one " + "a" * 60, "turn two " + "b" * 60]
+    rlr = _rebuild_fixture(tmp_path, monkeypatch, raw)
+    src = tmp_path / "longmemeval-ku-oracle-qwen-27b-src.jsonl"
+    row = json.loads(src.read_text(encoding="utf-8").splitlines()[0])
+    src.write_text("".join(
+        json.dumps({**row, "question_id": f"q{i}"}) + "\n"
+        for i in range(1, 4)), encoding="utf-8")
+    monkeypatch.setattr(lmb, "load_questions",
+                        lambda *a, **kw: [{"question_id": f"q{i}"}
+                                          for i in range(1, 4)])
+    rlr.main(["--src-tag", "src", "--out-tag", "out", "--limit", "2",
+              "--rag-lite-top-k", "1"])
+    out = lmb.load_rows(tmp_path / "longmemeval-ku-oracle-qwen-27b-out.jsonl")
+    assert len(out) == 2
+    assert all(r["partial"] is True for r in out)
+    assert "[1/2]" in capsys.readouterr().out
+
+
+def test_rebuild_without_limit_stamps_nothing(tmp_path, monkeypatch):
+    raw = ["turn one " + "a" * 60, "turn two " + "b" * 60]
+    rlr = _rebuild_fixture(tmp_path, monkeypatch, raw)
+    rlr.main(["--src-tag", "src", "--out-tag", "out",
+              "--rag-lite-top-k", "1"])
+    out = lmb.load_rows(tmp_path / "longmemeval-ku-oracle-qwen-27b-out.jsonl")
+    assert "partial" not in out[0]
 
 
 # ── BEAM: arm plumbing and token accounting ───────────────────────────────

@@ -25,6 +25,10 @@ scored, or the run does not happen.
         --extractor qwen-27b --src-tag ceiling-v38 --out-tag raglite-v38 \\
         --rag-lite-top-k 1,2 --rag-budget-tokens 100,400
 
+``--slug all`` points both the source and the destination at the
+500-question six-type family (``longmemeval-all-...``) instead of the
+78-question knowledge-update one.
+
 Then answer the rebuilt tag (this is the only GPU step):
 
     PYTHONPATH=. python evals/longmemeval_bench.py --dataset oracle \\
@@ -90,6 +94,15 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dataset", default="oracle")
     ap.add_argument("--extractor", default="qwen-27b")
+    # The knowledge-update runs carry the ``ku`` slug and the 500-question
+    # six-type sweeps carry ``all``. This was a separate wrapper module
+    # that monkeypatched ``lmb.out_file`` globally (untested, and a
+    # half-applied patch would read one family and write the other); it is
+    # one option applied to BOTH ends instead.
+    ap.add_argument("--slug", default="ku", choices=("ku", "all"),
+                    help="run family: ku (78 knowledge-update questions, "
+                         "the default) or all (the 500-question six-type "
+                         "sweeps)")
     ap.add_argument("--src-tag", required=True)
     ap.add_argument("--out-tag", required=True)
     ap.add_argument("--rag-lite-top-k", default=None,
@@ -102,9 +115,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="comma-separated token budgets, e.g. '100,400': "
                          "adds arms ragb100, ragb400")
     ap.add_argument("--limit", type=int, default=None,
-                    help="stop after N rows (a fidelity smoke; the output "
-                         "is then a partial file, so use --out-tag to "
-                         "throw it away)")
+                    help="stop after N rows (a fidelity smoke; every row "
+                         "written is stamped partial=true and the progress "
+                         "denominator is the limited slice, so the short "
+                         "file cannot be mistaken for a complete run)")
     args = ap.parse_args(argv)
 
     top_ks = lmb.parse_rag_lite_top_ks(args.rag_lite_top_k)
@@ -119,8 +133,10 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--out-tag must differ from --src-tag; never "
                          "overwrite a canonical result file")
 
-    src = lmb.out_file(args.dataset, args.extractor, args.src_tag)
-    dst = lmb.out_file(args.dataset, args.extractor, args.out_tag)
+    src = lmb.out_file(args.dataset, args.extractor, args.src_tag,
+                       slug=args.slug)
+    dst = lmb.out_file(args.dataset, args.extractor, args.out_tag,
+                       slug=args.slug)
     if dst.exists():
         raise SystemExit(f"refusing to overwrite {dst.name}")
     rows = lmb.load_rows(src)
@@ -131,7 +147,11 @@ def main(argv: list[str] | None = None) -> int:
 
     out_rows, mismatched = [], []
     t0 = time.perf_counter()
-    for i, row in enumerate(rows[:args.limit] if args.limit else rows, 1):
+    # The denominator is the slice actually being rebuilt: under --limit
+    # the run never intends to reach len(rows), and a "[1/78]" line on a
+    # 5-row smoke reads as a stall rather than a plan.
+    todo = rows[:args.limit] if args.limit else rows
+    for i, row in enumerate(todo, 1):
         qid = row["question_id"]
         q = by_id.get(qid)
         if q is None:
@@ -150,8 +170,13 @@ def main(argv: list[str] | None = None) -> int:
                 lmb.rag_lite_contexts(raw_texts, (), budget))
         for key in [k for k in row if is_judge_field(k)]:
             row.pop(key)                 # every arm re-judged in one pass
+        if args.limit:
+            # A limited rebuild writes a SHORT file under a perfectly
+            # normal name; nothing downstream could otherwise tell it
+            # apart from a complete run.
+            row["partial"] = True
         out_rows.append(row)
-        print(f"[{i}/{len(rows)}] {qid} ok", flush=True)
+        print(f"[{i}/{len(todo)}] {qid} ok", flush=True)
 
     if mismatched:
         # Loud, and nothing written: arms that are not prefixes of the
@@ -159,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(
             f"{mismatched[0]} re-derived a DIFFERENT rag context than the "
             f"one that was judged (row {len(out_rows) + 1} of "
-            f"{len(rows)}). "
+            f"{len(todo)}). "
             "The retrieval stack has moved since that run, so these arms "
             "would measure drift, not budget — re-extract instead of "
             "rebuilding.")

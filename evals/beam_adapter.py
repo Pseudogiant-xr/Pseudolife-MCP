@@ -674,6 +674,13 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
             # one trade-off. None only when no row carries a context.
             "context_tokens": mean_context_tokens(rows, arm),
         }
+        # Same column the LongMemEval summary carries, from the same
+        # implementation: how often a ragb<N> arm served ABOVE the budget
+        # its name quotes (the always-serve-one-turn floor). None — and
+        # so absent — for every arm that has no budget to miss.
+        over = lme.budget_overshoot(rows, arm)
+        if over is not None:
+            summary["arms"][arm]["budget_overshoot_rows"] = over
     by_type: dict[str, list[dict]] = {}
     for r in rows:
         by_type.setdefault(r["type"], []).append(r)

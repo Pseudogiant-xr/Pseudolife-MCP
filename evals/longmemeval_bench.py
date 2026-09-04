@@ -54,6 +54,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -457,6 +458,16 @@ def validate_rag_lite(top_ks: tuple[int, ...], budget_tokens: int | None,
     A width at or above the rag control's would serve a byte-identical
     copy of the control under a second name — a judged arm that measures
     nothing and costs a full answer+judge pass per question.
+
+    The BUDGET path carries no equivalent near-duplicate guard, and
+    cannot: what a token budget resolves to is a property of the data,
+    not of the flag. A budget above the control's cost serves a copy of
+    the control (``ragb100000`` on a 1,200-token run) and a budget below
+    the cost of one turn serves exactly ``rag1`` (measured: ``ragb100``
+    equalled ``rag1`` on 74 of the 78 raglite-v38 rows). Only the run's
+    recorded ``{arm}_context_tokens`` mean can say which happened, which
+    is why ``rag_lite_contexts`` warns at serve time and both summaries
+    carry ``budget_overshoot_rows``.
     """
     for k in top_ks:
         if k < 1:
@@ -518,8 +529,46 @@ def rag_lite_contexts(raw_texts: list[str], top_ks: tuple[int, ...],
             if kept and approx_tokens("\n\n".join(candidate)) > budget_tokens:
                 break
             kept = candidate
-        out[f"ragb{budget_tokens}"] = "\n\n".join(kept)
+        served = "\n\n".join(kept)
+        name = f"ragb{budget_tokens}"
+        out[name] = served
+        if approx_tokens(served) > budget_tokens:
+            # Loud, because on LongMemEval this is the COMMON case, not
+            # an edge one: a single raw turn is already ~200 tokens, so
+            # a 100-token budget served a mean 219.2 tokens over the 78
+            # raglite-v38 rows (36 of them above the budget) and was
+            # byte-identical to rag1 on 74 of them. An arm named for a
+            # budget it misses by 2.2x is not a token-matched
+            # comparator, and its name is the only place that says 100.
+            # The message text is constant so Python's default filter
+            # prints it once per run, not once per question.
+            warnings.warn(
+                f"the {name} arm's served block exceeds its budget: "
+                "one ranked turn alone is over budget and the arm's "
+                "floor is one turn, so it serves more than "
+                f"{budget_tokens} approximate tokens. Read the run's "
+                f"measured {name}_context_tokens mean and its "
+                "budget_overshoot_rows count, not the arm's name.",
+                stacklevel=2)
     return out
+
+
+def budget_overshoot(rows: list[dict], arm: str) -> int | None:
+    """How many rows a ``ragb<N>`` arm served ABOVE its own budget.
+
+    ``None`` for every other arm: only a budget arm has a budget to
+    miss. Both harnesses' summaries carry it beside the arm's mean
+    cost, so a reader of the artifact meets the overshoot without
+    recomputing it — the runbook's 2026-09-04 correction (ragb100
+    served 2.2x its name) had to be measured by hand because nothing
+    published it.
+    """
+    m = re.fullmatch(r"ragb(\d+)", arm)
+    if not m:
+        return None
+    budget = int(m.group(1))
+    key = f"{arm}_context_tokens"
+    return sum(1 for r in rows if int(r.get(key, 0)) > budget)
 
 
 def serve_comparator_arms(contexts: dict, question: str, *, archive=None,
@@ -1109,7 +1158,15 @@ def report(dataset: str, extractor_name: str, tag: str = "",
             tok = sum(r[f"{arm}_context_tokens"] for r in rows) / n
         summary["arms"][arm] = {"accuracy": round(acc, 3),
                                 "context_tokens": round(tok, 1)}
-        print(f"{arm:<10}{acc:>10.3f}{tok:>12.1f}")
+        # A ragb<N> arm is named for a budget it does not always keep —
+        # the always-serve-one-turn floor overshoots whenever one ranked
+        # turn is already over budget, which on LongMemEval is the common
+        # case. Published beside the mean so the artifact says it.
+        over = budget_overshoot(rows, arm)
+        if over is not None:
+            summary["arms"][arm]["budget_overshoot_rows"] = over
+        print(f"{arm:<10}{acc:>10.3f}{tok:>12.1f}"
+              + (f"  ({over}/{n} over budget)" if over else ""))
     sup = sum(r["consolidation"]["superseded"] for r in rows)
     print(f"supersessions across runs: {sup}")
     summary["superseded_total"] = sup
