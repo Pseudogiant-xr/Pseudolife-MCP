@@ -1849,6 +1849,253 @@ reversal of the hold decision.
 
 ---
 
+# Retrieval telemetry, offline replay, and the graph ablation (2026-09-04)
+
+Three read-only harnesses over a **restored copy** of a live bank. None of
+them touches `pseudolife_memory` or the shared `pseudolife_memory_bench`:
+each refuses those two database names outright, in either DSN spelling and
+regardless of case. `retrieval_telemetry_review.py` goes no further than
+that — it is plain SQL over the log tables, loads no model and never opens
+the search path. The two that do search (`retrieval_replay.py`,
+`graph_ablation.py`) build a `MemoryService` against the restored copy and
+then force `embedding.device = "cpu"` and
+`memory.retrieval_log.enabled = False`, so a replay cannot append to the
+log it is replaying.
+
+Restore recipe (the 2026-09-04 run used
+`pseudolife_memory_replay_20260904` on the bench Postgres):
+
+```powershell
+ops\backup.ps1 -OutDir <scratch>          # sanctioned dump path (pg_dump, read-only)
+docker cp <dump>.sql.gz pseudolife-mcp-postgres:/tmp/replay.sql.gz
+docker exec pseudolife-mcp-postgres psql -U pseudolife -d postgres `
+  -c "CREATE DATABASE pseudolife_memory_replay_20260904 OWNER pseudolife"
+docker exec pseudolife-mcp-postgres sh -c `
+  "gunzip -c /tmp/replay.sql.gz | psql -U pseudolife -d pseudolife_memory_replay_20260904 -q"
+```
+
+Pass the **deployed** `config.yaml` (`docker cp pseudolife-mcp-daemon:/data/config.yaml .`)
+with `--config` so the "shipped" arm is production and not the dataclass
+defaults.
+
+**Privacy.** Query text and entry text are private (this is a public repo),
+and the graph holds personal names and machine identifiers. The artifacts
+carry aggregates and ids only; `graph_ablation.py` emits an entity name
+only when `git grep` finds it in the tracked tree, and writes `<redacted>`
+otherwise.
+
+## `retrieval_telemetry_review.py` — does the learned reranker have labels yet?
+
+PR #168 logs the (query, served) half of the training tuple in
+`retrieval_events`, and `retrieval_uses` records the implicit relevance
+label: a `memory_get` / `memory_reinforce` on a served entry credits the
+most recent in-session serving event within `use_window_seconds` (3600).
+PR #200/#201 added `slot_reads`, `served_facts` and
+`entries.explicit_reinforcements`.
+
+The script separates the counters that mean **consumption** from the ones
+that only mean **served**, which is the distinction the raw numbers hide:
+
+| counter | what it actually means |
+| --- | --- |
+| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced |
+| `entries.explicit_reinforcements` | consumption — moves only on `memory_reinforce` |
+| `entries.access_count` | **serve count** — `cms.py` bumps it for every entry in a merged result set |
+| `slot_reads.read_count` | **serve count** — `_track_slot_reads`: "count each slot SERVED as an answer" |
+
+### Findings — 2026-09-04 bank (`retrieval-telemetry-review-20260904.json`)
+
+| quantity | value |
+| --- | --- |
+| logged events | 1349 |
+| distinct sessions / episodes | 60 / 101 |
+| **events with any downstream signal** | **1** (0.074%) |
+| `retrieval_uses` rows | 1 (`used_via=get`, served rank 0, 72 s after the serve) |
+| `entries.explicit_reinforcements`, bank-wide sum | **0** |
+| served-list length: mean / mode | 4.94 / 5 (146 events served exactly 1; 0 served nothing) |
+| `params` coverage (v32+) | 790 / 1349 (58.6%) |
+| `served_facts` coverage (v34+) | 160 / 1349 (11.9%), 798 facts |
+| served entry ids that still resolve in `entries` | 6666 of 6666 (no dangling ids) |
+| `slot_reads` | 605 slots, 807 serves — all serve-side |
+
+The event log is healthy: it writes on every search, the ids all still
+join, and 59% of rows carry the ranking-knob snapshot. The **label** side
+is empty. One labelled event is not a small sample, it is a plumbing
+check. Read against the plan's "a few hundred logged events", the correct
+reading is a few hundred **labelled** events — an event with no target
+trains nothing — so Phase 1 is 299 labelled events short of its own
+floor.
+
+Why: the label is only written by `memory_get` and `memory_reinforce`, and
+agents overwhelmingly consume `memory_search`'s inline result text and
+never dereference an id. Nothing about the current tool surface makes them.
+
+**Cheapest changes that would actually produce labels**, in ascending cost:
+
+1. **Credit `memory_fact_get` / `memory_fact_resolve` against `served_facts`.**
+   The fact half of the tuple has been recorded since v34 and has no
+   `uses` table at all; a fact-side read is a genuine consumption event
+   the daemon already sees.
+2. **An explicit `used_ids` parameter on `memory_outcome`.** The
+   convention already requires an outcome at task end, so the caller is
+   present and knows which memories mattered; today that knowledge is
+   discarded. This is the only option that produces *positive* labels for
+   the entries an agent actually reasoned from rather than clicked on.
+3. **Treat a `memory_store` whose text quotes a served entry as a use.**
+   Free (no tool-surface change) but noisy, and it labels writing, not
+   reading.
+
+Option 2 is the one worth shipping: it is a single optional list
+parameter, it is written by the agent that just used the memories, and it
+labels the whole served set rather than the one id someone happened to
+dereference.
+
+## `retrieval_replay.py` — the shipped knobs on the queries agents really asked
+
+Re-runs the logged queries through an offline `MemoryService` on the
+restored bank under several settings and scores each against a label set.
+
+Label sources: `uses` (the real implicit labels — n=1 on this bank, so it
+is a plumbing check), and `logged-top1` / `logged-top3`, which use the
+entry ids the daemon itself served at those ranks as pseudo-labels. The
+`logged-*` sources measure **agreement with the shipped ranker's own past
+head**, i.e. how far a setting moves the served head — never relevance.
+
+The `feat/retrieval-candidate-pool` arm probes the live config object for
+pool/fusion knobs rather than trusting a branch name; on 2026-09-04 the
+sibling worktree carried none, so the arm reports itself skipped.
+
+**The bank has grown since these events were logged**, so absolute MRR and
+hit@k are indicative only. Every arm sees the identical restored bank and
+the identical query list, so the paired comparison across arms is the
+valid read. The query-embedding LRU is cleared between arms — without
+that, the second arm reads its query vectors out of cache and posts a
+latency an order of magnitude below the first.
+
+### Findings — 2026-09-04 (`retrieval-replay-20260904.json`), 250 sampled events, top_k=6
+
+Latency is the **median** per-query wall time
+(`results.logged-top1.arms.<arm>.median_latency_s` in the artifact).
+
+| arm | MRR | hit@1 | hit@3 | hit@6 | median latency |
+| --- | --- | --- | --- | --- | --- |
+| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 | 0.305 s |
+| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 | 0.140 s |
+| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 | 0.694 s |
+
+Read as drift, three things:
+
+- **BM25 is load-bearing for the head.** Turning it off moves 12.4 points
+  of hit@1 and 9.4 of MRR while leaving hit@6 nearly intact — the lexical
+  channel decides *which* of the right six goes first, which is what a
+  reranker would be trained to do.
+- **BM25 costs ~165 ms per query at this bank scale** (median 0.305 s
+  vs 0.140 s), well above the 20-50 ms the config docstring quotes. That
+  docstring number is due a re-measure; it is not pinned to an artifact.
+- **The cross-encoder reranker reshuffles the head hard and does not
+  obviously improve it.** hit@1 drops 30 points against `shipped` while
+  hit@6 is unchanged — it is re-ordering the same six. Whether that
+  re-order is better cannot be settled by this harness, because the label
+  IS the shipped ranker's own head; it needs a judged run or real
+  `uses` labels. It stays off by default, and that decision is untouched
+  here.
+
+## `graph_ablation.py` — lever 6, does `memory_recall`'s expansion earn its cost?
+
+Two halves. `shape` describes the graph itself; `ablate` pairs
+`memory_recall` against plain `memory_search` on the same queries and
+classifies how each extra entity **arrived**: through a `part-of` edge
+only (containment, the cheapest edge the extractor makes), through a
+domain relation (`depends-on`, `uses`, `runs-on`, …), through a hub node
+(degree >= p95), or unlinked (it came from the re-query's dense hits, not
+from an edge at all).
+
+Query sets: 30 hand-written relational questions in the bank's own domain
+(each names the entity that should surface) plus a sample of the logged
+retrieval events, scored on whether the entry the daemon served at rank 0
+comes back. `--rel-limit` / `--logged-limit` cap both sets — `recall` at
+the shipped defaults (3 hops, `max_entities=50`, `expand_budget=0`) issues
+one search per newly-discovered entity per hop, which measured a **mean
+of 32.4 s per call on the relational set and 44.3 s on the logged set,
+worst case 73.0 s** on CPU against this bank
+(`ablation.*.summary.recall.mean_wall_s` in
+`graph-ablation-20260904.json`), so a full 30-question sweep still runs
+to tens of minutes. The artifact records the `n` it actually asked.
+
+### Findings — graph shape, 2026-09-04 (`graph-ablation-20260904.json`)
+
+| quantity | value |
+| --- | --- |
+| entities | 5504 |
+| edges (live / all versions) | 4020 / 4247 |
+| degree p50 / p95 / max | 1 / 5 / 132 |
+| `part-of` share of live edges | 19.0% |
+| entities with no live edge at all | 1156 (21%) |
+| dead weight (only `part-of` edges, no current fact) | 421 |
+
+Live edges by relation: `prefers` 929, `part-of` 765, `uses` 736,
+`configures` 272, `depends-on` 272, `related-to` 181, `implements` 181,
+`avoids` 162, `tests` 148, `runs-on` 139, `stores-data-in` 116, `hosts`
+70, `superseded-by` 49.
+
+Two things the shape says on its own:
+
+- **The graph is a hub-and-spokes star, not a mesh.** Median degree is 1
+  and p95 is 5, while the top node (`pseudolife-mcp`) carries 132 — so
+  most nodes are leaves hanging off a handful of hubs, which is exactly
+  the topology the recall hub gate exists to refuse to expand through.
+  1156 entities carry no live edge at all.
+- **Comparator names the corpus argues about are missing from the
+  graph.** Of the terms checked, `naive rag` (16 entries) and `titans`
+  (21 entries) are mentioned in five or more entries and have **no
+  node**, while `rag`, `longmemeval`, `cognee`, `bm25`, `beam` and `lme`
+  all do. The extractor promotes subjects of claims, not the things
+  claims are compared against — so the one relation a reader most wants
+  ("what did we measure this against, and what happened") is the one the
+  graph cannot answer.
+
+### Findings — `recall` vs `search`, 2026-09-04 (same artifact)
+
+8 of the 30 relational questions and 4 logged queries — the run size the
+per-recall cost allowed (mean 32.4 s relational / 44.3 s logged, max
+73.0 s), and small enough that the hit-rate column is a ceiling, not a
+comparison.
+
+| | relational (n=8) | | logged (n=4) | |
+| --- | --- | --- | --- | --- |
+| | `search` | `recall` | `search` | `recall` |
+| mean served chars | 6932 | 184641 | 6649 | 74186 |
+| mean wall time | 0.44 s | 32.4 s | 0.39 s | 44.3 s |
+| expected entity/entry found | 8/8 | 8/8 | 4/4 | 4/4 |
+| recall-only hits | — | 0 | — | 0 |
+
+`recall` served **27× the characters at 74× the wall time** of plain
+`search` on the relational set (11× / 114× on the logged set) and found
+the expected target no more often, because plain `search` already found
+it every time. That last clause is the honest limit of this run: at n=8
+with both arms at 100%, the questions cannot separate the two arms on
+quality — they only price the difference. A question set that plain
+search *fails* is what a quality verdict needs, and writing one is the
+obvious next step.
+
+What the expansion is made of is measurable even at this n. Of the 524
+entities `recall` added beyond its seeds on the relational set:
+
+| arrival | count | share |
+| --- | --- | --- |
+| touches a hub (degree >= p95 = 5) | 520 | 99.2% |
+| only `part-of` edges | 225 | 42.9% |
+| at least one domain relation | 299 | 57.1% |
+| unlinked (came from the re-query, not an edge) | 0 | 0% |
+
+Essentially every entity the graph adds arrives through a hub, and over
+two fifths arrive through containment alone. On a star-shaped graph with
+median degree 1, "expand the neighbourhood" mostly means "enumerate a
+hub's spokes" — which is why the payload is 27× larger without being
+more likely to contain the answer. The hub gate stops recall expanding
+*through* a hub; it does not stop a hub's spokes being pulled in as
+results.
+
 # Smaller probes
 
 Five tracked scripts, each answering one narrow question, without their
