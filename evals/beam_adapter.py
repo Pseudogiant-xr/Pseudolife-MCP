@@ -54,14 +54,15 @@ import longmemeval_bench as lme  # noqa: E402
 import nomem_arm  # noqa: E402
 import refind_arm  # noqa: E402
 from longmemeval_bench import (  # noqa: E402
-    _chat, ARMS, EXTRACTORS, QWEN_URL, RESULTS_DIR,
+    _chat, approx_tokens, ARMS, EXTRACTORS, QWEN_URL, RESULTS_DIR,
     _make_extractor, build_contexts, load_rows,
 )
 
 
 def arms_for(chronicle: bool, only: str | None = None,
              digest: bool = False, refind: bool = False,
-             nomem: bool = False) -> tuple[str, ...]:
+             nomem: bool = False,
+             rag_lite: tuple[str, ...] = ()) -> tuple[str, ...]:
     """The answered/judged arms: --chronicle adds hybrid_ev (vanilla
     hybrid + the served events block, same pinned search call — the LME
     ev2 arm contract); --digest adds hybrid_digest (spec 2026-08-24: the
@@ -79,6 +80,11 @@ def arms_for(chronicle: bool, only: str | None = None,
         arms = (*arms, "refind")
     if nomem:
         arms = (*arms, "nomem")
+    # Token-matched rag budgets (2026-09-04): named by their width, so
+    # the names come from the shared minter rather than a literal here
+    # — LongMemEval discovers the same arms from the persisted
+    # contexts, and a name minted twice is a name that can differ.
+    arms = (*arms, *rag_lite)
     if only:
         keep = {a.strip() for a in only.split(",") if a.strip()}
         unknown = keep - set(arms)
@@ -86,7 +92,8 @@ def arms_for(chronicle: bool, only: str | None = None,
             raise SystemExit(
                 f"--arms names {sorted(unknown)} not in {arms} "
                 "(hybrid_ev needs --chronicle; hybrid_digest needs "
-                "--digest; refind needs --refind; nomem needs --nomem)")
+                "--digest; refind needs --refind; nomem needs --nomem; "
+                "ragK/ragbN need --rag-lite-top-k/--rag-budget-tokens)")
         arms = tuple(a for a in arms if a in keep)
     return arms
 
@@ -272,6 +279,35 @@ def judge_response(judge_prompt: str, question: str, rubric: list[str],
     }
 
 
+def answer_arm(row: dict, arm: str, q: dict, ctx: str,
+               judge_prompt: str, chat=None) -> dict:
+    """Answer and judge ONE arm, filling every per-arm field on the row.
+
+    Lifted out of the run loop so the recorded fields are testable
+    without a GPU: the row shape is what every downstream reader
+    (report, leak_check, answerability_probe, beam_within_run_pairs)
+    keys off, and it had no pin at all before the token column was
+    added.
+    """
+    chat = chat or _chat
+    row.setdefault("contexts", {})[arm] = ctx
+    system, prompt = answer_call(arm, q["question"], ctx)
+    response = chat(system, prompt, max_tokens=1024)
+    verdict = judge_response(judge_prompt, q["question"], q["rubric"],
+                             response, chat=chat)
+    row[f"{arm}_response"] = response
+    # Served-context size in the harness's approximate tokens (len//4,
+    # the LongMemEval convention). BEAM recorded characters only until
+    # 2026-09-04, which left every accuracy-vs-cost read on this
+    # benchmark to be eyeballed across two separate artifacts.
+    row[f"{arm}_context_tokens"] = approx_tokens(ctx)
+    row[f"{arm}_score"] = verdict["llm_judge_score"]
+    row[f"{arm}_score_intfaithful"] = verdict["llm_judge_score_intfaithful"]
+    row[f"{arm}_judge"] = verdict["items"]
+    row[f"{arm}_judge_failures"] = verdict["judge_failures"]
+    return row
+
+
 def _dream_until_drained(svc, extractor, tally: dict) -> None:
     """One dream_run consumes a capped pull; a BEAM batch holds far more
     turns than one pull (first smoke: 3 dreams left most of 188 turns
@@ -400,7 +436,9 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         refind_top_k: int | None = None,
         refind_per_round_k: int = refind_arm.DEFAULT_PER_ROUND_K,
         refind_session_weight: float = refind_arm.SESSION_FUSION_WEIGHT,
-        refind_max_queries: int = refind_arm.DEFAULT_MAX_QUERIES
+        refind_max_queries: int = refind_arm.DEFAULT_MAX_QUERIES,
+        rag_lite_top_ks: tuple[int, ...] = (),
+        rag_budget_tokens: int | None = None
         ) -> None:
     # Validate BOTH budget knobs before mutating EITHER module global:
     # build_contexts slices the hybrid turns from a top_k=RAG_TOP_K
@@ -423,6 +461,12 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         raise SystemExit("--refind-max-queries must be positive")
     if not 0.0 <= refind_session_weight <= 1.0:
         raise SystemExit("--refind-session-weight must be in [0, 1]")
+    # Same rule, same single implementation as the LongMemEval CLI: a
+    # rag-lite width is checked against the EFFECTIVE rag width (after
+    # --rag-top-k), because an arm as wide as the control serves a copy
+    # of the control under another name and costs a full judged pass.
+    lme.validate_rag_lite(rag_lite_top_ks, rag_budget_tokens,
+                          effective_rag)
     if hybrid_top_k is not None:
         if hybrid_top_k < 1:
             raise SystemExit("--hybrid-top-k must be positive")
@@ -448,7 +492,13 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         # test_hybrid_top_k_is_read_at_call_time). Default None keeps every
         # prior artifact's hybrid budget byte-identical.
         lme.HYBRID_TOP_K = hybrid_top_k
-    arms = arms_for(chronicle, arms_only, digest, refind=refind, nomem=nomem)
+    # Same call-time contract: empty/None serves no rag-lite arm and
+    # adds no context key, so a vanilla run stays byte-identical.
+    lme.RAG_LITE_TOP_KS = rag_lite_top_ks
+    lme.RAG_BUDGET_TOKENS = rag_budget_tokens
+    rag_lite = lme.rag_lite_arm_names(rag_lite_top_ks, rag_budget_tokens)
+    arms = arms_for(chronicle, arms_only, digest, refind=refind,
+                    nomem=nomem, rag_lite=rag_lite)
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -533,18 +583,8 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                    # instead of re-paying the ingest/extraction phase.
                    "contexts": {}, "parts": parts}
             for arm in arms:
-                ctx = contexts.get(arm, "")
-                row["contexts"][arm] = ctx
-                system, prompt = answer_call(arm, q["question"], ctx)
-                response = _chat(system, prompt, max_tokens=1024)
-                verdict = judge_response(judge_prompt, q["question"],
-                                         q["rubric"], response)
-                row[f"{arm}_response"] = response
-                row[f"{arm}_score"] = verdict["llm_judge_score"]
-                row[f"{arm}_score_intfaithful"] = \
-                    verdict["llm_judge_score_intfaithful"]
-                row[f"{arm}_judge"] = verdict["items"]
-                row[f"{arm}_judge_failures"] = verdict["judge_failures"]
+                answer_arm(row, arm, q, contexts.get(arm, ""),
+                           judge_prompt)
             row["wall_seconds"] = round(time.perf_counter() - t1, 1)
             with out_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -553,6 +593,30 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                 flush=True)
         svc.flush()
         ingested[chat_id] = ()
+
+
+def row_context_tokens(row: dict, arm: str) -> int | None:
+    """One arm's served-context size in approximate tokens.
+
+    Recorded per row since 2026-09-04. Rows written before it are
+    re-estimated from the persisted context with the same len//4
+    convention, so a legacy artifact still reports the column instead
+    of a hole; None when the row kept no context for the arm at all
+    (the pre-2026-08-21 context-less runs).
+    """
+    if f"{arm}_context_tokens" in row:
+        return int(row[f"{arm}_context_tokens"])
+    ctx = (row.get("contexts") or {}).get(arm)
+    if ctx is None:
+        return None
+    return approx_tokens(ctx if isinstance(ctx, str) else str(ctx))
+
+
+def mean_context_tokens(rows: list[dict], arm: str) -> int | None:
+    """Mean served tokens over the rows that carry the arm's context."""
+    seen = [t for t in (row_context_tokens(r, arm) for r in rows)
+            if t is not None]
+    return round(sum(seen) / len(seen)) if seen else None
 
 
 def report(tier: str, extractor_name: str, tag: str) -> None:
@@ -564,6 +628,12 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
     # summary carries hybrid_ev, a vanilla run's does not.
     arms = [a for a in arms_for(True, digest=True, refind=True, nomem=True)
             if f"{a}_score" in rows[0]]
+    # Arms minted by a knob rather than a flag (the rag-lite budgets,
+    # whose names carry their width) are not in that static tuple, so
+    # they come off the row — otherwise a run reports fewer arms than
+    # it answered and the omission is invisible.
+    arms += sorted({k.removesuffix("_score") for k in rows[0]
+                    if k.endswith("_score")} - set(arms))
     summary = {"benchmark": "BEAM", "tier": tier, "extractor": extractor_name,
                "n_questions": len(rows),
                "n_chats": len({r["chat_id"] for r in rows}),
@@ -599,7 +669,18 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
             "score_intfaithful": round(
                 sum(r[f"{arm}_score_intfaithful"] for r in rows)
                 / len(rows), 4),
+            # Accuracy and cost in one table: the review's finding was
+            # that BEAM published them as two findings when they are
+            # one trade-off. None only when no row carries a context.
+            "context_tokens": mean_context_tokens(rows, arm),
         }
+        # Same column the LongMemEval summary carries, from the same
+        # implementation: how often a ragb<N> arm served ABOVE the budget
+        # its name quotes (the always-serve-one-turn floor). None — and
+        # so absent — for every arm that has no budget to miss.
+        over = lme.budget_overshoot(rows, arm)
+        if over is not None:
+            summary["arms"][arm]["budget_overshoot_rows"] = over
     by_type: dict[str, list[dict]] = {}
     for r in rows:
         by_type.setdefault(r["type"], []).append(r)
@@ -608,6 +689,12 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
             "n": len(trows),
             **{arm: round(sum(r[f"{arm}_score"] for r in trows)
                           / len(trows), 4) for arm in arms},
+            # Nested rather than flattened: an ability whose questions
+            # are long carries a different cost from the run mean, and
+            # a flat {arm}_context_tokens key here would collide with
+            # the score columns above.
+            "context_tokens": {arm: mean_context_tokens(trows, arm)
+                                for arm in arms},
         }
     out_path.with_name(
         out_path.name.removesuffix(".jsonl") + ".summary.json").write_text(
@@ -673,6 +760,17 @@ def main() -> int:
                     default=refind_arm.SESSION_FUSION_WEIGHT,
                     help="weight of the session-aware fusion term "
                          "(0 = pure lexical ranking)")
+    ap.add_argument("--rag-lite-top-k", default=None,
+                    help="comma-separated narrower rag budgets, e.g. "
+                         "'1,2': adds arms rag1, rag2 — the rag "
+                         "control's exact retrieval, ranking and "
+                         "formatting truncated to the first K ranked "
+                         "turns (token-matched comparator, 2026-09-04)")
+    ap.add_argument("--rag-budget-tokens", type=int, default=None,
+                    help="adds arm ragb<N>: the rag ranking truncated "
+                         "to the turns that fit N approximate tokens "
+                         "(len//4), matching a fact-spine budget "
+                         "exactly rather than by turn count")
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
     if args.report:
@@ -686,7 +784,9 @@ def main() -> int:
         refind_rounds=args.refind_rounds, refind_top_k=args.refind_top_k,
         refind_per_round_k=args.refind_per_round_k,
         refind_max_queries=args.refind_max_queries,
-        refind_session_weight=args.refind_session_weight)
+        refind_session_weight=args.refind_session_weight,
+        rag_lite_top_ks=lme.parse_rag_lite_top_ks(args.rag_lite_top_k),
+        rag_budget_tokens=args.rag_budget_tokens)
     report(args.tier, args.extractor, args.out_tag)
     return 0
 
