@@ -6,13 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-09-05 — the reranker does not rescue the wide pool)
+- **The cross-encoder reranker recovers the candidate-pool width penalty
+  and converts none of it into a win.** The 2026-09-04 entry below measured
+  the wider dense pool with the reranker OFF, and it lost; the open question
+  was whether the reranker — the piece the whole retrieve-then-rerank shape
+  was built for — pays for the extra width. Two further judged runs over the
+  same LongMemEval knowledge-update **oracle** slice (n=78, qwen-27b
+  extraction, the same judge and answerer, `weighted_sum` fusion — never
+  `rrf`, under which the reranker's `fusion_weight` collapses to
+  cross-encoder-only ordering) answer no. With the wide pool
+  (`pool-m4rr`) the reranker lifts naive RAG from `pool-m4sum`'s 0.782 to
+  0.885 (+0.026 against the 0.859 control, p 0.694, 4W/2L) but serves 27%
+  more context tokens to do it, and the hybrid arm still lands at 0.885
+  (-0.013, p 1.0) under its 0.897 control. At the shipped width
+  (`pool-m1rr`) the reranker can only reorder the set that was already
+  going to be served — context tokens identical to the control on every
+  arm — and it moves roughly one question: rag 0.872 (+0.013, p 1.0),
+  hybrid and cascade -0.013 each, all at p 1.0. The cortex arm never
+  touches `cms.retrieve` and holds 0.667, 0W/0L, in both cells, so the
+  measured noise floor is exactly zero and the deltas above are real
+  differences in served context. Both new summaries stamp
+  `bench_env.reranker.enabled: true`, which the control summary lacks —
+  that is the evidence the knob was live for these cells and not for the
+  control. Nothing is promoted: both pool knobs and the reranker stay at
+  their shipped defaults, and the reranker-on cell is now a measured wash
+  rather than an unmeasured option. Artifacts:
+  `evals/results/longmemeval-ku-oracle-qwen-27b-pool-{m1rr,m4rr}.jsonl`
+  with their `.summary.json`, and
+  `evals/results/compare-pool-{m1rr,m4rr}-pairs.json`; the table of all
+  five cells is in `evals/README.md`, "Reranker-on cells (2026-09-05)".
+
 ### Changed (2026-09-05 — the bench can switch the reranker on)
 - The 2026-09-04 candidate-pool judged runs all measured the cross-encoder
-  reranker OFF, leaving the reranker-on cell unmeasured. `evals/ladder_sweep.build_service`
+  reranker OFF, which left the reranker-on cell unmeasured until the entry
+  above. `evals/ladder_sweep.build_service`
   now honours `PSEUDOLIFE_BENCH_RERANK` (`1`/`true`/`on`; unset or
   `0`/`false`/`off` keeps the shipped default off; anything else aborts),
   and `bench_env_knobs()` stamps it into every summary next to
-  `candidate_pool` — eval-only, no accuracy claim made yet.
+  `candidate_pool` — eval-only; the accuracy it went on to measure is the
+  entry above.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
