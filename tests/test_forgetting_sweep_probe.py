@@ -255,6 +255,147 @@ def test_surprise_reconstruction_is_clamped_into_the_unit_interval():
     assert 0.0 <= got[1] <= 1.0
 
 
+# ── measurement, control check, pairing ───────────────────────────────────
+# These four functions gate G-F0 and compute every published delta, and the
+# only other thing that exercises them is a 20-minute run against gitignored
+# dumps that CI does not have. Fixtures instead.
+
+def _tiny_dump(entries: list[dict]) -> dict:
+    return {"question": "alpha beta", "query_emb": [1.0, 0.0],
+            "search_time": 3000.0, "question_ts": 2000.0,
+            "bands": [{"name": "flat", "depth": 0, "entries": entries}]}
+
+
+def test_measure_scores_the_documented_metrics():
+    ev = entry("alpha beta gamma", emb=[1.0, 0.0])
+    near = entry("alpha delta", emb=[0.95, 0.31])
+    far = entry("zeta eta", emb=[0.0, 1.0])
+    pool = [near, ev, far]
+    m = fsp._measure(_tiny_dump(pool), pool, {"alpha beta gamma"})
+    assert m["n_pool_entries"] == 3
+    assert m["evidence_in_top6"] == 1.0
+    assert m["any_evidence_served"] is True
+    assert m["rank_first_evidence"] == 1          # exact cosine match wins
+    assert m["evidence_survival"] == 1.0
+    assert m["select_topk_latency_ms"] >= 0.0
+
+
+def test_measure_reports_deleted_evidence_as_unsurvived():
+    """`evidence_survival` is measured on the pool handed in, so a sweep that
+    deleted the evidence must show 0.0 — not 1.0 from the original bank."""
+    near = entry("alpha delta", emb=[0.95, 0.31])
+    far = entry("zeta eta", emb=[0.0, 1.0])
+    swept = [near, far]
+    m = fsp._measure(_tiny_dump(swept), swept, {"alpha beta gamma"})
+    assert m["evidence_survival"] == 0.0
+    assert m["evidence_in_top6"] == 0.0
+    assert m["any_evidence_served"] is False
+    assert m["rank_first_evidence"] is None
+
+
+def _reference(tmp_path: Path, rows: list[dict]) -> Path:
+    repo = tmp_path / "repo"
+    p = repo / "evals" / "results"
+    p.mkdir(parents=True)
+    (p / "distractor-scale-probe-2026-08-15.json").write_text(
+        json.dumps({"per_question": rows}), encoding="utf-8")
+    return repo
+
+
+def _control_row(qid: str, **over) -> dict:
+    base = {"n_pool_entries": 10, "evidence_in_top6": 0.5,
+            "evidence_in_top3": 0.25, "any_evidence_served": True,
+            "rank_first_evidence": 2}
+    base.update(over)
+    return {"question_id": qid, "none": {lbl: dict(base) for lbl, _ in fsp.SCALES}}
+
+
+def test_control_check_passes_only_on_exact_agreement(tmp_path):
+    rows = [_control_row("q1")]
+    ref = [{"question_id": "q1",
+            "scales": {lbl: dict(rows[0]["none"][lbl]) for lbl, _ in fsp.SCALES}}]
+    got = fsp._control_check(rows, _reference(tmp_path, ref))
+    assert got["exact_match"] is True
+    assert got["n_cells_checked"] == len(fsp.SCALES)
+    assert got["mismatches"] == []
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("n_pool_entries", 11), ("evidence_in_top6", 0.6),
+    ("evidence_in_top3", 0.3), ("any_evidence_served", False),
+    ("rank_first_evidence", 3),
+])
+def test_control_check_flags_every_guarded_field(tmp_path, field, bad):
+    rows = [_control_row("q1")]
+    ref_scales = {lbl: dict(rows[0]["none"][lbl]) for lbl, _ in fsp.SCALES}
+    ref_scales["15x"][field] = bad
+    got = fsp._control_check(rows, _reference(
+        tmp_path, [{"question_id": "q1", "scales": ref_scales}]))
+    assert got["exact_match"] is False
+    assert [m["field"] for m in got["mismatches"]] == [field]
+    assert got["mismatches"][0]["scale"] == "15x"
+
+
+def test_control_check_flags_a_question_absent_from_the_reference(tmp_path):
+    got = fsp._control_check([_control_row("q1")], _reference(tmp_path, []))
+    assert got["exact_match"] is False
+    assert got["mismatches"][0]["question_id"] == "q1"
+    assert got["n_cells_checked"] == 0
+
+
+def test_control_check_cannot_pass_on_an_empty_run(tmp_path):
+    """A control that checked nothing must not report a clean control."""
+    got = fsp._control_check([], _reference(tmp_path, []))
+    assert got["n_cells_checked"] == 0
+    assert got["exact_match"] is True   # vacuous — so main must never get here
+    # ...which is why an empty run cannot reach it: `--limit 0` means "all".
+    assert fsp.N_QUESTIONS == 78
+
+
+def test_paired_subtracts_b_from_a_in_that_order():
+    by_cell = {
+        ("C1", "15x", "oracle"): [{"evidence_in_top6": 1.0},
+                                  {"evidence_in_top6": 0.5}],
+        ("C1", "15x", "none"): [{"evidence_in_top6": 0.25},
+                                {"evidence_in_top6": 0.25}],
+    }
+    got = fsp._paired(by_cell, "C1", "15x", "oracle", "none")
+    assert got["comparison"] == "oracle - none"
+    assert got["delta_mean"] == pytest.approx(0.5)   # (0.75 + 0.25) / 2
+    flipped = fsp._paired(by_cell, "C1", "15x", "none", "oracle")
+    assert flipped["delta_mean"] == pytest.approx(-0.5)
+    assert 0.0 <= got["p"] <= 1.0
+
+
+def test_aggregate_means_medians_and_drops_missing_ranks():
+    rows = [
+        {"evidence_in_top6": 1.0, "evidence_in_top3": 0.5,
+         "evidence_survival": 1.0, "any_evidence_served": True,
+         "rank_first_evidence": 1, "n_pool_entries": 10,
+         "select_topk_latency_ms": 4.0, "bm25_latency_ms": 2.0},
+        {"evidence_in_top6": 0.0, "evidence_in_top3": 0.0,
+         "evidence_survival": 0.0, "any_evidence_served": False,
+         "rank_first_evidence": None, "n_pool_entries": 20,
+         "select_topk_latency_ms": 8.0, "bm25_latency_ms": 6.0},
+    ]
+    agg = fsp._aggregate(rows)
+    assert agg["n_questions"] == 2
+    assert agg["evidence_in_top6_mean"] == pytest.approx(0.5)
+    assert agg["any_evidence_served_mean"] == pytest.approx(0.5)
+    assert agg["evidence_survival_mean"] == pytest.approx(0.5)
+    assert agg["rank_first_evidence_median"] == 1.0   # the None is dropped
+    assert agg["n_pool_entries_mean"] == pytest.approx(15.0)
+    assert agg["bm25_latency_ms_median"] == pytest.approx(4.0)
+
+
+def test_aggregate_reports_no_rank_when_nothing_was_ever_served():
+    rows = [{"evidence_in_top6": 0.0, "evidence_in_top3": 0.0,
+             "evidence_survival": 0.0, "any_evidence_served": False,
+             "rank_first_evidence": None, "n_pool_entries": 5,
+             "select_topk_latency_ms": 1.0, "bm25_latency_ms": 1.0}]
+    assert fsp._aggregate(rows)["rank_first_evidence_median"] is None
+
+
 # ── corpus properties (the mechanism number the docs publish) ─────────────
 
 def test_corpus_properties_counts_superseded_evidence_separately():
