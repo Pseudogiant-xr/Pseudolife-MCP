@@ -168,6 +168,7 @@ BENCH = "docs/guide/benchmarks.md"
 READ_ME = "README.md"
 CHANGELOG = "CHANGELOG.md"
 EVALS = "evals/README.md"
+CONFIG_GUIDE = "docs/guide/configuration.md"
 
 # ── the local-ceiling table (README front door + guide) ───────────────────
 # Re-based 2026-07-30 onto ceiling-v25 (reproducible q8_0 server). Its std
@@ -3023,6 +3024,231 @@ TELEMETRY_REVIEW = RESULTS + "retrieval-telemetry-review-20260904.json"
 RETRIEVAL_REPLAY = RESULTS + "retrieval-replay-20260904.json"
 GRAPH_ABLATION = RESULTS + "graph-ablation-20260904.json"
 
+# -- retrieval-pool probe (2026-09-04) ------------------------------------
+# A retrieval PROXY, not a judged number - but it is published as a table,
+# so it is backed like any other. Every cell reports the same recall, which
+# is exactly the kind of "did anyone actually run this?" claim the two
+# audits found unbacked; the latency column is pinned too, because a rerun
+# that moves it must move the doc.
+POOL_PROBE = RESULTS + "retrieval-pool-probe-20260904.json"
+
+
+def _pool(mult: int, fusion: str, rerank: str, field: str):
+    def read(doc):
+        cell = next(c for c in doc["cells"]
+                    if c["multiplier"] == mult and c["fusion"] == fusion
+                    and c["reranker"] == rerank)
+        return float(cell[field])
+    return read
+
+
+_POOL_ROWS = [
+    # (multiplier, fusion, reranker, verbatim README row, recall, churn, ms)
+    (1, "weighted_sum", "off",
+     "| 1 | weighted_sum | off | 0.700 | 0.300 | \u2014 (baseline) | 52 ms |",
+     0.700, None, 52),
+    (1, "weighted_sum", "on",
+     "| 1 | weighted_sum | on  | 0.700 | 0.300 | 0.000 | 112 ms |",
+     0.700, 0.000, 112),
+    (1, "rrf", "off",
+     "| 1 | rrf | off | 0.700 | 0.300 | 0.183 | 55 ms |", 0.700, 0.183, 55),
+    (1, "rrf", "on",
+     "| 1 | rrf | on  | 0.700 | 0.300 | 0.183 | 214 ms |", 0.700, 0.183, 214),
+    (4, "weighted_sum", "off",
+     "| 4 | weighted_sum | off | 0.700 | 0.300 | 0.283 | 48 ms |",
+     0.700, 0.283, 48),
+    (4, "weighted_sum", "on",
+     "| 4 | weighted_sum | on  | 0.700 | 0.300 | 0.283 | 373 ms |",
+     0.700, 0.283, 373),
+    (4, "rrf", "off",
+     "| 4 | rrf | off | 0.700 | 0.300 | 0.317 | 75 ms |", 0.700, 0.317, 75),
+    (4, "rrf", "on",
+     "| 4 | rrf | on  | 0.700 | 0.300 | 0.333 | 560 ms |",
+     0.700, 0.333, 560),
+]
+
+for _m, _f, _r, _needle, _recall, _churn, _ms in _POOL_ROWS:
+    _slug = f"{_m}-{_f}-{_r}"
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-recall", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "recall_at_6"),
+        stated=_recall, places=3))
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-stale", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "stale_leak"),
+        stated=0.300, places=3))
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-latency", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "latency_ms"),
+        stated=_ms, places=0))
+    if _churn is not None:
+        CLAIMS.append(Claim(
+            id=f"pool-probe-{_slug}-churn", doc=EVALS, needle=_needle,
+            artifacts=(POOL_PROBE,),
+            value=_pool(_m, _f, _r, "churn_vs_shipped"),
+            stated=_churn, places=3))
+
+
+# -- candidate-pool JUDGED verdict (2026-09-04) ---------------------------
+# The probe above is a proxy; this is the run that decided the knobs. Three
+# summaries (control, multiplier 4 + rrf, multiplier 4 + weighted_sum) plus
+# the two paired comparisons that carry the deltas, p-values and per-
+# question win/loss counts — a p-value gets its own artifact, so the pairs
+# files are cited for those and never the summaries.
+POOL_CTL = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-ctl.summary.json"
+POOL_M4RRF = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-m4rrf.summary.json"
+POOL_M4SUM = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-m4sum.summary.json"
+POOL_RRF_PAIRS = RESULTS + "compare-pool-m4rrf-pairs.json"
+POOL_SUM_PAIRS = RESULTS + "compare-pool-m4sum-pairs.json"
+
+
+def _pool_arm(arm: str, field: str):
+    return lambda d: float(d["arms"][arm][field])
+
+
+def _pool_paired(arm: str, field: str):
+    return lambda d: float(d["paired"]["a_vs_b"][arm][field])
+
+
+# (arm, verbatim README row, ctl acc, ctl tokens,
+#  rrf acc, rrf tokens, rrf delta, rrf p, rrf wins, rrf losses,
+#  sum acc, sum tokens, sum delta, sum p, sum wins, sum losses)
+_POOL_JUDGED = [
+    ("rag",
+     "| naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 "
+     "(-0.115, p 0.0506, 4W/13L) | 0.782 @ 1643.0 (-0.077, p 0.1071, "
+     "2W/8L) |",
+     0.859, 1184.1, 0.744, 1793.0, -0.115, 0.0506, 4, 13,
+     0.782, 1643.0, -0.077, 0.1071, 2, 8),
+    ("cortex",
+     "| cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 (0.000, p 1.0, "
+     "0W/0L) | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) |",
+     0.667, 96.7, 0.667, 96.7, 0.000, 1.0, 0, 0,
+     0.667, 96.7, 0.000, 1.0, 0, 0),
+    ("hybrid",
+     "| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
+     "(-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, "
+     "1W/3L) |",
+     0.897, 1289.7, 0.833, 1898.6, -0.064, 0.1265, 1, 6,
+     0.872, 1748.6, -0.026, 0.6194, 1, 3),
+    ("cascade",
+     "| commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 (0.000, "
+     "p 1.0, 1W/1L) | 0.859 @ 544.5 (+0.013, p 1.0, 2W/1L) |",
+     0.846, 389.4, 0.846, 598.7, 0.000, 1.0, 1, 1,
+     0.859, 544.5, 0.013, 1.0, 2, 1),
+]
+
+for (_arm, _needle, _c_acc, _c_tok, _r_acc, _r_tok, _r_d, _r_p, _r_w, _r_l,
+     _s_acc, _s_tok, _s_d, _s_p, _s_w, _s_l) in _POOL_JUDGED:
+    for _tag, _art, _acc, _tok in (("ctl", POOL_CTL, _c_acc, _c_tok),
+                                   ("m4rrf", POOL_M4RRF, _r_acc, _r_tok),
+                                   ("m4sum", POOL_M4SUM, _s_acc, _s_tok)):
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-acc", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_arm(_arm, "accuracy"),
+            stated=_acc, places=3))
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-tokens", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_arm(_arm, "context_tokens"),
+            stated=_tok, places=1))
+    for _tag, _art, _d, _pv, _w, _l in (
+            ("m4rrf", POOL_RRF_PAIRS, _r_d, _r_p, _r_w, _r_l),
+            ("m4sum", POOL_SUM_PAIRS, _s_d, _s_p, _s_w, _s_l)):
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-delta", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_paired(_arm, "delta"),
+            stated=_d, places=3))
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-p", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_paired(_arm, "p"),
+            stated=_pv, places=4))
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-wins", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_paired(_arm, "wins"),
+            stated=_w, places=0))
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-losses", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_paired(_arm, "losses"),
+            stated=_l, places=0))
+
+# The CHANGELOG states the same verdict in prose; its numbers are pinned
+# separately because a reader meets them there first (the retire-at-the-
+# old-site rule cuts both ways - a claim gets guarded wherever it is made).
+for _cid, _arm, _art, _val, _stated, _places in [
+    ("changelog-pool-rrf-rag-ctl", "rag", POOL_CTL,
+     _pool_arm("rag", "accuracy"), 0.859, 3),
+    ("changelog-pool-rrf-rag", "rag", POOL_M4RRF,
+     _pool_arm("rag", "accuracy"), 0.744, 3),
+    ("changelog-pool-rrf-rag-delta", "rag", POOL_RRF_PAIRS,
+     _pool_paired("rag", "delta"), -0.115, 3),
+    ("changelog-pool-rrf-rag-p", "rag", POOL_RRF_PAIRS,
+     _pool_paired("rag", "p"), 0.0506, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG,
+        needle="takes naive RAG from 0.859 to 0.744 (-0.115, p 0.0506)",
+        artifacts=(_art,), value=_val, stated=_stated, places=_places))
+
+for _cid, _art, _val, _stated, _places in [
+    ("changelog-pool-rrf-hybrid-ctl", POOL_CTL,
+     _pool_arm("hybrid", "accuracy"), 0.897, 3),
+    ("changelog-pool-rrf-hybrid", POOL_M4RRF,
+     _pool_arm("hybrid", "accuracy"), 0.833, 3),
+    ("changelog-pool-rrf-hybrid-delta", POOL_RRF_PAIRS,
+     _pool_paired("hybrid", "delta"), -0.064, 3),
+    ("changelog-pool-rrf-hybrid-p", POOL_RRF_PAIRS,
+     _pool_paired("hybrid", "p"), 0.1265, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG,
+        needle="from 0.897 to 0.833 (-0.064, p 0.1265)",
+        artifacts=(_art,), value=_val, stated=_stated, places=_places))
+
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("changelog-pool-sum-rag", "takes RAG to 0.782 (-0.077, p 0.1071)",
+     POOL_M4SUM, _pool_arm("rag", "accuracy"), 0.782, 3),
+    ("changelog-pool-sum-rag-delta", "takes RAG to 0.782 (-0.077, p 0.1071)",
+     POOL_SUM_PAIRS, _pool_paired("rag", "delta"), -0.077, 3),
+    ("changelog-pool-sum-rag-p", "takes RAG to 0.782 (-0.077, p 0.1071)",
+     POOL_SUM_PAIRS, _pool_paired("rag", "p"), 0.1071, 4),
+    ("changelog-pool-sum-hybrid", "and hybrid to 0.872",
+     POOL_M4SUM, _pool_arm("hybrid", "accuracy"), 0.872, 3),
+    ("changelog-pool-sum-hybrid-delta", "(-0.026, p 0.6194)",
+     POOL_SUM_PAIRS, _pool_paired("hybrid", "delta"), -0.026, 3),
+    ("changelog-pool-sum-hybrid-p", "(-0.026, p 0.6194)",
+     POOL_SUM_PAIRS, _pool_paired("hybrid", "p"), 0.6194, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle,
+        artifacts=(_art,), value=_val, stated=_stated, places=_places))
+
+# The zero noise floor: the cortex arm is identical in all three runs, and
+# both docs lean on that to call the other deltas real.
+for _tag, _art in (("ctl", POOL_CTL), ("m4rrf", POOL_M4RRF),
+                   ("m4sum", POOL_M4SUM)):
+    CLAIMS.append(Claim(
+        id=f"changelog-pool-cortex-floor-{_tag}", doc=CHANGELOG,
+        needle="is 0.667 in all three runs, 0W/0L",
+        artifacts=(_art,), value=_pool_arm("cortex", "accuracy"),
+        stated=0.667, places=3))
+
+# The configuration guide's gated-off bullet quotes the same two RAG
+# deltas as absolute costs; pinned there too, because that is where an
+# operator deciding whether to flip the knob actually reads them.
+for _cid, _needle, _art, _stated in [
+    ("config-guide-pool-rrf-rag-delta",
+     "multiplier 4 cost naive RAG 0.115 accuracy under",
+     POOL_RRF_PAIRS, 0.115),
+    ("config-guide-pool-sum-rag-delta",
+     "`rrf` and 0.077 under `weighted_sum`",
+     POOL_SUM_PAIRS, 0.077),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CONFIG_GUIDE, needle=_needle, artifacts=(_art,),
+        # The guide quotes the loss as a positive cost; the artifact
+        # carries the signed delta.
+        value=lambda d: -_pool_paired("rag", "delta")(d),
+        stated=_stated, places=3))
 
 # ── the recall fan-out caps (2026-09-04) ─────────────────────────────────
 # CPU-only paired run on a restored copy of the live bank: the same 20

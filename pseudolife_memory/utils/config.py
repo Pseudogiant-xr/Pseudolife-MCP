@@ -848,12 +848,20 @@ class RecallConfig:
     skip_part_of_expansion: bool = False
 
 
+# The retrieval channel-fusion modes. Named here so the config's
+# load-time validation and ``cms.retrieve``'s per-query belt cannot drift
+# apart, and so a new mode is added in one place.
+FUSION_MODES = ("weighted_sum", "rrf")
+
+
 @dataclass
 class SearchConfig:
     """Aggregation-aware retrieval knobs (Phase 1, spec
-    2026-08-03-aggregation-aware-recall-design.md). Both default OFF until
-    the preregistered gates pass; the eval harness pins its control arm to
-    vanilla retrieval via per-call overrides regardless of these values."""
+    2026-08-03-aggregation-aware-recall-design.md) plus the candidate-pool
+    shape knobs added 2026-09-04. All default OFF (or to the shipped
+    behaviour) until the preregistered gates pass; the eval harness pins
+    its control arm to vanilla retrieval via per-call overrides regardless
+    of these values."""
 
     # Temporal-contiguity expansion (EM-LLM, arXiv:2407.09450): each search
     # hit also surfaces up to N temporal neighbors per side — same episode,
@@ -877,6 +885,90 @@ class SearchConfig:
     #   "quarantine" — a stale record's ``value`` is replaced by a wrapper
     #                  and the original moves to ``last_known_value``
     stale_policy: str = "annotate"
+    # Retrieve-then-rerank width. Each band's DENSE candidate pool becomes
+    # ``top_k * candidate_pool_multiplier`` (band-size capped); the final
+    # truncation to ``top_k`` is unchanged. 1 (default) is the shipped
+    # path, byte-identical to the pre-knob code and pinned by
+    # tests/test_retrieval_pool.py::
+    # test_multiplier_one_matches_captured_prechange_output.
+    #
+    # Why this is a knob at all: under ``miras.preset = "flat"`` (the
+    # default since 2026-08-15) there is ONE band, so the dense pool for
+    # the whole bank was exactly the served width — BM25 fusion, the slot
+    # pool and the cross-encoder all re-ranked a set that dense retrieval
+    # had already cut to size, and the reranker's ``top_n = 20`` budget
+    # never saw more than ~11 candidates. Not a tuned constant, and not
+    # unmeasured either: multiplier 4 was run through a judged eval on
+    # 2026-09-04 and LOST under both fusions (see the verdict on
+    # ``fusion`` below), so it ships at 1.
+    candidate_pool_multiplier: int = 1
+    # How the dense / slot / BM25 / timeline channels are merged.
+    #   "weighted_sum" — today's behaviour: BM25 contributes
+    #                    ``weight x normalised`` additively to the dense
+    #                    score and every channel's score is then raw-sorted
+    #                    together, despite the scales being incommensurate
+    #                    (cosine, 0.55-0.95 slot confidence, 0.3 x
+    #                    normalised BM25).
+    #   "rrf"          — reciprocal rank fusion over the four channels'
+    #                    RANK lists, which needs no shared scale. Source
+    #                    and supersession multipliers stay ranking-only
+    #                    modifiers, applied to the fused score; recency
+    #                    rides inside the dense channel's own rank order.
+    # Ships "weighted_sum" for the same measured reason as the multiplier
+    # above.
+    #
+    # CAUTION — "rrf" changes the SCALE of every served score, not just the
+    # order: a fused score is a sum of 1/(60 + rank) terms, so it tops out
+    # around 0.05 (typically 0.016-0.05) where a cosine reaches 1.0. Any
+    # threshold, weight or margin tuned on the cosine scale silently
+    # changes meaning. Four known sites, all pinned in
+    # tests/test_retrieval_pool.py:
+    #
+    #   ``memory.search_confidence_floor`` — set it to 0 (its default)
+    #     before enabling rrf, or memory_search abstains on everything;
+    #     the same hazard the reranker's ``skip_margin`` comment
+    #     documents, in the other direction.
+    #   ``memory.reranker.fusion_weight`` — reranker.fuse computes
+    #     ``w * ce + (1 - w) * orig``. With ``orig`` on the rrf scale the
+    #     bi-encoder term is worth at most 0.3 x 0.05 = 0.015, so a
+    #     cross-encoder difference of ~0.02 outranks the ENTIRE fused
+    #     ranking: rrf plus the reranker is cross-encoder-only ordering.
+    #   ``memory.reranker.skip_margin`` — a nonzero margin tuned on
+    #     cosines can never be reached by fused scores, so the gate never
+    #     skips and the ~200ms pass it was added to avoid always runs.
+    #   the reference bank (Pool 2) — reference documents keep their RAW
+    #     cosines (~0.9), which are not rescaled onto the fused scale.
+    #     They trail positionally with the reranker off, but the moment
+    #     the reranker fires they sort above every memory on the
+    #     ``(1 - w) * orig`` term alone.
+    #
+    # Plainly: do NOT combine "rrf" with the cross-encoder reranker or a
+    # populated reference bank until that combination has been measured.
+    # The judged verdict below covers rrf with the reranker OFF and an
+    # empty reference bank; nothing else is measured.
+    #
+    # Judged verdict (2026-09-04, LongMemEval knowledge-update oracle,
+    # n=78, qwen-27b extraction): "rrf" at multiplier 4 LOSES —
+    # rag 0.744 vs 0.859 control (-0.115), hybrid 0.833 vs 0.897
+    # (-0.064). Artifacts:
+    # evals/results/longmemeval-ku-oracle-qwen-27b-pool-{ctl,m4rrf}.*
+    # and evals/results/compare-pool-m4rrf-pairs.json; the table is in
+    # evals/README.md. Ships "weighted_sum" for that reason, not for want
+    # of measurement.
+    fusion: str = "weighted_sum"
+
+    def __post_init__(self) -> None:
+        # Fail at LOAD, not once per query. ``cms.retrieve`` also rejects
+        # an unknown mode, but that raise fires inside every retrieval, so
+        # a typo in config.yaml would surface as a burst of failing
+        # searches on a daemon that started clean. Validating here turns
+        # it into a refusal to start. The retrieve() check stays as the
+        # belt: config objects reach it by paths that never run this
+        # (per-attribute setattr, eval harnesses, Console saves).
+        if self.fusion not in FUSION_MODES:
+            raise ValueError(
+                f"memory.search.fusion: unknown mode {self.fusion!r} "
+                f"(expected one of {', '.join(map(repr, FUSION_MODES))})")
 
 
 @dataclass

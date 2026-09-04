@@ -281,6 +281,25 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   experiments (neighbor expansion, a timeline channel) that measurably
   failed their gates and ship dormant; they remain settable for
   replication but there is no measured reason to enable them.
+- **Candidate pool at the served width**
+  (`memory.search.candidate_pool_multiplier = 1`,
+  `memory.search.fusion = "weighted_sum"`) — the
+  retrieve-then-rerank shape (a dense pool `top_k x multiplier` wide,
+  optionally merged by reciprocal rank fusion instead of raw-sorting
+  incommensurate channel scores) exists and is settable, and it **lost**
+  its judged run: on the LongMemEval knowledge-update oracle slice
+  (2026-09-04, n=78) multiplier 4 cost naive RAG 0.115 accuracy under
+  `rrf` and 0.077 under `weighted_sum`, while serving 36-54% more
+  context tokens on every arm that serves turns. Table, caveats and artifacts in
+  `evals/README.md` ("Judged verdict (2026-09-04)"). CAUTION if you
+  enable `rrf` anyway: it changes the SCALE of every served score to
+  ~0.016-0.05, so `memory.search_confidence_floor` must stay 0, and
+  `rrf` must not be combined with the cross-encoder reranker
+  (`memory.reranker.fusion_weight` collapses to cross-encoder-only
+  ordering, `memory.reranker.skip_margin` can never be reached) or with
+  a populated reference bank (its raw cosines are not rescaled and
+  outrank every memory once the reranker fires). Neither combination has
+  been measured.
 - **Staleness served as annotation** (`memory.search.stale_policy =
   "annotate"`) — stale records (past 2×TTL for their freshness class)
   carry `effective_confidence`/`stale` flags and nothing more, today's
