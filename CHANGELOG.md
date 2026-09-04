@@ -6,6 +6,117 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
+- **Every memory-vs-RAG comparison this project has published scored a
+  ~100-token fact context against a ~1,200-token raw-turn context and reported
+  the two gaps separately**, so nobody could say what plain RAG scores at the
+  fact spine's token budget. Two new bench knobs serve exactly that
+  comparator: `--rag-lite-top-k 1,2` adds arms `rag1`/`rag2` (the rag control's
+  own ranking truncated to the first K turns) and `--rag-budget-tokens N` adds
+  `ragb<N>` (truncated to the turns that fit N approximate tokens, so a run can
+  match a fact-spine budget exactly rather than by turn count). Both live in
+  `build_contexts`, which the LongMemEval bench and the BEAM adapter both call,
+  so the harnesses cannot serve them differently; each arm is a strict prefix
+  of the rag context by construction and a width at or above the control's is
+  rejected. Off by default: no new context keys, not one extra model call,
+  every prior artifact byte-identical.
+- **The BEAM adapter now records `{arm}_context_tokens` on every row** and
+  reports a `context_tokens` mean per arm and per question type. Until now BEAM
+  recorded characters only, which left every accuracy-vs-cost read on that
+  benchmark to be eyeballed across two artifacts.
+  `evals/beam_within_run_pairs.py` carries `context_tokens_mean` beside
+  `context_chars_mean` (the committed `chip12-b16` pairing artifact was
+  regenerated to add the column — every pre-existing value is unchanged; its
+  rag control served 5,539 tokens/question against the cortex arm's 551).
+  `report()` also discovers knob-minted arms from the rows, so a run no longer
+  reports fewer arms than it answered.
+- **`evals/rag_lite_rebuild.py`** adds these arms to an already-extracted
+  LongMemEval run without re-paying extraction. Neither existing path can:
+  `--phase answer` only answers already-persisted context keys, and
+  `rebuild_contexts.py` copies the rag context verbatim while the fact-bank
+  dumps hold no turn list. The rebuild re-ingests the static haystack on the
+  CPU, re-runs the control's pinned search, and refuses to write unless the
+  re-derived rag context matches the judged one byte for byte. `--slug ku|all`
+  points both the source and the destination at the 78-question
+  knowledge-update family or the 500-question six-type one (this replaced an
+  untested wrapper module that monkeypatched the bench's `out_file` globally);
+  `--limit N` stamps `partial: true` on every row it writes and counts against
+  the limited slice, so a fidelity smoke cannot be mistaken for a complete run.
+  Used once under `--slug all`, it **refused on row 1** of `alltypes-0803` —
+  the retrieval stack has moved since that run, so arms rebuilt onto it would
+  have measured drift rather than budget, which is why the 500-question run
+  below is a fresh extraction.
+- **Three runs executed, and the token-matched answer is not the one the
+  budget flag promised.** Procedure, per-arm tables and caveats:
+  `docs/runbooks/raglite-runs-20260904.md`.
+  - `longmemeval-ku-oracle-qwen-27b-raglite-v38` (78 knowledge-update
+    questions, rebuilt onto `ceiling-v38`, all arms re-judged in one pass):
+    rag 0.859 @ 1184.1 tokens, hybrid 0.846 @ 731.3, cascade 0.846 @ 389.4,
+    cortex 0.667 @ 96.7, rag2 0.551 @ 429.7, ragb400 0.500 @ 309.0,
+    ragb100 0.333 @ 219.2, rag1 0.321 @ 217.1. The carried-over rag/cortex/
+    hybrid arms re-scored their `ceiling-v38` values exactly, which is the
+    reproducible-server check passing.
+  - `beam-100K-qwen-27b-raglite-smoke` (BEAM 100K, 2 chats, 40 rows — the
+    first BEAM run carrying token costs at all): hybrid 0.5629 @ 3635 tokens,
+    rag 0.4462 @ 3158, rag2 0.3396 @ 1188, cortex 0.2956 @ 468, rag1 0.2750 @
+    496, ragb600 0.2600 @ 584. A smoke, not a verdict.
+  - `longmemeval-all-oracle-qwen-27b-raglite-all-fresh` (**the whole
+    benchmark**: fresh extraction, all six question types, 500 questions,
+    arms rag/rag1/rag2/ragb400/cortex/hybrid + derived cascade; 07:33–11:42 on
+    2026-09-04, ~30 s/question): hybrid 0.730 @ 1229.3 tokens, cascade 0.692 @
+    843.7, rag 0.690 @ 1124.2, ragb400 0.460 @ 312.3, rag2 0.458 @ 432.5,
+    rag1 0.316 @ 206.3, cortex 0.310 @ 96.5. Paired against the rag control
+    over all 500 rows (10k sign-flip permutations, seed 0): hybrid **+0.040**
+    ± 0.031 (p 0.015, 41W/21L), cascade +0.002 ± 0.022, ragb400 −0.230 ±
+    0.041, rag2 −0.232 ± 0.042, rag1 −0.374 ± 0.045, cortex −0.380 ± 0.048.
+    `ragb100` was **dropped from this run**: Run A showed it serving a mean
+    219.2 tokens against its 100-token name and producing a byte-identical
+    context to `rag1` on 74 of 78 rows, so judging it over 500 questions would
+    have bought a duplicate of the `rag1` column for a full extra arm-pass.
+- **The budget arm cannot reach a ~97-token budget on LongMemEval, and now
+  says so.** Truncation is turn-granular and the arm always serves at least
+  one turn (an arm that can serve empty is a second no-memory control), while
+  one raw LongMemEval turn is already ~200 approximate tokens. So `ragb100`
+  overshot on 36 of 78 rows and `ragb400` on 98 of 500, and the honest
+  token-matched pair on this dataset is **cortex @ ~97 tokens vs one-turn RAG
+  @ ~210–220** — where the two are indistinguishable: cortex − rag1 =
+  **−0.006 ± 0.049, p 0.87** over the 500 questions. `rag_lite_contexts` now
+  warns the first time a served block exceeds its budget in a run, both
+  harnesses' summaries carry `budget_overshoot_rows` per `ragb<N>` arm, and
+  `validate_rag_lite`'s docstring records why the budget path has no
+  near-duplicate guard (what a token budget resolves to is a property of the
+  data, not of the flag).
+- **`evals/beam_within_run_pairs.py` is harness-agnostic**, so a LongMemEval
+  within-run pairing no longer needs an inline script: `--score-key
+  correct|score` (booleans read as 1.0/0.0), `--type-key
+  type|question_type`, `--prefix`, `--pairs left:right` for arm-vs-arm
+  comparisons, and a derived `cascade` arm computed through
+  `replicate.cascade_correct` / `cascade_context_tokens`. The BEAM CLI,
+  defaults and committed artifacts are unchanged and still pinned byte-exact.
+  The 500-question pairing artifact
+  (`…raglite-all-fresh.arms-vs-rag.json`) had been written by an inline
+  script with no committed producer — the one case where regenerating a
+  canonical result file is the fix rather than the failure — and was
+  regenerated by the tool under the same filename: every delta, CI,
+  permutation p and W/L reproduced exactly, with a token column and the
+  BEAM schema added. It is now pinned by a byte-exact regeneration test.
+
+
+### Changed (2026-09-04 — the abstention headline is bounded by the no-memory floor)
+- **README and `evals/README.md` presented BEAM-100K abstention (fact
+  spine 0.950 vs naive RAG 0.775) as "the one decisive win".** The
+  budget-matched five-arm run of 2026-09-02
+  (`evals/results/beam-100K-qwen-27b-chip12-b16.summary.json`, committed
+  with PR #249 but never read into the docs) scores the no-memory arm at 1.000
+  on the same 40 questions: refusing is the correct answer there and an
+  empty context always refuses. Both sites now state the number as a
+  calibration property with the floor beside it, and the comparator-arms
+  section of `evals/README.md` — which still said the ReFind and no-memory
+  arms were "smoke-run only" — carries the full-tier five-arm table. The
+  paired column of that table is a new committed artifact
+  (`…chip12-b16.arms-vs-rag.json`) written by `evals/beam_within_run_pairs.py`
+  and pinned by a regeneration test. Docs, one eval script and evidence
+  pins only; no engine change.
 ### Measured (2026-09-04 — a query-shape router does not beat the commit-gated cascade)
 - **The engine concatenates channels for every query, and the question was
   whether routing by question shape would serve better answers on fewer

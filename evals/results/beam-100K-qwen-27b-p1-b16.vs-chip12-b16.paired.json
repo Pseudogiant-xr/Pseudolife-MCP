@@ -1,0 +1,375 @@
+{
+  "what": "cross-run paired comparison on identical questions (B minus A)",
+  "generated_at": "2026-09-04T02:59:06",
+  "a": {
+    "file": "beam-100K-qwen-27b-p1-b16.jsonl",
+    "label": "p1-b16",
+    "rows": 400
+  },
+  "b": {
+    "file": "beam-100K-qwen-27b-chip12-b16.jsonl",
+    "label": "chip12-b16",
+    "rows": 400
+  },
+  "paired_rows": 400,
+  "unpaired": {
+    "only_a": 0,
+    "only_b": 0
+  },
+  "control_note": "rag is the identical-input control (raw turns, no cortex); its delta is the instrument-noise floor for every other arm",
+  "arms": {
+    "rag": {
+      "n": 400,
+      "mean_a": 0.6425,
+      "mean_b": 0.6425,
+      "delta_mean": 0.0,
+      "delta_se": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ],
+      "rows_moved": 0,
+      "rows_up": 0,
+      "rows_down": 0,
+      "rows_context_differs": 0
+    },
+    "hybrid": {
+      "n": 400,
+      "mean_a": 0.6226,
+      "mean_b": 0.6226,
+      "delta_mean": 0.0,
+      "delta_se": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ],
+      "rows_moved": 0,
+      "rows_up": 0,
+      "rows_down": 0,
+      "rows_context_differs": 0
+    }
+  },
+  "types": {
+    "abstention": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.725,
+        "mean_b": 0.725,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.65,
+        "mean_b": 0.65,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "contradiction_resolution": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.5,
+        "mean_b": 0.5,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.4969,
+        "mean_b": 0.4969,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "event_ordering": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.4718,
+        "mean_b": 0.4718,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.4985,
+        "mean_b": 0.4985,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "information_extraction": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.799,
+        "mean_b": 0.799,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.775,
+        "mean_b": 0.775,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "instruction_following": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.7438,
+        "mean_b": 0.7438,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.7,
+        "mean_b": 0.7,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "knowledge_update": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.625,
+        "mean_b": 0.625,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.6062,
+        "mean_b": 0.6062,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "multi_session_reasoning": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.5955,
+        "mean_b": 0.5955,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.6105,
+        "mean_b": 0.6105,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "preference_following": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.9062,
+        "mean_b": 0.9062,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.8562,
+        "mean_b": 0.8562,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "summarization": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.4147,
+        "mean_b": 0.4147,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.3823,
+        "mean_b": 0.3823,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    },
+    "temporal_reasoning": {
+      "rag": {
+        "n": 40,
+        "mean_a": 0.6438,
+        "mean_b": 0.6438,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      },
+      "hybrid": {
+        "n": 40,
+        "mean_a": 0.65,
+        "mean_b": 0.65,
+        "delta_mean": 0.0,
+        "delta_se": 0.0,
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "rows_moved": 0,
+        "rows_up": 0,
+        "rows_down": 0,
+        "rows_context_differs": 0
+      }
+    }
+  },
+  "chats_with_context_diff": {}
+}
