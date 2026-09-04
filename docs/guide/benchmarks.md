@@ -13,7 +13,10 @@ right-hand column
 where both stacks are published side by side).
 The instrument is a term in every number below: compare within a stack, and
 treat a claim that has not been reproduced across judge families as
-provisional.
+provisional. One number on this page has graduated out of that caveat:
+the budget-matched hybrid arm of 2026-09-04, re-judged 2026-09-05 by a
+second, independent judge family and still a win
+([below](#the-budget-matched-hybrid-arm-2026-09-04)).
 
 Nearly every number on this page was measured on the **pre-v25 stack**: the
 384-d MiniLM backbone, with the BM25 hybrid pool off. Both defaults have
@@ -113,6 +116,42 @@ half-budget arm and is not comparable to post-flip hybrid numbers. **(2)**
 It was graded by the Qwen3.6 judge and has not been re-judged since the
 2026-08-17 migration — and on the one slice that *was* re-run, the cascade
 row moved by −0.090 (below). Read the cascade row here as an upper bound.
+
+### The budget-matched hybrid arm (2026-09-04)
+
+The wash above is a half-budget hybrid arm on a retired instrument. The
+same 500 questions were re-run on 2026-09-04 with fresh `qwen-27b`
+extraction, the Qwen3.8-27B answerer and judge, and the hybrid arm
+**budget-matched** to the control at 6 raw turns
+(`longmemeval-all-oracle-qwen-27b-raglite-all-fresh`). At a matched budget
+the hybrid arm does not tie the raw-turn control — it beats it, and it is
+**the one claim on this page reproduced across judge families**: the whole
+run was re-judged on 2026-09-05 by `claude-opus-5` over the identical
+recorded answers.
+
+| arm | Qwen3.8-27B judge | claude-opus-5 judge | paired vs naive RAG | context tokens/question |
+|---|---:|---:|---:|---:|
+| naive RAG (top-6 turns, control) | 0.690 | 0.694 | — | ~1124 |
+| **hybrid (facts + top-6 turns)** | **0.730** | **0.736** | **+0.040 / +0.042**, p 0.015 / 0.013 | ~1229 |
+
+The paired column is a within-row permutation test over all 500 rows
+(10,000 permutations, ±0.031 at 95% under both judges): 41 W / 21 L under
+the local judge, 42 W / 21 L under Opus. Across the run no arm's accuracy
+moved more than +0.010 between the two judges and per-arm item agreement
+was 0.976–0.982, so the win is a property of the memory, not of the
+instrument.
+
+Two honest limits. The hybrid arm buys that accuracy with **more** context,
+not less — ~1229 tokens against the control's ~1124 — so it is accuracy
+bought, not budget saved. And the **cascade**, the arm that does save
+context, stays a wash under both judges (+0.002 under Qwen, +0.010 under
+Opus at p 0.4576) and is not promoted with it. Artifacts:
+`evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.summary.json`,
+`…arms-vs-rag.json`, `…rejudge-opus5.summary.json`,
+`…rejudge-opus5.arms-vs-rag.json`; full per-arm tables, including the
+token-matched `cortex`-vs-`rag1` pair, in
+[`docs/runbooks/raglite-runs-20260904.md`](../runbooks/raglite-runs-20260904.md)
+and [`evals/README.md`](../../evals/README.md).
 
 ## The knowledge-update slice (78 of the 500)
 

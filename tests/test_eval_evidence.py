@@ -5046,3 +5046,370 @@ CLAIMS.append(Claim(
     needle="219.2 tokens against its 100-token name and producing a byte-identical",
     artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "context_tokens"),
     stated=219.2, places=1))
+
+
+# ── the second judge family over run C (2026-09-05) ──────────────────────
+# The budget-matched hybrid win is the first whole-benchmark memory-arm win
+# this project has measured, so it does not reach the README until a second,
+# independent judge family has seen the same rows. `evals/lme_rejudge.py`
+# replayed every recorded per-arm response through a `claude-opus-5` judge;
+# the Opus paired column is produced by the SAME beam_within_run_pairs.py
+# under `--score-key correct_opus5`, so both judges' numbers come off
+# identical arithmetic and both sides below read off their own artifact.
+RL_ALL_OPUS_SUM = (RESULTS + "longmemeval-all-oracle-qwen-27b-"
+                             "raglite-all-fresh.rejudge-opus5.summary.json")
+RL_ALL_OPUS_PAIRS = (RESULTS + "longmemeval-all-oracle-qwen-27b-"
+                               "raglite-all-fresh.rejudge-opus5"
+                               ".arms-vs-rag.json")
+
+# evals/README.md, per-arm table: both judges' accuracy, the transfer
+# between them, and the item-level agreement, all four off the re-judge
+# summary except the Qwen column, which is the source run's own.
+for _arm, _needle, _qwen, _opus, _xfer, _agree in [
+    ("rag", "| `rag` (control) | 0.690 | 0.694 | +0.004 | 0.976 |",
+     0.690, 0.694, 0.004, 0.976),
+    ("hybrid", "| `hybrid` | 0.730 | 0.736 | +0.006 | 0.982 |",
+     0.730, 0.736, 0.006, 0.982),
+    ("cortex", "| `cortex` | 0.310 | 0.320 | +0.010 | 0.978 |",
+     0.310, 0.320, 0.010, 0.978),
+    ("rag1", "| `rag1` | 0.316 | 0.320 | +0.004 | 0.980 |",
+     0.316, 0.320, 0.004, 0.980),
+]:
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-{_arm}-qwen", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_SUM,), value=_arm_metric(_arm, "accuracy"),
+        stated=_qwen, places=3))
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-{_arm}-opus", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_OPUS_SUM,), value=_arm_metric(_arm, "accuracy"),
+        stated=_opus, places=3))
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-{_arm}-transfer", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_OPUS_SUM,), value=_arm_metric(_arm, "delta"),
+        stated=_xfer, places=3))
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-{_arm}-agreement", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_OPUS_SUM,), value=_arm_metric(_arm, "agreement"),
+        stated=_agree, places=3))
+
+# evals/README.md, paired-vs-rag table: delta / CI / p / W / L per judge.
+# A p-value needs the artifact that computed it, so each side cites its own.
+_REJUDGE_PAIRED = [
+    ("hybrid",
+     "| `hybrid` | **+0.040** \u00b1 0.031 | 0.0153 | 41 / 21 | "
+     "**+0.042** \u00b1 0.031 | 0.0126 | 42 / 21 |",
+     (0.040, 0.031, 0.0153, 41, 21), (0.042, 0.031, 0.0126, 42, 21)),
+    ("cascade",
+     "| `cascade` | +0.002 \u00b1 0.022 | 1.0000 | 16 / 15 | "
+     "+0.010 \u00b1 0.021 | 0.4576 | 17 / 12 |",
+     (0.002, 0.022, 1.0000, 16, 15), (0.010, 0.021, 0.4576, 17, 12)),
+    ("cortex",
+     "| `cortex` | \u22120.380 \u00b1 0.048 | 0.0001 | 16 / 206 | "
+     "\u22120.374 \u00b1 0.048 | 0.0001 | 17 / 204 |",
+     (-0.380, 0.048, 0.0001, 16, 206), (-0.374, 0.048, 0.0001, 17, 204)),
+    ("rag1",
+     "| `rag1` | \u22120.374 \u00b1 0.045 | 0.0001 | 8 / 195 | "
+     "\u22120.374 \u00b1 0.046 | 0.0001 | 11 / 198 |",
+     (-0.374, 0.045, 0.0001, 8, 195), (-0.374, 0.046, 0.0001, 11, 198)),
+]
+for _arm, _needle, _q, _o in _REJUDGE_PAIRED:
+    for _judge, _art, _vals in (("qwen", RL_ALL_PAIRS, _q),
+                                ("opus", RL_ALL_OPUS_PAIRS, _o)):
+        _delta, _ci, _p, _w, _l = _vals
+        for _key, _stated, _places in (
+                ("delta_vs_control", _delta, 3),
+                ("ci95_halfwidth", _ci, 3),
+                ("perm_p", _p, 4),
+                ("wins", _w, 0),
+                ("losses", _l, 0)):
+            CLAIMS.append(Claim(
+                id=f"rejudge-ev-paired-{_arm}-{_judge}-{_key}", doc=EVALS,
+                needle=_needle, artifacts=(_art,),
+                value=_arm_metric(_arm, _key), stated=_stated,
+                places=_places))
+
+# evals/README.md, the leak-free reads under the second judge, and the
+# statement that the same 25 rows are flagged under both.
+_REJUDGE_LEAKFREE = ("unleaked rows Opus reads **rag 0.6989, hybrid 0.7389, "
+                     "cortex\n0.3263, rag1 0.3347**")
+for _arm, _stated in (("rag", 0.6989), ("hybrid", 0.7389),
+                      ("cortex", 0.3263), ("rag1", 0.3347)):
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-leak-free-{_arm}", doc=EVALS,
+        needle=_REJUDGE_LEAKFREE, artifacts=(RL_ALL_OPUS_SUM,),
+        value=(lambda a: lambda d: d["leak_check"]["arms"][a]["accuracy"])(
+            _arm),
+        stated=_stated, places=4))
+CLAIMS.append(Claim(
+    id="rejudge-ev-leaked-n", doc=EVALS,
+    needle="The gold-answer leak check flags the same 25 rows under both "
+           "judges. Over",
+    artifacts=(RL_ALL_OPUS_SUM,), value=lambda d: d["leak_check"]["n_leaked"],
+    stated=25, places=0))
+
+# evals/README.md, the instrument's own cost and its stability floor.
+_REJUDGE_COST = "Instrument cost and floor: **2,061** CLI judge calls, **0** errors, 2.61 s"
+for _cid, _needle, _val, _stated, _places in [
+    ("rejudge-ev-cli-calls", _REJUDGE_COST, lambda d: d["cli_calls"],
+     2061, 0),
+    ("rejudge-ev-cli-errors", _REJUDGE_COST, lambda d: d["cli_errors"],
+     0, 0),
+    ("rejudge-ev-sec-per-call", _REJUDGE_COST,
+     lambda d: d["seconds_per_call"], 2.61, 2),
+    ("rejudge-ev-wall", "per call, 5379.7 s wall.",
+     lambda d: d["wall_seconds"], 5379.7, 1),
+    ("rejudge-ev-stability-pairs",
+     "(row, arm) pairs a second time and the CLI judge agreed with itself on",
+     lambda d: d["stability_sample"]["n_pairs"], 60, 0),
+    ("rejudge-ev-stability-agreement",
+     "**0.9667** of them, a flip rate of ~0.033",
+     lambda d: d["stability_sample"]["agreement"], 0.9667, 4),
+    ("rejudge-ev-tooling-stability", "itself on 0.9667 of 60 sampled pairs",
+     lambda d: d["stability_sample"]["agreement"], 0.9667, 4),
+    ("rejudge-ev-tooling-pairs", "itself on 0.9667 of 60 sampled pairs",
+     lambda d: d["stability_sample"]["n_pairs"], 60, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(RL_ALL_OPUS_SUM,),
+        value=_val, stated=_stated, places=_places))
+
+# evals/README.md, the read paragraph — the same numbers restated in prose,
+# pinned at that site too, because a reader meets the prose first.
+_READ_1 = "**Read.** The win holds. Hybrid beats the raw-turn control by +0.040 under"
+_READ_2 = "the local judge and +0.042 under Opus, both at p < 0.02, and both judges"
+_READ_3 = "agree on which rows carry it (42 W / 21 L under Opus, 41 W / 21 L under"
+_READ_4 = "Qwen). No arm's accuracy moves more than +0.010 between judges and item"
+_READ_5 = "agreement runs 0.976\u20130.982, so judge transfer here is well inside the CLI"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-ev-read-qwen-delta", _READ_1, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.040, 3),
+    ("rejudge-ev-read-opus-delta", _READ_2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.042, 3),
+    ("rejudge-ev-read-opus-wins", _READ_3, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "wins"), 42, 0),
+    ("rejudge-ev-read-opus-losses", _READ_3, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-ev-read-qwen-wins", _READ_3, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "wins"), 41, 0),
+    ("rejudge-ev-read-qwen-losses", _READ_3, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-ev-read-max-transfer", _READ_4, RL_ALL_OPUS_SUM,
+     _arm_metric("cortex", "delta"), 0.010, 3),
+    ("rejudge-ev-read-agreement-low", _READ_5, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "agreement"), 0.976, 3),
+    ("rejudge-ev-read-agreement-high", _READ_5, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "agreement"), 0.982, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# The BEAM judge-transfer floor, restated in the LongMemEval read as the
+# comparison it is. Pinned at this site too — the existing pins guard a
+# different sentence, and a reader meets whichever one they land on.
+_REJUDGE_BEAM = ("gave (rag \u22120.002, cortex +0.007, hybrid \u22120.016 "
+                 "against a 0.073 floor).")
+for _cid, _val, _stated in [
+    ("rejudge-ev-beam-rag", lambda d: d["arms"]["rag"]["delta"], -0.002),
+    ("rejudge-ev-beam-cortex",
+     lambda d: d["arms"]["cortex"]["delta"], 0.007),
+    ("rejudge-ev-beam-hybrid",
+     lambda d: d["arms"]["hybrid"]["delta"], -0.016),
+    ("rejudge-ev-beam-floor",
+     lambda d: d["stability_sample"]["mean_abs_delta"], 0.073),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_REJUDGE_BEAM, artifacts=(BEAM_OPUS,),
+        value=_val, stated=_stated, places=3))
+
+# ── the promoted claim at the two front doors ────────────────────────────
+# docs/guide/benchmarks.md — the two-judge table and the prose under it.
+_BM_ROW_RAG = "| naive RAG (top-6 turns, control) | 0.690 | 0.694 | \u2014 | ~1124 |"
+_BM_ROW_HYB = ("| **hybrid (facts + top-6 turns)** | **0.730** | **0.736** | "
+               "**+0.040 / +0.042**, p 0.015 / 0.013 | ~1229 |")
+_BM_PAIRED = "(10,000 permutations, \u00b10.031 at 95% under both judges): 41 W / 21 L under"
+_BM_PAIRED2 = "the local judge, 42 W / 21 L under Opus. Across the run no arm's accuracy"
+_BM_XFER = "moved more than +0.010 between the two judges and per-arm item agreement"
+_BM_AGREE = "was 0.976\u20130.982, so the win is a property of the memory, not of the"
+_BM_COST = "not less \u2014 ~1229 tokens against the control's ~1124 \u2014 so it is accuracy"
+_BM_CASC = "context, stays a wash under both judges (+0.002 under Qwen, +0.010 under"
+_BM_CASC_P = "Opus at p 0.4576) and is not promoted with it. Artifacts:"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-bm-rag-qwen", _BM_ROW_RAG, RL_ALL_SUM,
+     _arm_metric("rag", "accuracy"), 0.690, 3),
+    ("rejudge-bm-rag-opus", _BM_ROW_RAG, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "accuracy"), 0.694, 3),
+    ("rejudge-bm-rag-tokens", _BM_ROW_RAG, RL_ALL_PAIRS,
+     lambda d: d["control_context_tokens_mean"], 1124, 0),
+    ("rejudge-bm-hybrid-qwen", _BM_ROW_HYB, RL_ALL_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.730, 3),
+    ("rejudge-bm-hybrid-opus", _BM_ROW_HYB, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.736, 3),
+    ("rejudge-bm-hybrid-qwen-delta", _BM_ROW_HYB, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.040, 3),
+    ("rejudge-bm-hybrid-opus-delta", _BM_ROW_HYB, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.042, 3),
+    ("rejudge-bm-hybrid-qwen-p", _BM_ROW_HYB, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.015, 3),
+    ("rejudge-bm-hybrid-opus-p", _BM_ROW_HYB, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.013, 3),
+    ("rejudge-bm-hybrid-tokens", _BM_ROW_HYB, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "context_tokens_mean"), 1229, 0),
+    ("rejudge-bm-qwen-ci", _BM_PAIRED, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "ci95_halfwidth"), 0.031, 3),
+    ("rejudge-bm-opus-ci", _BM_PAIRED, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "ci95_halfwidth"), 0.031, 3),
+    ("rejudge-bm-qwen-wins", _BM_PAIRED, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "wins"), 41, 0),
+    ("rejudge-bm-qwen-losses", _BM_PAIRED, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-bm-opus-wins", _BM_PAIRED2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "wins"), 42, 0),
+    ("rejudge-bm-opus-losses", _BM_PAIRED2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-bm-max-transfer", _BM_XFER, RL_ALL_OPUS_SUM,
+     _arm_metric("cortex", "delta"), 0.010, 3),
+    ("rejudge-bm-agreement-low", _BM_AGREE, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "agreement"), 0.976, 3),
+    ("rejudge-bm-agreement-high", _BM_AGREE, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "agreement"), 0.982, 3),
+    ("rejudge-bm-cost-hybrid", _BM_COST, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "context_tokens_mean"), 1229, 0),
+    ("rejudge-bm-cost-control", _BM_COST, RL_ALL_PAIRS,
+     lambda d: d["control_context_tokens_mean"], 1124, 0),
+    ("rejudge-bm-cascade-qwen", _BM_CASC, RL_ALL_PAIRS,
+     _arm_metric("cascade", "delta_vs_control"), 0.002, 3),
+    ("rejudge-bm-cascade-opus", _BM_CASC, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cascade", "delta_vs_control"), 0.010, 3),
+    ("rejudge-bm-cascade-opus-p", _BM_CASC_P, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cascade", "perm_p"), 0.4576, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=BENCH, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# README.md — the one promoted sentence at the measured headline.
+_RM_1 = "hybrid **0.730** against naive RAG's 0.690 under the local judge and"
+_RM_2 = ("**0.736** against 0.694 under `claude-opus-5` \u2014 paired "
+         "**+0.040 / +0.042**,")
+_RM_3 = "p 0.015 / 0.013 \u2014 bought with *more* context, ~1229 tokens against the"
+_RM_4 = "control's ~1124, not less."
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-rm-hybrid-qwen", _RM_1, RL_ALL_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.730, 3),
+    ("rejudge-rm-rag-qwen", _RM_1, RL_ALL_SUM,
+     _arm_metric("rag", "accuracy"), 0.690, 3),
+    ("rejudge-rm-hybrid-opus", _RM_2, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.736, 3),
+    ("rejudge-rm-rag-opus", _RM_2, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "accuracy"), 0.694, 3),
+    ("rejudge-rm-qwen-delta", _RM_2, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.040, 3),
+    ("rejudge-rm-opus-delta", _RM_2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.042, 3),
+    ("rejudge-rm-qwen-p", _RM_3, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.015, 3),
+    ("rejudge-rm-opus-p", _RM_3, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.013, 3),
+    ("rejudge-rm-hybrid-tokens", _RM_3, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "context_tokens_mean"), 1229, 0),
+    ("rejudge-rm-control-tokens", _RM_4, RL_ALL_PAIRS,
+     lambda d: d["control_context_tokens_mean"], 1124, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=READ_ME, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# CHANGELOG.md — the same numbers where the release notes state them.
+_CL_ACC_1 = "Per-arm accuracy, Qwen3.8 \u2192 Opus: rag 0.690 \u2192 0.694, hybrid 0.730 \u2192"
+_CL_ACC_2 = "0.736, cortex 0.310 \u2192 0.320, rag1 0.316 \u2192 0.320 \u2014 **no arm moves more"
+_CL_XFER = "than +0.010**, and per-arm item agreement is 0.976\u20130.982. Paired against"
+_CL_Q = "the rag control over all 500 rows, hybrid is **+0.040 \u00b1 0.031 (p 0.0153,"
+_CL_O = "41 W / 21 L)** under the local judge and **+0.042 \u00b1 0.031 (p 0.0126,"
+_CL_OWL = "42 W / 21 L)** under Opus. The cascade arm stays a wash under both"
+_CL_CASC = "(+0.002 at p 1.0000, +0.010 at p 0.4576) and is deliberately **not**"
+_CL_LOW = "promoted with it; cortex and rag1 stay far below the control (\u22120.380 and"
+_CL_LOW2 = "\u22120.374 under Qwen, both \u22120.374 under Opus, all p 0.0001). The"
+_CL_LEAK = "gold-answer leak check flags the same 25 rows under both judges."
+_CL_COST = "Instrument cost and floor: **2,061** CLI judge calls, **0** errors,"
+_CL_COST2 = "2.61 s per call, 5379.7 s wall, and a `--stability-sample 60`"
+_CL_STAB = "self-agreement of **0.9667** \u2014 a ~0.033 flip rate that every per-arm"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-cl-rag-qwen", _CL_ACC_1, RL_ALL_SUM,
+     _arm_metric("rag", "accuracy"), 0.690, 3),
+    ("rejudge-cl-rag-opus", _CL_ACC_1, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "accuracy"), 0.694, 3),
+    ("rejudge-cl-hybrid-qwen", _CL_ACC_1, RL_ALL_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.730, 3),
+    ("rejudge-cl-hybrid-opus", _CL_ACC_2, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.736, 3),
+    ("rejudge-cl-cortex-qwen", _CL_ACC_2, RL_ALL_SUM,
+     _arm_metric("cortex", "accuracy"), 0.310, 3),
+    ("rejudge-cl-cortex-opus", _CL_ACC_2, RL_ALL_OPUS_SUM,
+     _arm_metric("cortex", "accuracy"), 0.320, 3),
+    ("rejudge-cl-rag1-qwen", _CL_ACC_2, RL_ALL_SUM,
+     _arm_metric("rag1", "accuracy"), 0.316, 3),
+    ("rejudge-cl-rag1-opus", _CL_ACC_2, RL_ALL_OPUS_SUM,
+     _arm_metric("rag1", "accuracy"), 0.320, 3),
+    ("rejudge-cl-max-transfer", _CL_XFER, RL_ALL_OPUS_SUM,
+     _arm_metric("cortex", "delta"), 0.010, 3),
+    ("rejudge-cl-agreement-low", _CL_XFER, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "agreement"), 0.976, 3),
+    ("rejudge-cl-agreement-high", _CL_XFER, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "agreement"), 0.982, 3),
+    ("rejudge-cl-qwen-delta", _CL_Q, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.040, 3),
+    ("rejudge-cl-qwen-ci", _CL_Q, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "ci95_halfwidth"), 0.031, 3),
+    ("rejudge-cl-qwen-p", _CL_Q, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.0153, 4),
+    ("rejudge-cl-qwen-wins", _CL_O, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "wins"), 41, 0),
+    ("rejudge-cl-qwen-losses", _CL_O, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-cl-opus-delta", _CL_O, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.042, 3),
+    ("rejudge-cl-opus-ci", _CL_O, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "ci95_halfwidth"), 0.031, 3),
+    ("rejudge-cl-opus-p", _CL_O, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.0126, 4),
+    ("rejudge-cl-opus-wins", _CL_OWL, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "wins"), 42, 0),
+    ("rejudge-cl-opus-losses", _CL_OWL, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-cl-cascade-qwen", _CL_CASC, RL_ALL_PAIRS,
+     _arm_metric("cascade", "delta_vs_control"), 0.002, 3),
+    ("rejudge-cl-cascade-qwen-p", _CL_CASC, RL_ALL_PAIRS,
+     _arm_metric("cascade", "perm_p"), 1.0000, 4),
+    ("rejudge-cl-cascade-opus", _CL_CASC, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cascade", "delta_vs_control"), 0.010, 3),
+    ("rejudge-cl-cascade-opus-p", _CL_CASC, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cascade", "perm_p"), 0.4576, 4),
+    ("rejudge-cl-cortex-qwen-delta", _CL_LOW, RL_ALL_PAIRS,
+     _arm_metric("cortex", "delta_vs_control"), -0.380, 3),
+    ("rejudge-cl-rag1-qwen-delta", _CL_LOW2, RL_ALL_PAIRS,
+     _arm_metric("rag1", "delta_vs_control"), -0.374, 3),
+    ("rejudge-cl-cortex-opus-delta", _CL_LOW2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cortex", "delta_vs_control"), -0.374, 3),
+    ("rejudge-cl-rag1-opus-delta", _CL_LOW2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("rag1", "delta_vs_control"), -0.374, 3),
+    ("rejudge-cl-cortex-opus-p", _CL_LOW2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cortex", "perm_p"), 0.0001, 4),
+    ("rejudge-cl-leaked-n", _CL_LEAK, RL_ALL_OPUS_SUM,
+     lambda d: d["leak_check"]["n_leaked"], 25, 0),
+    ("rejudge-cl-cli-calls", _CL_COST, RL_ALL_OPUS_SUM,
+     lambda d: d["cli_calls"], 2061, 0),
+    ("rejudge-cl-cli-errors", _CL_COST, RL_ALL_OPUS_SUM,
+     lambda d: d["cli_errors"], 0, 0),
+    ("rejudge-cl-sec-per-call", _CL_COST2, RL_ALL_OPUS_SUM,
+     lambda d: d["seconds_per_call"], 2.61, 2),
+    ("rejudge-cl-wall", _CL_COST2, RL_ALL_OPUS_SUM,
+     lambda d: d["wall_seconds"], 5379.7, 1),
+    ("rejudge-cl-stability-pairs", _CL_COST2, RL_ALL_OPUS_SUM,
+     lambda d: d["stability_sample"]["n_pairs"], 60, 0),
+    ("rejudge-cl-stability-agreement", _CL_STAB, RL_ALL_OPUS_SUM,
+     lambda d: d["stability_sample"]["agreement"], 0.9667, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))

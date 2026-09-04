@@ -59,7 +59,13 @@ not recall — in the budget-matched five-arm run of 2026-09-02 (rag 0.725 there
 one replicate, local judge) an arm served no memory at all scores 1.000 on
 the same questions, because refusing is the right answer there and an
 empty context always refuses. The fact spine loses where an answer has to
-be aggregated across sessions. Graded by a local, byte-reproducible judge (the cross-judge check
+be aggregated across sessions. The second claim to survive a judge swap is
+a win rather than a wash: re-run on 2026-09-04 with the hybrid arm
+**budget-matched** to the control at 6 turns, the same 500 questions give
+hybrid **0.730** against naive RAG's 0.690 under the local judge and
+**0.736** against 0.694 under `claude-opus-5` — paired **+0.040 / +0.042**,
+p 0.015 / 0.013 — bought with *more* context, ~1229 tokens against the
+control's ~1124, not less. Graded by a local, byte-reproducible judge (the cross-judge check
 names its second judge) — compare within rows, never against GPT-judged
 leaderboards.
 
