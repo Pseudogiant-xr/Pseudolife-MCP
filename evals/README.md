@@ -1355,14 +1355,21 @@ and per-question wins/losses:
 |---|---|---|---|
 | naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 (-0.115, p 0.0506, 4W/13L) | 0.782 @ 1643.0 (-0.077, p 0.1071, 2W/8L) |
 | cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) |
-| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 (-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, 1W/3L) |
+| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 (-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, 1W/3L) |
 | commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 (0.000, p 1.0, 1W/1L) | 0.859 @ 544.5 (+0.013, p 1.0, 2W/1L) |
 
 **The cortex arm is the control with identical input.** It never touches
 `cms.retrieve`, so it scores 0.667 in all three runs with 0 wins and 0
-losses — a measured noise floor of exactly zero on this instrument. Every
-delta above is therefore a real difference in the served context, not
-judge jitter.
+losses. Corrected 2026-09-05: that is 0 of 78 flipped, which **bounds**
+the noise floor at ≤3.8% at 95% (rule of three) — it is not the "noise
+floor of exactly zero" this paragraph used to claim, because no finite
+run of identical inputs can measure a rate of zero. What makes the bound
+tight is causal rather than statistical: the answerer is deterministic
+and the cortex arm's served context is byte-identical across every cell,
+so it has nothing to flip on. The two RAG deltas above (-0.115, -0.077)
+are several times that bound and are real differences in the served
+context; the cascade's +0.013 is one question and sits inside it, which
+is why the reading below already calls it noise.
 
 **Reading it honestly.** Nothing is positive except the cascade's single
 +0.013 under weighted_sum, which is one question (2W/1L, p 1.0) and is
@@ -1422,7 +1429,7 @@ Accuracy @ mean context tokens, all five cells:
 |---|---|---|---|---|---|
 | naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 | 0.782 @ 1643.0 | 0.872 @ 1184.1 | 0.885 @ 1505.5 |
 | cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 | 0.667 @ 96.7 | 0.667 @ 96.7 | 0.667 @ 96.7 |
-| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 | 0.872 @ 1748.6 | 0.885 @ 1289.7 | 0.885 @ 1611.0 |
+| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 | 0.872 @ 1748.6 | 0.885 @ 1289.7 | 0.885 @ 1611.0 |
 | commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 | 0.859 @ 544.5 | 0.833 @ 389.4 | 0.872 @ 519.3 |
 
 Paired against the same `pool-ctl` control, with the bootstrap p
@@ -1432,7 +1439,7 @@ Paired against the same `pool-ctl` control, with the bootstrap p
 |---|---|---|
 | naive RAG (top-6 turns) | +0.013, p 1.0, 2W/1L | +0.026, p 0.694, 4W/2L |
 | cortex facts only | 0.000, p 1.0, 0W/0L | 0.000, p 1.0, 0W/0L |
-| hybrid (facts + top-3 turns) | -0.013, p 1.0, 0W/1L | -0.013, p 1.0, 1W/2L |
+| hybrid (facts + top-6 turns) | -0.013, p 1.0, 0W/1L | -0.013, p 1.0, 1W/2L |
 | commit-gated cascade | -0.013, p 1.0, 0W/1L | +0.026, p 0.5053, 2W/0L |
 
 **The knob was live.** Both new summaries carry
@@ -1440,9 +1447,16 @@ Paired against the same `pool-ctl` control, with the bootstrap p
 no `reranker` key at all. That stamp is what makes these cells
 comparable: it is evidence the runs differ in the reranker and not in
 something unrecorded, the same role `bench_env.candidate_pool` already
-plays for the pool width. The cortex arm remains the zero-noise control
-— 0.667 with 0W/0L in both new cells, as in all three 2026-09-04 runs —
-so every delta above is a real difference in served context.
+plays for the pool width. The cortex arm remains the control — 0.667
+with 0W/0L in both new cells, as in all three 2026-09-04 runs. Read that
+as a bound, not as a zero: 0 of 78 flipped puts the noise floor at ≤3.8%
+at 95% (rule of three), tight for the causal reason above — deterministic
+answerer, cortex context byte-identical across all five cells. It
+matters here in a way it did not on 2026-09-04, because these deltas are
+small: every `pool-m1rr` delta in the table above is ±0.013, exactly one
+question, and one question in 78 is 1.3% — inside the bound. On the same
+reading `pool-m4rr`'s +0.026 is two questions, 2.6%, also inside it. That
+is the quantitative form of the verdict below: these cells are a wash.
 
 **Reading it.** At the shipped width the reranker cannot change *what*
 is served, only the order: `pool-m1rr`'s context tokens are identical
@@ -1461,14 +1475,24 @@ being a loser without making it a winner. Both pool knobs and the
 reranker stay at their shipped defaults, and the retrieve-then-rerank
 shape is now measured rather than assumed.
 
-Wall time is the one number here that is not clean. The `--phase
-extract` leg took roughly 96 min (`pool-m4rr`) and 75 min
-(`pool-m1rr`) against roughly 35 min for the reranker-off cells — call
-it 2-3x, and do not quote it as a benchmark: the machine was running
-other jobs throughout. Read it only as "the cross-encoder costs real
-time on a full re-extraction", directionally consistent with the 7-11x
-per-search latency the proxy table above measures under controlled
-conditions.
+Wall time comes from the artifacts, not from a stopwatch. Every judged
+row carries a `wall_seconds` field — the elapsed time of that question's
+`--phase extract` body, written per row by `longmemeval_bench.py` — so
+summing it across each cell's 78 rows gives that cell's extract leg
+exactly. With the cross-encoder ON: **96.5 min** (`pool-m4rr`) and
+**66.3 min** (`pool-m1rr`). With it off: **40.1 min** (`pool-ctl`),
+**39.1 min** (`pool-m4rrf`) and **38.9 min** (`pool-m4sum`). That is
+**2.45x** and **1.68x** the reranker-off mean — the range is
+**1.7-2.5x**, not the "2-3x" an earlier version of this paragraph
+quoted from the terminal rather than from the artifacts, and the
+reranker-off cells are 40 min rather than the 35 it also quoted.
+
+It is still not a controlled benchmark: the machine was running other
+jobs throughout, and `wall_seconds` times the whole per-question extract
+body rather than the cross-encoder alone. Read it as "the cross-encoder
+costs real time on a full re-extraction", directionally consistent with
+the 7-11x per-search latency the proxy table above measures under
+controlled conditions.
 
 Artifacts (all committed):
 `results/longmemeval-ku-oracle-qwen-27b-pool-{m1rr,m4rr}.jsonl` and

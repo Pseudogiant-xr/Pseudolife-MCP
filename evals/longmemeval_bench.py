@@ -771,6 +771,16 @@ def build_contexts(svc, question: str, variants: bool = False,
     # knobs at their defaults the two calls return identical entries and
     # every pre-Phase-1 artifact stays byte-identical.
     #
+    # CARVE-OUT (2026-09-05 review): "pinned" covers the Phase-1 knobs
+    # this call names — contiguity and timeline — and nothing else. The
+    # PSEUDOLIFE_BENCH_* retrieval overrides (candidate pool, fusion,
+    # reranker) are applied to the SERVICE config, so they reach this
+    # call too and the rag arm becomes a treatment arm under them: the
+    # 2026-09-04/05 pool cells move rag by up to 0.115. Under any of
+    # those overrides the zero-delta control is the CORTEX arm, which
+    # never touches ``cms.retrieve`` — which is what the pool/reranker
+    # tables in evals/README.md are read against.
+    #
     # ``variants=True`` (spec Amendment 2026-08-03): five hybrid variants
     # built from the SAME live service — vanilla (shares the pinned
     # control call: byte-identical baseline by construction), +contiguity,

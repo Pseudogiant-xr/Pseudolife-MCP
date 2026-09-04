@@ -153,3 +153,24 @@ def test_rebuild_contexts_does_not_claim_to_honour_the_pool_knobs():
             "cortex ranking only. Teaching it the associative path needs an "
             "associative lockstep test beside "
             "test_rebuild_fact_ranking_matches_service_fusion.")
+
+
+@pytest.mark.parametrize("spelling", ["0", "false", "off", "OFF", "False"])
+def test_off_turns_the_reranker_off_on_a_config_that_has_it_on(
+        ladder, memory_cfg, monkeypatch, spelling):
+    """``=0`` must mean OFF, not "leave whatever the config says".
+
+    The 2026-09-05 review found the off-branch was a bare ``pass``: on a
+    fresh ``MemoryConfig`` the reranker is already off, so the existing
+    unset/off test passed while the branch did nothing. Against a config
+    that ships or overrides the reranker ON, ``PSEUDOLIFE_BENCH_RERANK=0``
+    would then have served a reranker-ON run while ``rerank_env_knobs``
+    stamped ``enabled: false`` — a judged artifact whose retrieval stamp
+    contradicts the retrieval it measured, which is exactly the failure
+    the stamp exists to prevent.
+    """
+    memory_cfg.reranker.enabled = True
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", spelling)
+    ladder.apply_rerank_env(memory_cfg)
+    assert memory_cfg.reranker.enabled is False
+    assert ladder.rerank_env_knobs() == {"enabled": False}

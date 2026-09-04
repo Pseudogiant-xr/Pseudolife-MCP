@@ -24,9 +24,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   going to be served — context tokens identical to the control on every
   arm — and it moves roughly one question: rag 0.872 (+0.013, p 1.0),
   hybrid and cascade -0.013 each, all at p 1.0. The cortex arm never
-  touches `cms.retrieve` and holds 0.667, 0W/0L, in both cells, so the
-  measured noise floor is exactly zero and the deltas above are real
-  differences in served context. Both new summaries stamp
+  touches `cms.retrieve` and holds 0.667, 0W/0L, in both cells — 0 of 78
+  flipped, which bounds the noise floor at ≤3.8% at 95% (rule of three)
+  rather than measuring it at zero. The bound is tight for a causal
+  reason (deterministic answerer; the cortex arm's context is
+  byte-identical across all five cells), but it is still a bound, and
+  every `pool-m1rr` delta above is one question in 78 — inside it. Both
+  new summaries stamp
   `bench_env.reranker.enabled: true`, which the control summary lacks —
   that is the evidence the knob was live for these cells and not for the
   control. Nothing is promoted: both pool knobs and the reranker stay at
@@ -46,6 +50,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `bench_env_knobs()` stamps it into every summary next to
   `candidate_pool` — eval-only; the accuracy it went on to measure is the
   entry above.
+- **`PSEUDOLIFE_BENCH_RERANK=0` now actually turns the reranker OFF.** Its
+  off-branch was a bare `pass`, which is indistinguishable from correct on
+  a stock config (the reranker ships off anyway) but silently wrong on any
+  config that has it on: the run would serve a reranker-ON retrieval while
+  `rerank_env_knobs()` stamped `enabled: false`, i.e. a judged artifact
+  whose retrieval stamp contradicts the retrieval it measured — the exact
+  failure the stamp exists to prevent. The existing off-path test could
+  not see it because it asserted against a fresh `MemoryConfig`; the new
+  one sets `reranker.enabled = True` first. No committed artifact is
+  affected: the branch only ever differed on a reranker-ON config, and all
+  five 2026-09-04/05 cells ran on a stock (reranker-off) config — the
+  three 2026-09-04 cells predate the knob and carry no `reranker` stamp,
+  the two 2026-09-05 cells set it to `1`.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

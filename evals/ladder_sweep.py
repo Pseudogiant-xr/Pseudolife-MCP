@@ -451,7 +451,13 @@ def apply_rerank_env(memory_cfg) -> None:
     if raw in ("1", "true", "on"):
         memory_cfg.reranker.enabled = True
     elif raw in ("0", "false", "off"):
-        pass
+        # Not a no-op: the override is symmetric on purpose. The config
+        # handed in may already carry the reranker ON (a config file, a
+        # future default flip), and ``rerank_env_knobs`` stamps
+        # ``enabled: false`` for this value regardless — so leaving the
+        # config alone here would ship a judged artifact whose retrieval
+        # stamp contradicts the retrieval it measured (2026-09-05 review).
+        memory_cfg.reranker.enabled = False
     else:
         sys.exit(f"PSEUDOLIFE_BENCH_RERANK={raw!r}: want "
                  "'1'/'true'/'on' or '0'/'false'/'off'")

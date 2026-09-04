@@ -3749,7 +3749,7 @@ _POOL_JUDGED = [
      0.667, 96.7, 0.667, 96.7, 0.000, 1.0, 0, 0,
      0.667, 96.7, 0.000, 1.0, 0, 0),
     ("hybrid",
-     "| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
+     "| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
      "(-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, "
      "1W/3L) |",
      0.897, 1289.7, 0.833, 1898.6, -0.064, 0.1265, 1, 6,
@@ -3905,7 +3905,7 @@ _POOL_RR_TABLE = [
      ((POOL_CTL, 0.667, 96.7), (POOL_M4RRF, 0.667, 96.7),
       (POOL_M4SUM, 0.667, 96.7), (POOL_M1RR, 0.667, 96.7),
       (POOL_M4RR, 0.667, 96.7))),
-    ("| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
+    ("| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
      "| 0.872 @ 1748.6 | 0.885 @ 1289.7 | 0.885 @ 1611.0 |",
      "hybrid",
      ((POOL_CTL, 0.897, 1289.7), (POOL_M4RRF, 0.833, 1898.6),
@@ -3945,7 +3945,7 @@ _POOL_RR_PAIRED = [
      "rag", (0.013, 1.0, 2, 1), (0.026, 0.694, 4, 2)),
     ("| cortex facts only | 0.000, p 1.0, 0W/0L | 0.000, p 1.0, 0W/0L |",
      "cortex", (0.000, 1.0, 0, 0), (0.000, 1.0, 0, 0)),
-    ("| hybrid (facts + top-3 turns) | -0.013, p 1.0, 0W/1L | "
+    ("| hybrid (facts + top-6 turns) | -0.013, p 1.0, 0W/1L | "
      "-0.013, p 1.0, 1W/2L |",
      "hybrid", (-0.013, 1.0, 0, 1), (-0.013, 1.0, 1, 2)),
     ("| commit-gated cascade | -0.013, p 1.0, 0W/1L | "
@@ -4045,6 +4045,115 @@ def test_reranker_on_cells_stamp_the_knob():
     assert not ctl.get("reranker", {}).get("enabled"), (
         "pool-ctl summary claims the reranker was on; it is the "
         "reranker-OFF control for both cells above")
+
+
+# -- the reranker's wall-time cost, summed from the rows (2026-09-05) -----
+# This paragraph used to quote the extract leg from the terminal -- "96
+# min, 75 min, roughly 35 min, call it 2-3x" -- and two of those four
+# figures were wrong, which is exactly the unbacked-number failure this
+# file exists to catch. Every judged row carries `wall_seconds` for its
+# --phase extract body, so each cell's leg is a sum over the committed
+# artifact: these pins COMPUTE it rather than restating a summary field.
+POOL_ROWS = {c: RESULTS + f"longmemeval-ku-oracle-qwen-27b-pool-{c}.jsonl"
+             for c in ("ctl", "m4rrf", "m4sum", "m1rr", "m4rr")}
+
+
+def _wall_minutes(rows) -> float:
+    """Sum of `wall_seconds` over one cell's judged rows, in minutes."""
+    return sum(r["wall_seconds"] for r in rows) / 60.0
+
+
+def _wall_ratio_vs_off(on, ctl, m4rrf, m4sum) -> float:
+    """A reranker-ON cell's leg over the mean of the three OFF cells.
+
+    The docs quote the ratio against the mean rather than against any one
+    off cell because the three are within 1.2 min of each other; pinning
+    it against the mean is what makes "1.7-2.5x" a range and not a pair
+    of cherry-picked pairwise numbers.
+    """
+    off = [_wall_minutes(c) for c in (ctl, m4rrf, m4sum)]
+    return _wall_minutes(on) / (sum(off) / len(off))
+
+
+_WALL_ON = "exactly. With the cross-encoder ON: **96.5 min** (`pool-m4rr`) and"
+_WALL_M1 = "**66.3 min** (`pool-m1rr`). With it off: **40.1 min** (`pool-ctl`),"
+_WALL_OFF = "**39.1 min** (`pool-m4rrf`) and **38.9 min** (`pool-m4sum`). That is"
+_WALL_RATIO = "**2.45x** and **1.68x** the reranker-off mean — the range is"
+
+for _cid, _needle, _cell, _stated in [
+        ("pool-rr-wall-m4rr", _WALL_ON, "m4rr", 96.5),
+        ("pool-rr-wall-m1rr", _WALL_M1, "m1rr", 66.3),
+        ("pool-rr-wall-ctl", _WALL_M1, "ctl", 40.1),
+        ("pool-rr-wall-m4rrf", _WALL_OFF, "m4rrf", 39.1),
+        ("pool-rr-wall-m4sum", _WALL_OFF, "m4sum", 38.9)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(POOL_ROWS[_cell],),
+        value=_wall_minutes, stated=_stated, places=1))
+
+for _cid, _cell, _stated in [("pool-rr-wall-ratio-m4rr", "m4rr", 2.45),
+                             ("pool-rr-wall-ratio-m1rr", "m1rr", 1.68)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_WALL_RATIO,
+        artifacts=(POOL_ROWS[_cell], POOL_ROWS["ctl"], POOL_ROWS["m4rrf"],
+                   POOL_ROWS["m4sum"]),
+        value=_wall_ratio_vs_off, stated=_stated, places=2))
+
+
+# -- the noise floor is a BOUND, not a zero (2026-09-05 review) -----------
+# 0 flips over 78 identical-input questions bounds the rate at <=3.8% at
+# 95% (rule of three); no finite run can measure it AT zero. Both docs
+# said "exactly zero" until this review. What is pinnable is the n they
+# divide by and the flip count itself, so both are.
+def _cortex_flips(d) -> float:
+    c = d["paired"]["a_vs_b"]["cortex"]
+    return float(c["wins"] + c["losses"])
+
+
+_FLOOR_EVALS_0904 = "losses. Corrected 2026-09-05: that is 0 of 78 flipped, which **bounds**"
+_FLOOR_EVALS_0905 = "as a bound, not as a zero: 0 of 78 flipped puts the noise floor at ≤3.8%"
+_FLOOR_CHANGELOG = "flipped, which bounds the noise floor at ≤3.8% at 95% (rule of three)"
+
+for _cid, _doc, _needle, _art in [
+        ("pool-floor-n-evals-0904", EVALS, _FLOOR_EVALS_0904, POOL_RRF_PAIRS),
+        ("pool-floor-n-evals-0905", EVALS, _FLOOR_EVALS_0905, POOL_M1RR_PAIRS),
+        ("pool-floor-n-changelog", CHANGELOG, _FLOOR_CHANGELOG,
+         POOL_M1RR_PAIRS)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=lambda d: float(d["n"]), stated=78, places=0))
+    CLAIMS.append(Claim(
+        id=_cid + "-flips", doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_cortex_flips, stated=0, places=0))
+
+
+def test_the_cortex_arm_is_byte_identical_across_all_five_pool_cells():
+    """The causal half of the noise-floor argument, asserted.
+
+    Both docs now state the floor as a BOUND (<=3.8%, rule of three over
+    78 questions) and then argue the bound is tight for a causal reason:
+    the answerer is deterministic and the cortex arm is served exactly
+    the same context in every cell, so it has nothing to flip on. That
+    clause is checkable, and unchecked it is only prose -- a re-extraction
+    that quietly moved the fact ranking would leave both docs claiming a
+    floor their own artifacts no longer support.
+    """
+    cells = {c: _load_artifact(p) for c, p in POOL_ROWS.items()}
+    base = {r["question_id"]: r for r in cells["ctl"]}
+    assert len(base) == 78, "pool-ctl is not the 78-question slice"
+    for name, rows in cells.items():
+        assert len(rows) == 78, f"pool-{name}: expected 78 judged rows"
+        for row in rows:
+            ref = base[row["question_id"]]
+            pairs = (("context", row["contexts"]["cortex"],
+                      ref["contexts"]["cortex"]),
+                     ("response", row["cortex_response"],
+                      ref["cortex_response"]),
+                     ("verdict", row["cortex_correct"], ref["cortex_correct"]))
+            for field, got, want in pairs:
+                assert got == want, (
+                    f"pool-{name}/{row['question_id']}: cortex {field} "
+                    f"differs from pool-ctl, so the cortex arm is not the "
+                    f"identical-input control both docs read it as")
 
 
 # ── the recall fan-out caps (2026-09-04) ─────────────────────────────────
