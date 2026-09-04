@@ -50,6 +50,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Preregistration, expectations, falsification rule and nine confounds:
   `docs/superpowers/specs/2026-09-05-epistemic-bench-design.md`; tables and
   procedure in `evals/README.md`.
+- **`--source lme` now runs the slice the synthetic corpus cannot test.**
+  Per qualifying question it builds a fresh bank through
+  `longmemeval_bench.ingest_and_dream` — the same per-question lifecycle
+  `run_extract` uses — and serves the identical arms, so the cortex and
+  hybrid numbers there measure the DEPLOYED pipeline (retrieval and
+  extraction together) rather than the representation's ceiling. It grades
+  D1, D2 and D5; D3 and D4 report `n: 0` because the dataset carries
+  neither a freshness class nor a never-stated question, and D5 is the
+  entry channel only because the LME slot is synthetic — every
+  restriction is stamped in the artifact's `caveats`, not just here.
+  `--extractor` (default `qwen-27b`, plus a no-LLM `floor` rung for CPU
+  plumbing checks) and `--limit`; the run probes its endpoint before
+  anything is ingested and is resumable per question, because it shares
+  the GPU. No numbers yet: the GPU run has not happened.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

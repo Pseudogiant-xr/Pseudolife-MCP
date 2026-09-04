@@ -186,6 +186,9 @@ harness refuses those arms without one rather than silently serving an
 empty cortex. `rag` and `nomem` run CPU-only on this source. The
 derivation itself is CPU-only and its counts are committed as
 `evals/results/epistemic-bench-lme-derivation-<date>.json`.
+(Implemented by amendment **A5**, section 9, which also refuses the whole
+run rather than individual arms when no endpoint answers, and adds a
+no-LLM `floor` rung so the bank lifecycle can be checked on CPU.)
 
 ## 5. Pre-registered expectations
 
@@ -405,3 +408,58 @@ That is a real gap in the serving path, not an artefact of the metric.
 - **A4 (2026-09-05) — rows persist the full served context.** The A1 bug
   had to be diagnosed by rebuilding the bank, because the rows carried
   only character counts. Every row now carries `{arm}_context`.
+- **A5 (2026-09-05) — the LongMemEval source path is implemented.**
+  `--source lme` no longer refuses. Per qualifying question it builds a
+  fresh bench bank through `longmemeval_bench.ingest_and_dream` — the
+  same per-question bank lifecycle `run_extract` uses, imported rather
+  than re-derived — and then serves the identical
+  `build_contexts` / `serve_comparator_arms` arms the synthetic path
+  serves. `--extractor` (default `qwen-27b`) names the rung from
+  `longmemeval_bench.EXTRACTORS`; `--extractor floor` is the no-LLM regex
+  extractor, which needs no endpoint and exists so the bank lifecycle can
+  be smoke-tested on CPU. `--limit N` scores the first N derived
+  questions, counted over the SLICE rather than over the pending set, so
+  a resumed run stays on the same slice.
+
+  Two properties this source needs and the synthetic one does not:
+
+  - **Resumable per question.** It shares the GPU with judged work, so a
+    row is appended to `epistemic-bench-lme-<tag>.jsonl` as each question
+    finishes and a restart skips the ids already there. The summary is
+    totalled from the ROWS, not from live serving, so questions scored by
+    an earlier process still count. The refuse-overwrite guard is
+    correspondingly weaker than the synthetic path's: the summary JSON
+    still blocks a rerun (it is written only once the whole slice is
+    scored), but an orphaned rows file is the resume point and does not.
+  - **The endpoint is probed before anything costs.** A dead extractor
+    must not buy a database, a dataset load, or a partial artifact.
+
+  **Which dimensions are gradable, and which are not.** Unchanged from
+  section 4 and now enforced by the code rather than asserted in prose:
+
+  | | dimension | on the LME slice |
+  |-|-----------|------------------|
+  | D1 | `update_following` | graded — the derived new value in the served text |
+  | D2 | `stale_serving` | graded — the derived old value served with the new one absent |
+  | D3 | `staleness_marking` | **n/a**, `n: 0` — no `freshness_class`, no TTL in the dataset |
+  | D4 | `abstention_support` | **n/a**, `n: 0` — no never-stated questions in the knowledge-update type |
+  | D5 | `retraction_handling` | graded, but through the ENTRY channel only |
+  | — | `answer_coverage` | graded |
+
+  D5's restriction is the one worth stating plainly. The bench slot is
+  synthetic (`lme:<question_id>` / `value`) because LongMemEval carries no
+  entity/attribute structure, so a question never matches a served fact
+  by name and the fact channel — the supersession chain — cannot fire on
+  this source. What remains is the served text plus a served entry's
+  `superseded_by_text`. The `cortex` arm serves no entries, so **its D5 is
+  0 by construction**: a measurement artefact, not a finding. Every
+  artifact says so in `caveats.d5_is_the_entry_channel_only`, alongside
+  `caveats.extraction_is_the_real_path` — the mirror image of the
+  synthetic source's perfect-extraction ceiling, since here a low cortex
+  number is a claim about the extractor at least as much as about the
+  spine.
+
+  Artifacts: `evals/results/epistemic-bench-lme-<tag>.json[l]`, with
+  `meta` recording the extractor and its URL, the derivation file and the
+  git rev it was derived at, the dataset, the counts, the serving widths
+  against per-question bank size, and `longmemeval_bench.bench_env_knobs()`.

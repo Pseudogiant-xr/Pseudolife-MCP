@@ -46,9 +46,17 @@ Ground truth comes from two sources:
              cortex arm a ceiling on the deployed system, not a measurement
              of it. Stamped in every artifact's ``caveats``.
   lme        the LongMemEval knowledge-update slice, derived by pure
-             parsing (23 of 78 questions qualify). Its bank is built by the
-             real ``ingest_and_dream`` path, so its cortex/hybrid arms need
-             an extractor endpoint; ``rag``/``nomem`` run CPU-only.
+             parsing (23 of 78 questions qualify). Its bank is built
+             per question by the real ``ingest_and_dream`` path, so the
+             cortex/hybrid arms measure the DEPLOYED pipeline — retrieval
+             and extraction together — and need an extractor endpoint
+             (``--extractor``, default ``qwen-27b``; ``--extractor floor``
+             is the no-LLM regex rung for CPU plumbing checks). The slice
+             grades D1, D2 and D5; D3 and D4 report ``n: 0`` because the
+             dataset carries no freshness class and no never-stated
+             question. The run is resumable per question: rows are
+             appended as each finishes and a restart skips them, because
+             this source shares the GPU.
 
 Usage (repo root):
 
@@ -56,6 +64,8 @@ Usage (repo root):
       --tag smoke-20260905 --contexts-only
   PYTHONPATH=. python evals/epistemic_bench.py --derive-lme oracle \\
       --tag lme-derivation-20260905
+  PYTHONPATH=. python evals/epistemic_bench.py --source lme \\
+      --contexts-only --extractor qwen-27b --tag lme-qwen27b-20260905
 
 Isolation: a private bench database ``pseudolife_memory_bench_<pid>``,
 created at start and dropped at exit. No other database is touched, and the
@@ -343,6 +353,64 @@ def score_arm(questions, serve) -> dict:
         if cell["n"]:
             cell["rate"] = round(cell["hits"] / cell["n"], 4)
     return out
+
+
+def score_from_rows(rows, arm: str) -> dict:
+    """Score one arm from PERSISTED rows rather than live ``Served``
+    objects.
+
+    The resumable LongMemEval path has to total questions scored by an
+    earlier process, whose per-question banks are long gone. Same shape as
+    ``score_arm``, plus the ``context_chars_mean`` column that
+    ``abstention_support`` must not be read without (spec amendment A3).
+    A missing key and a JSON ``null`` both mean not-applicable.
+    """
+    out = {name: {"n": 0, "hits": 0, "rate": None} for name in ALL_METRICS}
+    for row in rows:
+        for name in ALL_METRICS:
+            verdict = row.get(f"{arm}_{name}")
+            if verdict is None:
+                continue
+            out[name]["n"] += 1
+            out[name]["hits"] += int(bool(verdict))
+    for cell in out.values():
+        if cell["n"]:
+            cell["rate"] = round(cell["hits"] / cell["n"], 4)
+    out["context_chars_mean"] = round(
+        sum(int(r.get(f"{arm}_context_chars") or 0) for r in rows)
+        / max(1, len(rows)), 1)
+    return out
+
+
+def ground_truth_row(q: Question) -> dict:
+    """The question's epistemic state as artifact fields — the half of a
+    row a reader needs to re-derive any verdict by hand."""
+    return {"question_id": q.question_id, "kind": q.kind,
+            "entity": q.entity, "attribute": q.attribute,
+            "question": q.question,
+            "current_value": q.current_value,
+            "superseded_values": list(q.superseded_values),
+            "corrected_from": q.corrected_from,
+            "stale_slot": q.stale_slot,
+            "decoy_values": list(q.decoy_values)}
+
+
+def score_row(q: Question, served_by_arm: dict, base: dict) -> dict:
+    """One artifact row: the ground truth, then per arm the served
+    context, its size, and every metric verdict.
+
+    The served context is persisted, not only its length: a metric bug is
+    auditable from the artifact only if the artifact carries the text the
+    metric ran on (spec amendment A4).
+    """
+    row = dict(base)
+    for arm in ARMS:
+        served = served_by_arm[arm]
+        row[f"{arm}_context"] = served.text
+        row[f"{arm}_context_chars"] = len(served.text)
+        for name, fn in ALL_METRICS.items():
+            row[f"{arm}_{name}"] = fn(q, served)
+    return row
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -633,6 +701,131 @@ def lme_question(pair: dict) -> Question:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# LongMemEval source: extractor rungs, resume state, artifact naming
+# ─────────────────────────────────────────────────────────────────────────
+# The no-LLM rung, named the way ``ladder_sweep`` names it. It needs no
+# endpoint and no GPU, which is what makes a CPU plumbing check of the
+# whole per-question bank lifecycle possible without booking the GPU.
+FLOOR_EXTRACTOR = "floor"
+
+
+def _probe(url: str) -> bool:
+    """Is an OpenAI-compatible endpoint answering? Indirected through a
+    module-level name so the abort path is testable without a server."""
+    import longmemeval_bench as lmb
+
+    return lmb.probe(url)
+
+
+def extractor_url(name: str) -> str | None:
+    """The endpoint for an ``--extractor`` rung; ``None`` for the floor.
+
+    The map is ``longmemeval_bench.EXTRACTORS`` — imported, never copied,
+    so a rung added there is runnable here without a second edit.
+    """
+    if name == FLOOR_EXTRACTOR:
+        return None
+    import longmemeval_bench as lmb
+
+    if name not in lmb.EXTRACTORS:
+        raise SystemExit(f"unknown --extractor {name!r}. Known rungs: "
+                         + ", ".join(sorted(lmb.EXTRACTORS)
+                                     + [FLOOR_EXTRACTOR]))
+    return lmb.EXTRACTORS[name]
+
+
+def require_extractor(name: str) -> str | None:
+    """Resolve the rung and prove it answers BEFORE anything is ingested.
+
+    A run that dies on question 1 after paying a bank build has written no
+    row to resume from, and this one shares the GPU with judged work: it
+    has to fail at the door or not at all.
+    """
+    url = extractor_url(name)
+    if url is None:
+        return None
+    if not _probe(url):
+        raise SystemExit(
+            f"no extractor server at {url} for --extractor {name} — start "
+            "it first (dot-source evals/qwen_server.ps1 and call "
+            f"Start-Qwen), or run --extractor {FLOOR_EXTRACTOR} for a "
+            "CPU-only plumbing check.")
+    return url
+
+
+def make_extractor(name: str, url: str | None):
+    """The extractor object — the same two the other harnesses build:
+    ``longmemeval_bench._make_extractor`` for an endpoint rung, the
+    ``RegexExtractor`` floor for the no-LLM one."""
+    if url is None:
+        from pseudolife_memory.memory.dream import RegexExtractor
+
+        return RegexExtractor()
+    import longmemeval_bench as lmb
+
+    return lmb._make_extractor(url, None)
+
+
+def load_rows(path) -> list[dict]:
+    """Rows written so far. A truncated final line is dropped rather than
+    crashing the resume: a run killed mid-write must still be resumable."""
+    path = Path(path)
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def done_question_ids(rows_path) -> set[str]:
+    return {r["question_id"] for r in load_rows(rows_path)
+            if r.get("question_id")}
+
+
+def lme_pending(pairs, done, limit: int | None = None) -> list[dict]:
+    """The questions still to run.
+
+    ``--limit`` counts questions in the SLICE, not questions still
+    pending, so a resumed run covers the same slice as the interrupted one
+    instead of walking further down the derivation on each restart.
+    """
+    selected = list(pairs)[:limit] if limit else list(pairs)
+    return [p for p in selected if p["question_id"] not in done]
+
+
+def lme_out_path(tag: str) -> Path:
+    """``epistemic-bench-lme-<tag>.json`` — without stuttering when the tag
+    already names the source, which the derivation artifacts do."""
+    stem = tag if tag.startswith("lme-") else f"lme-{tag}"
+    return RESULTS_DIR / f"epistemic-bench-{stem}.json"
+
+
+def guard_lme_artifact(out, force: bool) -> None:
+    """Refuse to overwrite a FINISHED run; treat a rows file as a resume.
+
+    Deliberately weaker than ``write_artifact``'s guard, which also blocks
+    on an orphaned rows file. This run shares the GPU and is EXPECTED to be
+    interrupted, so its rows file is the resume point, not the wreckage of
+    a half-written run. The summary JSON is written only once every
+    selected question has been scored, so its presence still means "this
+    tag is done".
+    """
+    out = Path(out)
+    if out.exists() and not force:
+        raise SystemExit(
+            f"refusing to overwrite a finished run at {out}; tag the run "
+            "differently or pass --force. (The sibling .jsonl alone is a "
+            "resume point, not a finished run, and does not block.)")
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Serving
 # ─────────────────────────────────────────────────────────────────────────
 def serve_arms(svc, question: str) -> dict[str, Served]:
@@ -774,6 +967,49 @@ CAVEATS = {
 }
 
 
+# Source-specific caveats. The synthetic caveats above claim perfect
+# extraction; on this source that claim is false in the opposite
+# direction, so the two sets are never both stamped on one artifact.
+LME_CAVEATS = {
+    "extraction_is_the_real_path": (
+        "Unlike the synthetic source, this bank is built by "
+        "longmemeval_bench.ingest_and_dream — the product's own "
+        "store-then-dream cadence — so the cortex and hybrid arms measure "
+        "the DEPLOYED pipeline, retrieval and extraction together. A low "
+        "cortex number here is a claim about the extractor at least as "
+        "much as about the fact spine, and the extractor is named in "
+        "meta.extractor."),
+    "dimensions_the_dataset_cannot_ground": (
+        "Only D1 (update_following), D2 (stale_serving) and D5 "
+        "(retraction_handling) are graded, per section 4 of the spec. D3 "
+        "(staleness_marking) needs a freshness_class and a TTL "
+        "LongMemEval does not carry; D4 (abstention_support) needs "
+        "questions whose answer was never stated, which the "
+        "knowledge-update type does not contain by construction. Both "
+        "report n=0 and a NULL rate — never a 0.0, which a reader would "
+        "take for a failing arm."),
+    "d5_is_the_entry_channel_only": (
+        "The slot is synthetic (entity 'lme:<question_id>', attribute "
+        "'value') because LongMemEval has no entity/attribute structure, "
+        "so a bench question never matches a served fact BY NAME and D5's "
+        "fact channel — the supersession chain — cannot fire on this "
+        "source. D5 here is the served text plus a served entry's "
+        "superseded_by_text. The cortex arm serves no entries, so its D5 "
+        "is 0 BY CONSTRUCTION: a measurement artefact, not a finding."),
+    "correction_is_implicit": (
+        "A knowledge-update question's later statement IS the retraction, "
+        "but it is never phrased as one — no 'correction:', no 'not X, it "
+        "is Y'. That differs from the synthetic source's explicit "
+        "corrections, which is why the two sources are reported "
+        "separately and their rates are never pooled."),
+    "one_question_one_bank": (
+        "Each question gets its own bank, built from its own haystack and "
+        "truncated before the next — the LongMemEval protocol. No "
+        "cross-question interference, and no measurement of a bank that "
+        "has accumulated many sessions."),
+}
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Runs
 # ─────────────────────────────────────────────────────────────────────────
@@ -838,26 +1074,10 @@ def run_synthetic(args) -> int:
                     for q in corpus.questions)
                 / max(1, len(corpus.questions)), 1)
         for q in corpus.questions:
-            row = {"question_id": q.question_id, "kind": q.kind,
-                   "entity": q.entity, "attribute": q.attribute,
-                   "question": q.question,
-                   "current_value": q.current_value,
-                   "superseded_values": list(q.superseded_values),
-                   "corrected_from": q.corrected_from,
-                   "stale_slot": q.stale_slot,
-                   "decoy_values": list(q.decoy_values)}
-            for arm in ARMS:
-                served = served_by_q[q.question_id][arm]
-                # The served context is persisted, not just its length: a
-                # metric bug is only auditable from the artifact if the
-                # artifact carries the text the metric ran on. The first
-                # smoke's matcher bug (2026-09-05) had to be re-derived by
-                # rebuilding the bank because the rows held char counts.
-                row[f"{arm}_context"] = served.text
-                row[f"{arm}_context_chars"] = len(served.text)
-                for name, fn in ALL_METRICS.items():
-                    row[f"{arm}_{name}"] = fn(q, served)
-            rows.append(row)
+            # Shared with the LongMemEval path, so the two sources cannot
+            # drift into persisting different row shapes.
+            rows.append(score_row(q, served_by_q[q.question_id],
+                                  ground_truth_row(q)))
     finally:
         svc.flush()
 
@@ -888,6 +1108,194 @@ def run_synthetic(args) -> int:
     write_artifact(out, payload, rows, force=args.force)
     _print_table(payload)
     print(f"\nwrote {out}\n      {out.with_suffix('.jsonl')}")
+    return 0
+
+
+def run_lme(args) -> int:
+    """Score the LongMemEval-derived slice on a bank built the real way.
+
+    Per question: a fresh, truncated bench bank; every haystack turn
+    stored and dreamed session-by-session by
+    ``longmemeval_bench.ingest_and_dream`` (the product's consolidation
+    cadence); then the same ``build_contexts`` / ``serve_comparator_arms``
+    arms the synthetic path serves. The bank lifecycle is the one
+    ``longmemeval_bench.run_extract`` uses, imported rather than
+    re-derived, so a question scored here saw the bank it would have seen
+    there.
+
+    Resumable by construction: a row is appended as each question
+    finishes, and a restart skips the ids already in the file. This run
+    shares the GPU with judged work, so an interruption must never cost a
+    second round of extraction — and the summary is therefore totalled
+    from the ROWS, not from live serving, so questions scored by an
+    earlier process still count.
+    """
+    # Before anything costs: a dead endpoint must not buy a database, a
+    # dataset load, or a half-written artifact.
+    ex_url = require_extractor(args.extractor)
+
+    derivation = Path(args.derivation)
+    if derivation.suffix == ".jsonl":
+        derivation = derivation.with_suffix(".json")
+    pairs_path = derivation.with_suffix(".jsonl")
+    if not pairs_path.exists():
+        raise SystemExit(
+            f"{pairs_path} not found — the derived old/new pairs live in "
+            "the derivation artifact's .jsonl. Run --derive-lme first "
+            "(see evals/README.md), or point --derivation at a copy.")
+    pairs = load_rows(pairs_path)
+    if not pairs:
+        raise SystemExit(f"{pairs_path} carries no derived pairs")
+    dmeta = {}
+    if derivation.exists():
+        dmeta = json.loads(
+            derivation.read_text(encoding="utf-8")).get("meta", {})
+
+    lme_path = (Path(args.lme_path) if args.lme_path
+                else DATA_DIR / dmeta.get("dataset",
+                                          "longmemeval_oracle.json"))
+    if not lme_path.exists():
+        raise SystemExit(
+            f"{lme_path} not found. The LongMemEval JSONs are gitignored; "
+            "download them into evals/data/ (see evals/README.md) or point "
+            "--lme-path at a copy.")
+
+    out = lme_out_path(args.tag)
+    guard_lme_artifact(out, args.force)
+    rows_path = out.with_suffix(".jsonl")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    by_id = {q["question_id"]: q
+             for q in json.loads(lme_path.read_text(encoding="utf-8"))}
+    missing = [p["question_id"] for p in pairs
+               if p["question_id"] not in by_id]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} derived question_ids are absent from "
+            f"{lme_path.name} (first: {missing[0]}) — the derivation and "
+            "the dataset disagree. Re-derive before running.")
+
+    import tempfile
+
+    import longmemeval_bench as lmb
+    from ladder_sweep import build_service
+
+    db_name = _bench_db_name()
+    os.environ["PSEUDOLIFE_BENCH_DB"] = db_name
+    done = done_question_ids(rows_path)
+    todo = lme_pending(pairs, done, args.limit)
+    t0 = time.perf_counter()
+    print(f"bench db {db_name}: {len(pairs)} derived questions from "
+          f"{pairs_path.name}, extractor={args.extractor} "
+          f"({len(done)} already done, resuming; {len(todo)} to run)",
+          flush=True)
+
+    for i, pair in enumerate(todo, 1):
+        raw = by_id[pair["question_id"]]
+        q = lme_question(pair)
+        t_q = time.perf_counter()
+        tmp = Path(tempfile.mkdtemp(prefix="epistemic_lme_"))
+        svc = build_service(tmp)         # fresh, truncated per-question bank
+        svc.config.memory.dream.extract_relations = False    # facts only
+        extractor = make_extractor(args.extractor, ex_url)
+        try:
+            tally = lmb.ingest_and_dream(svc, extractor, raw,
+                                         ex_url or "floor://regex")
+            served = serve_arms(svc, q.question)
+            slots = len(svc.cortex_dump().get("entries", []))
+            stale_policy = getattr(svc.config.memory.search,
+                                   "stale_policy", "annotate")
+        finally:
+            svc.flush()
+        row = score_row(q, served, dict(
+            ground_truth_row(q),
+            family=pair.get("family"),
+            old_date=pair.get("old_date"), new_date=pair.get("new_date"),
+            sessions=len(raw.get("haystack_sessions") or []),
+            extractor=args.extractor, dataset=lme_path.name,
+            consolidation=tally, cortex_slots_in_bank=slots,
+            stale_policy=stale_policy,
+            wall_seconds=round(time.perf_counter() - t_q, 1)))
+        # Appended per question: this IS the resume point.
+        with rows_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        print(f"[{i}/{len(todo)}] {pair['question_id']}  "
+              f"({row['wall_seconds']}s, {tally['turns']} turns, "
+              f"{tally['claims']} claims, {slots} slots)", flush=True)
+
+    # Summarise from the ROWS, so questions scored by an earlier process
+    # count. Last write wins per id: a row can only be duplicated by a
+    # hand-edited resume file, and double-counting one question silently
+    # is worse than preferring the newer verdict.
+    keep = {p["question_id"] for p in
+            (list(pairs)[:args.limit] if args.limit else pairs)}
+    by_qid = {r["question_id"]: r for r in load_rows(rows_path)
+              if r.get("question_id") in keep}
+    rows = list(by_qid.values())
+    if len(rows) != len(keep):
+        raise SystemExit(
+            f"{len(rows)} rows for {len(keep)} selected questions — the "
+            "run did not finish its slice. Rerun the same command to "
+            "resume; a partial slice is never summarised.")
+    per_arm = {arm: score_from_rows(rows, arm) for arm in ARMS}
+    payload = {
+        "meta": {
+            "bench": "epistemic", "source": "lme", "tag": args.tag,
+            "git_rev": _git_rev(),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "contexts_only": True,
+            "extractor": args.extractor, "extractor_url": ex_url,
+            "derivation_file": pairs_path.name,
+            "derivation_git_rev": dmeta.get("git_rev"),
+            "dataset": lme_path.name,
+            "knowledge_update_questions":
+                dmeta.get("knowledge_update_questions"),
+            "derived_questions": len(pairs),
+            "questions_scored": len(rows), "limit": args.limit,
+            "arms": list(ARMS), "dimensions": list(DIMENSIONS),
+            "higher_is_better": HIGHER_IS_BETTER,
+            "companion_metric": COMPANION,
+            "spec": ("docs/superpowers/specs/"
+                     "2026-09-05-epistemic-bench-design.md"),
+            "stale_policy": rows[-1].get("stale_policy"),
+            "rag_top_k": lmb.RAG_TOP_K, "hybrid_top_k": lmb.HYBRID_TOP_K,
+            "cortex_top_k": lmb.CORTEX_TOP_K,
+            "cortex_min_score": lmb.CORTEX_MIN_SCORE,
+            # Serving widths against bank size, averaged over the
+            # per-question banks: a bank smaller than the widths makes
+            # every arm serve nearly everything it holds, which flatters
+            # coverage.
+            "selectivity": {
+                "cortex_slots_in_bank_mean": round(
+                    sum(int(r.get("cortex_slots_in_bank") or 0)
+                        for r in rows) / max(1, len(rows)), 1),
+                "cortex_top_k": lmb.CORTEX_TOP_K,
+                "turns_in_bank_mean": round(
+                    sum(int((r.get("consolidation") or {}).get("turns", 0))
+                        for r in rows) / max(1, len(rows)), 1),
+                "rag_top_k": lmb.RAG_TOP_K,
+            },
+            "env_knobs": lmb.bench_env_knobs(),
+            "extract_seconds_total": round(
+                sum(float((r.get("consolidation") or {})
+                          .get("extract_seconds", 0.0)) for r in rows), 1),
+            "wall_seconds_this_process": round(time.perf_counter() - t0, 1),
+        },
+        "caveats": {k: v for k, v in CAVEATS.items()
+                    if k != "synthetic_extraction_is_perfect"},
+        "arms": per_arm,
+    }
+    payload["caveats"].update(LME_CAVEATS)
+    # Only the summary is written here — deliberately NOT through
+    # write_artifact, which also rewrites the rows file. That file is this
+    # run's append-only resume log: rewriting it from the summarised slice
+    # would silently drop rows a narrower --limit excluded. The
+    # refuse-overwrite guard for the summary already ran, before the
+    # dataset load.
+    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+                   encoding="utf-8")
+    _print_table(payload)
+    print(f"\nwrote {out}\n      {rows_path} ({len(rows)} rows scored)")
     return 0
 
 
@@ -959,6 +1367,22 @@ def main() -> int:
                     help="derive the LongMemEval old/new pairs and write "
                          "the derivation artifact; runs no bank")
     ap.add_argument("--lme-path", help="explicit path to a LongMemEval JSON")
+    ap.add_argument("--derivation",
+                    default=str(RESULTS_DIR
+                                / "epistemic-bench-lme-derivation-"
+                                  "20260905.json"),
+                    help="--source lme: the derivation artifact whose "
+                         ".jsonl carries the old/new pairs")
+    ap.add_argument("--extractor", default="qwen-27b",
+                    help="--source lme: the extractor rung that fills the "
+                         "cortex. Names come from "
+                         "longmemeval_bench.EXTRACTORS, plus "
+                         f"'{FLOOR_EXTRACTOR}' for the no-LLM regex "
+                         "extractor (CPU-only, for plumbing checks)")
+    ap.add_argument("--limit", type=int,
+                    help="--source lme: score only the first N derived "
+                         "questions. Counts the slice, not the pending "
+                         "set, so a resume stays on the same slice")
     ap.add_argument("--tag", required=True, help="artifact tag")
     ap.add_argument("--seed", type=int, default=20260905)
     ap.add_argument("--entities", type=int, default=6)
@@ -981,15 +1405,10 @@ def main() -> int:
             "pass --contexts-only. This bench scores served contexts and "
             "never calls an answerer or a judge; an answered mode does not "
             "exist, and the flag makes that explicit in the artifact.")
-    if args.source == "lme":
-        raise SystemExit(
-            "--source lme needs a bank built by the real ingest+dream path, "
-            "which needs an extractor endpoint. Not implemented in this "
-            "revision: run --derive-lme to produce the derivation artifact, "
-            "and see section 4 of the design spec.")
+    run = run_lme if args.source == "lme" else run_synthetic
     db_name = _bench_db_name()
     try:
-        return run_synthetic(args)
+        return run(args)
     finally:
         try:
             drop_bench_db(db_name)

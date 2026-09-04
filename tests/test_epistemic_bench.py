@@ -431,3 +431,146 @@ def test_write_artifact_refuses_when_only_the_rows_file_exists(tmp_path):
     path.with_suffix(".jsonl").write_text("{}\n", encoding="utf-8")
     with pytest.raises(SystemExit):
         eb.write_artifact(path, {"meta": {}}, rows=[])
+
+
+# ── the LongMemEval source path ───────────────────────────────────────────
+# Fixture-level like everything above: no database, no extractor, no model.
+# The bank lifecycle itself is exercised by the CPU plumbing smoke
+# (--extractor floor), which is a run, not a test.
+def _pair(qid="q1", old="27:12", new="25:50"):
+    """One row of the committed derivation artifact
+    (evals/results/epistemic-bench-lme-derivation-20260905.jsonl)."""
+    return {"question_id": qid, "family": "time", "old_value": old,
+            "new_value": new, "old_date": "2023/05/25 (Thu) 20:21",
+            "new_date": "2023/05/27 (Sat) 10:20",
+            "question": "What was my personal best time in the 5K?"}
+
+
+def test_lme_scoring_credits_the_new_value_as_update_following():
+    q = eb.lme_question(_pair())
+    served = _served(text="[2023/05/27] user: my new PB is 25:50.")
+    assert eb.update_following(q, served) is True
+    assert eb.stale_serving(q, served) is False
+
+
+def test_lme_scoring_flags_the_old_value_alone_as_stale_serving():
+    q = eb.lme_question(_pair())
+    served = _served(text="[2023/05/25] user: my PB is 27:12.")
+    assert eb.update_following(q, served) is False
+    assert eb.stale_serving(q, served) is True
+
+
+def test_lme_scoring_is_clean_when_both_values_are_served():
+    """An agent can adjudicate two values; it cannot adjudicate one."""
+    q = eb.lme_question(_pair())
+    served = _served(text="[05/25] PB 27:12 ... [05/27] PB now 25:50.")
+    assert eb.stale_serving(q, served) is False
+    assert eb.update_following(q, served) is True
+
+
+def test_lme_questions_report_the_ungradable_dimensions_with_a_zero_count():
+    """Spec section 4: the slice grounds D1/D2/D5 and cannot ground D3/D4.
+    Those must report n=0 and a NULL rate, never a 0.0 a reader would take
+    for a failing arm."""
+    qs = [eb.lme_question(_pair(qid=f"q{i}")) for i in range(3)]
+    scored = eb.score_arm(qs, lambda q: _served(text=q.current_value))
+    assert scored["update_following"]["n"] == 3
+    assert scored["stale_serving"]["n"] == 3
+    assert scored["retraction_handling"]["n"] == 3
+    assert scored["staleness_marking"] == {"n": 0, "hits": 0, "rate": None}
+    assert scored["abstention_support"] == {"n": 0, "hits": 0, "rate": None}
+
+
+def test_lme_artifact_name_carries_the_source_without_stuttering():
+    assert (eb.lme_out_path("plumbing").name
+            == "epistemic-bench-lme-plumbing.json")
+    assert (eb.lme_out_path("lme-plumbing").name
+            == "epistemic-bench-lme-plumbing.json")
+
+
+def test_lme_resume_reads_the_question_ids_already_in_the_rows_file(tmp_path):
+    rows_path = tmp_path / "epistemic-bench-lme-x.jsonl"
+    rows_path.write_text('{"question_id": "a"}\n\n{"question_id": "b"}\n',
+                         encoding="utf-8")
+    assert eb.done_question_ids(rows_path) == {"a", "b"}
+    assert eb.done_question_ids(tmp_path / "missing.jsonl") == set()
+
+
+def test_lme_limit_selects_the_same_slice_across_a_resume():
+    """--limit counts questions in the SLICE, not questions still pending,
+    so an interrupted run resumes onto the same slice instead of walking
+    further down the derivation."""
+    pairs = [_pair(qid=f"q{i}") for i in range(5)]
+    assert [p["question_id"]
+            for p in eb.lme_pending(pairs, set(), limit=3)] == ["q0", "q1",
+                                                               "q2"]
+    assert [p["question_id"]
+            for p in eb.lme_pending(pairs, {"q0"}, limit=3)] == ["q1", "q2"]
+    assert len(eb.lme_pending(pairs, set(), limit=None)) == 5
+
+
+def test_lme_refuses_to_start_when_the_summary_already_exists(tmp_path):
+    out = tmp_path / "epistemic-bench-lme-x.json"
+    out.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        eb.guard_lme_artifact(out, force=False)
+    assert "--force" in str(exc.value)
+
+
+def test_lme_rows_file_alone_is_a_resume_not_a_refusal(tmp_path):
+    """The synthetic path treats an orphaned rows file as a half-written
+    run and blocks. The LME path shares the GPU and MUST resume from one."""
+    out = tmp_path / "epistemic-bench-lme-x.json"
+    out.with_suffix(".jsonl").write_text('{"question_id": "a"}\n',
+                                         encoding="utf-8")
+    eb.guard_lme_artifact(out, force=False)
+
+
+def test_lme_aborts_when_the_extractor_endpoint_is_unreachable(monkeypatch):
+    monkeypatch.setattr(eb, "extractor_url",
+                        lambda name: "http://127.0.0.1:9/v1")
+    monkeypatch.setattr(eb, "_probe", lambda url: False)
+    with pytest.raises(SystemExit) as exc:
+        eb.require_extractor("qwen-27b")
+    msg = str(exc.value)
+    assert "http://127.0.0.1:9/v1" in msg and "qwen-27b" in msg
+
+
+def test_the_no_llm_floor_rung_needs_no_endpoint(monkeypatch):
+    monkeypatch.setattr(eb, "_probe", lambda url: pytest.fail(
+        "probed an endpoint for the no-LLM floor rung"))
+    assert eb.require_extractor(eb.FLOOR_EXTRACTOR) is None
+
+
+def test_source_lme_aborts_on_a_dead_endpoint_before_any_bank_work(tmp_path):
+    """The probe is the first thing the run does: a dead endpoint must not
+    cost a database, a dataset load, or a partial artifact."""
+    import argparse
+
+    args = argparse.Namespace(
+        tag="never", extractor="qwen-27b", limit=None, force=False,
+        derivation=str(tmp_path / "does-not-exist.json"), lme_path=None)
+    orig_url, orig_probe = eb.extractor_url, eb._probe
+    eb.extractor_url = lambda name: "http://127.0.0.1:9/v1"
+    eb._probe = lambda url: False
+    try:
+        with pytest.raises(SystemExit) as exc:
+            eb.run_lme(args)
+    finally:
+        eb.extractor_url, eb._probe = orig_url, orig_probe
+    assert "extractor" in str(exc.value)
+
+
+def test_scores_aggregate_from_persisted_rows_so_a_resume_totals_correctly():
+    """A resumed run scores from the rows file, not from re-served
+    contexts, so questions carried over from an earlier process still
+    count in the summary."""
+    rows = [{"rag_update_following": True, "rag_stale_serving": False,
+             "rag_staleness_marking": None, "rag_context_chars": 100},
+            {"rag_update_following": False, "rag_stale_serving": True,
+             "rag_context_chars": 300}]
+    scored = eb.score_from_rows(rows, "rag")
+    assert scored["update_following"] == {"n": 2, "hits": 1, "rate": 0.5}
+    assert scored["stale_serving"] == {"n": 2, "hits": 1, "rate": 0.5}
+    assert scored["staleness_marking"] == {"n": 0, "hits": 0, "rate": None}
+    assert scored["context_chars_mean"] == 200.0

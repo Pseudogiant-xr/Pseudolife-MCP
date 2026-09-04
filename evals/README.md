@@ -964,9 +964,23 @@ guessed) and qualifies **23 of the 78** questions, identically on
 of what the later evidence says, 8 with an ambiguous old-value candidate,
 1 whose gold also appears in the earlier session. Artifacts
 `epistemic-bench-lme-derivation-20260905.json` and
-`…-lme-derivation-s-20260905.json`. This slice scores D1, D2 and D5 only,
-and its bank needs the real ingest+dream path, so its cortex/hybrid arms
-require an extractor endpoint — not run yet.
+`…-lme-derivation-s-20260905.json`.
+
+This slice scores **D1, D2 and D5 only** — D3 and D4 report `n: 0` and a
+NULL rate, because the dataset carries no `freshness_class` and no
+never-stated questions. D5 is graded through the **entry channel only**:
+the bench slot is synthetic (`lme:<question_id>` / `value`), since
+LongMemEval has no entity/attribute structure, so a question never
+matches a served fact by name and the supersession chain cannot fire. The
+`cortex` arm serves no entries, so its D5 is 0 by construction — an
+artefact, not a finding, and stamped as one in the artifact's `caveats`.
+
+Its bank is built the real way, one per question, through
+`longmemeval_bench.ingest_and_dream`, so the cortex and hybrid arms here
+measure the **deployed pipeline** — retrieval and extraction together —
+and need an extractor endpoint. That is the mirror image of the synthetic
+source's perfect-extraction ceiling: a low cortex number on this source
+is a claim about the extractor at least as much as about the spine.
 
 ## Running
 
@@ -979,14 +993,33 @@ PYTHONPATH=. python evals/epistemic_bench.py --source synthetic \
 # the LongMemEval derivation (no bank, no model, seconds)
 PYTHONPATH=. python evals/epistemic_bench.py --derive-lme oracle \
     --tag lme-derivation-20260905
+
+# the LongMemEval slice (GPU: needs the extractor endpoint up —
+# dot-source evals/qwen_server.ps1 and call Start-Qwen first)
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --contexts-only --extractor qwen-27b --tag lme-qwen27b-20260905
+
+# the same path on CPU, to check the plumbing without booking the GPU
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --contexts-only --extractor floor --limit 2 --tag lme-plumbing
 ```
+
+The LongMemEval run is **resumable per question** — it shares the GPU, so
+a row is appended to `epistemic-bench-lme-<tag>.jsonl` as each question
+finishes and rerunning the identical command skips the ids already there.
+Its summary JSON is written only once the whole slice is scored, and
+still refuses to overwrite a finished run; the orphaned `.jsonl` alone is
+a resume point and does not block. `--limit N` counts the first N derived
+questions of the slice, not the pending set, so a resumed run stays on the
+same slice. The extractor endpoint is probed before anything is ingested.
 
 Isolation: a private `pseudolife_memory_bench_<pid>` database, created at
 start and dropped at exit, with a name guard that refuses to drop anything
 the run did not create. The live bank is never touched. Every run writes
 `evals/results/epistemic-bench-<tag>.json` plus a `.jsonl` carrying every
-row **and every served context**, and refuses to overwrite either file
-without `--force`.
+row **and every served context**. The synthetic path refuses to overwrite
+either file without `--force`; the LongMemEval path refuses the summary
+only, because its `.jsonl` is the resume log (see above).
 
 ## Findings — 2026-09-05 synthetic smoke
 
