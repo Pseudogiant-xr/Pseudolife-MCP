@@ -127,6 +127,26 @@ KNOBS: list[dict[str, Any]] = [
      "min": 60, "max": 86400, "step": 60, "restart": False,
      "help": "A get/reinforce this long after a search still labels that "
              "search's served entry as used."},
+    # ── MCP payloads (agent-side token cost, 2026-09-04 ledger) ───────────
+    {"path": "memory.mcp.compact_payloads", "group": "MCP payloads",
+     "label": "Compact tool payloads", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Shape MCP responses for the agent's context window: search "
+             "entry text truncated (memory_get returns it whole), the "
+             "cortex block sized to the caller's top_k, and "
+             "memory_fact_get's bookkeeping keys behind verbose=True. Off "
+             "restores the pre-2026-09-04 payloads. Projection only — "
+             "ranking and every eval number are unaffected."},
+    {"path": "memory.mcp.entry_text_chars", "group": "MCP payloads",
+     "label": "Search entry text cap", "type": "int", "default": 600,
+     "min": 80, "max": 10000, "step": 20, "restart": False,
+     "help": "Chars of a search hit's text served before truncation "
+             "(marked truncated: true; memory_get returns it whole). "
+             "Ignored when compact payloads are off. 600 (~150 tokens) "
+             "clipped 88% of hits on the 2026-09-04 ledger bank and halved "
+             "the served entry text; raise it for long-form notes whose "
+             "tail carries the answer. Never applies to superseded_by_text, "
+             "which is served whole."},
     # ── Cortex ─────────────────────────────────────────────────────────────
     {"path": "memory.cortex.search_first", "group": "Cortex",
      "label": "Cortex-first search", "type": "bool", "default": True,

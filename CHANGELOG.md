@@ -117,6 +117,136 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`…chip12-b16.arms-vs-rag.json`) written by `evals/beam_within_run_pairs.py`
   and pinned by a regeneration test. Docs, one eval script and evidence
   pins only; no engine change.
+### Changed (2026-09-04 — measure what the AGENT pays, then cut it)
+- **Every "fewer tokens" number this project has published measures served
+  *benchmark* context — the passage an answerer model reads — and nothing
+  had ever measured what an MCP client reads back from a tool call and pays
+  for on every call.** New `evals/agent_token_ledger.py` measures it:
+  the per-tier tool manifest, the served session-start block, and the
+  `memory_search` / `memory_fact_get` / `memory_recall` response payloads
+  for 15 fixed dev-session queries against a live bank. Raw payloads are
+  read once from the daemon's GET-only REST and projected offline through
+  the MCP layer's own helpers, so before/after is exactly paired. (GET-only
+  is not side-effect free — `/api/search` appends `retrieval_events` rows
+  and touches access counters — but no bank content is written.) Artifact:
+  `evals/results/agent-token-ledger-20260904-r3.json` (1,316-entry bank,
+  `preset: flat`, 0 of 5,509 current facts label-bearing, which is the
+  validity condition for the `top_k=3` arm and is now counted per run);
+  the two pre-review runs (`agent-token-ledger-20260904.json` and
+  `...-r2.json`) stay committed as records and are cited by nothing. Every published cell is pinned in
+  `tests/test_eval_evidence.py`; the section is
+  `evals/README.md` → "Agent-side token ledger".
+  - What a session pays before asking anything: manifest **7,015 chars
+    (~1,753 tok) minimal / 14,076 core / 22,719 full**, plus **7,492 chars
+    (~1,873 tok)** of served session-start block (raw text, as the hook
+    writes it — not the JSON encoding the payload cells count).
+  - What one `memory_search` cost at the default `top_k=8`: **14,745 chars
+    mean** (median 15,325, p90 18,886), of which entry `text` alone was
+    **64%**.
+  - `memory_fact_get` on the five widest slots: **2,175 chars mean**.
+  - Not fixed, and the largest finding: a 3-hop `memory_recall` issues
+    **35 `service.search` calls on average, up to 66** on one question.
+    The response is already capped; the call amplification is untouched.
+- **Three payload cuts, behind one knob (`memory.mcp.compact_payloads`,
+  default on; `False` restores the previous payloads verbatim).** Console
+  knobs registered under a new "MCP payloads" group.
+  - `memory_search` entry `text` is truncated to
+    `memory.mcp.entry_text_chars` (default 600) with a `truncated: true`
+    marker, and the tool description points at `memory_get` for the whole
+    text — the shape `memory_recall` has used for its supporting texts
+    since 2026-07-10. `superseded_by_text` is **exempt** — see the
+    correction below. Mean payload **14,745 → 9,951 chars (−33%)**; entry
+    text 9,464 → 4,550.
+  - The cortex block follows the caller: `min(5, top_k)` facts instead of
+    a hardcoded 5. Inert at the default `top_k=8`; at `top_k=3` the block
+    goes 1,853 → 1,107 chars and the whole call 6,870 → 4,290 (−38%).
+    The narrowing is passed *into* `cortex_search` rather than sliced off
+    its output, so constraint pinning re-budgets with it and pinned facts
+    stay at the head.
+  - `memory_fact_get` serves the acting subset by default — entity,
+    attribute, value, kind/members, confidence, origin, asserted_at/age,
+    freshness_class, stale, the currency and label flags, `correct_with`,
+    `source_entries`, `entity_ref`, `contenders` — and moves provenance,
+    support, writer/session id, tx/valid time, polarity, status and the
+    supersession chain behind a new `verbose=True`. **2,175 → 1,296 chars
+    mean (−40%)**, 25 keys down to 12-13. The served-absent-when-default
+    rule (PR #245) holds: the keys that remain are byte-identical.
+    `source_entries` is kept on purpose — it is the only handle from a
+    fact back to the episodes that formed it, and the poisoned-memory
+    procedure in `docs/guide/security-posture.md`, `memory_get`'s
+    core-tier justification and
+    `test_release_ux.py::test_core_tier_can_close_its_own_loops` all read
+    it from the DEFAULT record.
+- **No ranking, `min_score` or service behaviour changed.** All three cuts
+  are projections in `mcp_server.py`, above `service.*`; the eval harness
+  calls the service directly and cannot see them — pinned by
+  `tests/test_agent_payload_budget.py::test_eval_harness_does_not_read_the_mcp_projection`,
+  which allows exactly two exceptions (this ledger and the existing
+  `recall_cap_probe.py`, both payload probes). No eval number moves, so
+  `regression_gate.ps1` was not run.
+- `memory_search`'s cortex-first block moved out of the tool body into the
+  pure `mcp_server._project_search`, so the ledger can reproduce the served
+  shape from raw service output without a live service and without a second
+  copy to drift. Behaviour-preserving, pinned byte-identical against a
+  pre-refactor snapshot by
+  `tests/test_agent_payload_budget.py::test_legacy_payloads_survive_the_projection_refactor`.
+- **The served session-start block was describing the old search shape.** It
+  told every session that results come back as `{id, text, source, tags,
+  score}` — an enumeration that went stale the moment entry `text` started
+  arriving clipped — so it now names the thing an agent has to act on
+  instead: "Long hits are clipped (`truncated: true` → `memory_get`)". Both
+  copies (`pseudolife_memory/web/session_hook.py` and the byte-identical
+  twin `examples/CLAUDE.memory.md`) move together; the block is 7,492 raw
+  chars against the 7,500 cap, so the replacement is length-neutral by
+  construction.
+- **`superseded_by_text` is served whole, never clipped** — and the
+  headline above is 33%, not the 41% the r2 run measured, because of it.
+  The first cut capped that field on the same terms as the entry's own
+  text, on the reasoning that it is read as an answer and so costs like
+  one. It is not recoverable like one: a compact entry carries no id for
+  the superseding entry and nothing stores a pointer to one, so
+  `memory_get(entry.id)` returns the *superseded* text rather than the
+  replacement, and a clipped correction cannot be retrieved by any tool
+  call in any tier. Three surfaces instruct agents to prefer that field
+  over the entry's own text (the served session-start block,
+  `examples/CLAUDE.memory.md`, `memory_search`'s description), and the r2
+  artifact measured 13 of 15 `top_k=8` queries clipping at least one
+  (2,406 → 1,199 chars mean). **The −41% and the entries-block figures the
+  PR first published priced that truncated payload and were retired before
+  merge**; every number in this entry is re-measured from r3 against the
+  shipped behaviour. `truncated: true` now means exactly one thing: this
+  entry's own `text` was clipped and `memory_get` returns it whole.
+- The ledger's `safe_label` redactor now covers **machine names** as well
+  as home paths, emails, IPs and credentials. A bank holds facts *about*
+  the machine it runs on, so a slot label can be a bare hostname with
+  nothing else in it to catch — and one reached a committed artifact,
+  which a public tree must never carry (CLAUDE.md). The redactor matches
+  every name this machine answers to (`socket.gethostname` plus
+  `COMPUTERNAME` / `HOSTNAME`), separator-insensitively, and the leaked
+  label in the r2 artifact was redacted in place. Guarded by
+  `tests/test_agent_payload_budget.py`, which checks every committed
+  ledger artifact against the running machine's own names.
+- The published payload breakdown names `superseded_by_text` as its own
+  row. It is a sixth of the "before" payload, and the r2 breakdown left
+  those ~2,400 chars unlabelled between the entries-block total and text +
+  metadata.
+- `agent_token_ledger.py` reads `entry_text_chars` and the cortex width
+  from `utils.config.McpConfig` instead of restating `600` and
+  `min(5, top_k)`, and writes what it used into the artifact's `config`
+  block, so changing a default re-prices the run rather than silently
+  desynchronising the published numbers from the shipped behaviour. Its
+  `fact_get` caveats now disclose that the arm prices the record and not
+  the call: the "before" is the `/api/facts` dump row (which carries an
+  `entity_id` the served record never has) and neither arm includes the
+  tool envelope, `contenders` or `correct_with`.
+- `agent_token_ledger.py` refuses to overwrite an existing `--out` unless
+  `--force` is passed. Its default path is dated, not run-tagged, so a
+  same-day rerun used to silently rewrite the canonical artifact — the exact
+  failure CLAUDE.md records from 2026-07-21. It also counts the label census
+  the `top_k=3` arm's validity rests on (`bank.facts_labelled` /
+  `facts_current` / `facts_dump_truncated`) instead of leaving it a
+  hand-checked sentence, and picks its five widest slots from the whole
+  cortex rather than the first 2,000 rows of the fact dump.
 
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 
