@@ -58,12 +58,16 @@ six question types, and every number ships with its committed run artifact:
 | knowledge-update slice (78 of the 500) | 0.859 | ~~0.936~~ (retired — see below) |
 
 Equal accuracy to naive RAG across the whole benchmark on **~73% of the
-context**, and a large edge at knowing when it doesn't know: on BEAM-100K's
+context**, and better calibrated about what it does not know: on BEAM-100K's
 abstention questions the fact spine scores **0.950** against naive RAG's
-0.775, unchanged under two independent judges. It loses where an answer has
-to be aggregated across sessions. Graded by a local, byte-reproducible
-judge (the cross-judge check names its second judge) — compare within rows,
-never against GPT-judged leaderboards.
+0.775, unchanged under two independent judges. Read that as calibration,
+not recall — in the budget-matched five-arm run of 2026-09-02 (rag 0.725 there;
+one replicate, local judge) an arm served no memory at all scores 1.000 on
+the same questions, because refusing is the right answer there and an
+empty context always refuses. The fact spine loses where an answer has to
+be aggregated across sessions. Graded by a local, byte-reproducible judge (the cross-judge check
+names its second judge) — compare within rows, never against GPT-judged
+leaderboards.
 
 > **Retired 2026-08-25 (#188): the 0.936 knowledge-update headline.** It was
 > measured on the 2026-07-30 bench stack (Qwen3.6-27B answerer and judge).
@@ -831,9 +835,12 @@ The consolidated spine helps where a fact changes and where the answer
 sits inside one session; it loses where the answer must be aggregated
 across sessions or ordered in time, because per-fact consolidation is
 exactly what discards that structure. BEAM-100K reproduces the same shape
-independently, and adds the one decisive win: on its abstention questions
+independently. Its abstention questions are where the spine looks best —
 the fact-spine arm scores 0.950 against naive RAG's 0.775, identical under
-the local judge and under an independent Opus-class judge. Setup, caveats,
+the local judge and under an independent Opus-class judge — but the
+2026-09-02 five-arm run bounds that reading: a no-memory arm scores 1.000
+there, so the edge is calibration (a small fact context refuses where raw
+turns confabulate), not evidence that the memory recalled anything. Setup, caveats,
 both bench stacks side by side, and the evidence that extraction quality is
 the dominant factor: [Benchmarks](docs/guide/benchmarks.md); full
 methodology: [`evals/README.md`](evals/README.md).
