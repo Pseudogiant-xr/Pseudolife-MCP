@@ -144,8 +144,9 @@ KNOBS: list[dict[str, Any]] = [
              "(marked truncated: true; memory_get returns it whole). "
              "Ignored when compact payloads are off. 600 (~150 tokens) "
              "clipped 88% of hits on the 2026-09-04 ledger bank and halved "
-             "the entries block; raise it for long-form notes whose tail "
-             "carries the answer."},
+             "the served entry text; raise it for long-form notes whose "
+             "tail carries the answer. Never applies to superseded_by_text, "
+             "which is served whole."},
     # ── Cortex ─────────────────────────────────────────────────────────────
     {"path": "memory.cortex.search_first", "group": "Cortex",
      "label": "Cortex-first search", "type": "bool", "default": True,

@@ -2892,12 +2892,15 @@ CLAIMS.append(Claim(
 # client pays per call, before and after the payload cuts. Unlike the
 # accuracy tables above this needs no GPU — it is pure counting — so every
 # cell is pinnable, and every cell is pinned.
-# Promoted 2026-09-04 from the r1 run to r2 after the pre-merge review:
-# r1 measured the lean fact_get projection while it still dropped
+# Promoted 2026-09-04 to r3 after the pre-merge review, twice over. r1
+# measured the lean fact_get projection while it still dropped
 # source_entries, and picked its widest slots from a 2,000-row prefix of
-# the fact dump. r1 stays committed as the pre-review record and is
-# deliberately cited by nothing.
-LEDGER = RESULTS + "agent-token-ledger-20260904-r2.json"
+# the fact dump. r2 fixed both and then measured `superseded_by_text`
+# truncated — a field with no recovery path, whose truncation was
+# REMOVED before merge, so r2's headline priced a payload this repo does
+# not ship. r3 prices the shipped one. r1 and r2 stay committed as
+# pre-review records and are deliberately cited by nothing.
+LEDGER = RESULTS + "agent-token-ledger-20260904-r3.json"
 
 
 def _ledger_manifest(tier: str, key: str):
@@ -2909,12 +2912,12 @@ def _ledger_search(scope: str, arm: str, part: str, stat: str = "mean"):
 
 
 _LEDGER_MANIFEST_ROWS = [
-    ("minimal", "| tool manifest, `minimal` tier (9 tools) | 6,923 | 1,730 |",
-     6923, 1730),
-    ("core", "| tool manifest, `core` tier (22 tools) | 13,984 | 3,496 |",
-     13984, 3496),
-    ("full", "| tool manifest, `full` tier (35 tools) | 22,627 | 5,656 |",
-     22627, 5656),
+    ("minimal", "| tool manifest, `minimal` tier (9 tools) | 7,015 | 1,753 |",
+     7015, 1753),
+    ("core", "| tool manifest, `core` tier (22 tools) | 14,076 | 3,519 |",
+     14076, 3519),
+    ("full", "| tool manifest, `full` tier (35 tools) | 22,719 | 5,679 |",
+     22719, 5679),
 ]
 for _tier, _needle, _chars, _toks in _LEDGER_MANIFEST_ROWS:
     CLAIMS.append(Claim(
@@ -2942,30 +2945,37 @@ CLAIMS.append(Claim(
     stated=1873, places=0))
 CLAIMS.append(Claim(
     id="ledger-manifest-full-split", doc=EVALS,
-    needle="(full tier: 14,445 + 8,182)", artifacts=(LEDGER,),
+    needle="(full tier: 14,523 + 8,196)", artifacts=(LEDGER,),
     value=_ledger_manifest("full", "description_chars"),
-    stated=14445, places=0))
+    stated=14523, places=0))
 CLAIMS.append(Claim(
     id="ledger-manifest-full-params", doc=EVALS,
-    needle="(full tier: 14,445 + 8,182)", artifacts=(LEDGER,),
+    needle="(full tier: 14,523 + 8,196)", artifacts=(LEDGER,),
     value=_ledger_manifest("full", "param_description_chars"),
-    stated=8182, places=0))
+    stated=8196, places=0))
 
 # The two before/after tables. `search` is the tool default (top_k=8);
 # `search_narrow` is top_k=3, the only place cut (b) can show.
 _LEDGER_SEARCH_ROWS = [
-    ("total", "total_chars", "| **total** | **14,744** | **8,746** | **−41%** |",
-     14744, 8746),
-    ("entries", "entries_chars", "| entries block | 12,636 | 6,638 | −47% |",
-     12636, 6638),
+    ("total", "total_chars", "| **total** | **14,745** | **9,951** | **−33%** |",
+     14745, 9951),
+    ("entries", "entries_chars", "| entries block | 12,637 | 7,842 | −38% |",
+     12637, 7842),
     ("text", "entries_text_chars",
      "| — entry `text` | 9,464 | 4,550 | −52% |", 9464, 4550),
+    # The exempted field, published as its own row (2026-09-04 review
+    # finding): it is a sixth of the "before" payload, and leaving it
+    # inside "entries block" left ~2,400 chars unaccounted for between
+    # the block total and text + metadata. Identical in both arms
+    # BECAUSE it is exempt — that identity is the pin on the exemption.
+    ("superseded", "entries_superseded_text_chars",
+     "| — `superseded_by_text` | 2,406 | 2,406 | — |", 2406, 2406),
     ("meta", "entries_other_chars",
-     "| — entry metadata | 766 | 889 | +16% |", 766, 889),
+     "| — entry metadata | 767 | 887 | +16% |", 767, 887),
     ("cortex", "cortex_chars", "| cortex block | 1,853 | 1,853 | — |",
      1853, 1853),
     ("tokens", "total_approx_tokens",
-     "| approx tokens | 3,686 | 2,186 | −41% |", 3686, 2186),
+     "| approx tokens | 3,686 | 2,487 | −33% |", 3686, 2487),
 ]
 for _slug, _part, _needle, _before, _after in _LEDGER_SEARCH_ROWS:
     CLAIMS.append(Claim(
@@ -2978,10 +2988,12 @@ for _slug, _part, _needle, _before, _after in _LEDGER_SEARCH_ROWS:
         stated=_after, places=0))
 
 _LEDGER_NARROW_ROWS = [
-    ("total", "total_chars", "| **total** | **6,870** | **3,794** | **−45%** |",
-     6870, 3794),
+    ("total", "total_chars", "| **total** | **6,870** | **4,290** | **−38%** |",
+     6870, 4290),
     ("text", "entries_text_chars",
      "| entry `text` | 3,537 | 1,712 | −52% |", 3537, 1712),
+    ("superseded", "entries_superseded_text_chars",
+     "| `superseded_by_text` | 931 | 931 | — |", 931, 931),
     ("cortex", "cortex_chars",
      "| cortex block (5 facts → 3) | 1,853 | 1,107 | −40% |", 1853, 1107),
 ]
@@ -2997,12 +3009,12 @@ for _slug, _part, _needle, _before, _after in _LEDGER_NARROW_ROWS:
         value=_ledger_search("search_narrow", "after", _part),
         stated=_after, places=0))
 
-_LEDGER_MEDIANS = "Median total 15,326 → 8,663; p90 18,885 → 10,425."
+_LEDGER_MEDIANS = "Median total 15,325 → 9,613; p90 18,886 → 12,583."
 for _cid, _arm, _stat, _stated in [
-    ("median-before", "before", "median", 15326),
-    ("median-after", "after", "median", 8663),
-    ("p90-before", "before", "p90", 18885),
-    ("p90-after", "after", "p90", 10425),
+    ("median-before", "before", "median", 15325),
+    ("median-after", "after", "median", 9613),
+    ("p90-before", "before", "p90", 18886),
+    ("p90-after", "after", "p90", 12583),
 ]:
     CLAIMS.append(Claim(
         id=f"ledger-search-{_cid}", doc=EVALS, needle=_LEDGER_MEDIANS,
@@ -3029,6 +3041,14 @@ for _cid, _arm, _stat, _stated in [
 _LEDGER_CAP = ("Served entry `text` runs mean **1,180** chars, median 1,149, "
                "p90 1,794 over\nthe 120 entries the 15 queries returned. A "
                "600-char cap therefore clips 88%")
+# The cap the run priced, read from ``McpConfig`` rather than restated in
+# the harness (2026-09-04 review finding), so a default change re-prices
+# the artifact instead of desynchronising it from this page.
+CLAIMS.append(Claim(
+    id="ledger-entry-text-cap", doc=EVALS, needle=_LEDGER_CAP,
+    artifacts=(LEDGER,),
+    value=lambda d: d["search"]["entry_text"]["entry_text_chars"],
+    stated=600, places=0))
 for _cid, _get, _stated in [
     ("mean", lambda d: d["search"]["entry_text"]["raw_chars"]["mean"], 1180),
     ("median", lambda d: d["search"]["entry_text"]["raw_chars"]["median"], 1149),
@@ -3041,7 +3061,7 @@ for _cid, _get, _stated in [
 CLAIMS.append(Claim(
     id="ledger-entry-text-share-over-600", doc=EVALS, needle=_LEDGER_CAP,
     artifacts=(LEDGER,),
-    value=lambda d: d["search"]["entry_text"]["share_over_600"],
+    value=lambda d: d["search"]["entry_text"]["share_over_cap"],
     stated=0.883, places=2))
 
 # memory_recall's call amplification — the finding the ledger surfaced and
@@ -3058,31 +3078,31 @@ CLAIMS.append(Claim(
     artifacts=(LEDGER,),
     value=lambda d: d["recall"]["aggregate"]["service_search_calls"]["max"],
     stated=66, places=0))
-_LEDGER_RECALL_SIZE = ("4,210 chars mean against 10,113 for the same walk "
+_LEDGER_RECALL_SIZE = ("4,243 chars mean against 10,349 for the same walk "
                        "with `verbose=True`")
 CLAIMS.append(Claim(
     id="ledger-recall-compact-chars", doc=EVALS, needle=_LEDGER_RECALL_SIZE,
     artifacts=(LEDGER,),
     value=lambda d: d["recall"]["aggregate"]["chars"]["mean"],
-    stated=4210, places=0))
+    stated=4243, places=0))
 CLAIMS.append(Claim(
     id="ledger-recall-verbose-chars", doc=EVALS, needle=_LEDGER_RECALL_SIZE,
     artifacts=(LEDGER,),
     value=lambda d: sum(r["verbose_chars"] for r in
                         d["recall"]["per_question"]) / len(
                             d["recall"]["per_question"]),
-    stated=10113, places=0))
+    stated=10349, places=0))
 CLAIMS.append(Claim(
     id="ledger-bank-entries", doc=EVALS,
-    needle="bank, 1,314 entries, `preset: flat`", artifacts=(LEDGER,),
-    value=lambda d: d["bank"]["entries"], stated=1314, places=0))
+    needle="bank, 1,316 entries, `preset: flat`", artifacts=(LEDGER,),
+    value=lambda d: d["bank"]["entries"], stated=1316, places=0))
 
 # The narrow arm's validity condition (2026-09-04 review finding): the
 # cortex slice only equals a real top_k=3 call while _pin_constraint_facts
 # is a no-op, which holds exactly while no current fact carries a
 # distortion_tolerance label. It shipped as a hand-checked sentence with
 # no artifact field behind it; the run counts it now.
-_LEDGER_LABELS = "carries **0 of 5,500** labelled current facts"
+_LEDGER_LABELS = "carries **0 of 5,509** labelled current facts"
 CLAIMS.append(Claim(
     id="ledger-facts-labelled", doc=EVALS, needle=_LEDGER_LABELS,
     artifacts=(LEDGER,), value=lambda d: d["bank"]["facts_labelled"],
@@ -3090,4 +3110,4 @@ CLAIMS.append(Claim(
 CLAIMS.append(Claim(
     id="ledger-facts-current", doc=EVALS, needle=_LEDGER_LABELS,
     artifacts=(LEDGER,), value=lambda d: d["bank"]["facts_current"],
-    stated=5500, places=0))
+    stated=5509, places=0))

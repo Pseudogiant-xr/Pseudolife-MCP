@@ -181,22 +181,50 @@ def test_verbose_search_keeps_the_whole_text(
     assert e["text"] == _LONG and "truncated" not in e
 
 
-def test_superseded_by_text_is_truncated_too(
+def test_superseded_by_text_is_never_truncated(
         tmp_path: Path, monkeypatch) -> None:
-    """The supersession pointer changes answers, so it always survives
-    compaction — which is exactly why it also has to be capped."""
+    """The correction an agent is told to ACT ON must arrive whole.
+
+    A compact entry carries no id for the superseding entry, and nothing
+    stores a pointer to it: ``memory_get(entry.id)`` returns the
+    SUPERSEDED entry's own text, so a clipped ``superseded_by_text`` is
+    unrecoverable by any tool call in any tier. Three surfaces —
+    ``web/session_hook.MEMORY_LOOP_BLOCK``, ``examples/CLAUDE.memory.md``
+    and this tool's own docstring — instruct agents to prefer it over the
+    entry's text, so it is exempt from the cap (2026-09-04 review
+    finding). Cost is bounded: mean 2,406 chars per top_k=8 query on the
+    measured bank.
+    """
     mod = _reload(tmp_path, monkeypatch)
     mod.service.config.memory.mcp.entry_text_chars = 50
+    out = mod._compact_entries(
+        {"entries": [{"text": _LONG, "superseded": True,
+                      "superseded_by_text": _LONG}]},
+        text_chars=50)
+    e = out["entries"][0]
+    assert e["superseded_by_text"] == _LONG
+    # The entry's OWN text is still capped, and the flag still fires.
+    assert len(e["text"]) == 51 and e["text"].endswith("…")
+    # ``truncated`` means exactly one thing: this entry's ``text`` was
+    # clipped and ``memory_get`` returns it whole. It never refers to
+    # ``superseded_by_text``, which is served in full.
+    assert e["truncated"] is True
+
+
+def test_a_long_supersession_alone_does_not_mark_the_entry_truncated(
+        tmp_path: Path, monkeypatch) -> None:
+    """The flag's contract is ``memory_get`` recovers the rest. That is
+    only true of ``text``, so an entry whose short text was NOT clipped
+    must not carry a flag pointing at a call that would return the wrong
+    field."""
+    mod = _reload(tmp_path, monkeypatch)
     out = mod._compact_entries(
         {"entries": [{"text": "short", "superseded": True,
                       "superseded_by_text": _LONG}]},
         text_chars=50)
     e = out["entries"][0]
-    assert len(e["superseded_by_text"]) == 51
-    assert e["superseded_by_text"].endswith("…")
-    # One flag covers the entry, not one per field: it means "this entry
-    # was clipped, memory_get returns it whole", true of both fields.
-    assert e["truncated"] is True and e["text"] == "short"
+    assert e["superseded_by_text"] == _LONG and e["text"] == "short"
+    assert "truncated" not in e
 
 
 def test_compact_payloads_false_keeps_full_entry_text(
@@ -403,3 +431,72 @@ def test_eval_harness_does_not_read_the_mcp_projection() -> None:
             offenders.append(p.name)
     assert offenders == [], (
         f"eval harness imports the MCP projection layer: {offenders}")
+
+
+# ── the ledger's own artifact hygiene ─────────────────────────────────────
+# The ledger writes slot NAMES from a live bank into a committed artifact,
+# and this repo is public. Its redactor caught home paths, emails, IPs and
+# credentials but not MACHINE NAMES, so a hostname-shaped slot label reached
+# a tracked file (2026-09-04 review finding). CLAUDE.md treats a hostname
+# exactly like an email: never committed, and the guard extended rather than
+# the leak merely scrubbed.
+
+
+def _ledger():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_agent_token_ledger",
+        Path(__file__).resolve().parents[1] / "evals"
+        / "agent_token_ledger.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_safe_label_redacts_this_machines_hostname(monkeypatch) -> None:
+    led = _ledger()
+    monkeypatch.setattr(led, "_HOST", led.host_pattern({"box-two"}))
+    for label in ("box-two | crash-root-cause", "BOX-TWO | status",
+                  "box two | notes", "boxtwo | notes",
+                  "why did box-two reboot | cause"):
+        assert led.safe_label(label) == "<redacted>", label
+    # Names that merely share a prefix are not machines.
+    assert led.safe_label("box-twofold | notes") == "box-twofold | notes"
+    assert led.safe_label("pseudolife-mcp | next-release") == (
+        "pseudolife-mcp | next-release")
+
+
+def test_host_pattern_skips_useless_names() -> None:
+    led = _ledger()
+    # Nothing to match on: no pattern at all, rather than one that eats
+    # every label.
+    assert led.host_pattern([]) is None
+    assert led.host_pattern(["", "pc"]) is None
+    # A fully-qualified name matches on its label, not its domain.
+    pat = led.host_pattern(["box-two.example.com"])
+    assert pat is not None and pat.search("box-two | notes")
+    assert not pat.search("example.com | notes")
+
+
+def test_ledger_reads_this_machines_names() -> None:
+    import os
+    import socket
+    led = _ledger()
+    assert socket.gethostname() in led.local_hostnames()
+    if os.environ.get("COMPUTERNAME"):
+        assert os.environ["COMPUTERNAME"] in led.local_hostnames()
+
+
+def test_committed_ledger_artifacts_carry_no_hostname() -> None:
+    """The leak itself, pinned where the ledger's own tests live. The
+    tracked-tree guard in ``test_release_ux.py`` catches identifiers it
+    knows by name; this catches the artifact against the machine the suite
+    is running on, whatever that machine is called."""
+    led = _ledger()
+    results = Path(__file__).resolve().parents[1] / "evals" / "results"
+    for art in sorted(results.glob("agent-token-ledger-*.json")):
+        text = art.read_text(encoding="utf-8")
+        if led._HOST is not None:
+            assert not led._HOST.search(text), (
+                f"{art.name} names the machine it was measured on")
+        assert not led._UNSAFE.search(text), f"{art.name} carries PII"

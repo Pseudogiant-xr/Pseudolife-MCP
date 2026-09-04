@@ -1,10 +1,10 @@
 {
   "generated": "2026-09-04",
   "bank": {
-    "entries": 1314,
+    "entries": 1316,
     "preset": "flat",
-    "facts_total": 5551,
-    "facts_current": 5500,
+    "facts_total": 5560,
+    "facts_current": 5509,
     "facts_labelled": 0,
     "facts_dump_truncated": false,
     "facts_dump_limit": 20000
@@ -13,27 +13,32 @@
     "chars": "compact JSON as an MCP client receives it (separators=(',',':'), ensure_ascii=False)",
     "approx_tokens": "chars // 4 (evals/ladder_sweep.approx_tokens)"
   },
+  "config": {
+    "compact_payloads": true,
+    "entry_text_chars": 600,
+    "cortex_width_uncut": 5
+  },
   "manifest": {
     "minimal": {
       "tools": 9,
-      "description_chars": 4644,
-      "param_description_chars": 2279,
-      "chars": 6923,
-      "approx_tokens": 1730
+      "description_chars": 4722,
+      "param_description_chars": 2293,
+      "chars": 7015,
+      "approx_tokens": 1753
     },
     "core": {
       "tools": 22,
-      "description_chars": 8951,
-      "param_description_chars": 5033,
-      "chars": 13984,
-      "approx_tokens": 3496
+      "description_chars": 9029,
+      "param_description_chars": 5047,
+      "chars": 14076,
+      "approx_tokens": 3519
     },
     "full": {
       "tools": 35,
-      "description_chars": 14445,
-      "param_description_chars": 8182,
-      "chars": 22627,
-      "approx_tokens": 5656
+      "description_chars": 14523,
+      "param_description_chars": 8196,
+      "chars": 22719,
+      "approx_tokens": 5679
     }
   },
   "session_start_block": {
@@ -49,12 +54,12 @@
       {
         "query": "what port does the bench postgres listen on",
         "before": {
-          "total_chars": 16145,
+          "total_chars": 16146,
           "entries_chars": 14473,
           "entries_text_chars": 10954,
           "entries_superseded_text_chars": 2650,
           "entries_other_chars": 869,
-          "cortex_chars": 1563,
+          "cortex_chars": 1564,
           "events_chars": 0,
           "envelope_chars": 109,
           "count": 8,
@@ -62,17 +67,17 @@
           "approx_tokens": 4036
         },
         "after": {
-          "total_chars": 8123,
-          "entries_chars": 6451,
+          "total_chars": 9568,
+          "entries_chars": 7895,
           "entries_text_chars": 4257,
-          "entries_superseded_text_chars": 1206,
+          "entries_superseded_text_chars": 2650,
           "entries_other_chars": 988,
-          "cortex_chars": 1563,
+          "cortex_chars": 1564,
           "events_chars": 0,
           "envelope_chars": 109,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2030
+          "approx_tokens": 2392
         }
       },
       {
@@ -107,12 +112,12 @@
       {
         "query": "why is the recency boost disabled",
         "before": {
-          "total_chars": 15360,
+          "total_chars": 15361,
           "entries_chars": 13369,
           "entries_text_chars": 10072,
           "entries_superseded_text_chars": 2408,
           "entries_other_chars": 889,
-          "cortex_chars": 1892,
+          "cortex_chars": 1893,
           "events_chars": 0,
           "envelope_chars": 99,
           "count": 8,
@@ -120,27 +125,27 @@
           "approx_tokens": 3840
         },
         "after": {
-          "total_chars": 8696,
-          "entries_chars": 6705,
+          "total_chars": 9897,
+          "entries_chars": 7905,
           "entries_text_chars": 4506,
-          "entries_superseded_text_chars": 1208,
+          "entries_superseded_text_chars": 2408,
           "entries_other_chars": 991,
-          "cortex_chars": 1892,
+          "cortex_chars": 1893,
           "events_chars": 0,
           "envelope_chars": 99,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2174
+          "approx_tokens": 2474
         }
       },
       {
         "query": "what did the flat band ablation conclude",
         "before": {
-          "total_chars": 17239,
-          "entries_chars": 15607,
+          "total_chars": 17238,
+          "entries_chars": 15606,
           "entries_text_chars": 11879,
           "entries_superseded_text_chars": 3046,
-          "entries_other_chars": 682,
+          "entries_other_chars": 681,
           "cortex_chars": 1526,
           "events_chars": 0,
           "envelope_chars": 106,
@@ -149,17 +154,17 @@
           "approx_tokens": 4309
         },
         "after": {
-          "total_chars": 9087,
-          "entries_chars": 7455,
+          "total_chars": 10321,
+          "entries_chars": 8689,
           "entries_text_chars": 4826,
-          "entries_superseded_text_chars": 1811,
-          "entries_other_chars": 818,
+          "entries_superseded_text_chars": 3046,
+          "entries_other_chars": 817,
           "cortex_chars": 1526,
           "events_chars": 0,
           "envelope_chars": 106,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2271
+          "approx_tokens": 2580
         }
       },
       {
@@ -178,27 +183,27 @@
           "approx_tokens": 4015
         },
         "after": {
-          "total_chars": 9590,
-          "entries_chars": 7257,
+          "total_chars": 11844,
+          "entries_chars": 9511,
           "entries_text_chars": 4614,
-          "entries_superseded_text_chars": 1815,
+          "entries_superseded_text_chars": 4069,
           "entries_other_chars": 828,
           "cortex_chars": 2233,
           "events_chars": 0,
           "envelope_chars": 100,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2397
+          "approx_tokens": 2961
         }
       },
       {
         "query": "how does the dream cursor advance",
         "before": {
-          "total_chars": 15326,
-          "entries_chars": 13371,
+          "total_chars": 15325,
+          "entries_chars": 13370,
           "entries_text_chars": 10049,
           "entries_superseded_text_chars": 2489,
-          "entries_other_chars": 833,
+          "entries_other_chars": 832,
           "cortex_chars": 1856,
           "events_chars": 0,
           "envelope_chars": 99,
@@ -207,17 +212,17 @@
           "approx_tokens": 3831
         },
         "after": {
-          "total_chars": 8959,
-          "entries_chars": 7004,
+          "total_chars": 10241,
+          "entries_chars": 8286,
           "entries_text_chars": 4829,
-          "entries_superseded_text_chars": 1206,
-          "entries_other_chars": 969,
+          "entries_superseded_text_chars": 2489,
+          "entries_other_chars": 968,
           "cortex_chars": 1856,
           "events_chars": 0,
           "envelope_chars": 99,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2239
+          "approx_tokens": 2560
         }
       },
       {
@@ -236,17 +241,17 @@
           "approx_tokens": 4755
         },
         "after": {
-          "total_chars": 11923,
-          "entries_chars": 8332,
+          "total_chars": 13976,
+          "entries_chars": 10385,
           "entries_text_chars": 4823,
-          "entries_superseded_text_chars": 2412,
+          "entries_superseded_text_chars": 4465,
           "entries_other_chars": 1097,
           "cortex_chars": 2322,
           "events_chars": 1149,
           "envelope_chars": 120,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2980
+          "approx_tokens": 3494
         }
       },
       {
@@ -265,28 +270,28 @@
           "approx_tokens": 3029
         },
         "after": {
-          "total_chars": 8663,
-          "entries_chars": 6755,
+          "total_chars": 9354,
+          "entries_chars": 7446,
           "entries_text_chars": 4818,
-          "entries_superseded_text_chars": 1208,
+          "entries_superseded_text_chars": 1899,
           "entries_other_chars": 729,
           "cortex_chars": 1513,
           "events_chars": 0,
           "envelope_chars": 395,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2165
+          "approx_tokens": 2338
         }
       },
       {
         "query": "how are constraint facts pinned in retrieval",
         "before": {
-          "total_chars": 18885,
+          "total_chars": 18886,
           "entries_chars": 16527,
           "entries_text_chars": 11271,
           "entries_superseded_text_chars": 4454,
           "entries_other_chars": 802,
-          "cortex_chars": 2248,
+          "cortex_chars": 2249,
           "events_chars": 0,
           "envelope_chars": 110,
           "count": 8,
@@ -294,27 +299,27 @@
           "approx_tokens": 4721
         },
         "after": {
-          "total_chars": 10425,
-          "entries_chars": 8067,
+          "total_chars": 12583,
+          "entries_chars": 10224,
           "entries_text_chars": 4832,
-          "entries_superseded_text_chars": 2297,
+          "entries_superseded_text_chars": 4454,
           "entries_other_chars": 938,
-          "cortex_chars": 2248,
+          "cortex_chars": 2249,
           "events_chars": 0,
           "envelope_chars": 110,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2606
+          "approx_tokens": 3145
         }
       },
       {
         "query": "what happened with the retrieval event log",
         "before": {
-          "total_chars": 13124,
-          "entries_chars": 11626,
+          "total_chars": 13125,
+          "entries_chars": 11627,
           "entries_text_chars": 9961,
           "entries_superseded_text_chars": 932,
-          "entries_other_chars": 733,
+          "entries_other_chars": 734,
           "cortex_chars": 1390,
           "events_chars": 0,
           "envelope_chars": 108,
@@ -323,27 +328,27 @@
           "approx_tokens": 3281
         },
         "after": {
-          "total_chars": 7535,
-          "entries_chars": 6037,
+          "total_chars": 7848,
+          "entries_chars": 6350,
           "entries_text_chars": 4565,
-          "entries_superseded_text_chars": 603,
-          "entries_other_chars": 869,
+          "entries_superseded_text_chars": 932,
+          "entries_other_chars": 853,
           "cortex_chars": 1390,
           "events_chars": 0,
           "envelope_chars": 108,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 1883
+          "approx_tokens": 1962
         }
       },
       {
         "query": "which extractor is deployed for consolidation",
         "before": {
-          "total_chars": 10384,
-          "entries_chars": 8289,
+          "total_chars": 10386,
+          "entries_chars": 8291,
           "entries_text_chars": 7610,
           "entries_superseded_text_chars": 0,
-          "entries_other_chars": 679,
+          "entries_other_chars": 681,
           "cortex_chars": 1984,
           "events_chars": 0,
           "envelope_chars": 111,
@@ -352,11 +357,11 @@
           "approx_tokens": 2596
         },
         "after": {
-          "total_chars": 7313,
-          "entries_chars": 5218,
+          "total_chars": 7315,
+          "entries_chars": 5220,
           "entries_text_chars": 4420,
           "entries_superseded_text_chars": 0,
-          "entries_other_chars": 798,
+          "entries_other_chars": 800,
           "cortex_chars": 1984,
           "events_chars": 0,
           "envelope_chars": 111,
@@ -381,17 +386,17 @@
           "approx_tokens": 3283
         },
         "after": {
-          "total_chars": 8401,
-          "entries_chars": 6481,
+          "total_chars": 11515,
+          "entries_chars": 9595,
           "entries_text_chars": 3752,
-          "entries_superseded_text_chars": 1870,
-          "entries_other_chars": 859,
+          "entries_superseded_text_chars": 5001,
+          "entries_other_chars": 842,
           "cortex_chars": 1547,
           "events_chars": 0,
           "envelope_chars": 373,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2100
+          "approx_tokens": 2878
         }
       },
       {
@@ -410,46 +415,46 @@
           "approx_tokens": 3310
         },
         "after": {
-          "total_chars": 8761,
-          "entries_chars": 6106,
+          "total_chars": 9354,
+          "entries_chars": 6699,
           "entries_text_chars": 4566,
-          "entries_superseded_text_chars": 603,
+          "entries_superseded_text_chars": 1196,
           "entries_other_chars": 937,
           "cortex_chars": 2276,
           "events_chars": 0,
           "envelope_chars": 379,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2190
+          "approx_tokens": 2338
         }
       },
       {
         "query": "why did the cascade number get retired",
         "before": {
-          "total_chars": 14763,
-          "entries_chars": 12516,
+          "total_chars": 14764,
+          "entries_chars": 12517,
           "entries_text_chars": 10111,
           "entries_superseded_text_chars": 1673,
-          "entries_other_chars": 732,
+          "entries_other_chars": 733,
           "cortex_chars": 2143,
           "events_chars": 0,
           "envelope_chars": 104,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 3690
+          "approx_tokens": 3691
         },
         "after": {
-          "total_chars": 8542,
-          "entries_chars": 6295,
+          "total_chars": 9613,
+          "entries_chars": 7366,
           "entries_text_chars": 4824,
-          "entries_superseded_text_chars": 603,
-          "entries_other_chars": 868,
+          "entries_superseded_text_chars": 1673,
+          "entries_other_chars": 869,
           "cortex_chars": 2143,
           "events_chars": 0,
           "envelope_chars": 104,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 2135
+          "approx_tokens": 2403
         }
       },
       {
@@ -468,32 +473,32 @@
           "approx_tokens": 4214
         },
         "after": {
-          "total_chars": 7903,
-          "entries_chars": 6248,
+          "total_chars": 8568,
+          "entries_chars": 6913,
           "entries_text_chars": 4831,
-          "entries_superseded_text_chars": 607,
+          "entries_superseded_text_chars": 1272,
           "entries_other_chars": 810,
           "cortex_chars": 1555,
           "events_chars": 0,
           "envelope_chars": 100,
           "count": 8,
           "cortex_count": 5,
-          "approx_tokens": 1975
+          "approx_tokens": 2142
         }
       }
     ],
     "aggregate": {
       "before": {
         "total_chars": {
-          "mean": 14744.5,
-          "median": 15326,
-          "p90": 18885.0,
+          "mean": 14744.9,
+          "median": 15325,
+          "p90": 18886.0,
           "max": 19021.0
         },
         "entries_chars": {
-          "mean": 12636.5,
+          "mean": 12636.6,
           "median": 13369,
-          "p90": 15607.0,
+          "p90": 15606.0,
           "max": 16527.0
         },
         "entries_text_chars": {
@@ -502,14 +507,20 @@
           "p90": 11879.0,
           "max": 13256.0
         },
+        "entries_superseded_text_chars": {
+          "mean": 2405.5,
+          "median": 2408,
+          "p90": 4465.0,
+          "max": 5001.0
+        },
         "entries_other_chars": {
-          "mean": 766.5,
+          "mean": 766.6,
           "median": 740,
           "p90": 889.0,
           "max": 978.0
         },
         "cortex_chars": {
-          "mean": 1852.8,
+          "mean": 1853.0,
           "median": 1856,
           "p90": 2276.0,
           "max": 2322.0
@@ -529,16 +540,16 @@
       },
       "after": {
         "total_chars": {
-          "mean": 8745.6,
-          "median": 8663,
-          "p90": 10425.0,
-          "max": 11923.0
+          "mean": 9950.7,
+          "median": 9613,
+          "p90": 12583.0,
+          "max": 13976.0
         },
         "entries_chars": {
-          "mean": 6637.5,
-          "median": 6481,
-          "p90": 8067.0,
-          "max": 8332.0
+          "mean": 7842.4,
+          "median": 7895,
+          "p90": 10224.0,
+          "max": 10385.0
         },
         "entries_text_chars": {
           "mean": 4550.1,
@@ -546,14 +557,20 @@
           "p90": 4831.0,
           "max": 4832.0
         },
+        "entries_superseded_text_chars": {
+          "mean": 2405.5,
+          "median": 2408,
+          "p90": 4465.0,
+          "max": 5001.0
+        },
         "entries_other_chars": {
-          "mean": 888.9,
-          "median": 868,
+          "mean": 886.7,
+          "median": 853,
           "p90": 991.0,
           "max": 1097.0
         },
         "cortex_chars": {
-          "mean": 1852.8,
+          "mean": 1853.0,
           "median": 1856,
           "p90": 2276.0,
           "max": 2322.0
@@ -565,23 +582,24 @@
           "max": 1149.0
         },
         "total_approx_tokens": {
-          "mean": 2185.9,
-          "median": 2165,
-          "p90": 2606.0,
-          "max": 2980.0
+          "mean": 2487.3,
+          "median": 2403,
+          "p90": 3145.0,
+          "max": 3494.0
         }
       }
     },
     "entry_text": {
       "entries": 120,
+      "entry_text_chars": 600,
       "raw_chars": {
         "mean": 1179.6,
         "median": 1149.0,
         "p90": 1794.0,
         "max": 2302.0
       },
-      "over_600": 106,
-      "share_over_600": 0.883
+      "over_cap": 106,
+      "share_over_cap": 0.883
     }
   },
   "search_narrow": {
@@ -591,30 +609,30 @@
       {
         "query": "what port does the bench postgres listen on",
         "before": {
-          "total_chars": 7003,
+          "total_chars": 7004,
           "entries_chars": 5331,
           "entries_text_chars": 3246,
           "entries_superseded_text_chars": 1741,
           "entries_other_chars": 344,
-          "cortex_chars": 1563,
+          "cortex_chars": 1564,
           "events_chars": 0,
           "envelope_chars": 109,
           "count": 3,
           "cortex_count": 5,
-          "approx_tokens": 1750
+          "approx_tokens": 1751
         },
         "after": {
-          "total_chars": 3221,
-          "entries_chars": 2218,
+          "total_chars": 4360,
+          "entries_chars": 3356,
           "entries_text_chars": 1237,
-          "entries_superseded_text_chars": 603,
+          "entries_superseded_text_chars": 1741,
           "entries_other_chars": 378,
-          "cortex_chars": 894,
+          "cortex_chars": 895,
           "events_chars": 0,
           "envelope_chars": 109,
           "count": 3,
           "cortex_count": 3,
-          "approx_tokens": 805
+          "approx_tokens": 1090
         }
       },
       {
@@ -649,12 +667,12 @@
       {
         "query": "why is the recency boost disabled",
         "before": {
-          "total_chars": 9136,
+          "total_chars": 9137,
           "entries_chars": 7145,
           "entries_text_chars": 5607,
           "entries_superseded_text_chars": 1183,
           "entries_other_chars": 355,
-          "cortex_chars": 1892,
+          "cortex_chars": 1893,
           "events_chars": 0,
           "envelope_chars": 99,
           "count": 3,
@@ -662,27 +680,27 @@
           "approx_tokens": 2284
         },
         "after": {
-          "total_chars": 4159,
-          "entries_chars": 2818,
+          "total_chars": 4740,
+          "entries_chars": 3398,
           "entries_text_chars": 1809,
-          "entries_superseded_text_chars": 603,
+          "entries_superseded_text_chars": 1183,
           "entries_other_chars": 406,
-          "cortex_chars": 1242,
+          "cortex_chars": 1243,
           "events_chars": 0,
           "envelope_chars": 99,
           "count": 3,
           "cortex_count": 3,
-          "approx_tokens": 1039
+          "approx_tokens": 1185
         }
       },
       {
         "query": "what did the flat band ablation conclude",
         "before": {
-          "total_chars": 6957,
-          "entries_chars": 5325,
+          "total_chars": 6956,
+          "entries_chars": 5324,
           "entries_text_chars": 3443,
           "entries_superseded_text_chars": 1631,
-          "entries_other_chars": 251,
+          "entries_other_chars": 250,
           "cortex_chars": 1526,
           "events_chars": 0,
           "envelope_chars": 106,
@@ -691,17 +709,17 @@
           "approx_tokens": 1739
         },
         "after": {
-          "total_chars": 3781,
-          "entries_chars": 2714,
+          "total_chars": 4808,
+          "entries_chars": 3741,
           "entries_text_chars": 1809,
-          "entries_superseded_text_chars": 603,
-          "entries_other_chars": 302,
+          "entries_superseded_text_chars": 1631,
+          "entries_other_chars": 301,
           "cortex_chars": 961,
           "events_chars": 0,
           "envelope_chars": 106,
           "count": 3,
           "cortex_count": 3,
-          "approx_tokens": 945
+          "approx_tokens": 1202
         }
       },
       {
@@ -720,27 +738,27 @@
           "approx_tokens": 1702
         },
         "after": {
-          "total_chars": 3920,
-          "entries_chars": 2524,
+          "total_chars": 4731,
+          "entries_chars": 3335,
           "entries_text_chars": 1596,
-          "entries_superseded_text_chars": 603,
+          "entries_superseded_text_chars": 1414,
           "entries_other_chars": 325,
           "cortex_chars": 1296,
           "events_chars": 0,
           "envelope_chars": 100,
           "count": 3,
           "cortex_count": 3,
-          "approx_tokens": 980
+          "approx_tokens": 1182
         }
       },
       {
         "query": "how does the dream cursor advance",
         "before": {
-          "total_chars": 8222,
-          "entries_chars": 6267,
+          "total_chars": 8221,
+          "entries_chars": 6266,
           "entries_text_chars": 3449,
           "entries_superseded_text_chars": 2489,
-          "entries_other_chars": 329,
+          "entries_other_chars": 328,
           "cortex_chars": 1856,
           "events_chars": 0,
           "envelope_chars": 99,
@@ -749,17 +767,17 @@
           "approx_tokens": 2055
         },
         "after": {
-          "total_chars": 4537,
-          "entries_chars": 3395,
+          "total_chars": 5819,
+          "entries_chars": 4677,
           "entries_text_chars": 1809,
-          "entries_superseded_text_chars": 1206,
-          "entries_other_chars": 380,
+          "entries_superseded_text_chars": 2489,
+          "entries_other_chars": 379,
           "cortex_chars": 1043,
           "events_chars": 0,
           "envelope_chars": 99,
           "count": 3,
           "cortex_count": 3,
-          "approx_tokens": 1134
+          "approx_tokens": 1454
         }
       },
       {
@@ -778,17 +796,17 @@
           "approx_tokens": 2554
         },
         "after": {
-          "total_chars": 6110,
-          "entries_chars": 3451,
+          "total_chars": 6860,
+          "entries_chars": 4201,
           "entries_text_chars": 1812,
-          "entries_superseded_text_chars": 1206,
+          "entries_superseded_text_chars": 1956,
           "entries_other_chars": 433,
           "cortex_chars": 1390,
           "events_chars": 1149,
           "envelope_chars": 120,
           "count": 3,
           "cortex_count": 3,
-          "approx_tokens": 1527
+          "approx_tokens": 1715
         }
       },
       {
@@ -823,30 +841,30 @@
       {
         "query": "how are constraint facts pinned in retrieval",
         "before": {
-          "total_chars": 8067,
+          "total_chars": 8068,
           "entries_chars": 5709,
           "entries_text_chars": 3942,
           "entries_superseded_text_chars": 1441,
           "entries_other_chars": 326,
-          "cortex_chars": 2248,
+          "cortex_chars": 2249,
           "events_chars": 0,
           "envelope_chars": 110,
           "count": 3,
           "cortex_count": 5,
-          "approx_tokens": 2016
+          "approx_tokens": 2017
         },
         "after": {
-          "total_chars": 4999,
-          "entries_chars": 3281,
+          "total_chars": 5350,
+          "entries_chars": 3631,
           "entries_text_chars": 1813,
-          "entries_superseded_text_chars": 1091,
+          "entries_superseded_text_chars": 1441,
           "entries_other_chars": 377,
-          "cortex_chars": 1608,
+          "cortex_chars": 1609,
           "events_chars": 0,
           "envelope_chars": 110,
           "count": 3,
           "cortex_count": 3,
-          "approx_tokens": 1249
+          "approx_tokens": 1337
         }
       },
       {
@@ -881,11 +899,11 @@
       {
         "query": "which extractor is deployed for consolidation",
         "before": {
-          "total_chars": 5089,
-          "entries_chars": 2994,
+          "total_chars": 5090,
+          "entries_chars": 2995,
           "entries_text_chars": 2754,
           "entries_superseded_text_chars": 0,
-          "entries_other_chars": 240,
+          "entries_other_chars": 241,
           "cortex_chars": 1984,
           "events_chars": 0,
           "envelope_chars": 111,
@@ -894,11 +912,11 @@
           "approx_tokens": 1272
         },
         "after": {
-          "total_chars": 2906,
-          "entries_chars": 1674,
+          "total_chars": 2907,
+          "entries_chars": 1675,
           "entries_text_chars": 1400,
           "entries_superseded_text_chars": 0,
-          "entries_other_chars": 274,
+          "entries_other_chars": 275,
           "cortex_chars": 1121,
           "events_chars": 0,
           "envelope_chars": 111,
@@ -923,17 +941,17 @@
           "approx_tokens": 1784
         },
         "after": {
-          "total_chars": 3701,
-          "entries_chars": 2775,
+          "total_chars": 5205,
+          "entries_chars": 4279,
           "entries_text_chars": 1819,
-          "entries_superseded_text_chars": 603,
+          "entries_superseded_text_chars": 2107,
           "entries_other_chars": 353,
           "cortex_chars": 828,
           "events_chars": 0,
           "envelope_chars": 98,
           "count": 3,
           "cortex_count": 3,
-          "approx_tokens": 925
+          "approx_tokens": 1301
         }
       },
       {
@@ -1027,9 +1045,9 @@
     "aggregate": {
       "before": {
         "total_chars": {
-          "mean": 6870.0,
+          "mean": 6870.1,
           "median": 6904,
-          "p90": 9136.0,
+          "p90": 9137.0,
           "max": 10219.0
         },
         "entries_chars": {
@@ -1044,6 +1062,12 @@
           "p90": 4970.0,
           "max": 5607.0
         },
+        "entries_superseded_text_chars": {
+          "mean": 930.8,
+          "median": 1183,
+          "p90": 2107.0,
+          "max": 2489.0
+        },
         "entries_other_chars": {
           "mean": 294.5,
           "median": 302,
@@ -1051,7 +1075,7 @@
           "max": 382.0
         },
         "cortex_chars": {
-          "mean": 1852.8,
+          "mean": 1853.0,
           "median": 1856,
           "p90": 2276.0,
           "max": 2322.0
@@ -1063,7 +1087,7 @@
           "max": 1149.0
         },
         "total_approx_tokens": {
-          "mean": 1717.1,
+          "mean": 1717.3,
           "median": 1726,
           "p90": 2284.0,
           "max": 2554.0
@@ -1071,16 +1095,16 @@
       },
       "after": {
         "total_chars": {
-          "mean": 3793.9,
-          "median": 3572,
-          "p90": 4999.0,
-          "max": 6110.0
+          "mean": 4290.3,
+          "median": 4360,
+          "p90": 5819.0,
+          "max": 6860.0
         },
         "entries_chars": {
-          "mean": 2486.8,
-          "median": 2218,
-          "p90": 3395.0,
-          "max": 3451.0
+          "mean": 2983.0,
+          "median": 3335,
+          "p90": 4279.0,
+          "max": 4677.0
         },
         "entries_text_chars": {
           "mean": 1712.4,
@@ -1088,17 +1112,23 @@
           "p90": 1816.0,
           "max": 1819.0
         },
+        "entries_superseded_text_chars": {
+          "mean": 930.8,
+          "median": 1183,
+          "p90": 2107.0,
+          "max": 2489.0
+        },
         "entries_other_chars": {
-          "mean": 339.9,
+          "mean": 339.8,
           "median": 353,
           "p90": 406.0,
           "max": 433.0
         },
         "cortex_chars": {
-          "mean": 1106.9,
+          "mean": 1107.1,
           "median": 1087,
           "p90": 1390.0,
-          "max": 1608.0
+          "max": 1609.0
         },
         "events_chars": {
           "mean": 76.6,
@@ -1107,23 +1137,24 @@
           "max": 1149.0
         },
         "total_approx_tokens": {
-          "mean": 948.1,
-          "median": 893,
-          "p90": 1249.0,
-          "max": 1527.0
+          "mean": 1072.3,
+          "median": 1090,
+          "p90": 1454.0,
+          "max": 1715.0
         }
       }
     },
     "entry_text": {
       "entries": 45,
+      "entry_text_chars": 600,
       "raw_chars": {
         "mean": 1174.9,
         "median": 1144.0,
         "p90": 1790.0,
         "max": 2241.0
       },
-      "over_600": 40,
-      "share_over_600": 0.889
+      "over_cap": 40,
+      "share_over_cap": 0.889
     }
   },
   "fact_get": {
@@ -1209,9 +1240,9 @@
         "iterations": 1,
         "entities": 10,
         "service_search_calls": 58,
-        "chars": 5413,
-        "approx_tokens": 1353,
-        "verbose_chars": 14352
+        "chars": 5579,
+        "approx_tokens": 1394,
+        "verbose_chars": 15533
       },
       {
         "question": "what depends on the embedding model",
@@ -1252,7 +1283,7 @@
         "max": 66.0
       },
       "chars": {
-        "mean": 4209.6,
+        "mean": 4242.8,
         "median": 5339,
         "p90": 5971.0,
         "max": 5971.0

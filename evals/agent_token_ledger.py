@@ -43,6 +43,15 @@ Method (the honest caveats, because the numbers are bank-specific):
 * Sizes are chars of the compact JSON encoding an MCP client receives
   (``separators=(",", ":")``, ``ensure_ascii=False``) and approx tokens are
   ``chars // 4``, the convention in ``ladder_sweep.approx_tokens``.
+* The ``fact_get`` arm prices the RECORD, not the call: its "before" is the
+  ``/api/facts`` dump row rather than the served ``cortex_lookup`` record
+  (the dump carries an ``entity_id`` the served record never has), and
+  neither arm includes the tool envelope, ``contenders`` or
+  ``correct_with``. See ``measure_fact_get``.
+* The cuts are read from ``utils.config.McpConfig`` rather than restated
+  here, so a change to ``entry_text_chars`` re-prices the run instead of
+  silently desynchronising it from the published numbers. The values used
+  are written into the artifact's ``config`` block.
 
 Usage::
 
@@ -63,11 +72,13 @@ import importlib
 import json
 import os
 import re
+import socket
 import statistics
 import sys
 import tempfile
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable
 from datetime import date
 from typing import Any
 
@@ -143,9 +154,51 @@ _UNSAFE = re.compile(
     r"|\bsk-[A-Za-z0-9]|\bghp_|\bBearer\b)", re.IGNORECASE)
 
 
+def host_pattern(names: Iterable[str]) -> re.Pattern[str] | None:
+    """A matcher for MACHINE NAMES, or None when there is nothing to hide.
+
+    A bank keeps facts ABOUT the machine it runs on, so a slot label can
+    be a bare hostname with no path, address or credential in it for
+    ``_UNSAFE`` to catch: it passed ``<host> | crash-root-cause`` straight
+    into a committed artifact (2026-09-04 review finding), and CLAUDE.md
+    forbids hostnames in a public tree as firmly as it forbids emails.
+
+    Separators are optional in the match, so the DNS form, the shouty
+    NetBIOS form and the spaced-out prose form of one name all hit:
+    ``box-two`` matches ``BOX-TWO``, ``box two`` and ``boxtwo``. Any
+    domain suffix is dropped (only the label is matched), and names under
+    three characters are skipped because they would redact real words.
+    """
+    alts = []
+    for n in names:
+        n = (n or "").strip().split(".")[0]
+        if len(n) < 3:
+            continue
+        parts = [re.escape(p) for p in re.split(r"[-_.\s]+", n) if p]
+        if parts:
+            alts.append(r"[-_.\s]?".join(parts))
+    if not alts:
+        return None
+    return re.compile(r"\b(?:" + "|".join(sorted(set(alts))) + r")\b",
+                      re.IGNORECASE)
+
+
+def local_hostnames() -> set[str]:
+    """Every name this machine answers to — the OS name plus the two env
+    vars Windows and POSIX respectively set."""
+    return {n for n in (socket.gethostname(),
+                        os.environ.get("COMPUTERNAME", ""),
+                        os.environ.get("HOSTNAME", "")) if n}
+
+
+_HOST = host_pattern(local_hostnames())
+
+
 def safe_label(s: str) -> str:
     s = " ".join((s or "").split())
-    return "<redacted>" if _UNSAFE.search(s) else s
+    if _UNSAFE.search(s) or (_HOST is not None and _HOST.search(s)):
+        return "<redacted>"
+    return s
 
 
 # ── daemon REST (read-only) ───────────────────────────────────────────────
@@ -183,6 +236,33 @@ def read_token() -> str | None:
 
 
 # ── the MCP projection layer, loaded without touching a bank ──────────────
+
+def mcp_defaults() -> Any:
+    """The shipped ``memory.mcp`` defaults, read from the dataclass.
+
+    The two cuts this ledger prices are parameterised in
+    ``utils.config.McpConfig`` (``entry_text_chars``, and the
+    ``min(5, top_k)`` cortex width the tool computes from it being on).
+    Reading them here rather than restating the numbers means a future
+    change to a default cannot silently desynchronise the published
+    figures from the behaviour they describe — the run would price the
+    new default and the pinned claims would go red (2026-09-04 review
+    finding).
+    """
+    from pseudolife_memory.utils.config import AppConfig
+    return AppConfig().memory.mcp
+
+
+# The cortex block's width under the cut, as ``memory_search`` computes it
+# (``mcp_server.memory_search``: ``min(5, max(1, top_k))``). Kept as one
+# named helper so the ledger and the tool cannot drift apart in two
+# places.
+CORTEX_WIDTH_UNCUT = 5
+
+
+def cortex_width(top_k: int) -> int:
+    return min(CORTEX_WIDTH_UNCUT, max(1, top_k))
+
 
 def load_mcp():
     """Import ``mcp_server`` bound to a throwaway file-mode data dir. Only
@@ -268,7 +348,8 @@ def _split_search(payload: dict) -> dict[str, int]:
     }
 
 
-def project_search(mod, raw: dict, *, compact: bool, top_k: int) -> dict:
+def project_search(mod, raw: dict, *, compact: bool, top_k: int,
+                   text_chars: int) -> dict:
     """Reproduce the MCP payload for one raw ``/api/search`` response.
 
     ``/api/search`` returns exactly the two inputs the tool's projection
@@ -296,46 +377,55 @@ def project_search(mod, raw: dict, *, compact: bool, top_k: int) -> dict:
     payload = json.loads(json.dumps(raw, default=str))
     facts = payload.pop("cortex", []) or []
     if compact:
-        facts = facts[:min(5, max(1, top_k))]
+        facts = facts[:cortex_width(top_k)]
     return mod._project_search(
         payload, facts, compact=True,
-        text_chars=(600 if compact else None))
+        text_chars=(text_chars if compact else None))
 
 
-def measure_search(mod, dm: Daemon, top_k: int) -> dict[str, Any]:
+def measure_search(mod, dm: Daemon, top_k: int,
+                   text_chars: int) -> dict[str, Any]:
     rows = []
     entry_text_lengths: list[float] = []
     for q in QUERIES:
         raw = dm.get("/api/search", q=q, top_k=top_k)
         before = _split_search(project_search(
-            mod, raw, compact=False, top_k=top_k))
+            mod, raw, compact=False, top_k=top_k, text_chars=text_chars))
         after = _split_search(project_search(
-            mod, raw, compact=True, top_k=top_k))
+            mod, raw, compact=True, top_k=top_k, text_chars=text_chars))
         # Raw per-entry text length — what the ``entry_text_chars`` cap is
         # chosen against. Taken from the untruncated arm, in characters of
         # the text itself rather than of its JSON encoding.
         entry_text_lengths += [
             float(len(e.get("text") or ""))
-            for e in project_search(mod, raw, compact=False,
-                                    top_k=top_k).get("entries", [])]
+            for e in project_search(
+                mod, raw, compact=False, top_k=top_k,
+                text_chars=text_chars).get("entries", [])]
         rows.append({"query": q, "before": before, "after": after})
     agg: dict[str, Any] = {}
     for arm in ("before", "after"):
         agg[arm] = {
             k: _stats([r[arm][k] for r in rows])
+            # ``entries_superseded_text_chars`` is aggregated, not just
+            # recorded per query: it is a third of the entries block on
+            # this bank and the README's breakdown did not name it, which
+            # left ~2,400 chars unlabelled between the block total and
+            # text + metadata (2026-09-04 review finding).
             for k in ("total_chars", "entries_chars", "entries_text_chars",
+                      "entries_superseded_text_chars",
                       "entries_other_chars", "cortex_chars", "events_chars")
         }
         agg[arm]["total_approx_tokens"] = _stats(
             [r[arm]["approx_tokens"] for r in rows])
-    cap = 600
+    cap = text_chars
     return {"top_k": top_k, "queries": len(rows), "per_query": rows,
             "aggregate": agg,
             "entry_text": {
                 "entries": len(entry_text_lengths),
+                "entry_text_chars": cap,
                 "raw_chars": _stats(entry_text_lengths),
-                "over_600": sum(1 for n in entry_text_lengths if n > cap),
-                "share_over_600": round(
+                "over_cap": sum(1 for n in entry_text_lengths if n > cap),
+                "share_over_cap": round(
                     sum(1 for n in entry_text_lengths if n > cap)
                     / max(1, len(entry_text_lengths)), 3),
             }}
@@ -345,6 +435,29 @@ def measure_search(mod, dm: Daemon, top_k: int) -> dict[str, Any]:
 
 def measure_fact_get(mod, dm: Daemon, slots: list[tuple[str, str]],
                      records: dict[tuple[str, str], dict]) -> dict[str, Any]:
+    """Price the lean fact projection over five real slots — with two
+    disclosed gaps, both in the direction of over-stating the "before".
+
+    1. The "before" record is the ``/api/facts`` dump row
+       (``service.cortex_dump``), not the record ``memory_fact_get``
+       serves (``service.cortex_lookup``). The two agree on the
+       bookkeeping keys the cut moves, which is what makes the arm
+       meaningful, but the dump row carries an ``entity_id`` the served
+       record never has, and the served record can carry keys the dump
+       does not (``correct_with``, ``stale``/currency flags recomputed at
+       lookup time). So the "before" is a few tens of chars wide of a real
+       call and the "after" is the projection applied to that same row.
+    2. Neither arm includes the tool ENVELOPE — ``{"record": ...,
+       "contenders": [...]}`` plus, on an aged fact, ``correct_with`` and
+       the ``correction_note`` — so both numbers are the record alone.
+       The percentage cut is the honest figure; the absolute chars are a
+       floor on what a call costs, not the call.
+
+    Fixing either would need a live service bound to the bank, which this
+    script deliberately does not have (it loads ``mcp_server`` against a
+    throwaway file-mode dir so it can never write). Disclosed rather than
+    silently approximated (2026-09-04 review finding).
+    """
     rows = []
     for ent, attr in slots:
         rec = records[(ent, attr)]
@@ -502,6 +615,7 @@ def main() -> int:
         return 2
 
     mod = load_mcp()
+    cfg = mcp_defaults()
     dm = Daemon(args.daemon, read_token())
     stats = dm.get("/api/stats")
 
@@ -515,10 +629,16 @@ def main() -> int:
                      "(separators=(',',':'), ensure_ascii=False)",
             "approx_tokens": "chars // 4 (evals/ladder_sweep.approx_tokens)",
         },
+        "config": {
+            "compact_payloads": cfg.compact_payloads,
+            "entry_text_chars": cfg.entry_text_chars,
+            "cortex_width_uncut": CORTEX_WIDTH_UNCUT,
+        },
         "manifest": measure_manifest(mod),
         "session_start_block": measure_session_block(),
-        "search": measure_search(mod, dm, args.top_k),
-        "search_narrow": measure_search(mod, dm, args.narrow_top_k),
+        "search": measure_search(mod, dm, args.top_k, cfg.entry_text_chars),
+        "search_narrow": measure_search(mod, dm, args.narrow_top_k,
+                                        cfg.entry_text_chars),
         "fact_get": measure_fact_get(mod, dm, slots, records),
         "recall": measure_recall(mod, dm),
     }

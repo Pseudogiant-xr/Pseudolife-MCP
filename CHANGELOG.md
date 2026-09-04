@@ -18,19 +18,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the MCP layer's own helpers, so before/after is exactly paired. (GET-only
   is not side-effect free — `/api/search` appends `retrieval_events` rows
   and touches access counters — but no bank content is written.) Artifact:
-  `evals/results/agent-token-ledger-20260904-r2.json` (1,314-entry bank,
-  `preset: flat`, 0 of 5,500 current facts label-bearing, which is the
+  `evals/results/agent-token-ledger-20260904-r3.json` (1,316-entry bank,
+  `preset: flat`, 0 of 5,509 current facts label-bearing, which is the
   validity condition for the `top_k=3` arm and is now counted per run);
-  the pre-review `agent-token-ledger-20260904.json` stays committed as the
-  r1 record and is cited by nothing. Every published cell is pinned in
+  the two pre-review runs (`agent-token-ledger-20260904.json` and
+  `...-r2.json`) stay committed as records and are cited by nothing. Every published cell is pinned in
   `tests/test_eval_evidence.py`; the section is
   `evals/README.md` → "Agent-side token ledger".
-  - What a session pays before asking anything: manifest **6,923 chars
-    (~1,730 tok) minimal / 13,984 core / 22,627 full**, plus **7,492 chars
+  - What a session pays before asking anything: manifest **7,015 chars
+    (~1,753 tok) minimal / 14,076 core / 22,719 full**, plus **7,492 chars
     (~1,873 tok)** of served session-start block (raw text, as the hook
     writes it — not the JSON encoding the payload cells count).
-  - What one `memory_search` cost at the default `top_k=8`: **14,744 chars
-    mean** (median 15,326, p90 18,885), of which entry `text` alone was
+  - What one `memory_search` cost at the default `top_k=8`: **14,745 chars
+    mean** (median 15,325, p90 18,886), of which entry `text` alone was
     **64%**.
   - `memory_fact_get` on the five widest slots: **2,175 chars mean**.
   - Not fixed, and the largest finding: a 3-hop `memory_recall` issues
@@ -43,11 +43,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `memory.mcp.entry_text_chars` (default 600) with a `truncated: true`
     marker, and the tool description points at `memory_get` for the whole
     text — the shape `memory_recall` has used for its supporting texts
-    since 2026-07-10. `superseded_by_text` is capped on the same terms.
-    Mean payload **14,744 → 8,746 chars (−41%)**; entry text 9,464 → 4,550.
+    since 2026-07-10. `superseded_by_text` is **exempt** — see the
+    correction below. Mean payload **14,745 → 9,951 chars (−33%)**; entry
+    text 9,464 → 4,550.
   - The cortex block follows the caller: `min(5, top_k)` facts instead of
     a hardcoded 5. Inert at the default `top_k=8`; at `top_k=3` the block
-    goes 1,853 → 1,107 chars and the whole call 6,870 → 3,794 (−45%).
+    goes 1,853 → 1,107 chars and the whole call 6,870 → 4,290 (−38%).
     The narrowing is passed *into* `cortex_search` rather than sliced off
     its output, so constraint pinning re-budgets with it and pinned facts
     stay at the head.
@@ -87,6 +88,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   twin `examples/CLAUDE.memory.md`) move together; the block is 7,492 raw
   chars against the 7,500 cap, so the replacement is length-neutral by
   construction.
+- **`superseded_by_text` is served whole, never clipped** — and the
+  headline above is 33%, not the 41% the r2 run measured, because of it.
+  The first cut capped that field on the same terms as the entry's own
+  text, on the reasoning that it is read as an answer and so costs like
+  one. It is not recoverable like one: a compact entry carries no id for
+  the superseding entry and nothing stores a pointer to one, so
+  `memory_get(entry.id)` returns the *superseded* text rather than the
+  replacement, and a clipped correction cannot be retrieved by any tool
+  call in any tier. Three surfaces instruct agents to prefer that field
+  over the entry's own text (the served session-start block,
+  `examples/CLAUDE.memory.md`, `memory_search`'s description), and the r2
+  artifact measured 13 of 15 `top_k=8` queries clipping at least one
+  (2,406 → 1,199 chars mean). **The −41% and the entries-block figures the
+  PR first published priced that truncated payload and were retired before
+  merge**; every number in this entry is re-measured from r3 against the
+  shipped behaviour. `truncated: true` now means exactly one thing: this
+  entry's own `text` was clipped and `memory_get` returns it whole.
+- The ledger's `safe_label` redactor now covers **machine names** as well
+  as home paths, emails, IPs and credentials. A bank holds facts *about*
+  the machine it runs on, so a slot label can be a bare hostname with
+  nothing else in it to catch — and one reached a committed artifact,
+  which a public tree must never carry (CLAUDE.md). The redactor matches
+  every name this machine answers to (`socket.gethostname` plus
+  `COMPUTERNAME` / `HOSTNAME`), separator-insensitively, and the leaked
+  label in the r2 artifact was redacted in place. Guarded by
+  `tests/test_agent_payload_budget.py`, which checks every committed
+  ledger artifact against the running machine's own names.
+- The published payload breakdown names `superseded_by_text` as its own
+  row. It is a sixth of the "before" payload, and the r2 breakdown left
+  those ~2,400 chars unlabelled between the entries-block total and text +
+  metadata.
+- `agent_token_ledger.py` reads `entry_text_chars` and the cortex width
+  from `utils.config.McpConfig` instead of restating `600` and
+  `min(5, top_k)`, and writes what it used into the artifact's `config`
+  block, so changing a default re-prices the run rather than silently
+  desynchronising the published numbers from the shipped behaviour. Its
+  `fact_get` caveats now disclose that the arm prices the record and not
+  the call: the "before" is the `/api/facts` dump row (which carries an
+  `entity_id` the served record never has) and neither arm includes the
+  tool envelope, `contenders` or `correct_with`.
 - `agent_token_ledger.py` refuses to overwrite an existing `--out` unless
   `--force` is passed. Its default path is dated, not run-tagged, so a
   same-day rerun used to silently rewrite the canonical artifact — the exact

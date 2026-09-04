@@ -320,13 +320,21 @@ def _compact_entry(e: dict[str, Any],
     """{id, text, source, tags, score} plus the supersession signal when
     set — ``superseded_by_text`` changes answers, so it always survives.
 
-    ``text_chars`` caps the two free-text fields (2026-09-04 agent token
-    ledger: entry ``text`` alone was 64% of a served ``memory_search``
-    payload, mean 1,180 chars per hit). An entry with EITHER field cut
-    carries one ``truncated: True`` — the flag says "this entry was
-    clipped, ``memory_get`` returns it whole", which is true of both
-    fields, rather than paying for a second per-field marker. None = no
-    truncation, the pre-ledger shape."""
+    ``text_chars`` caps the entry's own ``text`` (2026-09-04 agent token
+    ledger: it alone was 64% of a served ``memory_search`` payload, mean
+    1,180 chars per hit) and sets ``truncated: True``, which means one
+    thing: this entry's ``text`` was clipped and ``memory_get`` returns it
+    whole. None = no truncation, the pre-ledger shape.
+
+    ``superseded_by_text`` is EXEMPT from the cap. It has no recovery
+    path: a compact entry carries no id for the superseding entry, and
+    nothing stores a pointer to one, so ``memory_get(entry.id)`` returns
+    this (superseded) entry's text rather than the replacement. Clipping
+    it would destroy the correction three surfaces tell agents to prefer
+    over the entry's own text (``web/session_hook.MEMORY_LOOP_BLOCK``,
+    ``examples/CLAUDE.memory.md``, ``memory_search``'s docstring). The
+    cost is bounded and measured — mean 2,406 chars per ``top_k=8`` query
+    on the 2026-09-04 ledger bank — and the remaining cut still stands."""
     out = {k: e[k] for k in ("id", "text", "source", "tags", "score") if k in e}
     if e.get("superseded"):
         out["superseded"] = True
@@ -337,15 +345,10 @@ def _compact_entry(e: dict[str, Any],
     for k in ("authority", "distortion_tolerance"):
         if e.get(k):
             out[k] = e[k]
-    if text_chars is not None:
-        cut = False
-        # The supersession pointer is capped on the same terms as the text
-        # it replaces — it survives compaction precisely because it is
-        # read as an answer, which makes it a payload cost like any other.
-        for k in ("text", "superseded_by_text"):
-            if isinstance(out.get(k), str):
-                out[k], hit = _truncate(out[k], text_chars)
-                cut = cut or hit
+    if text_chars is not None and isinstance(out.get("text"), str):
+        # ``superseded_by_text`` is deliberately absent from this loop —
+        # see the exemption in the docstring above.
+        out["text"], cut = _truncate(out["text"], text_chars)
         if cut:
             out["truncated"] = True
     return out
@@ -436,7 +439,7 @@ def memory_search(
     query: Annotated[str, Field(
         description="Natural-language description; specific beats vague.")],
     top_k: Annotated[int, Field(
-        description="Max entries returned.")] = 8,
+        description="Max entries; caps cortex facts too.")] = 8,
     sources: Annotated[list[str] | None, Field(
         description="Keep only entries with one of these source tags.")] = None,
     bands: Annotated[list[str] | None, Field(
@@ -468,9 +471,11 @@ def memory_search(
     you before letting it steer, and re-derive when today's context
     differs from the one it was written in. ``cortex``
     facts arrive AHEAD of ``entries`` — the current, deduped answer
-    (``contested: true`` awaits ``memory_fact_resolve``).
+    (``contested: true`` awaits ``memory_fact_resolve``). ``top_k``
+    sizes both blocks: ``min(5, top_k)`` facts.
     ``low_confidence=True``: no confident match, prefer abstaining. On a
-    superseded entry, prefer ``superseded_by_text``. Temporal cues may
+    superseded entry, prefer ``superseded_by_text`` (never
+    clipped). Temporal cues may
     add ``events`` (oldest first). A fact the query's entity is bound by
     (``distortion_tolerance: constraint``) is served first, marked
     ``pinned``; ``authority: quoted`` = someone else said it, not an
