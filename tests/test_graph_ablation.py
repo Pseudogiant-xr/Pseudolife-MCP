@@ -2,10 +2,13 @@
 
 CPU only, no database, no model, no git dependency: the DB seam
 (``graph_shape``) and the service seam (``run_pairs``) are exercised
-through fakes, and the redactor is tested against a stub.
+through fakes; the redactor is tested both against a stub and
+against a real `git grep` over a throwaway repo.
 """
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,11 +19,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 import graph_ablation as ga  # noqa: E402
 
 
-def test_guard_refuses_the_live_and_bench_dbs():
+# Both DSN spellings libpq accepts, and neither is case-sensitive in the
+# database name (2026-09-04 review: the URI-only, case-sensitive original
+# waved `dbname=pseudolife_memory` and a trailing slash straight through).
+_DSN_FORMS = (
+    "postgresql://u:p@h:5433/{db}",
+    "postgresql://u:p@h:5433/{db}/",
+    "postgresql://u:p@h:5433/{DB}",
+    "postgresql://u:p@h:5433/{db}?sslmode=disable",
+    "host=h port=5433 dbname={db}",
+    "dbname={DB} user=u",
+)
+
+
+@pytest.mark.parametrize("dsn_form", _DSN_FORMS)
+def test_guard_refuses_the_live_and_bench_dbs(dsn_form):
     for db in ("pseudolife_memory", "pseudolife_memory_bench"):
         with pytest.raises(SystemExit):
-            ga.guard_dsn(f"postgresql://u:p@h:5433/{db}")
+            ga.guard_dsn(dsn_form.format(db=db, DB=db.upper()))
     ga.guard_dsn("postgresql://u:p@h:5433/pseudolife_memory_replay_20260904")
+    ga.guard_dsn("host=h dbname=pseudolife_memory_replay_20260904")
 
 
 def test_thirty_relational_questions_each_name_an_expected_entity():
@@ -141,6 +159,37 @@ def test_redactor_redacts_when_git_is_unavailable(monkeypatch):
     monkeypatch.setattr(ga.subprocess, "run", boom)
     r = ga.NameRedactor(Path("."), enabled=True)
     assert r("pseudolife-mcp") == "<redacted>"
+
+
+def test_redactor_runs_real_git_grep_against_a_tracked_tree(tmp_path):
+    """The three tests above stub `public` or break subprocess, so none of
+    them exercises the seam that actually decides what leaks: the `git
+    grep` call. The 2026-09-04 review found a hostname in the published
+    artifact, and the question "did the check pass it, or was it never
+    run?" could not be answered from the suite. Drive the real path
+    against a throwaway repo: a name in a tracked file survives, a name
+    only in an UNTRACKED file does not, and matching is case-insensitive
+    (the redactor passes `-i`, and entity names are normalised lower-case
+    while the tree may spell them otherwise).
+    """
+    if shutil.which("git") is None:                     # pragma: no cover
+        pytest.skip("git not on PATH")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True,
+                   capture_output=True, timeout=30)
+    (tmp_path / "tracked.md").write_text(
+        "the Pseudolife-MCP daemon and its Cortex Console\n", encoding="utf-8")
+    (tmp_path / "untracked.md").write_text(
+        "some-laptop-hostname\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.md"], cwd=tmp_path, check=True,
+                   capture_output=True, timeout=30)
+
+    r = ga.NameRedactor(tmp_path, enabled=True)
+    assert r("pseudolife-mcp") == "pseudolife-mcp"   # tracked, other case
+    assert r("cortex console") == "cortex console"   # tracked, other case
+    assert r("some-laptop-hostname") == "<redacted>"  # untracked file
+    assert r("never-written-anywhere") == "<redacted>"
+    # The decision is cached per name, not re-shelled on every entity.
+    assert r._cache["some-laptop-hostname"] is False
 
 
 def test_sample_evenly_is_deterministic_and_spans_the_list():

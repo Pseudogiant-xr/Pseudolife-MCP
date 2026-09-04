@@ -52,7 +52,7 @@
         "degree": 30
       },
       {
-        "entity": "brendan-hermes",
+        "entity": "<redacted>",
         "degree": 29
       },
       {
@@ -492,5 +492,6 @@
   },
   "caveat": "the bank has grown since the logged events were served, so the logged arm's absolute hit rates are indicative; search and recall see the identical restored bank, so the paired comparison is the valid read",
   "privacy": "entity names appear only when they also occur in the tracked repo tree; no query or entry text",
+  "redaction_note": "one hostname-shaped entity name in graph_shape.top_degree_nodes was redacted to <redacted> by hand on 2026-09-04. The redactor emits a name only when it also occurs in the tracked repo tree; this one occurred there via a judge-eval fixture built from real bank memories, so the check vouched for it. No measured field changed - the degree beside it is the degree that was measured.",
   "config_seed_note": "the run predates the fix that records the config file NAME instead of its path; this ONE provenance string was rewritten to the value the current code emits, because an absolute path embeds the maintainer's OS username. No measured field was touched."
 }

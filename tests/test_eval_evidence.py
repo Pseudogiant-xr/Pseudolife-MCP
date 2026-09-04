@@ -2994,3 +2994,47 @@ for _cid, _key, _stated in [("hub", "via_hub", 520),
         value=(lambda k: lambda d: _dig(d, _REL + ("arrivals_total", k)))(_key),
         stated=_stated, places=0))
 
+
+# The per-arm MEDIAN latency. Added 2026-09-04 in pre-merge review: the
+# table shipped 0.234 / 0.101 / 0.394 s, none of which the artifact
+# carries, because nothing pinned the latency column while MRR and hit@1
+# beside it were pinned. The ~165 ms BM25 cost in the prose below the
+# table is the difference of the first two, so pinning both pins it.
+_LAT = "median_latency_s"
+for _arm, _needle, _stated in [
+    ("shipped",
+     "| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 |"
+     " 0.305 s |", 0.305),
+    ("bm25_off",
+     "| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 | 0.140 s |", 0.140),
+    ("rerank_on",
+     "| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 | 0.694 s |", 0.694),
+]:
+    CLAIMS.append(Claim(
+        id=f"replay-{_arm}-median-latency", doc=EVALS, needle=_needle,
+        artifacts=(RETRIEVAL_REPLAY,), value=_replay(_arm, _LAT),
+        stated=_stated, places=3))
+
+# `memory_recall`'s per-call wall time. The docs and the harness comment
+# both quoted "~2.5 minutes per call" until the 2026-09-04 pre-merge
+# review; the artifact says 32.4 s / 44.3 s mean, 73.0 s worst case. The
+# figure sizes every run of this harness, so it is pinned at both means.
+_LOG = ("ablation", "logged_queries", "summary")
+_WALL_NEEDLE = "| mean wall time | 0.44 s | 32.4 s | 0.39 s | 44.3 s |"
+for _cid, _path, _stated in [
+    ("relational", _REL + ("recall", "mean_wall_s"), 32.4),
+    ("logged", _LOG + ("recall", "mean_wall_s"), 44.3),
+]:
+    CLAIMS.append(Claim(
+        id=f"graph-recall-mean-wall-{_cid}", doc=EVALS, needle=_WALL_NEEDLE,
+        artifacts=(GRAPH_ABLATION,),
+        value=(lambda p: lambda d: _dig(d, p))(_path),
+        stated=_stated, places=1))
+CLAIMS.append(Claim(
+    id="graph-recall-max-wall", doc=EVALS,
+    needle="max\n73.0 s), and small enough that the hit-rate column is a",
+    artifacts=(GRAPH_ABLATION,),
+    value=lambda d: max(q["recall"]["wall_s"] for q in
+                        d["ablation"]["relational_questions"]["per_question"]),
+    stated=73.0, places=1))
+

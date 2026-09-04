@@ -106,9 +106,20 @@ COMPARATOR_TERMS = [
 
 
 def guard_dsn(dsn: str) -> None:
-    db = re.sub(r"\?.*$", "", dsn).rsplit("/", 1)[-1]
-    if db in FORBIDDEN_DBS:
-        sys.exit(f"refusing to run against {db!r} — restore a dedicated "
+    """Refuse the live and shared-bench banks by name, in either DSN
+    spelling libpq accepts and regardless of case.
+
+    The 2026-09-04 pre-merge review found the original matched only a
+    lower-case URI path segment: ``dbname=pseudolife_memory``, a trailing
+    slash, and an upper-cased name each walked through onto the live bank.
+    """
+    text = re.sub(r"\?.*$", "", dsn.strip())
+    names = {text.rstrip("/").rsplit("/", 1)[-1].lower()}
+    names.update(m.group(1).lower() for m in re.finditer(
+        r"\bdbname\s*=\s*['\"]?([^\s'\"]+)", text, re.IGNORECASE))
+    hit = sorted(names & {d.lower() for d in FORBIDDEN_DBS})
+    if hit:
+        sys.exit(f"refusing to run against {hit[0]!r} — restore a dedicated "
                  "replay copy instead (see the module docstring)")
 
 
@@ -467,10 +478,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--logged-limit", type=int, default=40)
     # `recall` at the shipped defaults (3 hops, max_entities=50,
     # expand_budget=0) issues one search per newly-discovered entity per
-    # hop — measured 2026-09-04 at ~2.5 min per call on CPU against the
-    # live-bank copy (1296 entries, 5504 entities). A full 30-question
-    # sweep is a multi-hour job; these caps make a smaller, honest run
-    # possible and the artifact records the n it used.
+    # hop — measured 2026-09-04 against the live-bank copy (1296 entries,
+    # 5504 entities) at a mean of 32.4 s per call on the relational set and
+    # 44.3 s on the logged set, worst case 73.0 s
+    # (graph-ablation-20260904.json, ablation.*.summary.recall.mean_wall_s).
+    # A full 30-question sweep still runs to tens of minutes; these caps
+    # make a smaller, honest run possible and the artifact records the n.
     ap.add_argument("--rel-limit", type=int, default=0,
                     help="cap the relational-question set (0 = all 30)")
     ap.add_argument("--no-redact", action="store_true",

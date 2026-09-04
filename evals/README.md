@@ -1838,11 +1838,14 @@ latency an order of magnitude below the first.
 
 ### Findings — 2026-09-04 (`retrieval-replay-20260904.json`), 250 sampled events, top_k=6
 
+Latency is the **median** per-query wall time
+(`results.logged-top1.arms.<arm>.median_latency_s` in the artifact).
+
 | arm | MRR | hit@1 | hit@3 | hit@6 | median latency |
 | --- | --- | --- | --- | --- | --- |
-| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 | 0.234 s |
-| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 | 0.101 s |
-| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 | 0.394 s |
+| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 | 0.305 s |
+| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 | 0.140 s |
+| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 | 0.694 s |
 
 Read as drift, three things:
 
@@ -1850,8 +1853,8 @@ Read as drift, three things:
   of hit@1 and 9.4 of MRR while leaving hit@6 nearly intact — the lexical
   channel decides *which* of the right six goes first, which is what a
   reranker would be trained to do.
-- **BM25 costs ~130 ms per query at this bank scale** (0.234 s vs
-  0.101 s), well above the 20-50 ms the config docstring quotes. That
+- **BM25 costs ~165 ms per query at this bank scale** (median 0.305 s
+  vs 0.140 s), well above the 20-50 ms the config docstring quotes. That
   docstring number is due a re-measure; it is not pinned to an artifact.
 - **The cross-encoder reranker reshuffles the head hard and does not
   obviously improve it.** hit@1 drops 30 points against `shipped` while
@@ -1876,9 +1879,12 @@ Query sets: 30 hand-written relational questions in the bank's own domain
 retrieval events, scored on whether the entry the daemon served at rank 0
 comes back. `--rel-limit` / `--logged-limit` cap both sets — `recall` at
 the shipped defaults (3 hops, `max_entities=50`, `expand_budget=0`) issues
-one search per newly-discovered entity per hop, which measured **~2.5
-minutes per call** on CPU against this bank, so a full 30-question sweep
-is a multi-hour job. The artifact records the `n` it actually asked.
+one search per newly-discovered entity per hop, which measured a **mean
+of 32.4 s per call on the relational set and 44.3 s on the logged set,
+worst case 73.0 s** on CPU against this bank
+(`ablation.*.summary.recall.mean_wall_s` in
+`graph-ablation-20260904.json`), so a full 30-question sweep still runs
+to tens of minutes. The artifact records the `n` it actually asked.
 
 ### Findings — graph shape, 2026-09-04 (`graph-ablation-20260904.json`)
 
@@ -1915,8 +1921,9 @@ Two things the shape says on its own:
 ### Findings — `recall` vs `search`, 2026-09-04 (same artifact)
 
 8 of the 30 relational questions and 4 logged queries — the run size the
-2.5-minute-per-recall cost allowed, and small enough that the hit-rate
-column is a ceiling, not a comparison.
+per-recall cost allowed (mean 32.4 s relational / 44.3 s logged, max
+73.0 s), and small enough that the hit-rate column is a ceiling, not a
+comparison.
 
 | | relational (n=8) | | logged (n=4) | |
 | --- | --- | --- | --- | --- |

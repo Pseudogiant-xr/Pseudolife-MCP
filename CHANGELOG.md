@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-04 — pre-merge review of the retrieval-replay branch)
+- **A machine hostname reached a public artifact.** `graph-ablation-20260904.json`
+  published a homelab hostname carrying the maintainer name as a top-degree
+  entity name: the redactor emits a name only when it also occurs in the
+  tracked tree, and the tree already carried that hostname inside
+  `evals/data/judge_eval_20260816.json`, a judge-eval fixture built from real
+  bank memories — so the check vouched for it. The entity is redacted to `<redacted>` in the artifact (recorded there as
+  `redaction_note`; no measured field changed), the fixture that vouched for it
+  is scrubbed of that hostname and of the workstation name beside it, and both
+  shapes are now needles in `test_tracked_tree_carries_no_maintainer_identifiers`. The redactor's `git
+  grep` seam gets its first test that actually runs it, against a throwaway
+  repo, so "did the check pass it, or was it never run?" is answerable.
+- **The replay latency table misquoted its own artifact** — it published
+  medians of 0.234 / 0.101 / 0.394 s where `retrieval-replay-20260904.json`
+  records 0.305 / 0.140 / 0.694 s, and the BM25 cost derived from them
+  (~130 ms) becomes ~165 ms. MRR and hit@1 were pinned to the artifact; the
+  latency column was not, so nothing contradicted it. All three medians now
+  carry Claim rows.
+- **`memory_recall`'s per-call cost was published as "~2.5 minutes"** in
+  `evals/README.md` and in `graph_ablation.py`'s comment; the artifact's
+  per-question wall times are a mean of 32.4 s (relational) / 44.3 s (logged)
+  with a 73.0 s worst case. Both means and the max are now pinned.
+- **`guard_dsn` matched only lower-case URI DSNs** in all three harnesses, so
+  `dbname=pseudolife_memory`, a trailing slash, and an upper-cased name each
+  walked through onto the live bank. It now compares case-insensitively and
+  parses the keyword form too.
+
+
 ### Added (2026-09-04 — offline retrieval replay and graph ablation harnesses; eval-only)
 - **`evals/retrieval_telemetry_review.py`, `evals/retrieval_replay.py` and
   `evals/graph_ablation.py`** — three read-only harnesses over a restored

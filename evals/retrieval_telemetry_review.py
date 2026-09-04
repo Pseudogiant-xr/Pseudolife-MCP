@@ -50,9 +50,20 @@ FORBIDDEN_DBS = {"pseudolife_memory", "pseudolife_memory_bench"}
 
 
 def guard_dsn(dsn: str) -> None:
-    db = re.sub(r"\?.*$", "", dsn).rsplit("/", 1)[-1]
-    if db in FORBIDDEN_DBS:
-        sys.exit(f"refusing to run against {db!r} — restore a dedicated "
+    """Refuse the live and shared-bench banks by name, in either DSN
+    spelling libpq accepts and regardless of case.
+
+    The 2026-09-04 pre-merge review found the original matched only a
+    lower-case URI path segment: ``dbname=pseudolife_memory``, a trailing
+    slash, and an upper-cased name each walked through onto the live bank.
+    """
+    text = re.sub(r"\?.*$", "", dsn.strip())
+    names = {text.rstrip("/").rsplit("/", 1)[-1].lower()}
+    names.update(m.group(1).lower() for m in re.finditer(
+        r"\bdbname\s*=\s*['\"]?([^\s'\"]+)", text, re.IGNORECASE))
+    hit = sorted(names & {d.lower() for d in FORBIDDEN_DBS})
+    if hit:
+        sys.exit(f"refusing to run against {hit[0]!r} — restore a dedicated "
                  "replay copy instead (see the module docstring)")
 
 

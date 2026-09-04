@@ -30,16 +30,32 @@ def _event(eid, served_ids, *, ts=1_780_000_000.0, session="s1",
 
 # ── guards ────────────────────────────────────────────────────────────────
 
+# libpq accepts two DSN spellings and neither is case-sensitive in the
+# database name; the 2026-09-04 review found the original guard matched only
+# a lower-case URI path segment, so `dbname=pseudolife_memory` and a trailing
+# slash both walked straight through onto the live bank.
+_DSN_FORMS = [
+    "postgresql://u:p@127.0.0.1:5433/{db}",
+    "postgresql://u:p@127.0.0.1:5433/{db}/",
+    "postgresql://u:p@127.0.0.1:5433/{DB}",
+    "postgresql://u:p@127.0.0.1:5433/{db}?sslmode=disable",
+    "host=127.0.0.1 port=5433 dbname={db}",
+    "dbname={DB} user=u",
+]
+
+
+@pytest.mark.parametrize("dsn_form", _DSN_FORMS)
 @pytest.mark.parametrize("db", ["pseudolife_memory", "pseudolife_memory_bench"])
 @pytest.mark.parametrize("guard", [rr.guard_dsn, rtr.guard_dsn])
-def test_guard_refuses_live_and_bench_dbs(guard, db):
+def test_guard_refuses_live_and_bench_dbs(guard, db, dsn_form):
     with pytest.raises(SystemExit):
-        guard(f"postgresql://u:p@127.0.0.1:5433/{db}")
+        guard(dsn_form.format(db=db, DB=db.upper()))
 
 
 @pytest.mark.parametrize("guard", [rr.guard_dsn, rtr.guard_dsn])
 def test_guard_allows_a_replay_copy(guard):
     guard("postgresql://u:p@127.0.0.1:5433/pseudolife_memory_replay_20260904")
+    guard("host=127.0.0.1 dbname=pseudolife_memory_replay_20260904")
 
 
 # ── telemetry review ──────────────────────────────────────────────────────
