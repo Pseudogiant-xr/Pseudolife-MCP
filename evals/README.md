@@ -987,20 +987,22 @@ should say so, or add a character-matched variant.
 it): 20 chats, 400 questions, every arm at a matched 16-turn budget,
 reproducible Qwen3.8 answerer and judge, **one replicate**. The `rag` and
 `hybrid` rows reproduce the committed `p1-b16` run at a paired delta of
-exactly 0.0000 over all 400 rows (`beam-100K-qwen-27b-chip5-b16.vs-chip12-b16.paired.json`
-carries the same control at 0.0000 against the chip-5 run), so the
+exactly 0.0000 over all 400 rows
+(`beam-100K-qwen-27b-p1-b16.vs-chip12-b16.paired.json`; the chip-5
+comparison beside it carries the same control at 0.0000), so the
 cross-arm deltas below sit on a zero instrument-noise floor. The paired
 column is written by `evals/beam_within_run_pairs.py` into
 `beam-100K-qwen-27b-chip12-b16.arms-vs-rag.json` (sign-flip permutation,
-10k draws, seed 0; the CI is 1.96 × SE over the 400 per-row deltas).
+10k draws, seed 0, so the smallest reportable p is 1/10001; the CI is
+1.96 × SE over the 400 per-row deltas).
 
 | arm | score | vs rag, paired | served chars/q |
 |---|---:|---|---:|
 | rag | 0.6425 | control | 22,158 |
 | refind | 0.6272 | −0.0152 ± 0.0362 (p 0.41) | 41,757 |
 | hybrid | 0.6226 | −0.0199 ± 0.0285 (p 0.18) | 24,398 |
-| cortex | 0.2829 | −0.3595 ± 0.0485 (p 0.0001) | 2,207 |
-| nomem | 0.1812 | −0.4612 ± 0.0479 (p 0.0001) | 0 |
+| cortex | 0.2829 | −0.3595 ± 0.0485 (p < 0.0001) | 2,207 |
+| nomem | 0.1812 | −0.4612 ± 0.0479 (p < 0.0001) | 0 |
 
 Two findings, both of which bound earlier readings on this page:
 
@@ -1017,8 +1019,11 @@ Two findings, both of which bound earlier readings on this page:
   evidence that memory recalled anything.
 - **The agentic lexical loop does not beat naive cosine RAG.** `refind`
   served 1.9× the characters (41,757 vs 22,158 mean characters per
-  question) for a delta that is negative and not significant. It wins one
-  type, contradiction_resolution (0.616 vs 0.500). The arms are matched by
+  question) for a delta that is negative and not significant. It sits above
+  the control on three of the ten types, but only contradiction_resolution
+  (0.616 vs 0.500) clears the judge-transfer floor this page reports
+  (mean |item delta| 0.073); temporal_reasoning (0.669 vs 0.644) and
+  event_ordering (0.496 vs 0.472) sit inside it. The arms are matched by
   turn count, not characters — the asymmetry the smoke flagged — so read
   the refind row as "more text, same score".
 

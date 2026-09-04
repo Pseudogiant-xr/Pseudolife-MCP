@@ -55,11 +55,11 @@ Equal accuracy to naive RAG across the whole benchmark on **~73% of the
 context**, and better calibrated about what it does not know: on BEAM-100K's
 abstention questions the fact spine scores **0.950** against naive RAG's
 0.775, unchanged under two independent judges. Read that as calibration,
-not recall — on the same questions an arm served no memory at all scores 1.000,
-because refusing is the right answer there and an empty context always
-refuses (the budget-matched five-arm run of 2026-09-02, one replicate,
-local judge). It loses where an answer has to be aggregated across
-sessions. Graded by a local, byte-reproducible judge (the cross-judge check
+not recall — in the budget-matched five-arm run of 2026-09-02 (rag 0.725 there;
+one replicate, local judge) an arm served no memory at all scores 1.000 on
+the same questions, because refusing is the right answer there and an
+empty context always refuses. The fact spine loses where an answer has to
+be aggregated across sessions. Graded by a local, byte-reproducible judge (the cross-judge check
 names its second judge) — compare within rows, never against GPT-judged
 leaderboards.
 
