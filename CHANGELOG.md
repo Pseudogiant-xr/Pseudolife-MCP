@@ -21,9 +21,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (+0.002 at p 1.0000, +0.010 at p 0.4576) and is deliberately **not**
   promoted with it; cortex and rag1 stay far below the control (−0.380 and
   −0.374 under Qwen, both −0.374 under Opus, all p 0.0001). The
-  gold-answer leak check flags the same 25 rows under both judges.
-  Instrument cost and floor: **2,061** CLI judge calls, **0** errors,
-  2.61 s per call, 5379.7 s wall, and a `--stability-sample 60`
+  gold-answer leak check flags the same 25 rows under both judges. The win
+  is **not uniform across question types**: `temporal-reasoning` carries
+  **+12 of the +21** net rows under Opus and **+13 of the +20** under Qwen,
+  most of the effect out of 133 of the 500 questions, with both judges
+  ranking it first and `single-session-preference` last — so the headline
+  is an average over a benchmark the fact spine helps very unevenly, and
+  all three docs now say so. The middle four types the two judges order
+  differently, which is why only the ends are claimed.
+  Instrument cost and floor: **2,061** CLI judge calls (2,060 judged
+  calls + 1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall,
+  and a `--stability-sample 60`
   self-agreement of **0.9667** — a ~0.033 flip rate that every per-arm
   transfer above sits inside, the same reading the 2026-08-22 BEAM
   re-judge gave. Artifacts:
@@ -32,6 +40,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `README.md`, `docs/guide/benchmarks.md` and `evals/README.md` carry the
   promoted claim; the 2026-08-03 "wash" table stays where it is, on its
   own older instrument, and says so.
+
+### Fixed (2026-09-05 — three holes the merge review of the re-judge found)
+- **`evals/lme_rejudge.py`'s resume arm-guard inspected `rows[0]` only**, so
+  a narrowed `--resume` followed by a wide one appended rows carrying no
+  verdict column for the dropped arm while the first row still looked
+  complete — and `summarize` reads an absent column as a run of False
+  verdicts, not as a gap. The guard now checks **every** row's arm set and
+  refuses any resume whose `--arms` differ from the file's in **either**
+  direction, naming the offending row and the arms on both sides.
+- **`seconds_per_call` divided a wall window that excludes the launch probe
+  by a call count that includes it.** The summary now records
+  `cli_calls_total` (every call) and `judged_calls` (only the calls inside
+  the timed window) and takes the rate over the latter. On the 2026-09-05
+  run that is 2,060 rather than 2,061 — 2.61 s either way, so no published
+  number moves, and the docs now quote the split.
+- **The re-judge's pairing artifact shipped without the `note` its source
+  run's carries.** `…rejudge-opus5.arms-vs-rag.json` gains one post hoc —
+  that the paired deltas span all 500 rows including the 25 the leak check
+  flags, that the leak-free means live in the summary instead, and that the
+  cascade arm is derived rather than answered — with no measured field
+  touched (`tests/test_beam_within_run_pairs.py` now regenerates that
+  artifact from its rows and asserts only the note differs). `--note` now
+  defaults to those caveats, so a future run cannot omit them by forgetting
+  a flag.
 
 ### Added (2026-09-05 — a second judge family for LongMemEval, before the claim moves)
 - **The 2026-09-04 500-question run is the first whole-benchmark memory-arm

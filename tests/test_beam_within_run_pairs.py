@@ -39,6 +39,17 @@ LME_ARTIFACT = RESULTS / (
     "longmemeval-all-oracle-qwen-27b-raglite-all-fresh.arms-vs-rag.json")
 LME_ARMS = ["cortex", "hybrid", "rag1", "rag2", "ragb400", "cascade"]
 
+# The same rows re-judged by claude-opus-5 (2026-09-05). Its pairing
+# artifact shipped without the `note` its Qwen sibling carries and had one
+# added by hand on 2026-09-05; this regenerates every OTHER field from the
+# rows, so a hand edit can never quietly move a measured number.
+LME_OPUS_ROWS = RESULTS / (
+    "longmemeval-all-oracle-qwen-27b-raglite-all-fresh.rejudge-opus5.jsonl")
+LME_OPUS_ARTIFACT = RESULTS / (
+    "longmemeval-all-oracle-qwen-27b-raglite-all-fresh.rejudge-opus5"
+    ".arms-vs-rag.json")
+LME_OPUS_ARMS = ["cortex", "hybrid", "rag1", "cascade"]
+
 
 def _rows() -> list[dict]:
     return [json.loads(line) for line in ROWS.read_text(encoding="utf-8")
@@ -107,6 +118,12 @@ def _lme_rows() -> list[dict]:
             LME_ROWS.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _lme_opus_rows() -> list[dict]:
+    return [json.loads(line) for line in
+            LME_OPUS_ROWS.read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+
+
 @pytest.mark.skipif(not LME_ROWS.exists(),
                     reason="raglite-all-fresh rows not checked out")
 def test_lme_artifact_regenerates_byte_exactly():
@@ -119,6 +136,29 @@ def test_lme_artifact_regenerates_byte_exactly():
     regenerated["note"] = committed["note"]
     assert (json.dumps(regenerated, indent=2, sort_keys=True) + "\n"
             == LME_ARTIFACT.read_text(encoding="utf-8"))
+
+
+@pytest.mark.skipif(not LME_OPUS_ROWS.exists(),
+                    reason="rejudge-opus5 rows not checked out")
+def test_lme_opus_artifact_regenerates_byte_exactly_apart_from_its_note():
+    """Only the hand-added `note` may differ from a fresh pairing run.
+
+    The artifact was written by the 2026-09-05 re-judge and edited once,
+    post hoc, to carry the caveats its Qwen sibling already had. Every
+    other key is recomputed here from the re-judged rows under the same
+    `--score-key correct_opus5` the summary's `pairing_command` records.
+    """
+    committed = json.loads(LME_OPUS_ARTIFACT.read_text(encoding="utf-8"))
+    assert "post hoc" in committed["note"]
+    regenerated = pair_run(_lme_opus_rows(), LME_OPUS_ARMS,
+                           perms=committed["perms"], seed=committed["seed"],
+                           score_key="correct_opus5",
+                           type_key="question_type",
+                           pairs=(("cortex", "rag1"),))
+    regenerated["source"] = LME_OPUS_ROWS.name
+    regenerated["note"] = committed["note"]
+    assert (json.dumps(regenerated, indent=2, sort_keys=True) + "\n"
+            == LME_OPUS_ARTIFACT.read_text(encoding="utf-8"))
 
 
 def test_lme_artifact_shape_matches_docs():

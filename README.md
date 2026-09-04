@@ -65,7 +65,8 @@ a win rather than a wash: re-run on 2026-09-04 with the hybrid arm
 hybrid **0.730** against naive RAG's 0.690 under the local judge and
 **0.736** against 0.694 under `claude-opus-5` — paired **+0.040 / +0.042**,
 p 0.015 / 0.013 — bought with *more* context, ~1229 tokens against the
-control's ~1124, not less. Graded by a local, byte-reproducible judge (the cross-judge check
+control's ~1124, not less, and carried mostly by temporal-reasoning
+questions. Graded by a local, byte-reproducible judge (the cross-judge check
 names its second judge) — compare within rows, never against GPT-judged
 leaderboards.
 

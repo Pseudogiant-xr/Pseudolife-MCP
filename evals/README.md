@@ -490,13 +490,39 @@ arithmetic (all 500 rows, 10,000 permutations, seed 0):
 | `cortex` | −0.380 ± 0.048 | 0.0001 | 16 / 206 | −0.374 ± 0.048 | 0.0001 | 17 / 204 |
 | `rag1` | −0.374 ± 0.045 | 0.0001 | 8 / 195 | −0.374 ± 0.046 | 0.0001 | 11 / 198 |
 
+**Where the win comes from.** That paired column is a sum over six
+question types, and they do not contribute equally. Net rows per type —
+questions the hybrid arm gets right and the control does not, minus the
+reverse — counted off each judge's own verdict column:
+
+| question type | n | Opus net | Opus Δ | Qwen net | Qwen Δ |
+|---|---:|---:|---:|---:|---:|
+| `temporal-reasoning` | 133 | **+12** | **+0.0902** | **+13** | **+0.0977** |
+| `single-session-user` | 70 | +3 | +0.0429 | +2 | +0.0286 |
+| `single-session-assistant` | 56 | +2 | +0.0357 | 0 | 0.0000 |
+| `knowledge-update` | 78 | +2 | +0.0256 | +3 | +0.0385 |
+| `multi-session` | 133 | +2 | +0.0150 | +3 | +0.0226 |
+| `single-session-preference` | 30 | 0 | 0.0000 | −1 | −0.0333 |
+| **all 500** | 500 | **+21** | **+0.0420** | **+20** | **+0.0400** |
+
+`temporal-reasoning` is **0.27** of the benchmark and carries **0.57** of
+the net win under Opus and **0.65** of it under Qwen — four times the next
+type's net rows under either judge. Both judges rank the six types the
+same way at the top and the bottom, so the concentration is a property of
+the questions, not of the instrument; `single-session-preference` is the
+only cell that is negative at all (−1 row under Qwen, 0 under Opus, over
+just 30 questions). Read the headline +0.040 / +0.042 as an average over a
+benchmark whose types the fact spine helps very unevenly, not as a uniform
+lift.
+
 The gold-answer leak check flags the same 25 rows under both judges. Over
 the 475 unleaked rows Opus reads **rag 0.6989, hybrid 0.7389, cortex
 0.3263, rag1 0.3347** — the same shape as the Qwen leak-free block above,
 and again not the headline figures.
 
-Instrument cost and floor: **2,061** CLI judge calls, **0** errors, 2.61 s
-per call, 5379.7 s wall. `--stability-sample 60` re-judged 60 random
+Instrument cost and floor: **2,061** CLI judge calls (2,060 judged calls +
+1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall.
+`--stability-sample 60` re-judged 60 random
 (row, arm) pairs a second time and the CLI judge agreed with itself on
 **0.9667** of them, a flip rate of ~0.033 — the control floor any
 judge-to-judge delta has to clear before it is a finding.
@@ -513,6 +539,10 @@ and is promoted to `README.md` and `docs/guide/benchmarks.md`. The cascade
 arm is a wash under both judges and is **not** promoted. Artifacts:
 `…raglite-all-fresh.rejudge-opus5.summary.json` and
 `…rejudge-opus5.arms-vs-rag.json`, committed beside the source run's own.
+What it does **not** support is a uniform reading: the win is carried
+mostly by `temporal-reasoning` under both judges (the per-type table
+above), so it is closer to a claim about one question type than about the
+benchmark average.
 
 ### Second-judge-family re-judge (`lme_rejudge.py`, added 2026-09-05)
 
@@ -544,12 +574,24 @@ Three artifacts, none of which touch the source: `…rejudge-<tag>.jsonl`
 `{arm}_correct` kept beside it, so every comparison pairs within-row),
 `…rejudge-<tag>.summary.json` (per-arm and per-type accuracy under both
 judges, item-level agreement per arm, the gold-leak exclusion with its
-excluded ids, CLI call/error counts, seconds per call), and
+excluded ids, and the instrument's own cost — `cli_calls_total` counts
+every call including the launch probe, `judged_calls` counts only the ones
+inside the timed window, and `seconds_per_call` divides the wall time by
+the latter, because the window opens after the probe), and
 `…rejudge-<tag>.arms-vs-rag.json` — the *same* paired comparison the
 original claim was made from, produced by `beam_within_run_pairs.py` with
 `--score-key correct_<tag>`, so the two numbers come off identical
-arithmetic. An existing output is refused rather than overwritten
-(`--resume` continues it, `--force` discards it).
+arithmetic; `--note` defaults to the standing pairing caveats so that
+artifact is never written bare. An existing output is refused rather than
+overwritten (`--resume` continues it, `--force` discards it), and a resume
+whose `--arms` differ from the file's — in either direction, checked on
+every row rather than the first — is refused too, because a column absent
+from some rows reads as a run of False verdicts rather than as a gap.
+
+**Known gap (follow-up).** Raw judge verdict text is not persisted and a
+wholesale per-arm failure increments no summary counter — the same shape
+as `beam_rejudge.py`, and unfixed here because closing it means re-running
+the judge over rows already judged.
 
 `--stability-sample N` judges N random (row, arm) pairs a second time. A
 CLI judge, unlike the pinned q8_0 server, is not bit-reproducible, and its

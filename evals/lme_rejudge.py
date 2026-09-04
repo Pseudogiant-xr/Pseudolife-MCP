@@ -75,6 +75,22 @@ CONTROL = "rag"
 KU_TYPE = "knowledge-update"
 _RESPONSE_SUFFIX = "_response"
 
+# The caveats a reader of the pairing artifact needs and cannot derive from
+# it: which rows the deltas span, where the leak-free means actually live,
+# and that the cascade arm was never answered. `--note` overrides it; the
+# DEFAULT is the point, because the 2026-09-05 re-judge shipped its pairing
+# artifact with no note at all while the source run's carried these same
+# three, and an omission that depends on remembering a flag recurs.
+DEFAULT_NOTE = (
+    "paired vs the rag control over every row in the file, including any "
+    "row the summary's leak check flags as naming its own gold answer, so "
+    "every arm is paired over the same rows; the summary's arm accuracies "
+    "span those rows too -- the leak-free means are the separate "
+    "leak_check.arms block in the summary, and the deltas here are not "
+    "those; the cascade arm is derived by replicate.cascade_correct / "
+    "cascade_context_tokens from the judged cortex and rag arms, never "
+    "answered")
+
 
 # ── naming ────────────────────────────────────────────────────────────────
 def summary_path_for(out_path: Path) -> Path:
@@ -171,11 +187,16 @@ def open_output(out_path: Path, *, resume: bool, force: bool,
     artifact is refused unless the caller says which they meant —
     ``--resume`` (continue it) or ``--force`` (discard it).
 
-    Resuming with a WIDER ``--arms`` than the run that wrote the file is
-    also refused: the rows already on disk carry no verdict column for the
-    added arm, and ``summarize`` would read that absence as a run of False
-    verdicts rather than fail. ``arms``/``tag`` are optional so the naming
-    contract stays testable on its own.
+    Resuming under a DIFFERENT ``--arms`` than the file already holds is
+    refused in both directions, and the check reads every row rather than
+    the first one. Widening is the obvious hazard — the rows on disk carry
+    no verdict column for the added arm, and ``summarize`` reads that
+    absence as a run of False verdicts rather than failing — but narrowing
+    is what creates the hazard: a narrowed resume appends rows missing the
+    dropped arm's column, after which ``rows[0]`` still looks complete and
+    a first-row-only guard waves the next wide resume straight through.
+    ``arms``/``tag`` are optional so the naming contract stays testable on
+    its own.
     """
     if not out_path.exists():
         return set()
@@ -185,13 +206,28 @@ def open_output(out_path: Path, *, resume: bool, force: bool,
     if resume:
         rows = load_rows(out_path)
         if rows and arms:
-            missing = [a for a in arms if f"{a}_correct_{tag}" not in rows[0]]
-            if missing:
+            want, suffix = set(arms), f"_correct_{tag}"
+            for i, row in enumerate(rows):
+                have = {k[:-len(suffix)] for k in row if k.endswith(suffix)}
+                if have == want:
+                    continue
+                missing = sorted(want - have)
+                extra = sorted(have - want)
+                where = row.get("question_id") or f"row {i}"
                 raise SystemExit(
-                    f"{out_path} was written without {missing}; resuming "
-                    "would leave those arms unjudged on every row already "
-                    "in it. Re-run with the original --arms, or with "
-                    "--force under a new --tag.")
+                    f"{out_path} does not hold the requested arms: {where} "
+                    f"carries {sorted(have)}, --arms asks for "
+                    f"{sorted(want)}"
+                    + (f" (missing {missing})" if missing else "")
+                    + (f" (already judged, not requested: {extra})"
+                       if extra else "")
+                    + ". A resume must name the SAME arms the file was "
+                      "written with — widening leaves the added arm "
+                      "unjudged on every row already in it, and narrowing "
+                      "appends rows the next widening cannot see are "
+                      "short, either way summarize reads the absent "
+                      "column as False verdicts. Re-run with the "
+                      "original --arms, or with --force under a new --tag.")
         return {r["question_id"] for r in rows if r.get("question_id")}
     raise SystemExit(
         f"{out_path} already exists; pass --resume to continue it or "
@@ -351,6 +387,30 @@ def pairing_argv(out_path: Path, arms: tuple[str, ...], tag: str,
     return argv
 
 
+def call_counters(total_calls: int, probe_calls: int,
+                  wall_seconds: float) -> dict:
+    """The instrument's own cost, with the probe kept out of the rate.
+
+    The wall window opens AFTER the probe-gated abort, so dividing it by
+    every call the judge ever made charges the judged work for a call the
+    window never contained. On the 2026-09-05 run that was 2,061 against
+    2,060 — the same 2.61 s either way, but the two numbers do not
+    describe the same thing, and a short run makes the gap visible.
+
+    ``cli_calls_total`` counts every call including the probe;
+    ``judged_calls`` counts only the calls inside the timed window, and is
+    the denominator of ``seconds_per_call``.
+    """
+    judged = total_calls - probe_calls
+    return {
+        "cli_calls_total": total_calls,
+        "judged_calls": judged,
+        "wall_seconds": round(wall_seconds, 1),
+        "seconds_per_call": (round(wall_seconds / judged, 2)
+                             if judged else None),
+    }
+
+
 def _git_rev() -> str | None:
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
@@ -362,7 +422,7 @@ def _git_rev() -> str | None:
         return None
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--in", dest="src", required=True, type=Path,
                     help="existing LongMemEval per-question JSONL")
@@ -385,9 +445,14 @@ def main(argv: list[str] | None = None) -> int:
                     help="discard an existing output artifact and restart")
     ap.add_argument("--skip-pairs", action="store_true",
                     help="do not write the paired arms-vs-rag artifact")
-    ap.add_argument("--note", default=None,
-                    help="a sentence recorded in both artifacts")
-    args = ap.parse_args(argv)
+    ap.add_argument("--note", default=DEFAULT_NOTE,
+                    help="a sentence recorded in both artifacts; defaults "
+                         "to the standing pairing caveats, pass '' to omit")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     src_rows = load_rows(args.src)
     if not src_rows:
@@ -408,6 +473,9 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(
             f"judge probe failed: {args.cli} --model {args.judge_model} did "
             "not answer (logged in? on PATH?)")
+    # Everything the judge has spent so far is pre-window: the timed run
+    # starts below, so these calls must not land in the per-call rate.
+    probe_calls = judge.calls
 
     print(f"lme_rejudge: {len(src_rows)} rows, arms={arms}, "
           f"judge={args.judge_model}, workers={args.workers} "
@@ -445,12 +513,9 @@ def main(argv: list[str] | None = None) -> int:
                 [f.result() for f in futs])
     # Counters land AFTER the stability pass so its calls (and any of their
     # failures) are visible in the artifact.
-    summary["cli_calls"] = judge.calls
     summary["cli_errors"] = judge.errors
-    summary["wall_seconds"] = round(time.time() - started, 1)
-    summary["seconds_per_call"] = (
-        round(summary["wall_seconds"] / judge.calls, 2) if judge.calls
-        else None)
+    summary.update(call_counters(judge.calls, probe_calls,
+                                 time.time() - started))
     summary["date"] = time.strftime("%Y-%m-%d")
     summary["git_rev"] = _git_rev()
     sum_path = summary_path_for(out_path)

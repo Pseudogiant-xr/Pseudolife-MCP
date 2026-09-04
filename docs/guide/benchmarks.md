@@ -141,11 +141,18 @@ moved more than +0.010 between the two judges and per-arm item agreement
 was 0.976–0.982, so the win is a property of the memory, not of the
 instrument.
 
-Two honest limits. The hybrid arm buys that accuracy with **more** context,
+Three honest limits. **(1)** The hybrid arm buys accuracy with **more** context,
 not less — ~1229 tokens against the control's ~1124 — so it is accuracy
-bought, not budget saved. And the **cascade**, the arm that does save
+bought, not budget saved. **(2)** The **cascade**, the arm that does save
 context, stays a wash under both judges (+0.002 under Qwen, +0.010 under
-Opus at p 0.4576) and is not promoted with it. Artifacts:
+Opus at p 0.4576) and is not promoted with it. **(3)** The win is not
+spread evenly across question types: `temporal-reasoning` carries **+12 of
+the +21** net rows under Opus and **+13 of the +20** under Qwen — most of
+the effect out of 133 of the 500 questions — while
+`single-session-preference` is flat-to-negative under both. Both judges
+agree on that shape, and the per-type table is in
+[`evals/README.md`](../../evals/README.md#second-judge-family-2026-09-05).
+Artifacts:
 `evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.summary.json`,
 `…arms-vs-rag.json`, `…rejudge-opus5.summary.json`,
 `…rejudge-opus5.arms-vs-rag.json`; full per-arm tables, including the

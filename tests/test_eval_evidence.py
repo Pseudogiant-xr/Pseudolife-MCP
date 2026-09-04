@@ -5148,15 +5148,28 @@ CLAIMS.append(Claim(
     stated=25, places=0))
 
 # evals/README.md, the instrument's own cost and its stability floor.
-_REJUDGE_COST = "Instrument cost and floor: **2,061** CLI judge calls, **0** errors, 2.61 s"
+# The call count is published as a SPLIT (2026-09-05 merge review): the
+# timed window opens after the launch probe, so the probe is one of the
+# 2,061 calls and none of the 2,060 the rate is taken over. This run's
+# artifact predates the `cli_calls_total` / `judged_calls` fields and
+# carries the combined `cli_calls`; the probe is exactly one call by
+# construction (`main` fires it once before `started`), so the judged count
+# and the corrected rate are DERIVED here rather than read, which is also
+# what makes them checkable against the artifact instead of the prose.
+_REJUDGE_COST = "Instrument cost and floor: **2,061** CLI judge calls (2,060 judged calls +"
+_REJUDGE_COST2 = "1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall."
 for _cid, _needle, _val, _stated, _places in [
     ("rejudge-ev-cli-calls", _REJUDGE_COST, lambda d: d["cli_calls"],
      2061, 0),
-    ("rejudge-ev-cli-errors", _REJUDGE_COST, lambda d: d["cli_errors"],
+    ("rejudge-ev-judged-calls", _REJUDGE_COST,
+     lambda d: d["cli_calls"] - 1, 2060, 0),
+    ("rejudge-ev-cli-errors", _REJUDGE_COST2, lambda d: d["cli_errors"],
      0, 0),
-    ("rejudge-ev-sec-per-call", _REJUDGE_COST,
+    ("rejudge-ev-sec-per-call", _REJUDGE_COST2,
      lambda d: d["seconds_per_call"], 2.61, 2),
-    ("rejudge-ev-wall", "per call, 5379.7 s wall.",
+    ("rejudge-ev-sec-per-judged-call", _REJUDGE_COST2,
+     lambda d: d["wall_seconds"] / (d["cli_calls"] - 1), 2.61, 2),
+    ("rejudge-ev-wall", _REJUDGE_COST2,
      lambda d: d["wall_seconds"], 5379.7, 1),
     ("rejudge-ev-stability-pairs",
      "(row, arm) pairs a second time and the CLI judge agreed with itself on",
@@ -5233,7 +5246,7 @@ _BM_XFER = "moved more than +0.010 between the two judges and per-arm item agree
 _BM_AGREE = "was 0.976\u20130.982, so the win is a property of the memory, not of the"
 _BM_COST = "not less \u2014 ~1229 tokens against the control's ~1124 \u2014 so it is accuracy"
 _BM_CASC = "context, stays a wash under both judges (+0.002 under Qwen, +0.010 under"
-_BM_CASC_P = "Opus at p 0.4576) and is not promoted with it. Artifacts:"
+_BM_CASC_P = "Opus at p 0.4576) and is not promoted with it. **(3)** The win is not"
 for _cid, _needle, _art, _val, _stated, _places in [
     ("rejudge-bm-rag-qwen", _BM_ROW_RAG, RL_ALL_SUM,
      _arm_metric("rag", "accuracy"), 0.690, 3),
@@ -5293,7 +5306,7 @@ _RM_1 = "hybrid **0.730** against naive RAG's 0.690 under the local judge and"
 _RM_2 = ("**0.736** against 0.694 under `claude-opus-5` \u2014 paired "
          "**+0.040 / +0.042**,")
 _RM_3 = "p 0.015 / 0.013 \u2014 bought with *more* context, ~1229 tokens against the"
-_RM_4 = "control's ~1124, not less."
+_RM_4 = "control's ~1124, not less, and carried mostly by temporal-reasoning"
 for _cid, _needle, _art, _val, _stated, _places in [
     ("rejudge-rm-hybrid-qwen", _RM_1, RL_ALL_SUM,
      _arm_metric("hybrid", "accuracy"), 0.730, 3),
@@ -5331,8 +5344,9 @@ _CL_CASC = "(+0.002 at p 1.0000, +0.010 at p 0.4576) and is deliberately **not**
 _CL_LOW = "promoted with it; cortex and rag1 stay far below the control (\u22120.380 and"
 _CL_LOW2 = "\u22120.374 under Qwen, both \u22120.374 under Opus, all p 0.0001). The"
 _CL_LEAK = "gold-answer leak check flags the same 25 rows under both judges."
-_CL_COST = "Instrument cost and floor: **2,061** CLI judge calls, **0** errors,"
-_CL_COST2 = "2.61 s per call, 5379.7 s wall, and a `--stability-sample 60`"
+_CL_COST = "Instrument cost and floor: **2,061** CLI judge calls (2,060 judged"
+_CL_COST2 = "calls + 1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall,"
+_CL_STAB_N = "and a `--stability-sample 60`"
 _CL_STAB = "self-agreement of **0.9667** \u2014 a ~0.033 flip rate that every per-arm"
 for _cid, _needle, _art, _val, _stated, _places in [
     ("rejudge-cl-rag-qwen", _CL_ACC_1, RL_ALL_SUM,
@@ -5399,13 +5413,17 @@ for _cid, _needle, _art, _val, _stated, _places in [
      lambda d: d["leak_check"]["n_leaked"], 25, 0),
     ("rejudge-cl-cli-calls", _CL_COST, RL_ALL_OPUS_SUM,
      lambda d: d["cli_calls"], 2061, 0),
-    ("rejudge-cl-cli-errors", _CL_COST, RL_ALL_OPUS_SUM,
+    ("rejudge-cl-judged-calls", _CL_COST, RL_ALL_OPUS_SUM,
+     lambda d: d["cli_calls"] - 1, 2060, 0),
+    ("rejudge-cl-cli-errors", _CL_COST2, RL_ALL_OPUS_SUM,
      lambda d: d["cli_errors"], 0, 0),
     ("rejudge-cl-sec-per-call", _CL_COST2, RL_ALL_OPUS_SUM,
      lambda d: d["seconds_per_call"], 2.61, 2),
+    ("rejudge-cl-sec-per-judged-call", _CL_COST2, RL_ALL_OPUS_SUM,
+     lambda d: d["wall_seconds"] / (d["cli_calls"] - 1), 2.61, 2),
     ("rejudge-cl-wall", _CL_COST2, RL_ALL_OPUS_SUM,
      lambda d: d["wall_seconds"], 5379.7, 1),
-    ("rejudge-cl-stability-pairs", _CL_COST2, RL_ALL_OPUS_SUM,
+    ("rejudge-cl-stability-pairs", _CL_STAB_N, RL_ALL_OPUS_SUM,
      lambda d: d["stability_sample"]["n_pairs"], 60, 0),
     ("rejudge-cl-stability-agreement", _CL_STAB, RL_ALL_OPUS_SUM,
      lambda d: d["stability_sample"]["agreement"], 0.9667, 4),
@@ -5413,3 +5431,195 @@ for _cid, _needle, _art, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,), value=_val,
         stated=_stated, places=_places))
+
+
+# ── where the hybrid win comes from, per question type (2026-09-05) ──────
+# The merge review of the re-judge found the promoted +0.040 / +0.042 is
+# not spread evenly: one of the six types carries most of it under BOTH
+# judges, and no doc said so. Every cell of the published table is COMPUTED
+# from the judged rows here rather than read off the summaries' `types`
+# blocks, because the load-bearing quantity is the NET row count (rows the
+# hybrid arm wins minus rows the control wins), which no summary carries at
+# all — the summaries hold per-arm per-type accuracies, whose difference
+# would be a rounded restatement of a number computed elsewhere. Each judge
+# reads its own file: the Qwen column off the source run's rows, the Opus
+# column off the re-judge's, so neither can be edited to match the other.
+RL_ALL_OPUS_ROWS = (RESULTS + "longmemeval-all-oracle-qwen-27b-"
+                              "raglite-all-fresh.rejudge-opus5.jsonl")
+_Q_KEYS = ("hybrid_correct", "rag_correct")
+_O_KEYS = ("hybrid_correct_opus5", "rag_correct_opus5")
+_TYPES = ("temporal-reasoning", "single-session-user",
+          "single-session-assistant", "knowledge-update", "multi-session",
+          "single-session-preference")
+
+
+def _sel(rows: list[dict], qtype: str | None) -> list[dict]:
+    return rows if qtype is None else [r for r in rows
+                                       if r.get("question_type") == qtype]
+
+
+def _net(qtype: str | None, keys: tuple[str, str]):
+    """Net rows for one type: hybrid-only wins minus control-only wins."""
+    hk, rk = keys
+    return lambda rows: sum(int(bool(r[hk])) - int(bool(r[rk]))
+                            for r in _sel(rows, qtype))
+
+
+def _net_delta(qtype: str | None, keys: tuple[str, str]):
+    """That net expressed as an accuracy delta over the type's questions."""
+    return lambda rows: _net(qtype, keys)(rows) / len(_sel(rows, qtype))
+
+
+def _type_n(qtype: str):
+    return lambda rows: len(_sel(rows, qtype))
+
+
+def _net_share(qtype: str, keys: tuple[str, str]):
+    """The fraction of the whole run's net win that one type carries."""
+    return lambda rows: _net(qtype, keys)(rows) / _net(None, keys)(rows)
+
+
+def _net_lead(qtype: str, keys: tuple[str, str]):
+    """How far the top type's net leads the best of the other five."""
+    return lambda rows: _net(qtype, keys)(rows) / max(
+        _net(t, keys)(rows) for t in _TYPES if t != qtype)
+
+
+# evals/README.md — the per-type table itself, one row per question type
+# plus the total, both judges' net counts and deltas in each row.
+_TYPE_TABLE = [
+    ("temporal-reasoning",
+     "| `temporal-reasoning` | 133 | **+12** | **+0.0902** | **+13** | "
+     "**+0.0977** |", 133, 12, 0.0902, 13, 0.0977),
+    ("single-session-user",
+     "| `single-session-user` | 70 | +3 | +0.0429 | +2 | +0.0286 |",
+     70, 3, 0.0429, 2, 0.0286),
+    ("single-session-assistant",
+     "| `single-session-assistant` | 56 | +2 | +0.0357 | 0 | 0.0000 |",
+     56, 2, 0.0357, 0, 0.0000),
+    ("knowledge-update",
+     "| `knowledge-update` | 78 | +2 | +0.0256 | +3 | +0.0385 |",
+     78, 2, 0.0256, 3, 0.0385),
+    ("multi-session",
+     "| `multi-session` | 133 | +2 | +0.0150 | +3 | +0.0226 |",
+     133, 2, 0.0150, 3, 0.0226),
+    ("single-session-preference",
+     "| `single-session-preference` | 30 | 0 | 0.0000 | −1 | −0.0333 |",
+     30, 0, 0.0000, -1, -0.0333),
+]
+for _t, _needle, _n, _onet, _odelta, _qnet, _qdelta in _TYPE_TABLE:
+    CLAIMS.append(Claim(
+        id=f"rejudge-type-{_t}-n", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_OPUS_ROWS,), value=_type_n(_t), stated=_n,
+        places=0))
+    for _judge, _rows_art, _keys, _net_v, _delta_v in (
+            ("opus", RL_ALL_OPUS_ROWS, _O_KEYS, _onet, _odelta),
+            ("qwen", RL_ALL_ROWS, _Q_KEYS, _qnet, _qdelta)):
+        CLAIMS.append(Claim(
+            id=f"rejudge-type-{_t}-{_judge}-net", doc=EVALS, needle=_needle,
+            artifacts=(_rows_art,), value=_net(_t, _keys), stated=_net_v,
+            places=0))
+        CLAIMS.append(Claim(
+            id=f"rejudge-type-{_t}-{_judge}-delta", doc=EVALS,
+            needle=_needle, artifacts=(_rows_art,),
+            value=_net_delta(_t, _keys), stated=_delta_v, places=4))
+
+_TYPE_TOTAL = ("| **all 500** | 500 | **+21** | **+0.0420** | **+20** | "
+               "**+0.0400** |")
+for _cid, _art, _val, _stated, _places in [
+    ("rejudge-type-total-n", RL_ALL_OPUS_ROWS, len, 500, 0),
+    ("rejudge-type-total-opus-net", RL_ALL_OPUS_ROWS, _net(None, _O_KEYS),
+     21, 0),
+    ("rejudge-type-total-opus-delta", RL_ALL_OPUS_ROWS,
+     _net_delta(None, _O_KEYS), 0.0420, 4),
+    ("rejudge-type-total-qwen-net", RL_ALL_ROWS, _net(None, _Q_KEYS), 20, 0),
+    ("rejudge-type-total-qwen-delta", RL_ALL_ROWS, _net_delta(None, _Q_KEYS),
+     0.0400, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_TYPE_TOTAL, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+# evals/README.md — the prose reading of that table.
+_TYPE_SHARE_1 = ("`temporal-reasoning` is **0.27** of the benchmark and "
+                 "carries **0.57** of")
+_TYPE_SHARE_2 = ("the net win under Opus and **0.65** of it under Qwen "
+                 "— four times the next")
+_TR = "temporal-reasoning"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-type-share-benchmark", _TYPE_SHARE_1, RL_ALL_OPUS_ROWS,
+     lambda rows: _type_n(_TR)(rows) / len(rows), 0.27, 2),
+    ("rejudge-type-share-opus", _TYPE_SHARE_1, RL_ALL_OPUS_ROWS,
+     _net_share(_TR, _O_KEYS), 0.57, 2),
+    ("rejudge-type-share-qwen", _TYPE_SHARE_2, RL_ALL_ROWS,
+     _net_share(_TR, _Q_KEYS), 0.65, 2),
+    ("rejudge-type-lead-opus", _TYPE_SHARE_2, RL_ALL_OPUS_ROWS,
+     _net_lead(_TR, _O_KEYS), 4, 0),
+    ("rejudge-type-lead-qwen", _TYPE_SHARE_2, RL_ALL_ROWS,
+     _net_lead(_TR, _Q_KEYS), 4, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# docs/guide/benchmarks.md — the third honest limit.
+_BM_TYPE_1 = ("spread evenly across question types: `temporal-reasoning` "
+              "carries **+12 of")
+_BM_TYPE_2 = ("the +21** net rows under Opus and **+13 of the +20** under "
+              "Qwen — most of")
+_BM_TYPE_3 = "the effect out of 133 of the 500 questions — while"
+_BM_TYPE_4 = ("`single-session-preference` is flat-to-negative under both. "
+              "Both judges")
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-bm-type-opus-net", _BM_TYPE_1, RL_ALL_OPUS_ROWS,
+     _net(_TR, _O_KEYS), 12, 0),
+    ("rejudge-bm-type-opus-total", _BM_TYPE_2, RL_ALL_OPUS_ROWS,
+     _net(None, _O_KEYS), 21, 0),
+    ("rejudge-bm-type-qwen-net", _BM_TYPE_2, RL_ALL_ROWS,
+     _net(_TR, _Q_KEYS), 13, 0),
+    ("rejudge-bm-type-qwen-total", _BM_TYPE_2, RL_ALL_ROWS,
+     _net(None, _Q_KEYS), 20, 0),
+    ("rejudge-bm-type-n", _BM_TYPE_3, RL_ALL_OPUS_ROWS, _type_n(_TR),
+     133, 0),
+    ("rejudge-bm-type-rows", _BM_TYPE_3, RL_ALL_OPUS_ROWS, len, 500, 0),
+    ("rejudge-bm-type-pref-opus", _BM_TYPE_4, RL_ALL_OPUS_ROWS,
+     _net("single-session-preference", _O_KEYS), 0, 0),
+    ("rejudge-bm-type-pref-qwen", _BM_TYPE_4, RL_ALL_ROWS,
+     _net("single-session-preference", _Q_KEYS), -1, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=BENCH, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# README.md — the clause on the promoted sentence. "Mostly" is a claim
+# about the share, so the share is what is pinned to it.
+for _cid, _art, _val, _stated in [
+    ("rejudge-rm-type-share-opus", RL_ALL_OPUS_ROWS,
+     _net_share(_TR, _O_KEYS), 0.57),
+    ("rejudge-rm-type-share-qwen", RL_ALL_ROWS,
+     _net_share(_TR, _Q_KEYS), 0.65),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=READ_ME, needle=_RM_4, artifacts=(_art,), value=_val,
+        stated=_stated, places=2))
+
+# CHANGELOG.md — the same reading in the Measured entry.
+_CL_TYPE_1 = ("**+12 of the +21** net rows under Opus and **+13 of the "
+              "+20** under Qwen,")
+_CL_TYPE_2 = ("most of the effect out of 133 of the 500 questions, with "
+              "both judges")
+for _cid, _needle, _art, _val, _stated in [
+    ("rejudge-cl-type-opus-net", _CL_TYPE_1, RL_ALL_OPUS_ROWS,
+     _net(_TR, _O_KEYS), 12),
+    ("rejudge-cl-type-opus-total", _CL_TYPE_1, RL_ALL_OPUS_ROWS,
+     _net(None, _O_KEYS), 21),
+    ("rejudge-cl-type-qwen-net", _CL_TYPE_1, RL_ALL_ROWS,
+     _net(_TR, _Q_KEYS), 13),
+    ("rejudge-cl-type-qwen-total", _CL_TYPE_1, RL_ALL_ROWS,
+     _net(None, _Q_KEYS), 20),
+    ("rejudge-cl-type-n", _CL_TYPE_2, RL_ALL_OPUS_ROWS, _type_n(_TR), 133),
+    ("rejudge-cl-type-rows", _CL_TYPE_2, RL_ALL_OPUS_ROWS, len, 500),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=0))

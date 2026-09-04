@@ -243,6 +243,44 @@ def test_resume_refuses_an_arm_the_existing_rows_never_judged(tmp_path):
                                    arms=("rag",), tag=TAG) == {"q0"}
 
 
+def test_resume_refuses_when_a_LATER_row_is_missing_an_arms_column(tmp_path):
+    """The arm guard reads EVERY row, not just the first one.
+
+    A wide run, then a narrowed ``--resume``, then a wide one: ``rows[0]``
+    still carries every column, so a first-row-only guard waves the wide
+    resume through while the rows the narrowed pass appended stay without a
+    ``hybrid`` verdict — an absence ``summarize`` reads as a run of False
+    verdicts rather than as a gap.
+    """
+    out = tmp_path / "run.rejudge-opus5.jsonl"
+    out.write_text(
+        json.dumps({"question_id": "q0", "rag_correct_opus5": True,
+                    "hybrid_correct_opus5": True}) + "\n"
+        + json.dumps({"question_id": "q1", "rag_correct_opus5": False})
+        + "\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        lme_rejudge.open_output(out, resume=True, force=False,
+                                arms=("rag", "hybrid"), tag=TAG)
+    assert "q1" in str(e.value) and "hybrid" in str(e.value)
+
+
+def test_resume_refuses_a_NARROWER_arms_than_the_file_already_holds(tmp_path):
+    """Refusal runs in both directions, because narrowing is what CREATES
+    the mixed file the test above catches."""
+    out = tmp_path / "run.rejudge-opus5.jsonl"
+    out.write_text(json.dumps({"question_id": "q0",
+                               "rag_correct_opus5": True,
+                               "hybrid_correct_opus5": True}) + "\n",
+                   encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        lme_rejudge.open_output(out, resume=True, force=False,
+                                arms=("rag",), tag=TAG)
+    assert "hybrid" in str(e.value)
+    # The exact arm set the file holds still resumes without complaint.
+    assert lme_rejudge.open_output(out, resume=True, force=False,
+                                   arms=("rag", "hybrid"), tag=TAG) == {"q0"}
+
+
 def test_pending_rows_skip_the_ones_already_judged():
     rows = [_row(i) for i in range(4)]
     pending = lme_rejudge.pending_rows(rows, {"q1", "q3"})
@@ -276,6 +314,31 @@ def test_merge_stability_weights_by_pair_count():
     assert merged["n_pairs"] == 4 and merged["agreement"] == pytest.approx(0.5)
 
 
+# ── instrument cost: the probe is not one of the judged calls ─────────────
+def test_call_counters_charge_the_wall_window_to_the_judged_calls_only():
+    """The wall window opens AFTER the probe-gated abort, so the probe must
+    not sit in the denominator of the per-call rate."""
+    c = lme_rejudge.call_counters(3, 1, 10.0)
+    assert c["cli_calls_total"] == 3 and c["judged_calls"] == 2
+    assert c["seconds_per_call"] == pytest.approx(5.0)
+    # The bug this replaces: 10.0 / 3 == 3.33, a rate over a call the
+    # window never contained.
+    assert c["seconds_per_call"] != pytest.approx(round(10.0 / 3, 2))
+
+
+def test_call_counters_reproduce_the_2026_09_05_run():
+    """2,061 CLI calls, one of them the probe, over a 5,379.7 s window."""
+    c = lme_rejudge.call_counters(2061, 1, 5379.7)
+    assert c["cli_calls_total"] == 2061 and c["judged_calls"] == 2060
+    assert c["wall_seconds"] == pytest.approx(5379.7)
+    assert c["seconds_per_call"] == pytest.approx(2.61)
+
+
+def test_call_counters_survive_a_run_that_judged_nothing():
+    c = lme_rejudge.call_counters(1, 1, 4.0)
+    assert c["judged_calls"] == 0 and c["seconds_per_call"] is None
+
+
 # ── the paired comparison handed on to beam_within_run_pairs ──────────────
 def test_pairing_argv_uses_the_tagged_score_key_and_the_rejudge_rows():
     out = Path("evals/results/longmemeval-all-oracle-qwen-27b-"
@@ -296,6 +359,22 @@ def test_pairing_argv_uses_the_tagged_score_key_and_the_rejudge_rows():
     assert "rag" not in armlist
     assert armlist == ["hybrid", "cortex", "rag1", "cascade"]
     assert argv[argv.index("--pairs") + 1] == "cortex:rag1"
+
+
+def test_a_run_that_passes_no_note_still_records_the_pairing_caveats():
+    """The 2026-09-05 re-judge shipped its pairing artifact with no `note`
+    while the source run's carried three caveats a reader cannot derive
+    from the file. A default that has to be remembered is not a default."""
+    args = lme_rejudge.build_parser().parse_args(
+        ["--in", "x.jsonl", "--tag", TAG])
+    assert args.note == lme_rejudge.DEFAULT_NOTE
+    note = lme_rejudge.DEFAULT_NOTE
+    assert "leak check" in note          # deltas span the leaked rows too
+    assert "leak_check.arms" in note     # where the leak-free means live
+    assert "cascade" in note and "never answered" in note  # derived, not run
+    argv = lme_rejudge.pairing_argv(Path("evals/results/x.rejudge-opus5.jsonl"),
+                                    ("rag", "hybrid"), TAG, note=args.note)
+    assert argv[argv.index("--note") + 1] == lme_rejudge.DEFAULT_NOTE
 
 
 def test_pairing_argv_drops_the_cascade_when_cortex_was_not_rejudged():
