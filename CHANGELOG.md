@@ -57,6 +57,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the knob to a bench run (`ladder_sweep.build_service`) and rides into the
   summary as `bench_env.dream.assistant_claims`; an invalid value aborts
   the run rather than silently serving the default, as for the pool knobs.
+- **Measured (2026-09-05).** Asking the extractor for assistant-stated
+  facts works, and the guard that stops those facts overwriting the user's
+  costs nothing we can measure. On the LongMemEval oracle slice
+  `single-session-assistant` + `single-session-preference` +
+  `knowledge-update` (164 questions, extractor `qwen-27b`), the fact-only
+  arm on `single-session-assistant` goes from **0.054** to **0.518** with
+  the provenance prompt at `contender` and **0.500** with the naive prompt
+  at `supersede` — paired **+0.464** and **+0.446**, both p < 0.0001, 26
+  and 25 questions won against **zero** lost. The knowledge-update family,
+  carried as the pollution check, is flat-to-up under both (cortex 0.667 →
+  0.744 provenance, → 0.705 naive; hybrid 0.897 → 0.923, → 0.885), so the
+  pollution a naive extraction was expected to cause is **not detectable
+  in accuracy at this n** — the guard's case is the safety property, not
+  an accuracy gain. Head to head the guarded arm leads on every
+  fact-reading arm directionally and on none of them significantly (slice
+  hybrid +0.037, 11 W / 5 L, p = 0.21). `single-session-preference` is the
+  one type both variants hurt slightly (cortex 0.233 → 0.100 provenance,
+  → 0.167 naive; n = 30). The `rag` control moved by 0.0000 with 0 wins
+  and 0 losses in all twelve paired comparisons, and the shipped-prompt
+  arm reproduced the 2026-09-04 rows exactly (56/56 identical claim
+  counts, 56/56 byte-identical contexts, 0 verdict flips), which is what
+  makes these paired tests rather than a comparison of two benches.
+  Artifacts: `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-{prov,naive}`,
+  `longmemeval-ssa-oracle-qwen-27b-assist-base` and the twelve
+  `compare-assist-*-pairs.json`, all under `evals/results/`; the tables
+  are in `evals/README.md`. **Defaults are unchanged** — the shipped
+  prompt emits no `speaker`, so every mechanism above stays inert — and
+  **adoption of either prompt is gated on the extraction ladder**
+  (`evals/ladder_sweep.py`), which has not been run on them.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

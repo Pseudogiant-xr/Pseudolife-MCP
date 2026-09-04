@@ -461,7 +461,21 @@ The paired column is a committed artifact
 (`--score-key correct|score`, `--type-key`, `--prefix`, `--pairs left:right`,
 and a derived `cascade` arm) — and pinned by a byte-exact regeneration test.
 
-### Assistant-stated facts — `assistant_facts_*.txt` + `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS` (added 2026-09-05, not yet run)
+### Assistant-stated facts — `assistant_facts_*.txt` + `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS` (measured 2026-09-05)
+
+The fact spine scored almost nothing on questions whose answer the
+*assistant* gave, because the shipped extraction prompt reads
+assistant-stated content as not-a-fact and writes nothing down at all. Two
+prompt variants that ask for those facts were measured on 2026-09-05
+against the shipped prompt. Both recover that question type — the fact-only
+arm goes from 0.054 to about 0.5 — and the knowledge-update family that
+would have shown the extra claims polluting user-stated values does not go
+down. The safety guard that stops an assistant-stated value from
+overwriting a user-stated one costs nothing measurable. **No shipped
+default changed**: adopting either prompt is a separate decision, and it is
+gated on the extraction ladder, which has not been run on them.
+
+#### The diagnosis
 
 On the six-type oracle run
 (`longmemeval-all-oracle-qwen-27b-raglite-all-fresh.summary.json`) the
@@ -477,6 +491,14 @@ book). No code filters assistant turns — the shipped claims prompt asks for
 "durable, current-state facts … skip narrative, opinions" and every worked
 example is a user-stated fact, so the model reads assistant-stated content
 as not-a-fact.
+
+That "returns nothing, fast" signature is also visible inside the committed
+`assist-base` run, which re-extracts the same 56 sessions: its 50
+zero-claim rows have a **median `extract_seconds` of 2.05**, against
+**7.75** on the six rows that did produce claims. The model is not failing
+to parse a hard session; it is reading it and declining.
+
+#### The two variants and the knob
 
 Two prompt variants test whether asking changes that, and one engine knob
 decides what the extra claims are allowed to do:
@@ -514,23 +536,184 @@ it rather than retyping it, and the property is pinned by
 shows up as a diff here instead of silently drifting from the measured
 artifacts — edit the generator and re-run, never the `.txt` by hand.
 
-Planned arms — one slice, three runs, `--extractor qwen-27b --dataset
-oracle --types single-session-assistant,single-session-preference,knowledge-update`:
+#### The runs
 
-| tag | prompt file | `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS` |
-|---|---|---|
-| `assist-base` | (none — the shipped prompt) | unset |
-| `assist-naive` | `assistant_facts_naive.txt` | `supersede` |
-| `assist-prov` | `assistant_facts_provenance.txt` | `contender` |
+One slice, three runs, `--extractor qwen-27b --dataset oracle --types
+single-session-assistant,single-session-preference,knowledge-update`
+(56 + 30 + 78 = **164 questions**), answered and judged by Qwen3.8-27B on
+the reproducible q8_0 server:
+
+| tag | prompt file | `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS` | artifact prefix |
+|---|---|---|---|
+| `assist-base` | (none — the shipped prompt) | unset | `longmemeval-ssa-oracle-qwen-27b-assist-base` (SSA only; the determinism check) |
+| `assist-naive` | `assistant_facts_naive.txt` | `supersede` | `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-naive` |
+| `assist-prov` | `assistant_facts_provenance.txt` | `contender` | `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-prov` |
 
 The `rag` arm is the control: it is built from raw turns and never touches
 the extractor, so any movement there across the three runs is measurement
-noise and bounds what the cortex/hybrid deltas can claim. The
-knowledge-update family rides along as the pollution check — it is the
-family the fact spine is tuned on, so a naive arm that buys SSA accuracy by
-overwriting user-stated values should show up there as a loss.
+noise and bounds what the cortex/hybrid deltas can claim. It moves by
+**exactly 0.0000, 0 wins and 0 losses, in all twelve paired comparisons
+below**. The knowledge-update family rides along as the pollution check —
+it is the family the fact spine is tuned on, so a naive arm that buys SSA
+accuracy by overwriting user-stated values should show up there as a loss.
 
-No numbers yet: nothing has been run.
+The baseline column is the committed 2026-09-04 six-type run
+(`longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl`) restricted to
+these three types, not a fourth run. `assist-base` is what licenses that:
+re-running the shipped prompt over the 56 SSA sessions reproduces the
+09-04 rows exactly — **56 of 56 identical claim counts, 56 of 56
+byte-identical `cortex`, `rag` and `hybrid` contexts, and 0 verdict flips
+on any arm**. Same instrument, so the cross-run pairings below are paired
+tests and not a comparison of two different benches.
+
+#### Per-type accuracy
+
+`assist-base` here is the 2026-09-04 baseline; `rag` is the control arm.
+
+| question type (n) | arm | `assist-base` | `assist-prov` | `assist-naive` |
+|---|---|---|---|---|
+| single-session-assistant (56) | cortex | 0.054 | **0.518** | 0.500 |
+| single-session-assistant (56) | hybrid | 0.911 | **0.964** | 0.929 |
+| single-session-assistant (56) | cascade | 0.893 | **0.929** | 0.911 |
+| single-session-assistant (56) | rag (control) | 0.911 | 0.911 | 0.911 |
+| single-session-preference (30) | cortex | 0.233 | 0.100 | 0.167 |
+| single-session-preference (30) | hybrid | 0.500 | 0.533 | 0.500 |
+| single-session-preference (30) | cascade | 0.467 | 0.367 | 0.467 |
+| single-session-preference (30) | rag (control) | 0.533 | 0.533 | 0.533 |
+| knowledge-update (78) | cortex | 0.667 | **0.744** | 0.705 |
+| knowledge-update (78) | hybrid | 0.897 | **0.923** | 0.885 |
+| knowledge-update (78) | cascade | 0.846 | 0.872 | 0.872 |
+| knowledge-update (78) | rag (control) | 0.859 | 0.859 | 0.859 |
+
+Over the whole 164-question slice, with mean context tokens per question
+for the two measured runs:
+
+| arm | `assist-base` | `assist-prov` | `assist-naive` | prov tokens | naive tokens |
+|---|---|---|---|---|---|
+| cortex | 0.378 | **0.549** | 0.537 | 216 | 183 |
+| hybrid | 0.829 | **0.866** | 0.829 | 1297 | 1263 |
+| cascade | 0.793 | 0.799 | 0.811 | 581 | 599 |
+| rag (control) | 0.817 | 0.817 | 0.817 | 1072 | 1072 |
+
+The extraction side moved the way the diagnosis predicts. Sessions
+consolidating with `claims == 0`, per type:
+
+| question type (n) | `assist-base` | `assist-prov` | `assist-naive` |
+|---|---|---|---|
+| single-session-assistant (56) | 50 | 20 | 23 |
+| single-session-preference (30) | 12 | 4 | 11 |
+| knowledge-update (78) | 1 | 0 | 1 |
+
+#### Paired tests
+
+`evals/compare_arms.py --a-file/--b-file [--types]`, 10,000 sign-flip
+draws, seed 0. Δ is A minus B; W / L are questions the A run got right and
+B wrong, and the reverse. `p < 0.0001` is the artifact's `p: 0.0` — no
+draw of 10,000 reached the observed delta.
+
+**`assist-prov` vs `assist-base`** (`compare-assist-prov-vs-base*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | **+0.171** | < 0.0001 | 36 / 8 |
+| all 164 | hybrid | +0.037 | 0.14 | 9 / 3 |
+| all 164 | cascade | +0.006 | 1.00 | 8 / 7 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | **+0.464** | < 0.0001 | 26 / 0 |
+| single-session-assistant (56) | hybrid | +0.054 | 0.24 | 3 / 0 |
+| single-session-assistant (56) | cascade | +0.036 | 0.51 | 2 / 0 |
+| knowledge-update (78) | cortex | +0.077 | 0.18 | 10 / 4 |
+| knowledge-update (78) | hybrid | +0.026 | 0.69 | 4 / 2 |
+| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |
+| single-session-preference (30) | cortex | −0.133 | 0.12 | 0 / 4 |
+| single-session-preference (30) | hybrid | +0.033 | 1.00 | 2 / 1 |
+| single-session-preference (30) | cascade | −0.100 | 0.37 | 1 / 4 |
+
+**`assist-naive` vs `assist-base`** (`compare-assist-naive-vs-base*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | **+0.159** | 0.0002 | 35 / 9 |
+| all 164 | hybrid | 0.000 | 1.00 | 5 / 5 |
+| all 164 | cascade | +0.018 | 0.60 | 9 / 6 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | **+0.446** | < 0.0001 | 25 / 0 |
+| single-session-assistant (56) | hybrid | +0.018 | 1.00 | 1 / 0 |
+| single-session-assistant (56) | cascade | +0.018 | 1.00 | 1 / 0 |
+| knowledge-update (78) | cortex | +0.038 | 0.62 | 9 / 6 |
+| knowledge-update (78) | hybrid | −0.013 | 1.00 | 2 / 3 |
+| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |
+| single-session-preference (30) | cortex | −0.067 | 0.61 | 1 / 3 |
+| single-session-preference (30) | hybrid | 0.000 | 1.00 | 2 / 2 |
+| single-session-preference (30) | cascade | 0.000 | 1.00 | 3 / 3 |
+
+**`assist-prov` vs `assist-naive`** — the guard's own cost
+(`compare-assist-prov-vs-naive*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | +0.012 | 0.82 | 11 / 9 |
+| all 164 | hybrid | +0.037 | 0.21 | 11 / 5 |
+| all 164 | cascade | −0.012 | 0.77 | 5 / 7 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | +0.018 | 1.00 | 4 / 3 |
+| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |
+| single-session-assistant (56) | cascade | +0.018 | 1.00 | 1 / 0 |
+| knowledge-update (78) | cortex | +0.038 | 0.55 | 7 / 4 |
+| knowledge-update (78) | hybrid | +0.038 | 0.45 | 5 / 2 |
+| knowledge-update (78) | cascade | 0.000 | 1.00 | 4 / 4 |
+| single-session-preference (30) | cortex | −0.067 | 0.51 | 0 / 2 |
+| single-session-preference (30) | hybrid | +0.033 | 1.00 | 4 / 3 |
+| single-session-preference (30) | cascade | −0.100 | 0.24 | 0 / 3 |
+
+#### The read
+
+Stated plainly, because the result is not the one the change was designed
+to argue for:
+
+- **Both variants recover `single-session-assistant`**, from 0.054 to
+  0.518 (`assist-prov`) and 0.500 (`assist-naive`) on the fact-only arm —
+  +0.464 and +0.446 paired, 26 and 25 questions won against **zero** lost.
+  Asking for assistant-stated facts is what moved the number; the guard is
+  not what moved it.
+- **The pollution the naive arm was expected to cause is not detectable in
+  accuracy at this n.** The knowledge-update canary is flat-to-up under
+  both variants (naive cortex +0.038, hybrid −0.013; prov cortex +0.077,
+  hybrid +0.026), and none of those deltas is significant. On this
+  evidence the case for the provenance guard is **not** an accuracy case.
+- **The guard's case is the safety property**: an assistant-stated value
+  can never overwrite a value of any other origin — it parks as a
+  contender — and that costs nothing measurable. Head to head, `prov`
+  leads `naive` on every fact-reading arm directionally but not
+  significantly (slice hybrid +0.037, 11 W / 5 L, p = 0.21; slice cortex
+  +0.012, 11 / 9). A delta this size is inside what this bench can
+  resolve, so read it as "no measured cost", not as "the guard is better".
+- **`single-session-preference` is the one type both variants hurt**
+  slightly (prov cortex −0.133, naive −0.067; n = 30, so 2 to 4 questions).
+  Preferences are facts about the *user*, and the added instruction pulls
+  extraction toward the thing being described instead. Not significant,
+  but it is the only consistent negative and it should not be rounded away.
+- **The `rag` control moved by 0.0000 with 0 wins and 0 losses in all
+  twelve comparisons**, so none of the above is a run-to-run measurement
+  artifact.
+
+#### What this does and does not decide
+
+Nothing in the shipped defaults changes. The shipped extraction prompt
+never emits a `speaker` field, so the whole engine path measured here —
+the `assistant` origin, the unconditional contender park, the ×0.85
+demotion, `memory.dream.assistant_claims` — is inert until a prompt
+variant is adopted.
+
+**Adoption is gated on the extraction ladder** (`evals/ladder_sweep.py`),
+which has **not** been run on either variant. That is the screen for
+extraction quality as such — gold recoverability and stale leakage on the
+knowledge-update corpus — and it is the gate a dream-path prompt change
+must pass, deliberately not covered by `evals/regression_gate.ps1`. A
+LongMemEval slice that recovers one question type says the prompt finds
+more facts; the ladder says whether the facts it finds are the right ones.
+Promoting `assistant_facts_provenance.txt` to the shipped prompt is the
+decision this measurement informs and does not make.
 
 Model roles are split so extraction quality is the **only** variable:
 

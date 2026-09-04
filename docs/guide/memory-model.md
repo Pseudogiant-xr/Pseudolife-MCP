@@ -394,6 +394,14 @@ slot, but against a current value of any other origin it always parks as a
 contender — that rule is not gated on `protect_provenance` below — and it
 ranks after user-origin facts at equal similarity. Nothing supersedes *it*
 in return: an assistant-origin value is replaced by any later write.
+Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
+for assistant-stated facts lifts the fact-only arm on
+`single-session-assistant` from 0.054 to 0.518 while the knowledge-update
+pollution check stays flat-to-up, and the guard costs nothing measurable
+against an unguarded variant of the same prompt — tables, paired tests and
+the adoption gate are in `evals/README.md`. Nothing here is on by default:
+the shipped extraction prompt asks for no `speaker` label, so this tier is
+only reachable by a bank whose dream runs one of those candidate prompts.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in
