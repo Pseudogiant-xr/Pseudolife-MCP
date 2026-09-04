@@ -48,7 +48,7 @@ from pseudolife_memory.memory.contradiction import detect_contradictions, decay_
 from pseudolife_memory.memory.slots import extract_slots
 from pseudolife_memory.memory.bm25 import BM25Index, normalize_scores
 from pseudolife_memory.memory.episodes import EpisodeManager, normalize_tags
-from pseudolife_memory.utils.config import MemoryConfig
+from pseudolife_memory.utils.config import FUSION_MODES, MemoryConfig
 
 if TYPE_CHECKING:
     from pseudolife_memory.memory.nli import NLIContradictionScorer
@@ -747,10 +747,14 @@ class ContinuumMemorySystem:
             getattr(search_cfg, "candidate_pool_multiplier", 1) or 1))
         fusion_mode = str(getattr(search_cfg, "fusion", "weighted_sum")
                           or "weighted_sum")
-        if fusion_mode not in ("weighted_sum", "rrf"):
+        # Belt. ``SearchConfig.__post_init__`` rejects a bad mode at LOAD
+        # so config.yaml typos fail at startup rather than once per query;
+        # this catches the objects that never ran it — per-attribute
+        # setattr, eval harnesses, anything hand-built.
+        if fusion_mode not in FUSION_MODES:
             raise ValueError(
                 f"memory.search.fusion: unknown mode {fusion_mode!r} "
-                "(expected 'weighted_sum' or 'rrf')")
+                f"(expected one of {', '.join(map(repr, FUSION_MODES))})")
         # Reciprocal rank fusion's smoothing constant. 60 is the value from
         # the method's original publication (Cormack, Clarke & Buettcher,
         # SIGIR 2009, "Reciprocal Rank Fusion outperforms Condorcet and
@@ -951,6 +955,9 @@ class ContinuumMemorySystem:
                     neural.append((entry, adjusted, surprise))
                     dense_rank_src.append((entry.text, float(relevance)))
                     seen_texts.add(entry.text)
+                    # Counts POOL candidates, not served ones: with the
+                    # multiplier on, a band lands here for entries the
+                    # final cut to ``top_k`` then drops.
                     hit_band_names.add(band.name)
                     comps[entry.text] = {
                         "channel": "dense",

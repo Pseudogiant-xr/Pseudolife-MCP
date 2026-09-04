@@ -14,13 +14,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pool and the cross-encoder all re-ranked a set that dense retrieval had
   already cut to size, and the reranker's `top_n = 20` budget never saw
   more than ~11 candidates. Three knobs give it the retrieve-then-rerank
-  shape properly. **All three ship at their current behaviour**; none has
-  passed the judged regression gate, so nothing changes by default.
+  shape properly. **All three ship at their current behaviour** — not for
+  want of measurement: the judged run (2026-09-04, LongMemEval
+  knowledge-update oracle, n=78) says both settings LOSE. Multiplier 4 +
+  rrf takes naive RAG from 0.859 to 0.744 (-0.115, p 0.0506) and hybrid
+  from 0.897 to 0.833 (-0.064, p 0.1265); multiplier 4 + weighted_sum
+  takes RAG to 0.782 (-0.077, p 0.1071) and hybrid to 0.872
+  (-0.026, p 0.6194), both while serving a third to a half more context
+  tokens.
+  The cortex arm — the control whose input never touches `cms.retrieve` —
+  is 0.667 in all three runs, 0W/0L, so those deltas are not judge noise.
+  Artifacts:
+  `evals/results/longmemeval-ku-oracle-qwen-27b-pool-{ctl,m4rrf,m4sum}.*`
+  plus `evals/results/compare-pool-m4{rrf,sum}-pairs.json`; the table and
+  the caveats (nothing is significant at n=78; the reranker-on cell is
+  untested) are in `evals/README.md`.
   - `memory.search.candidate_pool_multiplier` (default `1`) — each band's
     dense pool becomes `top_k * multiplier`, band-size capped. The final
     truncation to `top_k` does not move. At `1` the path is byte-identical
-    to the pre-change code, pinned against a captured golden in
-    `tests/test_retrieval_pool.py`.
+    to the pre-change code, pinned against two goldens captured on
+    7595ce6f in `tests/test_retrieval_pool.py` — one over plain
+    un-boosted cosines, one over a fixture where a served entry carries a
+    nonzero BM25 boost (the single default-path line this change touched)
+    and another arrives only through the slot channel. The reranker and
+    the reference pool at multiplier `1` are pinned behaviourally in the
+    same module, not by a captured golden.
   - `memory.search.fusion` (default `"weighted_sum"`) — `"rrf"` merges the
     dense / slot / BM25 / timeline channels by reciprocal rank fusion
     (`k = 60`, the constant from Cormack et al., SIGIR 2009) instead of
@@ -30,6 +48,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     order. `min_score` keeps its per-channel meaning — the dense floor
     gates cosines before fusion, so a lexical-only hit is never dropped by
     a cosine gate, and the ~0.03-scale fused score is never compared to it.
+    A typo'd value now fails at config LOAD (`SearchConfig.__post_init__`)
+    instead of raising inside every `retrieve()` call; the per-query check
+    stays as the belt for config objects built by other paths. The CAUTION
+    beside the knob names all four thresholds the rrf scale silently
+    redefines — `search_confidence_floor`, the reranker's `fusion_weight`
+    and `skip_margin`, and the reference pool's un-rescaled cosines — and
+    says plainly that rrf must not be combined with the reranker or a
+    populated reference bank until that combination is measured. Each
+    hazard is pinned in `tests/test_retrieval_pool.py` against the real
+    `CrossEncoderReranker.fuse` arithmetic.
   - **Rerank-then-cut** — with a widened pool AND the reranker enabled, the
     cross-encoder now sees the fused pool *before* the truncation to
     `top_k`. Under multiplier `1` the old truncate-then-rerank order is
@@ -50,7 +78,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   **Null result**: recall@6 is 0.700 and stale leak 0.300 in all eight
   cells, with the same three misses; the knobs move 18–33% of the served
   set and cost 48ms → 560ms per query at multiplier 4 with the reranker on.
-  A proxy, not a verdict — only the judged gate decides these.
+  A proxy, not a verdict — the judged run above is the verdict, and it is
+  negative; this null only says the proxy could not see the difference.
 - **Sanctioned bench override** — `PSEUDOLIFE_BENCH_POOL_MULT` /
   `PSEUDOLIFE_BENCH_FUSION`, applied by `ladder_sweep.build_service` and
   stamped into every summary's `bench_env` (the PR #165 contract). Note the

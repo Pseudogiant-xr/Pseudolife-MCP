@@ -11,10 +11,20 @@ Three knobs, all default-OFF so the shipped path stays byte-identical:
 * Rerank-then-cut — under a widened pool the cross-encoder sees the fused
   pool BEFORE the truncation to ``k`` instead of after it.
 
-``test_multiplier_one_matches_captured_prechange_output`` is the
-byte-identity pin: ``GOLDEN`` was captured by running this module as a
-script against the commit BEFORE these knobs existed (7595ce6f).
-Regenerate it only when you INTEND the shipped default path to change.
+Two goldens pin the default path, both captured by running this module as
+a script against the commit BEFORE these knobs existed (7595ce6f):
+
+* ``GOLDEN`` — four un-boosted dense cosines, the plain ranking.
+* ``GOLDEN_MIXED`` — the same path with the channels this diff touched
+  actually firing: a served entry carrying a nonzero BM25 boost (the one
+  default-path line the diff changed, the ``fusion_mode == "weighted_sum"``
+  guard on the boost) and a served slot hit on its own 0.55-0.95 scale.
+
+Together they pin the shipped weighted-sum path with the dense, lexical
+and slot channels live. They do NOT pin the reranker or the reference
+pool at multiplier 1 — those are covered by behavioural tests below, not
+by a captured golden. Regenerate a golden only when you INTEND the
+shipped default path to change.
 """
 
 from __future__ import annotations
@@ -25,7 +35,12 @@ import pytest
 import torch
 
 from pseudolife_memory.memory.cms import ContinuumMemorySystem
-from pseudolife_memory.utils.config import MemoryConfig, SearchConfig
+from pseudolife_memory.memory.reranker import CrossEncoderReranker
+from pseudolife_memory.utils.config import (
+    MemoryConfig,
+    SearchConfig,
+    load_config,
+)
 
 DIM = 16
 
@@ -100,12 +115,41 @@ def _serve(cms: ContinuumMemorySystem, *, top_k: int = 4, **kwargs):
     return cms.retrieve(_query(), top_k=top_k, query_text=QUERY_TEXT, **kwargs)
 
 
+# A third bank exercising the channels the plain GOLDEN never touches:
+# the first row shares three content tokens with the query (so it is a
+# served DENSE hit carrying a nonzero BM25 boost), and the last row is the
+# only slot-bearing entry (``Jacque.type=cat`` / ``Jacque.breed=Ragdoll``),
+# whose cosine is far too low to reach the dense pool — it can only arrive
+# through the slot channel, at that channel's own 0.55-0.95 confidence
+# scale. The distractor cosines sit low enough that the slot hit is not
+# cut by the truncation to ``top_k``.
+MIXED_FIXTURE: list[tuple[str, float]] = [
+    ("the gateway rollout owner is the platform team", 0.95),
+    ("deployment note eta about the pipeline schedule", 0.62),
+    ("deployment note theta about the pipeline schedule", 0.58),
+    ("deployment note iota about the pipeline schedule", 0.54),
+    ("I have a Ragdoll cat named Jacque", 0.30),
+]
+MIXED_QUERY = "who owns the gateway rollout and what breed is Jacque"
+
+
 # Captured on the pre-knob commit (7595ce6f); see the module docstring.
 GOLDEN: list[tuple[str, float]] = [
     ("deployment note zeta about the pipeline schedule", 0.95),
     ("deployment note eta about the pipeline schedule", 0.9),
     ("deployment note theta about the pipeline schedule", 0.85),
     ("deployment note iota about the pipeline schedule", 0.8),
+]
+
+# Ditto, over MIXED_FIXTURE: 1.25 is 0.95 dense + 0.3 x 1.0 BM25 (a served
+# entry with a live lexical boost), 0.666667 is the slot channel's
+# 0.55 + 0.35 x (1/3) confidence (a served slot hit), and the tail is plain
+# dense. One capture, three channels.
+GOLDEN_MIXED: list[tuple[str, float]] = [
+    ("the gateway rollout owner is the platform team", 1.25),
+    ("I have a Ragdoll cat named Jacque", 0.666667),
+    ("deployment note eta about the pipeline schedule", 0.62),
+    ("deployment note theta about the pipeline schedule", 0.58),
 ]
 
 
@@ -132,6 +176,28 @@ def test_multiplier_one_matches_captured_prechange_output():
     res = _serve(_build())
     got = [(e.text, round(float(s), 6)) for e, s in zip(res.entries, res.scores)]
     assert got == [(t, round(s, 6)) for t, s in GOLDEN]
+
+
+def test_multiplier_one_matches_captured_prechange_output_with_all_channels():
+    """The BM25-boost and slot channels are byte-identical too.
+
+    ``GOLDEN`` alone only covers un-boosted cosines, which leaves the one
+    default-path line this change touched — the ``weighted_sum`` guard on
+    the BM25 boost — unpinned. This fixture serves an entry that carries a
+    nonzero boost and an entry that arrives only through the slot channel.
+    """
+    cms = _cms(MIXED_FIXTURE)
+    res, trace = cms.retrieve_with_trace(
+        _query(), top_k=4, query_text=MIXED_QUERY)
+    got = [(e.text, round(float(s), 6)) for e, s in zip(res.entries, res.scores)]
+    assert got == [(t, round(s, 6)) for t, s in GOLDEN_MIXED]
+    # Both channels really fired — a fixture that quietly stopped boosting
+    # or stopped hitting a slot would still match a golden captured from
+    # it, so the golden's value depends on this staying true.
+    assert res.params["candidate_pool"]["multiplier"] == 1
+    assert [h["text_preview"] for h in trace["slot_pool"]] == [
+        "I have a Ragdoll cat named Jacque"]
+    assert got[0][1] == pytest.approx(0.95 + 0.3, abs=1e-9)
 
 
 def test_multiplier_one_declares_the_shipped_shape_in_params():
@@ -290,7 +356,29 @@ def test_rrf_gates_each_channel_on_its_native_score_not_the_fused_one():
     assert all(float(s) < 0.25 for s in res.scores), res.scores
 
 
+def test_bad_fusion_mode_is_rejected_at_config_load():
+    """A typo'd mode fails at STARTUP, not once per query.
+
+    ``_build(fusion=...)`` below reaches ``retrieve`` by setattr, which
+    skips ``__post_init__`` — the belt. This is the load-time gate a
+    config.yaml typo actually meets."""
+    with pytest.raises(ValueError, match="fusion"):
+        SearchConfig(fusion="nonsense")
+
+
+def test_bad_fusion_mode_in_yaml_fails_the_daemon_at_startup(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "memory:\n  search:\n    fusion: rff\n",
+        encoding="utf-8")
+    with pytest.raises(ValueError, match="fusion"):
+        load_config(cfg)
+
+
 def test_bad_fusion_mode_is_rejected_loudly():
+    """The belt: a config object that never ran ``__post_init__`` (per-
+    attribute setattr, eval harnesses, anything hand-built) still cannot
+    serve a query under an unknown mode."""
     with pytest.raises(ValueError, match="fusion"):
         _serve(_build(fusion="nonsense"))
 
@@ -396,6 +484,140 @@ def test_rerank_before_cut_does_not_fire_without_a_reranker():
     assert res.params["candidate_pool"]["rerank_position"] == "after_cut"
 
 
+# ── The rrf scale hazard: rrf x reranker x reference pool ────────────────
+# The CAUTION on ``SearchConfig.fusion`` names four thresholds that change
+# meaning when the served score drops from the cosine scale to
+# ~0.016-0.05. ``search_confidence_floor`` is documented at its own site;
+# these pin the other three. They assert TODAY'S behaviour, which is the
+# hazardous behaviour — nothing here is rescaled, because rescaling would
+# be an unmeasured change to a path the judged verdict never covered
+# (rrf was measured with the reranker OFF and an empty reference bank).
+# The pins exist so the hazard cannot be discovered a third time by
+# surprise, and so a future rescaling has to move a test on purpose.
+
+_HAZARD_FIXTURE = [("alpha gateway rollout note", 0.95),
+                   ("beta gateway rollout note", 0.60)]
+_HAZARD_QUERY = "gateway rollout note"
+
+
+class _RealFuseReranker(CrossEncoderReranker):
+    """Stub that keeps the SHIPPED fusion arithmetic.
+
+    Subclasses the real reranker and overrides only the model call, so
+    ``fuse`` is literally ``w * ce + (1 - w) * orig`` as served — a
+    hand-rolled pass-through of ``ce`` (the ``_StubReranker`` above) would
+    hide exactly the term under test.
+    """
+
+    def __init__(self, ce_by_text: dict[str, float], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.ce_by_text = ce_by_text
+        self.seen: list[list[str]] = []
+
+    def is_available(self) -> bool:
+        return True
+
+    def rerank(self, query: str, candidates: list[str]) -> list[float]:
+        self.seen.append(list(candidates))
+        return [self.ce_by_text[c] for c in candidates]
+
+
+def _hazard_cms(ce_by_text, *, fusion, reference=None, skip_margin=0.0):
+    cfg = MemoryConfig(embedding_dim=DIM)
+    cfg.search.fusion = fusion
+    cfg.reranker.enabled = True
+    cfg.reranker.skip_margin = skip_margin
+    stub = _RealFuseReranker(ce_by_text)
+    cms = ContinuumMemorySystem(cfg, reference_bank=reference, reranker=stub)
+    for text, cos in _HAZARD_FIXTURE:
+        cms.store(text, _vec(cos), source="user")
+    return cms, stub
+
+
+def _hazard_serve(cms):
+    # bm25=False isolates the dense channel: with both fixture entries
+    # matching the query lexically, the BM25 boost would be an equal
+    # constant and only add noise to the scale comparison.
+    return cms.retrieve(_query(), top_k=4, query_text=_HAZARD_QUERY,
+                        bm25=False)
+
+
+def test_rrf_collapses_the_bi_encoder_term_of_the_reranker_fusion():
+    """``fusion_weight`` stops mixing anything under rrf.
+
+    ``fuse`` is ``0.7 * ce + 0.3 * orig``. On cosines the bi-encoder term
+    spans 0.3 x (0.95 - 0.60) = 0.105, enough to hold a 0.02 cross-encoder
+    difference off. On rrf scores it spans 0.3 x (1/61 - 1/62) = 0.00008,
+    so the same 0.02 flips the ranking: rrf + reranker is cross-encoder-
+    only ordering, whatever ``fusion_weight`` says."""
+    ce = {"alpha gateway rollout note": 0.50,
+          "beta gateway rollout note": 0.52}
+
+    ws, _ = _hazard_cms(ce, fusion="weighted_sum")
+    rrf, _ = _hazard_cms(ce, fusion="rrf")
+    ws_order = [e.text for e in _hazard_serve(ws).entries]
+    rrf_res = _hazard_serve(rrf)
+    rrf_order = [e.text for e in rrf_res.entries]
+
+    assert ws_order[0].startswith("alpha"), ws_order
+    assert rrf_order[0].startswith("beta"), rrf_order
+    # The served score is the real fusion of a ce score and an rrf score:
+    # 0.7 x 0.52 + 0.3 x 1/62.
+    assert float(rrf_res.scores[0]) == pytest.approx(
+        0.7 * 0.52 + 0.3 * (1 / 62), abs=1e-9)
+
+
+def test_rrf_makes_a_cosine_scaled_skip_margin_unreachable():
+    """``skip_margin`` inverts: the gate that should fire, never does.
+
+    A margin tuned on cosines (0.15) skips the ~200ms cross-encoder pass
+    on a decisively separated head. Fused rrf scores are ~0.016 apart at
+    the very top, so the gate can never be reached — the pass it exists to
+    avoid runs on every query instead."""
+    ce = {"alpha gateway rollout note": 0.50,
+          "beta gateway rollout note": 0.52}
+
+    ws, ws_stub = _hazard_cms(ce, fusion="weighted_sum", skip_margin=0.15)
+    ws_res = _hazard_serve(ws)
+    # 0.95 - 0.60 = 0.35 >= 0.15: skipped, as designed.
+    assert ws_stub.seen == []
+    assert ws_res.params["reranker"]["skip_reason"] == "unambiguous_margin"
+
+    rrf, rrf_stub = _hazard_cms(ce, fusion="rrf", skip_margin=0.15)
+    rrf_res = _hazard_serve(rrf)
+    # 1/61 - 1/62 = 0.00026 < 0.15: the same decisively-separated head
+    # reranks anyway.
+    assert len(rrf_stub.seen) == 1, rrf_stub.seen
+    assert rrf_res.params["reranker"]["fired"] is True
+    assert rrf_res.params["reranker"]["margin"] == pytest.approx(
+        1 / 61 - 1 / 62, abs=1e-9)
+
+
+def test_rrf_lets_un_rescaled_reference_cosines_overturn_the_reranker():
+    """Pool 2 keeps RAW cosines (~0.99) and is never rescaled.
+
+    With the reranker off they simply trail. With it on, the ``0.3 x orig``
+    term hands every reference document ~0.29 of unearned score — worth a
+    0.42 cross-encoder gap — so the cross-encoder's verdict is overturned
+    by the scale mismatch alone. Same ce scores, same pool, only the
+    fusion mode differs."""
+    ce = {"alpha gateway rollout note": 0.65,
+          "beta gateway rollout note": 0.65,
+          _StubReferenceBank.DOCS[0]: 0.30,
+          _StubReferenceBank.DOCS[1]: 0.30}
+
+    ws, _ = _hazard_cms(ce, fusion="weighted_sum",
+                        reference=_StubReferenceBank())
+    rrf, _ = _hazard_cms(ce, fusion="rrf", reference=_StubReferenceBank())
+    ws_order = [e.text for e in _hazard_serve(ws).entries]
+    rrf_order = [e.text for e in _hazard_serve(rrf).entries]
+
+    # Cosine scale: the cross-encoder prefers the memory, and gets its way.
+    assert ws_order[0].startswith("alpha"), ws_order
+    # RRF scale: both reference documents sort above every memory.
+    assert rrf_order[:2] == list(_StubReferenceBank.DOCS), rrf_order
+
+
 # ── explain=True trace ───────────────────────────────────────────────────
 
 
@@ -418,8 +640,12 @@ def test_trace_default_records_the_shipped_shape():
 
 
 if __name__ == "__main__":  # pragma: no cover - golden capture helper
-    result = _serve(_build())
-    print("GOLDEN: list[tuple[str, float]] = [")
-    for entry, score in zip(result.entries, result.scores):
-        print(f"    ({entry.text!r}, {round(float(score), 6)}),")
-    print("]")
+    def _dump(name, result) -> None:
+        print(f"{name}: list[tuple[str, float]] = [")
+        for entry, score in zip(result.entries, result.scores):
+            print(f"    ({entry.text!r}, {round(float(score), 6)}),")
+        print("]")
+
+    _dump("GOLDEN", _serve(_build()))
+    _dump("GOLDEN_MIXED", _cms(MIXED_FIXTURE).retrieve(
+        _query(), top_k=4, query_text=MIXED_QUERY))

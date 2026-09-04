@@ -1041,9 +1041,10 @@ only the 100K tier has been run — 500K/1M/10M are unmeasured.
 
 A **retrieval proxy, not a verdict.** It answers "does the gold-bearing
 turn reach the served window?" under each candidate-pool setting, and
-nothing about whether an answerer then gets the question right. Only the
-judged regression gate decides these knobs — and see the scope warning
-below, because the gate as it stands does not reach them.
+nothing about whether an answerer then gets the question right. Only a
+judged run decides these knobs — the standing regression gate does not
+reach them (scope warning below), so a dedicated one was run: **both
+settings lose**, and the verdict table is at the end of this section.
 
 Run (CPU only; no Postgres, no GPU, no judge, no network):
 
@@ -1082,10 +1083,12 @@ dump — and their own vectors are 384-d from the retired MiniLM backbone.
 Every cell scores 0.700 with the *same three misses*, so on this proxy the
 knobs buy nothing: the misses are questions whose gold turn no pool width
 reaches. What they do change is *which* turns are served — 18–33% of the
-served set — which is exactly the difference a judged run would score, and
-what makes the null here uninformative rather than negative. The cost side
-is not null: multiplier 4 with the reranker on is 7–11x the shipped
-latency, because rerank-then-cut hands the cross-encoder ~4x the pairs.
+served set — which is exactly the difference a judged run scores. The
+null here is uninformative rather than negative *as a proxy*; the judged
+verdict below is what settled the knobs, and it is negative. The cost
+side is not null either: multiplier 4 with the reranker on is 7–11x the
+shipped latency, because rerank-then-cut hands the cross-encoder ~4x the
+pairs.
 
 Power caveat: 10 gold queries whose gold values are rare tokens the BM25
 channel already nails, over a 426-entry bank. Read the table as "no signal
@@ -1111,6 +1114,56 @@ python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
 
 An invalid value aborts rather than silently serving the default
 (`tests/test_bench_pool_knobs.py`).
+
+### Judged verdict (2026-09-04): the knobs lose
+
+That `--phase extract` re-run was done. Three runs over the LongMemEval
+knowledge-update **oracle** slice (n=78, qwen-27b extraction, identical
+judge and answerer): the shipped control, multiplier 4 + rrf, and
+multiplier 4 + weighted_sum. Accuracy @ mean context tokens, with the
+paired delta against the control, its bootstrap p (10 000 draws, seed 0)
+and per-question wins/losses:
+
+| arm | shipped (`pool-ctl`) | mult 4 + rrf (`pool-m4rrf`) | mult 4 + weighted_sum (`pool-m4sum`) |
+|---|---|---|---|
+| naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 (-0.115, p 0.0506, 4W/13L) | 0.782 @ 1643.0 (-0.077, p 0.1071, 2W/8L) |
+| cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) |
+| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 (-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, 1W/3L) |
+| commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 (0.000, p 1.0, 1W/1L) | 0.859 @ 544.5 (+0.013, p 1.0, 2W/1L) |
+
+**The cortex arm is the control with identical input.** It never touches
+`cms.retrieve`, so it scores 0.667 in all three runs with 0 wins and 0
+losses — a measured noise floor of exactly zero on this instrument. Every
+delta above is therefore a real difference in the served context, not
+judge jitter.
+
+**Reading it honestly.** Nothing is positive except the cascade's single
++0.013 under weighted_sum, which is one question (2W/1L, p 1.0) and is
+noise. Neither RAG delta clears p < 0.05 at n=78 — rrf's -0.115 lands at
+p 0.0506, a hair outside — so the individually-significant claim is not
+available. What *is* available is the pattern: every arm that moves at
+all moves down, under both knobs, while the turn-serving arms' context
+cost rises by between a third and a half (the token columns above). A
+knob that costs that much more context to lose 0.115 on its primary arm
+does not need a tighter p-value to be declined.
+
+**The reranker-on cell is untested.** Both runs had the cross-encoder OFF
+and an empty reference bank. That is the only combination measured, and
+it is the only one the CAUTION on `SearchConfig.fusion` permits: under
+rrf the reranker's `fusion_weight` collapses to cross-encoder-only
+ordering and un-rescaled reference cosines outrank every memory. Whether
+a widened pool pays off *with* the cross-encoder — the configuration the
+whole retrieve-then-rerank shape was built for — remains unmeasured.
+
+Artifacts (all committed):
+`results/longmemeval-ku-oracle-qwen-27b-pool-{ctl,m4rrf,m4sum}.jsonl`
+and their `.summary.json`; paired comparisons
+`results/compare-pool-m4rrf-pairs.json` and
+`results/compare-pool-m4sum-pairs.json`.
+
+This is why both knobs ship at today's behaviour, stay off the Console
+(`tests/test_console_knob_gapfill.py`), and are documented as measured
+losers rather than as unmeasured options.
 
 **Regression gate for the v35 label carrier (2026-09-03).** Two paired
 checks confirmed the write-time `authority`/`distortion_tolerance` labels
