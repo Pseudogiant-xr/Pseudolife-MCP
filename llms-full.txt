@@ -1422,11 +1422,11 @@ it came from a live `memory_set_add` call or a dream claim.
 ## Provenance contenders — never silently overwrite a user fact
 
 Every cortex fact carries a provenance tier: **`user` > `action` >
-`agent`** (set via `origin=`, or defaulted from `source`). A write may only
-*supersede* a slot whose current value is backed by an equal-or-weaker
-tier. A **weaker-tier** write (e.g. an `agent` value conflicting with a
-`user`-stated fact), or one below the confidence margin, is **not
-applied** — it's parked as a *contender*:
+`agent` > `assistant`** (set via `origin=`, or defaulted from `source`). A
+write may only *supersede* a slot whose current value is backed by an
+equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
+conflicting with a `user`-stated fact), or one below the confidence margin,
+is **not applied** — it's parked as a *contender*:
 
 ```python
 memory_fact_set("db", "host", "10.0.0.5", origin="user")   # current
@@ -1436,6 +1436,14 @@ memory_fact_set("db", "host", "10.0.0.9", origin="agent")  # -> action="conteste
 memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user-confirmed)
 # or accept=False -> discard the contender, current unchanged.
 ```
+
+`assistant` is the floor tier: a fact the **assistant** stated in a turn,
+written only by a dream whose extraction prompt asks for a `speaker` label
+(`memory.dream.assistant_claims`, default `contender`). It may fill an empty
+slot, but against a current value of any other origin it always parks as a
+contender — that rule is not gated on `protect_provenance` below — and it
+ranks after user-origin facts at equal similarity. Nothing supersedes *it*
+in return: an assistant-origin value is replaced by any later write.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in

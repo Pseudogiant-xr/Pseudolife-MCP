@@ -50,6 +50,21 @@ class Claim(_ClaimRequired, total=False):
     # the span gate's mode decides what that costs. Same parse-boundary
     # normalisation rule as stance.
     quote: str
+    # Who STATED the fact in the cited turn ("user" | "assistant"), for
+    # prompts that ask for it (evals/prompts/assistant_facts_provenance.txt).
+    # Absent = unstated, which is every shipped extraction: the shipped
+    # _SYSTEM_PROMPT never asks for this field. ``service_dream`` maps
+    # "assistant" to the ``assistant`` write origin under
+    # ``memory.dream.assistant_claims``; "user" is a label about the TURN
+    # and never a tier promotion (support is never taken from claim text).
+    # Same parse-boundary whitelist rule as op/stance.
+    speaker: str
+
+
+# The only two speaker labels a claim may carry: the dream renders turns as
+# "[date] role: content", so these are exactly the roles a model can read off
+# the note it cites.
+_SPEAKERS = ("user", "assistant")
 
 
 class LessonClaim(TypedDict):
@@ -1076,6 +1091,14 @@ class OpenAICompatExtractor:
             quote = c.get("quote")
             if isinstance(quote, str) and quote.strip():
                 claim["quote"] = quote.strip()[:200]
+            # Speaker provenance: whitelisted to the two roles the rendered
+            # turns carry, so a value the write path has never seen cannot
+            # reach it (the op field's 2026-07-31 lesson, in reverse).
+            speaker = c.get("speaker")
+            if isinstance(speaker, str):
+                who = speaker.strip().lower()
+                if who in _SPEAKERS:
+                    claim["speaker"] = who
             try:
                 idx = int(c.get("source")) - 1     # 1-based in the prompt
             except (TypeError, ValueError):

@@ -132,7 +132,15 @@ def _is_aggregate_value(value: str) -> bool:
 # agent only *said*. ``origin`` returns the strongest tier in a record's
 # ``support`` set, so a fact the agent guessed and the user later confirmed
 # reports ``origin == "user"`` (corroboration), not ``"agent"``.
-SUPPORT_PRECEDENCE = ("user", "action", "agent")
+#
+# ``assistant`` (2026-09-05) is the weakest tier: a fact the ASSISTANT stated
+# in a turn, extracted by a prompt that asks for a ``speaker`` label. It sits
+# below ``agent`` so an assistant restatement can fill an empty slot but never
+# supersedes a value any other tier put there — it parks as a contender via the
+# guard below instead. Corroboration still works the normal way: a later
+# user/agent write on the same value unions into ``support`` and the record
+# reports the stronger origin.
+SUPPORT_PRECEDENCE = ("user", "action", "agent", "assistant")
 
 # In-RAM cap on the supersession audit log. Persistence already stores only
 # the newest 200 (storage/sync.py); without this in-place trim the list grew
@@ -206,7 +214,19 @@ def _pick(label, rec, field_name: str):
 # Provenance tier rank for the supersession guard. A write may only SUPERSEDE a
 # slot whose current value is backed by an equal-or-weaker tier; a weaker-tier
 # write is parked as a contender instead of silently overwriting. Unknown/"" = 0.
-_TIER_RANK = {"user": 3, "action": 2, "agent": 1}
+# ``assistant`` shares rank 0 with unknown deliberately: it is the floor, so an
+# assistant-stated value never wins a slot on tier arithmetic, and an
+# assistant-origin current is superseded by anything (including another
+# assistant claim) — the guard is one-directional by design.
+_TIER_RANK = {"user": 3, "action": 2, "agent": 1, "assistant": 0}
+
+# Gentle ranking penalty for assistant-stated facts, so a user-origin fact
+# outranks an assistant restatement at equal similarity. Same constant and same
+# rationale as the associative spine's ASSISTANT_SCORE_MULT (cms.py, in
+# ``retrieve``): no separate measurement, deliberately the same 0.85 so the two
+# spines demote assistant provenance identically. Mirrored offline by
+# evals/rebuild_contexts.py.
+ASSISTANT_FACT_SCORE_MULT = 0.85
 
 
 def _rank(origin: str | None) -> int:
@@ -485,6 +505,21 @@ class CortexStore:
             # win the slot on tier arithmetic.
             return self._contend(cur, slot, emb, confidence, prov, t, sup,
                                  "quarantine_low_trust", semb,
+                                 freshness_class=freshness_class,
+                                 stance=stance, **lab, **stamp)
+
+        if sup == "assistant" and cur.origin != "assistant":
+            # Assistant-stated values never take a slot some other origin
+            # already holds — they park via the same contender machinery.
+            # Deliberately NOT gated on ``protect_provenance``: that switch
+            # trades parking for newer-wins between tiers that all
+            # legitimately assert facts, and turning it off (as
+            # evals/ladder_sweep.build_service does, to isolate extraction
+            # quality) would otherwise DROP the conflicting value outright.
+            # The guard is one-directional: an assistant-origin current is
+            # superseded by anything, this branch included.
+            return self._contend(cur, slot, emb, confidence, prov, t, sup,
+                                 "assistant_origin", semb,
                                  freshness_class=freshness_class,
                                  stance=stance, **lab, **stamp)
 
@@ -1286,9 +1321,21 @@ class CortexStore:
         mat = torch.stack([r.embedding.reshape(-1) for r in current])
         mat = mat / (mat.norm(dim=1, keepdim=True) + 1e-12)
         sims = (mat @ q).tolist()
+        # Assistant-stated facts are demoted so they serve after
+        # user-origin facts at equal similarity. Applied to POSITIVE cosines
+        # only — scaling a negative score would move it UP the ranking,
+        # which is the opposite of a penalty. The ``min_score`` floor is
+        # then applied to the demoted score (self-consistent with what the
+        # caller gets back), so a caller-supplied floor can drop an
+        # assistant fact that sat just above it. Records with any other
+        # origin multiply by 1.0, so a bank with no assistant facts ranks
+        # byte-identically to before.
         scored = [
-            (rec, float(s)) for rec, s in zip(current, sims) if float(s) >= min_score
+            (rec, float(s) * ASSISTANT_FACT_SCORE_MULT
+             if s > 0 and rec.origin == "assistant" else float(s))
+            for rec, s in zip(current, sims)
         ]
+        scored = [(rec, s) for rec, s in scored if s >= min_score]
         scored.sort(key=lambda rs: rs[1], reverse=True)
         return scored[: max(0, int(top_k))]
 

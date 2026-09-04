@@ -292,6 +292,19 @@ class DreamConfig:
     # Sources operators explicitly trust past the quarantine (exact match
     # on the entry's ``source`` tag). Empty = the paranoid configuration.
     trusted_sources: list[str] = field(default_factory=list)
+    # What a claim labelled ``speaker: "assistant"`` becomes (2026-09-05):
+    #   "contender"  — write it at the ``assistant`` origin: it may fill an
+    #                  empty slot, but the tier guard parks it as a contender
+    #                  against any stronger-tier current, and it ranks below
+    #                  user-origin facts at equal similarity.
+    #   "supersede"  — treat it as an ordinary agent-tier dream claim (the
+    #                  naive arm: no label, no guard, no ranking penalty).
+    #   "drop"       — discard it before any write.
+    # Behaviour-neutral at every setting for the SHIPPED prompt, which never
+    # asks for a speaker field: with no label on the claim this knob is never
+    # consulted. An unrecognised value falls back to "contender" (fail safe —
+    # a typo must not open the overwrite path).
+    assistant_claims: str = "contender"
     # Tier 2 (Phase 3) — BYO OpenAI-compatible extractor. Unused in Phases 1–2.
     extractor_base_url: str | None = None
     extractor_api_key: str | None = None

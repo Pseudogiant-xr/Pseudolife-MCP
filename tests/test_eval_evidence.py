@@ -5046,3 +5046,69 @@ CLAIMS.append(Claim(
     needle="219.2 tokens against its 100-token name and producing a byte-identical",
     artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "context_tokens"),
     stated=219.2, places=1))
+
+# ── the assistant-turn extraction gap (2026-09-05) ────────────────────────
+# The CHANGELOG and evals/README both open the assistant-facts work with the
+# per-type scores that motivate it and the zero-claim row counts that
+# diagnose it. Per-type arm accuracies live in the run summary's `types`
+# block; the zero-claim counts are recomputed from the run's own rows.
+
+def _type_arm(qtype: str, arm: str):
+    return lambda d: d["types"][qtype]["arms"][arm]
+
+
+def _zero_claims(qtype: str):
+    """Rows of one question type whose consolidation extracted NO claims."""
+    return lambda rows: float(sum(
+        1 for r in rows
+        if r.get("question_type") == qtype
+        and (r.get("consolidation") or {}).get("claims") == 0))
+
+
+_ASSIST_CL_CORTEX_SSA = "`cortex` arm scores 0.054 on"
+_ASSIST_CL_CORTEX_SSP = "(56 questions) and 0.233 on"
+_ASSIST_CL_RAG = "against plain RAG's 0.911 / 0.533 —"
+_ASSIST_EV_CORTEX_SSA = (
+    "arm scores **0.054** on `single-session-assistant` (56 q) and")
+_ASSIST_EV_CORTEX_SSP = (
+    "**0.233** on `single-session-preference` (30 q), against `rag`'s")
+_ASSIST_EV_RAG = (
+    "**0.911** and **0.533**. The row-level cause is not retrieval: **50 of")
+
+for _cid, _doc, _needle, _val, _stated in [
+    ("assist-cl-cortex-ssa", CHANGELOG, _ASSIST_CL_CORTEX_SSA,
+     _type_arm("single-session-assistant", "cortex"), 0.054),
+    ("assist-cl-cortex-ssp", CHANGELOG, _ASSIST_CL_CORTEX_SSP,
+     _type_arm("single-session-preference", "cortex"), 0.233),
+    ("assist-cl-rag-ssa", CHANGELOG, _ASSIST_CL_RAG,
+     _type_arm("single-session-assistant", "rag"), 0.911),
+    ("assist-cl-rag-ssp", CHANGELOG, _ASSIST_CL_RAG,
+     _type_arm("single-session-preference", "rag"), 0.533),
+    ("assist-ev-cortex-ssa", EVALS, _ASSIST_EV_CORTEX_SSA,
+     _type_arm("single-session-assistant", "cortex"), 0.054),
+    ("assist-ev-cortex-ssp", EVALS, _ASSIST_EV_CORTEX_SSP,
+     _type_arm("single-session-preference", "cortex"), 0.233),
+    ("assist-ev-rag-ssa", EVALS, _ASSIST_EV_RAG,
+     _type_arm("single-session-assistant", "rag"), 0.911),
+    ("assist-ev-rag-ssp", EVALS, _ASSIST_EV_RAG,
+     _type_arm("single-session-preference", "rag"), 0.533),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(RL_ALL_SUM,),
+        value=_val, stated=_stated, places=3))
+
+CLAIMS.append(Claim(
+    id="assist-cl-zero-claims-ssa", doc=CHANGELOG,
+    needle="and 50 of those 56 sessions consolidated with **zero claims**",
+    artifacts=(RL_ALL_ROWS,),
+    value=_zero_claims("single-session-assistant"), stated=50, places=0))
+CLAIMS.append(Claim(
+    id="assist-ev-zero-claims-ssa", doc=EVALS, needle=_ASSIST_EV_RAG,
+    artifacts=(RL_ALL_ROWS,),
+    value=_zero_claims("single-session-assistant"), stated=50, places=0))
+CLAIMS.append(Claim(
+    id="assist-ev-zero-claims-ssp", doc=EVALS,
+    needle=("the 56** SSA sessions and **12 of the 30** SSP sessions "
+            "consolidated with"),
+    artifacts=(RL_ALL_ROWS,),
+    value=_zero_claims("single-session-preference"), stated=12, places=0))

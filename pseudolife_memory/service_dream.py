@@ -722,6 +722,16 @@ class DreamOps:
         qt_parked = 0
         qt_held = 0
         qt_promoted = 0
+        # Assistant-stated claims (2026-09-05). Only prompts that ask for a
+        # ``speaker`` field ever produce one, so this is inert for the
+        # shipped prompt. An unrecognised policy fails SAFE to "contender":
+        # a config typo must not silently open the overwrite path.
+        assistant_policy = str(dream_cfg.assistant_claims or "contender")
+        if assistant_policy not in ("contender", "supersede", "drop"):
+            logger.warning(
+                "dream: unknown memory.dream.assistant_claims %r; using "
+                "'contender'", assistant_policy)
+            assistant_policy = "contender"
         # Chronicle events (schema v28): default-on since the 2026-08-12
         # soak review; requires PG (the table has no file-mode counterpart).
         chronicle_on = bool(dream_cfg.chronicle) and self._storage is not None
@@ -1004,6 +1014,22 @@ class DreamOps:
                     if chronicle_on:
                         _write_event(c, src_id)
                     continue
+                # Speaker provenance -> write origin. "user" is a label about
+                # the TURN, never a tier promotion: support is never taken
+                # from claim text (2026-08-09 review), so only the DEMOTING
+                # direction is honoured here. Absent speaker (every shipped
+                # extraction) leaves the origin exactly as the claim carries
+                # it, so nothing about the shipped dream moves.
+                claim_origin = c.get("origin", "agent")
+                if c.get("speaker") == "assistant":
+                    if assistant_policy == "drop":
+                        logger.info(
+                            "dream: dropping assistant-stated claim for "
+                            "%s.%s (assistant_claims=drop)",
+                            c["entity"], c["attribute"])
+                        continue
+                    if assistant_policy == "contender":
+                        claim_origin = "assistant"
                 ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
                 # Claim-level op (Task 7): "add"/"remove" route to the member
                 # model; anything else (absent, or a value the extractor got
@@ -1119,7 +1145,7 @@ class DreamOps:
                     res = self.set_add(
                         ent, attr, c["value"],
                         confidence=float(c.get("confidence", 0.55)),
-                        origin=c.get("origin", "agent"))
+                        origin=claim_origin)
                     if res["action"] == "member_invalid":
                         logger.info(
                             "dream: member add rejected (invalid value) "
@@ -1151,7 +1177,7 @@ class DreamOps:
                     # hand-edited sites).
                     claim_kwargs = {
                         "confidence": float(c.get("confidence", 0.55)),
-                        "support": c.get("origin", "agent"),
+                        "support": claim_origin,
                         "stance": c.get("stance"),
                         # v35: labels are a property of the SOURCE entry,
                         # never of model output — an unlabelled source

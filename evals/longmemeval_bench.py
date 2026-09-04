@@ -66,7 +66,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import hybrid_context  # noqa: E402
 from ladder_sweep import (approx_tokens, build_service,  # noqa: E402
-                          pool_env_knobs, probe)
+                          dream_env_knobs, pool_env_knobs, probe)
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 import answerability_probe  # noqa: E402
 import leak_check  # noqa: E402
@@ -237,6 +237,13 @@ def bench_env_knobs() -> dict:
         # only on a --phase extract run — rebuild_contexts.py copies the
         # associative context verbatim and cannot honour them.
         "candidate_pool": pool_env_knobs(),
+        # Dream-path knobs (memory.dream). Applied by the same
+        # ladder_sweep.build_service; None means the shipped default.
+        # assistant_claims is only a term for arms whose extraction prompt
+        # asks for a speaker label (evals/prompts/assistant_facts_*.txt) —
+        # the shipped prompt never does, so it reads as the default and
+        # means nothing for every pre-2026-09-05 artifact.
+        "dream": dream_env_knobs(),
     }
 
 

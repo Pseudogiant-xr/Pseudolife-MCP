@@ -6,6 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-05 — assistant-stated facts, labelled and unable to overwrite the user)
+- **The fact spine scores near zero on questions whose answer the assistant
+  said, because the extractor never writes those facts down.** On the
+  six-type oracle run the `cortex` arm scores 0.054 on
+  `single-session-assistant` (56 questions) and 0.233 on
+  `single-session-preference` (30), against plain RAG's 0.911 / 0.533 —
+  and 50 of those 56 sessions consolidated with **zero claims**. Replayed
+  against the reproducible server, the extractor returns a well-formed
+  `{"claims": []}` for a session where the assistant recommends a
+  restaurant or describes a book: nothing filters assistant turns in code,
+  but the shipped prompt asks for "durable, current-state facts … skip
+  narrative, opinions" over worked examples that are all user-stated, so
+  the model reads assistant-stated content as not-a-fact. This change adds
+  the machinery to extract those facts *safely*; the shipped extraction
+  prompt is unchanged, so **no default behaviour moves**.
+- **A claim may now carry `"speaker": "user" | "assistant"`**, whitelisted
+  at the parse boundary exactly like `op` and `stance` (anything else
+  degrades to absent). The two candidate prompts that ask for it live in
+  `evals/prompts/assistant_facts_naive.txt` and
+  `…_provenance.txt`, both generated from the shipped `_SYSTEM_PROMPT`
+  verbatim by `evals/gen_assistant_facts_prompts.py`. The shipped prompt
+  never asks for the field, so every shipped extraction — and every
+  pre-existing artifact — is byte-identical.
+- **New provenance origin `assistant`**, the floor of the tier ladder
+  (`user` > `action` > `agent` > `assistant`). A `speaker: "assistant"`
+  claim may create a slot or fill an empty one, but against a current value
+  of any other origin it parks as a **contender** through the existing
+  contender machinery rather than superseding — deliberately *not* gated on
+  `memory.cortex.protect_provenance`, because the eval harness turns that
+  off and the guard would otherwise drop the value outright. The guard is
+  one-directional: an `assistant`-origin value is superseded by anything,
+  including a later assistant claim. `speaker: "user"` is a label about the
+  turn and never a tier promotion — support is still never taken from model
+  output.
+- **Assistant-origin facts rank after user-origin ones at equal
+  similarity** (×0.85 in `CortexStore.search`, the same constant and
+  rationale as the associative spine's `ASSISTANT_SCORE_MULT`), applied to
+  positive cosines only so a penalty can never read as a promotion.
+  `evals/rebuild_contexts.py` mirrors it, keeping the offline fact ranking
+  in lockstep; a bank with no assistant facts ranks byte-identically.
+- **`memory.dream.assistant_claims`** (default `contender`; also
+  `supersede` — treat the claim as an ordinary agent-tier dream claim, the
+  naive arm — and `drop`). An unrecognised value falls back to `contender`:
+  a config typo must not open the overwrite path. Because the shipped
+  prompt emits no speaker label, the knob is never consulted on any shipped
+  path, at any setting — pinned by a test that a speakerless claim writes
+  exactly as before under all three values.
+- **`PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender|supersede|drop`** applies
+  the knob to a bench run (`ladder_sweep.build_service`) and rides into the
+  summary as `bench_env.dream.assistant_claims`; an invalid value aborts
+  the run rather than silently serving the default, as for the pool knobs.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported
