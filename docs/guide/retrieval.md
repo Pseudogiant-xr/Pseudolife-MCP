@@ -344,7 +344,11 @@ clamped to 1..5, so the most the per-hop cap can spend is
 only a raised `max_searches_per_hop` reaches it. Hitting either ceiling
 stops the walk and adds `truncated: true` and `searches_issued: N` to the
 response instead of raising, and those two fields are absent when neither
-bound, so a complete walk's response is unchanged. `truncated` claims only
+bound, so a walk that stayed under every cap has an unchanged response.
+Read their absence narrowly: it means no ceiling tripped, NOT that nothing
+was dropped. `max_searches_per_hop` is the cap that binds in ordinary use
+and it deliberately sets no flag, because it changes only which re-queries
+run, never the entities and edges the walk returns. `truncated` claims only
 what it knows: some re-queries, and possibly deeper hops, were skipped, so
 supporting texts and deeper entities may be missing — a ceiling that trips
 inside the last permitted hop's re-queries leaves that hop's entities and
