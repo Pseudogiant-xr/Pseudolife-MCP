@@ -1970,6 +1970,42 @@ deep-hop entities still present in the result
 graph than the live audit's, so the two byte counts aren't comparable
 to each other, only each to its own before/after.
 
+**Search fan-out caps (2026-09-04).** The output caps above bound what
+comes *back*; these bound what the walk *spends*. Each hop re-queried every
+newly discovered entity by name, so on a star-shaped graph one hub's ring
+set the price of the whole call — measured on a restored copy of the live
+bank at a mean of 89.15 searches and 25.25 s per call (max 205 and
+57.67 s), enough that two live calls timed out at the MCP layer that
+morning. Three knobs bound it, all in the Console's Recall group:
+`memory.recall.max_searches_per_hop` (default 6) re-queries only the top N
+newly discovered entities per hop — ranked by mentions in the seed hits,
+then by lowest degree — while still returning the rest as entities with
+their facts; `max_total_searches` (default 31) and `time_budget_seconds`
+(default 20.0) are hard ceilings over the whole call including the seed
+search. 31 is deliberately a backstop, not a working limit: `hops` is
+clamped to 1..5, so the most the per-hop cap can spend is
+1 + 6 x 5 = 31 and no request the tool accepts is cut by the ceiling —
+only a raised `max_searches_per_hop` reaches it. Hitting either ceiling
+stops the walk and adds `truncated: true` and `searches_issued: N` to the
+response instead of raising, and those two fields are absent when neither
+bound, so a walk that stayed under every cap has an unchanged response.
+Read their absence narrowly: it means no ceiling tripped, NOT that nothing
+was dropped. `max_searches_per_hop` is the cap that binds in ordinary use
+and it deliberately sets no flag, because it changes only which re-queries
+run, never the entities and edges the walk returns. `truncated` claims only
+what it knows: some re-queries, and possibly deeper hops, were skipped, so
+supporting texts and deeper entities may be missing — a ceiling that trips
+inside the last permitted hop's re-queries leaves that hop's entities and
+edges complete and cuts only `texts`. Graph expansion is deliberately
+untouched (the hub gate and
+`max_entities` already bound it): on the paired 20-question run
+(`evals/recall_fanout_bench.py`,
+`evals/results/recall-fanout-cap-20260904.json`) the caps took the mean
+call to 12.40 searches and 4.166 s with the entity, edge and iteration
+counts identical on every question and no expected target lost. A fourth
+knob, `skip_part_of_expansion`, is eval-only and default-off: it drops the
+re-query for entities reached only through `part-of` edges.
+
 **`low_confidence: true`** means no seed entity matched the query — the
 graph had no starting point. In that case fall back to `memory_search`.
 

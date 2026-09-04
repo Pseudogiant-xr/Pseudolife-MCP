@@ -10,6 +10,7 @@ from __future__ import annotations
 import json  # noqa: E402
 import os  # noqa: E402
 import re
+import time
 import urllib.request  # noqa: E402
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
@@ -48,6 +49,13 @@ class RecallState:
     paths: list[list[str]] = field(default_factory=list)
     iterations: int = 0
     low_confidence: bool = False
+    # Cost telemetry: how many ``search_fn`` calls the walk issued (the
+    # seed search included), and whether a hard ceiling — the total-search
+    # cap or the time budget — cut the walk short. Always tracked in
+    # process; serialized only when ``truncated`` (see
+    # ``recall_state_to_dict``), so an untruncated response is unchanged.
+    searches_issued: int = 0
+    truncated: bool = False
 
 
 class RecallController(Protocol):
@@ -121,16 +129,72 @@ def _hub_threshold(degrees, percentile: float, floor: int) -> int:
     return max(floor, vals[idx])
 
 
+def _requery_order(newly: list[str], hits: list[str],
+                   degree_fn: Callable[[str], int] | None) -> list[str]:
+    """Rank newly discovered entities by how worthwhile a re-query is.
+
+    (1) mention count in the SEED search hits, descending — an entity the
+    question's own top hits already talk about is the one whose extra
+    context is on topic; (2) degree ascending — a spoke's re-query is
+    about that spoke, a hub's drags the corpus in (the same reasoning as
+    ``_select_frontier``'s expansion order, applied to the SEARCH budget);
+    (3) name, so the cut is deterministic.
+    """
+    counts = {n: sum(1 for t in hits if _mentions(t, n)) for n in newly}
+    return sorted(newly, key=lambda n: (-counts[n],
+                                        (degree_fn(n) or 0) if degree_fn else 0,
+                                        n))
+
+
 def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
                query: str, controller: RecallController, *,
                hops: int = 3, top_k: int = 5,
                max_entities: int = 50,
                degree_fn: Callable[[str], int] | None = None,
                hub_threshold: int | None = None,
-               expand_budget: int | None = None) -> RecallState:
-    """Iterative search(+graph) loop. Depth-1 graph expansion per iteration."""
+               expand_budget: int | None = None,
+               max_searches_per_hop: int | None = None,
+               max_total_searches: int | None = None,
+               time_budget_seconds: float | None = None,
+               skip_part_of_expansion: bool = False) -> RecallState:
+    """Iterative search(+graph) loop. Depth-1 graph expansion per iteration.
+
+    The four fan-out arguments bound the SEARCH cost (graph expansion is
+    already bounded by ``hub_threshold`` / ``expand_budget`` /
+    ``max_entities``). Each is off when falsy, and with all four off the
+    walk is the pre-2026-09-04 one, entity for entity and byte for byte —
+    ``max_searches_per_hop`` only reorders when it actually cuts, and
+    ``skip_part_of_expansion`` only collects relation provenance when
+    enabled (``tests/test_recall.py``'s byte-identity pin).
+
+    ``max_searches_per_hop`` re-queries only the top-N newly discovered
+    entities per hop (``_requery_order``); the rest are still returned as
+    entities with their facts. ``max_total_searches`` is a hard ceiling
+    over the whole call including the seed search, and
+    ``time_budget_seconds`` a wall-clock one; either stops the walk and
+    sets ``truncated``, returning what the walk has rather than raising.
+    ``skip_part_of_expansion`` drops entities reached ONLY by ``part-of``
+    edges from the re-query set (they are still returned).
+    """
     state = RecallState()
-    hits = [e.get("text", "") for e in search_fn(query, top_k).get("entries", [])]
+    started = time.monotonic()
+    # Normalise to "positive int/float, or None for off". A hand-edited
+    # config can carry a negative, and a negative per-hop cap would slice
+    # ``targets[:-1]`` — silently dropping one re-query instead of doing
+    # nothing. The Console's own minimums are 0.
+    max_searches_per_hop = max(0, int(max_searches_per_hop or 0)) or None
+    max_total_searches = max(0, int(max_total_searches or 0)) or None
+    time_budget_seconds = max(0.0, float(time_budget_seconds or 0.0)) or None
+
+    def _out_of_time() -> bool:
+        return (bool(time_budget_seconds)
+                and (time.monotonic() - started) >= float(time_budget_seconds))
+
+    def _search(q: str) -> dict:
+        state.searches_issued += 1
+        return search_fn(q, top_k)
+
+    hits = [e.get("text", "") for e in _search(query).get("entries", [])]
     for t in hits:
         if t and t not in state.texts:
             state.texts.append(t)
@@ -151,11 +215,27 @@ def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
     seed_set = set(state.seeds)
     frontier = list(state.seeds)
     while frontier and state.iterations < hops and len(seen) < max_entities:
+        if _out_of_time():
+            state.truncated = True
+            break
         state.iterations += 1
         hop_num = state.iterations
         newly: list[str] = []
+        # Relations that reached each entity this hop — only collected when
+        # ``skip_part_of_expansion`` needs it, so the default path is
+        # exactly the pre-change loop.
+        rel_touch: dict[str, set[str]] = {}
+        stopped = False
         for name in _select_frontier(frontier, seed_set, degree_fn,
                                       hub_threshold, expand_budget):
+            # The budget is checked here too, not only at the search
+            # boundaries: expanding through a 132-degree hub is one
+            # ``graph_fn`` call, and a walk that blew its budget inside the
+            # expansion loop would otherwise run the hop out first.
+            if _out_of_time():
+                state.truncated = True
+                stopped = True
+                break
             nb = graph_fn(name, 1)
             if not nb.get("found"):
                 continue
@@ -172,16 +252,55 @@ def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
                     state.entity_hop[en] = hop_num
             for ed in nb.get("edges", []):
                 _add_edge(state, ed, hop_num)
+                if skip_part_of_expansion:
+                    # ONLY the edges incident to the node being expanded say
+                    # how its neighbours were reached. ``graph_fn`` returns
+                    # the INDUCED subgraph (graph.py's ``build_subgraph``
+                    # keeps every edge whose endpoints are both in the
+                    # neighborhood), so crediting both endpoints of every
+                    # edge would let a neighbour-to-neighbour link disguise
+                    # a containment-only arrival as a domain one.
+                    src, dst = ed.get("src"), ed.get("dst")
+                    if src == name and dst:
+                        rel_touch.setdefault(dst, set()).add(ed.get("relation"))
+                    elif dst == name and src:
+                        rel_touch.setdefault(src, set()).add(ed.get("relation"))
             for p in nb.get("paths", []):
                 if p not in state.paths:
                     state.paths.append(p)
             if len(seen) >= max_entities:
                 break
-        for q in controller.next_queries(query, newly):
-            for e in search_fn(q, top_k).get("entries", []):
+
+        targets = newly
+        if skip_part_of_expansion:
+            # Reached ONLY by containment: reading its facts is free, but a
+            # re-query on it is the corpus's filler relation buying a
+            # search. (19.0% of the live bank copy's edges are ``part-of``,
+            # and 1,046 of the 1,763 entities recall added across the
+            # 2026-09-04 20-question run arrived via ``part-of`` alone —
+            # evals/results/recall-fanout-cap-20260904.json.)
+            targets = [n for n in targets
+                       if rel_touch.get(n, set()) != {"part-of"}]
+        if max_searches_per_hop and len(targets) > max_searches_per_hop:
+            targets = _requery_order(
+                targets, hits, degree_fn)[:max_searches_per_hop]
+
+        for q in ([] if stopped else controller.next_queries(query, targets)):
+            if (max_total_searches
+                    and state.searches_issued >= int(max_total_searches)):
+                state.truncated = True
+                stopped = True
+                break
+            if _out_of_time():
+                state.truncated = True
+                stopped = True
+                break
+            for e in _search(q).get("entries", []):
                 t = e.get("text", "")
                 if t and t not in state.texts:
                     state.texts.append(t)
+        if stopped:
+            break
         frontier = newly
     return state
 
@@ -193,7 +312,7 @@ def recall_state_to_dict(state: RecallState, query: str, hops: int) -> dict[str,
     (``entity_hop`` / ``edge_hop`` / ``seed_text_count``) the MCP layer's
     output caps rely on (issue #186) to keep deep hops and hop-discovered
     texts from being crowded out by a flat prefix cap."""
-    return {
+    out: dict[str, Any] = {
         "query": query,
         "seeds": state.seeds,
         "entities": [{"entity": n, "facts": state.entity_facts.get(n, [])}
@@ -208,6 +327,18 @@ def recall_state_to_dict(state: RecallState, query: str, hops: int) -> dict[str,
         "edge_hop": list(state.edge_hop),
         "seed_text_count": state.seed_text_count,
     }
+    # Served only when a hard ceiling actually cut the walk short: a
+    # complete walk's response stays byte-identical to the pre-cap one
+    # (the served-absent-when-default convention). The flag asserts only
+    # what it knows — some re-queries, and possibly deeper hops, were
+    # skipped, so supporting texts and deeper entities may be missing. It
+    # does NOT mean the returned entity/edge set is partial: a ceiling
+    # tripping inside the re-query loop of the last permitted hop leaves
+    # that hop's graph expansion already complete and cuts only ``texts``.
+    if state.truncated:
+        out["truncated"] = True
+        out["searches_issued"] = state.searches_issued
+    return out
 
 
 def _parse_name_list(raw: str) -> list[str]:

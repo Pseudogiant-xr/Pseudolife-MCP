@@ -556,6 +556,30 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.recall.default_top_k", "group": "Recall",
      "label": "Recall top-k", "type": "int", "default": 5, "min": 1, "max": 50,
      "step": 1, "restart": False, "help": "Results per internal recall search."},
+    {"path": "memory.recall.max_searches_per_hop", "group": "Recall",
+     "label": "Re-queries per hop", "type": "int", "default": 6, "min": 0,
+     "max": 50, "step": 1, "restart": False,
+     "help": "Per hop, re-query only the top N newly discovered entities "
+             "(seed-hit mentions first, then lowest degree). The rest are "
+             "still returned with their facts. 0 = unlimited."},
+    {"path": "memory.recall.max_total_searches", "group": "Recall",
+     "label": "Search ceiling per call", "type": "int", "default": 31,
+     "min": 0, "max": 200, "step": 1, "restart": False,
+     "help": "Hard cap on searches per recall call, seed search included. "
+             "On reaching it the walk stops and the response is flagged "
+             "truncated. 31 = 1 + 6 x 5, a backstop above the most the "
+             "per-hop cap can spend at the tool's max 5 hops. "
+             "0 = no ceiling."},
+    {"path": "memory.recall.time_budget_seconds", "group": "Recall",
+     "label": "Recall time budget (s)", "type": "float", "default": 20.0,
+     "min": 0.0, "max": 300.0, "step": 1.0, "restart": False,
+     "help": "Return what the walk has, flagged truncated, once it has run "
+             "this long. 0 = no budget."},
+    {"path": "memory.recall.skip_part_of_expansion", "group": "Recall",
+     "label": "Skip part-of re-queries", "type": "bool", "default": False,
+     "restart": False,
+     "help": "Entities reached only by part-of edges are returned with "
+             "their facts but never spend a search."},
     # ── Retention ──────────────────────────────────────────────────────────
     {"path": "memory.compaction.enabled", "group": "Retention",
      "label": "Superseded-row compaction", "type": "bool", "default": True,
