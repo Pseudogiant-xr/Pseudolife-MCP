@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-05 — the bench can switch the reranker on)
+- The 2026-09-04 candidate-pool judged runs all measured the cross-encoder
+  reranker OFF, leaving the reranker-on cell unmeasured. `evals/ladder_sweep.build_service`
+  now honours `PSEUDOLIFE_BENCH_RERANK` (`1`/`true`/`on`; unset or
+  `0`/`false`/`off` keeps the shipped default off; anything else aborts),
+  and `bench_env_knobs()` stamps it into every summary next to
+  `candidate_pool` — eval-only, no accuracy claim made yet.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported

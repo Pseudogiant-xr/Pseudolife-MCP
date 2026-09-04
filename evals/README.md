@@ -1332,6 +1332,7 @@ the summary:
 ```powershell
 $env:PSEUDOLIFE_BENCH_POOL_MULT = "4"   # unset = shipped default 1
 $env:PSEUDOLIFE_BENCH_FUSION    = "rrf" # unset = shipped weighted_sum
+$env:PSEUDOLIFE_BENCH_RERANK    = "1"   # unset/0/false/off = shipped default off (cross-encoder)
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
     --tag arm1-pool --phase extract
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `

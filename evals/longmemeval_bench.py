@@ -66,7 +66,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import hybrid_context  # noqa: E402
 from ladder_sweep import (approx_tokens, build_service,  # noqa: E402
-                          pool_env_knobs, probe)
+                          pool_env_knobs, probe, rerank_env_knobs)
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 import answerability_probe  # noqa: E402
 import leak_check  # noqa: E402
@@ -237,6 +237,9 @@ def bench_env_knobs() -> dict:
         # only on a --phase extract run — rebuild_contexts.py copies the
         # associative context verbatim and cannot honour them.
         "candidate_pool": pool_env_knobs(),
+        # Cross-encoder reranker (memory.reranker.enabled). Same
+        # build_service/--phase extract constraint as candidate_pool above.
+        "reranker": rerank_env_knobs(),
     }
 
 

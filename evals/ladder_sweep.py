@@ -375,6 +375,7 @@ def build_service(tmp_dir: Path):
     if LITERAL_GATE is not None:
         svc.config.memory.dream.literal_gate = LITERAL_GATE
     apply_pool_env(svc.config.memory.search)
+    apply_rerank_env(svc.config.memory)
     return svc
 
 
@@ -419,6 +420,41 @@ def apply_pool_env(search_cfg) -> None:
             sys.exit(f"PSEUDOLIFE_BENCH_FUSION={fusion!r}: want "
                      "'weighted_sum' or 'rrf'")
         search_cfg.fusion = fusion
+
+
+def rerank_env_knobs() -> dict:
+    """Cross-encoder reranker knob state, for stamping into artifacts.
+
+    Same contract as ``pool_env_knobs`` above: a judged run whose retrieval
+    config cannot be audited afterwards is exactly the failure PR #165
+    closed. ``enabled`` reflects whether ``PSEUDOLIFE_BENCH_RERANK`` turned
+    the reranker on; the shipped default (``memory.reranker.enabled =
+    False``) is in force whenever the var is unset.
+    """
+    raw = os.environ.get("PSEUDOLIFE_BENCH_RERANK", "").strip().lower()
+    return {"enabled": raw in ("1", "true", "on")}
+
+
+def apply_rerank_env(memory_cfg) -> None:
+    """Apply the PSEUDOLIFE_BENCH_RERANK env override to a bench config.
+
+    The cross-encoder reranker (Tier B, ``memory.reranker``) ships OFF by
+    default. This is the ONLY sanctioned way to run a judged eval with it
+    on — same discipline as ``apply_pool_env`` above: an invalid value is a
+    hard error, not a silent fall-back to the default.
+
+        PSEUDOLIFE_BENCH_RERANK=1
+    """
+    raw = os.environ.get("PSEUDOLIFE_BENCH_RERANK", "").strip().lower()
+    if not raw:
+        return
+    if raw in ("1", "true", "on"):
+        memory_cfg.reranker.enabled = True
+    elif raw in ("0", "false", "off"):
+        pass
+    else:
+        sys.exit(f"PSEUDOLIFE_BENCH_RERANK={raw!r}: want "
+                 "'1'/'true'/'on' or '0'/'false'/'off'")
 
 
 def ingest(svc) -> None:
