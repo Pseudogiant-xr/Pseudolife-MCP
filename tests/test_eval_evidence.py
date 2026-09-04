@@ -857,7 +857,7 @@ _CCS_CHANGELOG = [
      _ccs("hybrid_ctg", "context_effect", "cue_fired", "mean_turns_added"),
      1.46, 2),
     ("ccs-ctg-turns-displaced",
-     "the same 1.46 ranked hits. Lever 5 of the fresh-eyes review is closed",
+     "the same 1.46 ranked hits. The Phase-1 verdict that contiguity stays off",
      _ccs("hybrid_ctg", "context_effect", "cue_fired",
           "mean_turns_displaced"), 1.46, 2),
     ("ccs-tl-gated-overall",

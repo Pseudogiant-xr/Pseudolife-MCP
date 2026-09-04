@@ -31,8 +31,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   p 0.00000), buying +0.008 of the 0.147 weak-type hole while adding 254
   context tokens. Mechanism: the served memory block is a fixed top-k,
   so on cue-fired rows contiguity adds a mean 1.46 turns and *displaces*
-  the same 1.46 ranked hits. Lever 5 of the fresh-eyes review is closed
-  negative; no defaults change.
+  the same 1.46 ranked hits. The Phase-1 verdict that contiguity stays off
+  stands (`evals/results/agg-recall-phase1-verdict.json`); no defaults change.
   Validity: `hybrid_tl` gated equals `hybrid_tl` ungated to the digit
   (0.640 / 0.447) because the timeline channel is already cue-gated in
   the engine, and 522 arm-rows whose served context was byte-identical
