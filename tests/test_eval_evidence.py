@@ -3374,6 +3374,30 @@ CLAIMS.append(Claim(
     id="raglite-ev-b100-overshoot", doc=EVALS, needle=_EV_BUDGET,
     artifacts=(RL_V38_ROWS,), value=_over("ragb100", 100), stated=36,
     places=0))
+# evals/README.md's leak-free sentence beside the arm means: the headline
+# figures span all 500 rows, and the summary's own leak_check block is
+# where the 475-row reads live. Pinned so the two can never drift apart.
+_EV_LEAKFREE = "unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**."
+for _arm, _stated in (("rag", 0.6947), ("hybrid", 0.7326),
+                      ("cortex", 0.3158)):
+    CLAIMS.append(Claim(
+        id=f"raglite-ev-all-{_arm}-leak-free", doc=EVALS,
+        needle=_EV_LEAKFREE, artifacts=(RL_ALL_SUM,),
+        value=(lambda a: lambda d: d["leak_check"]["arms"][a]["leak_free"])(
+            _arm),
+        stated=_stated, places=4))
+CLAIMS.append(Claim(
+    id="raglite-ev-all-leak-free-n", doc=EVALS,
+    needle="own `leak_check` block and are not the headline figures: over the 475",
+    artifacts=(RL_ALL_SUM,),
+    value=lambda d: d["leak_check"]["arms"]["rag"]["n_leak_free"],
+    stated=475, places=0))
+CLAIMS.append(Claim(
+    id="raglite-ev-all-leaked-n", doc=EVALS,
+    needle="leak check flags as naming their own gold answer included, so every arm is",
+    artifacts=(RL_ALL_SUM,), value=lambda d: d["leak_check"]["n_leaked"],
+    stated=25, places=0))
+
 CLAIMS.append(Claim(
     id="raglite-ev-b100-cortex-target", doc=EVALS,
     needle="`ragb100` \u2014 sized to match the cortex arm's 96.7 tokens \u2014 served a mean",

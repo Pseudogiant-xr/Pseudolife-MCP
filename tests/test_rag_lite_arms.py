@@ -312,6 +312,13 @@ def test_rag_lite_names_collide_with_nothing_but_the_reader_sweep():
     deliberately serve these arms. Any OTHER artifact carrying such a key
     is a collision — a run that minted ``rag1_`` for something else, or a
     tag that fell outside the naming convention these arms are read under.
+
+    Weaker than a tree-wide ban, and knowingly so: the entries above are
+    filename PREFIXES, so any future ``…-qwen-27b-raglite-<newtag>``
+    artifact is admitted without review. That is the intended latitude
+    (re-running these arms under a new tag is routine); what the check
+    still catches is the case it was written for — the vocabulary
+    appearing in a file family that does not serve these arms at all.
     """
     import re
     pattern = re.compile(r'"(rag\d+|ragb\d+)_')
@@ -546,6 +553,43 @@ def test_beam_row_context_tokens_prefers_the_recorded_field():
     assert beam.row_context_tokens(row, "nomem") == 1      # legacy estimate
     assert beam.row_context_tokens(row, "absent") is None
     assert beam.mean_context_tokens([row, row], "rag") == 99
+
+
+def _lme_row(qid: str, **extra) -> dict:
+    """The minimum a judged LongMemEval row needs to reach ``report()``."""
+    row = {"question_id": qid, "question_type": "knowledge-update",
+           "consolidation": {"superseded": 0}}
+    for arm in lmb.ARMS:
+        row[f"{arm}_correct"] = 1
+        row[f"{arm}_context_tokens"] = 100
+    row.update(extra)
+    return row
+
+
+def test_report_carries_the_partial_stamp_into_the_summary(tmp_path,
+                                                           monkeypatch):
+    """``rag_lite_rebuild.py --limit`` stamps ``partial: true`` on the rows
+    it writes, but the summary is what a reader quotes — and a summary with
+    ``"n": 2`` and ordinary-looking means is exactly what gets mistaken for
+    a complete two-question run. The stamp has to survive the report."""
+    monkeypatch.setattr(lmb, "RESULTS_DIR", tmp_path)
+    out = tmp_path / "longmemeval-ku-oracle-qwen-27b-t.jsonl"
+
+    out.write_text("".join(json.dumps(_lme_row(f"q{i}")) + "\n"
+                           for i in range(2)), encoding="utf-8")
+    lmb.report("oracle", "qwen-27b", "t")
+    whole = json.loads((tmp_path / "longmemeval-ku-oracle-qwen-27b-t"
+                        ".summary.json").read_text(encoding="utf-8"))
+    assert "partial" not in whole            # a complete run says nothing
+
+    out.write_text(
+        "".join(json.dumps(_lme_row(f"q{i}", partial=True)) + "\n"
+                for i in range(2)), encoding="utf-8")
+    lmb.report("oracle", "qwen-27b", "t")
+    limited = json.loads((tmp_path / "longmemeval-ku-oracle-qwen-27b-t"
+                          ".summary.json").read_text(encoding="utf-8"))
+    assert limited["partial"] is True
+    assert limited["n"] == 2
 
 
 def test_beam_report_carries_context_tokens_per_arm_and_type(tmp_path,

@@ -449,6 +449,12 @@ rows, hybrid is **+0.040 ± 0.031 (p 0.015, 41 W / 21 L)** and cascade
 tokens, cascade 0.692 @ 843.7, rag 0.690 @ 1124.2, ragb400 0.460 @ 312.3,
 rag2 0.458 @ 432.5, rag1 0.316 @ 206.3, cortex 0.310 @ 96.5.
 
+Those means — and the paired deltas above — span all 500 rows, the 25 the
+leak check flags as naming their own gold answer included, so every arm is
+paired over the same questions. The leak-free reads live in the summary's
+own `leak_check` block and are not the headline figures: over the 475
+unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**.
+
 The paired column is a committed artifact
 (`…raglite-all-fresh.arms-vs-rag.json`) written by
 `evals/beam_within_run_pairs.py` — harness-agnostic since 2026-09-04

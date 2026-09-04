@@ -1128,6 +1128,14 @@ def report(dataset: str, extractor_name: str, tag: str = "",
                # say which config produced it is unauditable afterwards.
                "bench_env": bench_env_knobs(),
                "arms": {}}
+    # rag_lite_rebuild.py --limit stamps partial=true on every row it
+    # writes. Carry it into the summary: the rows said so, but a summary
+    # reading "n": 5 beside normal-looking means is exactly what a reader
+    # mistakes for a complete run of 5 questions.
+    if any(r.get("partial") for r in rows):
+        summary["partial"] = True
+        print(f"PARTIAL run: {n} rows carry partial=true — a limited "
+              "rebuild, not a complete run")
     # Variant arms (hybrid_ctg etc.) are detected from the rows so old
     # three-arm artifacts report identically.
     extra_arms = tuple(sorted(

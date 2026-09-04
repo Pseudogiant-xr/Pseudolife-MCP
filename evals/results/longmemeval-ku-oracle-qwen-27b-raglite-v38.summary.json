@@ -29,11 +29,13 @@
     },
     "ragb100": {
       "accuracy": 0.333,
-      "context_tokens": 219.2
+      "context_tokens": 219.2,
+      "budget_overshoot_rows": 36
     },
     "ragb400": {
       "accuracy": 0.5,
-      "context_tokens": 309.0
+      "context_tokens": 309.0,
+      "budget_overshoot_rows": 17
     },
     "cascade": {
       "accuracy": 0.846,
