@@ -212,6 +212,93 @@ def test_policy_arm_uses_the_shipped_retention_score():
     assert got == want
 
 
+# ── the "one stable sort == N evictions" shortcut ─────────────────────────
+# `_keep_indices_by_score` replaces a pop loop with one sort, arguing that
+# `_evict_one`'s scores do not depend on which entries are still resident.
+# The argument is right, but an argument is not a guard: this runs the real
+# `MIRASBand._evict_one` down to the same capacity and demands the same
+# survivors, in the same order.
+
+def _band_holding(arm: str, entries: list[dict], surprises: list[float]):
+    """A real `MIRASBand` holding the fixture pool, entry for entry."""
+    import torch
+    from pseudolife_memory.memory.miras.band import MIRASBand
+    from pseudolife_memory.memory.miras.retention import build_policy
+    from pseudolife_memory.memory.titans_memory import MemoryEntry
+
+    band = MIRASBand(
+        name="flat", embedding_dim=2, retention=build_policy(arm),
+        max_entries=len(entries) + 1, update_interval=1,
+        promotion_access_count=1, promotion_surprise=1.0, device="cpu")
+    # Direct assignment, not `store()`: `store` would apply the surprise
+    # gate and its own capacity eviction, and the pool under test is a
+    # replayed dump, not a live write stream.
+    band.entries = [
+        MemoryEntry(text=e["text"], embedding=torch.tensor(e["emb"]),
+                    surprise_score=s, timestamp=e["ts"], access_count=0,
+                    source=e["source"], bank="flat",
+                    superseded_at=e["superseded_at"])
+        for e, s in zip(entries, surprises)
+    ]
+    return band
+
+
+def _mixed_pool(n: int = 12) -> tuple[list[dict], list[float]]:
+    """A pool that makes every term of `source_weighted_score` bite: three
+    source weights (1.5 / 1.0 / 0.5), the x0.05 superseded multiplier, and
+    a surprise spread that leaves genuine ties inside each group."""
+    sources = ["user_msg", "tool_result", "tool_call", "bench"]
+    entries = [
+        entry(f"t{i}", surprise_seed=((i * 37) % 11) / 11.0,
+              superseded=(i % 3 == 0), ts=1000.0 + i,
+              source=sources[i % len(sources)])
+        for i in range(n)
+    ]
+    return entries, [e["_surprise"] for e in entries]
+
+
+@pytest.mark.parametrize("capacity", [1, 3, 7, 11])
+@pytest.mark.parametrize("arm", sorted(fsp.POLICY_ARMS))
+def test_one_stable_sort_matches_repeated_evict_one(arm, capacity):
+    """N pops of the shipped `_evict_one` == one sort by (score, ordinal).
+
+    The equivalence is independent of the wall clock `_evict_one` reads:
+    with `access_count` = 0 (substitution 1 — the dumps never carry it)
+    all three shipped scores lose their `now` term, so a fixed `now` here
+    and `now_seconds()` in the band cannot disagree.
+    """
+    entries, sur = _mixed_pool()
+    band = _band_holding(arm, entries, sur)
+    for _ in range(len(entries) - capacity):
+        band._evict_one()
+    survivors = [e.text for e in band.entries]
+    assert len(survivors) == capacity
+
+    now = 9_000_000.0
+    assert texts(fsp.sweep(entries, sur, capacity=capacity, arm=arm,
+                           now=now, evidence=set(), seed=0)) == survivors
+    keep = fsp._keep_indices_by_score(
+        fsp.eviction_scores(entries, sur, now, arm), capacity)
+    assert [entries[i]["text"] for i in keep] == survivors
+
+
+def test_evict_one_equivalence_covers_an_all_tie_pool():
+    """`recency_heavy` with no access counts scores every live entry
+    identically, so the ONLY thing deciding survivors is the tie-break.
+    Kept separate from the case above so a tie-break regression cannot
+    hide behind the score spread."""
+    entries = [entry(f"t{i}", surprise_seed=0.5, ts=1000.0 + i)
+               for i in range(8)]
+    sur = [e["_surprise"] for e in entries]
+    band = _band_holding("recency_heavy", entries, sur)
+    for _ in range(5):
+        band._evict_one()
+    assert [e.text for e in band.entries] == ["t5", "t6", "t7"]
+    assert texts(fsp.sweep(entries, sur, capacity=3, arm="recency_heavy",
+                           now=9_000_000.0, evidence=set(), seed=0)) == \
+        [e.text for e in band.entries]
+
+
 def test_sweep_preserves_pool_order():
     """`select_topk` tie-breaks on insertion ordinal, so a sweep that
     reordered the survivors would change the ranking on its own."""
@@ -394,6 +481,17 @@ def test_aggregate_reports_no_rank_when_nothing_was_ever_served():
              "rank_first_evidence": None, "n_pool_entries": 5,
              "select_topk_latency_ms": 1.0, "bm25_latency_ms": 1.0}]
     assert fsp._aggregate(rows)["rank_first_evidence_median"] is None
+
+
+def test_cell_swept_requires_every_question_in_the_cell_to_agree():
+    """The artifact publishes `swept` once per cell, but it is measured per
+    question — capacities are per question, so row 0 must not speak for the
+    other 77. The published "capacity no-op" rows rest on this flag."""
+    assert fsp._cell_swept([{"swept": False}] * 3, "C1", "1x", "none") is False
+    assert fsp._cell_swept([{"swept": True}] * 3, "C1", "15x", "none") is True
+    with pytest.raises(ValueError, match="disagree"):
+        fsp._cell_swept([{"swept": False}, {"swept": True}],
+                        "C1", "3x", "balanced")
 
 
 # ── corpus properties (the mechanism number the docs publish) ─────────────

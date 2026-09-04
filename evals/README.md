@@ -1478,8 +1478,8 @@ the gate cell is C1/15x, paired sign-flip permutation, 10k perms, seed 0):
 - **G-F1 (does a shipped sweep pay?): NO, by a mile.** The bar was
   ≥ +0.05 with p < 0.05; the measured deltas against no sweep are
   **−0.5777 (balanced), −0.5969 (recency_heavy), −0.5777
-  (surprise_heavy), all p < 0.0001**. Sweeping to a lean bank costs about
-  three times what accumulating to 15x costs.
+  (surprise_heavy), all p < 0.0001**. Sweeping to a lean bank costs
+  about two and a half times what accumulating to 15x costs.
 - **G-F2 (is victim choice worth anything?): YES.** `oracle − none` =
   **+0.3222, p < 0.0001**, and the oracle at 0.9191 beats even the
   undiluted 1x bank's 0.8299 — thinning a pool helps when you thin the

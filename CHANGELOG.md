@@ -31,8 +31,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sweep 0.5969, random 0.0710, balanced 0.0192, surprise_heavy 0.0192,
   recency_heavy 0.0000.** No shipped arm meets the +0.05 bar — they come
   in at **−0.5777 / −0.5969 / −0.5777 against no sweep, all p < 0.0001**,
-  so sweeping costs roughly three times what accumulating to 15x costs
-  — and all three sit *significantly below the random floor*
+  so sweeping costs about two and a half times what accumulating to 15x
+  costs — and all three sit *significantly below the random floor*
   (−0.0518 p 0.0329, −0.0710 p 0.0002, −0.0518 p 0.0329). Mechanism:
   `source_weighted_score` puts every superseded entry below every live
   one at a ×0.05 multiplier, and 247 of 286 gold-evidence entries
@@ -56,7 +56,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   easiest material a sweep could hope to identify; two aggressive
   capacities (7% and 20% of the 15x pool), so nothing here speaks to a
   capacity set just below the accumulated size; a retrieval proxy, not a
-  judged run; single backbone (v25, 1024-d). CPU only, 1,040 s, no
+  judged run; single backbone (v25, 1024-d). CPU only, 1,196 s, no
   defaults change.
   Spec `docs/superpowers/specs/2026-09-05-forgetting-sweep-preregistration.md`,
   artifact `evals/results/forgetting-sweep-probe-20260905.json`, section

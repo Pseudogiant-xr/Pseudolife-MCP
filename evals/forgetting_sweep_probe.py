@@ -279,10 +279,33 @@ def _keep_indices_by_score(scores: list[float], capacity: int) -> list[int]:
     — the FIRST minimum, i.e. the lowest insertion ordinal on a tie. The
     scores do not depend on which other entries are resident, so N pops is
     exactly "drop the N lowest by ``(score, ordinal)``". One sort, same
-    result.
+    result — pinned against the real pop loop by
+    ``test_one_stable_sort_matches_repeated_evict_one``, so the claim is
+    a guard rather than an argument.
     """
     order = sorted(range(len(scores)), key=lambda i: (scores[i], i))
     return sorted(order[len(scores) - capacity:])
+
+
+def _cell_swept(rows: list[dict], capacity: str, scale: str,
+                arm: str) -> bool:
+    """The cell's ``swept`` flag — every question in the cell must agree.
+
+    ``swept`` is published once per cell but measured once per question,
+    and the capacities are per question (C1 and C3 are that question's
+    own 1x and 3x pool sizes). Reading ``rows[0]`` let one question's
+    pool size speak for all 78. It is uniform by construction — the pool
+    grows monotonically with scale and each capacity is a fixed scale of
+    the same question's pool — but the published ``capacity no-op`` rows
+    rest on this flag, so require the agreement instead of assuming it.
+    """
+    flags = {bool(r["swept"]) for r in rows}
+    if len(flags) != 1:
+        raise ValueError(
+            f"{capacity}/{scale}/{arm}: questions disagree on whether the "
+            f"pool was swept ({sorted(flags)}) — the cell has no single "
+            f"`swept` flag to publish")
+    return flags.pop()
 
 
 def sweep(entries: list[dict], surprises: list[float], capacity: int, arm: str,
@@ -309,7 +332,8 @@ def sweep(entries: list[dict], surprises: list[float], capacity: int, arm: str,
         if len(protected) >= capacity:
             keep = sorted(protected[:capacity])
         else:
-            rest = [i for i in range(len(entries)) if i not in set(protected)]
+            held = set(protected)
+            rest = [i for i in range(len(entries)) if i not in held]
             rng = random.Random(seed)
             keep = sorted(protected
                           + rng.sample(rest, capacity - len(protected)))
@@ -624,7 +648,8 @@ def main(argv: list[str] | None = None) -> int:
         for label, _ in SCALES:
             cells_out[cap_label][label] = {
                 arm: dict(_aggregate(by_cell[(cap_label, label, arm)]),
-                          swept=by_cell[(cap_label, label, arm)][0]["swept"])
+                          swept=_cell_swept(by_cell[(cap_label, label, arm)],
+                                            cap_label, label, arm))
                 for arm in ARMS
             }
 

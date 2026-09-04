@@ -65,7 +65,10 @@ the fixed RNG-free rotation, `band_ablation.select_topk` (flat policy,
 recency off, BM25 on), `_evidence_texts`, `_paired_permutation_p` — by
 importing `evals/distractor_scale_probe.py`, not by copying it. Same 78
 LongMemEval knowledge-update questions, same v25 flat-band dumps
-(`evals/results/banks/s-qwen-27b-ablbands-flat/`), same five scales
+(the 1024-d replay, resolved by backbone dimension as the amendment
+above sets out — corrected 2026-09-05 after the run; this line named
+`evals/results/banks/s-qwen-27b-ablbands-flat/`, which is the retired
+384-d directory the amendment rejects), same five scales
 (1x / 3x / 7x / 15x / 31x).
 
 The one new step: after the pool for question q at scale N is built, a
@@ -316,8 +319,10 @@ so.
   reaches the served window, not what an answerer then gets right. The
   distractor probe's G-D3 sanity gate (1x ≥ 0.5) is inherited to bound
   how much the proxy can be trusted.
-- **Single embedder/backbone** (v25, 384-d), like every conclusion from
-  this dump family.
+- **Single embedder/backbone** (v25, 1024-d — corrected 2026-09-05
+  after the run; the dumps the probe resolved and recorded in its
+  artifact are 1024-d, per the amendment above, not the 384-d this
+  line first said), like every conclusion from this dump family.
 - **Two capacities, both aggressive.** C1 and C3 are 7% and 20% of the
   15x pool. This probe does not sweep gently, and says nothing about a
   capacity set just below the accumulated size.

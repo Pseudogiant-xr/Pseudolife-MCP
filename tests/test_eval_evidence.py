@@ -1937,6 +1937,81 @@ CLAIMS.append(Claim(
     stated=38086, places=0))
 
 
+# The sweep's cost stated as a ratio to accumulation's, in both docs that
+# state it. Neither doc's number is in the artifact as a ratio, so the
+# claim is COMPUTED from the two that are: the accumulation cost the
+# distractor probe measured (1x minus 15x on the `none` arm, 0.2330) and
+# the sweep cost G-F1 measured (balanced minus none at the gate cell,
+# 0.5777). Both docs published "roughly three times" until the 2026-09-05
+# review fold recomputed it at 2.48; they now say "two and a half", one
+# decimal, hence `places=1`.
+def _sweep_cost_ratio(d: dict) -> float:
+    c = d["cells"]["C1"]
+    accumulation = (c["1x"]["none"]["evidence_in_top6_mean"]
+                    - c["15x"]["none"]["evidence_in_top6_mean"])
+    sweeping = -d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"]
+    return sweeping / accumulation
+
+
+for _cid, _doc, _needle in [
+    ("sweep-cost-ratio-evals", EVALS,
+     "Sweeping to a lean bank costs\n  about two and a half times what "
+     "accumulating to 15x costs."),
+    ("sweep-cost-ratio-changelog", CHANGELOG,
+     "so sweeping costs about two and a half times what accumulating to "
+     "15x\n  costs"),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(SWEEP,),
+        value=_sweep_cost_ratio, stated=2.5, places=1))
+
+# The CHANGELOG restates the gate numbers in its own words, and a
+# restatement is a claim like any other — the 2026-09-02 queue-judge block
+# below pins CHANGELOG text the same way. The needles carry the
+# CHANGELOG's own wrapping, not the README's, so rewrapping either doc
+# alone still fails here rather than quietly stopping guarding.
+_CL_ORDERING = ("**oracle 0.9191, no\n  sweep 0.5969, random 0.0710, "
+                "balanced 0.0192, surprise_heavy 0.0192,\n  "
+                "recency_heavy 0.0000.**")
+_CL_GF1 = ("**−0.5777 / −0.5969 / −0.5777 against no sweep, "
+           "all p < 0.0001**")
+_CL_GF2 = "**oracle − none = +0.3222,\n  p < 0.0001**"
+for _cid, _needle, _val, _stated, _places in [
+    ("sweep-cl-oracle", _CL_ORDERING, _cell("C1", "15x", "oracle"), 0.9191, 4),
+    ("sweep-cl-none", _CL_ORDERING, _cell("C1", "15x", "none"), 0.5969, 4),
+    ("sweep-cl-random", _CL_ORDERING, _cell("C1", "15x", "random"), 0.0710, 4),
+    ("sweep-cl-balanced", _CL_ORDERING,
+     _cell("C1", "15x", "balanced"), 0.0192, 4),
+    ("sweep-cl-surprise", _CL_ORDERING,
+     _cell("C1", "15x", "surprise_heavy"), 0.0192, 4),
+    ("sweep-cl-recency", _CL_ORDERING,
+     _cell("C1", "15x", "recency_heavy"), 0.0000, 4),
+    ("sweep-cl-gf1-balanced", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"],
+     -0.5777, 4),
+    ("sweep-cl-gf1-recency", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["recency_heavy"]["delta_mean"],
+     -0.5969, 4),
+    ("sweep-cl-gf1-surprise", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["surprise_heavy"]["delta_mean"],
+     -0.5777, 4),
+    ("sweep-cl-gf2-delta", _CL_GF2,
+     lambda d: d["gates"]["G-F2"]["delta_mean"], 0.3222, 4),
+    ("sweep-cl-1x-none", "bank's 0.8299, so thinning helps",
+     _cell("C1", "1x", "none"), 0.8299, 4),
+    ("sweep-cl-gf0-cells", "across all 390 question × scale cells**",
+     lambda d: float(d["control"]["n_cells_checked"]), 390.0, 0),
+    # Runtime: the CHANGELOG kept the FIRST run's 1,040 s after the
+    # artifact was regenerated (de1ec39e) at 1195.9 s. Pinned here so the
+    # doc and the artifact cannot drift apart again unnoticed.
+    ("sweep-cl-runtime", "CPU only, 1,196 s",
+     lambda d: float(d["runtime_s"]), 1196.0, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(SWEEP,),
+        value=_val, stated=_stated, places=_places))
+
+
 # The judge-model ladder's published auto-reject precisions (CHANGELOG,
 # 2026-08-16): the measured floor for the autonomous Step-C judge.
 JUDGE_LADDER = RESULTS + "judge-ladder-20260816.json"
