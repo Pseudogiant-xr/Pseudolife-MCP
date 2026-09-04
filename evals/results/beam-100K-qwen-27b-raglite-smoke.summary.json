@@ -34,7 +34,8 @@
     "ragb600": {
       "score": 0.26,
       "score_intfaithful": 0.2392,
-      "context_tokens": 584
+      "context_tokens": 584,
+      "budget_overshoot_rows": 12
     }
   },
   "types": {

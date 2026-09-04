@@ -837,6 +837,49 @@ class SearchConfig:
 
 
 @dataclass
+class McpConfig:
+    """What an AGENT pays per MCP tool call (spec: the 2026-09-04 agent-side
+    token ledger, ``evals/agent_token_ledger.py``).
+
+    Every published "fewer tokens" figure to date measured *served benchmark
+    context* — the answerer's prompt — never the payload a real MCP client
+    reads back from a tool. The ledger measured that side; these knobs gate
+    the cuts it justified, as ONE switch:
+
+    * ``memory_search`` entry ``text`` capped at ``entry_text_chars`` with a
+      ``truncated: true`` marker (``memory_get`` returns the full text);
+    * the cortex block sized to the caller's ``top_k`` rather than a fixed 5;
+    * ``memory_fact_get``'s bookkeeping keys behind ``verbose=True``.
+
+    ``compact_payloads: False`` restores the pre-cut payloads verbatim. All
+    three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
+    the service layer are untouched, so no eval number can move (the eval
+    harness calls the service, pinned by
+    ``tests/test_agent_payload_budget.py``).
+    """
+
+    compact_payloads: bool = True
+    # 600 chars ≈ 150 tokens. Measured 2026-09-04 over 15 dev-session
+    # queries at top_k=8 against the live bank (1,316 entries, 120 served
+    # entries) — evals/results/agent-token-ledger-20260904-r3.json: served
+    # entry text runs mean 1,180 chars / median 1,149 / p90 1,794, and
+    # entry text alone was 64% of the whole search payload. A 600-char cap
+    # therefore clips 88% of hits ON THIS BANK, deliberately: these are
+    # consolidated notes, not one-liners, and 600 chars is enough to judge
+    # a hit and usually to act on it, with ``memory_get`` for the rest. It
+    # halves the served entry text (9,464 -> 4,550 mean chars) and takes
+    # 33% off the call. It does NOT apply to ``superseded_by_text``, which
+    # is exempt: that field has no recovery path, since a compact entry
+    # carries no id for the superseding entry (see ``_compact_entry``).
+    # Raise it for long-form corpora where the tail of a
+    # note carries the answer. ``memory_recall`` has capped its supporting
+    # texts at 200 since 2026-07-10 (``_RECALL_TEXT_CHARS``); search
+    # entries are the primary answer rather than walk evidence, so they
+    # get the wider cap.
+    entry_text_chars: int = 600
+
+
+@dataclass
 class MemoryConfig:
     embedding_dim: int = 384
     # MIRAS (v0.5+) — preset-driven per-band specification. The default
@@ -866,6 +909,8 @@ class MemoryConfig:
     compaction: CompactionConfig = field(default_factory=CompactionConfig)
     # memory_recall — live MemCoT iterative retrieval (read-only).
     recall: RecallConfig = field(default_factory=RecallConfig)
+    # MCP payload shaping — the agent-side token cost of a tool call.
+    mcp: McpConfig = field(default_factory=McpConfig)
     # Topology analytics computed during dream (Track B).
     graph_insight: GraphInsightConfig = field(default_factory=GraphInsightConfig)
     # Engram cross-index (provenance-as-link, schema v13).
@@ -1048,6 +1093,8 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             config.memory.dream = _dict_to_dataclass(DreamConfig, mem_raw["dream"])
         if "recall" in mem_raw:
             config.memory.recall = _dict_to_dataclass(RecallConfig, mem_raw["recall"])
+        if "mcp" in mem_raw:
+            config.memory.mcp = _dict_to_dataclass(McpConfig, mem_raw["mcp"])
         if "graph_insight" in mem_raw:
             config.memory.graph_insight = _dict_to_dataclass(
                 GraphInsightConfig, mem_raw["graph_insight"],

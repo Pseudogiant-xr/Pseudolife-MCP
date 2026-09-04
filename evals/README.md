@@ -449,6 +449,12 @@ rows, hybrid is **+0.040 ± 0.031 (p 0.015, 41 W / 21 L)** and cascade
 tokens, cascade 0.692 @ 843.7, rag 0.690 @ 1124.2, ragb400 0.460 @ 312.3,
 rag2 0.458 @ 432.5, rag1 0.316 @ 206.3, cortex 0.310 @ 96.5.
 
+Those means — and the paired deltas above — span all 500 rows, the 25 the
+leak check flags as naming their own gold answer included, so every arm is
+paired over the same questions. The leak-free reads live in the summary's
+own `leak_check` block and are not the headline figures: over the 475
+unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**.
+
 The paired column is a committed artifact
 (`…raglite-all-fresh.arms-vs-rag.json`) written by
 `evals/beam_within_run_pairs.py` — harness-agnostic since 2026-09-04
@@ -2115,3 +2121,194 @@ own section above:
   evidence pack with full-length merge snippets, recovering the
   2026-09-02 panel's 240-char-clipped rows by prefix match against the
   bank they were built from, feeding the fulllen ladder rerun above.
+
+---
+
+# Agent-side token ledger (`agent_token_ledger.py`)
+
+Every "fewer tokens" number this repo publishes measures **served benchmark
+context** — the passage an answerer model reads to answer a LongMemEval or
+BEAM question. Nothing measured the other side of the wire: what a real MCP
+client reads *back* from a tool call, and pays for on every call, forever.
+This ledger measures that side, and the payload cuts below were chosen from
+it rather than from taste.
+
+```bash
+python evals/agent_token_ledger.py --daemon http://127.0.0.1:8765 \
+    --out evals/results/agent-token-ledger-20260904-r3.json
+```
+
+The cited artifact is
+`evals/results/agent-token-ledger-20260904-r3.json`. Two earlier runs stay
+committed as **pre-review records** and are cited by no number below:
+
+* `agent-token-ledger-20260904.json` (r1) measured the lean
+  `memory_fact_get` projection while it was still dropping `source_entries`,
+  and picked its five widest slots from a 2,000-row prefix of the fact dump
+  rather than from the whole cortex. Both were fixed; the `fact_get` row
+  moved as a result and says so in place.
+* `agent-token-ledger-20260904-r2.json` measured `superseded_by_text`
+  truncated to the same 600 chars as the entry's own text. That behaviour
+  was **corrected before merge** — the field has no recovery path, since a
+  compact entry carries no id for the superseding entry — so its headline
+  (−41%) priced a payload this repo does not ship. The r3 run below prices
+  the shipped one. (One slot label in r2 was redacted in place after the
+  fact: it was a bare machine name, which `safe_label` did not catch until
+  the same review taught it hostnames.)
+
+The script refuses to overwrite an existing `--out`, which is why each
+rerun is a new tag rather than a rewrite.
+
+**Method.** Raw payloads are fetched once from the daemon's GET-only REST
+(`/api/search`, `/api/recall`, `/api/facts`), then projected offline through
+the MCP layer's own pure helpers (`mcp_server._project_search`,
+`_lean_fact_record`, the `_cap_recall_*` family), so before/after is exactly
+paired — same bytes in, two projections out. GET-only is not side-effect
+free: `/api/search` runs the real retrieval path, so it appends
+`retrieval_events` rows and touches per-entry access counters. It changes no
+bank *content* — nothing is written, moved or reinforced. Sizes are
+characters of the compact JSON an MCP client receives; approximate tokens
+are `chars // 4`, the `ladder_sweep.approx_tokens` convention. Queries are a
+fixed, committed list of 15 dev-session questions, deliberately **not** a
+sample of the `retrieval_events` table: this is a public repo and real
+queries carry paths and names. Numbers are bank-specific (measured on the
+maintainer's live bank, 1,316 entries, `preset: flat`) and the artifact
+records the entry count so a rerun elsewhere is not read as a regression.
+The two cuts' parameters are read from `utils.config.McpConfig` rather than
+restated in the harness — the values used are written to the artifact's
+`config` block — so a future change to `entry_text_chars` re-prices the run
+instead of quietly leaving the published numbers describing the old default.
+
+## What a session costs before it asks anything
+
+| Surface | chars | ~tokens |
+| --- | --- | --- |
+| tool manifest, `minimal` tier (9 tools) | 7,015 | 1,753 |
+| tool manifest, `core` tier (22 tools) | 14,076 | 3,519 |
+| tool manifest, `full` tier (35 tools) | 22,719 | 5,679 |
+| served session-start block (`MEMORY_LOOP_BLOCK`) | 7,492 | 1,873 |
+
+The manifest split is roughly two-thirds tool descriptions, one-third
+inputSchema parameter descriptions (full tier: 14,523 + 8,196). Both halves
+are already metered per tier by
+`tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets`; this
+ledger reads them through the same path so the two cannot disagree.
+
+The session-start row is **raw** characters, not the JSON encoding the rest
+of this page counts: the hook writes that block into the session as plain
+text, so the escaping is not paid. (Its JSON size, 7,644, is in the artifact
+under `chars` for comparability and is not the cost.) The block is capped at
+`HOOK_CONTEXT_MAX_CHARS - 2,000` = 7,500 raw chars by
+`tests/test_plugin_packaging.py`, which is why it is the one surface here
+with almost no headroom.
+
+## What a call costs — before and after the cuts
+
+Mean over the 15 queries, `memory_search` at the tool's default `top_k=8`:
+
+| Payload part | before | after | change |
+| --- | --- | --- | --- |
+| **total** | **14,745** | **9,951** | **−33%** |
+| entries block | 12,637 | 7,842 | −38% |
+| — entry `text` | 9,464 | 4,550 | −52% |
+| — `superseded_by_text` | 2,406 | 2,406 | — |
+| — entry metadata | 767 | 887 | +16% |
+| cortex block | 1,853 | 1,853 | — |
+| approx tokens | 3,686 | 2,487 | −33% |
+
+Median total 15,325 → 9,613; p90 18,886 → 12,583. Entry `text` alone was
+**64% of the whole payload**. The metadata line goes *up*, on purpose: the
+`truncated: true` marker is what tells the reader that `memory_get` has more.
+
+The `superseded_by_text` line is **exempt from the cap** and is why the
+headline is 33% rather than the 41% the r2 run reported. It is a sixth of
+the "before" payload and a quarter of what ships, so capping it looked like
+free money — but it has no recovery path. A compact entry carries no id for
+the superseding entry and nothing stores a pointer to one, so
+`memory_get(entry.id)` returns the *superseded* text, not the replacement:
+a clipped correction is unrecoverable by any tool call in any tier. Three
+surfaces tell agents to prefer that field over the entry's own text (the
+served session-start block, `examples/CLAUDE.memory.md`, and
+`memory_search`'s own description), and 13 of these 15 queries had at least
+one clipped under r2 (2,406 → 1,199 chars mean). It was published as a row
+here rather than left inside "entries block" because the r2 breakdown left
+those ~2,400 chars unlabelled between the block total and text + metadata
+(2026-09-04 review finding).
+
+One approximation, named: the narrow arm slices the width-5 cortex list
+`/api/search` returns rather than re-running `cortex_search` at width 3, so
+it would diverge from a real call on a bank where constraint pinning
+re-budgets. The measured bank carries **0 of 5,509** labelled current facts,
+so `_pin_constraint_facts` is a no-op and the two are the same set in the
+same order. That validity condition is now counted by the run itself and
+recorded in the artifact (`bank.facts_labelled` / `bank.facts_current`, with
+`bank.facts_dump_truncated` false so the census saw the whole cortex) rather
+than hand-checked; read this arm only while `facts_labelled` is 0.
+
+At `top_k=3` — where the cortex-block narrowing actually bites, since
+`min(5, top_k)` is inert at the default:
+
+| Payload part | before | after | change |
+| --- | --- | --- | --- |
+| **total** | **6,870** | **4,290** | **−38%** |
+| entry `text` | 3,537 | 1,712 | −52% |
+| `superseded_by_text` | 931 | 931 | — |
+| cortex block (5 facts → 3) | 1,853 | 1,107 | −40% |
+
+`memory_fact_get`, over the five widest current slots in the bank: **2,175 →
+1,296 chars** mean (median 2,281 → 1,128), a 40% cut from moving provenance,
+support, writer/session id, tx/valid time and the supersession chain behind
+`verbose=True` — 25 keys down to 12 or 13.
+
+That cut is smaller than the r1 run reported (1,424 → 764, 46%), for
+two reasons, both corrections rather than regressions. The projection now
+keeps `source_entries`, the engram links: it is the only handle from a fact
+back to the episodes that formed it, and the poisoned-memory procedure in
+`docs/guide/security-posture.md` ("follow the engram links"), `memory_get`'s
+core-tier justification, and
+`tests/test_release_ux.py::test_core_tier_can_close_its_own_loops` all
+depend on it being served by default. And the five widest slots are now
+chosen from the whole cortex rather than from the first 2,000 rows the fact
+dump returned, so both arms are measured on genuinely wider records.
+
+Both arms price the RECORD, not the whole call, and in the same direction:
+the "before" is the `/api/facts` dump row (`service.cortex_dump`), which
+carries an `entity_id` the served `memory_fact_get` record never has, and
+neither arm includes the tool envelope — `{record, contenders}` plus
+`correct_with` and the correction note on an aged fact. Read the percentage
+as the claim and the absolute chars as a floor. Closing either gap needs a
+live service bound to the bank, which this script deliberately does not
+have.
+
+## The cap, and why 600
+
+Served entry `text` runs mean **1,180** chars, median 1,149, p90 1,794 over
+the 120 entries the 15 queries returned. A 600-char cap therefore clips 88%
+of hits on this bank — deliberately: these are consolidated notes, not
+one-liners, and 600 chars (~150 tokens) is enough to judge a hit and usually
+to act on it, with `memory_get` for the rest. `memory_recall` has capped its
+supporting texts at 200 since 2026-07-10 for the same reason; search entries
+are the primary answer rather than walk evidence, so they get the wider cap.
+
+## `memory_recall` is the expensive one
+
+A 3-hop `memory_recall` issues **35 `service.search` calls on average** and
+up to **66** on a single question — one seed search plus one per entity
+newly discovered on each hop (`run_recall` + `MechanicalController.next_queries`;
+derived from the response's `entity_hop`, not instrumented). Two of the five
+relational questions resolved no seed entity and cost 1 search each; the
+other three cost 50, 58 and 66. The *response* is already lean by comparison
+— 4,243 chars mean against 10,349 for the same walk with `verbose=True` —
+because the recall caps landed on 2026-07-10 and in #186. The call
+amplification is untouched here and is the obvious next lever.
+
+## What this does **not** measure
+
+- Ranking, `min_score`, or anything an accuracy number depends on. Every cut
+  is a projection above `service.*`; the eval harness calls the service
+  directly, pinned by
+  `tests/test_agent_payload_budget.py::test_eval_harness_does_not_read_the_mcp_projection`.
+- Real client tokenisation. `chars // 4` is the house approximation, not a
+  tokeniser.
+- Whether a clipped hit ever costs an answer. That needs an end-to-end run
+  with an agent in the loop, and is not attempted here.

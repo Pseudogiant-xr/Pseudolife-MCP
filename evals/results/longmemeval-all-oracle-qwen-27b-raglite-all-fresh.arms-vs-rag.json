@@ -140,7 +140,7 @@
     "temporal-reasoning": 0.5338
   },
   "n_rows": 500,
-  "note": "paired vs the rag control over all 500 rows, including the 25 gold-leak rows the summary excludes; the cascade arm is derived by replicate.cascade_correct / cascade_context_tokens from the judged cortex and rag arms, never answered",
+  "note": "paired vs the rag control over all 500 rows, including the 25 rows the summary's leak check flags as naming their own gold answer, so every arm is paired over the same 500; the summary's arm accuracies span those rows too -- the leak-free means are the separate leak_check.arms[*].leak_free block in the summary (rag 0.6947, hybrid 0.7326, cortex 0.3158), and the deltas here are not those; the cascade arm is derived by replicate.cascade_correct / cascade_context_tokens from the judged cortex and rag arms, never answered",
   "pairs": {
     "cortex-rag1": {
       "ci95_halfwidth": 0.0492,
