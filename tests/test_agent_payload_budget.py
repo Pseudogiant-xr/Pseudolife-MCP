@@ -293,6 +293,38 @@ def test_fact_get_default_drops_bookkeeping(
         assert k in rec, f"{k} must survive the default projection"
 
 
+def test_fact_get_lean_record_keeps_source_entries(
+        tmp_path: Path, monkeypatch) -> None:
+    """``source_entries`` is an affordance, not bookkeeping: it is the only
+    handle from a fact back to the episodes that formed it, and three
+    surfaces name it as the default-tier contract — the poisoned-memory
+    procedure in ``docs/guide/security-posture.md`` ("follow the engram
+    links"), ``memory_get``'s core-tier justification, and
+    ``test_release_ux.py::test_core_tier_can_close_its_own_loops``. A lean
+    projection that dropped it would break all three silently (2026-09-04
+    review finding)."""
+    mod = _reload(tmp_path, monkeypatch)
+    _seed(mod)
+    # ``source_entries`` is attached by ``service.cortex_lookup`` only when a
+    # storage backend is present, and file mode has none — so the key is
+    # injected here rather than seeded. The projection is what is under
+    # test, and it is the same code on either backend.
+    rec = dict(mod.service.cortex_lookup("bench postgres", "port"))
+    rec["source_entries"] = [11, 12]
+    monkeypatch.setattr(mod.service, "cortex_lookup", lambda e, a: dict(rec))
+    lean = mod.memory_fact_get(entity="bench postgres",
+                               attribute="port")["record"]
+    full = mod.memory_fact_get(entity="bench postgres", attribute="port",
+                               verbose=True)["record"]
+    assert lean["source_entries"] == full["source_entries"] == [11, 12]
+    assert "source_entries" in mod._LEAN_FACT_KEYS
+    # Set slots too: their members carry the same projection, and the slot
+    # itself is where ``source_entries`` sits on the set path.
+    assert mod._lean_fact_record(
+        {"kind": "set", "members": [], "source_entries": [3]},
+    )["source_entries"] == [3]
+
+
 def test_fact_get_verbose_restores_every_key(
         tmp_path: Path, monkeypatch) -> None:
     mod = _reload(tmp_path, monkeypatch)

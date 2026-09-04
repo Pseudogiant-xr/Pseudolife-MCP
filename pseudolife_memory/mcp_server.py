@@ -322,7 +322,7 @@ def _compact_entry(e: dict[str, Any],
 
     ``text_chars`` caps the two free-text fields (2026-09-04 agent token
     ledger: entry ``text`` alone was 64% of a served ``memory_search``
-    payload, mean 1,168 chars per hit). An entry with EITHER field cut
+    payload, mean 1,180 chars per hit). An entry with EITHER field cut
     carries one ``truncated: True`` — the flag says "this entry was
     clipped, ``memory_get`` returns it whole", which is true of both
     fields, rather than paying for a second per-field marker. None = no
@@ -898,9 +898,17 @@ def memory_fact_get(
 # The keys ``memory_fact_get`` serves by default (2026-09-04 agent token
 # ledger, cut c). Everything else in ``_cortex_record_to_dict`` —
 # provenance, support, writer/session id, tx/valid time, the supersession
-# chain, polarity, status — is audit bookkeeping an agent never acts on
-# mid-task and can still reach through ``verbose=True``, ``memory_history``
-# or the Console. Measured: 62% of the record's chars, on every lookup.
+# chain, status — is audit bookkeeping an agent never acts on mid-task and
+# can still reach through ``verbose=True``, ``memory_history`` or the
+# Console. ``polarity`` is dropped on narrower grounds — it is a negation
+# marker, not bookkeeping, but every service write path leaves it at "+".
+# Each mints ``Slot(entity, attribute, value)`` positionally, so the
+# polarity ``cortex.write_fact`` would honour is never set from the service
+# (``cortex_write``, ``add_member``, and the CMS write-through at
+# service.py ~1258, which folds an extracted negative slot into a
+# NOT-prefixed VALUE rather than a negative row). All 5,500 current facts
+# on the measured bank read "+" (2026-09-04); a "-" row would need
+# ``verbose=True``. Measured: 62% of the record's chars, on every lookup.
 #
 # An allow-list, not a deny-list, and the served-absent-when-default rule
 # (PR #245) still holds: a key that survives is byte-identical to what it
@@ -923,6 +931,14 @@ _LEAN_FACT_KEYS = (
     "re_verify", "re_verify_reason", "correct_with",
     # Serving-side stale policy wrapper (memory.search.stale_policy).
     "warning", "last_known_value",
+    # The engram links — a short int list, and the only handle from a fact
+    # back to the episodes that formed it. Three surfaces name it as the
+    # DEFAULT-tier contract: the poisoned-memory procedure in
+    # docs/guide/security-posture.md ("follow the engram links"),
+    # memory_get's core-tier justification above, and
+    # test_release_ux.py::test_core_tier_can_close_its_own_loops. Not
+    # bookkeeping (2026-09-04 review finding).
+    "source_entries",
     # v29/v35 labels: how the value may be USED.
     "stance", "authority", "distortion_tolerance",
 )

@@ -1757,21 +1757,35 @@ it rather than from taste.
 
 ```bash
 python evals/agent_token_ledger.py --daemon http://127.0.0.1:8765 \
-    --out evals/results/agent-token-ledger-20260904.json
+    --out evals/results/agent-token-ledger-20260904-r2.json
 ```
 
-**Method.** Raw payloads are fetched once from the daemon's read-only REST
+The cited artifact is
+`evals/results/agent-token-ledger-20260904-r2.json`. The first run,
+`agent-token-ledger-20260904.json`, stays committed as the **pre-review
+record** and is no longer cited by any number below: it measured the lean
+`memory_fact_get` projection while it was still dropping `source_entries`,
+and picked its five widest slots from a 2,000-row prefix of the fact dump
+rather than from all 5,500. Both were fixed and the ledger re-run; the
+`fact_get` row moved as a result and says so in place. The script refuses to
+overwrite an existing `--out`, which is why the rerun is a new tag rather
+than a rewrite.
+
+**Method.** Raw payloads are fetched once from the daemon's GET-only REST
 (`/api/search`, `/api/recall`, `/api/facts`), then projected offline through
 the MCP layer's own pure helpers (`mcp_server._project_search`,
 `_lean_fact_record`, the `_cap_recall_*` family), so before/after is exactly
-paired — same bytes in, two projections out. Sizes are characters of the
-compact JSON an MCP client receives; approximate tokens are `chars // 4`,
-the `ladder_sweep.approx_tokens` convention. Queries are a fixed, committed
-list of 15 dev-session questions, deliberately **not** a sample of the
-`retrieval_events` table: this is a public repo and real queries carry paths
-and names. Numbers are bank-specific (measured on the maintainer's live
-bank, 1,298 entries, `preset: flat`) and the artifact records the entry
-count so a rerun elsewhere is not read as a regression.
+paired — same bytes in, two projections out. GET-only is not side-effect
+free: `/api/search` runs the real retrieval path, so it appends
+`retrieval_events` rows and touches per-entry access counters. It changes no
+bank *content* — nothing is written, moved or reinforced. Sizes are
+characters of the compact JSON an MCP client receives; approximate tokens
+are `chars // 4`, the `ladder_sweep.approx_tokens` convention. Queries are a
+fixed, committed list of 15 dev-session questions, deliberately **not** a
+sample of the `retrieval_events` table: this is a public repo and real
+queries carry paths and names. Numbers are bank-specific (measured on the
+maintainer's live bank, 1,314 entries, `preset: flat`) and the artifact
+records the entry count so a rerun elsewhere is not read as a regression.
 
 ## What a session costs before it asks anything
 
@@ -1780,7 +1794,7 @@ count so a rerun elsewhere is not read as a regression.
 | tool manifest, `minimal` tier (9 tools) | 6,923 | 1,730 |
 | tool manifest, `core` tier (22 tools) | 13,984 | 3,496 |
 | tool manifest, `full` tier (35 tools) | 22,627 | 5,656 |
-| served session-start block (`MEMORY_LOOP_BLOCK`) | 7,643 | 1,910 |
+| served session-start block (`MEMORY_LOOP_BLOCK`) | 7,492 | 1,873 |
 
 The manifest split is roughly two-thirds tool descriptions, one-third
 inputSchema parameter descriptions (full tier: 14,445 + 8,182). Both halves
@@ -1788,47 +1802,69 @@ are already metered per tier by
 `tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets`; this
 ledger reads them through the same path so the two cannot disagree.
 
+The session-start row is **raw** characters, not the JSON encoding the rest
+of this page counts: the hook writes that block into the session as plain
+text, so the escaping is not paid. (Its JSON size, 7,644, is in the artifact
+under `chars` for comparability and is not the cost.) The block is capped at
+`HOOK_CONTEXT_MAX_CHARS - 2,000` = 7,500 raw chars by
+`tests/test_plugin_packaging.py`, which is why it is the one surface here
+with almost no headroom.
+
 ## What a call costs — before and after the cuts
 
 Mean over the 15 queries, `memory_search` at the tool's default `top_k=8`:
 
 | Payload part | before | after | change |
 | --- | --- | --- | --- |
-| **total** | **14,577** | **8,734** | **−40%** |
-| entries block | 12,475 | 6,631 | −47% |
-| — entry `text` | 9,374 | 4,550 | −51% |
-| — entry metadata | 760 | 883 | +16% |
-| cortex block | 1,847 | 1,847 | — |
-| approx tokens | 3,644 | 2,183 | −40% |
+| **total** | **14,744** | **8,746** | **−41%** |
+| entries block | 12,636 | 6,638 | −47% |
+| — entry `text` | 9,464 | 4,550 | −52% |
+| — entry metadata | 766 | 889 | +16% |
+| cortex block | 1,853 | 1,853 | — |
+| approx tokens | 3,686 | 2,186 | −41% |
 
-Median total 14,881 → 8,663; p90 18,803 → 10,343. Entry `text` alone was
+Median total 15,326 → 8,663; p90 18,885 → 10,425. Entry `text` alone was
 **64% of the whole payload**. The metadata line goes *up*, on purpose: the
 `truncated: true` marker is what tells the reader that `memory_get` has more.
 
 One approximation, named: the narrow arm slices the width-5 cortex list
 `/api/search` returns rather than re-running `cortex_search` at width 3, so
 it would diverge from a real call on a bank where constraint pinning
-re-budgets. The measured bank carries **0 of 5,483** labelled facts, so
-`_pin_constraint_facts` is a no-op and the two are the same set in the same
-order; re-check that before reading this arm on a labelled bank.
+re-budgets. The measured bank carries **0 of 5,500** labelled current facts,
+so `_pin_constraint_facts` is a no-op and the two are the same set in the
+same order. That validity condition is now counted by the run itself and
+recorded in the artifact (`bank.facts_labelled` / `bank.facts_current`, with
+`bank.facts_dump_truncated` false so the census saw the whole cortex) rather
+than hand-checked; read this arm only while `facts_labelled` is 0.
 
 At `top_k=3` — where the cortex-block narrowing actually bites, since
 `min(5, top_k)` is inert at the default:
 
 | Payload part | before | after | change |
 | --- | --- | --- | --- |
-| **total** | **6,959** | **3,840** | **−45%** |
-| entry `text` | 3,565 | 1,727 | −52% |
-| cortex block (5 facts → 3) | 1,847 | 1,098 | −41% |
+| **total** | **6,870** | **3,794** | **−45%** |
+| entry `text` | 3,537 | 1,712 | −52% |
+| cortex block (5 facts → 3) | 1,853 | 1,107 | −40% |
 
-`memory_fact_get`, over the five widest current slots in the bank: **1,424 →
-764 chars** mean (median 1,374 → 770), a 46% cut from moving provenance,
+`memory_fact_get`, over the five widest current slots in the bank: **2,175 →
+1,296 chars** mean (median 2,281 → 1,128), a 40% cut from moving provenance,
 support, writer/session id, tx/valid time and the supersession chain behind
-`verbose=True`.
+`verbose=True` — 25 keys down to 12 or 13.
+
+That cut is smaller than the pre-review run reported (1,424 → 764, 46%), for
+two reasons, both corrections rather than regressions. The projection now
+keeps `source_entries`, the engram links: it is the only handle from a fact
+back to the episodes that formed it, and the poisoned-memory procedure in
+`docs/guide/security-posture.md` ("follow the engram links"), `memory_get`'s
+core-tier justification, and
+`tests/test_release_ux.py::test_core_tier_can_close_its_own_loops` all
+depend on it being served by default. And the five widest slots are now
+chosen from the whole cortex rather than from the first 2,000 rows the fact
+dump returned, so both arms are measured on genuinely wider records.
 
 ## The cap, and why 600
 
-Served entry `text` runs mean **1,168** chars, median 1,146, p90 1,790 over
+Served entry `text` runs mean **1,180** chars, median 1,149, p90 1,794 over
 the 120 entries the 15 queries returned. A 600-char cap therefore clips 88%
 of hits on this bank — deliberately: these are consolidated notes, not
 one-liners, and 600 chars (~150 tokens) is enough to judge a hit and usually
@@ -1843,8 +1879,8 @@ up to **66** on a single question — one seed search plus one per entity
 newly discovered on each hop (`run_recall` + `MechanicalController.next_queries`;
 derived from the response's `entity_hop`, not instrumented). Two of the five
 relational questions resolved no seed entity and cost 1 search each; the
-other three cost 50, 57 and 66. The *response* is already lean by comparison
-— 4,073 chars mean against 9,562 for the same walk with `verbose=True` —
+other three cost 50, 58 and 66. The *response* is already lean by comparison
+— 4,210 chars mean against 10,113 for the same walk with `verbose=True` —
 because the recall caps landed on 2026-07-10 and in #186. The call
 amplification is untouched here and is the obvious next lever.
 

@@ -14,19 +14,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the per-tier tool manifest, the served session-start block, and the
   `memory_search` / `memory_fact_get` / `memory_recall` response payloads
   for 15 fixed dev-session queries against a live bank. Raw payloads are
-  read once from the daemon's read-only REST and projected offline through
-  the MCP layer's own helpers, so before/after is exactly paired. Artifact:
-  `evals/results/agent-token-ledger-20260904.json` (1,298-entry bank,
-  `preset: flat`); every published cell is pinned in
+  read once from the daemon's GET-only REST and projected offline through
+  the MCP layer's own helpers, so before/after is exactly paired. (GET-only
+  is not side-effect free — `/api/search` appends `retrieval_events` rows
+  and touches access counters — but no bank content is written.) Artifact:
+  `evals/results/agent-token-ledger-20260904-r2.json` (1,314-entry bank,
+  `preset: flat`, 0 of 5,500 current facts label-bearing, which is the
+  validity condition for the `top_k=3` arm and is now counted per run);
+  the pre-review `agent-token-ledger-20260904.json` stays committed as the
+  r1 record and is cited by nothing. Every published cell is pinned in
   `tests/test_eval_evidence.py`; the section is
   `evals/README.md` → "Agent-side token ledger".
   - What a session pays before asking anything: manifest **6,923 chars
-    (~1,730 tok) minimal / 13,984 core / 22,627 full**, plus **7,643 chars
-    (~1,910 tok)** of served session-start block.
-  - What one `memory_search` cost at the default `top_k=8`: **14,577 chars
-    mean** (median 14,881, p90 18,803), of which entry `text` alone was
+    (~1,730 tok) minimal / 13,984 core / 22,627 full**, plus **7,492 chars
+    (~1,873 tok)** of served session-start block (raw text, as the hook
+    writes it — not the JSON encoding the payload cells count).
+  - What one `memory_search` cost at the default `top_k=8`: **14,744 chars
+    mean** (median 15,326, p90 18,885), of which entry `text` alone was
     **64%**.
-  - `memory_fact_get` on the five widest slots: **1,424 chars mean**.
+  - `memory_fact_get` on the five widest slots: **2,175 chars mean**.
   - Not fixed, and the largest finding: a 3-hop `memory_recall` issues
     **35 `service.search` calls on average, up to 66** on one question.
     The response is already capped; the call amplification is untouched.
@@ -38,21 +44,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     marker, and the tool description points at `memory_get` for the whole
     text — the shape `memory_recall` has used for its supporting texts
     since 2026-07-10. `superseded_by_text` is capped on the same terms.
-    Mean payload **14,577 → 8,734 chars (−40%)**; entry text 9,374 → 4,550.
+    Mean payload **14,744 → 8,746 chars (−41%)**; entry text 9,464 → 4,550.
   - The cortex block follows the caller: `min(5, top_k)` facts instead of
     a hardcoded 5. Inert at the default `top_k=8`; at `top_k=3` the block
-    goes 1,847 → 1,098 chars and the whole call 6,959 → 3,840 (−45%).
+    goes 1,853 → 1,107 chars and the whole call 6,870 → 3,794 (−45%).
     The narrowing is passed *into* `cortex_search` rather than sliced off
     its output, so constraint pinning re-budgets with it and pinned facts
     stay at the head.
   - `memory_fact_get` serves the acting subset by default — entity,
     attribute, value, kind/members, confidence, origin, asserted_at/age,
     freshness_class, stale, the currency and label flags, `correct_with`,
-    `entity_ref`, `contenders` — and moves provenance, support,
-    writer/session id, tx/valid time, polarity, status and the supersession
-    chain behind a new `verbose=True`. **1,424 → 764 chars mean (−46%).**
-    The served-absent-when-default rule (PR #245) holds: the keys that
-    remain are byte-identical.
+    `source_entries`, `entity_ref`, `contenders` — and moves provenance,
+    support, writer/session id, tx/valid time, polarity, status and the
+    supersession chain behind a new `verbose=True`. **2,175 → 1,296 chars
+    mean (−40%)**, 25 keys down to 12-13. The served-absent-when-default
+    rule (PR #245) holds: the keys that remain are byte-identical.
+    `source_entries` is kept on purpose — it is the only handle from a
+    fact back to the episodes that formed it, and the poisoned-memory
+    procedure in `docs/guide/security-posture.md`, `memory_get`'s
+    core-tier justification and
+    `test_release_ux.py::test_core_tier_can_close_its_own_loops` all read
+    it from the DEFAULT record.
 - **No ranking, `min_score` or service behaviour changed.** All three cuts
   are projections in `mcp_server.py`, above `service.*`; the eval harness
   calls the service directly and cannot see them — pinned by
@@ -66,6 +78,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   copy to drift. Behaviour-preserving, pinned byte-identical against a
   pre-refactor snapshot by
   `tests/test_agent_payload_budget.py::test_legacy_payloads_survive_the_projection_refactor`.
+- **The served session-start block was describing the old search shape.** It
+  told every session that results come back as `{id, text, source, tags,
+  score}` — an enumeration that went stale the moment entry `text` started
+  arriving clipped — so it now names the thing an agent has to act on
+  instead: "Long hits are clipped (`truncated: true` → `memory_get`)". Both
+  copies (`pseudolife_memory/web/session_hook.py` and the byte-identical
+  twin `examples/CLAUDE.memory.md`) move together; the block is 7,492 raw
+  chars against the 7,500 cap, so the replacement is length-neutral by
+  construction.
+- `agent_token_ledger.py` refuses to overwrite an existing `--out` unless
+  `--force` is passed. Its default path is dated, not run-tagged, so a
+  same-day rerun used to silently rewrite the canonical artifact — the exact
+  failure CLAUDE.md records from 2026-07-21. It also counts the label census
+  the `top_k=3` arm's validity rests on (`bank.facts_labelled` /
+  `facts_current` / `facts_dump_truncated`) instead of leaving it a
+  hand-checked sentence, and picks its five widest slots from the whole
+  cortex rather than the first 2,000 rows of the fact dump.
 
 ## [0.15.0] - 2026-09-04 — labelled claims, judged review queues, and reversible forgets
 

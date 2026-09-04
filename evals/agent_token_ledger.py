@@ -29,10 +29,15 @@ Method (the honest caveats, because the numbers are bank-specific):
   representative and is deliberately not used: this is a public repo, real
   queries carry paths and names, and the ledger has to be re-runnable by
   anyone.
-* Payloads are fetched ONCE, raw, from the daemon's read-only REST
-  (``/api/search``, ``/api/recall``, ``/api/facts``), then projected offline
-  through the MCP layer's own pure helpers (``mcp_server._project_search``,
-  ``_lean_fact_record``, the ``_cap_recall_*`` family). Before/after is
+* Payloads are fetched ONCE, raw, from the daemon's GET-only REST
+  (``/api/search``, ``/api/recall``, ``/api/facts``). GET-only is not the
+  same as side-effect-free: ``/api/search`` runs the real retrieval path,
+  which appends ``retrieval_events`` rows and touches per-entry access
+  counters. It does not change bank CONTENT — no entry, fact, edge or
+  episode is written, moved or reinforced by this script. The payloads are
+  then projected offline through the MCP layer's own pure helpers
+  (``mcp_server._project_search``, ``_lean_fact_record``, the
+  ``_cap_recall_*`` family). Before/after is
   therefore exactly paired — same bytes in, two projections out — and one
   read of the bank serves both arms.
 * Sizes are chars of the compact JSON encoding an MCP client receives
@@ -43,7 +48,12 @@ Usage::
 
     python evals/agent_token_ledger.py \
         --daemon http://127.0.0.1:8765 \
-        --out evals/results/agent-token-ledger-20260904.json
+        --out evals/results/agent-token-ledger-20260904-r2.json
+
+The output path is never overwritten: a rerun that would land on an existing
+artifact refuses and tells you to tag the new run (``--out ...-r2.json``) or
+pass ``--force``. Tag and promote deliberately — a canonical result file
+silently rewritten by a rerun is the 2026-07-21 lesson in CLAUDE.md.
 """
 from __future__ import annotations
 
@@ -216,8 +226,19 @@ def measure_manifest(mod) -> dict[str, Any]:
 # ── 2. the served session-start block ─────────────────────────────────────
 
 def measure_session_block() -> dict[str, Any]:
+    """Both sizes, because they measure different things and only one is
+    the cost. The hook writes the block to Claude's context as PLAIN TEXT,
+    so ``raw_chars`` is what a session actually pays — that is the number
+    the docs publish. ``chars`` is the same block JSON-encoded (escaped
+    newlines and quotes), kept for comparability with every other cell in
+    this ledger, which really is a JSON payload (2026-09-04 review
+    finding: the README published the JSON size for a non-JSON surface).
+    """
     from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
-    return sized(MEMORY_LOOP_BLOCK) | {"raw_chars": len(MEMORY_LOOP_BLOCK)}
+    return sized(MEMORY_LOOP_BLOCK) | {
+        "raw_chars": len(MEMORY_LOOP_BLOCK),
+        "raw_approx_tokens": approx_tokens(MEMORY_LOOP_BLOCK),
+    }
 
 
 # ── 3. memory_search ──────────────────────────────────────────────────────
@@ -264,11 +285,13 @@ def project_search(mod, raw: dict, *, compact: bool, top_k: int) -> dict:
     ``_pin_constraint_facts`` budgets pins at ``max(1, top_k // 2)``, so a
     real ``top_k=3`` call would allow one pin where a width-5 fetch
     allowed two, and the slice would keep the extra pin instead of a
-    ranked fact. On the measured bank they cannot differ — 0 of 5,483
-    current facts carry a ``distortion_tolerance`` label (checked
-    2026-09-04), so ``_pin_constraint_facts`` returns its input untouched
-    and the slice is the same set in the same order. Re-check that before
-    reading the narrow arm on a labelled bank.
+    ranked fact. They cannot differ while no current fact carries a
+    ``distortion_tolerance`` label, because ``_pin_constraint_facts`` then
+    returns its input untouched and the slice is the same set in the same
+    order. That validity condition is counted per run rather than asserted:
+    ``pick_slots`` writes ``facts_labelled`` / ``facts_current`` into the
+    artifact's ``bank`` block. Read the narrow arm only when
+    ``facts_labelled`` is 0.
     """
     payload = json.loads(json.dumps(raw, default=str))
     facts = payload.pop("cortex", []) or []
@@ -341,18 +364,42 @@ def measure_fact_get(mod, dm: Daemon, slots: list[tuple[str, str]],
                 "after": _stats([r["after_chars"] for r in rows])}}
 
 
-def pick_slots(dm: Daemon, n: int = 5) -> tuple[list[tuple[str, str]],
-                                                dict[tuple[str, str], dict]]:
+def pick_slots(dm: Daemon, n: int = 5, limit: int = 20_000) -> tuple[
+        list[tuple[str, str]], dict[tuple[str, str], dict], dict[str, Any]]:
     """Five real slots, chosen deterministically: the widest current facts
     in ``(entity, attribute)`` order, so a rerun on the same bank picks the
-    same five and the record projection is exercised at its real width."""
-    dump = dm.get("/api/facts", limit=2000)
-    rows = [r for r in dump.get("entries", []) if r.get("kind") != "member"]
+    same five and the record projection is exercised at its real width.
+
+    The same dump is the census the narrow search arm's validity rests on
+    (see ``project_search``): the cortex slice only equals a real
+    ``top_k=3`` call while ``_pin_constraint_facts`` is a no-op, which holds
+    exactly while no current fact carries a ``distortion_tolerance`` label.
+    That condition used to be a hand-checked sentence in the docstring and
+    the README with nothing behind it (2026-09-04 review finding), so it is
+    counted here, from the dump already being fetched, and written into the
+    artifact's ``bank`` block where a Claim row can pin it.
+
+    ``truncated`` is recorded rather than assumed: the endpoint caps at
+    ``limit``, and a truncated dump would make both the slot pick and the
+    label census read a prefix of the bank.
+    """
+    dump = dm.get("/api/facts", limit=limit)
+    entries = dump.get("entries", []) or []
+    rows = [r for r in entries if r.get("kind") != "member"]
+    labelled = [r for r in rows if r.get("distortion_tolerance")]
+    census = {
+        "facts_total": len(entries),
+        "facts_current": len(rows),
+        "facts_labelled": len(labelled),
+        "facts_dump_truncated": bool(dump.get("truncated")),
+        "facts_dump_limit": limit,
+    }
     rows.sort(key=lambda r: (-len(wire(r)), r.get("entity", ""),
                              r.get("attribute", "")))
     picked = rows[:n]
     slots = [(r["entity"], r["attribute"]) for r in picked]
-    return slots, {(r["entity"], r["attribute"]): r for r in picked}
+    return (slots, {(r["entity"], r["attribute"]): r for r in picked},
+            census)
 
 
 # ── 5. memory_recall ──────────────────────────────────────────────────────
@@ -435,21 +482,34 @@ def main() -> int:
                     help="Second search pass, to price the cortex-block "
                          "narrowing (cut b), which is inert at top_k >= 5.")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--force", action="store_true",
+                    help="Overwrite --out if it already exists. Off by "
+                         "default: a rerun tags a new file and is promoted "
+                         "deliberately, so a canonical artifact is never "
+                         "silently rewritten.")
     args = ap.parse_args()
 
     out_path = args.out or os.path.join(
         REPO, "evals", "results",
         f"agent-token-ledger-{date.today():%Y%m%d}.json")
 
+    # Refuse before spending the run, not after: the daemon fetch is the
+    # slow part and there is nothing to salvage once the file is gone.
+    if os.path.exists(out_path) and not args.force:
+        print(f"refusing to overwrite {out_path}\n"
+              f"  tag this run instead (--out ...-r2.json) and promote it "
+              f"deliberately, or pass --force.", file=sys.stderr)
+        return 2
+
     mod = load_mcp()
     dm = Daemon(args.daemon, read_token())
     stats = dm.get("/api/stats")
 
-    slots, records = pick_slots(dm)
+    slots, records, census = pick_slots(dm)
     ledger = {
         "generated": date.today().isoformat(),
         "bank": {"entries": stats.get("total_memories"),
-                 "preset": stats.get("preset")},
+                 "preset": stats.get("preset"), **census},
         "convention": {
             "chars": "compact JSON as an MCP client receives it "
                      "(separators=(',',':'), ensure_ascii=False)",
@@ -472,7 +532,11 @@ def main() -> int:
     print(f"wrote {out_path}")
     print(f"manifest full: {ledger['manifest']['full']['chars']} chars "
           f"(~{ledger['manifest']['full']['approx_tokens']} tok)")
-    print(f"session block: {ledger['session_start_block']['chars']} chars")
+    print(f"session block: {ledger['session_start_block']['raw_chars']} "
+          f"raw chars ({ledger['session_start_block']['chars']} JSON)")
+    print(f"labelled facts: {census['facts_labelled']} of "
+          f"{census['facts_current']} current"
+          + ("  [DUMP TRUNCATED]" if census["facts_dump_truncated"] else ""))
     print(f"search top_k={args.top_k} mean total: "
           f"{s['before']['total_chars']['mean']} -> "
           f"{s['after']['total_chars']['mean']} chars")

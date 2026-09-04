@@ -49,7 +49,7 @@ RECALL — at the start of any task:
   training may have stale (versions, prices, who-holds-a-role, findings).
 - `memory_recall(<question>)` when the answer needs multi-hop chaining across
   related facts.
-- Results are compact (`{id, text, source, tags, score}`). An entry carrying
+- Long hits are clipped (`truncated: true` → `memory_get`). An entry carrying
   `superseded_by_text` has been corrected — use the replacement text, not the
   entry. Pass `verbose=true` only when debugging retrieval.
 - If a tool named here isn't in your tool list, call

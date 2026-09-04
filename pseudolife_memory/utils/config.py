@@ -860,14 +860,14 @@ class McpConfig:
 
     compact_payloads: bool = True
     # 600 chars ≈ 150 tokens. Measured 2026-09-04 over 15 dev-session
-    # queries at top_k=8 against the live bank (1,298 entries, 120 served
-    # entries) — evals/results/agent-token-ledger-20260904.json: served
-    # entry text runs mean 1,168 chars / median 1,146 / p90 1,790, and
+    # queries at top_k=8 against the live bank (1,314 entries, 120 served
+    # entries) — evals/results/agent-token-ledger-20260904-r2.json: served
+    # entry text runs mean 1,180 chars / median 1,149 / p90 1,794, and
     # entry text alone was 64% of the whole search payload. A 600-char cap
     # therefore clips 88% of hits ON THIS BANK, deliberately: these are
     # consolidated notes, not one-liners, and 600 chars is enough to judge
     # a hit and usually to act on it, with ``memory_get`` for the rest. It
-    # halves the entries block (9,374 -> 4,550 mean chars) and takes 40%
+    # halves the entries block (9,464 -> 4,550 mean chars) and takes 41%
     # off the call. Raise it for long-form corpora where the tail of a
     # note carries the answer. ``memory_recall`` has capped its supporting
     # texts at 200 since 2026-07-10 (``_RECALL_TEXT_CHARS``); search
