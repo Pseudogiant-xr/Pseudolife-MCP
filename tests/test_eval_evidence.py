@@ -5504,9 +5504,9 @@ CLAIMS.append(Claim(
     artifacts=(EPI_RUN,), value=_epi_meta("extract_seconds_total"),
     stated=826.4, places=1))
 _EPI_SPEC_E1_A = (
-    "  - **E1 held, and again uselessly.** `hybrid` 1.000 ≥ `cortex` 0.913 and")
+    "    1.000 ≥ `cortex` 0.913, and `rag` 1.000 > `nomem` 0.000 — but the")
 _EPI_SPEC_E1_B = (
-    "    `rag` 1.000 > `nomem` 0.000, so the ordering is not falsified — but")
+    "    middle one does not: `cortex` 0.913 is **below** `rag` 1.000, which")
 for _cid, _needle, _arm, _stated in (
         ("epistemic-lme-spec-e1-hybrid", _EPI_SPEC_E1_A, "hybrid", 1.0),
         ("epistemic-lme-spec-e1-cortex", _EPI_SPEC_E1_A, "cortex", 0.913),
@@ -5516,7 +5516,7 @@ for _cid, _needle, _arm, _stated in (
         id=_cid, doc=EPI_SPEC, needle=_needle, artifacts=(EPI_RUN,),
         value=_epi(_arm, "update_following"), stated=_stated, places=3))
 _EPI_SPEC_SELECTIVITY = (
-    "    accurate: each bank holds 23.2 turns and `rag_top_k` is 6, so a")
+    "    bank holds 23.2 turns and `rag_top_k` is 6, so a quarter of the whole")
 CLAIMS.append(Claim(
     id="epistemic-lme-spec-turns-mean", doc=EPI_SPEC,
     needle=_EPI_SPEC_SELECTIVITY, artifacts=(EPI_RUN,),
@@ -5544,3 +5544,348 @@ def test_lme_ungradable_dimensions_report_null_not_zero():
             assert cell["rate"] is None, (
                 f"{arm}/{dim} publishes a rate of {cell['rate']!r}; the docs "
                 f"say n/a, which requires NULL")
+
+
+# ── the corrected LongMemEval derivation and rescore (2026-09-05) ─────────
+# The review that re-derived A6's numbers found the bench's only
+# stale_serving event was a compound-gold parsing artifact (spec A7). The
+# corrected slice and its rescored table land in the same three docs, so
+# each number is pinned at every site that states it — and the retired
+# numbers above stay pinned to the artifacts that still carry them, which
+# is what "retire at the old site, keep it visible" means here.
+EPI_LME_B = RESULTS + "epistemic-bench-lme-derivation-20260905b.json"
+EPI_LME_S_B = RESULTS + "epistemic-bench-lme-derivation-s-20260905b.json"
+EPI_RUN_B = RESULTS + "epistemic-bench-lme-qwen27b-20260905b.json"
+EPI_RUN_B_ROWS = RESULTS + "epistemic-bench-lme-qwen27b-20260905b.jsonl"
+
+_EPI_B_QUALIFIED = (
+    "guessed) and qualifies **21 of the 78** questions, identically on")
+for _art, _suffix in ((EPI_LME_B, "oracle"), (EPI_LME_S_B, "s")):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-qualified-evals-{_suffix}", doc=EVALS,
+        needle=_EPI_B_QUALIFIED, artifacts=(_art,), value=_epi_qualified,
+        stated=21, places=0))
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-qualified-cl-{_suffix}", doc=CHANGELOG,
+        needle="  slice is **21 of the 78** knowledge-update questions (was 23), still",
+        artifacts=(_art,), value=_epi_qualified, stated=21, places=0))
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-qualified-spec-{_suffix}", doc=EPI_SPEC,
+        needle="  **Qualifying count: 21 of the 78** knowledge-update questions (was 23),",
+        artifacts=(_art,), value=_epi_qualified, stated=21, places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-ku-total", doc=EVALS, needle=_EPI_B_QUALIFIED,
+    artifacts=(EPI_LME_B,),
+    value=lambda d: d["meta"]["knowledge_update_questions"], stated=78,
+    places=0))
+
+# The new skip class, and the ambiguous count it moved.
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-skip-compound", doc=EVALS,
+    needle="of what the later evidence says, **4 whose gold value token is only part",
+    artifacts=(EPI_LME_B,),
+    value=lambda d: d["skips"]["gold-value-is-compound-token"], stated=4,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-skip-ambiguous", doc=EVALS,
+    needle="of a compound token**, 6 with an ambiguous old-value candidate, 1 whose",
+    artifacts=(EPI_LME_B,),
+    value=lambda d: sum(v for k, v in d["skips"].items()
+                        if k.startswith("ambiguous-old-value")),
+    stated=6, places=0))
+
+# The corrected table in evals/README.md and spec A7 (identical rows, so
+# one needle serves both docs' copies).
+_EPI_B_TABLE = [
+    ("update_following",
+     "| `update_following` ↑ | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |",
+     (("rag", 1.0), ("cortex", 0.952), ("hybrid", 1.0), ("cascade", 0.952),
+      ("nomem", 0.0)), 21),
+    ("stale_serving",
+     "| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 21 |",
+     (("rag", 0.0), ("cortex", 0.0), ("hybrid", 0.0), ("cascade", 0.0),
+      ("nomem", 0.0)), 21),
+    ("retraction_handling",
+     "| `retraction_handling` ↑ | 0.333 | 0.000 | 0.333 | 0.000 | 0.000 | 21 |",
+     (("rag", 0.333), ("cortex", 0.0), ("hybrid", 0.333), ("cascade", 0.0),
+      ("nomem", 0.0)), 21),
+    ("answer_coverage",
+     "| `answer_coverage` | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |",
+     (("rag", 1.0), ("cortex", 0.952), ("hybrid", 1.0), ("cascade", 0.952),
+      ("nomem", 0.0)), 21),
+]
+for _dim, _needle, _cells, _n in _EPI_B_TABLE:
+    for _arm, _rate in _cells:
+        CLAIMS.append(Claim(
+            id=f"epistemic-lme-b-{_dim}-{_arm}", doc=EVALS, needle=_needle,
+            artifacts=(EPI_RUN_B,), value=_epi(_arm, _dim), stated=_rate,
+            places=3))
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-{_dim}-n", doc=EVALS, needle=_needle,
+        artifacts=(EPI_RUN_B,), value=_epi_n(_dim), stated=_n, places=0))
+
+_EPI_B_CHARS = (
+    "| context chars (mean) | 5397.0 | 378.1 | 5809.2 | 378.1 | 0.0 | |")
+for _arm, _chars in (("rag", 5397.0), ("cortex", 378.1), ("hybrid", 5809.2),
+                     ("cascade", 378.1), ("nomem", 0.0)):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-chars-{_arm}", doc=EVALS, needle=_EPI_B_CHARS,
+        artifacts=(EPI_RUN_B,), value=_epi_chars(_arm), stated=_chars,
+        places=1))
+
+# The rescored slice's share of the original run's extraction cost, and
+# the original total beside it — two artifacts, two numbers, one sentence.
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-extract-seconds", doc=EVALS,
+    needle="`longmemeval_bench.ingest_and_dream`, extracted by `qwen-27b` (714.7s of",
+    artifacts=(EPI_RUN_B,), value=_epi_meta("extract_seconds_total"),
+    stated=714.7, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-extract-seconds-source", doc=EVALS,
+    needle="the original run's 826.4s of extraction), `--contexts-only`,",
+    artifacts=(EPI_RUN,), value=_epi_meta("extract_seconds_total"),
+    stated=826.4, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-extract-seconds-spec", doc=EPI_SPEC,
+    needle="  questions, same `qwen-27b` extraction (714.7 s of the original run's",
+    artifacts=(EPI_RUN_B,), value=_epi_meta("extract_seconds_total"),
+    stated=714.7, places=1))
+
+# Why the raw-turn arms are still saturated on the narrower slice.
+_EPI_B_SELECTIVITY = (
+    "  here.** Each bank holds 23.1 turns on average against `rag_top_k` 6, so")
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-turns-mean", doc=EVALS, needle=_EPI_B_SELECTIVITY,
+    artifacts=(EPI_RUN_B,),
+    value=_epi_meta("selectivity", "turns_in_bank_mean"), stated=23.1,
+    places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-rag-top-k", doc=EVALS, needle=_EPI_B_SELECTIVITY,
+    artifacts=(EPI_RUN_B,), value=_epi_meta("rag_top_k"), stated=6,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-turns-mean-spec", doc=EPI_SPEC,
+    needle="  saturated (23.1 turns per bank against `rag_top_k` 6, and rag carries",
+    artifacts=(EPI_RUN_B,),
+    value=_epi_meta("selectivity", "turns_in_bank_mean"), stated=23.1,
+    places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-rag-d1-hits", doc=EVALS,
+    needle="  context carries the current value on 21 of 21, and carries *both* the",
+    artifacts=(EPI_RUN_B,), value=_epi_hits("rag", "update_following"),
+    stated=21, places=0))
+
+# The both-values counts on the corrected slice, recomputed from contexts.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-b-both-evals", EVALS,
+         "  current value and the superseded one on 20 of 21 (hybrid: 21 of 21) — so"),
+        ("epistemic-lme-b-both-spec", EPI_SPEC,
+         "  both values on 20 of 21 questions; hybrid on 21 of 21). E5 moves from")):
+    for _arm, _stated in (("rag", 20), ("hybrid", 21)):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(EPI_RUN_B_ROWS,), value=_epi_serves_both(_arm),
+            stated=_stated, places=0))
+
+# The width/coverage trade on the corrected slice, in all three docs.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-b-trade-evals", EVALS,
+         "- **The spine serves the current value in 20 of 21 questions at 7.0% of"),
+        ("epistemic-lme-b-trade-spec", EPI_SPEC,
+         "  becomes 20 of 21 questions at 7.0% of rag's characters — 378.1 against")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-hits", doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi_hits("cortex", "update_following"), stated=20, places=0))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-pct", doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi_width_pct, stated=7.0, places=1))
+for _cid, _doc, _needle, _arm, _stated in (
+        ("epistemic-lme-b-chars-evals-cortex", EVALS,
+         "  rag's characters** — 378.1 against 5397.0 — with no `stale_serving`",
+         "cortex", 378.1),
+        ("epistemic-lme-b-chars-evals-rag", EVALS,
+         "  rag's characters** — 378.1 against 5397.0 — with no `stale_serving`",
+         "rag", 5397.0),
+        ("epistemic-lme-b-chars-spec-cortex", EPI_SPEC,
+         "  becomes 20 of 21 questions at 7.0% of rag's characters — 378.1 against",
+         "cortex", 378.1),
+        ("epistemic-lme-b-chars-spec-rag", EPI_SPEC,
+         "  5397.0. **E6 is unchanged: the premise is still not supported, and the",
+         "rag", 5397.0),
+        ("epistemic-lme-b-chars-cl-cortex", CHANGELOG,
+         "  and hybrid 1.000, at 378.1 characters against rag's 5397.0 — 7.0% of the",
+         "cortex", 378.1),
+        ("epistemic-lme-b-chars-cl-rag", CHANGELOG,
+         "  and hybrid 1.000, at 378.1 characters against rag's 5397.0 — 7.0% of the",
+         "rag", 5397.0)):
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi_chars(_arm), stated=_stated, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-width-pct-cl", doc=CHANGELOG,
+    needle="  and hybrid 1.000, at 378.1 characters against rag's 5397.0 — 7.0% of the",
+    artifacts=(EPI_RUN_B,), value=_epi_width_pct, stated=7.0, places=1))
+
+# D1 and D5 on the corrected slice, restated in the CHANGELOG.
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-cl-cortex-d1", doc=CHANGELOG,
+    needle="  never occurred. `update_following` is cortex 0.952 (20 of 21) against rag",
+    artifacts=(EPI_RUN_B,), value=_epi("cortex", "update_following"),
+    stated=0.952, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-cl-cortex-d1-hits", doc=CHANGELOG,
+    needle="  never occurred. `update_following` is cortex 0.952 (20 of 21) against rag",
+    artifacts=(EPI_RUN_B,), value=_epi_hits("cortex", "update_following"),
+    stated=20, places=0))
+for _arm in ("rag", "hybrid"):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-cl-{_arm}-d5", doc=CHANGELOG,
+        needle="  width. `retraction_handling` is 0.333 for rag and hybrid, 0.000 for cortex",
+        artifacts=(EPI_RUN_B,), value=_epi(_arm, "retraction_handling"),
+        stated=0.333, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-cl-cortex-d5", doc=CHANGELOG,
+    needle="  width. `retraction_handling` is 0.333 for rag and hybrid, 0.000 for cortex",
+    artifacts=(EPI_RUN_B,), value=_epi("cortex", "retraction_handling"),
+    stated=0.0, places=3))
+for _cid, _doc, _needle in (
+        ("epistemic-lme-b-d5-evals", EVALS,
+         "  entries. rag/hybrid's 0.333 (7 of 21) *is* a real measurement of that"),
+        ("epistemic-lme-b-d5-spec", EPI_SPEC,
+         "  0.348 to 0.333 (7 of 21) for rag and hybrid. The width/coverage trade")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-rate", doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi("rag", "retraction_handling"), stated=0.333, places=3))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-hits", doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi_hits("rag", "retraction_handling"), stated=7, places=0))
+
+# The D2 zero is the headline of the correction, so it is pinned at each
+# site as an explicit hit count of 0 rather than only as a table cell.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-b-d2-evals", EVALS,
+         "- **`stale_serving` is 0.000 on every arm of every source the bench has"),
+        ("epistemic-lme-b-d2-cl", CHANGELOG,
+         "  `stale_serving` is **0.000 on every arm**, which makes it 0.000 on every arm"),
+        ("epistemic-lme-b-d2-spec", EPI_SPEC,
+         "  now **0.000 on every arm of every source the bench has ever run** — the")):
+    for _arm in ("rag", "cortex", "hybrid", "cascade", "nomem"):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(EPI_RUN_B,), value=_epi_hits(_arm, "stale_serving"),
+            stated=0, places=0))
+
+
+def _epi_cascade_is_cortex(*artifacts) -> float:
+    """Rows where the cascade proxy served exactly the cortex context.
+
+    The docs say the column carries no independent information; that is a
+    count over every row of every run, so the claim cites all three rows
+    files at once rather than three separate near-identical claims."""
+    return sum(1 for rows in artifacts for r in rows
+               if r["cascade_context"] == r["cortex_context"])
+
+
+def _epi_row_total(*artifacts) -> float:
+    return sum(len(rows) for rows in artifacts)
+
+
+_EPI_ALL_ROWS = (EPI_SMOKE_ROWS, EPI_SCALE_ROWS, EPI_RUN_ROWS)
+for _cid, _doc, _needle in (
+        ("epistemic-cascade-dup-evals", EVALS,
+         "identical to `cortex` on **173 of 173** rows — every row of the smoke, the"),
+        ("epistemic-cascade-dup-cl", CHANGELOG,
+         "  identical to `cortex` on 173 of 173 rows across all three runs — it carries"),
+        ("epistemic-cascade-dup-spec", EPI_SPEC,
+         "    `cortex` on 173 of 173 rows across the smoke, scale and LongMemEval")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-same", doc=_doc, needle=_needle, artifacts=_EPI_ALL_ROWS,
+        value=_epi_cascade_is_cortex, stated=173, places=0))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-total", doc=_doc, needle=_needle, artifacts=_EPI_ALL_ROWS,
+        value=_epi_row_total, stated=173, places=0))
+
+
+def _epi_decoys_in_cortex(rows) -> float:
+    """Decoy values that reached the cortex context on the never-stated
+    questions — the arithmetic under D4's cortex 0.000, recomputed with
+    the harness's own matcher."""
+    from epistemic_bench import value_present
+
+    return sum(1 for r in rows if r["kind"] == "unstated"
+               for v in r["decoy_values"]
+               if value_present(r["cortex_context"], v))
+
+
+def _epi_decoys_total(rows) -> float:
+    return sum(len(r["decoy_values"]) for r in rows if r["kind"] == "unstated")
+
+
+for _cid, _doc, _needle in (
+        ("epistemic-d4-decoys-evals", EVALS,
+         "  **71 of the 72 decoy values reached the cortex context**, every decoy on"),
+        ("epistemic-d4-decoys-cl", CHANGELOG,
+         "  by `cortex_top_k` 24 against a 40-slot bank than by served width: 71 of the"),
+        ("epistemic-d4-decoys-spec", EPI_SPEC,
+         "  on the smoke rows, 71 of the 72 decoy values reached the cortex")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-hit", doc=_doc, needle=_needle,
+        artifacts=(EPI_SMOKE_ROWS,), value=_epi_decoys_in_cortex, stated=71,
+        places=0))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-total", doc=_doc, needle=_needle,
+        artifacts=(EPI_SMOKE_ROWS,), value=_epi_decoys_total, stated=72,
+        places=0))
+CLAIMS.append(Claim(
+    id="epistemic-d4-slots-evals", doc=EVALS,
+    needle="  out of a bank that holds 40 — the `selectivity` block in the artifact —",
+    artifacts=(EPI_SMOKE,),
+    value=lambda d: d["meta"]["selectivity"]["cortex_slots_in_bank"],
+    stated=40, places=0))
+CLAIMS.append(Claim(
+    id="epistemic-d4-topk-evals", doc=EVALS,
+    needle="  width (cortex serves 3.2× rag's characters, the column above), so it is",
+    artifacts=(EPI_SMOKE,),
+    value=lambda d: d["meta"]["selectivity"]["cortex_top_k"], stated=24,
+    places=0))
+
+
+def test_the_corrected_slice_is_a_subset_of_the_run_it_rescored():
+    """A rescore may only narrow a slice.
+
+    If the corrected derivation ever admits a question the source run
+    never scored, its numbers stop being a rescore and become a run that
+    was never made — the exact failure `rescore_rows` refuses at runtime,
+    pinned here against the committed artifacts.
+    """
+    derived = {p["question_id"] for p in _load_artifact(
+        RESULTS + "epistemic-bench-lme-derivation-20260905b.jsonl")}
+    scored = {r["question_id"] for r in _load_artifact(EPI_RUN_ROWS)}
+    assert derived <= scored, sorted(derived - scored)
+    assert {r["question_id"] for r in _load_artifact(EPI_RUN_B_ROWS)} == derived
+
+
+def test_the_rescored_artifact_names_what_it_supersedes_and_why():
+    """A retired number stays quotable unless the thing replacing it says
+    what it replaced. The pointer is data in the artifact, not prose in a
+    doc that a reader may never open."""
+    for rel, retired in ((EPI_RUN_B, "epistemic-bench-lme-qwen27b-20260905.json"),
+                         (EPI_LME_B, "epistemic-bench-lme-derivation-20260905.json"),
+                         (EPI_LME_S_B,
+                          "epistemic-bench-lme-derivation-s-20260905.json")):
+        meta = _load_artifact(rel)["meta"]
+        assert meta["supersedes"]["artifact"] == retired
+        assert len(meta["supersedes"]["reason"]) > 40
+
+
+def test_the_corrected_run_records_which_verdicts_were_recomputed():
+    """The rescore recomputes the text-only predicates and CARRIES the
+    payload ones; an artifact that did not say so would look like a full
+    re-run of every dimension."""
+    meta = _load_artifact(EPI_RUN_B)["meta"]
+    assert meta["rescored_from"] == "epistemic-bench-lme-qwen27b-20260905.jsonl"
+    assert set(meta["rescored_metrics"]) == {
+        "update_following", "stale_serving", "answer_coverage"}
+    assert set(meta["carried_metrics"]) == {
+        "staleness_marking", "abstention_support", "retraction_handling"}
+    assert "rescored_not_rerun" in _load_artifact(EPI_RUN_B)["caveats"]

@@ -10,11 +10,21 @@ rag 0.6425 vs hybrid 0.6226). This bench asks the other question: does the
 served context tell the agent WHICH value is current, how old it is,
 whether it was retracted, and when nothing is known at all.
 
-Judge-free and CPU-only by construction. Each metric is a deterministic
-predicate over one arm's served context — word-boundary string containment
-on the served text, or a structural read of the served payload (the entry /
-fact dicts the serving call returned). No answerer, no judge, no GPU, so a
-rerun is byte-reproducible and costs seconds.
+Judge-free by construction. Each metric is a deterministic predicate over
+one arm's served context — word-boundary string containment on the served
+text, or a structural read of the served payload (the entry / fact dicts
+the serving call returned). No answerer and no judge, so SCORING never
+needs a GPU.
+
+The two sources differ in what building the bank costs, and the docs must
+not blur them. The synthetic source is CPU-only end to end and its score
+fields are byte-reproducible on a rerun (the ``meta`` timestamps and wall
+times of course differ). The LongMemEval source builds each bank through
+the real extractor: the 2026-09-05 run spent 826.4 s of GPU extraction,
+and it is reproducible only to the extent the extractor is. ``--extractor
+floor`` is the no-LLM rung for checking that path on CPU, and
+``--rescore-from`` re-scores an already-extracted run's persisted rows
+with no bank and no GPU at all.
 
 Five dimensions (see the spec for the full definitions and the
 preregistered expectations):
@@ -78,6 +88,7 @@ import json
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -140,6 +151,41 @@ def value_present(text: str, value: str) -> bool:
 
 def _norm(s) -> str:
     return re.sub(r"\s+", " ", str(s or "")).strip().casefold()
+
+
+# Punctuation that can sit against a value without being part of it —
+# sentence enders, brackets, quotes. Everything else touching a value
+# (a hyphen, a slash, a percent sign, a currency symbol, a comma group)
+# makes it one PIECE of a larger token rather than a value.
+_TOKEN_EDGE = "\"'“”‘’()[]{}<>.,;:!?…"
+
+
+def is_compound_token(text: str, start: int, end: int) -> bool:
+    """Is ``text[start:end]`` only PART of the token it sits in?
+
+    The value families below match a leading token, and ``\\b`` treats
+    every non-word character as a boundary — so ``\\b\\d+\\b`` happily
+    returns ``70`` out of ``70-200mm``, ``5`` out of a ``5-2`` record, and
+    ``25`` out of ``25%``. Measured 2026-09-05 on the committed LongMemEval
+    derivation: three of the 23 qualifying pairs were built that way, and
+    one of them (question 41698283, an ``18-55mm kit lens`` paired with a
+    ``70-200mm zoom lens``) produced the only ``stale_serving`` event the
+    bench has ever recorded — two different lenses read as one slot
+    changing value.
+
+    The rule: a usable value IS its whole whitespace-delimited token, once
+    surrounding sentence punctuation and brackets are stripped. Anything
+    else — a hyphenated range, a win-loss record, a comma-grouped number,
+    a digit welded to a unit or a symbol — is compound and is not a value
+    this derivation can pair.
+    """
+    s = str(text)
+    left, right = start, end
+    while left > 0 and not s[left - 1].isspace():
+        left -= 1
+    while right < len(s) and not s[right].isspace():
+        right += 1
+    return s[left:right].strip(_TOKEN_EDGE) != s[start:end]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -382,6 +428,54 @@ def score_from_rows(rows, arm: str) -> dict:
     return out
 
 
+# Which metrics a persisted row can be re-scored from, and which have to
+# be carried. The split is what each predicate READS: D1, D2 and the
+# coverage companion are word-boundary containment on ``served.text``,
+# which every row carries (A4); D3, D4 and D5 read ``served.facts`` /
+# ``served.entries``, which rows before amendment A7 do not.
+TEXT_ONLY_METRICS = ("update_following", "stale_serving", COMPANION)
+PAYLOAD_METRICS = ("staleness_marking", "abstention_support",
+                   "retraction_handling")
+
+
+def rescore_rows(pairs, rows) -> list[dict]:
+    """Re-score persisted rows against a (re-)derivation, without a bank.
+
+    A corrected derivation must be scorable on CPU: the extraction that
+    built each per-question bank cost 826 s of GPU on the 2026-09-05 run
+    and rerunning it to change a parsing rule would be absurd. Every
+    text-only predicate re-runs here on the ``{arm}_context`` the row
+    already carries; the payload predicates are CARRIED from the original
+    row verbatim, because the payloads they read are not in rows written
+    before amendment A7 — silently recomputing them against an empty
+    payload would turn D3/D5 into zeros that look like measurements.
+
+    Only a derivation that is a SUBSET of what was run can be rescored:
+    an id with no persisted row is refused rather than dropped, because a
+    slice quietly narrowed to what happens to be scorable is not the
+    slice the derivation names.
+    """
+    by_id = {r["question_id"]: r for r in rows if r.get("question_id")}
+    missing = [p["question_id"] for p in pairs
+               if p["question_id"] not in by_id]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} derived question_ids have no persisted row "
+            f"(first: {missing[0]}) — a rescore can only narrow a slice, "
+            "never extend it. Those questions need a real run.")
+    out = []
+    for pair in pairs:
+        q = lme_question(pair)
+        row = dict(by_id[pair["question_id"]])
+        for arm in ARMS:
+            served = Served(text=row.get(f"{arm}_context") or "")
+            for name in TEXT_ONLY_METRICS:
+                row[f"{arm}_{name}"] = ALL_METRICS[name](q, served)
+        row["rescored"] = True
+        out.append(row)
+    return out
+
+
 def ground_truth_row(q: Question) -> dict:
     """The question's epistemic state as artifact fields — the half of a
     row a reader needs to re-derive any verdict by hand."""
@@ -395,19 +489,38 @@ def ground_truth_row(q: Question) -> dict:
             "decoy_values": list(q.decoy_values)}
 
 
+# The fields of a served fact / entry that a marker verdict is read off.
+# Persisted per row so D3 and D5's payload channels are auditable from the
+# artifact the same way A4 made the text channel auditable (review finding
+# L1, 2026-09-05) — the full payloads would multiply the rows file for no
+# extra audit value, so this is the projection the predicates actually
+# read plus the id that identifies the entry.
+_FACT_AUDIT_KEYS = ("entity", "attribute", "value", "stale", "warning",
+                    "last_known_value", "supersedes_value")
+_ENTRY_AUDIT_KEYS = ("id", "superseded_by_text")
+
+
+def _audit(payload, keys) -> list[dict]:
+    return [{k: item[k] for k in keys if k in item} for item in payload]
+
+
 def score_row(q: Question, served_by_arm: dict, base: dict) -> dict:
     """One artifact row: the ground truth, then per arm the served
-    context, its size, and every metric verdict.
+    context, its size, the payload fields the marker metrics read, and
+    every metric verdict.
 
     The served context is persisted, not only its length: a metric bug is
     auditable from the artifact only if the artifact carries the text the
-    metric ran on (spec amendment A4).
+    metric ran on (spec amendment A4). The fact / entry projections do the
+    same job for the payload channels (amendment A7).
     """
     row = dict(base)
     for arm in ARMS:
         served = served_by_arm[arm]
         row[f"{arm}_context"] = served.text
         row[f"{arm}_context_chars"] = len(served.text)
+        row[f"{arm}_facts"] = _audit(served.facts, _FACT_AUDIT_KEYS)
+        row[f"{arm}_entries"] = _audit(served.entries, _ENTRY_AUDIT_KEYS)
         for name, fn in ALL_METRICS.items():
             row[f"{arm}_{name}"] = fn(q, served)
     return row
@@ -613,12 +726,21 @@ def _parse_lme_date(raw: str) -> datetime:
     return datetime.min
 
 
-def _value_core(text) -> tuple[str | None, str | None]:
+def _value_core(text) -> tuple[str | None, str | None, bool]:
+    """``(family, value, compound)`` for a gold answer.
+
+    ``compound`` says the matched token is only part of a larger one
+    (``is_compound_token``), which the caller treats as a skip rather
+    than trying the next match — guessing at a second token is exactly
+    the judgement this derivation refuses to make.
+    """
+    raw = str(text or "")
     for name, rx in _FAMILIES:
-        m = rx.search(str(text or ""))
+        m = rx.search(raw)
         if m:
-            return name, m.group(0).strip()
-    return None, None
+            return (name, m.group(0).strip(),
+                    is_compound_token(raw, m.start(), m.end()))
+    return None, None, False
 
 
 def _evidence_text(session) -> str:
@@ -651,9 +773,12 @@ def derive_lme_pairs(questions) -> tuple[list[dict], dict[str, int]]:
         if len(evidence) != 2:
             _skip("not-two-evidence-sessions")
             continue
-        family, gold = _value_core(q["answer"])
+        family, gold, compound = _value_core(q["answer"])
         if not gold:
             _skip("gold-has-no-value-token")
+            continue
+        if compound:
+            _skip("gold-value-is-compound-token")
             continue
         early = _evidence_text(evidence[0][2])
         late = _evidence_text(evidence[1][2])
@@ -664,6 +789,14 @@ def derive_lme_pairs(questions) -> tuple[list[dict], dict[str, int]]:
             _skip("gold-also-in-earlier-evidence")
             continue
         rx = dict(_FAMILIES)[family]
+        # The compound rule is deliberately NOT applied to the candidate
+        # side in this pass. Measured 2026-09-05 over both LongMemEval
+        # files: filtering compound candidates too drops question ba61f0b9
+        # (whose old value 25 comes out of "25% of executive positions")
+        # but newly ADMITS 0e4e4c46 and 0f05491a, and a question that was
+        # never in the slice has no served context to rescore — it needs a
+        # fresh extraction run. Spec amendment A7 carries it as the open
+        # item; the gold side is fixed here because it is a strict subset.
         candidates = sorted({m.group(0).strip() for m in rx.finditer(early)}
                             - {gold})
         candidates = [c for c in candidates if not value_present(late, c)]
@@ -835,8 +968,13 @@ def serve_arms(svc, question: str) -> dict[str, Served]:
     ``serve_comparator_arms`` — imported, never re-implemented, so an arm
     here is the same object an arm of that name is there. The structured
     payloads come from the SAME service calls ``build_contexts`` makes,
-    pinned to its own module constants, so a width change there reaches
-    both channels together.
+    with the same module constants and the same knob split: the rag
+    control is pinned to vanilla retrieval (that harness's preregistered
+    control contract) and the hybrid arm follows ``HYBRID_CONTIG`` /
+    ``HYBRID_TIMELINE``. At the shipped defaults (both ``None``) the two
+    calls return the same entries, so this is inert today; it stops the
+    payload channel from silently diverging from the text channel the
+    first time a knob is turned on.
     """
     import longmemeval_bench as lmb
 
@@ -848,7 +986,15 @@ def serve_arms(svc, question: str) -> dict[str, Served]:
     entries = tuple(svc.search(question, top_k=lmb.RAG_TOP_K,
                                contiguity_neighbors=0, timeline=False
                                ).get("entries", []))
-    hybrid_entries = entries[:lmb.HYBRID_TOP_K]
+    # HYBRID_TOP_K == RAG_TOP_K == 6 as shipped, so this slice is a no-op
+    # today and hybrid's entry channel is the rag entry channel exactly.
+    # It is kept because the two widths are separate knobs in that module
+    # and D5's hybrid number would otherwise silently follow the rag one.
+    hybrid_entries = tuple(
+        svc.search(question, top_k=lmb.RAG_TOP_K,
+                   contiguity_neighbors=lmb.HYBRID_CONTIG,
+                   timeline=lmb.HYBRID_TIMELINE
+                   ).get("entries", []))[:lmb.HYBRID_TOP_K]
     served = {
         "rag": Served(text=contexts["rag"], entries=entries),
         "cortex": Served(text=contexts["cortex"], facts=facts),
@@ -952,7 +1098,12 @@ CAVEATS = {
         "The cascade arm is a CONTEXT-level proxy — the cortex context "
         "when non-empty, else the rag context. The published cascade is an "
         "ANSWER-level policy routing on whether the cortex arm commits. "
-        "The two are different objects and must not be compared."),
+        "The two are different objects and must not be compared. On every "
+        "row of every run to date (173 of 173 across the 2026-09-05 "
+        "smoke, scale and LongMemEval cells) the cortex context was "
+        "non-empty, so this column is identical to the cortex column and "
+        "carries no independent information; it is retained only to keep "
+        "the arm set stable across artifacts."),
     "marker_dimensions_have_a_structural_floor": (
         "staleness_marking and the fact channel of retraction_handling are "
         "0 by construction for the rag and nomem arms: a raw turn carries "
@@ -988,6 +1139,12 @@ LME_CAVEATS = {
         "knowledge-update type does not contain by construction. Both "
         "report n=0 and a NULL rate — never a 0.0, which a reader would "
         "take for a failing arm."),
+    "hybrid_d5_is_the_rag_entry_channel": (
+        "HYBRID_TOP_K and RAG_TOP_K are both 6 as shipped, so the hybrid "
+        "arm's entry slice is the rag arm's entry list unchanged. On this "
+        "source that makes hybrid's D5 exactly 'the rag entry channel OR "
+        "the cortex fact channel' by construction, and the two arms' D5 "
+        "numbers are not independent measurements."),
     "d5_is_the_entry_channel_only": (
         "The slot is synthetic (entity 'lme:<question_id>', attribute "
         "'value') because LongMemEval has no entity/attribute structure, "
@@ -1080,6 +1237,7 @@ def run_synthetic(args) -> int:
                                   ground_truth_row(q)))
     finally:
         svc.flush()
+        shutil.rmtree(tmp, ignore_errors=True)
 
     payload = {
         "meta": {
@@ -1207,6 +1365,10 @@ def run_lme(args) -> int:
                                    "stale_policy", "annotate")
         finally:
             svc.flush()
+            # One scratch directory per question, and this loop runs the
+            # whole slice: leaving them behind is a slow leak the sibling
+            # rebuild harness already had to fix once.
+            shutil.rmtree(tmp, ignore_errors=True)
         row = score_row(q, served, dict(
             ground_truth_row(q),
             family=pair.get("family"),
@@ -1299,6 +1461,28 @@ def run_lme(args) -> int:
     return 0
 
 
+def supersession_meta(args) -> dict:
+    """``meta.supersedes`` for an artifact that replaces an earlier one.
+
+    A pointer with no reason is the failure this project keeps meeting —
+    a superseded number that stays quotable because nothing next to it
+    says why it was retired — so the reason is required with the pointer,
+    not optional beside it.
+    """
+    tag = getattr(args, "supersedes", None)
+    reason = getattr(args, "supersedes_reason", None)
+    if not tag:
+        if reason:
+            raise SystemExit("--supersedes-reason needs --supersedes")
+        return {}
+    if not reason:
+        raise SystemExit(
+            "--supersedes needs --supersedes-reason: an artifact that "
+            "retires another has to say why, in the artifact.")
+    return {"supersedes": {"artifact": f"epistemic-bench-{tag}.json",
+                           "reason": reason}}
+
+
 def run_derive_lme(args) -> int:
     stem = "oracle" if args.derive_lme == "oracle" else "s_cleaned"
     path = DATA_DIR / f"longmemeval_{stem}.json"
@@ -1322,11 +1506,23 @@ def run_derive_lme(args) -> int:
                  "knowledge_update_questions": len(ku),
                  "qualified": len(pairs),
                  "spec": ("docs/superpowers/specs/"
-                          "2026-09-05-epistemic-bench-design.md")},
-        "caveats": {"derivation_is_parsing_only": (
-            "Pure parsing: a question that does not derive cleanly is "
-            "skipped, never guessed at. The skip histogram is half the "
-            "result.")},
+                          "2026-09-05-epistemic-bench-design.md"),
+                 **supersession_meta(args)},
+        "caveats": {
+            "derivation_is_parsing_only": (
+                "Pure parsing: a question that does not derive cleanly is "
+                "skipped, never guessed at. The skip histogram is half "
+                "the result."),
+            "compound_gold_tokens_are_skipped": (
+                "A gold whose value token is only PART of its whitespace "
+                "token — a hyphenated range (70-200mm), a win-loss record "
+                "(5-2), a comma-grouped number, a digit welded to a unit "
+                "— is skipped as gold-value-is-compound-token. The rule "
+                "is not applied to the old-value candidates: doing so "
+                "changes which questions qualify and so needs a fresh "
+                "extraction run, which is why one derived pair (ba61f0b9) "
+                "still takes its old value out of '25%'."),
+        },
         "skips": dict(sorted(skips.items(), key=lambda kv: -kv[1])),
     }
     write_artifact(out, payload, pairs, force=args.force)
@@ -1335,6 +1531,124 @@ def run_derive_lme(args) -> int:
     for reason, n in payload["skips"].items():
         print(f"  skip {reason}: {n}")
     print(f"\nwrote {out}\n      {out.with_suffix('.jsonl')}")
+    return 0
+
+
+def run_rescore(args) -> int:
+    """Re-score an already-extracted LongMemEval run against a corrected
+    derivation — no bank, no extractor, no GPU, seconds.
+
+    The rows of the source run carry every arm's served context (A4), so
+    a derivation fix is a parsing change over data already on disk. The
+    source artifacts are never touched: this writes its own tagged
+    summary and its own rows subset, and refuses to overwrite either.
+    """
+    rows_path = Path(args.rescore_from)
+    if not rows_path.exists():
+        raise SystemExit(f"{rows_path} not found — --rescore-from takes the "
+                         "rows (.jsonl) of an already-scored run")
+    source_rows = load_rows(rows_path)
+    if not source_rows:
+        raise SystemExit(f"{rows_path} carries no rows")
+
+    derivation = Path(args.derivation)
+    if derivation.suffix == ".jsonl":
+        derivation = derivation.with_suffix(".json")
+    pairs_path = derivation.with_suffix(".jsonl")
+    if not pairs_path.exists():
+        raise SystemExit(f"{pairs_path} not found — point --derivation at "
+                         "the derivation artifact to re-score against")
+    pairs = load_rows(pairs_path)
+    if not pairs:
+        raise SystemExit(f"{pairs_path} carries no derived pairs")
+
+    out = lme_out_path(args.tag)
+    out_rows = out.with_suffix(".jsonl")
+    existing = [p for p in (out, out_rows) if p.exists()]
+    if existing and not args.force:
+        raise SystemExit("refusing to overwrite an existing artifact: "
+                         + ", ".join(str(p) for p in existing)
+                         + "\nTag the rescore differently, or pass --force.")
+
+    rows = rescore_rows(pairs, source_rows)
+    per_arm = {arm: score_from_rows(rows, arm) for arm in ARMS}
+    # Provenance for the constants a rescore cannot re-derive from rows.
+    # Read from the source run's own summary rather than re-imported, so
+    # this path stays free of the bench stack.
+    src_meta = {}
+    src_summary = rows_path.with_suffix(".json")
+    if src_summary.exists():
+        src_meta = json.loads(
+            src_summary.read_text(encoding="utf-8")).get("meta", {})
+    dmeta = {}
+    if derivation.exists():
+        dmeta = json.loads(
+            derivation.read_text(encoding="utf-8")).get("meta", {})
+    payload = {
+        "meta": {
+            "bench": "epistemic", "source": "lme", "tag": args.tag,
+            "git_rev": _git_rev(),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "contexts_only": True,
+            "rescored_from": rows_path.name,
+            "rescored_metrics": list(TEXT_ONLY_METRICS),
+            "carried_metrics": list(PAYLOAD_METRICS),
+            "source_run_git_rev": src_meta.get("git_rev"),
+            "extractor": src_meta.get("extractor"),
+            "extractor_url": src_meta.get("extractor_url"),
+            "derivation_file": pairs_path.name,
+            "derivation_git_rev": dmeta.get("git_rev"),
+            "dataset": src_meta.get("dataset"),
+            "knowledge_update_questions":
+                dmeta.get("knowledge_update_questions"),
+            "derived_questions": len(pairs),
+            "questions_scored": len(rows), "limit": None,
+            "arms": list(ARMS), "dimensions": list(DIMENSIONS),
+            "higher_is_better": HIGHER_IS_BETTER,
+            "companion_metric": COMPANION,
+            "spec": ("docs/superpowers/specs/"
+                     "2026-09-05-epistemic-bench-design.md"),
+            "stale_policy": rows[-1].get("stale_policy"),
+            "rag_top_k": src_meta.get("rag_top_k"),
+            "hybrid_top_k": src_meta.get("hybrid_top_k"),
+            "cortex_top_k": src_meta.get("cortex_top_k"),
+            "cortex_min_score": src_meta.get("cortex_min_score"),
+            "selectivity": {
+                "cortex_slots_in_bank_mean": round(
+                    sum(int(r.get("cortex_slots_in_bank") or 0)
+                        for r in rows) / max(1, len(rows)), 1),
+                "cortex_top_k": src_meta.get("cortex_top_k"),
+                "turns_in_bank_mean": round(
+                    sum(int((r.get("consolidation") or {}).get("turns", 0))
+                        for r in rows) / max(1, len(rows)), 1),
+                "rag_top_k": src_meta.get("rag_top_k"),
+            },
+            "env_knobs": src_meta.get("env_knobs"),
+            "extract_seconds_total": round(
+                sum(float((r.get("consolidation") or {})
+                          .get("extract_seconds", 0.0)) for r in rows), 1),
+            **supersession_meta(args),
+        },
+        "caveats": {k: v for k, v in CAVEATS.items()
+                    if k != "synthetic_extraction_is_perfect"},
+        "arms": per_arm,
+    }
+    payload["caveats"].update(LME_CAVEATS)
+    payload["caveats"]["rescored_not_rerun"] = (
+        "No bank was built for this artifact. Every text-only verdict "
+        f"({', '.join(TEXT_ONLY_METRICS)}) was recomputed from the served "
+        f"context each row carries; the payload verdicts "
+        f"({', '.join(PAYLOAD_METRICS)}) were CARRIED from the source run "
+        "unchanged, because rows written before spec amendment A7 do not "
+        "persist the fact / entry payloads those predicates read. The "
+        "rescore path is verified by reproducing the source run's own "
+        "summary exactly when it is run against the source derivation "
+        "(tests/test_epistemic_bench.py).")
+    write_artifact(out, payload, rows, force=args.force)
+    _print_table(payload)
+    print(f"\nrescored {len(rows)} of {len(source_rows)} persisted rows "
+          f"against {pairs_path.name}")
+    print(f"wrote {out}\n      {out_rows}")
     return 0
 
 
@@ -1394,12 +1708,30 @@ def main() -> int:
                     help="stop after building the served contexts. The "
                          "only implemented mode: this bench is judge-free "
                          "by design and never calls an answerer.")
+    ap.add_argument("--rescore-from",
+                    help="re-score the persisted rows of an already-run "
+                         "LongMemEval cell (its .jsonl) against "
+                         "--derivation, and write a new tagged artifact. "
+                         "No bank, no extractor, no GPU: the rows carry "
+                         "every arm's served context. Only the text-only "
+                         "predicates are recomputed; the payload ones are "
+                         "carried from the source run")
+    ap.add_argument("--supersedes",
+                    help="tag of the artifact this one retires; recorded "
+                         "as meta.supersedes and required to carry "
+                         "--supersedes-reason")
+    ap.add_argument("--supersedes-reason",
+                    help="why the superseded artifact was retired")
     ap.add_argument("--force", action="store_true",
                     help="overwrite an existing artifact")
     args = ap.parse_args()
 
     if args.derive_lme:
         return run_derive_lme(args)
+    # Neither of these builds a bank, so both run before the database
+    # lifecycle below — a rescore must not create or drop a database.
+    if args.rescore_from:
+        return run_rescore(args)
     if not args.contexts_only:
         raise SystemExit(
             "pass --contexts-only. This bench scores served contexts and "

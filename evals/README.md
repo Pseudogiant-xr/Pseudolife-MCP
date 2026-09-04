@@ -896,8 +896,6 @@ inside the fired set.
 
 ---
 
----
-
 # Epistemic bench (`epistemic_bench.py`)
 
 Every retrieval number above asks one question — did the served context
@@ -906,8 +904,17 @@ RAG (LongMemEval-500 rag 0.690 vs cascade 0.692; BEAM-100K rag 0.6425 vs
 hybrid 0.6226). The 2026-09-04 fresh-eyes audit argued the spine's real
 value is epistemic instead: knowing which value is current, how old it is,
 who retracted what, and when to say "I don't know". This bench measures
-that, and scores the **served context** rather than a model answer — so it
-is judge-free, CPU-only, and byte-reproducible in seconds.
+that, and scores the **served context** rather than a model answer — so
+**scoring** is judge-free and never needs a GPU.
+
+What a *run* costs depends on the source, and the two must not be blurred.
+The synthetic source is CPU-only end to end and reproduces its score
+fields byte for byte in seconds. The LongMemEval source builds each bank
+through the real extractor: the 2026-09-05 cell spent 826.4s of GPU
+extraction, and reproduces only as far as that extractor does.
+`--extractor floor` checks that path on CPU, and `--rescore-from`
+re-scores an already-extracted run's persisted rows with no bank and no
+GPU at all.
 
 Design and preregistration:
 `docs/superpowers/specs/2026-09-05-epistemic-bench-design.md`.
@@ -943,6 +950,20 @@ is not the judged answer-level cascade; the two must never be compared,
 which every artifact repeats in `caveats.cascade_proxy`. `refind` is
 excluded: its search loop is planned by a model.
 
+**The `cascade` column carries no independent information.** It is
+identical to `cortex` on **173 of 173** rows — every row of the smoke, the
+scale cell and the LongMemEval cell — because the cortex context was never
+empty, so the fallback never fired. Read the tables below as four arms
+plus a duplicate; the column is retained only to keep the arm set stable
+across artifacts.
+
+**`hybrid`'s entry channel is `rag`'s.** `HYBRID_TOP_K` and `RAG_TOP_K` are
+both 6, so the hybrid slice takes the whole rag entry list. That matters
+for D5 specifically: hybrid's `retraction_handling` is "the rag entry
+channel OR the cortex fact channel" **by construction**, not a second
+measurement, which is why the two arms report the same number wherever
+the fact channel cannot fire.
+
 ## Sources
 
 **Synthetic** — a seeded generator (N entities × M attributes over K dated
@@ -958,13 +979,41 @@ stamped in every artifact's `caveats`.
 **LongMemEval-derived** — the knowledge-update type, whose two dated
 evidence sessions carry an old value and a new one. The derivation is pure
 parsing (family-matched value tokens, ambiguity rejected rather than
-guessed) and qualifies **23 of the 78** questions, identically on
-`longmemeval_oracle.json` and `longmemeval_s_cleaned.json`. The 55 skips:
+guessed) and qualifies **21 of the 78** questions, identically on
+`longmemeval_oracle.json` and `longmemeval_s_cleaned.json`. The 57 skips:
 39 gold answers with no value token at all, 7 whose gold is a paraphrase
-of what the later evidence says, 8 with an ambiguous old-value candidate,
-1 whose gold also appears in the earlier session. Artifacts
-`epistemic-bench-lme-derivation-20260905.json` and
-`…-lme-derivation-s-20260905.json`.
+of what the later evidence says, **4 whose gold value token is only part
+of a compound token**, 6 with an ambiguous old-value candidate, 1 whose
+gold also appears in the earlier session. Artifacts
+`epistemic-bench-lme-derivation-20260905b.json` and
+`…-lme-derivation-s-20260905b.json`.
+
+The compound rule exists because the value families match a *leading*
+token: `\b\d+\b` happily returns `70` out of `70-200mm` and `5` out of a
+`5-2` record. A gold's value token has to BE its whole whitespace token
+once sentence punctuation and brackets are stripped; anything else — a
+hyphenated range, a win-loss record, a comma-grouped number, a digit
+welded to a unit — is skipped as `gold-value-is-compound-token`. Two of
+the four such golds had been qualifying, and one of them
+(`41698283`, an `18-55mm kit lens` paired with a `70-200mm zoom lens`)
+produced the only `stale_serving` event the bench ever recorded. Spec
+amendment A7. The same bug can still reach an OLD value candidate
+(`ba61f0b9` takes its 25 out of "25%"); fixing that side changes which
+questions qualify, so it needs a fresh extraction run and is A7's open
+item.
+
+> **Superseded 2026-09-05, kept visible.** The first derivation read:
+> "The derivation is pure
+> parsing (family-matched value tokens, ambiguity rejected rather than
+> guessed) and qualifies **23 of the 78** questions, identically on
+> `longmemeval_oracle.json` and `longmemeval_s_cleaned.json`. The 55 skips:
+> 39 gold answers with no value token at all, 7 whose gold is a paraphrase
+> of what the later evidence says, 8 with an ambiguous old-value candidate,
+> 1 whose gold also appears in the earlier session. Artifacts
+> `epistemic-bench-lme-derivation-20260905.json` and
+> `…-lme-derivation-s-20260905.json`."
+> Those artifacts are still committed; the two extra questions they
+> admitted are `41698283` and `c7dc5443`, both compound-gold artifacts.
 
 This slice scores **D1, D2 and D5 only** — D3 and D4 report `n: 0` and a
 NULL rate, because the dataset carries no `freshness_class` and no
@@ -1041,7 +1090,10 @@ A second, larger cell (`epistemic-bench-scale-20260905`, 10 × 10 × 6 — 100
 questions, 156 turns, 80 slots) was run afterwards to ask whether the
 `stale_serving` zero was a corpus-size artefact. It is not: every cell is
 identical at double the corpus except rag's `abstention_support` (0.750)
-and rag's `retraction_handling` (0.400).
+and rag's `retraction_handling` (0.400). *(Corrected 2026-09-05: "every
+cell" means every **rate**. The context-chars row moves at scale — rag
+373.1 → 388.1, cortex 1206.5 → 1232.3, hybrid 1613.7 → 1654.4, cascade
+with cortex — because the larger bank serves slightly longer contexts.)*
 
 **The preregistered verdict is that the premise is not supported by this
 evidence**, and the reason is the interesting part:
@@ -1067,6 +1119,15 @@ evidence**, and the reason is the interesting part:
   every one of the 10 never-stated slots. This is confounded with served
   width (cortex serves 3.2× rag's characters, the column above), so it is
   a lead for a width-matched rerun, **not yet a defect to quote**.
+  *(Cause sharpened 2026-09-05, spec A7: width is real but weaker than
+  the arithmetic under it. The cortex arm serves `cortex_top_k` = 24 slots
+  out of a bank that holds 40 — the `selectivity` block in the artifact —
+  on every question, including the ones whose slot was never written, so
+  a near-miss value is close to unavoidable. Measured on the rows:
+  **71 of the 72 decoy values reached the cortex context**, every decoy on
+  9 of the 10 unstated questions and 7 of 8 on the tenth. What this cell
+  measures is a serving width against a bank smaller than it, not a
+  property of the representation.)*
 - **A serving gap the bench made visible.** No arm renders the stale flag
   into the flattened context string. D3 scores the served *payload*, so a
   stale value reaches an agent reading the MCP response marked and an
@@ -1077,7 +1138,124 @@ context-not-answers framing, the perfect-extraction ceiling, the cascade
 proxy, the structural floor on D3/D5 for raw-turn arms, and the
 payload-only stale flag.
 
-#### LongMemEval source (2026-09-05)
+## Findings — 2026-09-05 LongMemEval source
+
+`epistemic-bench-lme-qwen27b-20260905b` — the first run on a bank an
+extractor actually built, re-scored on the corrected derivation. **21**
+derived knowledge-update questions, one fresh bank per question through
+`longmemeval_bench.ingest_and_dream`, extracted by `qwen-27b` (714.7s of
+the original run's 826.4s of extraction), `--contexts-only`,
+`stale_policy` at its `annotate` default:
+
+```bash
+# the run (GPU: needs the extractor endpoint up)
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --contexts-only --extractor qwen-27b --tag lme-qwen27b-20260905
+
+# the re-score onto the corrected derivation (CPU, seconds, no bank)
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --tag lme-qwen27b-20260905b \
+    --rescore-from evals/results/epistemic-bench-lme-qwen27b-20260905.jsonl \
+    --derivation evals/results/epistemic-bench-lme-derivation-20260905b.json \
+    --supersedes lme-qwen27b-20260905 --supersedes-reason "..."
+```
+
+| dimension | rag | cortex | hybrid | cascade | nomem | n |
+|-----------|-----|--------|--------|---------|-------|---|
+| `update_following` ↑ | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |
+| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 21 |
+| `staleness_marking` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+| `abstention_support` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+| `retraction_handling` ↑ | 0.333 | 0.000 | 0.333 | 0.000 | 0.000 | 21 |
+| `answer_coverage` | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |
+| context chars (mean) | 5397.0 | 378.1 | 5809.2 | 378.1 | 0.0 | |
+
+The two `n/a` rows report `n: 0` and a NULL rate in the artifact, never a
+0.0 — a reader would take a 0.0 for a failing arm. `staleness_marking` is
+ungradable because LongMemEval carries no `freshness_class` and no TTL, so
+no slot can be past 2×TTL. `abstention_support` is ungradable because the
+knowledge-update type contains no question whose answer was never stated.
+
+**Why this table replaced the first one.** The first read of this slice
+scored 23 questions and reported one `stale_serving` event (cortex 0.043)
+— the only such event the bench had ever recorded on any source. It was a
+derivation artifact. Question `41698283` asks what camera lens was bought
+most recently; the gold is `a 70-200mm zoom lens`, and the `number` family
+took its leading token, deriving new value `70` against an old value `18`
+lifted out of an `18-55mm kit lens` in the earlier session. The cortex
+context served `user — lenses owned: 18-55mm kit lens`, a **currently-true
+fact on a different slot**, and the metric counted it as a superseded
+value served with no replacement. `c7dc5443` (a `5-2` volleyball record
+read as the bare number 5) is the same shape. Both are now skipped as
+`gold-value-is-compound-token`, and the run was re-scored from its own
+persisted contexts — no re-extraction, no GPU. Spec amendment A7.
+
+**The read: this run validates the plumbing and the width/coverage trade,
+not the premise.**
+
+- **`stale_serving` is 0.000 on every arm of every source the bench has
+  run.** With the two artifact pairs removed, the defect D2 exists to
+  catch has never occurred — not on the synthetic corpus, not here, on no
+  arm. That is a stronger version of the same verdict, not a different
+  one: E2 is *untestable* on both corpora rather than failing on one.
+- **rag saturates, so D1 and D2 carry no signal for the raw-turn arms
+  here.** Each bank holds 23.1 turns on average against `rag_top_k` 6, so
+  a quarter of the entire bank is served on every question. The rag
+  context carries the current value on 21 of 21, and carries *both* the
+  current value and the superseded one on 20 of 21 (hybrid: 21 of 21) — so
+  the superseded-only case D2 exists to catch happens zero times. Same
+  failure as the synthetic source, for the same reason, now on a real
+  haystack: on an oracle slice the defect cannot arise.
+- **The spine serves the current value in 20 of 21 questions at 7.0% of
+  rag's characters** — 378.1 against 5397.0 — with no `stale_serving`
+  event anywhere. That trade is the one thing this run measures cleanly,
+  and because the bank was built the real way it is a claim about the
+  deployed pipeline, retrieval *and* extraction together, not about the
+  representation's ceiling.
+- **The two dimensions where the spine is expected to differentiate are
+  not gradable on this source at all.** D3 and D4 are the marker
+  dimensions — the ones the synthetic cell showed the spine wins
+  structurally — and both report `n: 0` here. Whatever epistemic
+  advantage the spine has, LongMemEval cannot see it.
+- **D5's cortex 0.000 is the construction, not a result.** The slot is
+  synthetic, so only the entry channel grades and the cortex arm serves no
+  entries. rag/hybrid's 0.333 (7 of 21) *is* a real measurement of that
+  entry mechanism — contradiction detection firing on correction phrasing
+  that never announces itself as a correction, where the synthetic
+  source's explicit corrections scored 0.600 / 0.400. The two are reported
+  apart and never pooled (`caveats.correction_is_implicit`). rag and
+  hybrid are not two measurements: `HYBRID_TOP_K` = `RAG_TOP_K` = 6, so
+  hybrid's entry channel *is* rag's.
+
+**The premise test therefore still rests on the synthetic source, where
+E2 failed.** Neither source has produced a corpus on which `stale_serving`
+can fire: the synthetic generator hands the agent both values, and the LME
+oracle slice hands it both values out of a 23-turn bank. Testing the
+premise needs a corpus neither of them is — dated updates carrying TTL
+semantics so D3 grades instead of reporting `n: 0`, never-stated slots so
+D4 does, and for D2 a haystack large enough that retrieval must *choose*
+between the old turn and the new one rather than serving both. That is a
+purpose-built corpus, not another slice of an existing benchmark. The
+synthetic verdict above stands unchanged.
+
+**What the re-score does and does not recompute.** The rows carry every
+arm's served context, so `update_following`, `stale_serving` and
+`answer_coverage` were recomputed from them. `staleness_marking`,
+`abstention_support` and `retraction_handling` read the served fact /
+entry payloads, which rows written before spec amendment A7 do not carry,
+so those verdicts were **carried** from the original run unchanged — said
+so in `caveats.rescored_not_rerun`. The path is verified by reproducing
+the original run's summary exactly when it is re-scored against the
+original derivation (`tests/test_epistemic_bench.py`).
+
+### Superseded — the first read of this slice (23 questions)
+
+**Retired 2026-09-05 by the corrected derivation above**, and kept visible
+because its artifact is still committed and a reader will meet these
+numbers in spec amendment A6. Two of the 23 questions below (`41698283`,
+`c7dc5443`) were compound-gold derivation artifacts; the `stale_serving`
+0.043 cell is the one they produced.
+
 
 `epistemic-bench-lme-qwen27b-20260905` — the first run on a bank an
 extractor actually built. The 23 derived knowledge-update questions, one
@@ -1136,16 +1314,9 @@ not the premise.**
   explicit corrections scored 0.600 / 0.400. The two are reported apart
   and never pooled (`caveats.correction_is_implicit`).
 
-**The premise test therefore still rests on the synthetic source, where
-E2 failed.** Neither source has produced a corpus on which `stale_serving`
-can fire: the synthetic generator hands the agent both values, and the LME
-oracle slice hands it both values out of a 23-turn bank. Testing the
-premise needs a corpus neither of them is — dated updates carrying TTL
-semantics so D3 grades instead of reporting `n: 0`, never-stated slots so
-D4 does, and for D2 a haystack large enough that retrieval must *choose*
-between the old turn and the new one rather than serving both. That is a
-purpose-built corpus, not another slice of an existing benchmark. The
-synthetic verdict above stands unchanged.
+That read's closing paragraph — the premise test still rests on the
+synthetic source, and testing it needs a purpose-built corpus — is
+unchanged by the correction and is stated once, above.
 
 # Review-queue judge ladders (`judge_ladder.py`, `queue_judge_ladder.py`)
 

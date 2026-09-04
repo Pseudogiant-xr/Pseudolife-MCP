@@ -288,6 +288,9 @@ The premise dies, and this bench should report it dead, under any of:
    the LME derivation *only* admits questions whose gold token appears
    literally in the evidence — which is exactly why 8 of the 56 skips
    are "gold not in later evidence".
+   *(Superseded 2026-09-05, kept unedited per section 0: amendment A1
+   moved that figure to 7 of 55, and amendment A7 to 7 of 57. Section 4
+   was edited in place before that rule was being followed — see A1.)*
 4. **D3 depends on the run's wall clock.** Staleness is `now` versus the
    fact's assertion time, so the generator anchors its timeline relative
    to a `now` passed in at run start and records `anchor_epoch` in
@@ -360,6 +363,8 @@ supported by this evidence, and E6 is the reason.**
   as the pairing requires — nomem 0.000 against its 1.000 abstention.
   This is confounded with context width (amendment A3) and needs a
   width-matched rerun before it is quotable as a defect.
+  *(Cause restated by A7: the width confound is real but weaker than the
+  arithmetic underneath it — `cortex_top_k` 24 against a 40-slot bank.)*
 - **E5 held in shape and gave the finding it was written to give.**
   cortex/hybrid 1.000, rag 0.600 (0.400 at scale) — non-zero, so
   contradiction detection does fire on natural correction phrasing and
@@ -393,6 +398,12 @@ That is a real gap in the serving path, not an artefact of the metric.
   ending a sentence, moving `gold-not-in-later-evidence` from 8 to 7.
   Same fix, same run: the first synthetic smoke had scored the rag arm at
   0.150 `answer_coverage` on contexts that plainly carried the value.
+  **Disclosure (added 2026-09-05):** section 4's counts were rewritten in
+  place by commit `ed66270b` rather than only amended here, which section
+  0 says must not happen. This amendment preserves the prior number (22,
+  and `gold-not-in-later-evidence` at 8 of 56) and section 7's confound 3
+  now carries the same superseded marker; no other preregistered figure
+  was edited in place.
 - **A2 (2026-09-05) — a second, larger cell was added after reading the
   first.** Post-hoc and declared as such. It was not run to find a
   different answer but to ask whether `stale_serving`'s 0.000 was a
@@ -405,6 +416,12 @@ That is a real gap in the serving path, not an artefact of the metric.
   than one serving 373. The artifact now records `context_chars_mean`
   per arm beside every rate, and the E4 result must not be quoted as a
   spine defect until a width-matched cortex arm has been run.
+  *(Sharpened by A7: width is not the strongest statement available. The
+  cortex arm serves `cortex_top_k` = 24 slots out of a bank that holds
+  40, on every question including the ones whose slot was never written,
+  so a near-miss value is close to arithmetically unavoidable — measured
+  on the smoke rows, 71 of the 72 decoy values reached the cortex
+  context.)*
 - **A4 (2026-09-05) — rows persist the full served context.** The A1 bug
   had to be diagnosed by rebuilding the bank, because the rows carried
   only character counts. Every row now carries `{arm}_context`.
@@ -471,16 +488,22 @@ That is a real gap in the serving path, not an artefact of the metric.
   does to sections 5 and 6, expectation by expectation. Section 8 is not
   edited — the synthetic verdict stands as written.
 
-  - **E1 held, and again uselessly.** `hybrid` 1.000 ≥ `cortex` 0.913 and
-    `rag` 1.000 > `nomem` 0.000, so the ordering is not falsified — but
-    `rag` = `hybrid` = 1.000 makes the `hybrid ≥ rag` half a tie, and the
-    only arm below 1.000 is the one that had to pass through an
-    extractor. E1's falsification condition ("rag matches or beats
-    cortex") is *met on the numbers* and is not being read as
-    falsification, because on this slice rag is saturated rather than
-    accurate: each bank holds 23.2 turns and `rag_top_k` is 6, so a
-    quarter of the whole bank is served on every question. A saturated
-    control cannot falsify anything, which is itself the finding.
+  - **E1's middle link FAILED, and the falsification clause is met.**
+    *(Sentence corrected 2026-09-05 by A7: as first written it checked
+    `hybrid ≥ cortex` and `rag > nomem` and called the ordering "not
+    falsified", which are the two links E1 does not turn on. The numbers
+    it quoted were right; the reading was not.)* E1 predicted
+    `hybrid ≥ cortex ≥ rag > nomem = 0`. The outer links hold — `hybrid`
+    1.000 ≥ `cortex` 0.913, and `rag` 1.000 > `nomem` 0.000 — but the
+    middle one does not: `cortex` 0.913 is **below** `rag` 1.000, which
+    is verbatim E1's falsification condition ("rag matches or beats
+    cortex"). It is nevertheless not read as a refutation of the spine,
+    because on this slice rag is saturated rather than accurate: each
+    bank holds 23.2 turns and `rag_top_k` is 6, so a quarter of the whole
+    bank is served on every question and the control cannot lose. A
+    saturated control cannot falsify anything, which is itself the
+    finding — and the honest summary is that E1 was not testable here,
+    not that it held.
   - **E2 — no signal, again, and for the same mechanical reason.**
     `stale_serving` is 0.000 for rag and hybrid; the rag context carries
     the current value *and* a superseded one on 22 of 23 questions
@@ -516,3 +539,118 @@ That is a real gap in the serving path, not an artefact of the metric.
   choose between the old turn and the new one instead of serving both.
   No existing benchmark slice has all three — this is a purpose-built
   corpus, and building it is the open item.
+
+- **A7 (2026-09-05) — the bench's only `stale_serving` event was a
+  derivation artifact; the LongMemEval slice is re-derived and rescored.**
+  A fresh-eyes review of A6 re-derived every published number (no
+  mismatches) and then read the one D2 event off the row. Question
+  `41698283` asks *"What type of camera lens did I purchase most
+  recently?"*; the gold is `a 70-200mm zoom lens`. The `number` family
+  matches a leading token, so the derivation took `70` as the new value
+  and `18` — out of an `18-55mm kit lens` in the earlier session — as the
+  old one. Two different lenses, recorded as one slot changing value. The
+  cortex context served `user — lenses owned: 18-55mm kit lens`, a
+  currently-true fact on a different slot, and D2 counted it as a
+  superseded value served without its replacement. `c7dc5443` is the same
+  shape (a `5-2` volleyball record read as the bare number 5 against a 3
+  taken out of `3-2`).
+
+  **The rule.** A gold's value token must BE its whole whitespace token,
+  once surrounding sentence punctuation and brackets are stripped;
+  anything else — a hyphenated range, a win-loss record, a comma-grouped
+  number, a digit welded to a unit or a symbol — is skipped as
+  `gold-value-is-compound-token`. `epistemic_bench.is_compound_token`,
+  tested RED-first on both golds above plus a clean numeric gold that
+  must still qualify.
+
+  **Qualifying count: 21 of the 78** knowledge-update questions (was 23),
+  again identically on `longmemeval_oracle.json` and
+  `longmemeval_s_cleaned.json`. Four golds are compound; two of them had
+  been qualifying. The 57 skips: 39 no value token, 7 gold not literally
+  in the later evidence, 4 compound gold, 6 ambiguous old value, 1 gold
+  also in the earlier session. New artifacts
+  `epistemic-bench-lme-derivation-20260905b.json[l]` and
+  `…-derivation-s-20260905b.json[l]`, each naming the artifact it
+  supersedes and why in `meta.supersedes`. The originals are kept.
+
+  **Rescored, not re-run.** `--rescore-from <rows.jsonl>` re-scores an
+  already-extracted run against a corrected derivation with no bank, no
+  extractor and no GPU: the rows carry every arm's served context (A4),
+  so a parsing fix is a computation over data already on disk. Only the
+  text-only predicates (`update_following`, `stale_serving`,
+  `answer_coverage`) are recomputed; `staleness_marking`,
+  `abstention_support` and `retraction_handling` read `served.facts` /
+  `served.entries`, which rows written before this amendment do not
+  carry, so those verdicts are CARRIED from the source run and the
+  artifact says so in `caveats.rescored_not_rerun`. Correctness proof,
+  pinned as a test: rescoring the ORIGINAL derivation against the
+  original rows reproduces the original summary's `arms` block exactly.
+
+  **The corrected table** — `epistemic-bench-lme-qwen27b-20260905b`, 21
+  questions, same `qwen-27b` extraction (714.7 s of the original run's
+  826.4 s):
+
+  | dimension | rag | cortex | hybrid | cascade | nomem | n |
+  |-----------|-----|--------|--------|---------|-------|---|
+  | `update_following` ↑ | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |
+  | `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 21 |
+  | `staleness_marking` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+  | `abstention_support` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+  | `retraction_handling` ↑ | 0.333 | 0.000 | 0.333 | 0.000 | 0.000 | 21 |
+  | `answer_coverage` | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |
+  | context chars (mean) | 5397.0 | 378.1 | 5809.2 | 378.1 | 0.0 | |
+
+  **What it does to A6.** E2 is the one that moves. `stale_serving` is
+  now **0.000 on every arm of every source the bench has ever run** — the
+  0.043 cortex cell in A6, and the sentence calling it "the only D2 event
+  the bench has ever recorded", are retired here. The defect D2 exists to
+  catch has never occurred, on either source, on any arm. That does not
+  reverse A6's verdict; it strengthens the same conclusion — E2 is
+  untestable on both corpora rather than failing on one — and it removes
+  the single number that made the spine look worse than its control on
+  this slice. E1 is unchanged in kind: `cortex` 0.952 is still below
+  `rag` 1.000, still meets the falsification clause, and rag is still
+  saturated (23.1 turns per bank against `rag_top_k` 6, and rag carries
+  both values on 20 of 21 questions; hybrid on 21 of 21). E5 moves from
+  0.348 to 0.333 (7 of 21) for rag and hybrid. The width/coverage trade
+  becomes 20 of 21 questions at 7.0% of rag's characters — 378.1 against
+  5397.0. **E6 is unchanged: the premise is still not supported, and the
+  purpose-built corpus is still the open item.**
+
+  **Deliberately not shipped, and why.** The same leading-token bug can
+  also put a compound token into the OLD value: `ba61f0b9` pairs the gold
+  `6` with a `25` taken out of "women holding only 25% of executive
+  positions". Filtering the candidate side changes which questions
+  QUALIFY rather than narrowing them — measured 2026-09-05: it drops
+  `ba61f0b9` and newly admits `0e4e4c46` and `0f05491a` — and a question
+  that was never in the slice has no served context to rescore. It needs
+  a fresh extraction run, which is the open item this amendment leaves.
+  The gold-side rule ships now because it is a strict subset and can
+  therefore be honestly rescored. A test asserts the current
+  candidate-side behaviour so the choice stays visible.
+
+  **Three smaller corrections from the same review.**
+
+  - **Payloads now persist** (`{arm}_facts`, `{arm}_entries` — the fields
+    the predicates read, plus the entry id). D3 and D5's fact/entry
+    channels were being scored off payloads no artifact carried, so those
+    verdicts were not auditable the way A4 made the text channel
+    auditable. Rows written before this amendment — every 2026-09-05
+    artifact — do not have them, which is exactly why the rescore carries
+    those verdicts instead of recomputing them.
+  - **`cascade` carries no independent information.** It is identical to
+    `cortex` on 173 of 173 rows across the smoke, scale and LongMemEval
+    cells, because the cortex context was never empty. Stated in
+    `caveats.cascade_proxy`; the column is retained only to keep the arm
+    set stable across artifacts.
+  - **`hybrid`'s D5 is not an independent measurement of rag's.**
+    `HYBRID_TOP_K` and `RAG_TOP_K` are both 6, so the hybrid entry slice
+    is the rag entry list unchanged, and hybrid's D5 is "the rag entry
+    channel OR the cortex fact channel" by construction — which is why
+    the two arms report the same 0.333.
+
+  **Artifact provenance note.** The smoke, scale and derivation artifacts
+  stamp `git_rev cdbee209`, the commit that added this spec: the harness
+  was still uncommitted when they ran, so the rev names the tree they
+  were written against and not the code that wrote them. The `b`
+  artifacts stamp a rev that does contain the harness.

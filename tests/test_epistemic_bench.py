@@ -574,3 +574,307 @@ def test_scores_aggregate_from_persisted_rows_so_a_resume_totals_correctly():
     assert scored["stale_serving"] == {"n": 2, "hits": 1, "rate": 0.5}
     assert scored["staleness_marking"] == {"n": 0, "hits": 0, "rate": None}
     assert scored["context_chars_mean"] == 200.0
+
+
+# ── compound value tokens (the 2026-09-05 review finding) ─────────────────
+# The bench's only stale_serving event was a derivation artifact: the
+# `number` family took the LEADING numeric token of a compound gold, so
+# "a 70-200mm zoom lens" derived as new value "70" and paired it with "18"
+# from an "18-55mm kit lens" in the earlier evidence. Two different lenses,
+# scored as one slot changing value.
+def test_compound_token_predicate_sees_the_whole_whitespace_token():
+    assert eb.is_compound_token("a 70-200mm zoom lens", 2, 4) is True
+    assert eb.is_compound_token("we are 5-2 now", 7, 8) is True
+    assert eb.is_compound_token("women hold 25% of seats", 11, 13) is True
+    # A value that IS the whole token stays clean, sentence punctuation
+    # and brackets included — those are not part of a compound.
+    assert eb.is_compound_token("I am up to 220 now", 11, 14) is False
+    assert eb.is_compound_token("I am up to 220.", 11, 14) is False
+    assert eb.is_compound_token("(or 25:50)", 4, 9) is False
+    assert eb.is_compound_token("9 months in", 0, 1) is False
+
+
+def test_lme_derivation_skips_a_hyphenated_range_gold():
+    """LongMemEval 41698283 — "a 70-200mm zoom lens" against an earlier
+    "18-55mm kit lens". The pair the old rule derived (18 -> 70) is two
+    different lenses, and it produced the bench's only D2 event."""
+    q = _lme_q("41698283-shaped", "a 70-200mm zoom lens",
+               "issues with my old 18-55mm kit lens, and a 50mm prime",
+               "great shots with my new 70-200mm zoom lens lately")
+    pairs, skips = eb.derive_lme_pairs([q])
+    assert pairs == []
+    assert skips == {"gold-value-is-compound-token": 1}
+
+
+def test_lme_derivation_skips_a_win_loss_record_gold():
+    """LongMemEval c7dc5443 — a volleyball record "5-2" derived as the
+    bare number 5 against a 3 taken out of "3-2"."""
+    q = _lme_q("c7dc5443-shaped", "5-2",
+               "we're 3-2 so far!", "doing well with a 5-2 record")
+    pairs, skips = eb.derive_lme_pairs([q])
+    assert pairs == []
+    assert skips == {"gold-value-is-compound-token": 1}
+
+
+def test_lme_derivation_still_admits_a_clean_numeric_gold():
+    """The rule must not swallow the questions the slice is made of."""
+    q = _lme_q("clean", "220", "I am at 200 pages", "I am up to 220 now")
+    pairs, skips = eb.derive_lme_pairs([q])
+    assert [p["question_id"] for p in pairs] == ["clean"]
+    assert (pairs[0]["old_value"], pairs[0]["new_value"]) == ("200", "220")
+    assert skips == {}
+
+
+def test_lme_derivation_leaves_compound_old_value_candidates_alone():
+    """Deliberately NOT fixed in this change, and asserted so the choice is
+    visible rather than forgotten: the same leading-token bug can put a
+    compound token into the OLD value (LongMemEval ba61f0b9 paired the gold
+    6 with a 25 taken out of "25% of executive positions"). Filtering the
+    candidate side changes which questions QUALIFY — measured 2026-09-05:
+    it drops ba61f0b9 and newly admits 0e4e4c46 and 0f05491a, both of which
+    need a fresh extraction run to score. Spec amendment A7's open item."""
+    q = _lme_q("ba61f0b9-shaped", "6",
+               "a team of 10 people ... women hold only 25% of positions",
+               "6 women out of 10 people")
+    pairs, _ = eb.derive_lme_pairs([q])
+    assert [p["old_value"] for p in pairs] == ["25"]
+
+
+# ── the CPU rescore path ──────────────────────────────────────────────────
+def _persisted_row(qid="q1", rag_text="", cortex_text="", **extra):
+    row = {"question_id": qid, "rag_context": rag_text,
+           "rag_context_chars": len(rag_text),
+           "cortex_context": cortex_text,
+           "cortex_context_chars": len(cortex_text),
+           "hybrid_context": "", "hybrid_context_chars": 0,
+           "cascade_context": cortex_text,
+           "cascade_context_chars": len(cortex_text),
+           "nomem_context": "", "nomem_context_chars": 0}
+    for arm in eb.ARMS:
+        for name in eb.ALL_METRICS:
+            row.setdefault(f"{arm}_{name}", None)
+    row.update(extra)
+    return row
+
+
+def test_rescore_recomputes_the_text_metrics_from_the_persisted_context():
+    """A re-derivation must be scorable without a GPU: every text-only
+    predicate re-runs on the `{arm}_context` the row already carries."""
+    pair = _pair(qid="q1", old="27:12", new="25:50")
+    row = _persisted_row("q1", rag_text="PB was 27:12, now 25:50",
+                         cortex_text="PB 27:12",
+                         rag_update_following=False, rag_stale_serving=True,
+                         cortex_update_following=True,
+                         cortex_stale_serving=False)
+    out = eb.rescore_rows([pair], [row])
+    assert len(out) == 1
+    assert out[0]["rag_update_following"] is True
+    assert out[0]["rag_stale_serving"] is False
+    assert out[0]["cortex_update_following"] is False
+    assert out[0]["cortex_stale_serving"] is True
+    assert out[0]["rescored"] is True
+
+
+def test_rescore_carries_the_payload_metrics_it_cannot_recompute():
+    """`served.facts` / `served.entries` are not persisted in the
+    2026-09-05 artifacts, so D3/D4/D5 are carried from the original row
+    verbatim rather than silently recomputed as 0 (review finding L1)."""
+    pair = _pair(qid="q1")
+    row = _persisted_row("q1", rag_text="PB now 25:50",
+                         rag_retraction_handling=True,
+                         rag_staleness_marking=True)
+    out = eb.rescore_rows([pair], [row])
+    assert out[0]["rag_retraction_handling"] is True
+    assert out[0]["rag_staleness_marking"] is True
+
+
+def test_rescore_refuses_a_derivation_id_with_no_persisted_row():
+    """The rescore is only honest over a derivation that is a SUBSET of
+    what was actually run; a newly-qualifying question needs a real run."""
+    with pytest.raises(SystemExit) as exc:
+        eb.rescore_rows([_pair(qid="never-run")], [_persisted_row("q1")])
+    assert "never-run" in str(exc.value)
+
+
+def test_rescore_of_the_original_derivation_reproduces_the_original_run():
+    """The correctness proof for the rescore path, run against the
+    committed artifacts: rescoring the ORIGINAL derivation must reproduce
+    the ORIGINAL summary's score fields exactly."""
+    results = REPO / "evals" / "results"
+    pairs = eb.load_rows(
+        results / "epistemic-bench-lme-derivation-20260905.jsonl")
+    rows = eb.load_rows(
+        results / "epistemic-bench-lme-qwen27b-20260905.jsonl")
+    original = json.loads(
+        (results / "epistemic-bench-lme-qwen27b-20260905.json")
+        .read_text(encoding="utf-8"))
+    rescored = eb.rescore_rows(pairs, rows)
+    assert {arm: eb.score_from_rows(rescored, arm) for arm in eb.ARMS} \
+        == original["arms"]
+
+
+# ── the bench database name guard ─────────────────────────────────────────
+def test_drop_bench_db_refuses_a_database_this_run_did_not_create():
+    """A bench that can be pointed at a database it did not create is one
+    typo away from dropping a bank."""
+    import os
+
+    for name in ("pseudolife_memory", "pseudolife_memory_bench_999999999",
+                 f"someone_elses_db_{os.getpid()}", ""):
+        with pytest.raises(SystemExit) as exc:
+            eb.drop_bench_db(name)
+        assert "did not create it" in str(exc.value)
+
+
+def test_drop_bench_db_drops_exactly_the_name_it_was_given(monkeypatch):
+    import os
+
+    executed = []
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql):
+            executed.append(sql)
+
+    fake = type(sys)("psycopg")
+    fake.connect = lambda *a, **kw: _Conn()
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+    name = f"pseudolife_memory_bench_{os.getpid()}"
+    eb.drop_bench_db(name)
+    assert executed == [f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)']
+
+
+# ── serve_arms ────────────────────────────────────────────────────────────
+class _FakeService:
+    """Just enough service for serve_arms: the two payload reads."""
+
+    def __init__(self, facts=(), entries=()):
+        self._facts = list(facts)
+        self._entries = list(entries)
+        self.searches = []
+
+    def cortex_search(self, question, top_k=None, min_score=None):
+        return {"entries": list(self._facts)}
+
+    def search(self, question, top_k=None, contiguity_neighbors=None,
+               timeline=None, **kw):
+        self.searches.append({"top_k": top_k,
+                              "contiguity_neighbors": contiguity_neighbors,
+                              "timeline": timeline})
+        return {"entries": list(self._entries)}
+
+
+def _fake_lmb(monkeypatch, contexts):
+    mod = type(sys)("longmemeval_bench")
+    mod.RAG_TOP_K = 6
+    mod.HYBRID_TOP_K = 2
+    mod.CORTEX_TOP_K = 24
+    mod.CORTEX_MIN_SCORE = 0.2
+    mod.HYBRID_CONTIG = None
+    mod.HYBRID_TIMELINE = None
+    mod.build_contexts = lambda svc, question: dict(contexts)
+    mod.serve_comparator_arms = lambda ctx, question, nomem=False: None
+    monkeypatch.setitem(sys.modules, "longmemeval_bench", mod)
+    return mod
+
+
+def test_serve_arms_cascade_proxy_is_the_cortex_context_when_non_empty(
+        monkeypatch):
+    _fake_lmb(monkeypatch, {"rag": "raw turns", "cortex": "fact lines",
+                            "hybrid": "both", "nomem": ""})
+    served = eb.serve_arms(_FakeService(), "q?")
+    assert served["cascade"] is served["cortex"]
+    assert served["cascade"].text == "fact lines"
+
+
+def test_serve_arms_cascade_proxy_falls_back_to_rag_on_an_empty_cortex(
+        monkeypatch):
+    _fake_lmb(monkeypatch, {"rag": "raw turns", "cortex": "   ",
+                            "hybrid": "both", "nomem": ""})
+    served = eb.serve_arms(_FakeService(), "q?")
+    assert served["cascade"] is served["rag"]
+    assert served["cascade"].text == "raw turns"
+
+
+def test_serve_arms_passes_the_nomem_context_through_unchanged(monkeypatch):
+    _fake_lmb(monkeypatch, {"rag": "raw", "cortex": "facts", "hybrid": "b",
+                            "nomem": ""})
+    served = eb.serve_arms(_FakeService(facts=[{"entity": "e"}]), "q?")
+    assert served["nomem"].text == ""
+    assert served["nomem"].facts == () and served["nomem"].entries == ()
+
+
+def test_serve_arms_slices_the_hybrid_entry_channel_to_its_own_width(
+        monkeypatch):
+    _fake_lmb(monkeypatch, {"rag": "raw", "cortex": "facts", "hybrid": "b",
+                            "nomem": ""})
+    entries = [{"text": f"t{i}"} for i in range(5)]
+    served = eb.serve_arms(_FakeService(entries=entries), "q?")
+    assert [e["text"] for e in served["rag"].entries] == [
+        "t0", "t1", "t2", "t3", "t4"]
+    assert [e["text"] for e in served["hybrid"].entries] == ["t0", "t1"]
+    assert served["cortex"].entries == ()
+
+
+def test_serve_arms_pins_the_rag_control_and_follows_the_hybrid_knobs(
+        monkeypatch):
+    """build_contexts pins the rag arm to vanilla retrieval and lets the
+    hybrid arm follow HYBRID_CONTIG / HYBRID_TIMELINE. The payload channel
+    has to do the same or the docstring's "same service calls" claim is
+    false (review finding L4). Inert at the shipped defaults."""
+    mod = _fake_lmb(monkeypatch, {"rag": "raw", "cortex": "f", "hybrid": "b",
+                                  "nomem": ""})
+    svc = _FakeService(entries=[{"text": "t0"}])
+    eb.serve_arms(svc, "q?")
+    assert svc.searches[0] == {"top_k": 6, "contiguity_neighbors": 0,
+                               "timeline": False}
+    mod.HYBRID_CONTIG, mod.HYBRID_TIMELINE = 1, True
+    svc = _FakeService(entries=[{"text": "t0"}])
+    eb.serve_arms(svc, "q?")
+    assert svc.searches[0] == {"top_k": 6, "contiguity_neighbors": 0,
+                               "timeline": False}
+    assert svc.searches[1] == {"top_k": 6, "contiguity_neighbors": 1,
+                               "timeline": True}
+
+
+# ── score_row ─────────────────────────────────────────────────────────────
+def test_score_row_persists_every_arms_served_context():
+    """Spec amendment A4: a metric bug is auditable from the artifact only
+    if the artifact carries the text the metric ran on."""
+    q = _q(kind="correction", corrected_from="ENG-1100")
+    served = {arm: _served(text=f"{arm} says ENG-2200") for arm in eb.ARMS}
+    row = eb.score_row(q, served, eb.ground_truth_row(q))
+    for arm in eb.ARMS:
+        assert row[f"{arm}_context"] == f"{arm} says ENG-2200"
+        assert row[f"{arm}_context_chars"] == len(f"{arm} says ENG-2200")
+        for name in eb.ALL_METRICS:
+            assert f"{arm}_{name}" in row
+    assert row["question_id"] == "q1" and row["current_value"] == "ENG-2200"
+
+
+def test_score_row_persists_the_served_fact_and_entry_payloads():
+    """Review finding L1: D3 and D5's fact/entry channels were scored off
+    payloads the row never carried, so those verdicts were not auditable
+    from the artifact. Minimal projections now travel with every row."""
+    q = _q()
+    served = {arm: _served() for arm in eb.ARMS}
+    served["cortex"] = _served(
+        text="engine ENG-2200",
+        facts=[_fact(stale=True, supersedes_value="ENG-1100", extra="drop")])
+    served["rag"] = _served(
+        text="engine ENG-2200",
+        entries=[{"id": "e7", "text": "engine ENG-1100",
+                  "superseded_by_text": "engine is ENG-2200",
+                  "score": 0.9}])
+    row = eb.score_row(q, served, eb.ground_truth_row(q))
+    assert row["cortex_facts"] == [
+        {"entity": "ledger-db", "attribute": "engine", "value": "ENG-2200",
+         "stale": True, "supersedes_value": "ENG-1100"}]
+    assert row["rag_entries"] == [
+        {"id": "e7", "superseded_by_text": "engine is ENG-2200"}]
+    assert row["nomem_facts"] == [] and row["nomem_entries"] == []

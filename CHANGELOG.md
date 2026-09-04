@@ -18,8 +18,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`update_following`, `stale_serving` as a defect count, `staleness_marking`
   past 2×TTL, `abstention_support` reported beside an `answer_coverage`
   companion the no-memory arm fails, `retraction_handling` through the
-  supersession chain and `superseded_by_text`). Judge-free, CPU-only, no GPU,
-  seconds per run. Arms are imported from `longmemeval_bench` — `rag`,
+  supersession chain and `superseded_by_text`). **Scoring** is judge-free and
+  never needs a GPU; what a *run* costs depends on the source. The synthetic
+  source is CPU-only end to end and reproduces its score fields byte for byte
+  in seconds; the LongMemEval source builds each bank through the real
+  extractor endpoint and spent 826.4s of GPU extraction, so it is
+  reproducible only as far as that extractor is (`--extractor floor` checks
+  the path on CPU, `--rescore-from` re-scores persisted rows with no bank at
+  all). Arms are imported from `longmemeval_bench` — `rag`,
   `cortex`, `hybrid`, `nomem`, plus a clearly-labelled CONTEXT-level
   `cascade` proxy that is not the judged cascade. Runs on a private
   `pseudolife_memory_bench_<pid>` database it creates and drops, with a name
@@ -32,7 +38,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   derivation parses old/new value pairs out of the knowledge-update type and
   qualifies **23 of the 78** questions, identically on the oracle and `s`
   datasets; the 55 skips are itemised in the artifact rather than rescued by
-  guessing.
+  guessing. *(Superseded 2026-09-05 — see the `Fixed` entry below: two of
+  those 23 were compound-gold parsing artifacts and the corrected derivation
+  qualifies 21 of 78, with 57 skips.)*
 - **First run, and it says the premise is not yet supported.**
   `epistemic-bench-smoke-20260905` (50 questions) and
   `epistemic-bench-scale-20260905` (100 questions) agree: `staleness_marking`
@@ -87,6 +95,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   corpus with dated TTL updates, never-stated slots, and a haystack big
   enough that retrieval must choose between the old turn and the new one.
   Spec amendment A6; table and read in `evals/README.md`.
+  *(Every number in this bullet was superseded on 2026-09-05 by the `Fixed`
+  entry below — the 0.043 `stale_serving` cell most of all, which was a
+  derivation artifact. The numbers are kept here because the run that
+  produced them is still committed.)*
+
+### Fixed (2026-09-05 — the bench's only stale-serve event was a parsing artifact)
+- **The one `stale_serving` event the epistemic bench had ever recorded was
+  not a stale serve.** The LongMemEval derivation matched a gold answer's
+  *leading* value token, and `\b\d+\b` returns `70` out of `a 70-200mm zoom
+  lens`. Question `41698283` therefore derived new value `70` against old
+  value `18` — lifted out of an `18-55mm kit lens` mentioned months earlier
+  — pairing two different lenses as one slot changing value. The cortex arm
+  served `user — lenses owned: 18-55mm kit lens`, a currently-true fact on a
+  different slot, and the metric scored it as a superseded value served with
+  no replacement. `c7dc5443` (a `5-2` volleyball record read as the bare
+  number 5) was the same shape. A gold's value token must now BE its whole
+  whitespace token once sentence punctuation and brackets are stripped;
+  anything else — hyphenated range, win-loss record, comma-grouped number,
+  digit welded to a unit — is skipped as `gold-value-is-compound-token`. The
+  slice is **21 of the 78** knowledge-update questions (was 23), still
+  identical on the oracle and `s` datasets, in
+  `epistemic-bench-lme-derivation-20260905b`; the originals are kept and each
+  new artifact names what it supersedes and why in `meta.supersedes`.
+- **`--rescore-from` re-scores an already-extracted run without a GPU.** The
+  rows carry every arm's served context, so a derivation fix is a computation
+  over data already on disk rather than another 826.4s of extraction. Only
+  the text-only predicates are recomputed; `staleness_marking`,
+  `abstention_support` and `retraction_handling` read served fact / entry
+  payloads that rows written before this change do not carry, so those are
+  carried from the source run and the artifact says so. Verified by
+  reproducing the original run's summary exactly when re-scored against the
+  original derivation. Rows now persist `{arm}_facts` and `{arm}_entries`
+  too, so those channels are auditable from future artifacts.
+- **Corrected table** (`epistemic-bench-lme-qwen27b-20260905b`, 21 questions):
+  `stale_serving` is **0.000 on every arm**, which makes it 0.000 on every arm
+  of every source the bench has ever run — the defect it exists to catch has
+  never occurred. `update_following` is cortex 0.952 (20 of 21) against rag
+  and hybrid 1.000, at 378.1 characters against rag's 5397.0 — 7.0% of the
+  width. `retraction_handling` is 0.333 for rag and hybrid, 0.000 for cortex
+  (still the entry-channel construction). The verdict is unchanged and
+  slightly stronger: E2 is untestable on both corpora rather than failing on
+  one, and the premise still needs a purpose-built corpus. Spec amendment A7.
+- **Three smaller corrections from the same review.** The `cascade` column is
+  identical to `cortex` on 173 of 173 rows across all three runs — it carries
+  no independent information and is retained only to keep the arm set stable.
+  `HYBRID_TOP_K` and `RAG_TOP_K` are both 6, so hybrid's D5 is the rag entry
+  channel OR the cortex fact channel by construction, not a second
+  measurement. And the synthetic D4 result (cortex 0.000) is better explained
+  by `cortex_top_k` 24 against a 40-slot bank than by served width: 71 of the
+  72 decoy values reached the cortex context across the 10 never-stated
+  questions.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
