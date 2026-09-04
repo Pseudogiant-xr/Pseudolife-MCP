@@ -2744,6 +2744,135 @@ CLAIMS.append(Claim(
     stated=30, places=0))
 
 
+
+# ── the 2026-09-02 five-arm BEAM run bounds the abstention headline ──────
+# README + evals/README stated the cortex arm's 0.950 on BEAM abstention as
+# the fact spine's one decisive win; the budget-matched five-arm run scores
+# the no-memory arm at 1.000 there. Retired as a headline 2026-09-04; the
+# numbers stay, with the floor pinned beside them. The paired column comes
+# from the within-run pairing artifact (evals/beam_within_run_pairs.py).
+BEAM_CHIP12_PAIRS = _BEAM + "chip12-b16.arms-vs-rag.json"
+BEAM_P1B16_VS_CHIP12 = _BEAM + "p1-b16.vs-chip12-b16.paired.json"
+
+
+def _beam_type(arm: str, qtype: str) -> Callable[[dict], float]:
+    return lambda d: d["types"][qtype][arm]
+
+
+def _pairs(arm: str, key: str) -> Callable[[dict], float]:
+    return lambda d: float(d["arms"][arm][key])
+
+
+_NOMEM_ABSTAIN = _beam_type("nomem", "abstention")
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("beam-abstain-nomem-readme-teaser", READ_ME,
+     "an arm served no memory at all scores 1.000",
+     BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-abstain-nomem-readme-body", READ_ME,
+     "a no-memory arm scores 1.000", BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-abstain-nomem-evals-finding", EVALS,
+     "an arm served no memory scores 1.000",
+     BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-abstain-nomem-changelog", CHANGELOG,
+     "scores the no-memory arm at 1.000",
+     BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-abstain-nomem-evals-table", EVALS,
+     "scores 1.000 on\n  abstention", BEAM_CHIP12, _NOMEM_ABSTAIN, 1.000, 3),
+    ("beam-nomem-pref-evals", EVALS, "0.469 on preference_following",
+     BEAM_CHIP12, _beam_type("nomem", "preference_following"), 0.469, 3),
+    ("beam-nomem-instr-evals", EVALS, "0.344 on\n  instruction_following",
+     BEAM_CHIP12, _beam_type("nomem", "instruction_following"), 0.344, 3),
+    ("beam-abstain-cortex-evals-table", EVALS,
+     "(cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575)",
+     BEAM_CHIP12, _beam_type("cortex", "abstention"), 0.950, 3),
+    ("beam-abstain-rag-evals-table", EVALS,
+     "(cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575)",
+     BEAM_CHIP12, _beam_type("rag", "abstention"), 0.725, 3),
+    ("beam-abstain-hybrid-evals-table", EVALS,
+     "(cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575)",
+     BEAM_CHIP12, _beam_type("hybrid", "abstention"), 0.650, 3),
+    ("beam-abstain-refind-evals-table", EVALS,
+     "(cortex 0.950, rag 0.725, hybrid 0.650, refind 0.575)",
+     BEAM_CHIP12, _beam_type("refind", "abstention"), 0.575, 3),
+    ("beam-refind-contradiction-evals", EVALS,
+     "(0.616 vs 0.500) clears the judge-transfer floor",
+     BEAM_CHIP12, _beam_type("refind", "contradiction_resolution"), 0.616, 3),
+    ("beam-rag-contradiction-evals", EVALS,
+     "(0.616 vs 0.500) clears the judge-transfer floor",
+     BEAM_CHIP12, _beam_type("rag", "contradiction_resolution"), 0.500, 3),
+    ("beam-chip12-rag-score", EVALS, "| rag | 0.6425 |",
+     BEAM_CHIP12, _beam_score("rag"), 0.6425, 4),
+    ("beam-chip12-refind-score", EVALS, "| refind | 0.6272 |",
+     BEAM_CHIP12, _beam_score("refind"), 0.6272, 4),
+    ("beam-chip12-hybrid-score", EVALS, "| hybrid | 0.6226 |",
+     BEAM_CHIP12, _beam_score("hybrid"), 0.6226, 4),
+    ("beam-chip12-cortex-score", EVALS, "| cortex | 0.2829 |",
+     BEAM_CHIP12, _beam_score("cortex"), 0.2829, 4),
+    ("beam-chip12-nomem-score", EVALS, "| nomem | 0.1812 |",
+     BEAM_CHIP12, _beam_score("nomem"), 0.1812, 4),
+    ("beam-chip12-refind-delta", EVALS, "−0.0152 ± 0.0362 (p 0.41)",
+     BEAM_CHIP12_PAIRS, _pairs("refind", "delta_vs_control"), -0.0152, 4),
+    ("beam-chip12-refind-ci", EVALS, "−0.0152 ± 0.0362 (p 0.41)",
+     BEAM_CHIP12_PAIRS, _pairs("refind", "ci95_halfwidth"), 0.0362, 4),
+    ("beam-chip12-refind-p", EVALS, "−0.0152 ± 0.0362 (p 0.41)",
+     BEAM_CHIP12_PAIRS, _pairs("refind", "perm_p"), 0.41, 2),
+    ("beam-chip12-hybrid-delta", EVALS, "−0.0199 ± 0.0285 (p 0.18)",
+     BEAM_CHIP12_PAIRS, _pairs("hybrid", "delta_vs_control"), -0.0199, 4),
+    ("beam-chip12-hybrid-ci", EVALS, "−0.0199 ± 0.0285 (p 0.18)",
+     BEAM_CHIP12_PAIRS, _pairs("hybrid", "ci95_halfwidth"), 0.0285, 4),
+    ("beam-chip12-hybrid-p", EVALS, "−0.0199 ± 0.0285 (p 0.18)",
+     BEAM_CHIP12_PAIRS, _pairs("hybrid", "perm_p"), 0.18, 2),
+    ("beam-chip12-cortex-delta", EVALS, "−0.3595 ± 0.0485 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("cortex", "delta_vs_control"), -0.3595, 4),
+    ("beam-chip12-cortex-ci", EVALS, "−0.3595 ± 0.0485 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("cortex", "ci95_halfwidth"), 0.0485, 4),
+    ("beam-chip12-cortex-p", EVALS, "−0.3595 ± 0.0485 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("cortex", "perm_p"), 0.0001, 4),
+    ("beam-chip12-nomem-delta", EVALS, "−0.4612 ± 0.0479 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("nomem", "delta_vs_control"), -0.4612, 4),
+    ("beam-chip12-nomem-ci", EVALS, "−0.4612 ± 0.0479 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("nomem", "ci95_halfwidth"), 0.0479, 4),
+    ("beam-chip12-nomem-p", EVALS, "−0.4612 ± 0.0479 (p < 0.0001)",
+     BEAM_CHIP12_PAIRS, _pairs("nomem", "perm_p"), 0.0001, 4),
+    ("beam-chip12-nomem-full-marks", EVALS, "62 of 400 rows score full marks",
+     BEAM_CHIP12_PAIRS, _pairs("nomem", "full_marks_rows"), 62, 0),
+    ("beam-chip12-refind-chars", EVALS,
+     "(41,757 vs 22,158 mean characters",
+     BEAM_CHIP12_PAIRS, _pairs("refind", "context_chars_mean"), 41757, 0),
+    ("beam-chip12-rag-chars", EVALS,
+     "(41,757 vs 22,158 mean characters",
+     BEAM_CHIP12_PAIRS, lambda d: float(d["control_context_chars_mean"]),
+     22158, 0),
+    ("beam-chip12-refind-temporal", EVALS,
+     "temporal_reasoning (0.669 vs 0.644)",
+     BEAM_CHIP12, _beam_type("refind", "temporal_reasoning"), 0.669, 3),
+    ("beam-chip12-rag-temporal", EVALS,
+     "temporal_reasoning (0.669 vs 0.644)",
+     BEAM_CHIP12, _beam_type("rag", "temporal_reasoning"), 0.644, 3),
+    ("beam-chip12-refind-ordering", EVALS,
+     "event_ordering (0.496 vs 0.472)",
+     BEAM_CHIP12, _beam_type("refind", "event_ordering"), 0.496, 3),
+    ("beam-chip12-rag-ordering", EVALS,
+     "event_ordering (0.496 vs 0.472)",
+     BEAM_CHIP12, _beam_type("rag", "event_ordering"), 0.472, 3),
+    ("beam-abstain-rag-readme-fivearm", READ_ME, "(rag 0.725 there;",
+     BEAM_CHIP12, _beam_type("rag", "abstention"), 0.725, 3),
+    ("beam-chip12-p1b16-rag-control", EVALS,
+     "exactly 0.0000 over all 400 rows",
+     BEAM_P1B16_VS_CHIP12, _paired("rag", "delta_mean"), 0.0, 4),
+    ("beam-chip12-p1b16-hybrid-control", EVALS,
+     "exactly 0.0000 over all 400 rows",
+     BEAM_P1B16_VS_CHIP12, _paired("hybrid", "delta_mean"), 0.0, 4),
+    ("beam-chip12-hybrid-chars", EVALS, "| hybrid | 0.6226 | −0.0199 ± 0.0285 (p 0.18) | 24,398 |",
+     BEAM_CHIP12_PAIRS, _pairs("hybrid", "context_chars_mean"), 24398, 0),
+    ("beam-chip12-cortex-chars", EVALS, "| cortex | 0.2829 | −0.3595 ± 0.0485 (p < 0.0001) | 2,207 |",
+     BEAM_CHIP12_PAIRS, _pairs("cortex", "context_chars_mean"), 2207, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+
 def test_beam_range_quotes_match_the_committed_verdict():
     """The evals README quotes three sweep ranges; they must be the
     verdict file's, not a recollection of it."""
@@ -3090,3 +3219,411 @@ CLAIMS.append(Claim(
         "A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["bad"]),
     stated=0, places=0))
 
+
+# ── token-matched rag arms (2026-09-04, feat/rag-lite-arms) ──────────────
+# Three runs, published in the CHANGELOG, evals/README.md and the runbook.
+# Every arm mean and every context-token mean below is read straight out of
+# the run's own summary; the paired deltas come from the within-run pairing
+# artifact, which is itself regenerated byte-exactly by
+# tests/test_beam_within_run_pairs.py.
+RUNBOOK_RL = "docs/runbooks/raglite-runs-20260904.md"
+RL_V38_SUM = (RESULTS +
+              "longmemeval-ku-oracle-qwen-27b-raglite-v38.summary.json")
+RL_ALL_SUM = (RESULTS + "longmemeval-all-oracle-qwen-27b-"
+                        "raglite-all-fresh.summary.json")
+RL_SMOKE_SUM = RESULTS + "beam-100K-qwen-27b-raglite-smoke.summary.json"
+RL_ALL_PAIRS = (RESULTS + "longmemeval-all-oracle-qwen-27b-"
+                          "raglite-all-fresh.arms-vs-rag.json")
+BEAM_CHIP12_PAIRS = (RESULTS +
+                     "beam-100K-qwen-27b-chip12-b16.arms-vs-rag.json")
+
+
+def _arm_metric(arm: str, key: str):
+    return lambda d: d["arms"][arm][key]
+
+
+# The BEAM token costs the runbook sizes its budget off, and the CHANGELOG
+# quotes. Read from the pairing artifact, which is where the control's own
+# cost lives (the control is not an entry under "arms").
+_CHIP12_NEEDLE_RUNBOOK = ("rag serves **5,539** tokens/question, hybrid "
+                          "6,099, cortex **551**")
+for _cid, _val, _stated in [
+    ("raglite-chip12-rag-tokens",
+     lambda d: d["control_context_tokens_mean"], 5539),
+    ("raglite-chip12-hybrid-tokens",
+     _arm_metric("hybrid", "context_tokens_mean"), 6099),
+    ("raglite-chip12-cortex-tokens",
+     _arm_metric("cortex", "context_tokens_mean"), 551),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=RUNBOOK_RL, needle=_CHIP12_NEEDLE_RUNBOOK,
+        artifacts=(BEAM_CHIP12_PAIRS,), value=_val, stated=_stated, places=0))
+
+_CHIP12_NEEDLE_CL = "rag control served 5,539 tokens/question against the cortex arm's 551"
+CLAIMS.append(Claim(
+    id="raglite-chip12-rag-tokens-changelog", doc=CHANGELOG,
+    needle=_CHIP12_NEEDLE_CL, artifacts=(BEAM_CHIP12_PAIRS,),
+    value=lambda d: d["control_context_tokens_mean"], stated=5539, places=0))
+CLAIMS.append(Claim(
+    id="raglite-chip12-cortex-tokens-changelog", doc=CHANGELOG,
+    needle=_CHIP12_NEEDLE_CL, artifacts=(BEAM_CHIP12_PAIRS,),
+    value=_arm_metric("cortex", "context_tokens_mean"), stated=551, places=0))
+
+# Run A — LongMemEval KU oracle, 78 questions, rebuilt onto ceiling-v38.
+# Needle is the runbook's table row, which carries accuracy AND tokens.
+for _arm, _needle, _acc, _tok in [
+    ("rag", "| `rag` (control, 6 turns) | 0.859 | 1184.1 | |", 0.859, 1184.1),
+    ("hybrid", "| `hybrid` | 0.846 | 731.3 | |", 0.846, 731.3),
+    ("cascade", "| `cascade` (derived) | 0.846 | 389.4 | |", 0.846, 389.4),
+    ("rag2", "| `rag2` | 0.551 | 429.7 | |", 0.551, 429.7),
+    ("ragb400", "| `ragb400` | 0.500 | 309.0 | 17 of 78 rows over budget |",
+     0.500, 309.0),
+    ("ragb100",
+     "| `ragb100` | 0.333 | 219.2 | 36 of 78 over budget; = `rag1` on 74 of 78 |",
+     0.333, 219.2),
+    ("rag1", "| `rag1` | 0.321 | 217.1 | |", 0.321, 217.1),
+    ("cortex", "| `cortex` | 0.667 | 96.7 | |", 0.667, 96.7),
+]:
+    CLAIMS.append(Claim(
+        id=f"raglite-v38-{_arm}-accuracy", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_V38_SUM,), value=_arm_metric(_arm, "accuracy"),
+        stated=_acc, places=3))
+    CLAIMS.append(Claim(
+        id=f"raglite-v38-{_arm}-tokens", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_V38_SUM,), value=_arm_metric(_arm, "context_tokens"),
+        stated=_tok, places=1))
+
+# Run B — BEAM 100K, 2 chats. BEAM reports `score`, not `accuracy`.
+for _arm, _needle, _score, _tok in [
+    ("hybrid", "| `hybrid` | 0.5629 | 3635 | |", 0.5629, 3635),
+    ("rag", "| `rag` (control) | 0.4462 | 3158 | |", 0.4462, 3158),
+    ("rag2", "| `rag2` | 0.3396 | 1188 | |", 0.3396, 1188),
+    ("cortex", "| `cortex` | 0.2956 | 468 | |", 0.2956, 468),
+    ("rag1", "| `rag1` | 0.2750 | 496 | |", 0.2750, 496),
+    ("ragb600", "| `ragb600` | 0.2600 | 584 | 12 of 40 rows over budget |",
+     0.2600, 584),
+]:
+    CLAIMS.append(Claim(
+        id=f"raglite-smoke-{_arm}-score", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_SMOKE_SUM,), value=_arm_metric(_arm, "score"),
+        stated=_score, places=4))
+    CLAIMS.append(Claim(
+        id=f"raglite-smoke-{_arm}-tokens", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_SMOKE_SUM,), value=_arm_metric(_arm, "context_tokens"),
+        stated=_tok, places=0))
+
+# Run C — the whole benchmark, fresh extraction, 500 questions, six types.
+for _arm, _needle, _acc, _tok in [
+    ("hybrid", "| `hybrid` | 0.730 | 1229.3 | |", 0.730, 1229.3),
+    ("cascade", "| `cascade` (derived) | 0.692 | 843.7 | |", 0.692, 843.7),
+    ("rag", "| `rag` (control, 6 turns) | 0.690 | 1124.2 | |", 0.690, 1124.2),
+    ("ragb400", "| `ragb400` | 0.460 | 312.3 | 98 of 500 rows over budget |",
+     0.460, 312.3),
+    ("rag2", "| `rag2` | 0.458 | 432.5 | |", 0.458, 432.5),
+    ("rag1", "| `rag1` | 0.316 | 206.3 | |", 0.316, 206.3),
+    ("cortex", "| `cortex` | 0.310 | 96.5 | |", 0.310, 96.5),
+]:
+    CLAIMS.append(Claim(
+        id=f"raglite-all-{_arm}-accuracy", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_ALL_SUM,), value=_arm_metric(_arm, "accuracy"),
+        stated=_acc, places=3))
+    CLAIMS.append(Claim(
+        id=f"raglite-all-{_arm}-tokens", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_ALL_SUM,), value=_arm_metric(_arm, "context_tokens"),
+        stated=_tok, places=1))
+
+# Run C's paired column — a delta, a CI and a permutation p each need the
+# artifact that computed them; an aggregate of means cannot justify a p.
+for _arm, _needle, _delta, _ci, _p, _p_places, _w, _l in [
+    ("hybrid", "| `hybrid` | **+0.040** | 0.031 | 0.015 | 41 / 21 |",
+     0.040, 0.031, 0.015, 3, 41, 21),
+    ("cascade", "| `cascade` | +0.002 | 0.022 | 1.00 | 16 / 15 |",
+     0.002, 0.022, 1.00, 2, 16, 15),
+    ("ragb400", "| `ragb400` | \u2212" "0.230 | 0.041 | 0.0001 | 9 / 124 |",
+     -0.230, 0.041, 0.0001, 4, 9, 124),
+    ("rag2", "| `rag2` | \u2212" "0.232 | 0.042 | 0.0001 | 13 / 129 |",
+     -0.232, 0.042, 0.0001, 4, 13, 129),
+    ("rag1", "| `rag1` | \u2212" "0.374 | 0.045 | 0.0001 | 8 / 195 |",
+     -0.374, 0.045, 0.0001, 4, 8, 195),
+    ("cortex", "| `cortex` | \u2212" "0.380 | 0.048 | 0.0001 | 16 / 206 |",
+     -0.380, 0.048, 0.0001, 4, 16, 206),
+]:
+    CLAIMS.append(Claim(
+        id=f"raglite-all-paired-{_arm}-delta", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_ALL_PAIRS,), value=_arm_metric(_arm, "delta_vs_control"),
+        stated=_delta, places=3))
+    CLAIMS.append(Claim(
+        id=f"raglite-all-paired-{_arm}-ci", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_ALL_PAIRS,), value=_arm_metric(_arm, "ci95_halfwidth"),
+        stated=_ci, places=3))
+    CLAIMS.append(Claim(
+        id=f"raglite-all-paired-{_arm}-p", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_ALL_PAIRS,), value=_arm_metric(_arm, "perm_p"),
+        stated=_p, places=_p_places))
+    CLAIMS.append(Claim(
+        id=f"raglite-all-paired-{_arm}-wins", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_ALL_PAIRS,), value=_arm_metric(_arm, "wins"),
+        stated=_w, places=0))
+    CLAIMS.append(Claim(
+        id=f"raglite-all-paired-{_arm}-losses", doc=RUNBOOK_RL, needle=_needle,
+        artifacts=(RL_ALL_PAIRS,), value=_arm_metric(_arm, "losses"),
+        stated=_l, places=0))
+
+# The headline of the whole exercise: the fact spine at ~97 tokens against
+# one-turn RAG at ~206, paired arm-vs-arm rather than each against the rag
+# control. Stated in the runbook, evals/README.md and the CHANGELOG.
+def _pair_cr(key):
+    return lambda d: d["pairs"]["cortex-rag1"][key]
+
+
+for _doc, _needle in (
+    (RUNBOOK_RL, "**`cortex` \u2212 `rag1` = \u2212"
+                 "0.006 \u00b1 0.049, p 0.87 (77 W / 80 L / 343 ties).**"),
+    (EVALS, "**cortex \u2212 rag1 = \u2212" "0.006 \u00b1 0.049, p 0.87**"),
+    (CHANGELOG, "**\u2212" "0.006 \u00b1 0.049, p 0.87**"),
+):
+    CLAIMS.append(Claim(
+        id=f"raglite-cortex-vs-rag1-delta-{_doc[-12:]}", doc=_doc,
+        needle=_needle, artifacts=(RL_ALL_PAIRS,), value=_pair_cr("delta"),
+        stated=-0.006, places=3))
+    CLAIMS.append(Claim(
+        id=f"raglite-cortex-vs-rag1-ci-{_doc[-12:]}", doc=_doc,
+        needle=_needle, artifacts=(RL_ALL_PAIRS,),
+        value=_pair_cr("ci95_halfwidth"), stated=0.049, places=3))
+    CLAIMS.append(Claim(
+        id=f"raglite-cortex-vs-rag1-p-{_doc[-12:]}", doc=_doc,
+        needle=_needle, artifacts=(RL_ALL_PAIRS,), value=_pair_cr("perm_p"),
+        stated=0.87, places=2))
+
+# The overshoot the runbook and README correct the plan with: the budget arm
+# served 2.2x its name and was rag1 on 74 of 78 rows. Counted off the rows,
+# because that is the only place it is recorded per question.
+RL_V38_ROWS = RESULTS + "longmemeval-ku-oracle-qwen-27b-raglite-v38.jsonl"
+RL_ALL_ROWS = (RESULTS +
+               "longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl")
+RL_SMOKE_ROWS = RESULTS + "beam-100K-qwen-27b-raglite-smoke.jsonl"
+
+
+def _over(arm: str, budget: int):
+    return lambda rows: sum(1 for r in rows
+                            if r[f"{arm}_context_tokens"] > budget)
+
+
+def _same_context(a: str, b: str):
+    return lambda rows: sum(1 for r in rows
+                            if r["contexts"][a] == r["contexts"][b])
+
+
+_OVERSHOOT_NEEDLE = ("100-token budget, 36 of 78 rows exceeded it (mean "
+                     "388.5 tokens on those\n  rows); at 400, 98 of 500 did")
+for _cid, _art, _val, _stated in [
+    ("raglite-overshoot-v38-b100", RL_V38_ROWS, _over("ragb100", 100), 36),
+    ("raglite-overshoot-all-b400", RL_ALL_ROWS, _over("ragb400", 400), 98),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=RUNBOOK_RL, needle=_OVERSHOOT_NEEDLE, artifacts=(_art,),
+        value=_val, stated=_stated, places=0))
+CLAIMS.append(Claim(
+    id="raglite-overshoot-v38-b400", doc=RUNBOOK_RL,
+    needle="| `ragb400` | 0.500 | 309.0 | 17 of 78 rows over budget |",
+    artifacts=(RL_V38_ROWS,), value=_over("ragb400", 400), stated=17,
+    places=0))
+CLAIMS.append(Claim(
+    id="raglite-overshoot-smoke-b600", doc=RUNBOOK_RL,
+    needle="| `ragb600` | 0.2600 | 584 | 12 of 40 rows over budget |",
+    artifacts=(RL_SMOKE_ROWS,), value=_over("ragb600", 600), stated=12,
+    places=0))
+for _cid, _doc, _needle in [
+    ("raglite-b100-is-rag1-runbook", RUNBOOK_RL,
+     "byte-identical to `rag1` on 74\nof the 78 rows"),
+    ("raglite-b100-is-rag1-evals", EVALS,
+     "byte-identical context to `rag1` on 74 of them"),
+    ("raglite-b100-is-rag1-changelog", CHANGELOG,
+     "context to `rag1` on 74 of 78 rows"),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(RL_V38_ROWS,),
+        value=_same_context("ragb100", "rag1"), stated=74, places=0))
+
+# The split-recovery figure both the README and the runbook quote for why
+# rag_lite_rebuild.py re-ingests instead of slicing the persisted block.
+CEILING_V38_ROWS = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v38.jsonl"
+for _cid, _doc, _needle in [
+    ("raglite-split-recovery-evals", EVALS,
+     "back into turns recovers it for only 6 of the 78 `ceiling-v38` rows"),
+    ("raglite-split-recovery-runbook", RUNBOOK_RL,
+     "contain blank lines, so only **6 of the 78** rows split into the 6 turns"),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(CEILING_V38_ROWS,),
+        value=lambda rows: sum(
+            1 for r in rows if len(r["contexts"]["rag"].split("\n\n")) == 6),
+        stated=6, places=0))
+
+
+# The same three runs restated in the CHANGELOG and evals/README.md. A
+# needle in the runbook does not guard a second copy of the number on
+# another page, and the retire-at-the-old-site rule exists because exactly
+# that went wrong once already.
+_CL_V38 = [
+    ("rag", "rag 0.859 @ 1184.1 tokens", 0.859, 1184.1),
+    ("hybrid", "hybrid 0.846 @ 731.3", 0.846, 731.3),
+    ("cascade", "cascade 0.846 @ 389.4", 0.846, 389.4),
+    ("cortex", "cortex 0.667 @ 96.7", 0.667, 96.7),
+    ("rag2", "rag2 0.551 @ 429.7", 0.551, 429.7),
+    ("ragb400", "ragb400 0.500 @ 309.0", 0.500, 309.0),
+    ("ragb100", "ragb100 0.333 @ 219.2", 0.333, 219.2),
+    ("rag1", "rag1 0.321 @ 217.1", 0.321, 217.1),
+]
+_CL_ALL = [
+    ("hybrid", "hybrid 0.730 @ 1229.3 tokens", 0.730, 1229.3),
+    ("cascade", "cascade 0.692 @", 0.692, None),
+    ("rag", "rag 0.690 @ 1124.2", 0.690, 1124.2),
+    ("ragb400", "ragb400 0.460 @ 312.3", 0.460, 312.3),
+    ("rag2", "rag2 0.458 @ 432.5", 0.458, 432.5),
+    ("rag1", "rag1 0.316 @ 206.3", 0.316, 206.3),
+    ("cortex", "cortex 0.310 @ 96.5", 0.310, 96.5),
+]
+for _slug, _art, _rows in (("v38", RL_V38_SUM, _CL_V38),
+                           ("all", RL_ALL_SUM, _CL_ALL)):
+    for _arm, _needle, _acc, _tok in _rows:
+        CLAIMS.append(Claim(
+            id=f"raglite-cl-{_slug}-{_arm}-accuracy", doc=CHANGELOG,
+            needle=_needle, artifacts=(_art,),
+            value=_arm_metric(_arm, "accuracy"), stated=_acc, places=3))
+        if _tok is not None:
+            CLAIMS.append(Claim(
+                id=f"raglite-cl-{_slug}-{_arm}-tokens", doc=CHANGELOG,
+                needle=_needle, artifacts=(_art,),
+                value=_arm_metric(_arm, "context_tokens"), stated=_tok,
+                places=1))
+
+for _arm, _needle, _score, _tok in [
+    ("hybrid", "hybrid 0.5629 @ 3635 tokens", 0.5629, 3635),
+    ("rag", "rag 0.4462 @ 3158", 0.4462, 3158),
+    ("rag2", "rag2 0.3396 @ 1188", 0.3396, 1188),
+    ("cortex", "cortex 0.2956 @ 468", 0.2956, 468),
+    ("rag1", "rag1 0.2750 @", 0.2750, None),
+    ("ragb600", "ragb600 0.2600 @ 584", 0.2600, 584),
+]:
+    CLAIMS.append(Claim(
+        id=f"raglite-cl-smoke-{_arm}-score", doc=CHANGELOG, needle=_needle,
+        artifacts=(RL_SMOKE_SUM,), value=_arm_metric(_arm, "score"),
+        stated=_score, places=4))
+    if _tok is not None:
+        CLAIMS.append(Claim(
+            id=f"raglite-cl-smoke-{_arm}-tokens", doc=CHANGELOG,
+            needle=_needle, artifacts=(RL_SMOKE_SUM,),
+            value=_arm_metric(_arm, "context_tokens"), stated=_tok, places=0))
+
+# The CHANGELOG's paired line, and evals/README.md's copy of the same six
+# deltas. Both wrap, so each needle is one whole line of its page.
+_CL_PAIRED_A = "over all 500 rows (10k sign-flip permutations, seed 0): hybrid **+0.040**"
+_CL_PAIRED_B = "\u00b1 0.031 (p 0.015, 41W/21L), cascade +0.002 \u00b1 0.022, ragb400 \u2212" "0.230 \u00b1"
+_CL_PAIRED_C = "0.041, rag2 \u2212" "0.232 \u00b1 0.042, rag1 \u2212" "0.374 \u00b1 0.045, cortex \u2212" "0.380 \u00b1 0.048."
+_EV_PAIRED_A = "rows, hybrid is **+0.040 \u00b1 0.031 (p 0.015, 41 W / 21 L)** and cascade"
+_EV_PAIRED_B = "(ragb400 \u2212" "0.230 \u00b1 0.041, rag2 \u2212" "0.232 \u00b1 0.042, rag1 \u2212" "0.374 \u00b1 0.045, cortex"
+for _doc, _hyb, _casc, _rest in (
+    (CHANGELOG, _CL_PAIRED_A, _CL_PAIRED_B, _CL_PAIRED_C),
+    (EVALS, _EV_PAIRED_A, _EV_PAIRED_A, _EV_PAIRED_B),
+):
+    _tag = "cl" if _doc == CHANGELOG else "ev"
+    CLAIMS.append(Claim(
+        id=f"raglite-{_tag}-paired-hybrid-delta", doc=_doc, needle=_hyb,
+        artifacts=(RL_ALL_PAIRS,),
+        value=_arm_metric("hybrid", "delta_vs_control"), stated=0.040,
+        places=3))
+    CLAIMS.append(Claim(
+        id=f"raglite-{_tag}-paired-cascade-delta", doc=_doc, needle=_casc,
+        artifacts=(RL_ALL_PAIRS,),
+        value=_arm_metric("cascade", "delta_vs_control"), stated=0.002,
+        places=3))
+    for _arm, _delta, _ci in (("ragb400", -0.230, 0.041),
+                              ("rag2", -0.232, 0.042),
+                              ("rag1", -0.374, 0.045),
+                              ("cortex", -0.380, 0.048)):
+        CLAIMS.append(Claim(
+            id=f"raglite-{_tag}-paired-{_arm}-delta", doc=_doc, needle=_rest,
+            artifacts=(RL_ALL_PAIRS,),
+            value=_arm_metric(_arm, "delta_vs_control"), stated=_delta,
+            places=3))
+        CLAIMS.append(Claim(
+            id=f"raglite-{_tag}-paired-{_arm}-ci", doc=_doc, needle=_rest,
+            artifacts=(RL_ALL_PAIRS,),
+            value=_arm_metric(_arm, "ci95_halfwidth"), stated=_ci, places=3))
+
+# evals/README.md's own arm-mean sentence and its budget-arm paragraph.
+_EV_MEANS_A = "\u2212" "0.380 \u00b1 0.048). Arm means and costs on that run: hybrid 0.730 @ 1229.3"
+_EV_MEANS_B = "rag2 0.458 @ 432.5, rag1 0.316 @ 206.3, cortex 0.310 @ 96.5."
+for _arm, _needle, _acc, _tok in [
+    ("hybrid", _EV_MEANS_A, 0.730, 1229.3),
+    ("rag2", _EV_MEANS_B, 0.458, 432.5),
+    ("rag1", _EV_MEANS_B, 0.316, 206.3),
+    ("cortex", _EV_MEANS_B, 0.310, 96.5),
+]:
+    CLAIMS.append(Claim(
+        id=f"raglite-ev-all-{_arm}-accuracy", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_SUM,), value=_arm_metric(_arm, "accuracy"),
+        stated=_acc, places=3))
+    CLAIMS.append(Claim(
+        id=f"raglite-ev-all-{_arm}-tokens", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_SUM,), value=_arm_metric(_arm, "context_tokens"),
+        stated=_tok, places=1))
+
+_EV_BUDGET = "**219.2** tokens, overshot on 36 of the 78 `raglite-v38` rows, and produced a"
+CLAIMS.append(Claim(
+    id="raglite-ev-b100-tokens", doc=EVALS, needle=_EV_BUDGET,
+    artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "context_tokens"),
+    stated=219.2, places=1))
+CLAIMS.append(Claim(
+    id="raglite-ev-b100-overshoot", doc=EVALS, needle=_EV_BUDGET,
+    artifacts=(RL_V38_ROWS,), value=_over("ragb100", 100), stated=36,
+    places=0))
+CLAIMS.append(Claim(
+    id="raglite-ev-b100-cortex-target", doc=EVALS,
+    needle="`ragb100` \u2014 sized to match the cortex arm's 96.7 tokens \u2014 served a mean",
+    artifacts=(RL_V38_SUM,), value=_arm_metric("cortex", "context_tokens"),
+    stated=96.7, places=1))
+
+_EV_LAND = "Read the arm's measured `context_tokens` and its `budget_overshoot_rows`, never"
+_EV_LAND2 = "its name. `ragb400` does land (309.0 served on the 78-question run, 312.3 on"
+CLAIMS.append(Claim(
+    id="raglite-ev-b400-v38-tokens", doc=EVALS, needle=_EV_LAND2,
+    artifacts=(RL_V38_SUM,), value=_arm_metric("ragb400", "context_tokens"),
+    stated=309.0, places=1))
+CLAIMS.append(Claim(
+    id="raglite-ev-b400-all-tokens", doc=EVALS, needle=_EV_LAND2,
+    artifacts=(RL_ALL_SUM,), value=_arm_metric("ragb400", "context_tokens"),
+    stated=312.3, places=1))
+CLAIMS.append(Claim(
+    id="raglite-ev-b600-tokens", doc=EVALS,
+    needle="budget \u2014 `ragb600` served 584.",
+    artifacts=(RL_SMOKE_SUM,), value=_arm_metric("ragb600", "context_tokens"),
+    stated=584, places=0))
+CLAIMS.append(Claim(
+    id="raglite-ev-b100-vs-rag1-accuracy", doc=EVALS,
+    needle="byte-identical context to `rag1` on 74 of them (accuracies 0.333 vs 0.321)",
+    artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "accuracy"),
+    stated=0.333, places=3))
+CLAIMS.append(Claim(
+    id="raglite-ev-rag1-accuracy-v38", doc=EVALS,
+    needle="byte-identical context to `rag1` on 74 of them (accuracies 0.333 vs 0.321)",
+    artifacts=(RL_V38_SUM,), value=_arm_metric("rag1", "accuracy"),
+    stated=0.321, places=3))
+
+# The CHANGELOG's overshoot sentence.
+CLAIMS.append(Claim(
+    id="raglite-cl-overshoot-v38", doc=CHANGELOG,
+    needle="overshot on 36 of 78 rows and `ragb400` on 98 of 500",
+    artifacts=(RL_V38_ROWS,), value=_over("ragb100", 100), stated=36,
+    places=0))
+CLAIMS.append(Claim(
+    id="raglite-cl-overshoot-all", doc=CHANGELOG,
+    needle="overshot on 36 of 78 rows and `ragb400` on 98 of 500",
+    artifacts=(RL_ALL_ROWS,), value=_over("ragb400", 400), stated=98,
+    places=0))
+CLAIMS.append(Claim(
+    id="raglite-cl-b100-tokens", doc=CHANGELOG,
+    needle="219.2 tokens against its 100-token name and producing a byte-identical",
+    artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "context_tokens"),
+    stated=219.2, places=1))

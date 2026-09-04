@@ -1,0 +1,557 @@
+{
+  "benchmark": "BEAM",
+  "tier": "100K",
+  "extractor": "qwen-27b",
+  "n_questions": 40,
+  "n_chats": 2,
+  "scoring_note": "paper-faithful float mean; _intfaithful mirrors upstream int() flooring of 0.5",
+  "arms": {
+    "rag": {
+      "score": 0.4462,
+      "score_intfaithful": 0.4121,
+      "context_tokens": 3158
+    },
+    "cortex": {
+      "score": 0.2956,
+      "score_intfaithful": 0.275,
+      "context_tokens": 468
+    },
+    "hybrid": {
+      "score": 0.5629,
+      "score_intfaithful": 0.5287,
+      "context_tokens": 3635
+    },
+    "rag1": {
+      "score": 0.275,
+      "score_intfaithful": 0.2542,
+      "context_tokens": 496
+    },
+    "rag2": {
+      "score": 0.3396,
+      "score_intfaithful": 0.3287,
+      "context_tokens": 1188
+    },
+    "ragb600": {
+      "score": 0.26,
+      "score_intfaithful": 0.2392,
+      "context_tokens": 584
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 4,
+      "rag": 0.5,
+      "cortex": 0.75,
+      "hybrid": 0.25,
+      "rag1": 0.5,
+      "rag2": 0.5,
+      "ragb600": 0.25,
+      "context_tokens": {
+        "rag": 3628,
+        "cortex": 468,
+        "hybrid": 4106,
+        "rag1": 775,
+        "rag2": 1018,
+        "ragb600": 896
+      }
+    },
+    "contradiction_resolution": {
+      "n": 4,
+      "rag": 0.125,
+      "cortex": 0.0625,
+      "hybrid": 0.25,
+      "rag1": 0.125,
+      "rag2": 0.125,
+      "ragb600": 0.125,
+      "context_tokens": {
+        "rag": 3382,
+        "cortex": 496,
+        "hybrid": 3887,
+        "rag1": 144,
+        "rag2": 1176,
+        "ragb600": 273
+      }
+    },
+    "event_ordering": {
+      "n": 4,
+      "rag": 0.5333,
+      "cortex": 0.0,
+      "hybrid": 0.5333,
+      "rag1": 0.0,
+      "rag2": 0.0833,
+      "ragb600": 0.1,
+      "context_tokens": {
+        "rag": 2428,
+        "cortex": 471,
+        "hybrid": 2908,
+        "rag1": 159,
+        "rag2": 591,
+        "ragb600": 292
+      }
+    },
+    "information_extraction": {
+      "n": 4,
+      "rag": 0.5833,
+      "cortex": 0.25,
+      "hybrid": 0.7083,
+      "rag1": 0.5,
+      "rag2": 0.6667,
+      "ragb600": 0.5,
+      "context_tokens": {
+        "rag": 2476,
+        "cortex": 458,
+        "hybrid": 2943,
+        "rag1": 310,
+        "rag2": 945,
+        "ragb600": 410
+      }
+    },
+    "instruction_following": {
+      "n": 4,
+      "rag": 0.5,
+      "cortex": 0.375,
+      "hybrid": 0.875,
+      "rag1": 0.25,
+      "rag2": 0.25,
+      "ragb600": 0.25,
+      "context_tokens": {
+        "rag": 1960,
+        "cortex": 482,
+        "hybrid": 2452,
+        "rag1": 43,
+        "rag2": 1085,
+        "ragb600": 306
+      }
+    },
+    "knowledge_update": {
+      "n": 4,
+      "rag": 0.25,
+      "cortex": 0.5,
+      "hybrid": 0.5,
+      "rag1": 0.25,
+      "rag2": 0.25,
+      "ragb600": 0.25,
+      "context_tokens": {
+        "rag": 3169,
+        "cortex": 464,
+        "hybrid": 3642,
+        "rag1": 633,
+        "rag2": 1264,
+        "ragb600": 633
+      }
+    },
+    "multi_session_reasoning": {
+      "n": 4,
+      "rag": 0.3125,
+      "cortex": 0.25,
+      "hybrid": 0.5625,
+      "rag1": 0.0,
+      "rag2": 0.0625,
+      "ragb600": 0.0,
+      "context_tokens": {
+        "rag": 2701,
+        "cortex": 479,
+        "hybrid": 3189,
+        "rag1": 429,
+        "rag2": 1161,
+        "ragb600": 451
+      }
+    },
+    "preference_following": {
+      "n": 4,
+      "rag": 0.75,
+      "cortex": 0.5,
+      "hybrid": 0.875,
+      "rag1": 0.6875,
+      "rag2": 0.75,
+      "ragb600": 0.6875,
+      "context_tokens": {
+        "rag": 4380,
+        "cortex": 468,
+        "hybrid": 4856,
+        "rag1": 1002,
+        "rag2": 1475,
+        "ragb600": 1002
+      }
+    },
+    "summarization": {
+      "n": 4,
+      "rag": 0.4708,
+      "cortex": 0.2687,
+      "hybrid": 0.5125,
+      "rag1": 0.1875,
+      "rag2": 0.3958,
+      "ragb600": 0.1875,
+      "context_tokens": {
+        "rag": 4596,
+        "cortex": 448,
+        "hybrid": 5053,
+        "rag1": 864,
+        "rag2": 1972,
+        "ragb600": 971
+      }
+    },
+    "temporal_reasoning": {
+      "n": 4,
+      "rag": 0.4375,
+      "cortex": 0.0,
+      "hybrid": 0.5625,
+      "rag1": 0.25,
+      "rag2": 0.3125,
+      "ragb600": 0.25,
+      "context_tokens": {
+        "rag": 2856,
+        "cortex": 449,
+        "hybrid": 3314,
+        "rag1": 605,
+        "rag2": 1191,
+        "ragb600": 605
+      }
+    }
+  },
+  "hybrid_top_k": 6,
+  "rag_top_k": 6,
+  "leak_check": {
+    "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+    "n_rows": 40,
+    "n_leaked": 0,
+    "n_untestable": 21,
+    "untestable_reasons": {
+      "no_gold": 20,
+      "trivial_gold": 1
+    },
+    "leaked": [],
+    "untestable": [
+      "1/abstention[0]",
+      "1/abstention[1]",
+      "1/contradiction_resolution[0]",
+      "1/contradiction_resolution[1]",
+      "1/instruction_following[0]",
+      "1/instruction_following[1]",
+      "1/preference_following[0]",
+      "1/preference_following[1]",
+      "1/summarization[0]",
+      "1/summarization[1]",
+      "2/abstention[0]",
+      "2/abstention[1]",
+      "2/contradiction_resolution[0]",
+      "2/contradiction_resolution[1]",
+      "2/instruction_following[0]",
+      "2/instruction_following[1]",
+      "2/knowledge_update[1]",
+      "2/preference_following[0]",
+      "2/preference_following[1]",
+      "2/summarization[0]",
+      "2/summarization[1]"
+    ],
+    "sites": {},
+    "min_answer_chars": 4,
+    "arms": {
+      "cortex": {
+        "n": 40,
+        "all": 0.2956,
+        "n_leak_free": 40,
+        "leak_free": 0.2956,
+        "n_testable": 19,
+        "leak_free_testable": 0.2105
+      },
+      "hybrid": {
+        "n": 40,
+        "all": 0.5629,
+        "n_leak_free": 40,
+        "leak_free": 0.5629,
+        "n_testable": 19,
+        "leak_free_testable": 0.6035
+      },
+      "rag": {
+        "n": 40,
+        "all": 0.4462,
+        "n_leak_free": 40,
+        "leak_free": 0.4462,
+        "n_testable": 19,
+        "leak_free_testable": 0.4456
+      },
+      "rag1": {
+        "n": 40,
+        "all": 0.275,
+        "n_leak_free": 40,
+        "leak_free": 0.275,
+        "n_testable": 19,
+        "leak_free_testable": 0.2105
+      },
+      "rag2": {
+        "n": 40,
+        "all": 0.3396,
+        "n_leak_free": 40,
+        "leak_free": 0.3396,
+        "n_testable": 19,
+        "leak_free_testable": 0.2895
+      },
+      "ragb600": {
+        "n": 40,
+        "all": 0.26,
+        "n_leak_free": 40,
+        "leak_free": 0.26,
+        "n_testable": 19,
+        "leak_free_testable": 0.2316
+      }
+    }
+  },
+  "answerability": {
+    "check": "memory-only answerability + pathway evidence (AWM arXiv 2608.25618, PAST-Bench arXiv 2608.04003)",
+    "n_rows": 40,
+    "arms": {
+      "cortex": {
+        "n": 40,
+        "n_testable": 19,
+        "untestable_reasons": {
+          "no_gold": 20,
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 5,
+        "cells": {
+          "answerable_correct": 1,
+          "answerable_wrong": 0,
+          "unanswerable_correct": 3,
+          "unanswerable_wrong": 15
+        },
+        "answerable_share": 0.0526,
+        "answerable_by": {
+          "span": 0,
+          "tokens": 1
+        },
+        "unanswerable_correct_ids": [
+          "1/knowledge_update[1]",
+          "2/knowledge_update[0]",
+          "2/multi_session_reasoning[1]"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 10,
+          "untestable": 6,
+          "supported": 1,
+          "unsupported": 3,
+          "spanning": 0,
+          "supported_share": 0.25,
+          "unsupported_ids": [
+            "1/knowledge_update[1]",
+            "2/knowledge_update[0]",
+            "2/multi_session_reasoning[1]"
+          ],
+          "spanning_ids": []
+        }
+      },
+      "hybrid": {
+        "n": 40,
+        "n_testable": 19,
+        "untestable_reasons": {
+          "no_gold": 20,
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 15,
+        "cells": {
+          "answerable_correct": 4,
+          "answerable_wrong": 2,
+          "unanswerable_correct": 4,
+          "unanswerable_wrong": 9
+        },
+        "answerable_share": 0.3158,
+        "answerable_by": {
+          "span": 2,
+          "tokens": 4
+        },
+        "unanswerable_correct_ids": [
+          "1/information_extraction[1]",
+          "1/temporal_reasoning[1]",
+          "2/multi_session_reasoning[1]",
+          "2/temporal_reasoning[0]"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 15,
+          "untestable": 7,
+          "supported": 3,
+          "unsupported": 4,
+          "spanning": 1,
+          "supported_share": 0.375,
+          "unsupported_ids": [
+            "1/information_extraction[1]",
+            "1/temporal_reasoning[1]",
+            "2/multi_session_reasoning[1]",
+            "2/temporal_reasoning[0]"
+          ],
+          "spanning_ids": [
+            "1/multi_session_reasoning[0]"
+          ]
+        }
+      },
+      "rag": {
+        "n": 40,
+        "n_testable": 19,
+        "untestable_reasons": {
+          "no_gold": 20,
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 14,
+        "cells": {
+          "answerable_correct": 2,
+          "answerable_wrong": 4,
+          "unanswerable_correct": 2,
+          "unanswerable_wrong": 11
+        },
+        "answerable_share": 0.3158,
+        "answerable_by": {
+          "span": 2,
+          "tokens": 4
+        },
+        "unanswerable_correct_ids": [
+          "1/information_extraction[1]",
+          "1/temporal_reasoning[1]"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 11,
+          "untestable": 7,
+          "supported": 1,
+          "unsupported": 2,
+          "spanning": 1,
+          "supported_share": 0.25,
+          "unsupported_ids": [
+            "1/information_extraction[1]",
+            "1/temporal_reasoning[1]"
+          ],
+          "spanning_ids": [
+            "1/multi_session_reasoning[0]"
+          ]
+        }
+      },
+      "rag1": {
+        "n": 40,
+        "n_testable": 19,
+        "untestable_reasons": {
+          "no_gold": 20,
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 7,
+        "cells": {
+          "answerable_correct": 1,
+          "answerable_wrong": 0,
+          "unanswerable_correct": 3,
+          "unanswerable_wrong": 15
+        },
+        "answerable_share": 0.0526,
+        "answerable_by": {
+          "span": 1,
+          "tokens": 0
+        },
+        "unanswerable_correct_ids": [
+          "1/information_extraction[0]",
+          "1/information_extraction[1]",
+          "1/temporal_reasoning[1]"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 8,
+          "untestable": 4,
+          "supported": 1,
+          "unsupported": 3,
+          "spanning": 0,
+          "supported_share": 0.25,
+          "unsupported_ids": [
+            "1/information_extraction[0]",
+            "1/information_extraction[1]",
+            "1/temporal_reasoning[1]"
+          ],
+          "spanning_ids": []
+        }
+      },
+      "rag2": {
+        "n": 40,
+        "n_testable": 19,
+        "untestable_reasons": {
+          "no_gold": 20,
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 9,
+        "cells": {
+          "answerable_correct": 2,
+          "answerable_wrong": 1,
+          "unanswerable_correct": 2,
+          "unanswerable_wrong": 14
+        },
+        "answerable_share": 0.1579,
+        "answerable_by": {
+          "span": 1,
+          "tokens": 2
+        },
+        "unanswerable_correct_ids": [
+          "1/information_extraction[1]",
+          "1/temporal_reasoning[1]"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 10,
+          "untestable": 6,
+          "supported": 1,
+          "unsupported": 2,
+          "spanning": 1,
+          "supported_share": 0.25,
+          "unsupported_ids": [
+            "1/information_extraction[1]",
+            "1/temporal_reasoning[1]"
+          ],
+          "spanning_ids": [
+            "1/information_extraction[0]"
+          ]
+        }
+      },
+      "ragb600": {
+        "n": 40,
+        "n_testable": 19,
+        "untestable_reasons": {
+          "no_gold": 20,
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 8,
+        "cells": {
+          "answerable_correct": 1,
+          "answerable_wrong": 0,
+          "unanswerable_correct": 3,
+          "unanswerable_wrong": 15
+        },
+        "answerable_share": 0.0526,
+        "answerable_by": {
+          "span": 1,
+          "tokens": 0
+        },
+        "unanswerable_correct_ids": [
+          "1/information_extraction[0]",
+          "1/information_extraction[1]",
+          "1/temporal_reasoning[1]"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 7,
+          "untestable": 3,
+          "supported": 1,
+          "unsupported": 3,
+          "spanning": 0,
+          "supported_share": 0.25,
+          "unsupported_ids": [
+            "1/information_extraction[0]",
+            "1/information_extraction[1]",
+            "1/temporal_reasoning[1]"
+          ],
+          "spanning_ids": []
+        }
+      }
+    },
+    "beam_correct_threshold": 1.0
+  }
+}
