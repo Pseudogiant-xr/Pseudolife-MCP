@@ -449,6 +449,12 @@ rows, hybrid is **+0.040 ± 0.031 (p 0.015, 41 W / 21 L)** and cascade
 tokens, cascade 0.692 @ 843.7, rag 0.690 @ 1124.2, ragb400 0.460 @ 312.3,
 rag2 0.458 @ 432.5, rag1 0.316 @ 206.3, cortex 0.310 @ 96.5.
 
+Those means — and the paired deltas above — span all 500 rows, the 25 the
+leak check flags as naming their own gold answer included, so every arm is
+paired over the same questions. The leak-free reads live in the summary's
+own `leak_check` block and are not the headline figures: over the 475
+unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**.
+
 The paired column is a committed artifact
 (`…raglite-all-fresh.arms-vs-rag.json`) written by
 `evals/beam_within_run_pairs.py` — harness-agnostic since 2026-09-04
@@ -1162,6 +1168,135 @@ reader sweep is 116 of 400 rows, chats 1–7, so per-type rows are n=10–12
 and directional only; a CLI answerer/judge is not bit-reproducible; and
 only the 100K tier has been run — 500K/1M/10M are unmeasured.
 
+## Retrieval-pool probe (`retrieval_pool_probe.py`, 2026-09-04)
+
+A **retrieval proxy, not a verdict.** It answers "does the gold-bearing
+turn reach the served window?" under each candidate-pool setting, and
+nothing about whether an answerer then gets the question right. Only a
+judged run decides these knobs — the standing regression gate does not
+reach them (scope warning below), so a dedicated one was run: **both
+settings lose**, and the verdict table is at the end of this section.
+
+Run (CPU only; no Postgres, no GPU, no judge, no network):
+
+```bash
+python evals/retrieval_pool_probe.py          # writes results/retrieval-pool-probe-<today>.json
+python evals/retrieval_pool_probe.py --haystack 0   # synthetic corpus alone
+```
+
+Corpus: the 10 knowledge-update pairs + 6 distractors from
+`ladder_sweep.py`, ingested initials → distractors → updates, buried in
+400 real conversational turns whose TEXT is read from the
+`band_ablation.py` band-state dumps (`results/banks/s-qwen-27b-ablbands-flat`)
+and re-encoded with the current backbone. That directory is gitignored, so
+a fresh worktree has to copy it from the main checkout; without it the
+probe runs synthetic-only and says so in the artifact.
+
+Why not LongMemEval gold: no dump under `results/banks/` can score recall
+over `cms.retrieve()`. `dump_bank` persists cortex facts only (turns
+absent, `source_entries` stripped), and the band-state dumps carry no
+gold-turn labels — the `has_answer` markers live in the dataset, not the
+dump — and their own vectors are 384-d from the retired MiniLM backbone.
+
+**Result — `results/retrieval-pool-probe-20260904.json` (null):**
+
+| multiplier | fusion | reranker | recall@6 | stale leak | churn vs shipped | latency |
+|---|---|---|---|---|---|---|
+| 1 | weighted_sum | off | 0.700 | 0.300 | — (baseline) | 52 ms |
+| 1 | weighted_sum | on  | 0.700 | 0.300 | 0.000 | 112 ms |
+| 1 | rrf | off | 0.700 | 0.300 | 0.183 | 55 ms |
+| 1 | rrf | on  | 0.700 | 0.300 | 0.183 | 214 ms |
+| 4 | weighted_sum | off | 0.700 | 0.300 | 0.283 | 48 ms |
+| 4 | weighted_sum | on  | 0.700 | 0.300 | 0.283 | 373 ms |
+| 4 | rrf | off | 0.700 | 0.300 | 0.317 | 75 ms |
+| 4 | rrf | on  | 0.700 | 0.300 | 0.333 | 560 ms |
+
+Every cell scores 0.700 with the *same three misses*, so on this proxy the
+knobs buy nothing: the misses are questions whose gold turn no pool width
+reaches. What they do change is *which* turns are served — 18–33% of the
+served set — which is exactly the difference a judged run scores. The
+null here is uninformative rather than negative *as a proxy*; the judged
+verdict below is what settled the knobs, and it is negative. The cost
+side is not null either: multiplier 4 with the reranker on is 7–11x the
+shipped latency, because rerank-then-cut hands the cross-encoder ~4x the
+pairs.
+
+Power caveat: 10 gold queries whose gold values are rare tokens the BM25
+channel already nails, over a 426-entry bank. Read the table as "no signal
+at this scale", not "no effect".
+
+**Scope warning — the regression gate does not cover these knobs.**
+`regression_gate.ps1` stage 1 runs `rebuild_contexts.py`, which rebuilds
+the CORTEX fact ranking offline and copies the associative (`rag`, hybrid
+raw-memory) context verbatim, because no band state was dumped. The
+candidate-pool knobs live on `cms.retrieve`. Measuring them judged means a
+full `--phase extract` re-run with the sanctioned env overrides, which
+`ladder_sweep.build_service` applies and `bench_env_knobs()` stamps into
+the summary:
+
+```powershell
+$env:PSEUDOLIFE_BENCH_POOL_MULT = "4"   # unset = shipped default 1
+$env:PSEUDOLIFE_BENCH_FUSION    = "rrf" # unset = shipped weighted_sum
+python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
+    --tag arm1-pool --phase extract
+python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
+    --tag arm1-pool --phase answer      # Start-Qwen first (qwen_server.ps1)
+```
+
+An invalid value aborts rather than silently serving the default
+(`tests/test_bench_pool_knobs.py`).
+
+### Judged verdict (2026-09-04): the knobs lose
+
+That `--phase extract` re-run was done. Three runs over the LongMemEval
+knowledge-update **oracle** slice (n=78, qwen-27b extraction, identical
+judge and answerer): the shipped control, multiplier 4 + rrf, and
+multiplier 4 + weighted_sum. Accuracy @ mean context tokens, with the
+paired delta against the control, its bootstrap p (10 000 draws, seed 0)
+and per-question wins/losses:
+
+| arm | shipped (`pool-ctl`) | mult 4 + rrf (`pool-m4rrf`) | mult 4 + weighted_sum (`pool-m4sum`) |
+|---|---|---|---|
+| naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 (-0.115, p 0.0506, 4W/13L) | 0.782 @ 1643.0 (-0.077, p 0.1071, 2W/8L) |
+| cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) |
+| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 (-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, 1W/3L) |
+| commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 (0.000, p 1.0, 1W/1L) | 0.859 @ 544.5 (+0.013, p 1.0, 2W/1L) |
+
+**The cortex arm is the control with identical input.** It never touches
+`cms.retrieve`, so it scores 0.667 in all three runs with 0 wins and 0
+losses — a measured noise floor of exactly zero on this instrument. Every
+delta above is therefore a real difference in the served context, not
+judge jitter.
+
+**Reading it honestly.** Nothing is positive except the cascade's single
++0.013 under weighted_sum, which is one question (2W/1L, p 1.0) and is
+noise. Neither RAG delta clears p < 0.05 at n=78 — rrf's -0.115 lands at
+p 0.0506, a hair outside — so the individually-significant claim is not
+available. What *is* available is the pattern: every arm that moves at
+all moves down, under both knobs, while the turn-serving arms' context
+cost rises by 36-54% (the token columns above: +35.6% to +53.7% on
+rag/hybrid/cascade, cortex unchanged). A
+knob that costs that much more context to lose 0.115 on its primary arm
+does not need a tighter p-value to be declined.
+
+**The reranker-on cell is untested.** Both runs had the cross-encoder OFF
+and an empty reference bank. That is the only combination measured, and
+it is the only one the CAUTION on `SearchConfig.fusion` permits: under
+rrf the reranker's `fusion_weight` collapses to cross-encoder-only
+ordering and un-rescaled reference cosines outrank every memory. Whether
+a widened pool pays off *with* the cross-encoder — the configuration the
+whole retrieve-then-rerank shape was built for — remains unmeasured.
+
+Artifacts (all committed):
+`results/longmemeval-ku-oracle-qwen-27b-pool-{ctl,m4rrf,m4sum}.jsonl`
+and their `.summary.json`; paired comparisons
+`results/compare-pool-m4rrf-pairs.json` and
+`results/compare-pool-m4sum-pairs.json`.
+
+This is why both knobs ship at today's behaviour, stay off the Console
+(`tests/test_console_knob_gapfill.py`), and are documented as measured
+losers rather than as unmeasured options.
+
 **Regression gate for the v35 label carrier (2026-09-03).** Two paired
 checks confirmed the write-time `authority`/`distortion_tolerance` labels
 (and their `constraint`-carrier dream logic) don't move numbers where no
@@ -1454,6 +1589,105 @@ loop+graph (A)        1.000        1.0     1.0     1.0     3.0    137.4    69.1
   1 iter / 59 tok / 6 ms — roughly 2× tokens and 11× latency for a 3× recall
   gain on multi-hop corpora.
 - **1-hop cost reflects the unenforced gate.** Arm A runs the full hop-cap on every question, so even 1-hop lookups cost ~3 iterations — recall is not regressed, but the wasted cost on easy questions is exactly what a real (currently unenforced) gate would suppress.
+
+---
+
+# Recall fan-out cap (`recall_fanout_bench.py`)
+
+Does bounding `memory_recall`'s search fan-out cost it any answers? The walk
+as shipped issued one seed search plus one re-query per newly discovered
+entity per hop, which on a star-shaped graph is the whole cost of the call.
+`memory.recall.max_searches_per_hop` / `max_total_searches` /
+`time_budget_seconds` bound it; this harness runs the same 20 relational
+questions with the caps off and on, against a **restored copy** of the live
+bank (never the live bank, never the shared bench DB — `guard_dsn` refuses
+both), and records per question: searches issued, wall time, served
+characters, whether the expected entity surfaced, and how the added entities
+arrived (hub / `part-of` / domain relation).
+
+```
+# one arm per invocation
+python evals/recall_fanout_bench.py --arm before --dsn postgresql://.../pseudolife_memory_replay_YYYYMMDD --out before.json
+python evals/recall_fanout_bench.py --arm after  --dsn postgresql://.../pseudolife_memory_replay_YYYYMMDD --out after.json
+# pair them into the committed artifact
+python evals/recall_fanout_bench.py --combine before.json after.json --out evals/results/recall-fanout-cap-20260904.json
+```
+
+Question set: the twelve relational questions the 2026-09-04 graph-ablation
+probe ran (`evals/graph_ablation.py`, landing separately) plus eight written
+for this bench, n=20. Every `expect` string also
+occurs in the tracked repo tree, so the artifact carries no bank-private
+names, and no query or entry text is emitted.
+
+## Findings — 2026-09-04 (`recall-fanout-cap-20260904.json`)
+
+Restored copy of the live bank (1,296 entries, 5,504 entities, flat preset),
+CPU only, `top_k=6`, `hops=3`. BEFORE is the pre-change package (the knobs do
+not exist in it at all); AFTER ran the caps at 6 / 20 / 20.0 s.
+
+The AFTER arm's `code_commit` is `7595ce6f+dirty` — the working tree of the
+branch before it was committed, so the arm is pinned by the artifact's `caps`
+block rather than by a commit hash. Two edits landed after the run and neither
+can move its numbers: the `skip_part_of_expansion` induced-subgraph fix is
+inert with that knob off (`False` in the recorded `caps`), and the
+negative-value normalisation of the three numeric knobs is a no-op for the
+positive values recorded. The shipped `max_total_searches` default was later
+raised from the 20 recorded here to 31 (a backstop above `1 + 6 x 5`, the most
+the per-hop cap can spend at the tool's maximum `hops=5`); at `hops=3` a full
+walk costs at most 19, the ceiling never fired in either arm, and the numbers
+below stand unchanged.
+
+Reruns meant to be reproducible should pin the AFTER arm's budget off with
+`--time-budget-seconds 0`. A wall-clock budget makes the walk
+machine-dependent — the same question can truncate on slow hardware and not on
+fast — so leaving the 20.0 s default in place means a rerun that disagrees
+cannot be told apart from a real regression. (The BEFORE arm is unaffected:
+`apply_arm` forces every cap off for it.) The run below kept the 20.0 s
+default and it never fired, which the artifact records as
+`truncated_calls: 0`.
+
+```
+metric (per call)        before      after     ratio
+searches issued  mean     89.15      12.40      7.2x fewer
+                 median   58         13
+                 max     205         19
+recall wall (s)  mean     25.25        4.166     6.1x faster
+                 median   16.38        4.49
+                 max      57.67        7.51
+served chars     mean  178,110     77,546      2.3x smaller
+expected targets found    20/20      20/20
+```
+
+- **Nothing was lost, and the check could have failed.** `targets_lost` is
+  empty: every expected target the uncapped walk surfaced, the capped walk
+  surfaced too. Read that with the mechanism in mind — the caps bound the
+  SEARCH budget and deliberately leave graph expansion alone, so the entity,
+  edge and iteration counts are identical on all 20 questions
+  (`structural_identity`) and the only channel that could lose a target is
+  `texts`. `hit_channels` says how much of the question set actually rode
+  that channel: 17 targets arrived on `entity` (where the check has no
+  power) and **3 on `texts`** (where it does). Those three survived the cut
+  — the finding is about three questions, not twenty.
+- **The whole saving is supporting text.** 2,116 texts before, 558 after. The
+  MCP layer caps `texts` at 6 anyway, so the character figure above is the
+  service-level payload, not what a model sees — the honest headline is the
+  wall time and the search count.
+- **The per-hop cap does the work; the ceiling is a backstop.** With
+  `max_searches_per_hop=6` and `hops=3` a full walk costs at most
+  1 + 6 + 6 + 6 = 19 searches, so the `max_total_searches=20` this run used
+  never fired on these questions (`truncated_calls: 0` in both arms) and
+  neither did the 20 s budget. The shipped default has since been raised to
+  **31** so the ceiling is a backstop at every `hops` the tool accepts
+  (clamped 1..5, where the per-hop cap can spend 1 + 6 x 5 = 31) rather than
+  binding at 4 and 5 hops; at `hops=3` that changes nothing here. The ceiling
+  and the budget are pinned by unit tests (`tests/test_recall.py`), not by
+  this run.
+- **Search is still 16x cheaper.** Plain `memory_search` on the same questions
+  is 0.26 s and 7,789 chars per call and found 18 of the 20 targets; recall
+  buys the last two, and now costs 4.2 s instead of 25.3 s to do it.
+- The eval-only `skip_part_of_expansion` knob is not exercised in this run;
+  `arrivals_total` records the shape it targets (1,046 of the 1,763 added
+  entities arrived via `part-of` alone, identically in both arms).
 
 ---
 
@@ -1843,6 +2077,252 @@ reversal of the hold decision.
 
 ---
 
+# Retrieval telemetry, offline replay, and the graph ablation (2026-09-04)
+
+Three read-only harnesses over a **restored copy** of a live bank. None of
+them touches `pseudolife_memory` or the shared `pseudolife_memory_bench`:
+each refuses those two database names outright, in either DSN spelling and
+regardless of case. `retrieval_telemetry_review.py` goes no further than
+that — it is plain SQL over the log tables, loads no model and never opens
+the search path. The two that do search (`retrieval_replay.py`,
+`graph_ablation.py`) build a `MemoryService` against the restored copy and
+then force `embedding.device = "cpu"` and
+`memory.retrieval_log.enabled = False`, so a replay cannot append to the
+log it is replaying.
+
+Restore recipe (the 2026-09-04 run used
+`pseudolife_memory_replay_20260904` on the bench Postgres):
+
+```powershell
+ops\backup.ps1 -OutDir <scratch>          # sanctioned dump path (pg_dump, read-only)
+docker cp <dump>.sql.gz pseudolife-mcp-postgres:/tmp/replay.sql.gz
+docker exec pseudolife-mcp-postgres psql -U pseudolife -d postgres `
+  -c "CREATE DATABASE pseudolife_memory_replay_20260904 OWNER pseudolife"
+docker exec pseudolife-mcp-postgres sh -c `
+  "gunzip -c /tmp/replay.sql.gz | psql -U pseudolife -d pseudolife_memory_replay_20260904 -q"
+```
+
+Pass the **deployed** `config.yaml` (`docker cp pseudolife-mcp-daemon:/data/config.yaml .`)
+with `--config` so the "shipped" arm is production and not the dataclass
+defaults.
+
+**Privacy.** Query text and entry text are private (this is a public repo),
+and the graph holds personal names and machine identifiers. The artifacts
+carry aggregates and ids only; `graph_ablation.py` emits an entity name
+only when `git grep` finds it in the tracked tree, and writes `<redacted>`
+otherwise.
+
+## `retrieval_telemetry_review.py` — does the learned reranker have labels yet?
+
+PR #168 logs the (query, served) half of the training tuple in
+`retrieval_events`, and `retrieval_uses` records the implicit relevance
+label: a `memory_get` / `memory_reinforce` on a served entry credits the
+most recent in-session serving event within `use_window_seconds` (3600).
+PR #200/#201 added `slot_reads`, `served_facts` and
+`entries.explicit_reinforcements`.
+
+The script separates the counters that mean **consumption** from the ones
+that only mean **served**, which is the distinction the raw numbers hide:
+
+| counter | what it actually means |
+| --- | --- |
+| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced |
+| `entries.explicit_reinforcements` | consumption — moves only on `memory_reinforce` |
+| `entries.access_count` | **serve count** — `cms.py` bumps it for every entry in a merged result set |
+| `slot_reads.read_count` | **serve count** — `_track_slot_reads`: "count each slot SERVED as an answer" |
+
+### Findings — 2026-09-04 bank (`retrieval-telemetry-review-20260904.json`)
+
+| quantity | value |
+| --- | --- |
+| logged events | 1349 |
+| distinct sessions / episodes | 60 / 101 |
+| **events with any downstream signal** | **1** (0.074%) |
+| `retrieval_uses` rows | 1 (`used_via=get`, served rank 0, 72 s after the serve) |
+| `entries.explicit_reinforcements`, bank-wide sum | **0** |
+| served-list length: mean / mode | 4.94 / 5 (146 events served exactly 1; 0 served nothing) |
+| `params` coverage (v32+) | 790 / 1349 (58.6%) |
+| `served_facts` coverage (v34+) | 160 / 1349 (11.9%), 798 facts |
+| served entry ids that still resolve in `entries` | 6666 of 6666 (no dangling ids) |
+| `slot_reads` | 605 slots, 807 serves — all serve-side |
+
+The event log is healthy: it writes on every search, the ids all still
+join, and 59% of rows carry the ranking-knob snapshot. The **label** side
+is empty. One labelled event is not a small sample, it is a plumbing
+check. Read against the plan's "a few hundred logged events", the correct
+reading is a few hundred **labelled** events — an event with no target
+trains nothing — so Phase 1 is 299 labelled events short of its own
+floor.
+
+Why: the label is only written by `memory_get` and `memory_reinforce`, and
+agents overwhelmingly consume `memory_search`'s inline result text and
+never dereference an id. Nothing about the current tool surface makes them.
+
+**Cheapest changes that would actually produce labels**, in ascending cost:
+
+1. **Credit `memory_fact_get` / `memory_fact_resolve` against `served_facts`.**
+   The fact half of the tuple has been recorded since v34 and has no
+   `uses` table at all; a fact-side read is a genuine consumption event
+   the daemon already sees.
+2. **An explicit `used_ids` parameter on `memory_outcome`.** The
+   convention already requires an outcome at task end, so the caller is
+   present and knows which memories mattered; today that knowledge is
+   discarded. This is the only option that produces *positive* labels for
+   the entries an agent actually reasoned from rather than clicked on.
+3. **Treat a `memory_store` whose text quotes a served entry as a use.**
+   Free (no tool-surface change) but noisy, and it labels writing, not
+   reading.
+
+Option 2 is the one worth shipping: it is a single optional list
+parameter, it is written by the agent that just used the memories, and it
+labels the whole served set rather than the one id someone happened to
+dereference.
+
+## `retrieval_replay.py` — the shipped knobs on the queries agents really asked
+
+Re-runs the logged queries through an offline `MemoryService` on the
+restored bank under several settings and scores each against a label set.
+
+Label sources: `uses` (the real implicit labels — n=1 on this bank, so it
+is a plumbing check), and `logged-top1` / `logged-top3`, which use the
+entry ids the daemon itself served at those ranks as pseudo-labels. The
+`logged-*` sources measure **agreement with the shipped ranker's own past
+head**, i.e. how far a setting moves the served head — never relevance.
+
+The `feat/retrieval-candidate-pool` arm probes the live config object for
+pool/fusion knobs rather than trusting a branch name; on 2026-09-04 the
+sibling worktree carried none, so the arm reports itself skipped.
+
+**The bank has grown since these events were logged**, so absolute MRR and
+hit@k are indicative only. Every arm sees the identical restored bank and
+the identical query list, so the paired comparison across arms is the
+valid read. The query-embedding LRU is cleared between arms — without
+that, the second arm reads its query vectors out of cache and posts a
+latency an order of magnitude below the first.
+
+### Findings — 2026-09-04 (`retrieval-replay-20260904.json`), 250 sampled events, top_k=6
+
+Latency is the **median** per-query wall time
+(`results.logged-top1.arms.<arm>.median_latency_s` in the artifact).
+
+| arm | MRR | hit@1 | hit@3 | hit@6 | median latency |
+| --- | --- | --- | --- | --- | --- |
+| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 | 0.305 s |
+| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 | 0.140 s |
+| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 | 0.694 s |
+
+Read as drift, three things:
+
+- **BM25 is load-bearing for the head.** Turning it off moves 12.4 points
+  of hit@1 and 9.4 of MRR while leaving hit@6 nearly intact — the lexical
+  channel decides *which* of the right six goes first, which is what a
+  reranker would be trained to do.
+- **BM25 costs ~165 ms per query at this bank scale** (median 0.305 s
+  vs 0.140 s), well above the 20-50 ms the config docstring quotes. That
+  docstring number is due a re-measure; it is not pinned to an artifact.
+- **The cross-encoder reranker reshuffles the head hard and does not
+  obviously improve it.** hit@1 drops 30 points against `shipped` while
+  hit@6 is unchanged — it is re-ordering the same six. Whether that
+  re-order is better cannot be settled by this harness, because the label
+  IS the shipped ranker's own head; it needs a judged run or real
+  `uses` labels. It stays off by default, and that decision is untouched
+  here.
+
+## `graph_ablation.py` — lever 6, does `memory_recall`'s expansion earn its cost?
+
+Two halves. `shape` describes the graph itself; `ablate` pairs
+`memory_recall` against plain `memory_search` on the same queries and
+classifies how each extra entity **arrived**: through a `part-of` edge
+only (containment, the cheapest edge the extractor makes), through a
+domain relation (`depends-on`, `uses`, `runs-on`, …), through a hub node
+(degree >= p95), or unlinked (it came from the re-query's dense hits, not
+from an edge at all).
+
+Query sets: 30 hand-written relational questions in the bank's own domain
+(each names the entity that should surface) plus a sample of the logged
+retrieval events, scored on whether the entry the daemon served at rank 0
+comes back. `--rel-limit` / `--logged-limit` cap both sets — `recall` at
+the shipped defaults (3 hops, `max_entities=50`, `expand_budget=0`) issues
+one search per newly-discovered entity per hop, which measured a **mean
+of 32.4 s per call on the relational set and 44.3 s on the logged set,
+worst case 73.0 s** on CPU against this bank
+(`ablation.*.summary.recall.mean_wall_s` in
+`graph-ablation-20260904.json`), so a full 30-question sweep still runs
+to tens of minutes. The artifact records the `n` it actually asked.
+
+### Findings — graph shape, 2026-09-04 (`graph-ablation-20260904.json`)
+
+| quantity | value |
+| --- | --- |
+| entities | 5504 |
+| edges (live / all versions) | 4020 / 4247 |
+| degree p50 / p95 / max | 1 / 5 / 132 |
+| `part-of` share of live edges | 19.0% |
+| entities with no live edge at all | 1156 (21%) |
+| dead weight (only `part-of` edges, no current fact) | 421 |
+
+Live edges by relation: `prefers` 929, `part-of` 765, `uses` 736,
+`configures` 272, `depends-on` 272, `related-to` 181, `implements` 181,
+`avoids` 162, `tests` 148, `runs-on` 139, `stores-data-in` 116, `hosts`
+70, `superseded-by` 49.
+
+Two things the shape says on its own:
+
+- **The graph is a hub-and-spokes star, not a mesh.** Median degree is 1
+  and p95 is 5, while the top node (`pseudolife-mcp`) carries 132 — so
+  most nodes are leaves hanging off a handful of hubs, which is exactly
+  the topology the recall hub gate exists to refuse to expand through.
+  1156 entities carry no live edge at all.
+- **Comparator names the corpus argues about are missing from the
+  graph.** Of the terms checked, `naive rag` (16 entries) and `titans`
+  (21 entries) are mentioned in five or more entries and have **no
+  node**, while `rag`, `longmemeval`, `cognee`, `bm25`, `beam` and `lme`
+  all do. The extractor promotes subjects of claims, not the things
+  claims are compared against — so the one relation a reader most wants
+  ("what did we measure this against, and what happened") is the one the
+  graph cannot answer.
+
+### Findings — `recall` vs `search`, 2026-09-04 (same artifact)
+
+8 of the 30 relational questions and 4 logged queries — the run size the
+per-recall cost allowed (mean 32.4 s relational / 44.3 s logged, max
+73.0 s), and small enough that the hit-rate column is a ceiling, not a
+comparison.
+
+| | relational (n=8) | | logged (n=4) | |
+| --- | --- | --- | --- | --- |
+| | `search` | `recall` | `search` | `recall` |
+| mean served chars | 6932 | 184641 | 6649 | 74186 |
+| mean wall time | 0.44 s | 32.4 s | 0.39 s | 44.3 s |
+| expected entity/entry found | 8/8 | 8/8 | 4/4 | 4/4 |
+| recall-only hits | — | 0 | — | 0 |
+
+`recall` served **27× the characters at 74× the wall time** of plain
+`search` on the relational set (11× / 114× on the logged set) and found
+the expected target no more often, because plain `search` already found
+it every time. That last clause is the honest limit of this run: at n=8
+with both arms at 100%, the questions cannot separate the two arms on
+quality — they only price the difference. A question set that plain
+search *fails* is what a quality verdict needs, and writing one is the
+obvious next step.
+
+What the expansion is made of is measurable even at this n. Of the 524
+entities `recall` added beyond its seeds on the relational set:
+
+| arrival | count | share |
+| --- | --- | --- |
+| touches a hub (degree >= p95 = 5) | 520 | 99.2% |
+| only `part-of` edges | 225 | 42.9% |
+| at least one domain relation | 299 | 57.1% |
+| unlinked (came from the re-query, not an edge) | 0 | 0% |
+
+Essentially every entity the graph adds arrives through a hub, and over
+two fifths arrive through containment alone. On a star-shaped graph with
+median degree 1, "expand the neighbourhood" mostly means "enumerate a
+hub's spokes" — which is why the payload is 27× larger without being
+more likely to contain the answer. The hub gate stops recall expanding
+*through* a hub; it does not stop a hub's spokes being pulled in as
+results.
 # Offline routing analysis (`router_offline.py`)
 
 The engine concatenates channels for every query — the hybrid arm serves a
@@ -2058,3 +2538,194 @@ own section above:
   evidence pack with full-length merge snippets, recovering the
   2026-09-02 panel's 240-char-clipped rows by prefix match against the
   bank they were built from, feeding the fulllen ladder rerun above.
+
+---
+
+# Agent-side token ledger (`agent_token_ledger.py`)
+
+Every "fewer tokens" number this repo publishes measures **served benchmark
+context** — the passage an answerer model reads to answer a LongMemEval or
+BEAM question. Nothing measured the other side of the wire: what a real MCP
+client reads *back* from a tool call, and pays for on every call, forever.
+This ledger measures that side, and the payload cuts below were chosen from
+it rather than from taste.
+
+```bash
+python evals/agent_token_ledger.py --daemon http://127.0.0.1:8765 \
+    --out evals/results/agent-token-ledger-20260904-r3.json
+```
+
+The cited artifact is
+`evals/results/agent-token-ledger-20260904-r3.json`. Two earlier runs stay
+committed as **pre-review records** and are cited by no number below:
+
+* `agent-token-ledger-20260904.json` (r1) measured the lean
+  `memory_fact_get` projection while it was still dropping `source_entries`,
+  and picked its five widest slots from a 2,000-row prefix of the fact dump
+  rather than from the whole cortex. Both were fixed; the `fact_get` row
+  moved as a result and says so in place.
+* `agent-token-ledger-20260904-r2.json` measured `superseded_by_text`
+  truncated to the same 600 chars as the entry's own text. That behaviour
+  was **corrected before merge** — the field has no recovery path, since a
+  compact entry carries no id for the superseding entry — so its headline
+  (−41%) priced a payload this repo does not ship. The r3 run below prices
+  the shipped one. (One slot label in r2 was redacted in place after the
+  fact: it was a bare machine name, which `safe_label` did not catch until
+  the same review taught it hostnames.)
+
+The script refuses to overwrite an existing `--out`, which is why each
+rerun is a new tag rather than a rewrite.
+
+**Method.** Raw payloads are fetched once from the daemon's GET-only REST
+(`/api/search`, `/api/recall`, `/api/facts`), then projected offline through
+the MCP layer's own pure helpers (`mcp_server._project_search`,
+`_lean_fact_record`, the `_cap_recall_*` family), so before/after is exactly
+paired — same bytes in, two projections out. GET-only is not side-effect
+free: `/api/search` runs the real retrieval path, so it appends
+`retrieval_events` rows and touches per-entry access counters. It changes no
+bank *content* — nothing is written, moved or reinforced. Sizes are
+characters of the compact JSON an MCP client receives; approximate tokens
+are `chars // 4`, the `ladder_sweep.approx_tokens` convention. Queries are a
+fixed, committed list of 15 dev-session questions, deliberately **not** a
+sample of the `retrieval_events` table: this is a public repo and real
+queries carry paths and names. Numbers are bank-specific (measured on the
+maintainer's live bank, 1,316 entries, `preset: flat`) and the artifact
+records the entry count so a rerun elsewhere is not read as a regression.
+The two cuts' parameters are read from `utils.config.McpConfig` rather than
+restated in the harness — the values used are written to the artifact's
+`config` block — so a future change to `entry_text_chars` re-prices the run
+instead of quietly leaving the published numbers describing the old default.
+
+## What a session costs before it asks anything
+
+| Surface | chars | ~tokens |
+| --- | --- | --- |
+| tool manifest, `minimal` tier (9 tools) | 7,015 | 1,753 |
+| tool manifest, `core` tier (22 tools) | 14,076 | 3,519 |
+| tool manifest, `full` tier (35 tools) | 22,719 | 5,679 |
+| served session-start block (`MEMORY_LOOP_BLOCK`) | 7,492 | 1,873 |
+
+The manifest split is roughly two-thirds tool descriptions, one-third
+inputSchema parameter descriptions (full tier: 14,523 + 8,196). Both halves
+are already metered per tier by
+`tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets`; this
+ledger reads them through the same path so the two cannot disagree.
+
+The session-start row is **raw** characters, not the JSON encoding the rest
+of this page counts: the hook writes that block into the session as plain
+text, so the escaping is not paid. (Its JSON size, 7,644, is in the artifact
+under `chars` for comparability and is not the cost.) The block is capped at
+`HOOK_CONTEXT_MAX_CHARS - 2,000` = 7,500 raw chars by
+`tests/test_plugin_packaging.py`, which is why it is the one surface here
+with almost no headroom.
+
+## What a call costs — before and after the cuts
+
+Mean over the 15 queries, `memory_search` at the tool's default `top_k=8`:
+
+| Payload part | before | after | change |
+| --- | --- | --- | --- |
+| **total** | **14,745** | **9,951** | **−33%** |
+| entries block | 12,637 | 7,842 | −38% |
+| — entry `text` | 9,464 | 4,550 | −52% |
+| — `superseded_by_text` | 2,406 | 2,406 | — |
+| — entry metadata | 767 | 887 | +16% |
+| cortex block | 1,853 | 1,853 | — |
+| approx tokens | 3,686 | 2,487 | −33% |
+
+Median total 15,325 → 9,613; p90 18,886 → 12,583. Entry `text` alone was
+**64% of the whole payload**. The metadata line goes *up*, on purpose: the
+`truncated: true` marker is what tells the reader that `memory_get` has more.
+
+The `superseded_by_text` line is **exempt from the cap** and is why the
+headline is 33% rather than the 41% the r2 run reported. It is a sixth of
+the "before" payload and a quarter of what ships, so capping it looked like
+free money — but it has no recovery path. A compact entry carries no id for
+the superseding entry and nothing stores a pointer to one, so
+`memory_get(entry.id)` returns the *superseded* text, not the replacement:
+a clipped correction is unrecoverable by any tool call in any tier. Three
+surfaces tell agents to prefer that field over the entry's own text (the
+served session-start block, `examples/CLAUDE.memory.md`, and
+`memory_search`'s own description), and 13 of these 15 queries had at least
+one clipped under r2 (2,406 → 1,199 chars mean). It was published as a row
+here rather than left inside "entries block" because the r2 breakdown left
+those ~2,400 chars unlabelled between the block total and text + metadata
+(2026-09-04 review finding).
+
+One approximation, named: the narrow arm slices the width-5 cortex list
+`/api/search` returns rather than re-running `cortex_search` at width 3, so
+it would diverge from a real call on a bank where constraint pinning
+re-budgets. The measured bank carries **0 of 5,509** labelled current facts,
+so `_pin_constraint_facts` is a no-op and the two are the same set in the
+same order. That validity condition is now counted by the run itself and
+recorded in the artifact (`bank.facts_labelled` / `bank.facts_current`, with
+`bank.facts_dump_truncated` false so the census saw the whole cortex) rather
+than hand-checked; read this arm only while `facts_labelled` is 0.
+
+At `top_k=3` — where the cortex-block narrowing actually bites, since
+`min(5, top_k)` is inert at the default:
+
+| Payload part | before | after | change |
+| --- | --- | --- | --- |
+| **total** | **6,870** | **4,290** | **−38%** |
+| entry `text` | 3,537 | 1,712 | −52% |
+| `superseded_by_text` | 931 | 931 | — |
+| cortex block (5 facts → 3) | 1,853 | 1,107 | −40% |
+
+`memory_fact_get`, over the five widest current slots in the bank: **2,175 →
+1,296 chars** mean (median 2,281 → 1,128), a 40% cut from moving provenance,
+support, writer/session id, tx/valid time and the supersession chain behind
+`verbose=True` — 25 keys down to 12 or 13.
+
+That cut is smaller than the r1 run reported (1,424 → 764, 46%), for
+two reasons, both corrections rather than regressions. The projection now
+keeps `source_entries`, the engram links: it is the only handle from a fact
+back to the episodes that formed it, and the poisoned-memory procedure in
+`docs/guide/security-posture.md` ("follow the engram links"), `memory_get`'s
+core-tier justification, and
+`tests/test_release_ux.py::test_core_tier_can_close_its_own_loops` all
+depend on it being served by default. And the five widest slots are now
+chosen from the whole cortex rather than from the first 2,000 rows the fact
+dump returned, so both arms are measured on genuinely wider records.
+
+Both arms price the RECORD, not the whole call, and in the same direction:
+the "before" is the `/api/facts` dump row (`service.cortex_dump`), which
+carries an `entity_id` the served `memory_fact_get` record never has, and
+neither arm includes the tool envelope — `{record, contenders}` plus
+`correct_with` and the correction note on an aged fact. Read the percentage
+as the claim and the absolute chars as a floor. Closing either gap needs a
+live service bound to the bank, which this script deliberately does not
+have.
+
+## The cap, and why 600
+
+Served entry `text` runs mean **1,180** chars, median 1,149, p90 1,794 over
+the 120 entries the 15 queries returned. A 600-char cap therefore clips 88%
+of hits on this bank — deliberately: these are consolidated notes, not
+one-liners, and 600 chars (~150 tokens) is enough to judge a hit and usually
+to act on it, with `memory_get` for the rest. `memory_recall` has capped its
+supporting texts at 200 since 2026-07-10 for the same reason; search entries
+are the primary answer rather than walk evidence, so they get the wider cap.
+
+## `memory_recall` is the expensive one
+
+A 3-hop `memory_recall` issues **35 `service.search` calls on average** and
+up to **66** on a single question — one seed search plus one per entity
+newly discovered on each hop (`run_recall` + `MechanicalController.next_queries`;
+derived from the response's `entity_hop`, not instrumented). Two of the five
+relational questions resolved no seed entity and cost 1 search each; the
+other three cost 50, 58 and 66. The *response* is already lean by comparison
+— 4,243 chars mean against 10,349 for the same walk with `verbose=True` —
+because the recall caps landed on 2026-07-10 and in #186. The call
+amplification is untouched here and is the obvious next lever.
+
+## What this does **not** measure
+
+- Ranking, `min_score`, or anything an accuracy number depends on. Every cut
+  is a projection above `service.*`; the eval harness calls the service
+  directly, pinned by
+  `tests/test_agent_payload_budget.py::test_eval_harness_does_not_read_the_mcp_projection`.
+- Real client tokenisation. `chars // 4` is the house approximation, not a
+  tokeniser.
+- Whether a clipped hit ever costs an answer. That needs an end-to-end run
+  with an agent in the loop, and is not attempted here.

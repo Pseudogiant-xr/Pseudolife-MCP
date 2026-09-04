@@ -594,7 +594,8 @@
     "Seed entities → depth-1 graph expansion per hop, re-query each hop",
     "Hub-gating avoids degree blowup; Mechanical or LLM controllers",
     "Promoted from an evals harness into the memory_recall tool",
-    "v35: a seed entity's constraint facts are pinned first (survive the per-entity fact cap); hop-discovered entities are context, not scope"
+    "v35: a seed entity's constraint facts are pinned first (survive the per-entity fact cap); hop-discovered entities are context, not scope",
+    "2026-09-04: search fan-out capped (max_searches_per_hop / max_total_searches / time_budget_seconds); the hub gate bounds EXPANSION, these bound SEARCH"
    ]
   },
   {

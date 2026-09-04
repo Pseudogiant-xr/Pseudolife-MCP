@@ -741,3 +741,413 @@ def test_memory_recall_verbose_keeps_full_texts(monkeypatch,
               for e in out["entities"])
     assert not any(t.endswith("…") for t in out["texts"])
 
+
+
+# ---------------------------------------------------------------------------
+# Search fan-out caps (2026-09-04). A 3-hop memory_recall on a restored
+# copy of the live bank issued a mean of 89.15 service.search calls (max
+# 205) and took 25.25 s per call — one seed search plus one re-query per
+# newly discovered entity per hop, on a star-shaped graph (5,504 entities,
+# degree p50 1 / p95 5 / max 132), so one hub's ring priced the call
+# (evals/results/recall-fanout-cap-20260904.json). These pin the three
+# caps and the fail-soft budget; the byte-identity test below pins that a
+# walk which stays under them is unchanged.
+# ---------------------------------------------------------------------------
+
+class _CountingSvc:
+    """``_FakeSvc`` plus a record of every search query the walk issued."""
+
+    def __init__(self, inner, delay: float = 0.0):
+        self.inner = inner
+        self.delay = delay
+        self.queries: list[str] = []
+
+    def search(self, query, top_k=5):
+        self.queries.append(query)
+        if self.delay:
+            import time
+            time.sleep(self.delay)
+        return self.inner.search(query, top_k)
+
+    def graph(self, entity, depth=1):
+        return self.inner.graph(entity, depth)
+
+
+def _star(n: int = 10, relation: str = "depends-on"):
+    """One seed fanning out to ``n`` spokes — the live graph's shape."""
+    edges = [("hub", relation, f"spoke{i:02d}") for i in range(n)]
+    return _FakeSvc(["hub relates to many things"], edges)
+
+
+def _star_vocab(n: int = 10) -> list[str]:
+    return ["hub"] + [f"spoke{i:02d}" for i in range(n)]
+
+
+def _layers(width: int = 8, depth: int = 5, relation: str = "depends-on"):
+    """A graph wide at EVERY hop: ``depth`` layers of ``width`` nodes, with
+    node j of layer k linked to node j of layer k+1, so each hop discovers
+    exactly ``width`` new entities and each hop spends its full per-hop
+    re-query allowance. ``_star`` is only wide at hop 1."""
+    edges = [("hub", relation, f"L1_{j:02d}") for j in range(width)]
+    for k in range(1, depth):
+        edges += [(f"L{k}_{j:02d}", relation, f"L{k + 1}_{j:02d}")
+                  for j in range(width)]
+    return _FakeSvc(["hub relates to many things"], edges)
+
+
+def _layers_vocab(width: int = 8, depth: int = 5) -> list[str]:
+    return ["hub"] + [f"L{k}_{j:02d}"
+                      for k in range(1, depth + 1) for j in range(width)]
+
+
+def test_max_searches_per_hop_caps_requeries_but_keeps_entities():
+    svc = _CountingSvc(_star(10))
+    st = rc.run_recall(svc.search, svc.graph, _star_vocab(10), "about hub",
+                       rc.MechanicalController(), hops=1,
+                       max_searches_per_hop=3)
+    # 1 seed search + at most 3 re-queries.
+    assert len(svc.queries) == 4
+    assert st.searches_issued == 4
+    # Every spoke is still a RESULT with its facts — only the re-query is cut.
+    assert len([e for e in st.entities if e.startswith("spoke")]) == 10
+    assert st.entity_facts["spoke00"] == []
+
+
+def test_uncapped_walk_issues_one_search_per_new_entity():
+    """The behavior being bounded: without the cap, a 10-spoke hub costs
+    11 searches for one hop."""
+    svc = _CountingSvc(_star(10))
+    st = rc.run_recall(svc.search, svc.graph, _star_vocab(10), "about hub",
+                       rc.MechanicalController(), hops=1)
+    assert len(svc.queries) == 11
+    assert st.searches_issued == 11
+    assert st.truncated is False
+
+
+def test_requery_ranking_prefers_seed_mentions_then_low_degree():
+    # Seed hit names spoke07 only; degrees make spoke01 the cheapest of the
+    # unmentioned ones. Cap 2 must pick the mentioned one, then the lowest
+    # degree — never the hub-ward spoke09.
+    edges = [("hub", "depends-on", f"spoke{i:02d}") for i in (1, 7, 9)]
+    inner = _FakeSvc(["hub connects to spoke07 and others"], edges)
+    svc = _CountingSvc(inner)
+    degrees = {"hub": 3, "spoke01": 1, "spoke07": 4, "spoke09": 20}
+    st = rc.run_recall(svc.search, svc.graph,
+                       ["hub", "spoke01", "spoke07", "spoke09"],
+                       "about hub", rc.MechanicalController(), hops=1,
+                       degree_fn=degrees.get, hub_threshold=None,
+                       max_searches_per_hop=2)
+    assert svc.queries[1:] == ["about hub spoke07", "about hub spoke01"]
+    assert st.searches_issued == 3
+
+
+def test_max_total_searches_stops_the_walk_and_flags_truncated():
+    svc = _CountingSvc(_star(10))
+    st = rc.run_recall(svc.search, svc.graph, _star_vocab(10), "about hub",
+                       rc.MechanicalController(), hops=3,
+                       max_total_searches=5)
+    assert len(svc.queries) == 5          # seed + 4 re-queries, then stop
+    assert st.searches_issued == 5
+    assert st.truncated is True
+
+
+def test_total_ceiling_counts_the_seed_search():
+    svc = _CountingSvc(_star(10))
+    st = rc.run_recall(svc.search, svc.graph, _star_vocab(10), "about hub",
+                       rc.MechanicalController(), hops=3,
+                       max_total_searches=1)
+    assert len(svc.queries) == 1          # the seed search alone exhausts it
+    assert st.truncated is True
+    assert "hub" in st.entities           # and it still returns what it has
+
+
+def test_time_budget_returns_partial_instead_of_running_on():
+    svc = _CountingSvc(_star(20), delay=0.02)
+    st = rc.run_recall(svc.search, svc.graph, _star_vocab(20), "about hub",
+                       rc.MechanicalController(), hops=3,
+                       time_budget_seconds=0.05)
+    assert st.truncated is True
+    assert len(svc.queries) < 21          # did not run the full fan-out
+    assert st.seeds == ["hub"]            # fail-soft: returns what it has
+
+
+def test_skip_part_of_expansion_keeps_facts_but_does_not_requery():
+    edges = [("hub", "part-of", "container"), ("hub", "depends-on", "dep")]
+    svc = _CountingSvc(_FakeSvc(["hub relates to things"], edges))
+    st = rc.run_recall(svc.search, svc.graph, ["hub", "container", "dep"],
+                       "about hub", rc.MechanicalController(), hops=1,
+                       skip_part_of_expansion=True)
+    assert svc.queries == ["about hub", "about hub dep"]
+    assert "container" in st.entities     # still a result, with its facts
+    assert "container" in st.entity_facts
+
+
+def test_skip_part_of_expansion_off_requeries_everything():
+    edges = [("hub", "part-of", "container"), ("hub", "depends-on", "dep")]
+    svc = _CountingSvc(_FakeSvc(["hub relates to things"], edges))
+    rc.run_recall(svc.search, svc.graph, ["hub", "container", "dep"],
+                  "about hub", rc.MechanicalController(), hops=1)
+    assert svc.queries == ["about hub", "about hub container", "about hub dep"]
+
+
+# The pre-change response, captured verbatim from this repo at 7595ce6f
+# (the commit this branch forks from) for the ``_two_hop`` fixture, whose
+# walk issues 3 searches — under every default cap. Any drift in the
+# capped walk's output on an uncapped-sized neighborhood shows up here as
+# an inequality, not as a subtle ranking change nobody notices.
+_TWO_HOP_PRE_CHANGE_RESPONSE = {
+    "query": "what does alpha run on",
+    "seeds": ["alpha"],
+    "entities": [
+        {"entity": "alpha", "facts": [{"attribute": "t", "value": "alpha"}]},
+        {"entity": "beta", "facts": []},
+        {"entity": "gamma", "facts": []},
+    ],
+    "edges": [
+        {"src": "alpha", "relation": "depends-on", "dst": "beta",
+         "derived": False},
+        {"src": "beta", "relation": "runs-on", "dst": "gamma",
+         "derived": False},
+    ],
+    "paths": [],
+    "texts": ["alpha depends-on beta", "ZZZ runtime note gamma here"],
+    "iterations": 3,
+    "hops": 3,
+    "low_confidence": False,
+    "entity_hop": {"alpha": 0, "beta": 1, "gamma": 2},
+    "edge_hop": [1, 2],
+    "seed_text_count": 1,
+}
+
+
+def test_response_is_byte_identical_when_the_walk_stays_under_the_caps():
+    from pseudolife_memory.utils.config import RecallConfig
+    cfg = RecallConfig()
+    svc = _CountingSvc(_two_hop())
+    st = rc.run_recall(svc.search, svc.graph, ["alpha", "beta", "gamma"],
+                       "what does alpha run on", rc.MechanicalController(),
+                       max_searches_per_hop=cfg.max_searches_per_hop,
+                       max_total_searches=cfg.max_total_searches,
+                       time_budget_seconds=cfg.time_budget_seconds,
+                       skip_part_of_expansion=cfg.skip_part_of_expansion)
+    assert st.searches_issued < cfg.max_total_searches   # caps did not bind
+    assert st.truncated is False
+    out = rc.recall_state_to_dict(st, "what does alpha run on", 3)
+    assert out == _TWO_HOP_PRE_CHANGE_RESPONSE
+    # ... and the two new fields are served only when they mean something.
+    assert "truncated" not in out and "searches_issued" not in out
+
+
+def test_truncated_response_carries_the_two_new_fields():
+    svc = _CountingSvc(_star(10))
+    st = rc.run_recall(svc.search, svc.graph, _star_vocab(10), "about hub",
+                       rc.MechanicalController(), hops=3,
+                       max_total_searches=4)
+    out = rc.recall_state_to_dict(st, "about hub", 3)
+    assert out["truncated"] is True
+    assert out["searches_issued"] == 4
+
+
+def test_recall_config_fanout_cap_defaults():
+    from pseudolife_memory.utils.config import RecallConfig
+    c = RecallConfig()
+    assert c.max_searches_per_hop == 6
+    assert c.max_total_searches == 31
+    assert c.time_budget_seconds == 20.0
+    assert c.skip_part_of_expansion is False
+
+
+def test_default_ceiling_is_a_backstop_at_the_max_advertised_hops():
+    """``memory_recall`` clamps ``hops`` to 1..5, so a ceiling that calls
+    itself a backstop has to sit above what the per-hop cap can spend at
+    5 hops: 1 + 6 x 5 = 31. At the first-cut default of 20 a 5-hop request
+    silently ran four hops and came back flagged ``truncated`` — a working
+    limit dressed as a backstop (2026-09-04 review finding 1). This walks
+    the widest shape the defaults allow (8 new entities per hop, every
+    hop) and pins that nothing is cut."""
+    from pseudolife_memory.utils.config import RecallConfig
+    cfg = RecallConfig()
+    svc = _CountingSvc(_layers())
+    st = rc.run_recall(svc.search, svc.graph, _layers_vocab(), "about hub",
+                       rc.MechanicalController(), hops=5,
+                       max_searches_per_hop=cfg.max_searches_per_hop,
+                       max_total_searches=cfg.max_total_searches,
+                       time_budget_seconds=cfg.time_budget_seconds)
+    # Every hop ran, and each spent its full per-hop allowance.
+    assert st.iterations == 5
+    assert st.searches_issued == 1 + cfg.max_searches_per_hop * 5
+    assert st.truncated is False
+    assert "L5_00" in st.entities          # the deepest layer was reached
+
+
+def test_fanout_caps_are_exposed_in_the_console_config_registry():
+    from pseudolife_memory.web.config_io import KNOBS
+    paths = {row["path"]: row for row in KNOBS}
+    for name, default in (("max_searches_per_hop", 6),
+                          ("max_total_searches", 31),
+                          ("time_budget_seconds", 20.0),
+                          ("skip_part_of_expansion", False)):
+        row = paths[f"memory.recall.{name}"]
+        assert row["default"] == default
+        assert row["group"] == "Recall"
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_service_recall_passes_the_caps_through(tmp_path, monkeypatch):
+    """The knobs are useless if ``service.recall`` doesn't hand them to the
+    walk — the seam every other recall config item is wired through."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    svc.config.memory.recall.max_searches_per_hop = 2
+    svc.config.memory.recall.max_total_searches = 7
+    svc.config.memory.recall.time_budget_seconds = 3.5
+    svc.config.memory.recall.skip_part_of_expansion = True
+    seen = {}
+
+    def spy(*a, **kw):
+        seen.update(kw)
+        return rc.RecallState()
+
+    monkeypatch.setattr(rc, "run_recall", spy)
+    svc.recall("anything at all")
+    assert seen["max_searches_per_hop"] == 2
+    assert seen["max_total_searches"] == 7
+    assert seen["time_budget_seconds"] == 3.5
+    assert seen["skip_part_of_expansion"] is True
+
+
+# ---------------------------------------------------------------------------
+# Review findings, 2026-09-04 (independent pass over this branch's diff).
+# ---------------------------------------------------------------------------
+
+class _InducedSvc(_CountingSvc):
+    """Like ``_CountingSvc`` but its ``graph`` returns the INDUCED subgraph,
+    the way the real ``graph_neighborhood`` does (``graph.py``'s
+    ``build_subgraph`` keeps every edge whose endpoints are both inside the
+    neighborhood, not just the ones incident to the root). ``_FakeSvc``
+    returns only incident edges, which hid a bug in the first cut of
+    ``skip_part_of_expansion``: a neighbour-to-neighbour edge made a
+    containment-only arrival look like a domain one."""
+
+    def graph(self, entity, depth=1):
+        nbrs = {entity}
+        for (s, _r, d) in self.inner.edges:
+            if s == entity:
+                nbrs.add(d)
+            if d == entity:
+                nbrs.add(s)
+        nodes = [{"entity": entity,
+                  "facts": [{"attribute": "t", "value": entity}]}]
+        nodes += [{"entity": n, "facts": []}
+                  for n in sorted(nbrs - {entity})]
+        edges = [{"src": s, "relation": r, "dst": d, "derived": False}
+                 for (s, r, d) in self.inner.edges
+                 if s in nbrs and d in nbrs]
+        return {"found": True, "nodes": nodes, "edges": edges, "paths": []}
+
+
+def test_skip_part_of_ignores_neighbour_to_neighbour_edges():
+    # container is reached from the seed ONLY by part-of, but it also sits
+    # on a container->dep edge that the induced subgraph returns. Only the
+    # edges incident to the node being EXPANDED say how a neighbour
+    # arrived, so container must still be skipped.
+    edges = [("hub", "part-of", "container"),
+             ("hub", "depends-on", "dep"),
+             ("container", "relates-to", "dep")]
+    svc = _InducedSvc(_FakeSvc(["hub relates to things"], edges))
+    st = rc.run_recall(svc.search, svc.graph, ["hub", "container", "dep"],
+                       "about hub", rc.MechanicalController(), hops=1,
+                       skip_part_of_expansion=True)
+    assert svc.queries == ["about hub", "about hub dep"]
+    assert "container" in st.entities        # still a result
+
+
+def test_per_hop_cap_does_not_narrow_the_next_hop_frontier():
+    """The caps bound SEARCH, not expansion: an entity that lost its
+    re-query to the per-hop cap must still be expanded through, or the
+    knob quietly becomes a depth limit (``frontier = newly``, not
+    ``targets``)."""
+    edges = [("hub", "depends-on", f"spoke{i:02d}") for i in range(6)]
+    edges += [("spoke05", "runs-on", "deep")]      # only reachable via hop 2
+    svc = _CountingSvc(_FakeSvc(["hub relates to many things"], edges))
+    vocab = ["hub", "deep"] + [f"spoke{i:02d}" for i in range(6)]
+    st = rc.run_recall(svc.search, svc.graph, vocab, "about hub",
+                       rc.MechanicalController(), hops=2,
+                       max_searches_per_hop=1)
+    # Only spoke00 was re-queried on hop 1 (alphabetical, no seed mentions,
+    # no degrees) — spoke05 still expanded, so the hop-2 terminal arrives.
+    assert svc.queries[1] == "about hub spoke00"
+    assert "deep" in st.entities
+    assert st.entity_hop["deep"] == 2
+
+
+def test_per_hop_cap_alone_does_not_flag_truncated():
+    """Deliberate: a per-hop cut still returns every entity, edge and fact
+    the walk found — only supporting texts thin out, and the MCP layer caps
+    those at 6 anyway. ``truncated`` is reserved for the hard ceilings, so
+    it stays a signal rather than firing on nearly every live call."""
+    svc = _CountingSvc(_star(10))
+    st = rc.run_recall(svc.search, svc.graph, _star_vocab(10), "about hub",
+                       rc.MechanicalController(), hops=1,
+                       max_searches_per_hop=3)
+    assert st.truncated is False
+    out = rc.recall_state_to_dict(st, "about hub", 1)
+    assert "truncated" not in out and "searches_issued" not in out
+
+
+def test_requery_order_is_untouched_when_the_cap_exactly_fits():
+    """The reorder is gated on a strict ``>``: at exactly the cap the walk
+    must keep discovery order, which is what makes an under-cap response
+    byte-identical."""
+    edges = [("hub", "depends-on", f"spoke{i:02d}") for i in (9, 1, 5)]
+    svc = _CountingSvc(_FakeSvc(["hub connects to spoke09"], edges))
+    degrees = {"hub": 3, "spoke01": 1, "spoke05": 2, "spoke09": 20}
+    rc.run_recall(svc.search, svc.graph,
+                  ["hub", "spoke01", "spoke05", "spoke09"], "about hub",
+                  rc.MechanicalController(), hops=1, degree_fn=degrees.get,
+                  max_searches_per_hop=3)
+    # Discovery order (the graph's own sorted neighbor order), NOT the
+    # seed-mention/degree ranking that would have led with spoke09.
+    assert svc.queries[1:] == ["about hub spoke01", "about hub spoke05",
+                               "about hub spoke09"]
+
+
+def test_negative_caps_read_as_off_not_as_a_one_short_slice():
+    """A hand-edited config can carry a negative (the Console's minimums
+    are 0). ``targets[:-1]`` would silently drop one re-query per hop and
+    a negative ceiling would stop after the seed search — both look like
+    working caps."""
+    svc = _CountingSvc(_star(4))
+    st = rc.run_recall(svc.search, svc.graph, _star_vocab(4), "about hub",
+                       rc.MechanicalController(), hops=1,
+                       max_searches_per_hop=-1, max_total_searches=-5,
+                       time_budget_seconds=-1.0)
+    assert len(svc.queries) == 5          # seed + all four, uncapped
+    assert st.truncated is False
+
+
+def test_time_budget_stops_inside_the_expansion_loop():
+    """The budget is checked per expanded node, not only at the search
+    boundaries — a hop over a wide frontier is many ``graph_fn`` calls with
+    no search in between, and a walk that only checked at the search
+    boundaries would run the whole hop out first."""
+    slow = {"n": 0}
+    edges = [(f"hub{i}", "depends-on", f"spoke{i}") for i in range(3)]
+    inner = _FakeSvc(["three hubs"], edges)
+
+    def slow_graph(entity, depth=1):
+        import time as _t
+        slow["n"] += 1
+        _t.sleep(0.06)
+        return inner.graph(entity, depth)
+
+    svc = _CountingSvc(inner)
+    st = rc.run_recall(svc.search, slow_graph,
+                       ["hub0", "hub1", "hub2", "spoke0", "spoke1", "spoke2"],
+                       "about hub0 hub1 hub2", rc.MechanicalController(),
+                       hops=3, time_budget_seconds=0.1)
+    assert st.seeds == ["hub0", "hub1", "hub2"]
+    assert st.truncated is True
+    assert slow["n"] == 2                 # cut before the third seed expanded
+    assert len(svc.queries) == 1          # and never reached the re-queries

@@ -863,6 +863,28 @@ def test_memory_recall_caps_preserve_deep_hops_and_bound_size(monkeypatch) -> No
     # Internal hop-tracking bookkeeping must not leak into the tool result.
     assert "entity_hop" not in out and "edge_hop" not in out
     assert "seed_text_count" not in out
+    # A walk that hit no ceiling says nothing about ceilings (2026-09-04
+    # fan-out caps; the served-absent-when-default convention).
+    assert "truncated" not in out and "searches_issued" not in out
+
+
+def test_memory_recall_surfaces_truncation_through_the_output_caps(
+        monkeypatch) -> None:
+    """When the walk stopped on a search ceiling or the time budget, the
+    caller has to be able to tell a complete neighborhood from a partial
+    one — the output caps above already make the response look the same
+    size either way (2026-09-04 fan-out caps)."""
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    fixture = dict(_oversized_recall_fixture())
+    fixture["truncated"] = True
+    fixture["searches_issued"] = 20
+    monkeypatch.setattr(mcp_server.service, "recall",
+                        lambda *a, **k: dict(fixture))
+
+    out = _invoke("memory_recall", {"query": "what does root-svc connect to"})
+
+    assert out["truncated"] is True
+    assert out["searches_issued"] == 20
 
 
 # ---------------------------------------------------------------------------

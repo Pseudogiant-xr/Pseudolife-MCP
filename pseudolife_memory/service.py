@@ -6562,6 +6562,13 @@ class MemoryService(DreamOps):
             degree_fn=(degrees.get if cfg.hub_gate else None),
             hub_threshold=threshold,
             expand_budget=(cfg.expand_budget or None),
+            # Search fan-out caps; 0 means off, and ``run_recall`` takes
+            # None for off, so an operator zeroing a knob gets exactly the
+            # pre-cap walk.
+            max_searches_per_hop=cfg.max_searches_per_hop or None,
+            max_total_searches=cfg.max_total_searches or None,
+            time_budget_seconds=cfg.time_budget_seconds or None,
+            skip_part_of_expansion=bool(cfg.skip_part_of_expansion),
         )
         if getattr(cfg, "pin_constraints", None) is None:
             pin = getattr(self.config.memory.cortex, "pin_constraints", True)

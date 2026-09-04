@@ -562,10 +562,15 @@ provenance stamp** so the agent has a real sense of *when* a fact held and
   (the shim's `X-PL-Session` header preferred), so a Codex session, a second
   Claude session, and the dream are all distinguishable.
 
-Reads surface this: serialised facts include the stamp plus a human `age`
+Reads surface this: a serialised fact includes the stamp plus a human `age`
 ("3 days ago"), and **`memory_history(entity, attribute)`** returns the
 full version timeline — current + superseded, oldest→newest, each
-attributed. The supersession log records the writer/session too.
+attributed. The supersession log records the writer/session too. Since
+2026-09-04 the *stamp itself* — `tx_time`, `valid_time`, `writer_id`,
+`session_id` — is served by `memory_fact_get(..., verbose=True)`; the
+default record carries `asserted_at`/`age`, `last_confirmed` and the
+freshness flags, which is what a caller acts on. The REST/Console reads
+(`service.*`) are unchanged.
 
 > **Writer topology.** The live path is a single daemon with a coarse lock
 > (`write_mode=snapshot`) — correct by construction. The schema also lays a
