@@ -21,19 +21,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   already requires an outcome at task end; this makes the call carry the one
   thing only the caller knows.
 - **No schema bump.** `outcome_signals` is untouched and nothing is appended
-  to `detail` — the audit trail is the `retrieval_uses` row plus the
-  `episode_id` / `created_at` both tables already carry. The result reports
-  `used_ids_recorded` (ids credited to an event) and `used_ids_unmatched`
-  (ids no event in the window served), because a silent zero reads exactly
-  like a landed label. The `memory.retrieval_log.enabled` kill-switch covers
-  the new label too, and says so in the result.
+  to `detail`, and nothing links a signal row to the use rows it caused: the
+  labels stand on their own, and which outcome named which ids is
+  deliberately not recorded (the event's `episode_id` is stamped by the
+  writer at search time, the signal's comes from the `episode=` handle —
+  they are not a join). The result reports `used_ids_recorded` (ids credited
+  to an event), `used_ids_unmatched` (ids no event in the window served) and
+  `used_ids_errors` (labels the storage layer refused — an error is not a
+  miss, and reporting it as one would tell the agent nothing had served its
+  ids), because a silent zero reads exactly like a landed label. The
+  `memory.retrieval_log.enabled` kill-switch covers the new label too, and
+  says so in the result.
 - **Input parsing is deliberately wide** (`_parse_used_ids`): a real list of
   ints, a list of int-like strings, a JSON-encoded list, a comma- or
   space-separated string, or a bare id all land — Claude Code stringifies
   list params, and this list is typed by a model mid-sentence. Non-integer
-  tokens are dropped and counted (`used_ids_ignored`); a `used_ids` with
-  nothing usable in it returns `used_ids_reason` and still records the
-  outcome signal, which is the payload the whole convention exists for.
+  tokens are dropped and counted (`used_ids_ignored`), and the LENGTH gets
+  the same distrust as the contents: at most 50 distinct ids are taken per
+  call and the drop is reported as `used_ids_truncated`, since a runaway
+  list would be one storage round trip per id under the service lock and
+  the whole junk list echoed back as unmatched. A `used_ids` with nothing
+  usable in it returns `used_ids_reason` and still records the outcome
+  signal, which is the payload the whole convention exists for.
 - Served guidance asks for it: the session-start block
   (`web/session_hook.MEMORY_LOOP_BLOCK`, mirrored in
   `examples/CLAUDE.memory.md`) names `used_ids` in the REFLECT beat, funded

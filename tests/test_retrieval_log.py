@@ -399,3 +399,57 @@ def test_record_outcome_used_ids_silent_when_retrieval_log_disabled(
     assert out["used_ids_recorded"] == 0
     assert out["used_ids_reason"] == "retrieval log disabled"
     assert svc._storage.retrieval_events_window()[-1]["uses"] == []
+
+
+def test_record_outcome_separates_a_label_write_failure_from_a_miss(
+        pg_conn, pg_url, tmp_path, monkeypatch):
+    """A database failure and "no search served this id" are different
+    answers. Both used to come back as ``used_ids_unmatched``, telling the
+    agent its retrieval was never served when in fact the write raised —
+    the failures are counted in ``used_ids_errors`` instead, and the outcome
+    signal still records."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    entry_id = svc.search(text)["entries"][0]["id"]
+
+    real = svc._storage.credit_retrieval_use
+
+    def _flaky(eid, *args, **kwargs):
+        if int(eid) == 424242:
+            raise RuntimeError("connection reset by peer")
+        return real(eid, *args, **kwargs)
+
+    monkeypatch.setattr(svc._storage, "credit_retrieval_use", _flaky)
+    before = svc._retrieval_log_errors
+
+    out = svc.record_outcome("t", "success",
+                             used_ids=[entry_id, 424242, 987654])
+    assert out["recorded"] is True
+    assert out["used_ids_recorded"] == 1
+    assert out["used_ids_errors"] == 1
+    # The failed id is NOT reported as one nothing served.
+    assert out["used_ids_unmatched"] == [987654]
+    # The existing error accounting is unchanged.
+    assert svc._retrieval_log_errors == before + 1
+
+    uses = svc._storage.retrieval_events_window()[-1]["uses"]
+    assert [u["entry_id"] for u in uses if u["used_via"] == "outcome"] \
+        == [entry_id]
+
+
+def test_record_outcome_omits_used_ids_errors_when_nothing_failed(
+        pg_conn, pg_url, tmp_path):
+    """The key is a report of trouble, so it is absent on the happy path."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    entry_id = svc.search(text)["entries"][0]["id"]
+
+    out = svc.record_outcome("t", "success", used_ids=[entry_id])
+    assert out["used_ids_recorded"] == 1
+    assert "used_ids_errors" not in out

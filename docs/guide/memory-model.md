@@ -496,8 +496,13 @@ the `memory_search` hits the work actually turned on. Each one credits the
 serving `retrieval_events` row with a `retrieval_uses` label
 (`used_via="outcome"`) — the relevance signal a learned reranker trains on,
 which otherwise only `memory_get` / `memory_reinforce` produce. Nothing is
-written to the signal itself; the result reports `used_ids_recorded` and
-`used_ids_unmatched` (ids no search in the window served).
+written to the signal itself, and nothing links a signal to the labels it
+caused: the labels stand on their own, and which outcome named which ids is
+deliberately not recorded. The result reports `used_ids_recorded`,
+`used_ids_unmatched` (ids no search in the window served) and
+`used_ids_errors` (labels the storage layer refused, which is not the same
+answer as a miss); at most 50 ids are taken per call, any beyond that
+reported as `used_ids_truncated`.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,

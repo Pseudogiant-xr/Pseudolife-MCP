@@ -2278,12 +2278,13 @@ id to the most recent event in the session window that served it, writing
 the ordinary `retrieval_uses` row under `used_via="outcome"` — so
 `retrieval_replay.py`'s `uses` label source and this script's `by_via`
 breakdown pick it up with no harness change, and the two dereference vias
-stay distinguishable from the asserted one. No schema bump: the audit
-trail is that row plus the `episode_id` / `created_at` both tables already
-carry, and nothing is appended to the signal's `detail` prose. The result
-reports `used_ids_recorded` and `used_ids_unmatched`, because an id no
-event served must not read the same as a landed label. Whether agents
-actually pass it is the open question — the served session-start block
+stay distinguishable from the asserted one. No schema bump, and no join:
+nothing links a signal row to the use rows it caused — the labels stand on
+their own, and which outcome named which ids is deliberately not recorded.
+The result reports `used_ids_recorded`, `used_ids_unmatched` and
+`used_ids_errors`, because an id no event served must not read the same as
+a landed label, and neither must a label the storage layer refused.
+Whether agents actually pass it is the open question — the served session-start block
 (`MEMORY_LOOP_BLOCK`) now asks for it in the REFLECT beat, and the next
 telemetry review measures the answer against the 1 label above.
 
