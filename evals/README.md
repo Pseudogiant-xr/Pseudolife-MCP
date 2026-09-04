@@ -717,7 +717,6 @@ test over the 78 questions:
   tables now show. The v2 figures remain the same-stack baseline for
   everything else measured on the TurboQuant fork.
 
-
 ## Cue-gated contiguity (offline re-read of `aggp1-variants-0803`)
 
 **2026-09-04 — no new answer or judge calls.** The 2026-08-04 Phase-1
