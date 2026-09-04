@@ -17,6 +17,46 @@ This one holds the pool construction fixed and varies the sweep. It is
 the "realistic sweep vs oracle sweep" follow-up the 2026-08-15 spec's
 fixed interpretation rule named.
 
+## Amendment (2026-09-05, before the run) — which dumps
+
+The smoke run of the control arm failed G-F0, and the reason is worth
+recording rather than patching over: **`distractor_scale_probe.DUMP_DIR`
+does not name the directory the 2026-08-15 artifact was produced from.**
+
+That constant points at `results/banks/s-qwen-27b-ablbands-flat`, which on
+this tree holds the **retired 384-d MiniLM replay** (files dated
+2026-07-24). Re-selecting through it reproduces 11 of 30 checked
+question×scale cells; pool sizes match exactly, rankings do not, and no
+`select_topk` knob closes the gap (bm25 on/off, recency on/off, and the
+slot channel suppressed were all tried — 6 to 11 of 30 each).
+
+The v25 replay the artifact actually came from is **1024-d** — as this
+probe's own predecessor spec says, "1024-d embeddings already computed" —
+and sits in a sibling directory dated 2026-08-14/15. Re-selecting through
+it reproduces **40 of 40** checked cells exactly, control fields and pool
+sizes alike.
+
+The sibling's directory-name suffix is machine-local, so this probe does
+not hardcode it. It resolves the dump directory by **backbone dimension**:
+the one `results/banks/s-qwen-27b-ablbands-flat*` directory holding 78
+dumps whose `query_emb` is 1024-d, refusing with a listing when that is
+ambiguous or absent, and `--dumps` overrides. The chosen directory name
+and dimension are recorded in the artifact.
+
+Nothing else in this spec changes: the arms, capacities, metrics, gates
+and expected ordering above were written before any of this was known,
+and G-F0 remains an abort condition rather than a caveat.
+
+Two consequences worth stating for whoever reads this next:
+
+- The distractor probe as committed cannot regenerate its own published
+  artifact on this machine. It never noticed because it refuses to
+  overwrite an existing result file — the guard that protects canonical
+  numbers also hides that they have stopped reproducing.
+- Any other analysis that inherited that `DUMP_DIR` constant is reading
+  the retired backbone. Auditing them is out of scope here and is left as
+  a follow-up.
+
 ## Design
 
 Pure offline analysis, CPU only, no GPU, no judge, no daemon, no network.
