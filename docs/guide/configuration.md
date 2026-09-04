@@ -281,6 +281,25 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   experiments (neighbor expansion, a timeline channel) that measurably
   failed their gates and ship dormant; they remain settable for
   replication but there is no measured reason to enable them.
+- **Candidate pool at the served width**
+  (`memory.search.candidate_pool_multiplier = 1`,
+  `memory.search.fusion = "weighted_sum"`) — the
+  retrieve-then-rerank shape (a dense pool `top_k x multiplier` wide,
+  optionally merged by reciprocal rank fusion instead of raw-sorting
+  incommensurate channel scores) exists and is settable, and it **lost**
+  its judged run: on the LongMemEval knowledge-update oracle slice
+  (2026-09-04, n=78) multiplier 4 cost naive RAG 0.115 accuracy under
+  `rrf` and 0.077 under `weighted_sum`, while serving 36-54% more
+  context tokens on every arm that serves turns. Table, caveats and artifacts in
+  `evals/README.md` ("Judged verdict (2026-09-04)"). CAUTION if you
+  enable `rrf` anyway: it changes the SCALE of every served score to
+  ~0.016-0.05, so `memory.search_confidence_floor` must stay 0, and
+  `rrf` must not be combined with the cross-encoder reranker
+  (`memory.reranker.fusion_weight` collapses to cross-encoder-only
+  ordering, `memory.reranker.skip_margin` can never be reached) or with
+  a populated reference bank (its raw cosines are not rescaled and
+  outrank every memory once the reranker fires). Neither combination has
+  been measured.
 - **Staleness served as annotation** (`memory.search.stale_policy =
   "annotate"`) — stale records (past 2×TTL for their freshness class)
   carry `effective_confidence`/`stale` flags and nothing more, today's
@@ -300,6 +319,28 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   renders the record `value` field, so under `quarantine` a stale fact
   shows the wrapper there — a known P2 cost to weigh before ever
   flipping the default.
+
+- **Compact MCP payloads on** (`memory.mcp.compact_payloads = true`,
+  `memory.mcp.entry_text_chars = 600`) — the payload an MCP client reads
+  *back* from a tool call, shaped for its context window: a
+  `memory_search` hit's `text` is truncated to `entry_text_chars` and
+  marked `truncated: true` (`memory_get` returns the full text;
+  `superseded_by_text` is exempt from the cap — a compact entry carries no
+  id for the superseding entry, so a clipped correction could not be
+  recovered by any call); the cortex block serves `min(5, top_k)` facts,
+  so a narrow search stops paying for five;
+  and `memory_fact_get` serves the acting subset — value, kind/members,
+  confidence, origin, `asserted_at`/`age`, freshness, the currency and
+  label flags, `correct_with`, `source_entries`, `entity_ref`,
+  `contenders` — moving provenance, support, writer/session id, tx/valid
+  time and the supersession chain behind `verbose=True`. Measured on the
+  2026-09-04 agent token ledger (`evals/agent_token_ledger.py`, r3): a
+  default `top_k=8` search fell from 14,745 to 9,951 chars mean,
+  `memory_fact_get` from 2,175 to 1,296. These are PROJECTIONS above the
+  service layer — ranking, `min_score` and every benchmark number are
+  unaffected. Set `compact_payloads: false` to restore the pre-2026-09-04
+  payloads verbatim; raise `entry_text_chars` for long-form corpora where
+  the tail of a note carries the answer.
 
 ## Toolset tiers
 

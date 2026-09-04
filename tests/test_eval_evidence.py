@@ -168,6 +168,7 @@ BENCH = "docs/guide/benchmarks.md"
 READ_ME = "README.md"
 CHANGELOG = "CHANGELOG.md"
 EVALS = "evals/README.md"
+CONFIG_GUIDE = "docs/guide/configuration.md"
 
 # ── the local-ceiling table (README front door + guide) ───────────────────
 # Re-based 2026-07-30 onto ceiling-v25 (reproducible q8_0 server). Its std
@@ -3219,7 +3220,1401 @@ CLAIMS.append(Claim(
         "A4_two_vote_accept_mean_ge0.6_not_lowdiff"]["bad"]),
     stated=0, places=0))
 
+# ── offline routing analysis (2026-09-04, evals/README.md) ───────────────
+# Lever-4 question: is a query-shape router worth building, or is the gain
+# already in the commit-gated cascade? Answered offline from three
+# already-judged runs — no new answer or judge calls — so every number in
+# that section is a re-aggregation of ONE artifact, pinned here.
+ROUTER = RESULTS + "router-offline-20260904.json"
 
+
+def _r_arm(ds: str, arm: str, field: str):
+    return lambda d: d["datasets"][ds]["arms"][arm][field]
+
+
+def _r_pol(ds: str, key: str, field: str):
+    return lambda d: d["datasets"][ds]["policies"][key][field]
+
+
+def _r_verdict(ds: str, field: str):
+    return lambda d: d["verdict"][ds][field]
+
+
+# (needle, dataset, kind, key, stated score / cost / ratio) — one table row
+# each, pinned on all three published columns so a partial edit fails.
+_ROUTER_ROWS = [
+    # LongMemEval, 500 questions
+    ("| cortex only | 0.416 | 158 | 2.629 |",
+     "LME-500", "arms", "cortex", 0.416, 158, 2.629),
+    ("| hybrid (facts + top-k) | 0.664 | 842 | 0.789 |",
+     "LME-500", "arms", "hybrid", 0.664, 842, 0.789),
+    ("| **rag — best single arm** | **0.688** | 1210 | 0.569 |",
+     "LME-500", "arms", "rag", 0.688, 1210, 0.569),
+    ("| cascade (shipped policy) | 0.690 | 883 | 0.782 |",
+     "LME-500", "arms", "cascade", 0.690, 883, 0.782),
+    ("| oracle by type (arms + cascade) | 0.712 | 893 | 0.797 |",
+     "LME-500", "policies", "oracle_by_type[with_cascade]",
+     0.712, 893, 0.797),
+    ("| oracle per question (ceiling) | 0.778 | 419 | 1.857 |",
+     "LME-500", "policies", "oracle_per_question[base]", 0.778, 419, 1.857),
+    ("| router via predicted type | 0.686 | 1002 | 0.685 |",
+     "LME-500", "policies", "router_via_type[base|logreg]",
+     0.686, 1002, 0.685),
+    ("| two-stage: cascade, then router | 0.690 | 883 | 0.782 |",
+     "LME-500", "policies", "two_stage[tree_d3|acc]", 0.690, 883, 0.782),
+    ("| two-stage, token-greedy labels | 0.656 | 667 | 0.983 |",
+     "LME-500", "policies", "two_stage[tree_d3|cheap]", 0.656, 667, 0.983),
+    # BEAM 100K, 400 questions (cost in context CHARACTERS)
+    ("| cortex only | 0.283 | 2 207 | 0.513 |",
+     "BEAM-400", "arms", "cortex", 0.283, 2207, 0.513),
+    ("| cascade | 0.552 | 14 294 | 0.154 |",
+     "BEAM-400", "arms", "cascade", 0.552, 14294, 0.154),
+    ("| hybrid | 0.623 | 24 398 | 0.102 |",
+     "BEAM-400", "arms", "hybrid", 0.623, 24398, 0.102),
+    ("| refind | 0.627 | 41 757 | 0.060 |",
+     "BEAM-400", "arms", "refind", 0.627, 41757, 0.060),
+    ("| **rag — best single arm** | **0.642** | 22 158 | 0.116 |",
+     "BEAM-400", "arms", "rag", 0.642, 22158, 0.116),
+    ("| oracle by type (arms + cascade) | 0.683 | 22 861 | 0.120 |",
+     "BEAM-400", "policies", "oracle_by_type[with_cascade]",
+     0.683, 22861, 0.120),
+    ("| oracle by type (+ the no-memory arm) | 0.688 | 22 635 | 0.122 |",
+     "BEAM-400", "policies", "oracle_by_type[with_nomem]",
+     0.688, 22635, 0.122),
+    ("| oracle per question (ceiling) | 0.789 | 17 672 | 0.179 |",
+     "BEAM-400", "policies", "oracle_per_question[with_nomem]",
+     0.789, 17672, 0.179),
+    ("| router via predicted type | 0.620 | 27 780 | 0.089 |",
+     "BEAM-400", "policies", "router_via_type[base|logreg]",
+     0.620, 27780, 0.089),
+    ("| two-stage: cascade, then router | 0.554 | 14 364 | 0.154 |",
+     "BEAM-400", "policies", "two_stage[tree_d3|acc]", 0.554, 14364, 0.154),
+    # LongMemEval knowledge-update, 78 questions (ceiling-v38)
+    ("| cortex only | 0.667 | 97 | 6.894 |",
+     "LME-KU78", "arms", "cortex", 0.667, 97, 6.894),
+    ("| hybrid | 0.846 | 731 | 1.157 |",
+     "LME-KU78", "arms", "hybrid", 0.846, 731, 1.157),
+    ("| cascade | 0.846 | 389 | 2.173 |",
+     "LME-KU78", "arms", "cascade", 0.846, 389, 2.173),
+    ("| **rag — best single arm** | **0.859** | 1184 | 0.725 |",
+     "LME-KU78", "arms", "rag", 0.859, 1184, 0.725),
+    ("| oracle per question (ceiling) | 0.962 | 318 | 3.021 |",
+     "LME-KU78", "policies", "oracle_per_question[base]", 0.962, 318, 3.021),
+    ("| two-stage: cascade, then router | 0.846 | 382 | 2.212 |",
+     "LME-KU78", "policies", "two_stage[tree_d3|acc]", 0.846, 382, 2.212),
+]
+
+for _needle, _ds, _kind, _key, _score, _cost, _ratio in _ROUTER_ROWS:
+    _get = _r_arm if _kind == "arms" else _r_pol
+    _slug = f"router-{_ds.lower()}-{_kind}-{_key}".replace(" ", "")
+    CLAIMS.append(Claim(
+        id=f"{_slug}-score", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_get(_ds, _key, "score"), stated=_score, places=3))
+    CLAIMS.append(Claim(
+        id=f"{_slug}-cost", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_get(_ds, _key, "cost"), stated=float(_cost), places=0))
+    CLAIMS.append(Claim(
+        id=f"{_slug}-ratio", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_get(_ds, _key, "score_per_1k_tokens"), stated=_ratio,
+        places=3))
+
+# The no-memory arm serves nothing, so its ratio column reads "n/a".
+CLAIMS.append(Claim(
+    id="router-beam-nomem-score", doc=EVALS,
+    needle="| no memory | 0.181 | 0 | n/a |", artifacts=(ROUTER,),
+    value=_r_arm("BEAM-400", "nomem", "score"), stated=0.181, places=3))
+CLAIMS.append(Claim(
+    id="router-beam-nomem-cost", doc=EVALS,
+    needle="| no memory | 0.181 | 0 | n/a |", artifacts=(ROUTER,),
+    value=_r_arm("BEAM-400", "nomem", "cost"), stated=0.0, places=0))
+
+# The sanity gate the whole section rests on: the script must reproduce
+# each source run's own published per-arm table before anything else in it
+# means anything.
+CLAIMS.append(Claim(
+    id="router-sanity-lme500-exact", doc=EVALS,
+    needle="from the rows: LME-500 reproduces its summary exactly (max score delta",
+    artifacts=(ROUTER,),
+    value=lambda d: d["datasets"]["LME-500"]["sanity_vs_summary"][
+        "max_score_delta"], stated=0.0, places=4))
+
+# The verdict paragraph and the deltas quoted around the tables.
+_ROUTER_SCALARS = [
+    ("router-lme-oracle-gain",
+     "The oracle-by-type bound is **+0.024** over the best single arm, at 316",
+     _r_verdict("LME-500", "oracle_by_type_gain"), 0.024, 3),
+    ("router-lme-oracle-cost-saved",
+     "The oracle-by-type bound is **+0.024** over the best single arm, at 316",
+     lambda d: abs(d["verdict"]["LME-500"]["oracle_by_type_cost_delta"]),
+     316.0, 0),
+    ("router-lme-realizable-gain",
+     "fewer tokens. The best realizable router is **+0.002**, and it is the",
+     _r_verdict("LME-500", "realizable_gain"), 0.002, 3),
+    ("router-lme-two-stage-commits",
+     "the 193 questions where cortex commits and rag on the other 307, landing on",
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "two_stage[logreg|acc]"]["arm_share"]["cortex(commit)"], 193, 0),
+    ("router-lme-two-stage-rag",
+     "the 193 questions where cortex commits and rag on the other 307, landing on",
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "two_stage[logreg|acc]"]["arm_share"]["rag"], 307, 0),
+    ("router-lme-single-stage-best-score",
+     "single-stage one ties the best single arm at 0.688 on 1205 tokens, and the",
+     _r_pol("LME-500", "router[base|tree_d3|acc]", "score"), 0.688, 3),
+    ("router-lme-single-stage-best-cost",
+     "single-stage one ties the best single arm at 0.688 on 1205 tokens, and the",
+     _r_pol("LME-500", "router[base|tree_d3|acc]", "cost"), 1205, 0),
+    ("router-lme-with-cascade-score",
+     "two variants free to pick the cascade as well tie at 0.678, on 1005 and",
+     _r_pol("LME-500", "router[with_cascade|tree_d3|acc]", "score"),
+     0.678, 3),
+    ("router-lme-with-cascade-cost-tree",
+     "two variants free to pick the cascade as well tie at 0.678, on 1005 and",
+     _r_pol("LME-500", "router[with_cascade|tree_d3|acc]", "cost"), 1005, 0),
+    ("router-lme-with-cascade-cost-logreg",
+     "1009 tokens, agreeing with the oracle-by-type choice on 0.226 of questions.",
+     _r_pol("LME-500", "router[with_cascade|logreg|acc]", "cost"), 1009, 0),
+    ("router-lme-router-agreement",
+     "1009 tokens, agreeing with the oracle-by-type choice on 0.226 of questions.",
+     _r_pol("LME-500", "router[with_cascade|logreg|acc]",
+            "agree_with_oracle_by_type"), 0.226, 3),
+    ("router-beam-oracle-gain",
+     "Here the oracle-by-type bound is larger — **+0.046** — but it costs 477",
+     _r_verdict("BEAM-400", "oracle_by_type_gain"), 0.046, 3),
+    ("router-beam-oracle-cost-added",
+     "Here the oracle-by-type bound is larger — **+0.046** — but it costs 477",
+     _r_verdict("BEAM-400", "oracle_by_type_cost_delta"), 477.0, 0),
+    ("router-beam-realizable-gain",
+     "realizable router recovers **+0.008** of that, also at more cost. The",
+     _r_verdict("BEAM-400", "realizable_gain"), 0.008, 3),
+    ("router-beam-cascade-cost",
+     "alone scores 0.283 there, so committing to it costs 0.09.",
+     lambda d: (d["verdict"]["BEAM-400"]["best_single_score"]
+                - d["verdict"]["BEAM-400"]["cascade_score"]), 0.09, 2),
+    ("router-lme-typepred",
+     "LME-500 and 0.652 on BEAM-400 by 5-fold CV, against majority baselines of",
+     lambda d: d["datasets"]["LME-500"]["type_predictability"]["logreg"][
+         "cv_accuracy"], 0.654, 3),
+    ("router-beam-typepred",
+     "LME-500 and 0.652 on BEAM-400 by 5-fold CV, against majority baselines of",
+     lambda d: d["datasets"]["BEAM-400"]["type_predictability"]["logreg"][
+         "cv_accuracy"], 0.652, 3),
+    ("router-lme-typepred-majority",
+     "0.266 and 0.100. The gap is not in the classifier. It is that",
+     lambda d: d["datasets"]["LME-500"]["type_predictability"]["logreg"][
+         "majority_baseline"], 0.266, 3),
+    ("router-beam-typepred-majority",
+     "0.266 and 0.100. The gap is not in the classifier. It is that",
+     lambda d: d["datasets"]["BEAM-400"]["type_predictability"]["logreg"][
+         "majority_baseline"], 0.100, 3),
+    ("router-lme-collapse-rag",
+     "models collapse: 493/500 rag under accuracy-first tie-breaking on",
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "router[base|tree_d3|acc]"]["arm_share"]["rag"], 493, 0),
+    ("router-lme-collapse-cortex",
+     "LME-500, or 475/500 cortex under cost-first, which trades 0.25 accuracy",
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "router[base|tree_d3|cheap]"]["arm_share"]["cortex"], 475, 0),
+    ("router-robustness-agree",
+     "choice agrees on **two**:",
+     lambda d: d["robustness"]["type_pairs"]["n_agree"], 2, 0),
+    ("router-robustness-pairs",
+     "choice agrees on **two**:",
+     lambda d: d["robustness"]["type_pairs"]["n_pairs"], 4, 0),
+    ("router-verdict-lme-realizable",
+     "(LongMemEval, at 327 fewer tokens) and +0.008 (BEAM, at 671 MORE chars).",
+     _r_verdict("LME-500", "realizable_gain"), 0.002, 3),
+    ("router-verdict-lme-tokens-saved",
+     "(LongMemEval, at 327 fewer tokens) and +0.008 (BEAM, at 671 MORE chars).",
+     lambda d: abs(d["verdict"]["LME-500"]["realizable_cost_delta"]),
+     327.0, 0),
+    ("router-verdict-beam-chars-added",
+     "(LongMemEval, at 327 fewer tokens) and +0.008 (BEAM, at 671 MORE chars).",
+     _r_verdict("BEAM-400", "realizable_cost_delta"), 671.0, 0),
+    ("router-ceiling-gain-lme",
+     "the best single arm — say the channels genuinely disagree and a *perfect*",
+     _r_verdict("LME-500", "ceiling_gain"), 0.090, 3),
+    ("router-ceiling-gain-beam",
+     "the best single arm — say the channels genuinely disagree and a *perfect*",
+     _r_verdict("BEAM-400", "ceiling_gain"), 0.147, 3),
+    ("router-cascade-unbeaten",
+     "at 0.690/883 tokens, which the best router matches exactly and no router",
+     _r_arm("LME-500", "cascade", "score"), 0.690, 3),
+]
+
+for _cid, _needle, _value, _stated, _places in _ROUTER_SCALARS:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_value, stated=float(_stated), places=_places))
+
+# The KU-78 per-question ceiling is quoted beside the rag-union figure on
+# the SAME rows, so the union is pinned against the rows themselves — the
+# guide's 0.949 is a different run and a two-channel union, and the doc
+# says so.
+CLAIMS.append(Claim(
+    id="router-ku78-two-channel-union", doc=EVALS,
+    needle="against 0.936 for the rag∪cortex union on the same rows.",
+    artifacts=(V38_ROWS_JSONL,),
+    value=lambda rows: (sum(1 for r in rows
+                            if r["rag_correct"] or r["cortex_correct"])
+                        / len(rows)),
+    stated=0.936, places=3))
+
+# The "best cross-validated router" table row is a MAXIMUM over
+# configurations, and the fold-local tie-break fix (2026-09-04, review of
+# #260) moved which configuration attains it on LongMemEval without moving
+# the number. So the row pins against the verdict block, which names the
+# winner, instead of a policy key that can stop being the winner.
+def _r_best_ratio(ds: str, chars: bool):
+    def value(d):
+        v = d["verdict"][ds]
+        tokens = v["best_realizable_cost"] / (d["chars_per_token"]
+                                              if chars else 1.0)
+        return v["best_realizable_score"] / (tokens / 1000.0)
+    return value
+
+
+for _ds, _needle, _chars, _score, _cost, _ratio in (
+    ("LME-500", "| best cross-validated router | 0.690 | 883 | 0.782 |",
+     False, 0.690, 883, 0.782),
+    ("BEAM-400", "| best cross-validated router | 0.651 | 22 829 | 0.114 |",
+     True, 0.651, 22829, 0.114),
+):
+    _slug = f"router-{_ds.lower()}-best-realizable"
+    CLAIMS.append(Claim(
+        id=f"{_slug}-score", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_r_verdict(_ds, "best_realizable_score"), stated=_score,
+        places=3))
+    CLAIMS.append(Claim(
+        id=f"{_slug}-cost", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_r_verdict(_ds, "best_realizable_cost"), stated=float(_cost),
+        places=0))
+    CLAIMS.append(Claim(
+        id=f"{_slug}-ratio", doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_r_best_ratio(_ds, _chars), stated=_ratio, places=3))
+
+
+# The select-the-best disclosure counts the cross-validated configurations
+# the maximum is taken over. It understated BEAM by a third until the
+# review of #260, so the counts are read out of the artifact, not recalled.
+def _r_cv_configs(ds: str):
+    return lambda d: float(sum(
+        1 for k in d["datasets"][ds]["policies"]
+        if k.startswith(("router[", "router_via_type[", "two_stage["))))
+
+
+for _cid, _ds, _needle, _n in (
+    ("router-cv-configs-lme500", "LME-500",
+     "is **16** configurations on LongMemEval-500 and on the 78-question "
+     "slice —", 16),
+    ("router-cv-configs-ku78", "LME-KU78",
+     "is **16** configurations on LongMemEval-500 and on the 78-question "
+     "slice —", 16),
+    ("router-cv-configs-beam", "BEAM-400",
+     "two candidate sets each — and **22** on BEAM-400, which has three "
+     "because", 22),
+):
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(ROUTER,),
+        value=_r_cv_configs(_ds), stated=float(_n), places=0))
+
+
+# ── the same numbers where the CHANGELOG states them ──
+# The entry restates ~15 figures in prose. Every comparable prior entry
+# (aggp1-*, ev2-*, beamev-*, aggserve-*, c2op-*, lit-v6-*) pins its
+# CHANGELOG copy separately from the evals/README one, so that a rewrite of
+# either doc alone fails the guard. This section did not, until the review
+# of #260.
+_ROUTER_CHANGELOG = [
+    ("router-cl-lme-realizable-gain",
+     "and so does the oracle bound. Realizable gains: **+0.002** on "
+     "LongMemEval",
+     _r_verdict("LME-500", "realizable_gain"), 0.002, 3),
+    ("router-cl-lme-tokens-saved",
+     "(500 q, at 327 fewer tokens) and **+0.008** on BEAM 100K (400 q, at "
+     "671",
+     lambda d: abs(d["verdict"]["LME-500"]["realizable_cost_delta"]),
+     327, 0),
+    ("router-cl-beam-realizable-gain",
+     "(500 q, at 327 fewer tokens) and **+0.008** on BEAM 100K (400 q, at "
+     "671",
+     _r_verdict("BEAM-400", "realizable_gain"), 0.008, 3),
+    ("router-cl-beam-chars-added",
+     "MORE context chars). A router with perfect knowledge of the question "
+     "type",
+     _r_verdict("BEAM-400", "realizable_cost_delta"), 671, 0),
+    ("router-cl-lme-oracle-gain",
+     "reaches +0.024 (LongMemEval, under the bar) and +0.046 (BEAM, at more",
+     _r_verdict("LME-500", "oracle_by_type_gain"), 0.024, 3),
+    ("router-cl-beam-oracle-gain",
+     "reaches +0.024 (LongMemEval, under the bar) and +0.046 (BEAM, at more",
+     _r_verdict("BEAM-400", "oracle_by_type_gain"), 0.046, 3),
+    ("router-cl-two-stage-commits",
+     "configuration is the two-stage one, which serves cortex on the 193",
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "two_stage[logreg|acc]"]["arm_share"]["cortex(commit)"], 193, 0),
+    ("router-cl-two-stage-rag",
+     "questions where cortex commits and rag on the other 307, landing "
+     "exactly",
+     lambda d: d["datasets"]["LME-500"]["policies"][
+         "two_stage[logreg|acc]"]["arm_share"]["rag"], 307, 0),
+    ("router-cl-cascade-score",
+     "on the shipped 0.690 / 883 tokens. Question type IS predictable from",
+     _r_arm("LME-500", "cascade", "score"), 0.690, 3),
+    ("router-cl-cascade-cost",
+     "on the shipped 0.690 / 883 tokens. Question type IS predictable from",
+     _r_arm("LME-500", "cascade", "cost"), 883, 0),
+    ("router-cl-lme-typepred",
+     "surface text (0.654 and 0.652 by 5-fold CV against 0.266 / 0.100",
+     lambda d: d["datasets"]["LME-500"]["type_predictability"]["logreg"][
+         "cv_accuracy"], 0.654, 3),
+    ("router-cl-beam-typepred",
+     "surface text (0.654 and 0.652 by 5-fold CV against 0.266 / 0.100",
+     lambda d: d["datasets"]["BEAM-400"]["type_predictability"]["logreg"][
+         "cv_accuracy"], 0.652, 3),
+    ("router-cl-lme-typepred-majority",
+     "surface text (0.654 and 0.652 by 5-fold CV against 0.266 / 0.100",
+     lambda d: d["datasets"]["LME-500"]["type_predictability"]["logreg"][
+         "majority_baseline"], 0.266, 3),
+    ("router-cl-beam-typepred-majority",
+     "surface text (0.654 and 0.652 by 5-fold CV against 0.266 / 0.100",
+     lambda d: d["datasets"]["BEAM-400"]["type_predictability"]["logreg"][
+         "majority_baseline"], 0.100, 3),
+    ("router-cl-ceiling-lme",
+     "- Per-question ceilings say the channels do genuinely disagree: 0.778",
+     _r_pol("LME-500", "oracle_per_question[base]", "score"), 0.778, 3),
+    ("router-cl-ceiling-beam",
+     "(LongMemEval-500), 0.789 (BEAM-400), 0.962 (the 78-question",
+     _r_pol("BEAM-400", "oracle_per_question[with_nomem]", "score"),
+     0.789, 3),
+    ("router-cl-ceiling-ku78",
+     "(LongMemEval-500), 0.789 (BEAM-400), 0.962 (the 78-question",
+     _r_pol("LME-KU78", "oracle_per_question[base]", "score"), 0.962, 3),
+    ("router-cl-robustness-agree",
+     "- Only 2 of the 4 question types the two benchmarks share agree on a "
+     "best",
+     lambda d: d["robustness"]["type_pairs"]["n_agree"], 2, 0),
+    ("router-cl-robustness-pairs",
+     "- Only 2 of the 4 question types the two benchmarks share agree on a "
+     "best",
+     lambda d: d["robustness"]["type_pairs"]["n_pairs"], 4, 0),
+    # the AFTER values of the cross-validation fix, as the entry states them
+    ("router-cl-postfix-router-score",
+     'had predicted "cascade" on 500 of 500 rows, to 0.678 / 1009; that',
+     _r_pol("LME-500", "router[with_cascade|logreg|acc]", "score"),
+     0.678, 3),
+    ("router-cl-postfix-router-cost",
+     'had predicted "cascade" on 500 of 500 rows, to 0.678 / 1009; that',
+     _r_pol("LME-500", "router[with_cascade|logreg|acc]", "cost"), 1009, 0),
+    ("router-cl-postfix-best-score",
+     "maximum passed to the two-stage variant at the same 0.690 / 883. On "
+     "the",
+     _r_verdict("LME-500", "best_realizable_score"), 0.690, 3),
+    ("router-cl-postfix-best-cost",
+     "maximum passed to the two-stage variant at the same 0.690 / 883. On "
+     "the",
+     _r_verdict("LME-500", "best_realizable_cost"), 883, 0),
+    ("router-cl-postfix-ku78-score",
+     "to 0.846 (gain -0.013); no published figure quotes it. BEAM's "
+     "published",
+     _r_verdict("LME-KU78", "best_realizable_score"), 0.846, 3),
+    ("router-cl-postfix-ku78-gain",
+     "to 0.846 (gain -0.013); no published figure quotes it. BEAM's "
+     "published",
+     _r_verdict("LME-KU78", "realizable_gain"), -0.013, 3),
+]
+
+for _cid, _needle, _value, _stated, _places in _ROUTER_CHANGELOG:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(ROUTER,),
+        value=_value, stated=float(_stated), places=_places))
+
+CLAIMS.append(Claim(
+    id="router-cl-ku78-two-channel-union", doc=CHANGELOG,
+    needle="knowledge-update slice, three channels; 0.936 for rag∪cortex "
+           "on the same",
+    artifacts=(V38_ROWS_JSONL,),
+    value=lambda rows: (sum(1 for r in rows
+                            if r["rag_correct"] or r["cortex_correct"])
+                        / len(rows)),
+    stated=0.936, places=3))
+# ── the 2026-09-04 retrieval-telemetry / replay campaign (evals/README) ──
+# The telemetry review's headline is a COUNT, not an accuracy: how many
+# logged retrieval events carry a downstream label. It is pinned like any
+# other published number because the Phase-1 go/no-go rests on it, and a
+# rerun against a later bank would move it silently otherwise.
+TELEMETRY_REVIEW = RESULTS + "retrieval-telemetry-review-20260904.json"
+RETRIEVAL_REPLAY = RESULTS + "retrieval-replay-20260904.json"
+GRAPH_ABLATION = RESULTS + "graph-ablation-20260904.json"
+
+# -- retrieval-pool probe (2026-09-04) ------------------------------------
+# A retrieval PROXY, not a judged number - but it is published as a table,
+# so it is backed like any other. Every cell reports the same recall, which
+# is exactly the kind of "did anyone actually run this?" claim the two
+# audits found unbacked; the latency column is pinned too, because a rerun
+# that moves it must move the doc.
+POOL_PROBE = RESULTS + "retrieval-pool-probe-20260904.json"
+
+
+def _pool(mult: int, fusion: str, rerank: str, field: str):
+    def read(doc):
+        cell = next(c for c in doc["cells"]
+                    if c["multiplier"] == mult and c["fusion"] == fusion
+                    and c["reranker"] == rerank)
+        return float(cell[field])
+    return read
+
+
+_POOL_ROWS = [
+    # (multiplier, fusion, reranker, verbatim README row, recall, churn, ms)
+    (1, "weighted_sum", "off",
+     "| 1 | weighted_sum | off | 0.700 | 0.300 | \u2014 (baseline) | 52 ms |",
+     0.700, None, 52),
+    (1, "weighted_sum", "on",
+     "| 1 | weighted_sum | on  | 0.700 | 0.300 | 0.000 | 112 ms |",
+     0.700, 0.000, 112),
+    (1, "rrf", "off",
+     "| 1 | rrf | off | 0.700 | 0.300 | 0.183 | 55 ms |", 0.700, 0.183, 55),
+    (1, "rrf", "on",
+     "| 1 | rrf | on  | 0.700 | 0.300 | 0.183 | 214 ms |", 0.700, 0.183, 214),
+    (4, "weighted_sum", "off",
+     "| 4 | weighted_sum | off | 0.700 | 0.300 | 0.283 | 48 ms |",
+     0.700, 0.283, 48),
+    (4, "weighted_sum", "on",
+     "| 4 | weighted_sum | on  | 0.700 | 0.300 | 0.283 | 373 ms |",
+     0.700, 0.283, 373),
+    (4, "rrf", "off",
+     "| 4 | rrf | off | 0.700 | 0.300 | 0.317 | 75 ms |", 0.700, 0.317, 75),
+    (4, "rrf", "on",
+     "| 4 | rrf | on  | 0.700 | 0.300 | 0.333 | 560 ms |",
+     0.700, 0.333, 560),
+]
+
+for _m, _f, _r, _needle, _recall, _churn, _ms in _POOL_ROWS:
+    _slug = f"{_m}-{_f}-{_r}"
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-recall", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "recall_at_6"),
+        stated=_recall, places=3))
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-stale", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "stale_leak"),
+        stated=0.300, places=3))
+    CLAIMS.append(Claim(
+        id=f"pool-probe-{_slug}-latency", doc=EVALS, needle=_needle,
+        artifacts=(POOL_PROBE,), value=_pool(_m, _f, _r, "latency_ms"),
+        stated=_ms, places=0))
+    if _churn is not None:
+        CLAIMS.append(Claim(
+            id=f"pool-probe-{_slug}-churn", doc=EVALS, needle=_needle,
+            artifacts=(POOL_PROBE,),
+            value=_pool(_m, _f, _r, "churn_vs_shipped"),
+            stated=_churn, places=3))
+
+
+# -- candidate-pool JUDGED verdict (2026-09-04) ---------------------------
+# The probe above is a proxy; this is the run that decided the knobs. Three
+# summaries (control, multiplier 4 + rrf, multiplier 4 + weighted_sum) plus
+# the two paired comparisons that carry the deltas, p-values and per-
+# question win/loss counts — a p-value gets its own artifact, so the pairs
+# files are cited for those and never the summaries.
+POOL_CTL = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-ctl.summary.json"
+POOL_M4RRF = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-m4rrf.summary.json"
+POOL_M4SUM = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-m4sum.summary.json"
+POOL_RRF_PAIRS = RESULTS + "compare-pool-m4rrf-pairs.json"
+POOL_SUM_PAIRS = RESULTS + "compare-pool-m4sum-pairs.json"
+
+
+def _pool_arm(arm: str, field: str):
+    return lambda d: float(d["arms"][arm][field])
+
+
+def _pool_paired(arm: str, field: str):
+    return lambda d: float(d["paired"]["a_vs_b"][arm][field])
+
+
+# (arm, verbatim README row, ctl acc, ctl tokens,
+#  rrf acc, rrf tokens, rrf delta, rrf p, rrf wins, rrf losses,
+#  sum acc, sum tokens, sum delta, sum p, sum wins, sum losses)
+_POOL_JUDGED = [
+    ("rag",
+     "| naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 "
+     "(-0.115, p 0.0506, 4W/13L) | 0.782 @ 1643.0 (-0.077, p 0.1071, "
+     "2W/8L) |",
+     0.859, 1184.1, 0.744, 1793.0, -0.115, 0.0506, 4, 13,
+     0.782, 1643.0, -0.077, 0.1071, 2, 8),
+    ("cortex",
+     "| cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 (0.000, p 1.0, "
+     "0W/0L) | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) |",
+     0.667, 96.7, 0.667, 96.7, 0.000, 1.0, 0, 0,
+     0.667, 96.7, 0.000, 1.0, 0, 0),
+    ("hybrid",
+     "| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
+     "(-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, "
+     "1W/3L) |",
+     0.897, 1289.7, 0.833, 1898.6, -0.064, 0.1265, 1, 6,
+     0.872, 1748.6, -0.026, 0.6194, 1, 3),
+    ("cascade",
+     "| commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 (0.000, "
+     "p 1.0, 1W/1L) | 0.859 @ 544.5 (+0.013, p 1.0, 2W/1L) |",
+     0.846, 389.4, 0.846, 598.7, 0.000, 1.0, 1, 1,
+     0.859, 544.5, 0.013, 1.0, 2, 1),
+]
+
+for (_arm, _needle, _c_acc, _c_tok, _r_acc, _r_tok, _r_d, _r_p, _r_w, _r_l,
+     _s_acc, _s_tok, _s_d, _s_p, _s_w, _s_l) in _POOL_JUDGED:
+    for _tag, _art, _acc, _tok in (("ctl", POOL_CTL, _c_acc, _c_tok),
+                                   ("m4rrf", POOL_M4RRF, _r_acc, _r_tok),
+                                   ("m4sum", POOL_M4SUM, _s_acc, _s_tok)):
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-acc", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_arm(_arm, "accuracy"),
+            stated=_acc, places=3))
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-tokens", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_arm(_arm, "context_tokens"),
+            stated=_tok, places=1))
+    for _tag, _art, _d, _pv, _w, _l in (
+            ("m4rrf", POOL_RRF_PAIRS, _r_d, _r_p, _r_w, _r_l),
+            ("m4sum", POOL_SUM_PAIRS, _s_d, _s_p, _s_w, _s_l)):
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-delta", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_paired(_arm, "delta"),
+            stated=_d, places=3))
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-p", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_paired(_arm, "p"),
+            stated=_pv, places=4))
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-wins", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_paired(_arm, "wins"),
+            stated=_w, places=0))
+        CLAIMS.append(Claim(
+            id=f"pool-judged-{_tag}-{_arm}-losses", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_paired(_arm, "losses"),
+            stated=_l, places=0))
+
+# The CHANGELOG states the same verdict in prose; its numbers are pinned
+# separately because a reader meets them there first (the retire-at-the-
+# old-site rule cuts both ways - a claim gets guarded wherever it is made).
+for _cid, _arm, _art, _val, _stated, _places in [
+    ("changelog-pool-rrf-rag-ctl", "rag", POOL_CTL,
+     _pool_arm("rag", "accuracy"), 0.859, 3),
+    ("changelog-pool-rrf-rag", "rag", POOL_M4RRF,
+     _pool_arm("rag", "accuracy"), 0.744, 3),
+    ("changelog-pool-rrf-rag-delta", "rag", POOL_RRF_PAIRS,
+     _pool_paired("rag", "delta"), -0.115, 3),
+    ("changelog-pool-rrf-rag-p", "rag", POOL_RRF_PAIRS,
+     _pool_paired("rag", "p"), 0.0506, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG,
+        needle="takes naive RAG from 0.859 to 0.744 (-0.115, p 0.0506)",
+        artifacts=(_art,), value=_val, stated=_stated, places=_places))
+
+for _cid, _art, _val, _stated, _places in [
+    ("changelog-pool-rrf-hybrid-ctl", POOL_CTL,
+     _pool_arm("hybrid", "accuracy"), 0.897, 3),
+    ("changelog-pool-rrf-hybrid", POOL_M4RRF,
+     _pool_arm("hybrid", "accuracy"), 0.833, 3),
+    ("changelog-pool-rrf-hybrid-delta", POOL_RRF_PAIRS,
+     _pool_paired("hybrid", "delta"), -0.064, 3),
+    ("changelog-pool-rrf-hybrid-p", POOL_RRF_PAIRS,
+     _pool_paired("hybrid", "p"), 0.1265, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG,
+        needle="from 0.897 to 0.833 (-0.064, p 0.1265)",
+        artifacts=(_art,), value=_val, stated=_stated, places=_places))
+
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("changelog-pool-sum-rag", "takes RAG to 0.782 (-0.077, p 0.1071)",
+     POOL_M4SUM, _pool_arm("rag", "accuracy"), 0.782, 3),
+    ("changelog-pool-sum-rag-delta", "takes RAG to 0.782 (-0.077, p 0.1071)",
+     POOL_SUM_PAIRS, _pool_paired("rag", "delta"), -0.077, 3),
+    ("changelog-pool-sum-rag-p", "takes RAG to 0.782 (-0.077, p 0.1071)",
+     POOL_SUM_PAIRS, _pool_paired("rag", "p"), 0.1071, 4),
+    ("changelog-pool-sum-hybrid", "and hybrid to 0.872",
+     POOL_M4SUM, _pool_arm("hybrid", "accuracy"), 0.872, 3),
+    ("changelog-pool-sum-hybrid-delta", "(-0.026, p 0.6194)",
+     POOL_SUM_PAIRS, _pool_paired("hybrid", "delta"), -0.026, 3),
+    ("changelog-pool-sum-hybrid-p", "(-0.026, p 0.6194)",
+     POOL_SUM_PAIRS, _pool_paired("hybrid", "p"), 0.6194, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle,
+        artifacts=(_art,), value=_val, stated=_stated, places=_places))
+
+# The zero noise floor: the cortex arm is identical in all three runs, and
+# both docs lean on that to call the other deltas real.
+for _tag, _art in (("ctl", POOL_CTL), ("m4rrf", POOL_M4RRF),
+                   ("m4sum", POOL_M4SUM)):
+    CLAIMS.append(Claim(
+        id=f"changelog-pool-cortex-floor-{_tag}", doc=CHANGELOG,
+        needle="is 0.667 in all three runs, 0W/0L",
+        artifacts=(_art,), value=_pool_arm("cortex", "accuracy"),
+        stated=0.667, places=3))
+
+# The configuration guide's gated-off bullet quotes the same two RAG
+# deltas as absolute costs; pinned there too, because that is where an
+# operator deciding whether to flip the knob actually reads them.
+for _cid, _needle, _art, _stated in [
+    ("config-guide-pool-rrf-rag-delta",
+     "multiplier 4 cost naive RAG 0.115 accuracy under",
+     POOL_RRF_PAIRS, 0.115),
+    ("config-guide-pool-sum-rag-delta",
+     "`rrf` and 0.077 under `weighted_sum`",
+     POOL_SUM_PAIRS, 0.077),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CONFIG_GUIDE, needle=_needle, artifacts=(_art,),
+        # The guide quotes the loss as a positive cost; the artifact
+        # carries the signed delta.
+        value=lambda d: -_pool_paired("rag", "delta")(d),
+        stated=_stated, places=3))
+
+# ── the recall fan-out caps (2026-09-04) ─────────────────────────────────
+# CPU-only paired run on a restored copy of the live bank: the same 20
+# relational questions with the search caps off and on. The claim that
+# matters is the honesty one — no expected target the uncapped walk found
+# was lost — so `targets_lost` is pinned as a count beside the speedups.
+FANOUT_CAP = RESULTS + "recall-fanout-cap-20260904.json"
+_FANOUT_SEARCHES = "mean\n    89.15 → 12.40 and max 205 → 19"
+_FANOUT_WALL = "recall wall mean 25.25 s → 4.166 s and\n    max 57.67 s → 7.51 s"
+_FANOUT_CHARS = "served characters mean 178,110 → 77,546"
+_FANOUT_LOSS = "20/20 in both arms with **no target lost**"
+for _cid, _needle, _val, _stated, _places in [
+    ("fanout-searches-before", _FANOUT_SEARCHES,
+     lambda d: d["before"]["summary"]["searches_issued"]["mean"], 89.15, 2),
+    ("fanout-searches-after", _FANOUT_SEARCHES,
+     lambda d: d["after"]["summary"]["searches_issued"]["mean"], 12.40, 2),
+    ("fanout-searches-max-before", _FANOUT_SEARCHES,
+     lambda d: d["before"]["summary"]["searches_issued"]["max"], 205, 0),
+    ("fanout-searches-max-after", _FANOUT_SEARCHES,
+     lambda d: d["after"]["summary"]["searches_issued"]["max"], 19, 0),
+    ("fanout-wall-before", _FANOUT_WALL,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["mean"], 25.25, 3),
+    ("fanout-wall-after", _FANOUT_WALL,
+     lambda d: d["after"]["summary"]["recall_wall_s"]["mean"], 4.166, 3),
+    ("fanout-wall-max-before", _FANOUT_WALL,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["max"], 57.67, 2),
+    ("fanout-wall-max-after", _FANOUT_WALL,
+     lambda d: d["after"]["summary"]["recall_wall_s"]["max"], 7.51, 2),
+    ("fanout-chars-before", _FANOUT_CHARS,
+     lambda d: d["before"]["summary"]["recall_served_chars"]["mean"],
+     178110.3, 1),
+    ("fanout-chars-after", _FANOUT_CHARS,
+     lambda d: d["after"]["summary"]["recall_served_chars"]["mean"],
+     77546.4, 1),
+    ("fanout-hits-before", _FANOUT_LOSS,
+     lambda d: d["before"]["summary"]["recall_expected_hits"], 20, 0),
+    ("fanout-hits-after", _FANOUT_LOSS,
+     lambda d: d["after"]["summary"]["recall_expected_hits"], 20, 0),
+    ("fanout-targets-lost", _FANOUT_LOSS,
+     lambda d: len(d["targets_lost"]), 0, 0),
+    ("fanout-n", "20 relational questions — the twelve",
+     lambda d: d["n_questions"], 20, 0),
+    ("fanout-texts-before", "2,116 texts → 558",
+     lambda d: d["structural_identity"]["texts_total_before"], 2116, 0),
+    ("fanout-texts-after", "2,116 texts → 558",
+     lambda d: d["structural_identity"]["texts_total_after"], 558, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(FANOUT_CAP,),
+        value=_val, stated=_stated, places=_places))
+
+# The same run's evals/README table, plus the structural-identity row that
+# says WHY no target was lost: the caps bound searches, not expansion.
+_FANOUT_README_SEARCHES = "searches issued  mean     89.15      12.40"
+_FANOUT_README_WALL = "recall wall (s)  mean     25.25        4.166"
+_FANOUT_README_TEXTS = "2,116 texts before, 558 after"
+_FANOUT_README_STRUCT = ("identical on all 20 questions"
+                         "\n  (`structural_identity`)")
+for _cid, _needle, _val, _stated, _places in [
+    ("fanout-readme-searches-before", _FANOUT_README_SEARCHES,
+     lambda d: d["before"]["summary"]["searches_issued"]["mean"], 89.15, 2),
+    ("fanout-readme-searches-after", _FANOUT_README_SEARCHES,
+     lambda d: d["after"]["summary"]["searches_issued"]["mean"], 12.40, 2),
+    ("fanout-readme-wall-before", _FANOUT_README_WALL,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["mean"], 25.25, 3),
+    ("fanout-readme-wall-after", _FANOUT_README_WALL,
+     lambda d: d["after"]["summary"]["recall_wall_s"]["mean"], 4.166, 3),
+    ("fanout-readme-texts-before", _FANOUT_README_TEXTS,
+     lambda d: d["structural_identity"]["texts_total_before"], 2116, 0),
+    ("fanout-readme-texts-after", _FANOUT_README_TEXTS,
+     lambda d: d["structural_identity"]["texts_total_after"], 558, 0),
+    ("fanout-readme-entities-identical", _FANOUT_README_STRUCT,
+     lambda d: d["structural_identity"][
+         "questions_with_different_entity_count"], 0, 0),
+    ("fanout-readme-edges-identical", _FANOUT_README_STRUCT,
+     lambda d: d["structural_identity"][
+         "questions_with_different_edge_count"], 0, 0),
+    ("fanout-readme-part-of-arrivals", "1,046 of the 1,763 added",
+     lambda d: d["after"]["summary"]["arrivals_total"]["via_part_of"],
+     1046, 0),
+    ("fanout-readme-added-arrivals", "1,046 of the 1,763 added",
+     lambda d: d["after"]["summary"]["arrivals_total"]["added"], 1763, 0),
+    ("fanout-readme-search-hits", "found 18 of the 20 targets",
+     lambda d: d["after"]["summary"]["search_expected_hits"], 18, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(FANOUT_CAP,),
+        value=_val, stated=_stated, places=_places))
+
+# The retrieval guide restates the same run's headline pair; a restatement
+# is a claim like any other.
+_FANOUT_GUIDE_BEFORE = "mean of 89.15 searches and 25.25 s per call (max 205 and\n57.67 s)"
+_FANOUT_GUIDE_AFTER = "call to 12.40 searches and 4.166 s"
+for _cid, _needle, _val, _stated, _places in [
+    ("fanout-guide-searches-before", _FANOUT_GUIDE_BEFORE,
+     lambda d: d["before"]["summary"]["searches_issued"]["mean"], 89.15, 2),
+    ("fanout-guide-wall-before", _FANOUT_GUIDE_BEFORE,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["mean"], 25.25, 3),
+    ("fanout-guide-searches-max-before", _FANOUT_GUIDE_BEFORE,
+     lambda d: d["before"]["summary"]["searches_issued"]["max"], 205, 0),
+    ("fanout-guide-wall-max-before", _FANOUT_GUIDE_BEFORE,
+     lambda d: d["before"]["summary"]["recall_wall_s"]["max"], 57.67, 2),
+    ("fanout-guide-searches-after", _FANOUT_GUIDE_AFTER,
+     lambda d: d["after"]["summary"]["searches_issued"]["mean"], 12.40, 2),
+    ("fanout-guide-wall-after", _FANOUT_GUIDE_AFTER,
+     lambda d: d["after"]["summary"]["recall_wall_s"]["mean"], 4.166, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=RETRIEVAL_GUIDE, needle=_needle, artifacts=(FANOUT_CAP,),
+        value=_val, stated=_stated, places=_places))
+
+# The hit CHANNEL — the power of the targets_lost check. Only a target
+# carried by `texts` could be lost (the entity sets are identical before
+# and after by construction), so the entity/texts split is what says
+# whether a clean `targets_lost` means anything.
+_FANOUT_CHANNELS_CH = "**3 of the 20** arrived on `texts` (17 on `entity`)"
+_FANOUT_CHANNELS_EV = "17 targets arrived on `entity` (where the check has no"
+for _cid, _doc, _needle, _val, _stated in [
+    ("fanout-channel-texts-changelog", CHANGELOG, _FANOUT_CHANNELS_CH,
+     lambda d: d["after"]["summary"]["hit_channels"]["texts"], 3),
+    ("fanout-channel-entity-changelog", CHANGELOG, _FANOUT_CHANNELS_CH,
+     lambda d: d["after"]["summary"]["hit_channels"]["entity"], 17),
+    ("fanout-channel-texts-evals", EVALS, _FANOUT_CHANNELS_EV,
+     lambda d: d["before"]["summary"]["hit_channels"]["texts"], 3),
+    ("fanout-channel-entity-evals", EVALS, _FANOUT_CHANNELS_EV,
+     lambda d: d["before"]["summary"]["hit_channels"]["entity"], 17),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(FANOUT_CAP,),
+        value=_val, stated=_stated, places=0))
+_TELEM_NEEDLE = "| **events with any downstream signal** | **1** (0.074%) |"
+CLAIMS.append(Claim(
+    id="telemetry-labelled-events", doc=EVALS, needle=_TELEM_NEEDLE,
+    artifacts=(TELEMETRY_REVIEW,),
+    value=lambda d: d["labels"]["events_with_any_downstream_signal"],
+    stated=1, places=0))
+CLAIMS.append(Claim(
+    id="telemetry-logged-events", doc=EVALS,
+    needle="| logged events | 1349 |", artifacts=(TELEMETRY_REVIEW,),
+    value=lambda d: d["events"]["n_events"], stated=1349, places=0))
+CLAIMS.append(Claim(
+    id="telemetry-explicit-reinforcements", doc=EVALS,
+    needle="| `entries.explicit_reinforcements`, bank-wide sum | **0** |",
+    artifacts=(TELEMETRY_REVIEW,),
+    value=lambda d: d["bank"]["entries_explicit_reinforcements_total"],
+    stated=0, places=0))
+
+
+def _replay(arm: str, metric: str):
+    return lambda d: d["results"]["logged-top1"]["arms"][arm][metric]
+
+
+def _dig(d: dict, path: tuple[str, ...]):
+    for k in path:
+        d = d[k]
+    return d
+
+
+for _arm, _needle, _mrr, _h1 in [
+    ("shipped",
+     "| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 |",
+     0.784, 0.668),
+    ("bm25_off",
+     "| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 |",
+     0.689, 0.544),
+    ("rerank_on",
+     "| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 |",
+     0.606, 0.368),
+]:
+    CLAIMS.append(Claim(
+        id=f"replay-{_arm}-mrr", doc=EVALS, needle=_needle,
+        artifacts=(RETRIEVAL_REPLAY,), value=_replay(_arm, "mrr"),
+        stated=_mrr, places=3))
+    CLAIMS.append(Claim(
+        id=f"replay-{_arm}-hit1", doc=EVALS, needle=_needle,
+        artifacts=(RETRIEVAL_REPLAY,), value=_replay(_arm, "hit@1"),
+        stated=_h1, places=3))
+
+# The graph shape and the recall-vs-search price. The published cost
+# ratios are the headline of lever 6, so both are pinned; the hit-rate
+# column is deliberately NOT pinned as a quality claim (both arms are at
+# the ceiling, which the prose says outright).
+_GRAPH_SHAPE_NEEDLE = "| entities | 5504 |"
+for _cid, _path, _stated in [
+    ("graph-entities", ("graph_shape", "entities"), 5504),
+    ("graph-edges-live", ("graph_shape", "edges_live"), 4020),
+    ("graph-dead-weight", ("graph_shape", "dead_weight_entities", "count"),
+     421),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS,
+        needle=(_GRAPH_SHAPE_NEEDLE if _cid == "graph-entities"
+                else "| edges (live / all versions) | 4020 / 4247 |"
+                if _cid == "graph-edges-live"
+                else "| dead weight (only `part-of` edges, no current fact)"
+                     " | 421 |"),
+        artifacts=(GRAPH_ABLATION,),
+        value=(lambda p: lambda d: _dig(d, p))(_path),
+        stated=_stated, places=0))
+
+_REL = ("ablation", "relational_questions", "summary")
+CLAIMS.append(Claim(
+    id="graph-recall-chars-ratio", doc=EVALS,
+    needle="27× the characters at 74× the wall time",
+    artifacts=(GRAPH_ABLATION,),
+    value=lambda d: _dig(d, _REL + ("chars_ratio_recall_over_search",)),
+    stated=27, places=0))
+CLAIMS.append(Claim(
+    id="graph-recall-time-ratio", doc=EVALS,
+    needle="27× the characters at 74× the wall time",
+    artifacts=(GRAPH_ABLATION,),
+    value=lambda d: _dig(d, _REL + ("time_ratio_recall_over_search",)),
+    stated=74, places=0))
+CLAIMS.append(Claim(
+    id="graph-arrivals-added", doc=EVALS,
+    needle="Of the 524\nentities `recall` added beyond its seeds",
+    artifacts=(GRAPH_ABLATION,),
+    value=lambda d: _dig(d, _REL + ("arrivals_total", "added")),
+    stated=524, places=0))
+# One needle PER ROW. Until the 2026-09-04 review these four claims all
+# carried the `unlinked` row's text, so three of them verified a row that
+# does not state their number: the hub/part-of/domain counts could each be
+# edited to anything and stay green.
+for _cid, _key, _needle, _stated in [
+    ("hub", "via_hub",
+     "| touches a hub (degree >= p95 = 5) | 520 | 99.2% |", 520),
+    ("part-of", "via_part_of",
+     "| only `part-of` edges | 225 | 42.9% |", 225),
+    ("domain", "via_domain",
+     "| at least one domain relation | 299 | 57.1% |", 299),
+    ("unlinked", "unlinked",
+     "| unlinked (came from the re-query, not an edge) | 0 | 0% |", 0),
+]:
+    CLAIMS.append(Claim(
+        id=f"graph-arrivals-{_cid}", doc=EVALS, needle=_needle,
+        artifacts=(GRAPH_ABLATION,),
+        value=(lambda k: lambda d: _dig(d, _REL + ("arrivals_total", k)))(_key),
+        stated=_stated, places=0))
+# The hub threshold the "touches a hub" row names, from the same run.
+CLAIMS.append(Claim(
+    id="graph-hub-degree-p95", doc=EVALS,
+    needle="| touches a hub (degree >= p95 = 5) | 520 | 99.2% |",
+    artifacts=(GRAPH_ABLATION,), value=lambda d: d["hub_degree_p95"],
+    stated=5, places=0))
+
+
+# The per-arm MEDIAN latency. Added 2026-09-04 in pre-merge review: the
+# table shipped 0.234 / 0.101 / 0.394 s, none of which the artifact
+# carries, because nothing pinned the latency column while MRR and hit@1
+# beside it were pinned. The ~165 ms BM25 cost in the prose below the
+# table is the difference of the first two, so pinning both pins it.
+_LAT = "median_latency_s"
+for _arm, _needle, _stated in [
+    ("shipped",
+     "| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 |"
+     " 0.305 s |", 0.305),
+    ("bm25_off",
+     "| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 | 0.140 s |", 0.140),
+    ("rerank_on",
+     "| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 | 0.694 s |", 0.694),
+]:
+    CLAIMS.append(Claim(
+        id=f"replay-{_arm}-median-latency", doc=EVALS, needle=_needle,
+        artifacts=(RETRIEVAL_REPLAY,), value=_replay(_arm, _LAT),
+        stated=_stated, places=3))
+
+# `memory_recall`'s per-call wall time. The docs and the harness comment
+# both quoted "~2.5 minutes per call" until the 2026-09-04 pre-merge
+# review; the artifact says 32.4 s / 44.3 s mean, 73.0 s worst case. The
+# figure sizes every run of this harness, so it is pinned at both means.
+_LOG = ("ablation", "logged_queries", "summary")
+_WALL_NEEDLE = "| mean wall time | 0.44 s | 32.4 s | 0.39 s | 44.3 s |"
+for _cid, _path, _stated in [
+    ("relational", _REL + ("recall", "mean_wall_s"), 32.4),
+    ("logged", _LOG + ("recall", "mean_wall_s"), 44.3),
+]:
+    CLAIMS.append(Claim(
+        id=f"graph-recall-mean-wall-{_cid}", doc=EVALS, needle=_WALL_NEEDLE,
+        artifacts=(GRAPH_ABLATION,),
+        value=(lambda p: lambda d: _dig(d, p))(_path),
+        stated=_stated, places=1))
+CLAIMS.append(Claim(
+    id="graph-recall-max-wall", doc=EVALS,
+    needle="max\n73.0 s), and small enough that the hit-rate column is a",
+    artifacts=(GRAPH_ABLATION,),
+    value=lambda d: max(q["recall"]["wall_s"] for q in
+                        d["ablation"]["relational_questions"]["per_question"]),
+    stated=73.0, places=1))
+
+
+# ── the rest of the 2026-09-04 campaign's published numbers ──────────────
+# Added in the same pre-merge review that fixed the arrivals needles: the
+# three sections above published ~50 figures and pinned 20 of them, so a
+# rerun against a later bank could have moved the unpinned ones silently.
+# Everything a reader would quote back is pinned here; per-day event
+# counts, PR/schema references and arithmetic restated in prose are not.
+
+# -- telemetry review -----------------------------------------------------
+_SESS_NEEDLE = "| distinct sessions / episodes | 60 / 101 |"
+_SERVED_LEN_NEEDLE = ("| served-list length: mean / mode | 4.94 / 5 "
+                      "(146 events served exactly 1; 0 served nothing) |")
+_PARAMS_NEEDLE = "| `params` coverage (v32+) | 790 / 1349 (58.6%) |"
+_FACTS_NEEDLE = ("| `served_facts` coverage (v34+) | 160 / 1349 (11.9%), "
+                 "798 facts |")
+_JOIN_NEEDLE = ("| served entry ids that still resolve in `entries` | "
+                "6666 of 6666 (no dangling ids) |")
+_SLOTS_NEEDLE = "| `slot_reads` | 605 slots, 807 serves — all serve-side |"
+_USES_NEEDLE = ("| `retrieval_uses` rows | 1 (`used_via=get`, served rank 0, "
+                "72 s after the serve) |")
+for _cid, _needle, _val, _stated, _places in [
+    ("telemetry-sessions", _SESS_NEEDLE,
+     lambda d: d["events"]["distinct_sessions"], 60, 0),
+    ("telemetry-episodes", _SESS_NEEDLE,
+     lambda d: d["events"]["distinct_episodes"], 101, 0),
+    ("telemetry-signal-pct", _TELEM_NEEDLE,
+     lambda d: d["labels"]["events_with_any_downstream_signal_pct"],
+     0.074, 3),
+    ("telemetry-uses-rows", _USES_NEEDLE, lambda d: d["uses"]["n_uses"],
+     1, 0),
+    ("telemetry-uses-rank", _USES_NEEDLE,
+     lambda d: d["uses"]["detail"][0]["served_rank"], 0, 0),
+    ("telemetry-uses-latency", _USES_NEEDLE,
+     lambda d: d["uses"]["detail"][0]["latency_s"], 72.0, 0),
+    ("telemetry-mean-served-len", _SERVED_LEN_NEEDLE,
+     lambda d: d["events"]["mean_served_len"], 4.94, 2),
+    ("telemetry-mode-served-len", _SERVED_LEN_NEEDLE,
+     lambda d: int(max(d["events"]["served_len_distribution"].items(),
+                       key=lambda kv: kv[1])[0]), 5, 0),
+    ("telemetry-served-len-1", _SERVED_LEN_NEEDLE,
+     lambda d: d["events"]["served_len_distribution"]["1"], 146, 0),
+    ("telemetry-zero-result-events", _SERVED_LEN_NEEDLE,
+     lambda d: d["events"]["zero_result_events"], 0, 0),
+    ("telemetry-params-rows", _PARAMS_NEEDLE,
+     lambda d: d["events"]["params_coverage"]["rows"], 790, 0),
+    ("telemetry-params-pct", _PARAMS_NEEDLE,
+     lambda d: d["events"]["params_coverage"]["pct"], 58.6, 1),
+    # The prose below the table rounds the same coverage to a whole 59%.
+    ("telemetry-params-pct-prose",
+     "join, and 59% of rows carry the ranking-knob snapshot",
+     lambda d: d["events"]["params_coverage"]["pct"], 59, 0),
+    ("telemetry-served-facts-rows", _FACTS_NEEDLE,
+     lambda d: d["events"]["served_facts_coverage"]["rows"], 160, 0),
+    ("telemetry-served-facts-pct", _FACTS_NEEDLE,
+     lambda d: d["events"]["served_facts_coverage"]["pct"], 11.9, 1),
+    ("telemetry-served-facts-total", _FACTS_NEEDLE,
+     lambda d: d["events"]["served_facts_coverage"]["total_facts_served"],
+     798, 0),
+    ("telemetry-id-join-resolved", _JOIN_NEEDLE,
+     lambda d: d["labels"]["served_id_join"]["served_ids_still_in_entries"],
+     6666, 0),
+    ("telemetry-id-join-dangling", _JOIN_NEEDLE,
+     lambda d: d["labels"]["served_id_join"]["served_ids_dangling"], 0, 0),
+    ("telemetry-slot-read-rows", _SLOTS_NEEDLE,
+     lambda d: d["bank"]["slot_reads_rows"], 605, 0),
+    ("telemetry-slot-read-serves", _SLOTS_NEEDLE,
+     lambda d: d["bank"]["slot_reads_total"], 807, 0),
+    # The go/no-go sentence: how far short of the Phase-1 label floor.
+    ("telemetry-shortfall",
+     "so Phase 1 is 299 labelled events short of its own",
+     lambda d: d["verdict"]["shortfall"], 299, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(TELEMETRY_REVIEW,),
+        value=_val, stated=_stated, places=_places))
+
+# -- offline replay -------------------------------------------------------
+# The run size, which bounds how much the arm table can claim.
+_REPLAY_RUN_NEEDLE = "250 sampled events, top_k=6"
+CLAIMS.append(Claim(
+    id="replay-sample-size", doc=EVALS, needle=_REPLAY_RUN_NEEDLE,
+    artifacts=(RETRIEVAL_REPLAY,),
+    value=lambda d: d["results"]["logged-top1"]["n_cases"],
+    stated=250, places=0))
+CLAIMS.append(Claim(
+    id="replay-top-k", doc=EVALS, needle=_REPLAY_RUN_NEEDLE,
+    artifacts=(RETRIEVAL_REPLAY,), value=lambda d: d["top_k"],
+    stated=6, places=0))
+# hit@3 / hit@6 complete the arm table. hit@6 carries the "the reranker
+# only re-orders the same six" reading, so it is a claim, not decoration.
+for _arm, _needle, _h3, _h6 in [
+    ("shipped",
+     "| `shipped` (deployed config) | 0.784 | 0.668 | 0.888 | 0.948 |",
+     0.888, 0.948),
+    ("bm25_off", "| `bm25_off` | 0.689 | 0.544 | 0.812 | 0.920 |",
+     0.812, 0.920),
+    ("rerank_on", "| `rerank_on` | 0.606 | 0.368 | 0.852 | 0.948 |",
+     0.852, 0.948),
+]:
+    CLAIMS.append(Claim(
+        id=f"replay-{_arm}-hit3", doc=EVALS, needle=_needle,
+        artifacts=(RETRIEVAL_REPLAY,), value=_replay(_arm, "hit@3"),
+        stated=_h3, places=3))
+    CLAIMS.append(Claim(
+        id=f"replay-{_arm}-hit6", doc=EVALS, needle=_needle,
+        artifacts=(RETRIEVAL_REPLAY,), value=_replay(_arm, "hit@6"),
+        stated=_h6, places=3))
+
+# -- graph shape ----------------------------------------------------------
+_DEG_NEEDLE = "| degree p50 / p95 / max | 1 / 5 / 132 |"
+_NOEDGE_NEEDLE = "| entities with no live edge at all | 1156 (21%) |"
+for _cid, _needle, _val, _stated, _places in [
+    ("graph-edges-all-versions",
+     "| edges (live / all versions) | 4020 / 4247 |",
+     lambda d: d["graph_shape"]["edges_all_versions"], 4247, 0),
+    ("graph-degree-p50", _DEG_NEEDLE,
+     lambda d: d["graph_shape"]["degree_p50"], 1, 0),
+    ("graph-degree-p95", _DEG_NEEDLE,
+     lambda d: d["graph_shape"]["degree_p95"], 5, 0),
+    ("graph-degree-max", _DEG_NEEDLE,
+     lambda d: d["graph_shape"]["degree_max"], 132, 0),
+    ("graph-part-of-share",
+     "| `part-of` share of live edges | 19.0% |",
+     lambda d: d["graph_shape"]["part_of_share"] * 100, 19.0, 1),
+    ("graph-no-live-edge", _NOEDGE_NEEDLE,
+     lambda d: d["graph_shape"]["entities_with_no_live_edge"], 1156, 0),
+    ("graph-no-live-edge-pct", _NOEDGE_NEEDLE,
+     lambda d: (d["graph_shape"]["entities_with_no_live_edge"]
+                / d["graph_shape"]["entities"] * 100), 21, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(GRAPH_ABLATION,),
+        value=_val, stated=_stated, places=_places))
+
+# The 13-relation breakdown is published as one wrapped prose sentence, so
+# each relation gets the fragment that states its own count as its needle
+# (`hosts` straddles the line break, hence the embedded newline).
+for _rel, _needle, _stated in [
+    ("prefers", "`prefers` 929", 929),
+    ("part-of", "`part-of` 765", 765),
+    ("uses", "`uses` 736", 736),
+    ("configures", "`configures` 272", 272),
+    ("depends-on", "`depends-on` 272", 272),
+    ("related-to", "`related-to` 181", 181),
+    ("implements", "`implements` 181", 181),
+    ("avoids", "`avoids` 162", 162),
+    ("tests", "`tests` 148", 148),
+    ("runs-on", "`runs-on` 139", 139),
+    ("stores-data-in", "`stores-data-in` 116", 116),
+    ("hosts", "`hosts`\n70", 70),
+    ("superseded-by", "`superseded-by` 49", 49),
+]:
+    CLAIMS.append(Claim(
+        id=f"graph-edges-{_rel}", doc=EVALS, needle=_needle,
+        artifacts=(GRAPH_ABLATION,),
+        value=(lambda r: lambda d:
+               d["graph_shape"]["edges_by_relation"][r])(_rel),
+        stated=_stated, places=0))
+
+
+def _comparator(term: str):
+    return lambda d: next(
+        r["entries_mentioning"] for r in
+        d["graph_shape"]["comparator_coverage"]["detail"]
+        if r["term"] == term)
+
+
+# The comparator gap. The finding is that these two clear the threshold and
+# still have no node, so both entry counts and the threshold are
+# load-bearing.
+for _cid, _needle, _val, _stated in [
+    ("graph-comparator-naive-rag", "`naive rag` (16 entries)",
+     _comparator("naive rag"), 16),
+    ("graph-comparator-titans", "`titans`\n  (21 entries)",
+     _comparator("titans"), 21),
+    ("graph-comparator-threshold", "are mentioned in five or more entries",
+     lambda d: d["graph_shape"]["comparator_coverage"]["threshold_entries"],
+     5),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(GRAPH_ABLATION,),
+        value=_val, stated=_stated, places=0))
+
+# -- recall vs search -----------------------------------------------------
+# The run size first: at n=8 / n=4 the hit rows are a ceiling, which is the
+# caveat the prose leans on, so both the n and the hit rates are pinned.
+_N_NEEDLE = ("8 of the 30 relational questions and 4 logged queries — the "
+             "run size")
+_CHARS_NEEDLE = "| mean served chars | 6932 | 184641 | 6649 | 74186 |"
+_HIT_NEEDLE = "| expected entity/entry found | 8/8 | 8/8 | 4/4 | 4/4 |"
+_ONLY_NEEDLE = "| recall-only hits | — | 0 | — | 0 |"
+_LOG_RATIO_NEEDLE = "(11× / 114× on the logged set)"
+for _cid, _needle, _path, _stated, _places in [
+    ("ablation-n-relational", _N_NEEDLE, _REL + ("n",), 8, 0),
+    ("ablation-n-logged", _N_NEEDLE, _LOG + ("n",), 4, 0),
+    ("ablation-chars-rel-search", _CHARS_NEEDLE,
+     _REL + ("search", "mean_served_chars"), 6932, 0),
+    ("ablation-chars-rel-recall", _CHARS_NEEDLE,
+     _REL + ("recall", "mean_served_chars"), 184641, 0),
+    ("ablation-chars-log-search", _CHARS_NEEDLE,
+     _LOG + ("search", "mean_served_chars"), 6649, 0),
+    ("ablation-chars-log-recall", _CHARS_NEEDLE,
+     _LOG + ("recall", "mean_served_chars"), 74186, 0),
+    ("ablation-wall-rel-search", _WALL_NEEDLE,
+     _REL + ("search", "mean_wall_s"), 0.44, 2),
+    ("ablation-wall-log-search", _WALL_NEEDLE,
+     _LOG + ("search", "mean_wall_s"), 0.39, 2),
+    ("ablation-hit-rel-search", _HIT_NEEDLE,
+     _REL + ("search", "expected_hit_rate"), 1.0, 2),
+    ("ablation-hit-rel-recall", _HIT_NEEDLE,
+     _REL + ("recall", "expected_hit_rate"), 1.0, 2),
+    ("ablation-hit-log-search", _HIT_NEEDLE,
+     _LOG + ("search", "expected_hit_rate"), 1.0, 2),
+    ("ablation-hit-log-recall", _HIT_NEEDLE,
+     _LOG + ("recall", "expected_hit_rate"), 1.0, 2),
+    ("ablation-recall-only-rel", _ONLY_NEEDLE,
+     _REL + ("recall_only_hits",), 0, 0),
+    ("ablation-recall-only-log", _ONLY_NEEDLE,
+     _LOG + ("recall_only_hits",), 0, 0),
+    ("graph-recall-chars-ratio-logged", _LOG_RATIO_NEEDLE,
+     _LOG + ("chars_ratio_recall_over_search",), 11, 0),
+    ("graph-recall-time-ratio-logged", _LOG_RATIO_NEEDLE,
+     _LOG + ("time_ratio_recall_over_search",), 114, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(GRAPH_ABLATION,),
+        value=(lambda p: lambda d: _dig(d, p))(_path),
+        stated=_stated, places=_places))
+
+
+# ── the agent-side token ledger (2026-09-04) ──────────────────────────────
+# evals/README.md's "Agent-side token ledger" section publishes what an MCP
+# client pays per call, before and after the payload cuts. Unlike the
+# accuracy tables above this needs no GPU — it is pure counting — so every
+# cell is pinnable, and every cell is pinned.
+# Promoted 2026-09-04 to r3 after the pre-merge review, twice over. r1
+# measured the lean fact_get projection while it still dropped
+# source_entries, and picked its widest slots from a 2,000-row prefix of
+# the fact dump. r2 fixed both and then measured `superseded_by_text`
+# truncated — a field with no recovery path, whose truncation was
+# REMOVED before merge, so r2's headline priced a payload this repo does
+# not ship. r3 prices the shipped one. r1 and r2 stay committed as
+# pre-review records and are deliberately cited by nothing.
+LEDGER = RESULTS + "agent-token-ledger-20260904-r3.json"
+
+
+def _ledger_manifest(tier: str, key: str):
+    return lambda d: d["manifest"][tier][key]
+
+
+def _ledger_search(scope: str, arm: str, part: str, stat: str = "mean"):
+    return lambda d: d[scope]["aggregate"][arm][part][stat]
+
+
+_LEDGER_MANIFEST_ROWS = [
+    ("minimal", "| tool manifest, `minimal` tier (9 tools) | 7,015 | 1,753 |",
+     7015, 1753),
+    ("core", "| tool manifest, `core` tier (22 tools) | 14,076 | 3,519 |",
+     14076, 3519),
+    ("full", "| tool manifest, `full` tier (35 tools) | 22,719 | 5,679 |",
+     22719, 5679),
+]
+for _tier, _needle, _chars, _toks in _LEDGER_MANIFEST_ROWS:
+    CLAIMS.append(Claim(
+        id=f"ledger-manifest-{_tier}-chars", doc=EVALS, needle=_needle,
+        artifacts=(LEDGER,), value=_ledger_manifest(_tier, "chars"),
+        stated=_chars, places=0))
+    CLAIMS.append(Claim(
+        id=f"ledger-manifest-{_tier}-tokens", doc=EVALS, needle=_needle,
+        artifacts=(LEDGER,), value=_ledger_manifest(_tier, "approx_tokens"),
+        stated=_toks, places=0))
+
+# RAW chars, not the JSON encoding the other cells count: the hook writes
+# this block into the session as plain text (2026-09-04 review finding —
+# the README published the 7,644 JSON size for a non-JSON surface).
+_LEDGER_SESSION = ("| served session-start block (`MEMORY_LOOP_BLOCK`) "
+                   "| 7,492 | 1,873 |")
+CLAIMS.append(Claim(
+    id="ledger-session-block-chars", doc=EVALS, needle=_LEDGER_SESSION,
+    artifacts=(LEDGER,), value=lambda d: d["session_start_block"]["raw_chars"],
+    stated=7492, places=0))
+CLAIMS.append(Claim(
+    id="ledger-session-block-tokens", doc=EVALS, needle=_LEDGER_SESSION,
+    artifacts=(LEDGER,),
+    value=lambda d: d["session_start_block"]["raw_approx_tokens"],
+    stated=1873, places=0))
+CLAIMS.append(Claim(
+    id="ledger-manifest-full-split", doc=EVALS,
+    needle="(full tier: 14,523 + 8,196)", artifacts=(LEDGER,),
+    value=_ledger_manifest("full", "description_chars"),
+    stated=14523, places=0))
+CLAIMS.append(Claim(
+    id="ledger-manifest-full-params", doc=EVALS,
+    needle="(full tier: 14,523 + 8,196)", artifacts=(LEDGER,),
+    value=_ledger_manifest("full", "param_description_chars"),
+    stated=8196, places=0))
+
+# The two before/after tables. `search` is the tool default (top_k=8);
+# `search_narrow` is top_k=3, the only place cut (b) can show.
+_LEDGER_SEARCH_ROWS = [
+    ("total", "total_chars", "| **total** | **14,745** | **9,951** | **−33%** |",
+     14745, 9951),
+    ("entries", "entries_chars", "| entries block | 12,637 | 7,842 | −38% |",
+     12637, 7842),
+    ("text", "entries_text_chars",
+     "| — entry `text` | 9,464 | 4,550 | −52% |", 9464, 4550),
+    # The exempted field, published as its own row (2026-09-04 review
+    # finding): it is a sixth of the "before" payload, and leaving it
+    # inside "entries block" left ~2,400 chars unaccounted for between
+    # the block total and text + metadata. Identical in both arms
+    # BECAUSE it is exempt — that identity is the pin on the exemption.
+    ("superseded", "entries_superseded_text_chars",
+     "| — `superseded_by_text` | 2,406 | 2,406 | — |", 2406, 2406),
+    ("meta", "entries_other_chars",
+     "| — entry metadata | 767 | 887 | +16% |", 767, 887),
+    ("cortex", "cortex_chars", "| cortex block | 1,853 | 1,853 | — |",
+     1853, 1853),
+    ("tokens", "total_approx_tokens",
+     "| approx tokens | 3,686 | 2,487 | −33% |", 3686, 2487),
+]
+for _slug, _part, _needle, _before, _after in _LEDGER_SEARCH_ROWS:
+    CLAIMS.append(Claim(
+        id=f"ledger-search-{_slug}-before", doc=EVALS, needle=_needle,
+        artifacts=(LEDGER,), value=_ledger_search("search", "before", _part),
+        stated=_before, places=0))
+    CLAIMS.append(Claim(
+        id=f"ledger-search-{_slug}-after", doc=EVALS, needle=_needle,
+        artifacts=(LEDGER,), value=_ledger_search("search", "after", _part),
+        stated=_after, places=0))
+
+_LEDGER_NARROW_ROWS = [
+    ("total", "total_chars", "| **total** | **6,870** | **4,290** | **−38%** |",
+     6870, 4290),
+    ("text", "entries_text_chars",
+     "| entry `text` | 3,537 | 1,712 | −52% |", 3537, 1712),
+    ("superseded", "entries_superseded_text_chars",
+     "| `superseded_by_text` | 931 | 931 | — |", 931, 931),
+    ("cortex", "cortex_chars",
+     "| cortex block (5 facts → 3) | 1,853 | 1,107 | −40% |", 1853, 1107),
+]
+for _slug, _part, _needle, _before, _after in _LEDGER_NARROW_ROWS:
+    CLAIMS.append(Claim(
+        id=f"ledger-narrow-{_slug}-before", doc=EVALS, needle=_needle,
+        artifacts=(LEDGER,),
+        value=_ledger_search("search_narrow", "before", _part),
+        stated=_before, places=0))
+    CLAIMS.append(Claim(
+        id=f"ledger-narrow-{_slug}-after", doc=EVALS, needle=_needle,
+        artifacts=(LEDGER,),
+        value=_ledger_search("search_narrow", "after", _part),
+        stated=_after, places=0))
+
+_LEDGER_MEDIANS = "Median total 15,325 → 9,613; p90 18,886 → 12,583."
+for _cid, _arm, _stat, _stated in [
+    ("median-before", "before", "median", 15325),
+    ("median-after", "after", "median", 9613),
+    ("p90-before", "before", "p90", 18886),
+    ("p90-after", "after", "p90", 12583),
+]:
+    CLAIMS.append(Claim(
+        id=f"ledger-search-{_cid}", doc=EVALS, needle=_LEDGER_MEDIANS,
+        artifacts=(LEDGER,),
+        value=_ledger_search("search", _arm, "total_chars", _stat),
+        stated=_stated, places=0))
+
+_LEDGER_FACT = ("`memory_fact_get`, over the five widest current slots in "
+                "the bank: **2,175 →\n1,296 chars** mean (median 2,281 → 1,128)")
+for _cid, _arm, _stat, _stated in [
+    ("mean-before", "before", "mean", 2175),
+    ("mean-after", "after", "mean", 1296),
+    ("median-before", "before", "median", 2281),
+    ("median-after", "after", "median", 1128),
+]:
+    CLAIMS.append(Claim(
+        id=f"ledger-factget-{_cid}", doc=EVALS, needle=_LEDGER_FACT,
+        artifacts=(LEDGER,),
+        value=(lambda a, s: lambda d: d["fact_get"]["aggregate"][a][s])(
+            _arm, _stat),
+        stated=_stated, places=0))
+
+# The cap's justification — the reason 600 is 600 rather than a round guess.
+_LEDGER_CAP = ("Served entry `text` runs mean **1,180** chars, median 1,149, "
+               "p90 1,794 over\nthe 120 entries the 15 queries returned. A "
+               "600-char cap therefore clips 88%")
+# The cap the run priced, read from ``McpConfig`` rather than restated in
+# the harness (2026-09-04 review finding), so a default change re-prices
+# the artifact instead of desynchronising it from this page.
+CLAIMS.append(Claim(
+    id="ledger-entry-text-cap", doc=EVALS, needle=_LEDGER_CAP,
+    artifacts=(LEDGER,),
+    value=lambda d: d["search"]["entry_text"]["entry_text_chars"],
+    stated=600, places=0))
+for _cid, _get, _stated in [
+    ("mean", lambda d: d["search"]["entry_text"]["raw_chars"]["mean"], 1180),
+    ("median", lambda d: d["search"]["entry_text"]["raw_chars"]["median"], 1149),
+    ("p90", lambda d: d["search"]["entry_text"]["raw_chars"]["p90"], 1794),
+    ("n", lambda d: d["search"]["entry_text"]["entries"], 120),
+]:
+    CLAIMS.append(Claim(
+        id=f"ledger-entry-text-{_cid}", doc=EVALS, needle=_LEDGER_CAP,
+        artifacts=(LEDGER,), value=_get, stated=_stated, places=0))
+CLAIMS.append(Claim(
+    id="ledger-entry-text-share-over-600", doc=EVALS, needle=_LEDGER_CAP,
+    artifacts=(LEDGER,),
+    value=lambda d: d["search"]["entry_text"]["share_over_cap"],
+    stated=0.883, places=2))
+
+# memory_recall's call amplification — the finding the ledger surfaced and
+# deliberately did NOT fix.
+_LEDGER_RECALL = ("A 3-hop `memory_recall` issues **35 `service.search` "
+                  "calls on average** and\nup to **66** on a single question")
+CLAIMS.append(Claim(
+    id="ledger-recall-mean-searches", doc=EVALS, needle=_LEDGER_RECALL,
+    artifacts=(LEDGER,),
+    value=lambda d: d["recall"]["aggregate"]["service_search_calls"]["mean"],
+    stated=35, places=0))
+CLAIMS.append(Claim(
+    id="ledger-recall-max-searches", doc=EVALS, needle=_LEDGER_RECALL,
+    artifacts=(LEDGER,),
+    value=lambda d: d["recall"]["aggregate"]["service_search_calls"]["max"],
+    stated=66, places=0))
+_LEDGER_RECALL_SIZE = ("4,243 chars mean against 10,349 for the same walk "
+                       "with `verbose=True`")
+CLAIMS.append(Claim(
+    id="ledger-recall-compact-chars", doc=EVALS, needle=_LEDGER_RECALL_SIZE,
+    artifacts=(LEDGER,),
+    value=lambda d: d["recall"]["aggregate"]["chars"]["mean"],
+    stated=4243, places=0))
+CLAIMS.append(Claim(
+    id="ledger-recall-verbose-chars", doc=EVALS, needle=_LEDGER_RECALL_SIZE,
+    artifacts=(LEDGER,),
+    value=lambda d: sum(r["verbose_chars"] for r in
+                        d["recall"]["per_question"]) / len(
+                            d["recall"]["per_question"]),
+    stated=10349, places=0))
+CLAIMS.append(Claim(
+    id="ledger-bank-entries", doc=EVALS,
+    needle="bank, 1,316 entries, `preset: flat`", artifacts=(LEDGER,),
+    value=lambda d: d["bank"]["entries"], stated=1316, places=0))
+
+# The narrow arm's validity condition (2026-09-04 review finding): the
+# cortex slice only equals a real top_k=3 call while _pin_constraint_facts
+# is a no-op, which holds exactly while no current fact carries a
+# distortion_tolerance label. It shipped as a hand-checked sentence with
+# no artifact field behind it; the run counts it now.
+_LEDGER_LABELS = "carries **0 of 5,509** labelled current facts"
+CLAIMS.append(Claim(
+    id="ledger-facts-labelled", doc=EVALS, needle=_LEDGER_LABELS,
+    artifacts=(LEDGER,), value=lambda d: d["bank"]["facts_labelled"],
+    stated=0, places=0))
+CLAIMS.append(Claim(
+    id="ledger-facts-current", doc=EVALS, needle=_LEDGER_LABELS,
+    artifacts=(LEDGER,), value=lambda d: d["bank"]["facts_current"],
+    stated=5509, places=0))
 # ── token-matched rag arms (2026-09-04, feat/rag-lite-arms) ──────────────
 # Three runs, published in the CHANGELOG, evals/README.md and the runbook.
 # Every arm mean and every context-token mean below is read straight out of
@@ -3579,6 +4974,30 @@ CLAIMS.append(Claim(
     id="raglite-ev-b100-overshoot", doc=EVALS, needle=_EV_BUDGET,
     artifacts=(RL_V38_ROWS,), value=_over("ragb100", 100), stated=36,
     places=0))
+# evals/README.md's leak-free sentence beside the arm means: the headline
+# figures span all 500 rows, and the summary's own leak_check block is
+# where the 475-row reads live. Pinned so the two can never drift apart.
+_EV_LEAKFREE = "unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**."
+for _arm, _stated in (("rag", 0.6947), ("hybrid", 0.7326),
+                      ("cortex", 0.3158)):
+    CLAIMS.append(Claim(
+        id=f"raglite-ev-all-{_arm}-leak-free", doc=EVALS,
+        needle=_EV_LEAKFREE, artifacts=(RL_ALL_SUM,),
+        value=(lambda a: lambda d: d["leak_check"]["arms"][a]["leak_free"])(
+            _arm),
+        stated=_stated, places=4))
+CLAIMS.append(Claim(
+    id="raglite-ev-all-leak-free-n", doc=EVALS,
+    needle="own `leak_check` block and are not the headline figures: over the 475",
+    artifacts=(RL_ALL_SUM,),
+    value=lambda d: d["leak_check"]["arms"]["rag"]["n_leak_free"],
+    stated=475, places=0))
+CLAIMS.append(Claim(
+    id="raglite-ev-all-leaked-n", doc=EVALS,
+    needle="leak check flags as naming their own gold answer included, so every arm is",
+    artifacts=(RL_ALL_SUM,), value=lambda d: d["leak_check"]["n_leaked"],
+    stated=25, places=0))
+
 CLAIMS.append(Claim(
     id="raglite-ev-b100-cortex-target", doc=EVALS,
     needle="`ragb100` \u2014 sized to match the cortex arm's 96.7 tokens \u2014 served a mean",

@@ -803,14 +803,65 @@ class RecallConfig:
     hub_percentile: float = 95.0
     hub_floor: int = 8
     expand_budget: int = 0   # per-hop expansion cap; 0 = unlimited
+    # Search fan-out caps. Measured 2026-09-04, `evals/recall_fanout_bench.py`
+    # on a restored copy of the live bank (1,296 entries, 5,504 entities,
+    # flat preset; 20 relational questions, CPU, top_k=6, hops=3 —
+    # `evals/results/recall-fanout-cap-20260904.json`): the uncapped walk
+    # issued a mean of 89.15 `service.search` calls per recall (max 205)
+    # and took 25.25 s (max 57.67 s), against 0.26 s for a plain search on
+    # the same questions. Two live recall calls timed out at the MCP layer
+    # that morning. The cause is structural: one re-query per newly
+    # discovered entity per hop on a star-shaped graph (degree p50 1 /
+    # p95 5 / max 132), so one hub's ring prices the whole call.
+    #
+    # Per hop, re-query only the top-N newly discovered entities (seed-hit
+    # mentions first, then lowest degree); the rest are still returned as
+    # entities with their facts. 6 is above that degree p95 of 5, so a
+    # typical spoke's whole neighborhood is still re-queried and only hub
+    # rings are cut. At 6 the same 20 questions cost a mean of 12.40
+    # searches / 4.166 s with no expected target lost. 0 = unlimited
+    # (pre-2026-09-04 behavior).
+    max_searches_per_hop: int = 6
+    # Hard ceiling per recall call, seed search included; on reaching it
+    # the walk stops and the response carries `truncated: true` +
+    # `searches_issued`. Sized to be a genuine backstop rather than a
+    # binding constraint: `memory_recall` advertises `hops` clamped to
+    # 1..5, and a full 5-hop walk under the per-hop cap above costs at
+    # most 1 + 6 x 5 = 31, so at 31 no request the tool accepts can be cut
+    # by this ceiling — only a raised per-hop cap can reach it. (It was 20
+    # when the 2026-09-04 run above was measured; that run was hops=3, cost
+    # at most 19 searches, and never tripped the ceiling on any of the 20
+    # questions, so the artifact's numbers are unchanged by this default.)
+    # 0 = no ceiling.
+    max_total_searches: int = 31
+    # Wall-clock fail-soft: past this the walk returns what it has with
+    # `truncated: true` instead of running on. Above the 7.51 s worst
+    # capped call measured above and well inside the MCP client timeout
+    # the two live calls hit. 0 = no budget.
+    time_budget_seconds: float = 20.0
+    # `part-of` is this bank's filler relation — 19% of live edges, and
+    # 1,046 of the 1,763 entities the 2026-09-04 run's recalls added
+    # arrived through `part-of` alone. When True, such an entity is still
+    # returned with its facts but never spends a search. Default False:
+    # the knob exists so the eval can measure what dropping those
+    # re-queries costs before any default changes.
+    skip_part_of_expansion: bool = False
+
+
+# The retrieval channel-fusion modes. Named here so the config's
+# load-time validation and ``cms.retrieve``'s per-query belt cannot drift
+# apart, and so a new mode is added in one place.
+FUSION_MODES = ("weighted_sum", "rrf")
 
 
 @dataclass
 class SearchConfig:
     """Aggregation-aware retrieval knobs (Phase 1, spec
-    2026-08-03-aggregation-aware-recall-design.md). Both default OFF until
-    the preregistered gates pass; the eval harness pins its control arm to
-    vanilla retrieval via per-call overrides regardless of these values."""
+    2026-08-03-aggregation-aware-recall-design.md) plus the candidate-pool
+    shape knobs added 2026-09-04. All default OFF (or to the shipped
+    behaviour) until the preregistered gates pass; the eval harness pins
+    its control arm to vanilla retrieval via per-call overrides regardless
+    of these values."""
 
     # Temporal-contiguity expansion (EM-LLM, arXiv:2407.09450): each search
     # hit also surfaces up to N temporal neighbors per side — same episode,
@@ -834,6 +885,133 @@ class SearchConfig:
     #   "quarantine" — a stale record's ``value`` is replaced by a wrapper
     #                  and the original moves to ``last_known_value``
     stale_policy: str = "annotate"
+    # Retrieve-then-rerank width. Each band's DENSE candidate pool becomes
+    # ``top_k * candidate_pool_multiplier`` (band-size capped); the final
+    # truncation to ``top_k`` is unchanged. 1 (default) is the shipped
+    # path, byte-identical to the pre-knob code and pinned by
+    # tests/test_retrieval_pool.py::
+    # test_multiplier_one_matches_captured_prechange_output.
+    #
+    # Why this is a knob at all: under ``miras.preset = "flat"`` (the
+    # default since 2026-08-15) there is ONE band, so the dense pool for
+    # the whole bank was exactly the served width — BM25 fusion, the slot
+    # pool and the cross-encoder all re-ranked a set that dense retrieval
+    # had already cut to size, and the reranker's ``top_n = 20`` budget
+    # never saw more than ~11 candidates. Not a tuned constant, and not
+    # unmeasured either: multiplier 4 was run through a judged eval on
+    # 2026-09-04 and LOST under both fusions (see the verdict on
+    # ``fusion`` below), so it ships at 1.
+    candidate_pool_multiplier: int = 1
+    # How the dense / slot / BM25 / timeline channels are merged.
+    #   "weighted_sum" — today's behaviour: BM25 contributes
+    #                    ``weight x normalised`` additively to the dense
+    #                    score and every channel's score is then raw-sorted
+    #                    together, despite the scales being incommensurate
+    #                    (cosine, 0.55-0.95 slot confidence, 0.3 x
+    #                    normalised BM25).
+    #   "rrf"          — reciprocal rank fusion over the four channels'
+    #                    RANK lists, which needs no shared scale. Source
+    #                    and supersession multipliers stay ranking-only
+    #                    modifiers, applied to the fused score; recency
+    #                    rides inside the dense channel's own rank order.
+    # Ships "weighted_sum" for the same measured reason as the multiplier
+    # above.
+    #
+    # CAUTION — "rrf" changes the SCALE of every served score, not just the
+    # order: a fused score is a sum of 1/(60 + rank) terms, so it tops out
+    # around 0.05 (typically 0.016-0.05) where a cosine reaches 1.0. Any
+    # threshold, weight or margin tuned on the cosine scale silently
+    # changes meaning. Four known sites, all pinned in
+    # tests/test_retrieval_pool.py:
+    #
+    #   ``memory.search_confidence_floor`` — set it to 0 (its default)
+    #     before enabling rrf, or memory_search abstains on everything;
+    #     the same hazard the reranker's ``skip_margin`` comment
+    #     documents, in the other direction.
+    #   ``memory.reranker.fusion_weight`` — reranker.fuse computes
+    #     ``w * ce + (1 - w) * orig``. With ``orig`` on the rrf scale the
+    #     bi-encoder term is worth at most 0.3 x 0.05 = 0.015, so a
+    #     cross-encoder difference of ~0.02 outranks the ENTIRE fused
+    #     ranking: rrf plus the reranker is cross-encoder-only ordering.
+    #   ``memory.reranker.skip_margin`` — a nonzero margin tuned on
+    #     cosines can never be reached by fused scores, so the gate never
+    #     skips and the ~200ms pass it was added to avoid always runs.
+    #   the reference bank (Pool 2) — reference documents keep their RAW
+    #     cosines (~0.9), which are not rescaled onto the fused scale.
+    #     They trail positionally with the reranker off, but the moment
+    #     the reranker fires they sort above every memory on the
+    #     ``(1 - w) * orig`` term alone.
+    #
+    # Plainly: do NOT combine "rrf" with the cross-encoder reranker or a
+    # populated reference bank until that combination has been measured.
+    # The judged verdict below covers rrf with the reranker OFF and an
+    # empty reference bank; nothing else is measured.
+    #
+    # Judged verdict (2026-09-04, LongMemEval knowledge-update oracle,
+    # n=78, qwen-27b extraction): "rrf" at multiplier 4 LOSES —
+    # rag 0.744 vs 0.859 control (-0.115), hybrid 0.833 vs 0.897
+    # (-0.064). Artifacts:
+    # evals/results/longmemeval-ku-oracle-qwen-27b-pool-{ctl,m4rrf}.*
+    # and evals/results/compare-pool-m4rrf-pairs.json; the table is in
+    # evals/README.md. Ships "weighted_sum" for that reason, not for want
+    # of measurement.
+    fusion: str = "weighted_sum"
+
+    def __post_init__(self) -> None:
+        # Fail at LOAD, not once per query. ``cms.retrieve`` also rejects
+        # an unknown mode, but that raise fires inside every retrieval, so
+        # a typo in config.yaml would surface as a burst of failing
+        # searches on a daemon that started clean. Validating here turns
+        # it into a refusal to start. The retrieve() check stays as the
+        # belt: config objects reach it by paths that never run this
+        # (per-attribute setattr, eval harnesses, Console saves).
+        if self.fusion not in FUSION_MODES:
+            raise ValueError(
+                f"memory.search.fusion: unknown mode {self.fusion!r} "
+                f"(expected one of {', '.join(map(repr, FUSION_MODES))})")
+
+
+@dataclass
+class McpConfig:
+    """What an AGENT pays per MCP tool call (spec: the 2026-09-04 agent-side
+    token ledger, ``evals/agent_token_ledger.py``).
+
+    Every published "fewer tokens" figure to date measured *served benchmark
+    context* — the answerer's prompt — never the payload a real MCP client
+    reads back from a tool. The ledger measured that side; these knobs gate
+    the cuts it justified, as ONE switch:
+
+    * ``memory_search`` entry ``text`` capped at ``entry_text_chars`` with a
+      ``truncated: true`` marker (``memory_get`` returns the full text);
+    * the cortex block sized to the caller's ``top_k`` rather than a fixed 5;
+    * ``memory_fact_get``'s bookkeeping keys behind ``verbose=True``.
+
+    ``compact_payloads: False`` restores the pre-cut payloads verbatim. All
+    three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
+    the service layer are untouched, so no eval number can move (the eval
+    harness calls the service, pinned by
+    ``tests/test_agent_payload_budget.py``).
+    """
+
+    compact_payloads: bool = True
+    # 600 chars ≈ 150 tokens. Measured 2026-09-04 over 15 dev-session
+    # queries at top_k=8 against the live bank (1,316 entries, 120 served
+    # entries) — evals/results/agent-token-ledger-20260904-r3.json: served
+    # entry text runs mean 1,180 chars / median 1,149 / p90 1,794, and
+    # entry text alone was 64% of the whole search payload. A 600-char cap
+    # therefore clips 88% of hits ON THIS BANK, deliberately: these are
+    # consolidated notes, not one-liners, and 600 chars is enough to judge
+    # a hit and usually to act on it, with ``memory_get`` for the rest. It
+    # halves the served entry text (9,464 -> 4,550 mean chars) and takes
+    # 33% off the call. It does NOT apply to ``superseded_by_text``, which
+    # is exempt: that field has no recovery path, since a compact entry
+    # carries no id for the superseding entry (see ``_compact_entry``).
+    # Raise it for long-form corpora where the tail of a
+    # note carries the answer. ``memory_recall`` has capped its supporting
+    # texts at 200 since 2026-07-10 (``_RECALL_TEXT_CHARS``); search
+    # entries are the primary answer rather than walk evidence, so they
+    # get the wider cap.
+    entry_text_chars: int = 600
 
 
 @dataclass
@@ -866,6 +1044,8 @@ class MemoryConfig:
     compaction: CompactionConfig = field(default_factory=CompactionConfig)
     # memory_recall — live MemCoT iterative retrieval (read-only).
     recall: RecallConfig = field(default_factory=RecallConfig)
+    # MCP payload shaping — the agent-side token cost of a tool call.
+    mcp: McpConfig = field(default_factory=McpConfig)
     # Topology analytics computed during dream (Track B).
     graph_insight: GraphInsightConfig = field(default_factory=GraphInsightConfig)
     # Engram cross-index (provenance-as-link, schema v13).
@@ -1048,6 +1228,8 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             config.memory.dream = _dict_to_dataclass(DreamConfig, mem_raw["dream"])
         if "recall" in mem_raw:
             config.memory.recall = _dict_to_dataclass(RecallConfig, mem_raw["recall"])
+        if "mcp" in mem_raw:
+            config.memory.mcp = _dict_to_dataclass(McpConfig, mem_raw["mcp"])
         if "graph_insight" in mem_raw:
             config.memory.graph_insight = _dict_to_dataclass(
                 GraphInsightConfig, mem_raw["graph_insight"],

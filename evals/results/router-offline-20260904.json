@@ -1,0 +1,2457 @@
+{
+  "generated_by": "evals/router_offline.py",
+  "seed": 0,
+  "chars_per_token": 4.0,
+  "framing": "Offline re-use of already-judged per-question verdicts. No new answer or judge calls; a single replicate per source run; a local judge. Oracle rows are fit on the questions they score, so they are BOUNDS, not shipped results.",
+  "sources": {
+    "LME-500": "evals/results/longmemeval-all-oracle-qwen-27b-alltypes-0803.jsonl",
+    "LME-KU78": "evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-v38.jsonl",
+    "BEAM-400": "evals/results/beam-100K-qwen-27b-chip12-b16.jsonl"
+  },
+  "features": [
+    "temporal",
+    "aggregate",
+    "lookup",
+    "preference",
+    "instruction",
+    "update",
+    "summarize",
+    "multihop",
+    "self",
+    "assistant",
+    "n_words",
+    "n_chars",
+    "n_question_marks"
+  ],
+  "datasets": {
+    "LME-500": {
+      "name": "LME-500",
+      "n": 500,
+      "cost_unit": "tokens",
+      "notes": [
+        "binary judge verdicts",
+        "context tokens from the run"
+      ],
+      "sanity_vs_summary": {
+        "checked": true,
+        "summary": "longmemeval-all-oracle-qwen-27b-alltypes-0803.summary.json",
+        "n_matches": true,
+        "max_score_delta": 0.0,
+        "max_cost_delta": 0.04600000000004911,
+        "deltas": {
+          "cascade": 0.0,
+          "cascade_cost": 0.04,
+          "cortex": 0.0,
+          "cortex_cost": 0.032,
+          "hybrid": 0.0,
+          "hybrid_cost": 0.028,
+          "rag": 0.0,
+          "rag_cost": 0.046
+        }
+      },
+      "arms": {
+        "rag": {
+          "score": 0.688,
+          "cost": 1209.654,
+          "est_tokens": 1209.654,
+          "score_per_1k_tokens": 0.5687576778153092
+        },
+        "cortex": {
+          "score": 0.416,
+          "cost": 158.232,
+          "est_tokens": 158.232,
+          "score_per_1k_tokens": 2.6290510137014
+        },
+        "hybrid": {
+          "score": 0.664,
+          "cost": 842.072,
+          "est_tokens": 842.072,
+          "score_per_1k_tokens": 0.7885311469803057
+        },
+        "cascade": {
+          "score": 0.69,
+          "cost": 882.56,
+          "est_tokens": 882.56,
+          "score_per_1k_tokens": 0.7818165337200871
+        }
+      },
+      "types": {
+        "knowledge-update": {
+          "n": 78,
+          "arms": {
+            "rag": {
+              "score": 0.8589743589743589,
+              "cost": 1236.9102564102564
+            },
+            "cortex": {
+              "score": 0.7564102564102564,
+              "cost": 128.9102564102564
+            },
+            "hybrid": {
+              "score": 0.9102564102564102,
+              "cost": 790.2179487179487
+            },
+            "cascade": {
+              "score": 0.9358974358974359,
+              "cost": 443.03846153846155
+            }
+          }
+        },
+        "multi-session": {
+          "n": 133,
+          "arms": {
+            "rag": {
+              "score": 0.5037593984962406,
+              "cost": 1166.6616541353383
+            },
+            "cortex": {
+              "score": 0.21052631578947367,
+              "cost": 186.4812030075188
+            },
+            "hybrid": {
+              "score": 0.38345864661654133,
+              "cost": 841.6992481203008
+            },
+            "cascade": {
+              "score": 0.47368421052631576,
+              "cost": 997.5714285714286
+            }
+          }
+        },
+        "single-session-assistant": {
+          "n": 56,
+          "arms": {
+            "rag": {
+              "score": 0.9107142857142857,
+              "cost": 949.875
+            },
+            "cortex": {
+              "score": 0.5714285714285714,
+              "cost": 192.19642857142858
+            },
+            "hybrid": {
+              "score": 0.9642857142857143,
+              "cost": 844.3571428571429
+            },
+            "cascade": {
+              "score": 0.9285714285714286,
+              "cost": 610.125
+            }
+          }
+        },
+        "single-session-preference": {
+          "n": 30,
+          "arms": {
+            "rag": {
+              "score": 0.8,
+              "cost": 1223.0333333333333
+            },
+            "cortex": {
+              "score": 0.7333333333333333,
+              "cost": 150.86666666666667
+            },
+            "hybrid": {
+              "score": 0.6,
+              "cost": 905.7333333333333
+            },
+            "cascade": {
+              "score": 0.7,
+              "cost": 1116.9333333333334
+            }
+          }
+        },
+        "single-session-user": {
+          "n": 70,
+          "arms": {
+            "rag": {
+              "score": 0.9285714285714286,
+              "cost": 1484.7857142857142
+            },
+            "cortex": {
+              "score": 0.6714285714285714,
+              "cost": 92.88571428571429
+            },
+            "hybrid": {
+              "score": 0.9571428571428572,
+              "cost": 858.0285714285715
+            },
+            "cascade": {
+              "score": 0.9428571428571428,
+              "cost": 671.8714285714286
+            }
+          }
+        },
+        "temporal-reasoning": {
+          "n": 133,
+          "arms": {
+            "rag": {
+              "score": 0.5263157894736842,
+              "cost": 1198.218045112782
+            },
+            "cortex": {
+              "score": 0.15037593984962405,
+              "cost": 168.93233082706766
+            },
+            "hybrid": {
+              "score": 0.5338345864661654,
+              "cost": 849.1353383458646
+            },
+            "cascade": {
+              "score": 0.5263157894736842,
+              "cost": 1198.045112781955
+            }
+          }
+        }
+      },
+      "type_predictability": {
+        "tree_d3": {
+          "model": "tree_d3",
+          "cv_accuracy": 0.57,
+          "majority_baseline": 0.266
+        },
+        "logreg": {
+          "model": "logreg",
+          "cv_accuracy": 0.654,
+          "majority_baseline": 0.266
+        }
+      },
+      "policies": {
+        "oracle_by_type[base]": {
+          "choice": {
+            "knowledge-update": "hybrid",
+            "multi-session": "rag",
+            "single-session-assistant": "hybrid",
+            "single-session-preference": "rag",
+            "single-session-user": "hybrid",
+            "temporal-reasoning": "hybrid"
+          },
+          "score": 0.708,
+          "cost": 947.55,
+          "est_tokens": 947.55,
+          "score_per_1k_tokens": 0.7471901218933037
+        },
+        "oracle_per_question[base]": {
+          "score": 0.778,
+          "cost": 418.968,
+          "est_tokens": 418.968,
+          "score_per_1k_tokens": 1.8569437283993049
+        },
+        "router_via_type[base|tree_d3]": {
+          "model": "tree_d3",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "type_cv_accuracy": 0.57,
+          "arm_share": {
+            "cortex": 4,
+            "hybrid": 304,
+            "rag": 192
+          },
+          "score": 0.672,
+          "cost": 983.832,
+          "est_tokens": 983.832,
+          "score_per_1k_tokens": 0.6830434464420755
+        },
+        "router[base|tree_d3|acc]": {
+          "score": 0.688,
+          "cost": 1205.008,
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "arm_share": {
+            "cortex": 2,
+            "hybrid": 5,
+            "rag": 493
+          },
+          "agree_with_oracle_by_type": 0.328,
+          "confusion_vs_oracle_by_type": {
+            "hybrid": {
+              "cortex": 2,
+              "hybrid": 3,
+              "rag": 332
+            },
+            "rag": {
+              "hybrid": 2,
+              "rag": 161
+            }
+          },
+          "est_tokens": 1205.008,
+          "score_per_1k_tokens": 0.5709505663032942
+        },
+        "router[base|tree_d3|cheap]": {
+          "score": 0.434,
+          "cost": 189.262,
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "arm_share": {
+            "cortex": 475,
+            "hybrid": 23,
+            "rag": 2
+          },
+          "agree_with_oracle_by_type": 0.038,
+          "confusion_vs_oracle_by_type": {
+            "hybrid": {
+              "cortex": 316,
+              "hybrid": 19,
+              "rag": 2
+            },
+            "rag": {
+              "cortex": 159,
+              "hybrid": 4
+            }
+          },
+          "est_tokens": 189.262,
+          "score_per_1k_tokens": 2.2931174773594276
+        },
+        "router_via_type[base|logreg]": {
+          "model": "logreg",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "type_cv_accuracy": 0.654,
+          "arm_share": {
+            "cortex": 6,
+            "hybrid": 278,
+            "rag": 216
+          },
+          "score": 0.686,
+          "cost": 1001.858,
+          "est_tokens": 1001.858,
+          "score_per_1k_tokens": 0.6847277757925775
+        },
+        "router[base|logreg|acc]": {
+          "score": 0.688,
+          "cost": 1208.224,
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "arm_share": {
+            "cortex": 1,
+            "rag": 499
+          },
+          "agree_with_oracle_by_type": 0.326,
+          "confusion_vs_oracle_by_type": {
+            "hybrid": {
+              "cortex": 1,
+              "rag": 336
+            },
+            "rag": {
+              "rag": 163
+            }
+          },
+          "est_tokens": 1208.224,
+          "score_per_1k_tokens": 0.5694308340175331
+        },
+        "router[base|logreg|cheap]": {
+          "score": 0.434,
+          "cost": 199.476,
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "arm_share": {
+            "cortex": 467,
+            "hybrid": 29,
+            "rag": 4
+          },
+          "agree_with_oracle_by_type": 0.054,
+          "confusion_vs_oracle_by_type": {
+            "hybrid": {
+              "cortex": 312,
+              "hybrid": 24,
+              "rag": 1
+            },
+            "rag": {
+              "cortex": 155,
+              "hybrid": 5,
+              "rag": 3
+            }
+          },
+          "est_tokens": 199.476,
+          "score_per_1k_tokens": 2.1757003348773787
+        },
+        "oracle_by_type[with_cascade]": {
+          "choice": {
+            "knowledge-update": "cascade",
+            "multi-session": "rag",
+            "single-session-assistant": "hybrid",
+            "single-session-preference": "rag",
+            "single-session-user": "hybrid",
+            "temporal-reasoning": "hybrid"
+          },
+          "score": 0.712,
+          "cost": 893.39,
+          "est_tokens": 893.39,
+          "score_per_1k_tokens": 0.7969643716629915
+        },
+        "oracle_per_question[with_cascade]": {
+          "score": 0.778,
+          "cost": 418.968,
+          "est_tokens": 418.968,
+          "score_per_1k_tokens": 1.8569437283993049
+        },
+        "router_via_type[with_cascade|tree_d3]": {
+          "model": "tree_d3",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "type_cv_accuracy": 0.57,
+          "arm_share": {
+            "cascade": 72,
+            "cortex": 4,
+            "hybrid": 232,
+            "rag": 192
+          },
+          "score": 0.66,
+          "cost": 979.284,
+          "est_tokens": 979.284,
+          "score_per_1k_tokens": 0.673961792493291
+        },
+        "router[with_cascade|tree_d3|acc]": {
+          "score": 0.678,
+          "cost": 1005.184,
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 302,
+            "hybrid": 2,
+            "rag": 196
+          },
+          "agree_with_oracle_by_type": 0.226,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cascade": 46,
+              "rag": 32
+            },
+            "hybrid": {
+              "cascade": 160,
+              "hybrid": 1,
+              "rag": 98
+            },
+            "rag": {
+              "cascade": 96,
+              "hybrid": 1,
+              "rag": 66
+            }
+          },
+          "est_tokens": 1005.184,
+          "score_per_1k_tokens": 0.674503374506558
+        },
+        "router[with_cascade|tree_d3|cheap]": {
+          "score": 0.564,
+          "cost": 578.626,
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 258,
+            "cortex": 171,
+            "hybrid": 71
+          },
+          "agree_with_oracle_by_type": 0.18,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cascade": 47,
+              "cortex": 22,
+              "hybrid": 9
+            },
+            "hybrid": {
+              "cascade": 109,
+              "cortex": 107,
+              "hybrid": 43
+            },
+            "rag": {
+              "cascade": 102,
+              "cortex": 42,
+              "hybrid": 19
+            }
+          },
+          "est_tokens": 578.626,
+          "score_per_1k_tokens": 0.9747228779902735
+        },
+        "router_via_type[with_cascade|logreg]": {
+          "model": "logreg",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "type_cv_accuracy": 0.654,
+          "arm_share": {
+            "cascade": 102,
+            "cortex": 6,
+            "hybrid": 176,
+            "rag": 216
+          },
+          "score": 0.682,
+          "cost": 992.552,
+          "est_tokens": 992.552,
+          "score_per_1k_tokens": 0.6871176522741378
+        },
+        "router[with_cascade|logreg|acc]": {
+          "score": 0.678,
+          "cost": 1008.926,
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 300,
+            "rag": 200
+          },
+          "agree_with_oracle_by_type": 0.226,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cascade": 46,
+              "rag": 32
+            },
+            "hybrid": {
+              "cascade": 158,
+              "rag": 101
+            },
+            "rag": {
+              "cascade": 96,
+              "rag": 67
+            }
+          },
+          "est_tokens": 1008.926,
+          "score_per_1k_tokens": 0.6720017127123298
+        },
+        "router[with_cascade|logreg|cheap]": {
+          "score": 0.59,
+          "cost": 610.098,
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 265,
+            "cortex": 152,
+            "hybrid": 75,
+            "rag": 8
+          },
+          "agree_with_oracle_by_type": 0.242,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cascade": 54,
+              "cortex": 19,
+              "hybrid": 5
+            },
+            "hybrid": {
+              "cascade": 112,
+              "cortex": 80,
+              "hybrid": 63,
+              "rag": 4
+            },
+            "rag": {
+              "cascade": 99,
+              "cortex": 53,
+              "hybrid": 7,
+              "rag": 4
+            }
+          },
+          "est_tokens": 610.098,
+          "score_per_1k_tokens": 0.9670577513776476
+        },
+        "two_stage[tree_d3|acc]": {
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 193,
+          "n_routed": 307,
+          "arm_share": {
+            "cortex(commit)": 193,
+            "hybrid": 1,
+            "rag": 306
+          },
+          "score": 0.69,
+          "cost": 882.576,
+          "est_tokens": 882.576,
+          "score_per_1k_tokens": 0.7818023603633001
+        },
+        "two_stage[tree_d3|cheap]": {
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 193,
+          "n_routed": 307,
+          "arm_share": {
+            "cortex(commit)": 193,
+            "hybrid": 290,
+            "rag": 17
+          },
+          "score": 0.656,
+          "cost": 667.454,
+          "est_tokens": 667.454,
+          "score_per_1k_tokens": 0.9828392668258787
+        },
+        "two_stage[logreg|acc]": {
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 193,
+          "n_routed": 307,
+          "arm_share": {
+            "cortex(commit)": 193,
+            "rag": 307
+          },
+          "score": 0.69,
+          "cost": 882.56,
+          "est_tokens": 882.56,
+          "score_per_1k_tokens": 0.7818165337200871
+        },
+        "two_stage[logreg|cheap]": {
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 193,
+          "n_routed": 307,
+          "arm_share": {
+            "cortex(commit)": 193,
+            "hybrid": 301,
+            "rag": 6
+          },
+          "score": 0.652,
+          "cost": 659.426,
+          "est_tokens": 659.426,
+          "score_per_1k_tokens": 0.9887386909221049
+        }
+      },
+      "best_single_arm": "rag"
+    },
+    "LME-KU78": {
+      "name": "LME-KU78",
+      "n": 78,
+      "cost_unit": "tokens",
+      "notes": [
+        "binary judge verdicts",
+        "context tokens from the run"
+      ],
+      "sanity_vs_summary": {
+        "checked": true,
+        "summary": "longmemeval-ku-oracle-qwen-27b-ceiling-v38.summary.json",
+        "n_matches": true,
+        "max_score_delta": 0.00033333333333340764,
+        "max_cost_delta": 0.030769230769237765,
+        "deltas": {
+          "cascade": 0.000154,
+          "cascade_cost": 0.002564,
+          "cortex": 0.000333,
+          "cortex_cost": 0.005128,
+          "hybrid": 0.000154,
+          "hybrid_cost": 0.030769,
+          "rag": 2.6e-05,
+          "rag_cost": 0.028205
+        }
+      },
+      "arms": {
+        "rag": {
+          "score": 0.8589743589743589,
+          "cost": 1184.128205128205,
+          "est_tokens": 1184.128205128205,
+          "score_per_1k_tokens": 0.7254065524782919
+        },
+        "cortex": {
+          "score": 0.6666666666666666,
+          "cost": 96.7051282051282,
+          "est_tokens": 96.7051282051282,
+          "score_per_1k_tokens": 6.893808829378231
+        },
+        "hybrid": {
+          "score": 0.8461538461538461,
+          "cost": 731.2692307692307,
+          "est_tokens": 731.2692307692307,
+          "score_per_1k_tokens": 1.1571030347656868
+        },
+        "cascade": {
+          "score": 0.8461538461538461,
+          "cost": 389.3974358974359,
+          "est_tokens": 389.3974358974359,
+          "score_per_1k_tokens": 2.1729825832153558
+        }
+      },
+      "types": {
+        "knowledge-update": {
+          "n": 78,
+          "arms": {
+            "rag": {
+              "score": 0.8589743589743589,
+              "cost": 1184.128205128205
+            },
+            "cortex": {
+              "score": 0.6666666666666666,
+              "cost": 96.7051282051282
+            },
+            "hybrid": {
+              "score": 0.8461538461538461,
+              "cost": 731.2692307692307
+            },
+            "cascade": {
+              "score": 0.8461538461538461,
+              "cost": 389.3974358974359
+            }
+          }
+        }
+      },
+      "type_predictability": {
+        "tree_d3": {
+          "model": "tree_d3",
+          "cv_accuracy": 1.0,
+          "majority_baseline": 1.0
+        },
+        "logreg": {
+          "model": "logreg",
+          "cv_accuracy": 1.0,
+          "majority_baseline": 1.0
+        }
+      },
+      "policies": {
+        "oracle_by_type[base]": {
+          "choice": {
+            "knowledge-update": "rag"
+          },
+          "score": 0.8589743589743589,
+          "cost": 1184.128205128205,
+          "est_tokens": 1184.128205128205,
+          "score_per_1k_tokens": 0.7254065524782919
+        },
+        "oracle_per_question[base]": {
+          "score": 0.9615384615384616,
+          "cost": 318.3333333333333,
+          "est_tokens": 318.3333333333333,
+          "score_per_1k_tokens": 3.0205396697543296
+        },
+        "router_via_type[base|tree_d3]": {
+          "model": "tree_d3",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "type_cv_accuracy": 1.0,
+          "arm_share": {
+            "hybrid": 15,
+            "rag": 63
+          },
+          "score": 0.8205128205128205,
+          "cost": 1105.3589743589744,
+          "est_tokens": 1105.3589743589744,
+          "score_per_1k_tokens": 0.742304391194414
+        },
+        "router[base|tree_d3|acc]": {
+          "score": 0.8205128205128205,
+          "cost": 1084.0,
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "arm_share": {
+            "hybrid": 20,
+            "rag": 58
+          },
+          "agree_with_oracle_by_type": 0.7435897435897436,
+          "confusion_vs_oracle_by_type": {
+            "rag": {
+              "hybrid": 20,
+              "rag": 58
+            }
+          },
+          "est_tokens": 1084.0,
+          "score_per_1k_tokens": 0.7569306462295391
+        },
+        "router[base|tree_d3|cheap]": {
+          "score": 0.6666666666666666,
+          "cost": 116.55128205128206,
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "arm_share": {
+            "cortex": 76,
+            "hybrid": 1,
+            "rag": 1
+          },
+          "agree_with_oracle_by_type": 0.01282051282051282,
+          "confusion_vs_oracle_by_type": {
+            "rag": {
+              "cortex": 76,
+              "hybrid": 1,
+              "rag": 1
+            }
+          },
+          "est_tokens": 116.55128205128206,
+          "score_per_1k_tokens": 5.719942800571994
+        },
+        "router_via_type[base|logreg]": {
+          "model": "logreg",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "type_cv_accuracy": 1.0,
+          "arm_share": {
+            "hybrid": 15,
+            "rag": 63
+          },
+          "score": 0.8205128205128205,
+          "cost": 1105.3589743589744,
+          "est_tokens": 1105.3589743589744,
+          "score_per_1k_tokens": 0.742304391194414
+        },
+        "router[base|logreg|acc]": {
+          "score": 0.8205128205128205,
+          "cost": 1102.1025641025642,
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "arm_share": {
+            "hybrid": 16,
+            "rag": 62
+          },
+          "agree_with_oracle_by_type": 0.7948717948717948,
+          "confusion_vs_oracle_by_type": {
+            "rag": {
+              "hybrid": 16,
+              "rag": 62
+            }
+          },
+          "est_tokens": 1102.1025641025642,
+          "score_per_1k_tokens": 0.7444976967102508
+        },
+        "router[base|logreg|cheap]": {
+          "score": 0.6666666666666666,
+          "cost": 125.84615384615384,
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid"
+          ],
+          "arm_share": {
+            "cortex": 74,
+            "hybrid": 3,
+            "rag": 1
+          },
+          "agree_with_oracle_by_type": 0.01282051282051282,
+          "confusion_vs_oracle_by_type": {
+            "rag": {
+              "cortex": 74,
+              "hybrid": 3,
+              "rag": 1
+            }
+          },
+          "est_tokens": 125.84615384615384,
+          "score_per_1k_tokens": 5.297473512632437
+        },
+        "oracle_by_type[with_cascade]": {
+          "choice": {
+            "knowledge-update": "rag"
+          },
+          "score": 0.8589743589743589,
+          "cost": 1184.128205128205,
+          "est_tokens": 1184.128205128205,
+          "score_per_1k_tokens": 0.7254065524782919
+        },
+        "oracle_per_question[with_cascade]": {
+          "score": 0.9615384615384616,
+          "cost": 318.3333333333333,
+          "est_tokens": 318.3333333333333,
+          "score_per_1k_tokens": 3.0205396697543296
+        },
+        "router_via_type[with_cascade|tree_d3]": {
+          "model": "tree_d3",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "type_cv_accuracy": 1.0,
+          "arm_share": {
+            "cascade": 32,
+            "hybrid": 15,
+            "rag": 31
+          },
+          "score": 0.7948717948717948,
+          "cost": 734.1410256410256,
+          "est_tokens": 734.1410256410256,
+          "score_per_1k_tokens": 1.0827235736863243
+        },
+        "router[with_cascade|tree_d3|acc]": {
+          "score": 0.8205128205128205,
+          "cost": 1086.5897435897436,
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 2,
+            "hybrid": 17,
+            "rag": 59
+          },
+          "agree_with_oracle_by_type": 0.7564102564102564,
+          "confusion_vs_oracle_by_type": {
+            "rag": {
+              "cascade": 2,
+              "hybrid": 17,
+              "rag": 59
+            }
+          },
+          "est_tokens": 1086.5897435897436,
+          "score_per_1k_tokens": 0.7551266016943153
+        },
+        "router[with_cascade|tree_d3|cheap]": {
+          "score": 0.8461538461538461,
+          "cost": 402.55128205128204,
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 68,
+            "cortex": 1,
+            "hybrid": 7,
+            "rag": 2
+          },
+          "agree_with_oracle_by_type": 0.02564102564102564,
+          "confusion_vs_oracle_by_type": {
+            "rag": {
+              "cascade": 68,
+              "cortex": 1,
+              "hybrid": 7,
+              "rag": 2
+            }
+          },
+          "est_tokens": 402.55128205128204,
+          "score_per_1k_tokens": 2.101977769992675
+        },
+        "router_via_type[with_cascade|logreg]": {
+          "model": "logreg",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "type_cv_accuracy": 1.0,
+          "arm_share": {
+            "cascade": 32,
+            "hybrid": 15,
+            "rag": 31
+          },
+          "score": 0.7948717948717948,
+          "cost": 734.1410256410256,
+          "est_tokens": 734.1410256410256,
+          "score_per_1k_tokens": 1.0827235736863243
+        },
+        "router[with_cascade|logreg|acc]": {
+          "score": 0.8205128205128205,
+          "cost": 1102.1025641025642,
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "arm_share": {
+            "hybrid": 16,
+            "rag": 62
+          },
+          "agree_with_oracle_by_type": 0.7948717948717948,
+          "confusion_vs_oracle_by_type": {
+            "rag": {
+              "hybrid": 16,
+              "rag": 62
+            }
+          },
+          "est_tokens": 1102.1025641025642,
+          "score_per_1k_tokens": 0.7444976967102508
+        },
+        "router[with_cascade|logreg|cheap]": {
+          "score": 0.8333333333333334,
+          "cost": 423.8076923076923,
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 69,
+            "cortex": 3,
+            "hybrid": 5,
+            "rag": 1
+          },
+          "agree_with_oracle_by_type": 0.01282051282051282,
+          "confusion_vs_oracle_by_type": {
+            "rag": {
+              "cascade": 69,
+              "cortex": 3,
+              "hybrid": 5,
+              "rag": 1
+            }
+          },
+          "est_tokens": 423.8076923076923,
+          "score_per_1k_tokens": 1.9663006322412802
+        },
+        "two_stage[tree_d3|acc]": {
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 56,
+          "n_routed": 22,
+          "arm_share": {
+            "cortex(commit)": 56,
+            "hybrid": 2,
+            "rag": 20
+          },
+          "score": 0.8461538461538461,
+          "cost": 382.47435897435895,
+          "est_tokens": 382.47435897435895,
+          "score_per_1k_tokens": 2.212315221399122
+        },
+        "two_stage[tree_d3|cheap]": {
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 56,
+          "n_routed": 22,
+          "arm_share": {
+            "cortex(commit)": 56,
+            "hybrid": 16,
+            "rag": 6
+          },
+          "score": 0.8333333333333334,
+          "cost": 297.2435897435897,
+          "est_tokens": 297.2435897435897,
+          "score_per_1k_tokens": 2.8035367694630153
+        },
+        "two_stage[logreg|acc]": {
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 56,
+          "n_routed": 22,
+          "arm_share": {
+            "cortex(commit)": 56,
+            "rag": 22
+          },
+          "score": 0.8461538461538461,
+          "cost": 389.3974358974359,
+          "est_tokens": 389.3974358974359,
+          "score_per_1k_tokens": 2.1729825832153558
+        },
+        "two_stage[logreg|cheap]": {
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 56,
+          "n_routed": 22,
+          "arm_share": {
+            "cortex(commit)": 56,
+            "hybrid": 20,
+            "rag": 2
+          },
+          "score": 0.8076923076923077,
+          "cost": 288.29487179487177,
+          "est_tokens": 288.29487179487177,
+          "score_per_1k_tokens": 2.801618713034198
+        }
+      },
+      "best_single_arm": "rag"
+    },
+    "BEAM-400": {
+      "name": "BEAM-400",
+      "n": 400,
+      "cost_unit": "chars",
+      "notes": [
+        "float rubric means (paper-faithful)",
+        "cost is context CHARACTERS; no token column exists"
+      ],
+      "sanity_vs_summary": {
+        "checked": true,
+        "summary": "beam-100K-qwen-27b-chip12-b16.summary.json",
+        "n_matches": true,
+        "max_score_delta": 4.999999999999449e-05,
+        "max_cost_delta": 0.0,
+        "deltas": {
+          "cortex": 4.6e-05,
+          "hybrid": 3e-05,
+          "nomem": 5e-05,
+          "rag": 2.7e-05,
+          "refind": 4.7e-05
+        }
+      },
+      "arms": {
+        "rag": {
+          "score": 0.6424725000000002,
+          "cost": 22157.575,
+          "est_tokens": 5539.39375,
+          "score_per_1k_tokens": 0.1159824574665775
+        },
+        "cortex": {
+          "score": 0.28294649999999993,
+          "cost": 2206.6825,
+          "est_tokens": 551.670625,
+          "score_per_1k_tokens": 0.5128902775999719
+        },
+        "hybrid": {
+          "score": 0.62257025,
+          "cost": 24398.2575,
+          "est_tokens": 6099.564375,
+          "score_per_1k_tokens": 0.10206798579775625
+        },
+        "refind": {
+          "score": 0.6272465,
+          "cost": 41757.4175,
+          "est_tokens": 10439.354375,
+          "score_per_1k_tokens": 0.06008479810802476
+        },
+        "nomem": {
+          "score": 0.18125,
+          "cost": 0.0,
+          "est_tokens": 0.0,
+          "score_per_1k_tokens": null
+        },
+        "cascade": {
+          "score": 0.5519385000000001,
+          "cost": 14293.9875,
+          "est_tokens": 3573.496875,
+          "score_per_1k_tokens": 0.1544533322139816
+        }
+      },
+      "types": {
+        "abstention": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.725,
+              "cost": 20116.125
+            },
+            "cortex": {
+              "score": 0.95,
+              "cost": 2264.675
+            },
+            "hybrid": {
+              "score": 0.65,
+              "cost": 22414.8
+            },
+            "refind": {
+              "score": 0.575,
+              "cost": 43318.275
+            },
+            "nomem": {
+              "score": 1.0,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.725,
+              "cost": 21578.975
+            }
+          }
+        },
+        "contradiction_resolution": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.5,
+              "cost": 23528.4
+            },
+            "cortex": {
+              "score": 0.1375,
+              "cost": 2205.9
+            },
+            "hybrid": {
+              "score": 0.496875,
+              "cost": 25768.3
+            },
+            "refind": {
+              "score": 0.615625,
+              "cost": 40941.525
+            },
+            "nomem": {
+              "score": 0.0,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.315625,
+              "cost": 11606.65
+            }
+          }
+        },
+        "event_ordering": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.4717625,
+              "cost": 16641.95
+            },
+            "cortex": {
+              "score": 0.07012,
+              "cost": 2238.1
+            },
+            "hybrid": {
+              "score": 0.4985125000000001,
+              "cost": 18914.05
+            },
+            "refind": {
+              "score": 0.49617999999999995,
+              "cost": 41132.1
+            },
+            "nomem": {
+              "score": 0.0,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.41045500000000007,
+              "cost": 15157.75
+            }
+          }
+        },
+        "information_extraction": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.7989599999999999,
+              "cost": 16353.775
+            },
+            "cortex": {
+              "score": 0.2583325,
+              "cost": 2129.1
+            },
+            "hybrid": {
+              "score": 0.775,
+              "cost": 18516.875
+            },
+            "refind": {
+              "score": 0.7968775000000001,
+              "cost": 39756.425
+            },
+            "nomem": {
+              "score": 0.0,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.728125,
+              "cost": 13739.15
+            }
+          }
+        },
+        "instruction_following": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.74375,
+              "cost": 22625.25
+            },
+            "cortex": {
+              "score": 0.2125,
+              "cost": 2214.075
+            },
+            "hybrid": {
+              "score": 0.7,
+              "cost": 24873.325
+            },
+            "refind": {
+              "score": 0.65625,
+              "cost": 44024.275
+            },
+            "nomem": {
+              "score": 0.34375,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.61875,
+              "cost": 15246.625
+            }
+          }
+        },
+        "knowledge_update": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.625,
+              "cost": 24822.475
+            },
+            "cortex": {
+              "score": 0.3125,
+              "cost": 2188.375
+            },
+            "hybrid": {
+              "score": 0.60625,
+              "cost": 27044.85
+            },
+            "refind": {
+              "score": 0.625,
+              "cost": 42160.625
+            },
+            "nomem": {
+              "score": 0.0,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.625,
+              "cost": 12238.8
+            }
+          }
+        },
+        "multi_session_reasoning": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.595535,
+              "cost": 23922.95
+            },
+            "cortex": {
+              "score": 0.27565500000000004,
+              "cost": 2271.375
+            },
+            "hybrid": {
+              "score": 0.6105075,
+              "cost": 26228.325
+            },
+            "refind": {
+              "score": 0.5905674999999999,
+              "cost": 42695.65
+            },
+            "nomem": {
+              "score": 0.0,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.550655,
+              "cost": 14412.55
+            }
+          }
+        },
+        "preference_following": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.90625,
+              "cost": 28029.25
+            },
+            "cortex": {
+              "score": 0.4375,
+              "cost": 2178.075
+            },
+            "hybrid": {
+              "score": 0.85625,
+              "cost": 30241.325
+            },
+            "refind": {
+              "score": 0.875,
+              "cost": 46438.75
+            },
+            "nomem": {
+              "score": 0.46875,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.725,
+              "cost": 11231.925
+            }
+          }
+        },
+        "summarization": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.41471750000000007,
+              "cost": 24732.9
+            },
+            "cortex": {
+              "score": 0.1753575,
+              "cost": 2192.725
+            },
+            "hybrid": {
+              "score": 0.38230750000000013,
+              "cost": 26959.625
+            },
+            "refind": {
+              "score": 0.37321499999999996,
+              "cost": 40823.775
+            },
+            "nomem": {
+              "score": 0.0,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.214525,
+              "cost": 6390.3
+            }
+          }
+        },
+        "temporal_reasoning": {
+          "n": 40,
+          "arms": {
+            "rag": {
+              "score": 0.64375,
+              "cost": 20802.675
+            },
+            "cortex": {
+              "score": 0.0,
+              "cost": 2184.425
+            },
+            "hybrid": {
+              "score": 0.65,
+              "cost": 23021.1
+            },
+            "refind": {
+              "score": 0.66875,
+              "cost": 36282.775
+            },
+            "nomem": {
+              "score": 0.0,
+              "cost": 0.0
+            },
+            "cascade": {
+              "score": 0.60625,
+              "cost": 21337.15
+            }
+          }
+        }
+      },
+      "type_predictability": {
+        "tree_d3": {
+          "model": "tree_d3",
+          "cv_accuracy": 0.36,
+          "majority_baseline": 0.1
+        },
+        "logreg": {
+          "model": "logreg",
+          "cv_accuracy": 0.6525,
+          "majority_baseline": 0.1
+        }
+      },
+      "policies": {
+        "oracle_by_type[base]": {
+          "choice": {
+            "abstention": "cortex",
+            "contradiction_resolution": "refind",
+            "event_ordering": "hybrid",
+            "information_extraction": "rag",
+            "instruction_following": "rag",
+            "knowledge_update": "rag",
+            "multi_session_reasoning": "hybrid",
+            "preference_following": "rag",
+            "summarization": "rag",
+            "temporal_reasoning": "refind"
+          },
+          "score": 0.6832072500000002,
+          "cost": 24119.5,
+          "est_tokens": 6029.875,
+          "score_per_1k_tokens": 0.11330371690955454
+        },
+        "oracle_per_question[base]": {
+          "score": 0.7806627499999998,
+          "cost": 19291.5925,
+          "est_tokens": 4822.898125,
+          "score_per_1k_tokens": 0.161865900909943
+        },
+        "router_via_type[base|tree_d3]": {
+          "model": "tree_d3",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind"
+          ],
+          "type_cv_accuracy": 0.36,
+          "arm_share": {
+            "cortex": 59,
+            "hybrid": 23,
+            "rag": 132,
+            "refind": 186
+          },
+          "score": 0.5833175,
+          "cost": 28292.085,
+          "est_tokens": 7073.02125,
+          "score_per_1k_tokens": 0.0824707687680141
+        },
+        "router[base|tree_d3|acc]": {
+          "score": 0.6484420000000003,
+          "cost": 23361.3225,
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind"
+          ],
+          "arm_share": {
+            "hybrid": 4,
+            "rag": 373,
+            "refind": 23
+          },
+          "agree_with_oracle_by_type": 0.5,
+          "confusion_vs_oracle_by_type": {
+            "cortex": {
+              "rag": 40
+            },
+            "hybrid": {
+              "hybrid": 3,
+              "rag": 60,
+              "refind": 17
+            },
+            "rag": {
+              "hybrid": 1,
+              "rag": 195,
+              "refind": 4
+            },
+            "refind": {
+              "rag": 78,
+              "refind": 2
+            }
+          },
+          "est_tokens": 5840.330625,
+          "score_per_1k_tokens": 0.11102830329918185
+        },
+        "router[base|tree_d3|cheap]": {
+          "score": 0.5585137500000001,
+          "cost": 15777.7525,
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind"
+          ],
+          "arm_share": {
+            "cortex": 147,
+            "rag": 239,
+            "refind": 14
+          },
+          "agree_with_oracle_by_type": 0.375,
+          "confusion_vs_oracle_by_type": {
+            "cortex": {
+              "cortex": 31,
+              "rag": 9
+            },
+            "hybrid": {
+              "cortex": 2,
+              "rag": 68,
+              "refind": 10
+            },
+            "rag": {
+              "cortex": 77,
+              "rag": 119,
+              "refind": 4
+            },
+            "refind": {
+              "cortex": 37,
+              "rag": 43
+            }
+          },
+          "est_tokens": 3944.438125,
+          "score_per_1k_tokens": 0.14159526206283185
+        },
+        "router_via_type[base|logreg]": {
+          "model": "logreg",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind"
+          ],
+          "type_cv_accuracy": 0.6525,
+          "arm_share": {
+            "cortex": 44,
+            "hybrid": 43,
+            "rag": 155,
+            "refind": 158
+          },
+          "score": 0.62039075,
+          "cost": 27780.1175,
+          "est_tokens": 6945.029375,
+          "score_per_1k_tokens": 0.08932874383990637
+        },
+        "router[base|logreg|acc]": {
+          "score": 0.6448117500000002,
+          "cost": 22899.2325,
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind"
+          ],
+          "arm_share": {
+            "cortex": 2,
+            "hybrid": 3,
+            "rag": 379,
+            "refind": 16
+          },
+          "agree_with_oracle_by_type": 0.475,
+          "confusion_vs_oracle_by_type": {
+            "cortex": {
+              "rag": 40
+            },
+            "hybrid": {
+              "hybrid": 1,
+              "rag": 70,
+              "refind": 9
+            },
+            "rag": {
+              "cortex": 2,
+              "hybrid": 2,
+              "rag": 189,
+              "refind": 7
+            },
+            "refind": {
+              "rag": 80
+            }
+          },
+          "est_tokens": 5724.808125,
+          "score_per_1k_tokens": 0.11263464834465528
+        },
+        "router[base|logreg|cheap]": {
+          "score": 0.5669992500000002,
+          "cost": 16327.925,
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind"
+          ],
+          "arm_share": {
+            "cortex": 144,
+            "hybrid": 2,
+            "rag": 232,
+            "refind": 22
+          },
+          "agree_with_oracle_by_type": 0.385,
+          "confusion_vs_oracle_by_type": {
+            "cortex": {
+              "cortex": 34,
+              "rag": 5,
+              "refind": 1
+            },
+            "hybrid": {
+              "cortex": 6,
+              "rag": 64,
+              "refind": 10
+            },
+            "rag": {
+              "cortex": 67,
+              "hybrid": 2,
+              "rag": 120,
+              "refind": 11
+            },
+            "refind": {
+              "cortex": 37,
+              "rag": 43
+            }
+          },
+          "est_tokens": 4081.98125,
+          "score_per_1k_tokens": 0.13890295306966444
+        },
+        "oracle_by_type[with_cascade]": {
+          "choice": {
+            "abstention": "cortex",
+            "contradiction_resolution": "refind",
+            "event_ordering": "hybrid",
+            "information_extraction": "rag",
+            "instruction_following": "rag",
+            "knowledge_update": "cascade",
+            "multi_session_reasoning": "hybrid",
+            "preference_following": "rag",
+            "summarization": "rag",
+            "temporal_reasoning": "refind"
+          },
+          "score": 0.6832072500000002,
+          "cost": 22861.1325,
+          "est_tokens": 5715.283125,
+          "score_per_1k_tokens": 0.11954040334615972
+        },
+        "oracle_per_question[with_cascade]": {
+          "score": 0.7806627499999998,
+          "cost": 19291.5925,
+          "est_tokens": 4822.898125,
+          "score_per_1k_tokens": 0.161865900909943
+        },
+        "router_via_type[with_cascade|tree_d3]": {
+          "model": "tree_d3",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "cascade"
+          ],
+          "type_cv_accuracy": 0.36,
+          "arm_share": {
+            "cascade": 16,
+            "cortex": 59,
+            "hybrid": 23,
+            "rag": 127,
+            "refind": 175
+          },
+          "score": 0.5814425,
+          "cost": 27477.285,
+          "est_tokens": 6869.32125,
+          "score_per_1k_tokens": 0.08464336996904898
+        },
+        "router[with_cascade|tree_d3|acc]": {
+          "score": 0.6484420000000003,
+          "cost": 23361.3225,
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "cascade"
+          ],
+          "arm_share": {
+            "hybrid": 4,
+            "rag": 373,
+            "refind": 23
+          },
+          "agree_with_oracle_by_type": 0.4,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "rag": 40
+            },
+            "cortex": {
+              "rag": 40
+            },
+            "hybrid": {
+              "hybrid": 3,
+              "rag": 60,
+              "refind": 17
+            },
+            "rag": {
+              "hybrid": 1,
+              "rag": 155,
+              "refind": 4
+            },
+            "refind": {
+              "rag": 78,
+              "refind": 2
+            }
+          },
+          "est_tokens": 5840.330625,
+          "score_per_1k_tokens": 0.11102830329918185
+        },
+        "router[with_cascade|tree_d3|cheap]": {
+          "score": 0.6423057500000001,
+          "cost": 20863.3225,
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 7,
+            "cortex": 27,
+            "hybrid": 4,
+            "rag": 359,
+            "refind": 3
+          },
+          "agree_with_oracle_by_type": 0.4375,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cascade": 2,
+              "cortex": 3,
+              "hybrid": 1,
+              "rag": 34
+            },
+            "cortex": {
+              "cascade": 1,
+              "cortex": 21,
+              "hybrid": 2,
+              "rag": 16
+            },
+            "hybrid": {
+              "rag": 77,
+              "refind": 3
+            },
+            "rag": {
+              "cascade": 4,
+              "cortex": 3,
+              "hybrid": 1,
+              "rag": 152
+            },
+            "refind": {
+              "rag": 80
+            }
+          },
+          "est_tokens": 5215.830625,
+          "score_per_1k_tokens": 0.12314543860403829
+        },
+        "router_via_type[with_cascade|logreg]": {
+          "model": "logreg",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "cascade"
+          ],
+          "type_cv_accuracy": 0.6525,
+          "arm_share": {
+            "cascade": 16,
+            "cortex": 44,
+            "hybrid": 43,
+            "rag": 147,
+            "refind": 150
+          },
+          "score": 0.61789075,
+          "cost": 26942.38,
+          "est_tokens": 6735.595,
+          "score_per_1k_tokens": 0.09173513995422825
+        },
+        "router[with_cascade|logreg|acc]": {
+          "score": 0.6462405000000002,
+          "cost": 22784.915,
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "cascade"
+          ],
+          "arm_share": {
+            "cortex": 3,
+            "hybrid": 4,
+            "rag": 377,
+            "refind": 16
+          },
+          "agree_with_oracle_by_type": 0.3775,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cortex": 1,
+              "rag": 39
+            },
+            "cortex": {
+              "rag": 40
+            },
+            "hybrid": {
+              "hybrid": 2,
+              "rag": 69,
+              "refind": 9
+            },
+            "rag": {
+              "cortex": 2,
+              "hybrid": 2,
+              "rag": 149,
+              "refind": 7
+            },
+            "refind": {
+              "rag": 80
+            }
+          },
+          "est_tokens": 5696.22875,
+          "score_per_1k_tokens": 0.11345058781215557
+        },
+        "router[with_cascade|logreg|cheap]": {
+          "score": 0.6101867500000003,
+          "cost": 19681.065,
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 32,
+            "cortex": 51,
+            "hybrid": 2,
+            "rag": 295,
+            "refind": 20
+          },
+          "agree_with_oracle_by_type": 0.3725,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cascade": 7,
+              "cortex": 10,
+              "rag": 23
+            },
+            "cortex": {
+              "cortex": 22,
+              "rag": 18
+            },
+            "hybrid": {
+              "cascade": 3,
+              "cortex": 1,
+              "rag": 66,
+              "refind": 10
+            },
+            "rag": {
+              "cascade": 17,
+              "cortex": 11,
+              "hybrid": 2,
+              "rag": 120,
+              "refind": 10
+            },
+            "refind": {
+              "cascade": 5,
+              "cortex": 7,
+              "rag": 68
+            }
+          },
+          "est_tokens": 4920.26625,
+          "score_per_1k_tokens": 0.12401498597763898
+        },
+        "oracle_by_type[with_nomem]": {
+          "choice": {
+            "abstention": "nomem",
+            "contradiction_resolution": "refind",
+            "event_ordering": "hybrid",
+            "information_extraction": "rag",
+            "instruction_following": "rag",
+            "knowledge_update": "cascade",
+            "multi_session_reasoning": "hybrid",
+            "preference_following": "rag",
+            "summarization": "rag",
+            "temporal_reasoning": "refind"
+          },
+          "score": 0.68820725,
+          "cost": 22634.665,
+          "est_tokens": 5658.66625,
+          "score_per_1k_tokens": 0.12162004606650904
+        },
+        "oracle_per_question[with_nomem]": {
+          "score": 0.7894127499999999,
+          "cost": 17671.98,
+          "est_tokens": 4417.995,
+          "score_per_1k_tokens": 0.17868122304348466
+        },
+        "router_via_type[with_nomem|tree_d3]": {
+          "model": "tree_d3",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "nomem",
+            "cascade"
+          ],
+          "type_cv_accuracy": 0.36,
+          "arm_share": {
+            "cascade": 16,
+            "hybrid": 23,
+            "nomem": 59,
+            "rag": 127,
+            "refind": 175
+          },
+          "score": 0.5668175,
+          "cost": 27114.365,
+          "est_tokens": 6778.59125,
+          "score_per_1k_tokens": 0.08361877550884926
+        },
+        "router[with_nomem|tree_d3|acc]": {
+          "score": 0.6484420000000003,
+          "cost": 23427.5,
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "nomem",
+            "cascade"
+          ],
+          "arm_share": {
+            "hybrid": 4,
+            "rag": 372,
+            "refind": 24
+          },
+          "agree_with_oracle_by_type": 0.3975,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "rag": 40
+            },
+            "hybrid": {
+              "hybrid": 3,
+              "rag": 60,
+              "refind": 17
+            },
+            "nomem": {
+              "rag": 40
+            },
+            "rag": {
+              "hybrid": 1,
+              "rag": 154,
+              "refind": 5
+            },
+            "refind": {
+              "rag": 78,
+              "refind": 2
+            }
+          },
+          "est_tokens": 5856.875,
+          "score_per_1k_tokens": 0.11071467292711562
+        },
+        "router[with_nomem|tree_d3|cheap]": {
+          "score": 0.5766445000000001,
+          "cost": 17714.95,
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "nomem",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 6,
+            "hybrid": 1,
+            "nomem": 83,
+            "rag": 303,
+            "refind": 7
+          },
+          "agree_with_oracle_by_type": 0.4125,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cascade": 3,
+              "nomem": 18,
+              "rag": 19
+            },
+            "hybrid": {
+              "nomem": 1,
+              "rag": 73,
+              "refind": 6
+            },
+            "nomem": {
+              "cascade": 2,
+              "nomem": 25,
+              "rag": 13
+            },
+            "rag": {
+              "cascade": 1,
+              "nomem": 21,
+              "rag": 137,
+              "refind": 1
+            },
+            "refind": {
+              "hybrid": 1,
+              "nomem": 18,
+              "rag": 61
+            }
+          },
+          "est_tokens": 4428.7375,
+          "score_per_1k_tokens": 0.13020516569338328
+        },
+        "router_via_type[with_nomem|logreg]": {
+          "model": "logreg",
+          "label_policy": "predicted_type",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "nomem",
+            "cascade"
+          ],
+          "type_cv_accuracy": 0.6525,
+          "arm_share": {
+            "cascade": 16,
+            "hybrid": 43,
+            "nomem": 44,
+            "rag": 147,
+            "refind": 150
+          },
+          "score": 0.6142657499999999,
+          "cost": 26689.0825,
+          "est_tokens": 6672.270625,
+          "score_per_1k_tokens": 0.09206247535860401
+        },
+        "router[with_nomem|logreg|acc]": {
+          "score": 0.6505617500000004,
+          "cost": 22829.065,
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "nomem",
+            "cascade"
+          ],
+          "arm_share": {
+            "cortex": 2,
+            "hybrid": 2,
+            "rag": 380,
+            "refind": 16
+          },
+          "agree_with_oracle_by_type": 0.375,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cortex": 1,
+              "rag": 39
+            },
+            "hybrid": {
+              "rag": 71,
+              "refind": 9
+            },
+            "nomem": {
+              "rag": 40
+            },
+            "rag": {
+              "cortex": 1,
+              "hybrid": 2,
+              "rag": 150,
+              "refind": 7
+            },
+            "refind": {
+              "rag": 80
+            }
+          },
+          "est_tokens": 5707.26625,
+          "score_per_1k_tokens": 0.11398833022727832
+        },
+        "router[with_nomem|logreg|cheap]": {
+          "score": 0.5760617500000003,
+          "cost": 17859.785,
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "cortex",
+            "hybrid",
+            "refind",
+            "nomem",
+            "cascade"
+          ],
+          "arm_share": {
+            "cascade": 15,
+            "hybrid": 2,
+            "nomem": 93,
+            "rag": 269,
+            "refind": 21
+          },
+          "agree_with_oracle_by_type": 0.3675,
+          "confusion_vs_oracle_by_type": {
+            "cascade": {
+              "cascade": 3,
+              "nomem": 14,
+              "rag": 23
+            },
+            "hybrid": {
+              "cascade": 3,
+              "nomem": 1,
+              "rag": 66,
+              "refind": 10
+            },
+            "nomem": {
+              "nomem": 31,
+              "rag": 9
+            },
+            "rag": {
+              "cascade": 9,
+              "hybrid": 2,
+              "nomem": 25,
+              "rag": 113,
+              "refind": 11
+            },
+            "refind": {
+              "nomem": 22,
+              "rag": 58
+            }
+          },
+          "est_tokens": 4464.94625,
+          "score_per_1k_tokens": 0.1290187423868765
+        },
+        "two_stage[tree_d3|acc]": {
+          "model": "tree_d3",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 174,
+          "n_routed": 226,
+          "arm_share": {
+            "cortex(commit)": 174,
+            "hybrid": 14,
+            "rag": 212
+          },
+          "score": 0.5542887500000001,
+          "cost": 14364.2625,
+          "est_tokens": 3591.065625,
+          "score_per_1k_tokens": 0.15435216392070253
+        },
+        "two_stage[tree_d3|cheap]": {
+          "model": "tree_d3",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 174,
+          "n_routed": 226,
+          "arm_share": {
+            "cortex(commit)": 174,
+            "hybrid": 14,
+            "rag": 212
+          },
+          "score": 0.5542887500000001,
+          "cost": 14364.2625,
+          "est_tokens": 3591.065625,
+          "score_per_1k_tokens": 0.15435216392070253
+        },
+        "two_stage[logreg|acc]": {
+          "model": "logreg",
+          "label_policy": "acc",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 174,
+          "n_routed": 226,
+          "arm_share": {
+            "cortex(commit)": 174,
+            "hybrid": 6,
+            "rag": 220
+          },
+          "score": 0.5535010000000001,
+          "cost": 14329.8325,
+          "est_tokens": 3582.458125,
+          "score_per_1k_tokens": 0.15450313184051526
+        },
+        "two_stage[logreg|cheap]": {
+          "model": "logreg",
+          "label_policy": "cheap",
+          "candidates": [
+            "rag",
+            "hybrid"
+          ],
+          "n_commit": 174,
+          "n_routed": 226,
+          "arm_share": {
+            "cortex(commit)": 174,
+            "hybrid": 6,
+            "rag": 220
+          },
+          "score": 0.5535010000000001,
+          "cost": 14329.8325,
+          "est_tokens": 3582.458125,
+          "score_per_1k_tokens": 0.15450313184051526
+        }
+      },
+      "best_single_arm": "rag"
+    }
+  },
+  "robustness": {
+    "type_pairs": {
+      "pairs": [
+        {
+          "lme_type": "knowledge-update",
+          "beam_type": "knowledge_update",
+          "lme_best": "cascade",
+          "beam_best": "cascade",
+          "agree": true
+        },
+        {
+          "lme_type": "temporal-reasoning",
+          "beam_type": "temporal_reasoning",
+          "lme_best": "hybrid",
+          "beam_best": "refind",
+          "agree": false
+        },
+        {
+          "lme_type": "multi-session",
+          "beam_type": "multi_session_reasoning",
+          "lme_best": "rag",
+          "beam_best": "hybrid",
+          "agree": false
+        },
+        {
+          "lme_type": "single-session-preference",
+          "beam_type": "preference_following",
+          "lme_best": "rag",
+          "beam_best": "rag",
+          "agree": true
+        }
+      ],
+      "n_agree": 2,
+      "n_pairs": 4
+    }
+  },
+  "criterion": "a cross-validated router beats the best single arm by >= 0.03 at no more served cost, on BOTH benchmarks",
+  "verdict": {
+    "LME-500": {
+      "best_single_arm": "rag",
+      "best_single_score": 0.688,
+      "best_single_cost": 1209.654,
+      "cascade_score": 0.69,
+      "cascade_cost": 882.56,
+      "best_realizable_router": "two_stage[logreg|acc]",
+      "best_realizable_score": 0.69,
+      "best_realizable_cost": 882.56,
+      "realizable_gain": 0.0020000000000000018,
+      "realizable_cost_delta": -327.09400000000005,
+      "best_oracle_by_type": "oracle_by_type[with_cascade]",
+      "oracle_by_type_gain": 0.02400000000000002,
+      "oracle_by_type_cost_delta": -316.264,
+      "ceiling": "oracle_per_question[base]",
+      "ceiling_gain": 0.09000000000000008,
+      "passes": false,
+      "oracle_bound_would_pass": false
+    },
+    "LME-KU78": {
+      "best_single_arm": "rag",
+      "best_single_score": 0.8589743589743589,
+      "best_single_cost": 1184.128205128205,
+      "cascade_score": 0.8461538461538461,
+      "cascade_cost": 389.3974358974359,
+      "best_realizable_router": "router[with_cascade|tree_d3|cheap]",
+      "best_realizable_score": 0.8461538461538461,
+      "best_realizable_cost": 402.55128205128204,
+      "realizable_gain": -0.012820512820512775,
+      "realizable_cost_delta": -781.5769230769231,
+      "best_oracle_by_type": "oracle_by_type[base]",
+      "oracle_by_type_gain": 0.0,
+      "oracle_by_type_cost_delta": 0.0,
+      "ceiling": "oracle_per_question[base]",
+      "ceiling_gain": 0.10256410256410264,
+      "passes": false,
+      "oracle_bound_would_pass": false
+    },
+    "BEAM-400": {
+      "best_single_arm": "rag",
+      "best_single_score": 0.6424725000000002,
+      "best_single_cost": 22157.575,
+      "cascade_score": 0.5519385000000001,
+      "cascade_cost": 14293.9875,
+      "best_realizable_router": "router[with_nomem|logreg|acc]",
+      "best_realizable_score": 0.6505617500000004,
+      "best_realizable_cost": 22829.065,
+      "realizable_gain": 0.008089250000000159,
+      "realizable_cost_delta": 671.489999999998,
+      "best_oracle_by_type": "oracle_by_type[with_nomem]",
+      "oracle_by_type_gain": 0.045734749999999824,
+      "oracle_by_type_cost_delta": 477.09000000000015,
+      "ceiling": "oracle_per_question[with_nomem]",
+      "ceiling_gain": 0.14694024999999966,
+      "passes": false,
+      "oracle_bound_would_pass": false
+    },
+    "worth_building": false
+  }
+}

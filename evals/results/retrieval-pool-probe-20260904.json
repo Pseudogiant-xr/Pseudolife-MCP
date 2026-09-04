@@ -1,0 +1,134 @@
+{
+  "caveat": "Retrieval proxy, NOT a verdict: recall@6 of the gold-bearing turn in the served window, on a 10-question synthetic corpus buried in real conversational turns. It says nothing about answered accuracy. These knobs are decided by a judged --phase extract run, not by evals/regression_gate.ps1, whose stage 1 cannot reach memory.search; the 2026-09-04 judged run went against them and they ship OFF.",
+  "caveat_note": "The caveat text was corrected in place on 2026-09-04, after the review pass found it named evals/regression_gate.ps1 as the decider for these knobs \u2014 which this same PR establishes it cannot be. No measured field was touched; every value under cells/ and corpus/ is as the run wrote it.",
+  "cells": [
+    {
+      "churn_vs_shipped": 0.0,
+      "fusion": "weighted_sum",
+      "latency_ms": 51.6,
+      "misses": [
+        "What engine does the cache-layer use?",
+        "What is the metrics-store retention?",
+        "Who is the cdn-provider vendor?"
+      ],
+      "multiplier": 1,
+      "recall_at_6": 0.7,
+      "reranker": "off",
+      "stale_leak": 0.3
+    },
+    {
+      "churn_vs_shipped": 0.0,
+      "fusion": "weighted_sum",
+      "latency_ms": 112.44,
+      "misses": [
+        "What engine does the cache-layer use?",
+        "What is the metrics-store retention?",
+        "Who is the cdn-provider vendor?"
+      ],
+      "multiplier": 1,
+      "recall_at_6": 0.7,
+      "reranker": "on",
+      "stale_leak": 0.3
+    },
+    {
+      "churn_vs_shipped": 0.183,
+      "fusion": "rrf",
+      "latency_ms": 54.84,
+      "misses": [
+        "What engine does the cache-layer use?",
+        "What is the metrics-store retention?",
+        "Who is the cdn-provider vendor?"
+      ],
+      "multiplier": 1,
+      "recall_at_6": 0.7,
+      "reranker": "off",
+      "stale_leak": 0.3
+    },
+    {
+      "churn_vs_shipped": 0.183,
+      "fusion": "rrf",
+      "latency_ms": 213.84,
+      "misses": [
+        "What engine does the cache-layer use?",
+        "What is the metrics-store retention?",
+        "Who is the cdn-provider vendor?"
+      ],
+      "multiplier": 1,
+      "recall_at_6": 0.7,
+      "reranker": "on",
+      "stale_leak": 0.3
+    },
+    {
+      "churn_vs_shipped": 0.283,
+      "fusion": "weighted_sum",
+      "latency_ms": 48.44,
+      "misses": [
+        "What engine does the cache-layer use?",
+        "What is the metrics-store retention?",
+        "Who is the cdn-provider vendor?"
+      ],
+      "multiplier": 4,
+      "recall_at_6": 0.7,
+      "reranker": "off",
+      "stale_leak": 0.3
+    },
+    {
+      "churn_vs_shipped": 0.283,
+      "fusion": "weighted_sum",
+      "latency_ms": 373.37,
+      "misses": [
+        "What engine does the cache-layer use?",
+        "What is the metrics-store retention?",
+        "Who is the cdn-provider vendor?"
+      ],
+      "multiplier": 4,
+      "recall_at_6": 0.7,
+      "reranker": "on",
+      "stale_leak": 0.3
+    },
+    {
+      "churn_vs_shipped": 0.317,
+      "fusion": "rrf",
+      "latency_ms": 75.49,
+      "misses": [
+        "What engine does the cache-layer use?",
+        "What is the metrics-store retention?",
+        "Who is the cdn-provider vendor?"
+      ],
+      "multiplier": 4,
+      "recall_at_6": 0.7,
+      "reranker": "off",
+      "stale_leak": 0.3
+    },
+    {
+      "churn_vs_shipped": 0.333,
+      "fusion": "rrf",
+      "latency_ms": 560.36,
+      "misses": [
+        "What engine does the cache-layer use?",
+        "What is the metrics-store retention?",
+        "Who is the cdn-provider vendor?"
+      ],
+      "multiplier": 4,
+      "recall_at_6": 0.7,
+      "reranker": "on",
+      "stale_leak": 0.3
+    }
+  ],
+  "corpus": {
+    "entries": 426,
+    "haystack_source": "evals\\results\\banks\\s-qwen-27b-ablbands-flat",
+    "haystack_turns": 400,
+    "questions": 10,
+    "source": "evals/ladder_sweep.py PAIRS + DISTRACTORS",
+    "why_not_longmemeval_gold": "No dump in evals/results/banks/ can score recall over cms.retrieve(): dump_bank persists cortex facts only (no turns, source_entries stripped), and the band-state dumps (band_ablation.py replay) carry no gold-turn labels \u2014 the has_answer markers live in the LongMemEval dataset, not in the dump. Their TURN TEXT is reused here as a realistic haystack, re-encoded with the current backbone; their own 384-d MiniLM vectors are not used."
+  },
+  "date": "2026-09-04",
+  "embedder": {
+    "dim": 1024,
+    "model": "Qwen/Qwen3-Embedding-0.6B"
+  },
+  "probe": "retrieval-pool-probe",
+  "reranker_available": true,
+  "top_k": 6
+}

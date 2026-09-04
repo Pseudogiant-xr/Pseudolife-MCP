@@ -145,6 +145,16 @@ def test_gated_off_capabilities_stay_out_of_console():
         # separate decision after the gate-3 friction estimate.
         "memory.dream.quarantine_low_trust",
         "memory.dream.trusted_sources",
+        # Candidate-pool shape (2026-09-04). Both ship at today's behaviour
+        # and both went through a judged run and FAILED it: multiplier 4
+        # costs naive RAG 0.115 under rrf and 0.077 under weighted_sum on
+        # the LongMemEval knowledge-update oracle slice, while serving a
+        # third to a half more context tokens (table in evals/README.md,
+        # "Judged verdict (2026-09-04)"). A measured loser is a stronger
+        # reason to keep a live retrieval-ranking switch off the Console
+        # than an unmeasured one, not a weaker one.
+        "memory.search.candidate_pool_multiplier",
+        "memory.search.fusion",
     ):
         assert path not in _BY_PATH, f"gated-off knob surfaced: {path}"
 

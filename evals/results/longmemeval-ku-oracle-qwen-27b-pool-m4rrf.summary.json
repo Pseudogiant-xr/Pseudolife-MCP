@@ -1,0 +1,227 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 78,
+  "bench_env": {
+    "thinking": null,
+    "sampler": null,
+    "candidate_pool": {
+      "candidate_pool_multiplier": "4",
+      "fusion": "rrf"
+    }
+  },
+  "arms": {
+    "rag": {
+      "accuracy": 0.744,
+      "context_tokens": 1793.0
+    },
+    "cortex": {
+      "accuracy": 0.667,
+      "context_tokens": 96.7
+    },
+    "hybrid": {
+      "accuracy": 0.833,
+      "context_tokens": 1898.6
+    },
+    "cascade": {
+      "accuracy": 0.846,
+      "context_tokens": 598.7
+    }
+  },
+  "superseded_total": 136,
+  "leak_check": {
+    "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+    "n_rows": 78,
+    "n_leaked": 0,
+    "n_untestable": 27,
+    "untestable_reasons": {
+      "trivial_gold": 27
+    },
+    "leaked": [],
+    "untestable": [
+      "d7c942c3",
+      "89941a93",
+      "184da446",
+      "4d6b87c8",
+      "0f05491a",
+      "b6019101",
+      "45dc21b6",
+      "618f13b2",
+      "72e3ee87",
+      "c4ea545c",
+      "01493427",
+      "6a27ffc2",
+      "1cea1afa",
+      "ed4ddc30",
+      "b01defab",
+      "7e974930",
+      "603deb26",
+      "5831f84d",
+      "affe2881",
+      "0ddfec37",
+      "69fee5aa",
+      "7401057b",
+      "c7dc5443",
+      "06db6396",
+      "10e09553",
+      "ba61f0b9",
+      "42ec0761"
+    ],
+    "sites": {},
+    "min_answer_chars": 4,
+    "arms": {
+      "cortex": {
+        "n": 78,
+        "all": 0.6667,
+        "n_leak_free": 78,
+        "leak_free": 0.6667,
+        "n_testable": 51,
+        "leak_free_testable": 0.6667
+      },
+      "hybrid": {
+        "n": 78,
+        "all": 0.8333,
+        "n_leak_free": 78,
+        "leak_free": 0.8333,
+        "n_testable": 51,
+        "leak_free_testable": 0.8039
+      },
+      "rag": {
+        "n": 78,
+        "all": 0.7436,
+        "n_leak_free": 78,
+        "leak_free": 0.7436,
+        "n_testable": 51,
+        "leak_free_testable": 0.7059
+      }
+    }
+  },
+  "answerability": {
+    "check": "memory-only answerability + pathway evidence (AWM arXiv 2608.25618, PAST-Bench arXiv 2608.04003)",
+    "n_rows": 78,
+    "arms": {
+      "cortex": {
+        "n": 78,
+        "n_testable": 45,
+        "untestable_reasons": {
+          "trivial_gold": 27,
+          "abstention": 6
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 26,
+          "answerable_wrong": 6,
+          "unanswerable_correct": 3,
+          "unanswerable_wrong": 10
+        },
+        "answerable_share": 0.7111,
+        "answerable_by": {
+          "span": 26,
+          "tokens": 6
+        },
+        "unanswerable_correct_ids": [
+          "031748ae",
+          "c6853660",
+          "89941a94"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 52,
+          "untestable": 23,
+          "supported": 26,
+          "unsupported": 3,
+          "spanning": 0,
+          "supported_share": 0.8966,
+          "unsupported_ids": [
+            "031748ae",
+            "c6853660",
+            "89941a94"
+          ],
+          "spanning_ids": []
+        }
+      },
+      "hybrid": {
+        "n": 78,
+        "n_testable": 45,
+        "untestable_reasons": {
+          "trivial_gold": 27,
+          "abstention": 6
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 36,
+          "answerable_wrong": 8,
+          "unanswerable_correct": 1,
+          "unanswerable_wrong": 0
+        },
+        "answerable_share": 0.9778,
+        "answerable_by": {
+          "span": 37,
+          "tokens": 7
+        },
+        "unanswerable_correct_ids": [
+          "89941a94"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 65,
+          "untestable": 28,
+          "supported": 34,
+          "unsupported": 1,
+          "spanning": 2,
+          "supported_share": 0.9189,
+          "unsupported_ids": [
+            "89941a94"
+          ],
+          "spanning_ids": [
+            "031748ae",
+            "c6853660"
+          ]
+        }
+      },
+      "rag": {
+        "n": 78,
+        "n_testable": 45,
+        "untestable_reasons": {
+          "trivial_gold": 27,
+          "abstention": 6
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 28,
+          "answerable_wrong": 12,
+          "unanswerable_correct": 2,
+          "unanswerable_wrong": 3
+        },
+        "answerable_share": 0.8889,
+        "answerable_by": {
+          "span": 35,
+          "tokens": 5
+        },
+        "unanswerable_correct_ids": [
+          "031748ae",
+          "89941a94"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 58,
+          "untestable": 28,
+          "supported": 27,
+          "unsupported": 2,
+          "spanning": 1,
+          "supported_share": 0.9,
+          "unsupported_ids": [
+            "031748ae",
+            "89941a94"
+          ],
+          "spanning_ids": [
+            "c6853660"
+          ]
+        }
+      }
+    }
+  }
+}
