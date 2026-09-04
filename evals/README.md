@@ -458,8 +458,51 @@ unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**.
 The paired column is a committed artifact
 (`…raglite-all-fresh.arms-vs-rag.json`) written by
 `evals/beam_within_run_pairs.py` — harness-agnostic since 2026-09-04
-(`--score-key correct|score`, `--type-key`, `--prefix`, `--pairs left:right`,
-and a derived `cascade` arm) — and pinned by a byte-exact regeneration test.
+(`--score-key`, `--type-key`, `--prefix`, `--pairs left:right`, and a
+derived `cascade` arm) — and pinned by a byte-exact regeneration test.
+
+### Second-judge-family re-judge (`lme_rejudge.py`, added 2026-09-05)
+
+The hybrid win above is judged by **one** instrument, the local Qwen3.8-27B
+server. A claim does not reach the README on that: determinism is not
+validity — the retired cascade headline replicated at std 0.0000 three
+times and still did not survive a change of judge. `evals/lme_rejudge.py`
+is the second family for LongMemEval rows — the counterpart to
+`beam_rejudge.py`, which does the same for BEAM's rubric-scored ones.
+
+Retrieval and answering are **not** re-run. The recorded per-arm responses
+are replayed through a headless `claude -p` judge (the same pooled CLI
+contract `beam_rejudge` uses; its `CliJudge` is imported, not copied) with
+the harness's **own** judge prompts imported from `longmemeval_bench` —
+`_JUDGE_SYSTEM` for knowledge-update rows, `_JUDGE_SYSTEM_GENERIC` for the
+other five types, the same user message and the same `startswith("yes")`
+parse. The judge model is the only term that changes, so any movement is
+pure judge effect.
+
+```bash
+PYTHONPATH=. python evals/lme_rejudge.py \
+    --in evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl \
+    --tag opus5 --arms rag,hybrid,cortex,rag1 --workers 4 \
+    --stability-sample 60
+```
+
+Three artifacts, none of which touch the source: `…rejudge-<tag>.jsonl`
+(the rows with `{arm}_correct_<tag>` added and the original
+`{arm}_correct` kept beside it, so every comparison pairs within-row),
+`…rejudge-<tag>.summary.json` (per-arm and per-type accuracy under both
+judges, item-level agreement per arm, the gold-leak exclusion with its
+excluded ids, CLI call/error counts, seconds per call), and
+`…rejudge-<tag>.arms-vs-rag.json` — the *same* paired comparison the
+original claim was made from, produced by `beam_within_run_pairs.py` with
+`--score-key correct_<tag>`, so the two numbers come off identical
+arithmetic. An existing output is refused rather than overwritten
+(`--resume` continues it, `--force` discards it).
+
+`--stability-sample N` judges N random (row, arm) pairs a second time. A
+CLI judge, unlike the pinned q8_0 server, is not bit-reproducible, and its
+own flip rate is the control floor: a judge-to-judge delta smaller than it
+is not a finding. No numbers yet — only a 6-row plumbing smoke has been
+run.
 
 Model roles are split so extraction quality is the **only** variable:
 

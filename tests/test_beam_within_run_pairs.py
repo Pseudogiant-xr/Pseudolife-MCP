@@ -177,3 +177,74 @@ def test_perm_p_is_small_for_a_one_sided_run():
     assert x["delta_vs_control"] == 1.0
     assert 0.0 < x["perm_p"] < 0.05
     assert x["context_chars_mean"] is None
+
+
+def test_cli_score_key_accepts_a_rejudge_suffix(tmp_path, monkeypatch,
+                                                capsys):
+    """The CLI, not just ``pair_run``, has to take ``correct_<tag>``."""
+    import beam_within_run_pairs as mod
+    monkeypatch.setattr(mod, "RESULTS_DIR", tmp_path)
+    (tmp_path / "p-t.jsonl").write_text("\n".join(
+        json.dumps({"question_type": "t", "rag_correct": True,
+                    "rag_correct_opus5": False, "x_correct": False,
+                    "x_correct_opus5": True}) for _ in range(2)) + "\n",
+        encoding="utf-8")
+    assert mod.main(["--tag", "t", "--prefix", "p-", "--arms", "x",
+                     "--score-key", "correct_opus5",
+                     "--type-key", "question_type", "--perms", "100"]) == 0
+    capsys.readouterr()
+    d = json.loads((tmp_path / "p-t.arms-vs-rag.json")
+                   .read_text(encoding="utf-8"))
+    assert d["control_mean"] == 0.0 and d["arms"]["x"]["mean"] == 1.0
+
+
+def test_score_key_accepts_a_rejudge_suffix():
+    """A second-family re-judge writes ``{arm}_correct_<tag>`` beside the
+    original verdict, so the paired comparison has to read any key suffix
+    — not just the two harnesses' defaults."""
+    rows = [
+        {"question_type": "t", "rag_correct": True,
+         "rag_correct_opus5": False, "x_correct": False,
+         "x_correct_opus5": True},
+        {"question_type": "t", "rag_correct": True,
+         "rag_correct_opus5": False, "x_correct": False,
+         "x_correct_opus5": True},
+    ]
+    d = pair_run(rows, ["x"], perms=200, seed=0,
+                 score_key="correct_opus5", type_key="question_type")
+    assert d["control_mean"] == 0.0
+    assert d["arms"]["x"]["mean"] == 1.0
+    assert d["arms"]["x"]["delta_vs_control"] == 1.0
+
+
+def test_cascade_routes_on_the_response_but_scores_the_asked_for_key():
+    """The commit gate reads ``cortex_response`` only; under a re-judge key
+    the verdict it serves must come from THAT judge, not the original."""
+    rows = [
+        # cortex commits -> cascade takes the cortex verdict.
+        {"question_type": "t", "cortex_response": "Portland",
+         "cortex_correct": False, "cortex_correct_opus5": True,
+         "rag_correct": True, "rag_correct_opus5": False},
+        # cortex abstains -> cascade falls back to rag.
+        {"question_type": "t", "cortex_response": "I don't know",
+         "cortex_correct": True, "cortex_correct_opus5": False,
+         "rag_correct": False, "rag_correct_opus5": True},
+    ]
+    d = pair_run(rows, ["cascade"], perms=200, seed=0,
+                 score_key="correct_opus5", type_key="question_type")
+    assert d["arms"]["cascade"]["mean"] == 1.0
+    # Unchanged under the default key: the original judge's verdicts.
+    d0 = pair_run(rows, ["cascade"], perms=200, seed=0,
+                  score_key="correct", type_key="question_type")
+    assert d0["arms"]["cascade"]["mean"] == 0.0
+
+
+def test_cascade_under_a_rejudge_key_is_loud_when_the_key_is_missing():
+    """The cortex arm was left out of the re-judge, so the run carries no
+    cascade under that judge even though it carries one under the original."""
+    rows = [{"question_type": "t", "cortex_response": "x",
+             "cortex_correct": True, "rag_correct": True,
+             "rag_correct_opus5": True}]
+    with pytest.raises(SystemExit, match="derived cascade arm needs"):
+        pair_run(rows, ["cascade"], perms=10, seed=0,
+                 score_key="correct_opus5", type_key="question_type")

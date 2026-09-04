@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-05 — a second judge family for LongMemEval, before the claim moves)
+- **The 2026-09-04 500-question run is the first whole-benchmark memory-arm
+  win this project has measured (hybrid +0.040 over the naive RAG control,
+  paired permutation p 0.015, 41 W / 21 L) — and one judge model scored all
+  of it.** The standing rule is that a claim reaching the README first runs
+  under two independent judge families, because reproducibility measures an
+  instrument's steadiness, not its agreement with any other instrument. BEAM
+  has had that tool since 2026-08 (`evals/beam_rejudge.py`); LongMemEval rows
+  had none. **`evals/lme_rejudge.py`** is it: recorded per-arm responses are
+  replayed through a headless `claude -p` judge using the harness's *own*
+  judge prompts (imported from `longmemeval_bench`, KU and generic variants
+  both, with the identical user message and verdict parse), so the judge
+  model is the only term that changes and any movement is pure judge effect.
+  Retrieval and answering are not re-run and the source artifact is never
+  touched: output is `<source>.rejudge-<tag>.jsonl` (the new
+  `{arm}_correct_<tag>` beside the preserved original verdict),
+  a `.summary.json` carrying per-arm and per-type accuracy under both judges,
+  item-level agreement, the gold-leak exclusion with its excluded ids and the
+  CLI call/error counts, and the *same* paired arms-vs-rag comparison the
+  original claim was made from. An existing output is refused rather than
+  overwritten (`--resume` continues it, `--force` discards it, and a resume
+  that would widen `--arms` past what the file already holds is refused too,
+  because those rows carry no verdict column for the added arm), and
+  `--stability-sample N` measures
+  the CLI judge's own flip rate — the control floor a judge-to-judge delta
+  has to clear.
+- **`evals/beam_within_run_pairs.py` takes any `--score-key` suffix**, not
+  just `score` and `correct`, so a re-judge's `correct_<tag>` column is
+  paired by the same producer that wrote the original artifact instead of a
+  second inline copy of the arithmetic. The derived `cascade` arm keeps its
+  routing rule under the new key (the commit gate still reads
+  `cortex_response` only; the verdict it serves now comes from the judge the
+  caller asked for). Default behaviour is unchanged and every committed
+  pairing artifact still regenerates byte-exactly.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported
