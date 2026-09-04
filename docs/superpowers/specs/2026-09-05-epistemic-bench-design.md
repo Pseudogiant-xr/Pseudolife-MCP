@@ -163,15 +163,16 @@ The derivation is pure parsing, with no model and no judgement:
    appears in the later evidence. Exactly one candidate must remain —
    that is the old value. Zero or more than one → skip (ambiguous).
 
-**Qualifying count: 22 of the 78 knowledge-update questions**, identical
+**Qualifying count: 23 of the 78 knowledge-update questions**, identical
 on `longmemeval_oracle.json` and `longmemeval_s_cleaned.json` (the
 derivation reads only the evidence sessions, which the two files share).
-The 56 skips break down as: 39 gold answers carrying no value token at
-all (prose answers — "the Nikon D850", "her sister's wedding"), 8 where
+The 55 skips break down as: 39 gold answers carrying no value token at
+all (prose answers — "the Nikon D850", "her sister's wedding"), 7 where
 the gold token is not literally in the later evidence turns (the gold is
 a paraphrase), 8 ambiguous old-value candidates, 1 where the gold token
 also appears in the earlier session. Nothing is guessed to rescue a
 skip; a question that does not derive cleanly is not in the slice.
+(Count corrected from 22 by amendment A1 — see section 9.)
 
 The LME slice scores **D1, D2 and D5 only**. D3 needs a `freshness_class`
 and a TTL the dataset does not carry, and D4 needs questions whose
@@ -305,11 +306,102 @@ The premise dies, and this bench should report it dead, under any of:
    surfaces and neither is scored here; the generator does not produce
    them.
 
-## 8. Results
+## 8. Results — 2026-09-05 synthetic smoke
 
-Filled in after the run. See `evals/README.md` for the smoke table and
-`evals/results/epistemic-bench-smoke-20260905.json` for the artifact.
+Two cells, both `--source synthetic --contexts-only`, seed 20260905, on a
+private bench Postgres created and dropped by the run. Artifacts:
+`evals/results/epistemic-bench-smoke-20260905.json` (10 entities × 5
+attributes × 4 sessions — 50 questions, 72 turns, 40 cortex slots) and
+`epistemic-bench-scale-20260905.json` (10 × 10 × 6 — 100 questions, 156
+turns, 80 slots). Rows, including every served context, in the sibling
+`.jsonl`s.
+
+| dimension | rag | cortex | hybrid | cascade | nomem | n |
+|-----------|-----|--------|--------|---------|-------|---|
+| `update_following` ↑ | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 20 |
+| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 20 |
+| `staleness_marking` ↑ | 0.000 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |
+| `abstention_support` ↑ | 0.700 | 0.000 | 0.000 | 0.000 | 1.000 | 10 |
+| `retraction_handling` ↑ | 0.600 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |
+| `answer_coverage` | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 40 |
+| context chars (mean) | 373.1 | 1206.5 | 1613.7 | 1206.5 | 0.0 | |
+
+The scale cell moves only `abstention_support` (rag 0.700 → 0.750) and
+`retraction_handling` (rag 0.600 → 0.400); every other cell is identical
+at double the corpus.
+
+**Verdict against the preregistered expectations: the premise is NOT
+supported by this evidence, and E6 is the reason.**
+
+- **E1 held, uselessly.** Every memory arm scores 1.000 on
+  `update_following`, rag included. A slot-shaped utterance ("the engine
+  for ledger-db is ENG-2200") is a lexical key that the turn pool's BM25
+  channel resolves exactly, so the synthetic corpus cannot make retrieval
+  hard. D1 is saturated here and says nothing.
+- **E2 FAILED, and it is the load-bearing failure.** `stale_serving` is
+  0.000 on every arm at both scales. Cause, read off the rows: rag serves
+  the old value **and** the current one on every changed slot in both
+  cells (20 of 20 in the smoke, 40 of 40 at scale). The
+  defect the spine claims to prevent cannot occur when retrieval hands
+  the agent both values. That is falsification criterion 1 of section 6,
+  and by E6 it means this bench has not shown the spine to be
+  epistemically better — it has shown that on a corpus this size the
+  question does not arise.
+- **E3 held exactly as predicted.** `staleness_marking` 1.000 for
+  cortex/hybrid and 0.000 for rag, structurally.
+- **E4 FAILED in an unexpected direction.** The fact spine is *worse* at
+  abstention support than raw turns: cortex 0.000 against rag 0.700.
+  `cortex_search` at the shipped `top_k=24 / min_score=0.2` returns
+  near-miss facts for every unstated slot (another entity's value on the
+  same attribute), on all 10 of 10 questions. `answer_coverage` behaves
+  as the pairing requires — nomem 0.000 against its 1.000 abstention.
+  This is confounded with context width (amendment A3) and needs a
+  width-matched rerun before it is quotable as a defect.
+- **E5 held in shape and gave the finding it was written to give.**
+  cortex/hybrid 1.000, rag 0.600 (0.400 at scale) — non-zero, so
+  contradiction detection does fire on natural correction phrasing and
+  stamps `superseded_by_text` on the entry that stated the retracted
+  value. Rag can carry a retraction; it carries it about half the time.
+
+**What this bench is now good for, and what it is not.** D3 and D5
+discriminate cleanly and are the two dimensions where the spine's
+representation demonstrably reaches the served context. D4 discriminates
+and currently points *against* the spine. D1 and D2 are saturated on the
+synthetic source and can only be answered by the LongMemEval slice, where
+the value is buried in prose across a real haystack — which is exactly
+the risk section 7's confound 2 named, now measured rather than
+predicted. Running that slice is the next step and needs an extractor
+endpoint.
+
+**Serving observation, worth its own line.** No arm renders the stale
+flag into the flattened context string. `staleness_marking` scores the
+served *payload*, so a stale value reaches an agent reading the MCP
+response marked, and an answerer reading the context block unmarked.
+That is a real gap in the serving path, not an artefact of the metric.
 
 ## 9. Amendments
 
-None.
+- **A1 (2026-09-05) — LongMemEval qualifying count 22 → 23.** The first
+  implementation reused `ladder_sweep.value_present`, whose word-boundary
+  rule excludes any adjacent `.` and therefore rejects a value a sentence
+  ends on. The bench now uses a matcher that blocks a period only when it
+  continues a number (`1.5` searched for `1`). One knowledge-update
+  question qualified once its gold token stopped being rejected for
+  ending a sentence, moving `gold-not-in-later-evidence` from 8 to 7.
+  Same fix, same run: the first synthetic smoke had scored the rag arm at
+  0.150 `answer_coverage` on contexts that plainly carried the value.
+- **A2 (2026-09-05) — a second, larger cell was added after reading the
+  first.** Post-hoc and declared as such. It was not run to find a
+  different answer but to ask whether `stale_serving`'s 0.000 was a
+  property of the corpus size; it is not (identical at double the
+  corpus). Both cells are reported together and neither is promoted over
+  the other.
+- **A3 (2026-09-05) — a ninth confound, found by the run.**
+  `abstention_support` is confounded with served context width: an arm
+  serving 1,206 characters has more chances to sweep in a near-miss value
+  than one serving 373. The artifact now records `context_chars_mean`
+  per arm beside every rate, and the E4 result must not be quoted as a
+  spine defect until a width-matched cortex arm has been run.
+- **A4 (2026-09-05) — rows persist the full served context.** The A1 bug
+  had to be diagnosed by rebuilding the bank, because the rows carried
+  only character counts. Every row now carries `{arm}_context`.

@@ -5046,3 +5046,170 @@ CLAIMS.append(Claim(
     needle="219.2 tokens against its 100-token name and producing a byte-identical",
     artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "context_tokens"),
     stated=219.2, places=1))
+
+
+# ── the epistemic bench (2026-09-05) ──────────────────────────────────────
+# Judge-free by construction, so these are the cheapest claims in this file
+# to re-derive — which is exactly why nothing else would notice them
+# drifting. Spec: docs/superpowers/specs/2026-09-05-epistemic-bench-design.md
+EPI_SMOKE = RESULTS + "epistemic-bench-smoke-20260905.json"
+EPI_SMOKE_ROWS = RESULTS + "epistemic-bench-smoke-20260905.jsonl"
+EPI_SCALE = RESULTS + "epistemic-bench-scale-20260905.json"
+EPI_SCALE_ROWS = RESULTS + "epistemic-bench-scale-20260905.jsonl"
+EPI_LME = RESULTS + "epistemic-bench-lme-derivation-20260905.json"
+EPI_LME_S = RESULTS + "epistemic-bench-lme-derivation-s-20260905.json"
+
+
+def _epi(arm: str, dim: str):
+    return lambda d: d["arms"][arm][dim]["rate"]
+
+
+def _epi_n(dim: str):
+    """The scored denominator, read off the rag arm — every arm scores the
+    same questions, so a per-arm n that disagreed would be a harness bug."""
+    return lambda d: d["arms"]["rag"][dim]["n"]
+
+
+def _epi_chars(arm: str):
+    return lambda d: d["arms"][arm]["context_chars_mean"]
+
+
+def _epi_width_ratio(d):
+    return (d["arms"]["cortex"]["context_chars_mean"]
+            / d["arms"]["rag"]["context_chars_mean"])
+
+
+def _epi_qualified(d):
+    return d["meta"]["qualified"]
+
+
+# The smoke table in evals/README.md: one needle per row, every cell pinned.
+_EPI_TABLE = [
+    ("update_following",
+     "| `update_following` ↑ | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 20 |",
+     (("rag", 1.0), ("cortex", 1.0), ("hybrid", 1.0), ("cascade", 1.0),
+      ("nomem", 0.0)), 20),
+    ("stale_serving",
+     "| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 20 |",
+     (("rag", 0.0), ("cortex", 0.0), ("hybrid", 0.0), ("cascade", 0.0),
+      ("nomem", 0.0)), 20),
+    ("staleness_marking",
+     "| `staleness_marking` ↑ | 0.000 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |",
+     (("rag", 0.0), ("cortex", 1.0), ("hybrid", 1.0), ("cascade", 1.0),
+      ("nomem", 0.0)), 10),
+    ("abstention_support",
+     "| `abstention_support` ↑ | 0.700 | 0.000 | 0.000 | 0.000 | 1.000 | 10 |",
+     (("rag", 0.7), ("cortex", 0.0), ("hybrid", 0.0), ("cascade", 0.0),
+      ("nomem", 1.0)), 10),
+    ("retraction_handling",
+     "| `retraction_handling` ↑ | 0.600 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |",
+     (("rag", 0.6), ("cortex", 1.0), ("hybrid", 1.0), ("cascade", 1.0),
+      ("nomem", 0.0)), 10),
+    ("answer_coverage",
+     "| `answer_coverage` | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 40 |",
+     (("rag", 1.0), ("cortex", 1.0), ("hybrid", 1.0), ("cascade", 1.0),
+      ("nomem", 0.0)), 40),
+]
+for _dim, _needle, _cells, _n in _EPI_TABLE:
+    for _arm, _rate in _cells:
+        CLAIMS.append(Claim(
+            id=f"epistemic-smoke-{_dim}-{_arm}", doc=EVALS, needle=_needle,
+            artifacts=(EPI_SMOKE,), value=_epi(_arm, _dim), stated=_rate,
+            places=3))
+    CLAIMS.append(Claim(
+        id=f"epistemic-smoke-{_dim}-n", doc=EVALS, needle=_needle,
+        artifacts=(EPI_SMOKE,), value=_epi_n(_dim), stated=_n, places=0))
+
+_EPI_CHARS = "| context chars (mean) | 373.1 | 1206.5 | 1613.7 | 1206.5 | 0.0 | |"
+for _arm, _chars in (("rag", 373.1), ("cortex", 1206.5), ("hybrid", 1613.7),
+                     ("cascade", 1206.5), ("nomem", 0.0)):
+    CLAIMS.append(Claim(
+        id=f"epistemic-smoke-chars-{_arm}", doc=EVALS, needle=_EPI_CHARS,
+        artifacts=(EPI_SMOKE,), value=_epi_chars(_arm), stated=_chars,
+        places=1))
+
+# The width confound the abstention result must be read against.
+CLAIMS.append(Claim(
+    id="epistemic-smoke-width-ratio", doc=EVALS,
+    needle="width (cortex serves 3.2× rag's characters, the column above), so it is",
+    artifacts=(EPI_SMOKE,), value=_epi_width_ratio, stated=3.2, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-cl-width-ratio", doc=CHANGELOG,
+    needle="served width — cortex serves 3.2× the characters, now recorded per arm),",
+    artifacts=(EPI_SMOKE,), value=_epi_width_ratio, stated=3.2, places=1))
+
+# The larger cell: only two rag rates move, and the docs name both.
+CLAIMS.append(Claim(
+    id="epistemic-scale-rag-abstention", doc=EVALS,
+    needle="identical at double the corpus except rag's `abstention_support` (0.750)",
+    artifacts=(EPI_SCALE,), value=_epi("rag", "abstention_support"),
+    stated=0.75, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-scale-rag-retraction", doc=EVALS,
+    needle="and rag's `retraction_handling` (0.400).",
+    artifacts=(EPI_SCALE,), value=_epi("rag", "retraction_handling"),
+    stated=0.4, places=3))
+
+
+def _epi_rag_serves_both(rows):
+    """Rows where the rag context carried BOTH the superseded value and the
+    current one — the reason stale_serving cannot fire on this corpus.
+    Recomputed with the harness's own matcher, not a local copy of it."""
+    from epistemic_bench import value_present
+
+    return sum(1 for r in rows if r["superseded_values"]
+               and value_present(r["rag_context"], r["current_value"])
+               and any(value_present(r["rag_context"], v)
+                       for v in r["superseded_values"]))
+
+
+# Both cells are cited, so both are pinned: the smoke's 20 changed slots
+# and the larger cell's 40. A single artifact here is how "40 of 40" came
+# to be published beside a 20-row smoke in the first draft.
+for _cid, _doc, _needle in (
+        ("epistemic-both-values-evals", EVALS,
+         "  *and* the current one on every changed slot in both cells (20 of 20 in"),
+        ("epistemic-both-values-cl", CHANGELOG,
+         "  because rag serves the old value and the current one on every changed")):
+    for _art, _suffix, _stated in ((EPI_SMOKE_ROWS, "smoke", 20),
+                                   (EPI_SCALE_ROWS, "scale", 40)):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_suffix}", doc=_doc, needle=_needle,
+            artifacts=(_art,), value=_epi_rag_serves_both, stated=_stated,
+            places=0))
+
+# The LongMemEval derivation, and the oracle/s parity the docs claim.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-qualified-evals", EVALS,
+         "guessed) and qualifies **23 of the 78** questions, identically on"),
+        ("epistemic-lme-qualified-cl", CHANGELOG,
+         "  qualifies **23 of the 78** questions, identically on the oracle and `s`")):
+    for _art, _suffix in ((EPI_LME, "oracle"), (EPI_LME_S, "s")):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_suffix}", doc=_doc, needle=_needle,
+            artifacts=(_art,), value=_epi_qualified, stated=23, places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-ku-total", doc=EVALS,
+    needle="guessed) and qualifies **23 of the 78** questions, identically on",
+    artifacts=(EPI_LME,),
+    value=lambda d: d["meta"]["knowledge_update_questions"], stated=78,
+    places=0))
+
+_EPI_SKIPS = "39 gold answers with no value token at all, 7 whose gold is a paraphrase"
+CLAIMS.append(Claim(
+    id="epistemic-lme-skip-no-token", doc=EVALS, needle=_EPI_SKIPS,
+    artifacts=(EPI_LME,),
+    value=lambda d: d["skips"]["gold-has-no-value-token"], stated=39,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-skip-paraphrase", doc=EVALS, needle=_EPI_SKIPS,
+    artifacts=(EPI_LME,),
+    value=lambda d: d["skips"]["gold-not-in-later-evidence"], stated=7,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-skip-ambiguous", doc=EVALS,
+    needle="of what the later evidence says, 8 with an ambiguous old-value candidate,",
+    artifacts=(EPI_LME,),
+    value=lambda d: sum(v for k, v in d["skips"].items()
+                        if k.startswith("ambiguous-old-value")),
+    stated=8, places=0))

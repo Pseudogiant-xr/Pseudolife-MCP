@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-05 — a benchmark for the thing the fact spine is actually for)
+- **Every retrieval number this project publishes asks whether the served
+  context contained the gold string, and on that question the fact spine ties
+  naive RAG** (LongMemEval-500 rag 0.690 vs cascade 0.692; BEAM-100K rag
+  0.6425 vs hybrid 0.6226). Nothing measured the property the 2026-09-04
+  audit says the spine is really for: knowing which value is current, how old
+  it is, who retracted what, and when to say "I don't know".
+  **`evals/epistemic_bench.py`** scores exactly that, and scores the SERVED
+  CONTEXT rather than a model answer — five deterministic predicates
+  (`update_following`, `stale_serving` as a defect count, `staleness_marking`
+  past 2×TTL, `abstention_support` reported beside an `answer_coverage`
+  companion the no-memory arm fails, `retraction_handling` through the
+  supersession chain and `superseded_by_text`). Judge-free, CPU-only, no GPU,
+  seconds per run. Arms are imported from `longmemeval_bench` — `rag`,
+  `cortex`, `hybrid`, `nomem`, plus a clearly-labelled CONTEXT-level
+  `cascade` proxy that is not the judged cascade. Runs on a private
+  `pseudolife_memory_bench_<pid>` database it creates and drops, with a name
+  guard that refuses to drop anything it did not create.
+- **Ground truth from two sources.** A seeded synthetic generator writes its
+  facts straight through `cortex_write` with the session's timestamp, so no
+  extractor runs and extraction is held at perfect — which makes the
+  synthetic cortex arm a ceiling on the representation, not a measurement of
+  a deployed bank, and every artifact says so in `caveats`. A LongMemEval
+  derivation parses old/new value pairs out of the knowledge-update type and
+  qualifies **23 of the 78** questions, identically on the oracle and `s`
+  datasets; the 55 skips are itemised in the artifact rather than rescued by
+  guessing.
+- **First run, and it says the premise is not yet supported.**
+  `epistemic-bench-smoke-20260905` (50 questions) and
+  `epistemic-bench-scale-20260905` (100 questions) agree: `staleness_marking`
+  1.000 for cortex/hybrid against 0.000 for rag, and `retraction_handling`
+  1.000 against rag's 0.600 — but `stale_serving` is **0.000 on every arm**,
+  because rag serves the old value and the current one on every changed
+  slot in both cells (20 of 20 in the smoke, 40 of 40 at scale), and
+  `update_following` is saturated at 1.000 everywhere. The
+  bench's sharpest prediction is untestable on a synthetic corpus and has to
+  come from the LongMemEval slice. Two findings point the other way:
+  `abstention_support` is cortex 0.000 against rag 0.700 (confounded with
+  served width — cortex serves 3.2× the characters, now recorded per arm),
+  and no arm renders the stale flag into the flattened context string, so a
+  stale value reaches an MCP payload reader marked and an answerer unmarked.
+  Preregistration, expectations, falsification rule and nine confounds:
+  `docs/superpowers/specs/2026-09-05-epistemic-bench-design.md`; tables and
+  procedure in `evals/README.md`.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported

@@ -896,6 +896,154 @@ inside the fired set.
 
 ---
 
+---
+
+# Epistemic bench (`epistemic_bench.py`)
+
+Every retrieval number above asks one question — did the served context
+contain the gold string — and on that question the fact spine ties naive
+RAG (LongMemEval-500 rag 0.690 vs cascade 0.692; BEAM-100K rag 0.6425 vs
+hybrid 0.6226). The 2026-09-04 fresh-eyes audit argued the spine's real
+value is epistemic instead: knowing which value is current, how old it is,
+who retracted what, and when to say "I don't know". This bench measures
+that, and scores the **served context** rather than a model answer — so it
+is judge-free, CPU-only, and byte-reproducible in seconds.
+
+Design and preregistration:
+`docs/superpowers/specs/2026-09-05-epistemic-bench-design.md`.
+
+## Dimensions
+
+Each is a deterministic predicate over one arm's served context for one
+question — word-boundary containment on the served text, or a structural
+read of the served payload (the fact / entry dicts the serving call
+returned). No LLM anywhere in the scoring path.
+
+| | dimension | predicate | direction |
+|-|-----------|-----------|-----------|
+| D1 | `update_following` | the changed slot's **current** value appears in the served text | higher |
+| D2 | `stale_serving` | a **superseded** value appears and the current value does not appear anywhere | lower (a defect) |
+| D3 | `staleness_marking` | a slot past 2×TTL is served carrying the stale signal (`stale: true`, the `demote` warning, or the `quarantine` wrapper) | higher |
+| D4 | `abstention_support` | a **never-stated** slot surfaces no fact and no near-miss value | higher |
+| D5 | `retraction_handling` | a corrected value is served **with** its correction signal — the fact chain's `supersedes_value`, or a served turn's `superseded_by_text` | higher |
+| — | `answer_coverage` | over every **answerable** question, the current value is served. Never read alone: it is the half of the D4 pair that the no-memory arm fails | higher |
+
+`stale_serving` is the only defect count in the table; its direction is
+data in the artifact (`meta.higher_is_better`), not prose, because a
+flipped direction would invert the verdict silently.
+
+## Arms
+
+Imported, never re-implemented: `longmemeval_bench.build_contexts` and
+`serve_comparator_arms` build every served context, so an arm here and an
+arm of the same name in the LongMemEval harness are the same object.
+`rag` / `cortex` / `hybrid` / `nomem` are those arms. **`cascade` here is a
+CONTEXT-level proxy** — the cortex context when non-empty, else rag — and
+is not the judged answer-level cascade; the two must never be compared,
+which every artifact repeats in `caveats.cascade_proxy`. `refind` is
+excluded: its search loop is planned by a model.
+
+## Sources
+
+**Synthetic** — a seeded generator (N entities × M attributes over K dated
+sessions) producing five question kinds: `update`, `stable`, `stale`,
+`correction`, `unstated`. Turns go in through `store()`; facts go in
+**directly** through `cortex_write` with the session's timestamp and
+freshness class, so no extractor runs and chronological call order builds
+the real supersession chain (`cortex_write` ticks the HLC per call).
+Extraction is therefore held at perfect and the synthetic cortex arm is a
+**ceiling on the representation, not a measurement of a deployed bank** —
+stamped in every artifact's `caveats`.
+
+**LongMemEval-derived** — the knowledge-update type, whose two dated
+evidence sessions carry an old value and a new one. The derivation is pure
+parsing (family-matched value tokens, ambiguity rejected rather than
+guessed) and qualifies **23 of the 78** questions, identically on
+`longmemeval_oracle.json` and `longmemeval_s_cleaned.json`. The 55 skips:
+39 gold answers with no value token at all, 7 whose gold is a paraphrase
+of what the later evidence says, 8 with an ambiguous old-value candidate,
+1 whose gold also appears in the earlier session. Artifacts
+`epistemic-bench-lme-derivation-20260905.json` and
+`…-lme-derivation-s-20260905.json`. This slice scores D1, D2 and D5 only,
+and its bank needs the real ingest+dream path, so its cortex/hybrid arms
+require an extractor endpoint — not run yet.
+
+## Running
+
+```bash
+# the synthetic smoke (creates and drops its own bench database)
+PYTHONPATH=. python evals/epistemic_bench.py --source synthetic \
+    --tag smoke-20260905 --contexts-only --seed 20260905 \
+    --entities 10 --attributes 5 --sessions 4
+
+# the LongMemEval derivation (no bank, no model, seconds)
+PYTHONPATH=. python evals/epistemic_bench.py --derive-lme oracle \
+    --tag lme-derivation-20260905
+```
+
+Isolation: a private `pseudolife_memory_bench_<pid>` database, created at
+start and dropped at exit, with a name guard that refuses to drop anything
+the run did not create. The live bank is never touched. Every run writes
+`evals/results/epistemic-bench-<tag>.json` plus a `.jsonl` carrying every
+row **and every served context**, and refuses to overwrite either file
+without `--force`.
+
+## Findings — 2026-09-05 synthetic smoke
+
+`epistemic-bench-smoke-20260905` — 10 entities × 5 attributes × 4
+sessions: 50 questions, 72 turns, 40 cortex slots, `--contexts-only`,
+`stale_policy` at its `annotate` default.
+
+| dimension | rag | cortex | hybrid | cascade | nomem | n |
+|-----------|-----|--------|--------|---------|-------|---|
+| `update_following` ↑ | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 20 |
+| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 20 |
+| `staleness_marking` ↑ | 0.000 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |
+| `abstention_support` ↑ | 0.700 | 0.000 | 0.000 | 0.000 | 1.000 | 10 |
+| `retraction_handling` ↑ | 0.600 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |
+| `answer_coverage` | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 40 |
+| context chars (mean) | 373.1 | 1206.5 | 1613.7 | 1206.5 | 0.0 | |
+
+A second, larger cell (`epistemic-bench-scale-20260905`, 10 × 10 × 6 — 100
+questions, 156 turns, 80 slots) was run afterwards to ask whether the
+`stale_serving` zero was a corpus-size artefact. It is not: every cell is
+identical at double the corpus except rag's `abstention_support` (0.750)
+and rag's `retraction_handling` (0.400).
+
+**The preregistered verdict is that the premise is not supported by this
+evidence**, and the reason is the interesting part:
+
+- **D2 cannot fire on the synthetic corpus.** rag serves the old value
+  *and* the current one on every changed slot in both cells (20 of 20 in
+  the smoke, 40 of 40 at scale), so "confidently serve a
+  superseded value" never happens. The bench's sharpest prediction is
+  untestable here — falsification criterion 1 of the spec. D1 is saturated
+  for the same reason: a slot-shaped utterance is a lexical key the turn
+  pool's BM25 channel resolves exactly. **Both dimensions have to come
+  from the LongMemEval slice**, where the value sits in prose inside a real
+  haystack.
+- **D3 and D5 discriminate, as predicted.** The stale flag and the
+  supersession chain reach the served context on the fact arms and are
+  structurally absent from raw turns. D5's rag arm is non-zero (0.600 /
+  0.400), which is its own finding: contradiction detection *does* fire on
+  natural correction phrasing and stamps `superseded_by_text` on the entry
+  that stated the retracted value, roughly half the time.
+- **D4 points against the spine.** cortex 0.000 versus rag 0.700: at the
+  shipped `cortex_top_k=24 / min_score=0.2`, `cortex_search` returns a
+  near-miss fact — another entity's value on the same attribute — for
+  every one of the 10 never-stated slots. This is confounded with served
+  width (cortex serves 3.2× rag's characters, the column above), so it is
+  a lead for a width-matched rerun, **not yet a defect to quote**.
+- **A serving gap the bench made visible.** No arm renders the stale flag
+  into the flattened context string. D3 scores the served *payload*, so a
+  stale value reaches an agent reading the MCP response marked and an
+  answerer reading the context block unmarked.
+
+Caveats travel in the artifact, not only here: `caveats` names the
+context-not-answers framing, the perfect-extraction ceiling, the cascade
+proxy, the structural floor on D3/D5 for raw-turn arms, and the
+payload-only stale flag.
+
 # Review-queue judge ladders (`judge_ladder.py`, `queue_judge_ladder.py`)
 
 Two harnesses answer "can a judge model reproduce the ratified human panel"
