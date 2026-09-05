@@ -458,8 +458,151 @@ unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**.
 The paired column is a committed artifact
 (`…raglite-all-fresh.arms-vs-rag.json`) written by
 `evals/beam_within_run_pairs.py` — harness-agnostic since 2026-09-04
-(`--score-key correct|score`, `--type-key`, `--prefix`, `--pairs left:right`,
-and a derived `cascade` arm) — and pinned by a byte-exact regeneration test.
+(`--score-key`, `--type-key`, `--prefix`, `--pairs left:right`, and a
+derived `cascade` arm) — and pinned by a byte-exact regeneration test.
+
+#### Second judge family (2026-09-05)
+
+That hybrid delta is the first whole-benchmark memory-arm win this project
+has measured, and one instrument scored all of it. So before it went
+anywhere near the front door the entire run was re-judged by a second,
+independent judge family — `claude-opus-5`, through `evals/lme_rejudge.py`
+(the section below). Retrieval and answering were not re-run: the recorded
+per-arm responses were replayed through the harness's own judge prompts,
+so the judge model is the only term that changed and any movement is pure
+judge effect.
+
+| arm | Qwen3.8-27B | claude-opus-5 | transfer | item agreement |
+|---|---:|---:|---:|---:|
+| `rag` (control) | 0.690 | 0.694 | +0.004 | 0.976 |
+| `hybrid` | 0.730 | 0.736 | +0.006 | 0.982 |
+| `cortex` | 0.310 | 0.320 | +0.010 | 0.978 |
+| `rag1` | 0.316 | 0.320 | +0.004 | 0.980 |
+
+The paired column, recomputed by the *same* `beam_within_run_pairs.py`
+against each judge's own verdict key, so both sides come off identical
+arithmetic (all 500 rows, 10,000 permutations, seed 0):
+
+| arm vs `rag` | Qwen delta | p | W / L | Opus delta | p | W / L |
+|---|---:|---:|---:|---:|---:|---:|
+| `hybrid` | **+0.040** ± 0.031 | 0.0153 | 41 / 21 | **+0.042** ± 0.031 | 0.0126 | 42 / 21 |
+| `cascade` | +0.002 ± 0.022 | 1.0000 | 16 / 15 | +0.010 ± 0.021 | 0.4576 | 17 / 12 |
+| `cortex` | −0.380 ± 0.048 | 0.0001 | 16 / 206 | −0.374 ± 0.048 | 0.0001 | 17 / 204 |
+| `rag1` | −0.374 ± 0.045 | 0.0001 | 8 / 195 | −0.374 ± 0.046 | 0.0001 | 11 / 198 |
+
+**Where the win comes from.** That paired column is a sum over six
+question types, and they do not contribute equally. Net rows per type —
+questions the hybrid arm gets right and the control does not, minus the
+reverse — counted off each judge's own verdict column:
+
+| question type | n | Opus net | Opus Δ | Qwen net | Qwen Δ |
+|---|---:|---:|---:|---:|---:|
+| `temporal-reasoning` | 133 | **+12** | **+0.0902** | **+13** | **+0.0977** |
+| `single-session-user` | 70 | +3 | +0.0429 | +2 | +0.0286 |
+| `single-session-assistant` | 56 | +2 | +0.0357 | 0 | 0.0000 |
+| `knowledge-update` | 78 | +2 | +0.0256 | +3 | +0.0385 |
+| `multi-session` | 133 | +2 | +0.0150 | +3 | +0.0226 |
+| `single-session-preference` | 30 | 0 | 0.0000 | −1 | −0.0333 |
+| **all 500** | 500 | **+21** | **+0.0420** | **+20** | **+0.0400** |
+
+`temporal-reasoning` is **0.27** of the benchmark and carries **0.57** of
+the net win under Opus and **0.65** of it under Qwen — four times the next
+type's net rows under either judge. Both judges rank the six types the
+same way at the top and the bottom, so the concentration is a property of
+the questions, not of the instrument; `single-session-preference` is the
+only cell that is negative at all (−1 row under Qwen, 0 under Opus, over
+just 30 questions). Read the headline +0.040 / +0.042 as an average over a
+benchmark whose types the fact spine helps very unevenly, not as a uniform
+lift.
+
+The gold-answer leak check flags the same 25 rows under both judges. Over
+the 475 unleaked rows Opus reads **rag 0.6989, hybrid 0.7389, cortex
+0.3263, rag1 0.3347** — the same shape as the Qwen leak-free block above,
+and again not the headline figures.
+
+Instrument cost and floor: **2,061** CLI judge calls (2,060 judged calls +
+1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall.
+`--stability-sample 60` re-judged 60 random
+(row, arm) pairs a second time and the CLI judge agreed with itself on
+**0.9667** of them, a flip rate of ~0.033 — the control floor any
+judge-to-judge delta has to clear before it is a finding.
+
+**Read.** The win holds. Hybrid beats the raw-turn control by +0.040 under
+the local judge and +0.042 under Opus, both at p < 0.02, and both judges
+agree on which rows carry it (42 W / 21 L under Opus, 41 W / 21 L under
+Qwen). No arm's accuracy moves more than +0.010 between judges and item
+agreement runs 0.976–0.982, so judge transfer here is well inside the CLI
+judge's own flip rate — the same reading the 2026-08-22 BEAM re-judge
+gave (rag −0.002, cortex +0.007, hybrid −0.016 against a 0.073 floor).
+The budget-matched hybrid win therefore meets the two-judge-family rule
+and is promoted to `README.md` and `docs/guide/benchmarks.md`. The cascade
+arm is a wash under both judges and is **not** promoted. Artifacts:
+`…raglite-all-fresh.rejudge-opus5.summary.json` and
+`…rejudge-opus5.arms-vs-rag.json`, committed beside the source run's own.
+What it does **not** support is a uniform reading: the win is carried
+mostly by `temporal-reasoning` under both judges (the per-type table
+above), so it is closer to a claim about one question type than about the
+benchmark average.
+
+### Second-judge-family re-judge (`lme_rejudge.py`, added 2026-09-05)
+
+The hybrid win above was first judged by **one** instrument, the local
+Qwen3.8-27B server. A claim does not reach the README on that: determinism is not
+validity — the retired cascade headline replicated at std 0.0000 three
+times and still did not survive a change of judge. `evals/lme_rejudge.py`
+is the second family for LongMemEval rows — the counterpart to
+`beam_rejudge.py`, which does the same for BEAM's rubric-scored ones.
+
+Retrieval and answering are **not** re-run. The recorded per-arm responses
+are replayed through a headless `claude -p` judge (the same pooled CLI
+contract `beam_rejudge` uses; its `CliJudge` is imported, not copied) with
+the harness's **own** judge prompts imported from `longmemeval_bench` —
+`_JUDGE_SYSTEM` for knowledge-update rows, `_JUDGE_SYSTEM_GENERIC` for the
+other five types, the same user message and the same `startswith("yes")`
+parse. The judge model is the only term that changes, so any movement is
+pure judge effect.
+
+```bash
+PYTHONPATH=. python evals/lme_rejudge.py \
+    --in evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl \
+    --tag opus5 --arms rag,hybrid,cortex,rag1 --workers 4 \
+    --stability-sample 60
+```
+
+Three artifacts, none of which touch the source: `…rejudge-<tag>.jsonl`
+(the rows with `{arm}_correct_<tag>` added and the original
+`{arm}_correct` kept beside it, so every comparison pairs within-row),
+`…rejudge-<tag>.summary.json` (per-arm and per-type accuracy under both
+judges, item-level agreement per arm, the gold-leak exclusion with its
+excluded ids, and the instrument's own cost — `cli_calls_total` counts
+every call including the launch probe, `judged_calls` counts only the ones
+inside the timed window, and `seconds_per_call` divides the wall time by
+the latter, because the window opens after the probe), and
+`…rejudge-<tag>.arms-vs-rag.json` — the *same* paired comparison the
+original claim was made from, produced by `beam_within_run_pairs.py` with
+`--score-key correct_<tag>`, so the two numbers come off identical
+arithmetic; `--note` defaults to the standing pairing caveats so that
+artifact is never written bare. An existing output is refused rather than
+overwritten (`--resume` continues it, `--force` discards it), and a resume
+whose `--arms` differ from the file's — in either direction, checked on
+every row rather than the first — is refused too, because a column absent
+from some rows reads as a run of False verdicts rather than as a gap.
+
+**Known gap (follow-up).** Raw judge verdict text is not persisted and a
+wholesale per-arm failure increments no summary counter — the same shape
+as `beam_rejudge.py`, and unfixed here because closing it means re-running
+the judge over rows already judged.
+
+`--stability-sample N` judges N random (row, arm) pairs a second time. A
+CLI judge, unlike the pinned q8_0 server, is not bit-reproducible, and its
+own flip rate is the control floor: a judge-to-judge delta smaller than it
+is not a finding. On the 500-question run above the CLI judge agreed with
+itself on 0.9667 of 60 sampled pairs; the full run's three artifacts are
+committed beside their source
+(`…raglite-all-fresh.rejudge-opus5.jsonl`, `.summary.json`,
+`.arms-vs-rag.json`) and its numbers are in
+[Second judge family (2026-09-05)](#second-judge-family-2026-09-05)
+above.
 
 Model roles are split so extraction quality is the **only** variable:
 
@@ -895,6 +1038,428 @@ the cue fires on 70% of questions, and the losses are concentrated
 inside the fired set.
 
 ---
+
+# Epistemic bench (`epistemic_bench.py`)
+
+Every retrieval number above asks one question — did the served context
+contain the gold string — and on that question the fact spine ties naive
+RAG (LongMemEval-500 rag 0.690 vs cascade 0.692; BEAM-100K rag 0.6425 vs
+hybrid 0.6226). The 2026-09-04 fresh-eyes audit argued the spine's real
+value is epistemic instead: knowing which value is current, how old it is,
+who retracted what, and when to say "I don't know". This bench measures
+that, and scores the **served context** rather than a model answer — so
+**scoring** is judge-free and never needs a GPU.
+
+What a *run* costs depends on the source, and the two must not be blurred.
+The synthetic source is CPU-only end to end and reproduces its score
+fields byte for byte in seconds. The LongMemEval source builds each bank
+through the real extractor: the 2026-09-05 cell spent 826.4s of GPU
+extraction, and reproduces only as far as that extractor does.
+`--extractor floor` checks that path on CPU, and `--rescore-from`
+re-scores an already-extracted run's persisted rows with no bank and no
+GPU at all.
+
+Design and preregistration:
+`docs/superpowers/specs/2026-09-05-epistemic-bench-design.md`.
+
+## Dimensions
+
+Each is a deterministic predicate over one arm's served context for one
+question — word-boundary containment on the served text, or a structural
+read of the served payload (the fact / entry dicts the serving call
+returned). No LLM anywhere in the scoring path.
+
+| | dimension | predicate | direction |
+|-|-----------|-----------|-----------|
+| D1 | `update_following` | the changed slot's **current** value appears in the served text | higher |
+| D2 | `stale_serving` | a **superseded** value appears and the current value does not appear anywhere | lower (a defect) |
+| D3 | `staleness_marking` | a slot past 2×TTL is served carrying the stale signal (`stale: true`, the `demote` warning, or the `quarantine` wrapper) | higher |
+| D4 | `abstention_support` | a **never-stated** slot surfaces no fact and no near-miss value | higher |
+| D5 | `retraction_handling` | a corrected value is served **with** its correction signal — the fact chain's `supersedes_value`, or a served turn's `superseded_by_text` | higher |
+| — | `answer_coverage` | over every **answerable** question, the current value is served. Never read alone: it is the half of the D4 pair that the no-memory arm fails | higher |
+
+`stale_serving` is the only defect count in the table; its direction is
+data in the artifact (`meta.higher_is_better`), not prose, because a
+flipped direction would invert the verdict silently.
+
+## Arms
+
+Imported, never re-implemented: `longmemeval_bench.build_contexts` and
+`serve_comparator_arms` build every served context, so an arm here and an
+arm of the same name in the LongMemEval harness are the same object.
+`rag` / `cortex` / `hybrid` / `nomem` are those arms. **`cascade` here is a
+CONTEXT-level proxy** — the cortex context when non-empty, else rag — and
+is not the judged answer-level cascade; the two must never be compared,
+which every artifact repeats in `caveats.cascade_proxy`. `refind` is
+excluded: its search loop is planned by a model.
+
+**The `cascade` column carries no independent information.** It is
+identical to `cortex` on **173 of 173** rows — every row of the smoke, the
+scale cell and the LongMemEval cell — because the cortex context was never
+empty, so the fallback never fired. Read the tables below as four arms
+plus a duplicate; the column is retained only to keep the arm set stable
+across artifacts.
+
+**`hybrid`'s entry channel is `rag`'s.** `HYBRID_TOP_K` and `RAG_TOP_K` are
+both 6, so the hybrid slice takes the whole rag entry list. That matters
+for D5 specifically: hybrid's `retraction_handling` is "the rag entry
+channel OR the cortex fact channel" **by construction**, not a second
+measurement, which is why the two arms report the same number wherever
+the fact channel cannot fire.
+
+## Sources
+
+**Synthetic** — a seeded generator (N entities × M attributes over K dated
+sessions) producing five question kinds: `update`, `stable`, `stale`,
+`correction`, `unstated`. Turns go in through `store()`; facts go in
+**directly** through `cortex_write` with the session's timestamp and
+freshness class, so no extractor runs and chronological call order builds
+the real supersession chain (`cortex_write` ticks the HLC per call).
+Extraction is therefore held at perfect and the synthetic cortex arm is a
+**ceiling on the representation, not a measurement of a deployed bank** —
+stamped in every artifact's `caveats`.
+
+**LongMemEval-derived** — the knowledge-update type, whose two dated
+evidence sessions carry an old value and a new one. The derivation is pure
+parsing (family-matched value tokens, ambiguity rejected rather than
+guessed) and qualifies **21 of the 78** questions, identically on
+`longmemeval_oracle.json` and `longmemeval_s_cleaned.json`. The 57 skips:
+39 gold answers with no value token at all, 7 whose gold is a paraphrase
+of what the later evidence says, **4 whose gold value token is only part
+of a compound token**, 6 with an ambiguous old-value candidate, 1 whose
+gold also appears in the earlier session. Artifacts
+`epistemic-bench-lme-derivation-20260905b.json` and
+`…-lme-derivation-s-20260905b.json`.
+
+The compound rule exists because the value families match a *leading*
+token: `\b\d+\b` happily returns `70` out of `70-200mm` and `5` out of a
+`5-2` record. A gold's value token has to BE its whole whitespace token
+once sentence punctuation and brackets are stripped; anything else — a
+hyphenated range, a win-loss record, a comma-grouped number, a digit
+welded to a unit — is skipped as `gold-value-is-compound-token`. Two of
+the four such golds had been qualifying, and one of them
+(`41698283`, an `18-55mm kit lens` paired with a `70-200mm zoom lens`)
+produced the only `stale_serving` event the bench ever recorded. Spec
+amendment A7. The same bug can still reach an OLD value candidate
+(`ba61f0b9` takes its 25 out of "25%"); fixing that side changes which
+questions qualify, so it needs a fresh extraction run and is A7's open
+item.
+
+> **Superseded 2026-09-05, kept visible.** The first derivation read:
+> "The derivation is pure
+> parsing (family-matched value tokens, ambiguity rejected rather than
+> guessed) and qualifies **23 of the 78** questions, identically on
+> `longmemeval_oracle.json` and `longmemeval_s_cleaned.json`. The 55 skips:
+> 39 gold answers with no value token at all, 7 whose gold is a paraphrase
+> of what the later evidence says, 8 with an ambiguous old-value candidate,
+> 1 whose gold also appears in the earlier session. Artifacts
+> `epistemic-bench-lme-derivation-20260905.json` and
+> `…-lme-derivation-s-20260905.json`."
+> Those artifacts are still committed; the two extra questions they
+> admitted are `41698283` and `c7dc5443`, both compound-gold artifacts.
+
+This slice scores **D1, D2 and D5 only** — D3 and D4 report `n: 0` and a
+NULL rate, because the dataset carries no `freshness_class` and no
+never-stated questions. D5 is graded through the **entry channel only**:
+the bench slot is synthetic (`lme:<question_id>` / `value`), since
+LongMemEval has no entity/attribute structure, so a question never
+matches a served fact by name and the supersession chain cannot fire. The
+`cortex` arm serves no entries, so its D5 is 0 by construction — an
+artefact, not a finding, and stamped as one in the artifact's `caveats`.
+
+Its bank is built the real way, one per question, through
+`longmemeval_bench.ingest_and_dream`, so the cortex and hybrid arms here
+measure the **deployed pipeline** — retrieval and extraction together —
+and need an extractor endpoint. That is the mirror image of the synthetic
+source's perfect-extraction ceiling: a low cortex number on this source
+is a claim about the extractor at least as much as about the spine.
+
+## Running
+
+```bash
+# the synthetic smoke (creates and drops its own bench database)
+PYTHONPATH=. python evals/epistemic_bench.py --source synthetic \
+    --tag smoke-20260905 --contexts-only --seed 20260905 \
+    --entities 10 --attributes 5 --sessions 4
+
+# the LongMemEval derivation (no bank, no model, seconds)
+PYTHONPATH=. python evals/epistemic_bench.py --derive-lme oracle \
+    --tag lme-derivation-20260905
+
+# the LongMemEval slice (GPU: needs the extractor endpoint up —
+# dot-source evals/qwen_server.ps1 and call Start-Qwen first)
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --contexts-only --extractor qwen-27b --tag lme-qwen27b-20260905
+
+# the same path on CPU, to check the plumbing without booking the GPU
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --contexts-only --extractor floor --limit 2 --tag lme-plumbing
+```
+
+The LongMemEval run is **resumable per question** — it shares the GPU, so
+a row is appended to `epistemic-bench-lme-<tag>.jsonl` as each question
+finishes and rerunning the identical command skips the ids already there.
+Its summary JSON is written only once the whole slice is scored, and
+still refuses to overwrite a finished run; the orphaned `.jsonl` alone is
+a resume point and does not block. `--limit N` counts the first N derived
+questions of the slice, not the pending set, so a resumed run stays on the
+same slice. The extractor endpoint is probed before anything is ingested.
+
+Isolation: a private `pseudolife_memory_bench_<pid>` database, created at
+start and dropped at exit, with a name guard that refuses to drop anything
+the run did not create. The live bank is never touched. Every run writes
+`evals/results/epistemic-bench-<tag>.json` plus a `.jsonl` carrying every
+row **and every served context**. The synthetic path refuses to overwrite
+either file without `--force`; the LongMemEval path refuses the summary
+only, because its `.jsonl` is the resume log (see above).
+
+## Findings — 2026-09-05 synthetic smoke
+
+`epistemic-bench-smoke-20260905` — 10 entities × 5 attributes × 4
+sessions: 50 questions, 72 turns, 40 cortex slots, `--contexts-only`,
+`stale_policy` at its `annotate` default.
+
+| dimension | rag | cortex | hybrid | cascade | nomem | n |
+|-----------|-----|--------|--------|---------|-------|---|
+| `update_following` ↑ | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 20 |
+| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 20 |
+| `staleness_marking` ↑ | 0.000 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |
+| `abstention_support` ↑ | 0.700 | 0.000 | 0.000 | 0.000 | 1.000 | 10 |
+| `retraction_handling` ↑ | 0.600 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |
+| `answer_coverage` | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 40 |
+| context chars (mean) | 373.1 | 1206.5 | 1613.7 | 1206.5 | 0.0 | |
+
+A second, larger cell (`epistemic-bench-scale-20260905`, 10 × 10 × 6 — 100
+questions, 156 turns, 80 slots) was run afterwards to ask whether the
+`stale_serving` zero was a corpus-size artefact. It is not: every cell is
+identical at double the corpus except rag's `abstention_support` (0.750)
+and rag's `retraction_handling` (0.400). *(Corrected 2026-09-05: "every
+cell" means every **rate**. The context-chars row moves at scale — rag
+373.1 → 388.1, cortex 1206.5 → 1232.3, hybrid 1613.7 → 1654.4, cascade
+with cortex — because the larger bank serves slightly longer contexts.)*
+
+**The preregistered verdict is that the premise is not supported by this
+evidence**, and the reason is the interesting part:
+
+- **D2 cannot fire on the synthetic corpus.** rag serves the old value
+  *and* the current one on every changed slot in both cells (20 of 20 in
+  the smoke, 40 of 40 at scale), so "confidently serve a
+  superseded value" never happens. The bench's sharpest prediction is
+  untestable here — falsification criterion 1 of the spec. D1 is saturated
+  for the same reason: a slot-shaped utterance is a lexical key the turn
+  pool's BM25 channel resolves exactly. **Both dimensions have to come
+  from the LongMemEval slice**, where the value sits in prose inside a real
+  haystack.
+- **D3 and D5 discriminate, as predicted.** The stale flag and the
+  supersession chain reach the served context on the fact arms and are
+  structurally absent from raw turns. D5's rag arm is non-zero (0.600 /
+  0.400), which is its own finding: contradiction detection *does* fire on
+  natural correction phrasing and stamps `superseded_by_text` on the entry
+  that stated the retracted value, roughly half the time.
+- **D4 points against the spine.** cortex 0.000 versus rag 0.700: at the
+  shipped `cortex_top_k=24 / min_score=0.2`, `cortex_search` returns a
+  near-miss fact — another entity's value on the same attribute — for
+  every one of the 10 never-stated slots. This is confounded with served
+  width (cortex serves 3.2× rag's characters, the column above), so it is
+  a lead for a width-matched rerun, **not yet a defect to quote**.
+  *(Cause sharpened 2026-09-05, spec A7: width is real but weaker than
+  the arithmetic under it. The cortex arm serves `cortex_top_k` = 24 slots
+  out of a bank that holds 40 — the `selectivity` block in the artifact —
+  on every question, including the ones whose slot was never written, so
+  a near-miss value is close to unavoidable. Measured on the rows:
+  **71 of the 72 decoy values reached the cortex context**, every decoy on
+  9 of the 10 unstated questions and 7 of 8 on the tenth. What this cell
+  measures is a serving width against a bank smaller than it, not a
+  property of the representation.)*
+- **A serving gap the bench made visible.** No arm renders the stale flag
+  into the flattened context string. D3 scores the served *payload*, so a
+  stale value reaches an agent reading the MCP response marked and an
+  answerer reading the context block unmarked.
+
+Caveats travel in the artifact, not only here: `caveats` names the
+context-not-answers framing, the perfect-extraction ceiling, the cascade
+proxy, the structural floor on D3/D5 for raw-turn arms, and the
+payload-only stale flag.
+
+## Findings — 2026-09-05 LongMemEval source
+
+`epistemic-bench-lme-qwen27b-20260905b` — the first run on a bank an
+extractor actually built, re-scored on the corrected derivation. **21**
+derived knowledge-update questions, one fresh bank per question through
+`longmemeval_bench.ingest_and_dream`, extracted by `qwen-27b` (714.7s of
+the original run's 826.4s of extraction), `--contexts-only`,
+`stale_policy` at its `annotate` default:
+
+```bash
+# the run (GPU: needs the extractor endpoint up)
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --contexts-only --extractor qwen-27b --tag lme-qwen27b-20260905
+
+# the re-score onto the corrected derivation (CPU, seconds, no bank)
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --tag lme-qwen27b-20260905b \
+    --rescore-from evals/results/epistemic-bench-lme-qwen27b-20260905.jsonl \
+    --derivation evals/results/epistemic-bench-lme-derivation-20260905b.json \
+    --supersedes lme-qwen27b-20260905 --supersedes-reason "..."
+```
+
+| dimension | rag | cortex | hybrid | cascade | nomem | n |
+|-----------|-----|--------|--------|---------|-------|---|
+| `update_following` ↑ | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |
+| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 21 |
+| `staleness_marking` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+| `abstention_support` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+| `retraction_handling` ↑ | 0.333 | 0.000 | 0.333 | 0.000 | 0.000 | 21 |
+| `answer_coverage` | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |
+| context chars (mean) | 5397.0 | 378.1 | 5809.2 | 378.1 | 0.0 | |
+
+The two `n/a` rows report `n: 0` and a NULL rate in the artifact, never a
+0.0 — a reader would take a 0.0 for a failing arm. `staleness_marking` is
+ungradable because LongMemEval carries no `freshness_class` and no TTL, so
+no slot can be past 2×TTL. `abstention_support` is ungradable because the
+knowledge-update type contains no question whose answer was never stated.
+
+**Why this table replaced the first one.** The first read of this slice
+scored 23 questions and reported one `stale_serving` event (cortex 0.043)
+— the only such event the bench had ever recorded on any source. It was a
+derivation artifact. Question `41698283` asks what camera lens was bought
+most recently; the gold is `a 70-200mm zoom lens`, and the `number` family
+took its leading token, deriving new value `70` against an old value `18`
+lifted out of an `18-55mm kit lens` in the earlier session. The cortex
+context served `user — lenses owned: 18-55mm kit lens`, a **currently-true
+fact on a different slot**, and the metric counted it as a superseded
+value served with no replacement. `c7dc5443` (a `5-2` volleyball record
+read as the bare number 5) is the same shape. Both are now skipped as
+`gold-value-is-compound-token`, and the run was re-scored from its own
+persisted contexts — no re-extraction, no GPU. Spec amendment A7.
+
+**The read: this run validates the plumbing and the width/coverage trade,
+not the premise.**
+
+- **`stale_serving` is 0.000 on every arm of every source the bench has
+  run.** With the two artifact pairs removed, the defect D2 exists to
+  catch has never occurred — not on the synthetic corpus, not here, on no
+  arm. That is a stronger version of the same verdict, not a different
+  one: E2 is *untestable* on both corpora rather than failing on one.
+- **rag saturates, so D1 and D2 carry no signal for the raw-turn arms
+  here.** Each bank holds 23.1 turns on average against `rag_top_k` 6, so
+  a quarter of the entire bank is served on every question. The rag
+  context carries the current value on 21 of 21, and carries *both* the
+  current value and the superseded one on 20 of 21 (hybrid: 21 of 21) — so
+  the superseded-only case D2 exists to catch happens zero times. Same
+  failure as the synthetic source, for the same reason, now on a real
+  haystack: on an oracle slice the defect cannot arise.
+- **The spine serves the current value in 20 of 21 questions at 7.0% of
+  rag's characters** — 378.1 against 5397.0 — with no `stale_serving`
+  event anywhere. That trade is the one thing this run measures cleanly,
+  and because the bank was built the real way it is a claim about the
+  deployed pipeline, retrieval *and* extraction together, not about the
+  representation's ceiling.
+- **The two dimensions where the spine is expected to differentiate are
+  not gradable on this source at all.** D3 and D4 are the marker
+  dimensions — the ones the synthetic cell showed the spine wins
+  structurally — and both report `n: 0` here. Whatever epistemic
+  advantage the spine has, LongMemEval cannot see it.
+- **D5's cortex 0.000 is the construction, not a result.** The slot is
+  synthetic, so only the entry channel grades and the cortex arm serves no
+  entries. rag/hybrid's 0.333 (7 of 21) *is* a real measurement of that
+  entry mechanism — contradiction detection firing on correction phrasing
+  that never announces itself as a correction, where the synthetic
+  source's explicit corrections scored 0.600 / 0.400. The two are reported
+  apart and never pooled (`caveats.correction_is_implicit`). rag and
+  hybrid are not two measurements: `HYBRID_TOP_K` = `RAG_TOP_K` = 6, so
+  hybrid's entry channel *is* rag's.
+
+**The premise test therefore still rests on the synthetic source, where
+E2 failed.** Neither source has produced a corpus on which `stale_serving`
+can fire: the synthetic generator hands the agent both values, and the LME
+oracle slice hands it both values out of a 23-turn bank. Testing the
+premise needs a corpus neither of them is — dated updates carrying TTL
+semantics so D3 grades instead of reporting `n: 0`, never-stated slots so
+D4 does, and for D2 a haystack large enough that retrieval must *choose*
+between the old turn and the new one rather than serving both. That is a
+purpose-built corpus, not another slice of an existing benchmark. The
+synthetic verdict above stands unchanged.
+
+**What the re-score does and does not recompute.** The rows carry every
+arm's served context, so `update_following`, `stale_serving` and
+`answer_coverage` were recomputed from them. `staleness_marking`,
+`abstention_support` and `retraction_handling` read the served fact /
+entry payloads, which rows written before spec amendment A7 do not carry,
+so those verdicts were **carried** from the original run unchanged — said
+so in `caveats.rescored_not_rerun`. The path is verified by reproducing
+the original run's summary exactly when it is re-scored against the
+original derivation (`tests/test_epistemic_bench.py`).
+
+### Superseded — the first read of this slice (23 questions)
+
+**Retired 2026-09-05 by the corrected derivation above**, and kept visible
+because its artifact is still committed and a reader will meet these
+numbers in spec amendment A6. Two of the 23 questions below (`41698283`,
+`c7dc5443`) were compound-gold derivation artifacts; the `stale_serving`
+0.043 cell is the one they produced.
+
+
+`epistemic-bench-lme-qwen27b-20260905` — the first run on a bank an
+extractor actually built. The 23 derived knowledge-update questions, one
+fresh bank per question through `longmemeval_bench.ingest_and_dream`,
+extracted by `qwen-27b` (826.4s of extraction across the slice),
+`--contexts-only`, `stale_policy` at its `annotate` default:
+
+```bash
+PYTHONPATH=. python evals/epistemic_bench.py --source lme \
+    --contexts-only --extractor qwen-27b --tag lme-qwen27b-20260905
+```
+
+| dimension | rag | cortex | hybrid | cascade | nomem | n |
+|-----------|-----|--------|--------|---------|-------|---|
+| `update_following` ↑ | 1.000 | 0.913 | 1.000 | 0.913 | 0.000 | 23 |
+| `stale_serving` ↓ | 0.000 | 0.043 | 0.000 | 0.043 | 0.000 | 23 |
+| `staleness_marking` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+| `abstention_support` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |
+| `retraction_handling` ↑ | 0.348 | 0.000 | 0.348 | 0.000 | 0.000 | 23 |
+| `answer_coverage` | 1.000 | 0.913 | 1.000 | 0.913 | 0.000 | 23 |
+| context chars (mean) | 5253.3 | 410.0 | 5697.3 | 410.0 | 0.0 | |
+
+The two `n/a` rows report `n: 0` and a NULL rate in the artifact, never a
+0.0 — a reader would take a 0.0 for a failing arm. `staleness_marking` is
+ungradable because LongMemEval carries no `freshness_class` and no TTL, so
+no slot can be past 2×TTL. `abstention_support` is ungradable because the
+knowledge-update type contains no question whose answer was never stated.
+
+**The read: this run validates the plumbing and the width/coverage trade,
+not the premise.**
+
+- **rag saturates, so D1 and D2 carry no signal for the raw-turn arms
+  here.** Each bank holds 23.2 turns on average against `rag_top_k` 6, so
+  a quarter of the entire bank is served on every question. The rag
+  context carries the current value on 23 of 23, and carries *both* the
+  current value and the superseded one on 22 of 23 (hybrid: 23 of 23) —
+  so the superseded-only case D2 exists to catch happens zero times. Same
+  failure as the synthetic source, for the same reason, now on a real
+  haystack: on an oracle slice the defect cannot arise.
+- **The spine serves the current value in 21 of 23 questions at 7.8% of
+  rag's characters** — 410.0 against 5253.3 — and served a superseded
+  value with no replacement present once (1 of 23). That trade is the one
+  thing this run measures cleanly, and because the bank was built the real
+  way it is a claim about the deployed pipeline, retrieval *and*
+  extraction together, not about the representation's ceiling.
+- **The two dimensions where the spine is expected to differentiate are
+  not gradable on this source at all.** D3 and D4 are the marker
+  dimensions — the ones the synthetic cell showed the spine wins
+  structurally — and both report `n: 0` here. Whatever epistemic
+  advantage the spine has, LongMemEval cannot see it.
+- **D5's cortex 0.000 is the construction, not a result.** The slot is
+  synthetic, so only the entry channel grades and the cortex arm serves no
+  entries. rag/hybrid's 0.348 *is* a real measurement of that entry
+  mechanism — contradiction detection firing on correction phrasing that
+  never announces itself as a correction, where the synthetic source's
+  explicit corrections scored 0.600 / 0.400. The two are reported apart
+  and never pooled (`caveats.correction_is_implicit`).
+
+That read's closing paragraph — the premise test still rests on the
+synthetic source, and testing it needs a purpose-built corpus — is
+unchanged by the correction and is stated once, above.
 
 # Review-queue judge ladders (`judge_ladder.py`, `queue_judge_ladder.py`)
 
@@ -1522,6 +2087,134 @@ Bank dumps and served contexts persist per run under
 `evals/results/banks/beam-<tier>-<extractor>-<tag>/` (gitignored), so a
 serving-knob rerun or a re-judge recomposes from persisted state instead of
 re-paying the ~5h ingest/extraction phase.
+
+## Forgetting sweep (`forgetting_sweep_probe.py`, 2026-09-05)
+
+The distractor-scale probe (`distractor_scale_probe.py`, 2026-08-15,
+preregistered in
+`docs/superpowers/specs/2026-08-15-distractor-scale-probe-preregistration.md`)
+measured what accumulation costs: evidence-in-top-6 falls 0.830 (1x) →
+0.597 (15x) → 0.513 (31x) as the pool grows, while nothing ever evicts on
+the flat default. It left its own follow-up open in as many words — no
+experiment had forced eviction and asked *which* victims to pick, or
+whether not evicting at all beats picking badly. **This probe answers
+that, and the answer is that keeping everything wins.**
+
+Same construction, CPU only, no GPU/judge/daemon: the same 78
+knowledge-update dumps, the same RNG-free rotation, the same
+`band_ablation.select_topk` mirror (flat, recency off, BM25 on), the same
+five scales. The only new step is a **sweep** that reduces the pooled bank
+to a capacity `C` before selection.
+
+```bash
+python evals/forgetting_sweep_probe.py     # writes results/forgetting-sweep-probe-20260905.json
+python evals/forgetting_sweep_probe.py --dumps <band-state-dir> --limit 3
+```
+
+| arm | evicts |
+|---|---|
+| `none` | nothing — the distractor probe's own numbers, reproduced as the control |
+| `balanced` / `recency_heavy` / `surprise_heavy` | the lowest `RetentionPolicy.source_weighted_score`, the shipped `_evict_one` scoring, called offline |
+| `random` | uniformly at random, seeded — the floor a policy must beat |
+| `oracle` | never a gold-evidence entry, randomly among the rest — the ceiling victim choice can reach |
+
+Capacities are per question: **C1** = that question's 1x pool size
+(~490), **C3** = its 3x pool size (~1,470). A scale already at or below
+the capacity is a no-op and is reported as one.
+
+**Result — `results/forgetting-sweep-probe-20260905.json`,
+evidence-in-top-6 (n=78, mean pool size in the second column):**
+
+| capacity | scale | pool | `none` | `balanced` | `recency_heavy` | `surprise_heavy` | `random` | `oracle` |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1x | 488.3 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 |
+| C1 | 3x | 1464.8 | 0.7583 | 0.1528 | 0.0807 | 0.1528 | 0.4216 | 0.9030 |
+| C1 | 7x | 3418.0 | 0.6840 | 0.0465 | 0.0064 | 0.0465 | 0.1390 | 0.9063 |
+| C1 | 15x | 7324.2 | 0.5969 | 0.0192 | 0.0000 | 0.0192 | 0.0710 | 0.9191 |
+| C1 | 31x | 15136.7 | 0.5130 | 0.0000 | 0.0000 | 0.0000 | 0.0198 | 0.9121 |
+| C3 | 7x | 3418.0 | 0.6840 | 0.2736 | 0.0791 | 0.2736 | 0.3522 | 0.8571 |
+| C3 | 15x | 7324.2 | 0.5969 | 0.0652 | 0.0064 | 0.0652 | 0.1491 | 0.8752 |
+| C3 | 31x | 15136.7 | 0.5130 | 0.0454 | 0.0000 | 0.0454 | 0.0845 | 0.8666 |
+
+(C1/1x, C3/1x and C3/3x are capacity no-ops — the pool is already at or
+under C, so every arm returns the control's numbers. The swept pool holds
+488.3 entries at every scale under C1, and 1464.8 under C3.)
+
+**Verdict against the preregistered bars**
+(`docs/superpowers/specs/2026-09-05-forgetting-sweep-preregistration.md`;
+the gate cell is C1/15x, paired sign-flip permutation, 10k perms, seed 0):
+
+- **G-F0 (control): PASS, exactly.** The `none` arm reproduces the
+  2026-08-15 artifact across all 390 question × scale cells on pool size,
+  evidence-in-top-6, -top-3, any-served and rank-of-first-evidence.
+  Latency is excluded as machine-dependent.
+- **G-F1 (does a shipped sweep pay?): NO, by a mile.** The bar was
+  ≥ +0.05 with p < 0.05; the measured deltas against no sweep are
+  **−0.5777 (balanced), −0.5969 (recency_heavy), −0.5777
+  (surprise_heavy), all p < 0.0001**. Sweeping to a lean bank costs
+  about two and a half times what accumulating to 15x costs.
+- **G-F2 (is victim choice worth anything?): YES.** `oracle − none` =
+  **+0.3222, p < 0.0001**, and the oracle at 0.9191 beats even the
+  undiluted 1x bank's 0.8299 — thinning a pool helps when you thin the
+  right entries. The loss is in the scores, not in forgetting.
+- **G-F3 (do the shipped scores beat coin-flipping?): NO.** All three sit
+  significantly **below** the random floor: −0.0518 (p 0.0329), −0.0710
+  (p 0.0002), −0.0518 (p 0.0329).
+- **G-F4 (sanity): PASS** — 1x evidence-in-top-6 = 0.8299, above the 0.5
+  floor inherited from the distractor probe's G-D3.
+
+**Why the shipped policies lose to a coin flip.**
+`RetentionPolicy.source_weighted_score` multiplies a superseded entry's
+score by 0.05, putting every superseded entry below every live one — and
+on this corpus **247 of 286 gold-evidence entries (0.8636) are flagged
+superseded**, against a 0.7341 base rate over 38,086 entries
+(`results/forgetting-sweep-corpus-props-20260905.json`, written by
+`forgetting_sweep_probe.py --corpus-props`). The policies
+delete the answer first, by design. Evidence survival at C1/15x makes it
+concrete: 0.0214 (balanced and surprise_heavy), 0.0000
+(recency_heavy), 0.0727 (random), 1.0000 (`none` and `oracle`). This is a
+finding about `source_weighted_score` on knowledge-update material, not
+an argument that the multiplier is wrong in general — it was added
+because a correction was scoring below the stale fact it replaced
+(`miras/protocols.py`).
+
+**Every preregistered expectation held**, including the two stated as
+analytic consequences of the dumps carrying no `access_count`:
+`balanced` and `surprise_heavy` are identical to four decimal places at
+every cell (both reduce to a strictly increasing function of surprise),
+and `recency_heavy` degenerates to a positional policy that deletes the
+anchor's own turns first — a construction artifact, called out in the
+spec before the run, not a verdict on that policy.
+
+**The sweep is a large latency win and it does not matter.** Median BM25
+build+score at 15x falls from 812 ms unswept to 29 ms at C1, and
+`select_topk` from 1052 ms to 44 ms. The quality cliff arrives long before
+the latency ceiling does, which is the same conclusion the distractor
+probe's G-D2 reached from the other direction. Read those four as ratios,
+not constants: the probe was run twice and every quality number came back
+bit-identical while the latency medians moved 10-20% with machine load,
+which is why the control gate excludes them.
+
+Caveats, all preregistered: six substitutions the dumps force (chiefly
+`access_count = 0`, never dumped; surprise reconstructed exactly as
+`MIRASBand.compute_surprise` over each dump's own insertion order);
+distractors are foreign haystacks, i.e. the easiest possible material for
+a sweep to identify, so a sweep that loses here loses on realistic
+near-duplicate chatter too; both capacities are aggressive (7% and 20% of
+the 15x pool), so nothing here speaks to a capacity set just below the
+accumulated size; a retrieval proxy, not a judged run; single backbone
+(v25, 1024-d).
+
+**Note for anyone re-running the distractor probe**: its `DUMP_DIR`
+constant names `results/banks/s-qwen-27b-ablbands-flat`, which on a tree
+carrying both replays is the retired 384-d MiniLM dump — through it, 11
+of 30 checked cells reproduce the published numbers and no `select_topk`
+knob closes the gap. The v25 replay the artifact was measured on is
+1024-d and lives in a sibling directory whose suffix is machine-local, so
+the sweep probe resolves the directory by backbone dimension, preset and
+"nothing was evicted during the replay", and records its choice in the
+artifact. Those dumps are gitignored: a fresh worktree must link or copy
+them from the main checkout.
 
 ---
 
@@ -2329,7 +3022,7 @@ that only mean **served**, which is the distinction the raw numbers hide:
 
 | counter | what it actually means |
 | --- | --- |
-| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced |
+| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced (`used_via` `get` / `reinforce`), or named by the agent in `memory_outcome(used_ids=...)` (`outcome`) |
 | `entries.explicit_reinforcements` | consumption — moves only on `memory_reinforce` |
 | `entries.access_count` | **serve count** — `cms.py` bumps it for every entry in a merged result set |
 | `slot_reads.read_count` | **serve count** — `_track_slot_reads`: "count each slot SERVED as an answer" |
@@ -2380,6 +3073,21 @@ Option 2 is the one worth shipping: it is a single optional list
 parameter, it is written by the agent that just used the memories, and it
 labels the whole served set rather than the one id someone happened to
 dereference.
+
+**Shipped 2026-09-05.** `memory_outcome(..., used_ids=[...])` credits each
+id to the most recent event in the session window that served it, writing
+the ordinary `retrieval_uses` row under `used_via="outcome"` — so
+`retrieval_replay.py`'s `uses` label source and this script's `by_via`
+breakdown pick it up with no harness change, and the two dereference vias
+stay distinguishable from the asserted one. No schema bump, and no join:
+nothing links a signal row to the use rows it caused — the labels stand on
+their own, and which outcome named which ids is deliberately not recorded.
+The result reports `used_ids_recorded`, `used_ids_unmatched` and
+`used_ids_errors`, because an id no event served must not read the same as
+a landed label, and neither must a label the storage layer refused.
+Whether agents actually pass it is the open question — the served session-start block
+(`MEMORY_LOOP_BLOCK`) now asks for it in the REFLECT beat, and the next
+telemetry review measures the answer against the 1 label above.
 
 ## `retrieval_replay.py` — the shipped knobs on the queries agents really asked
 
@@ -2820,7 +3528,11 @@ text, so the escaping is not paid. (Its JSON size, 7,644, is in the artifact
 under `chars` for comparability and is not the cost.) The block is capped at
 `HOOK_CONTEXT_MAX_CHARS - 2,000` = 7,500 raw chars by
 `tests/test_plugin_packaging.py`, which is why it is the one surface here
-with almost no headroom.
+with almost no headroom. (Both rows above are the 2026-09-04 run. The
+2026-09-05 `used_ids` change re-priced them slightly — the block to 7,488
+raw chars, and the manifest by the new parameter's 81-char description in
+all three tiers — without a rerun of this ledger, which needs the live
+daemon.)
 
 ## What a call costs — before and after the cuts
 

@@ -260,7 +260,11 @@ def test_memory_loop_block_leaves_briefing_headroom():
     write-policy and trap-avoidance text, and 7,491 later that day after
     the v35 label line — which funded itself by two trims and left 9
     chars of reserve, so the next addition trims first or the cap moves
-    deliberately; a truncated briefing has no other alarm)."""
+    deliberately; a truncated briefing has no other alarm). 7,488 on
+    2026-09-05: the `used_ids` clause funded itself by three trims of
+    text the block already said elsewhere (`one claim per call` in the
+    CAPTURE header, `heed polarity:-` in the RECALL bullet, and
+    `rather than silently picking one`)."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
                                                     MEMORY_LOOP_BLOCK)
     assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000

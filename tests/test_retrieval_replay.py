@@ -91,6 +91,22 @@ def test_summarize_uses_reports_the_served_rank_it_credited():
     assert s["served_rank_histogram"] == {"rank_2": 1}
 
 
+def test_summarize_uses_counts_the_outcome_via():
+    """``memory_outcome(used_ids=...)`` writes ``used_via="outcome"``. The
+    via breakdown is a plain Counter, so a new via is reported without a
+    harness change — pinned here because the review's whole point is
+    telling label sources apart (get/reinforce are dereferences; outcome is
+    the agent asserting the entry mattered)."""
+    events = [_event(7, [10, 11], ts=100.0)]
+    uses = [{"event_id": 7, "entry_id": 10, "used_via": "outcome",
+             "created_at": 130.0},
+            {"event_id": 7, "entry_id": 11, "used_via": "get",
+             "created_at": 140.0}]
+    s = rtr.summarize_uses(events, uses)
+    assert s["by_via"] == {"outcome": 1, "get": 1}
+    assert s["served_rank_histogram"] == {"rank_0": 1, "rank_1": 1}
+
+
 def test_access_count_is_never_treated_as_a_downstream_label():
     """cms.py bumps access_count for every entry in a merged result set,
     so a served-and-never-read entry has access_count > 0. Counting it as

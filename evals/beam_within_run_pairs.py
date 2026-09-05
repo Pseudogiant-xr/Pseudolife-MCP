@@ -75,14 +75,17 @@ def _score(row: dict, arm: str, score_key: str) -> float | None:
 
     ``score_key`` is ``score`` for BEAM's rubric means and ``correct`` for
     LongMemEval's booleans; a bool reads as 1.0/0.0 so both harnesses feed
-    the same paired arithmetic.
+    the same paired arithmetic. Any other suffix is read verbatim, which
+    is how a second-family re-judge's ``correct_<tag>`` column pairs
+    through this same tool (evals/lme_rejudge.py, 2026-09-05).
     """
     if arm == CASCADE:
         # The gate reads cortex_response and both arms' boolean verdicts,
         # whatever score_key the rest of the run uses. Named explicitly so
         # a BEAM run asked for this arm fails with a sentence rather than
         # a bare KeyError three frames down.
-        needed = ("cortex_response", "cortex_correct", "rag_correct")
+        needed = ("cortex_response", f"cortex_{score_key}",
+                  f"{CONTROL}_{score_key}")
         if any(k not in row for k in needed):
             raise SystemExit(
                 "the derived cascade arm needs "
@@ -90,7 +93,14 @@ def _score(row: dict, arm: str, score_key: str) -> float | None:
                 f"{', '.join(k for k in needed if k not in row)} on none "
                 "of them (BEAM rows score a rubric, not a boolean, so they "
                 "carry no cascade)")
-        return float(_cascade().cascade_correct(row))
+        if score_key == "correct":
+            return float(_cascade().cascade_correct(row))
+        # Same routing rule under a non-default verdict key: the gate is
+        # the response text either way (correctness is never consulted for
+        # routing), but the verdict served has to come from the judge the
+        # caller asked for, not from the original column beside it.
+        src = "cortex" if _cascade().cortex_commits(row) else CONTROL
+        return float(row[f"{src}_{score_key}"])
     key = f"{arm}_{score_key}"
     if key not in row:
         return None
@@ -289,11 +299,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="comma-separated arms to pair against the rag "
                          f"control; {CASCADE!r} is derived from the judged "
                          "cortex/rag arms rather than read off a key")
-    ap.add_argument("--score-key", default="score", choices=("score",
-                                                             "correct"),
+    ap.add_argument("--score-key", default="score",
                     help="row key suffix holding an arm's verdict: score "
-                         "(BEAM rubric means, the default) or correct "
-                         "(LongMemEval booleans, read as 1.0/0.0)")
+                         "(BEAM rubric means, the default), correct "
+                         "(LongMemEval booleans, read as 1.0/0.0), or a "
+                         "re-judge column such as correct_opus5")
     ap.add_argument("--type-key", default="type",
                     choices=("type", "question_type"),
                     help="row key holding the question's ability/type")
