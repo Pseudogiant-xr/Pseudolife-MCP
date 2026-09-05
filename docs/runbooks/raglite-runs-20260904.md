@@ -215,6 +215,12 @@ seed 0):
 | `rag1` | −0.374 | 0.045 | 0.0001 | 8 / 195 |
 | `cortex` | −0.380 | 0.048 | 0.0001 | 16 / 206 |
 
+> Every verdict in the two tables above is the local Qwen3.8 judge's.
+> The whole run was re-judged on 2026-09-05 by a second, independent
+> judge family (`claude-opus-5`, via `evals/lme_rejudge.py`) and the
+> hybrid win holds — both judges' columns side by side in
+> [`evals/README.md`](../../evals/README.md#second-judge-family-2026-09-05).
+
 And the pairing the whole exercise was for — the fact spine at 96.5 tokens
 against one-turn RAG at 206.3, the cheapest comparator this dataset's turn
 granularity admits:
