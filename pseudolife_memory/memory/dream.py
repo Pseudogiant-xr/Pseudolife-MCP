@@ -50,14 +50,15 @@ class Claim(_ClaimRequired, total=False):
     # the span gate's mode decides what that costs. Same parse-boundary
     # normalisation rule as stance.
     quote: str
-    # Who STATED the fact in the cited turn ("user" | "assistant"), for
-    # prompts that ask for it (evals/prompts/assistant_facts_provenance.txt).
-    # Absent = unstated, which is every shipped extraction: the shipped
-    # _SYSTEM_PROMPT never asks for this field. ``service_dream`` maps
-    # "assistant" to the ``assistant`` write origin under
-    # ``memory.dream.assistant_claims``; "user" is a label about the TURN
-    # and never a tier promotion (support is never taken from claim text).
-    # Same parse-boundary whitelist rule as op/stance.
+    # Who STATED the fact in the cited turn ("user" | "assistant"). The
+    # shipped ``_SYSTEM_PROMPT`` asks for it since 2026-09-05, so a live
+    # dream normally carries it; absent = unstated, which is still valid and
+    # writes exactly as it did before (an older prompt, a custom
+    # ``--system-prompt-file``, a model that dropped the field).
+    # ``service_dream`` maps "assistant" to the ``assistant`` write origin
+    # under ``memory.dream.assistant_claims``; "user" is a label about the
+    # TURN and never a tier promotion (support is never taken from claim
+    # text). Same parse-boundary whitelist rule as op/stance.
     speaker: str
 
 
@@ -131,7 +132,7 @@ class NoOpExtractor:
         return []
 
 
-_SYSTEM_PROMPT = (
+_BASE_SYSTEM_PROMPT = (
     "You consolidate numbered notes into canonical facts. Extract durable, "
     'current-state facts as JSON: {"claims":[{"entity":..,"attribute":..,'
     '"value":..,"confidence":0..1,"source":<number of the note the fact came '
@@ -198,11 +199,86 @@ _SYSTEM_PROMPT = (
 # two deltas vs the KU-failed v8 block (bank-diff forensics traced that
 # failure to a diluted consolidation anchor): the "a hedged update is
 # STILL an update" sentence, and a worked example reusing the v0
-# example's own deploy-target slot as a later hedged update. This prompt
+# example's own deploy-target slot as a later hedged update. This BASE
 # must stay byte-identical to the measured artifact
 # evals/prompts/ku_op_prompt_v10_stance_update.txt (pinned by
-# test_op_prompt_artifact.py). Edit the prompt only through a new
-# measured artifact + gate.
+# test_op_prompt_artifact.py). Edit it only through a new measured
+# artifact + gate.
+
+
+# ── the assistant-facts blocks (shipped 2026-09-05) ───────────────────────
+# Until 2026-09-05 the base above WAS the shipped prompt, and the fact spine
+# consequently scored 0.054 on LongMemEval's single-session-assistant: 50 of
+# 56 such sessions consolidated with ZERO claims, because the base asks for
+# "durable, current-state facts ... skip narrative, opinions" over worked
+# examples that are all user-stated, and the model reads assistant-stated
+# content as not-a-fact. These three blocks are what asks for them, and they
+# are the shipped prompt's tail from 2026-09-05 on.
+#
+# Measured (2026-09-05, extractor qwen-27b, LongMemEval oracle slice
+# single-session-assistant + single-session-preference + knowledge-update,
+# 164 questions, tag `assist-prov2`): the fact-only arm on
+# single-session-assistant goes 0.054 -> 0.536, paired +0.482, p < 0.0001,
+# 27 questions won against zero lost; the knowledge-update pollution check
+# is flat-to-up (cortex 0.667 -> 0.731); the identical-input `rag` control
+# moved 0.0000 in all twelve paired comparisons. Gated on the extraction
+# ladder 2026-09-05 (evals/results/ladder-assistprompt-paired-verdict-
+# threshold.json): qwen-27b clears the ladder on both arms
+# (gold 1.0 / stale 0.0 / 13.4 -> 14.2 tok against a 34.98 budget); the
+# e4b-v3 sidecar rung is bimodal on stale_leak independently of the prompt
+# and its baseline arm does not clear the ladder in the mode it landed in,
+# a pre-existing finding. Tables and the retired first (contaminated) run
+# are in evals/README.md, "Assistant-stated facts".
+#
+# Every proper noun below is INVENTED and registered in
+# `gen_assistant_facts_prompts.EXAMPLE_TOKENS`, which greps each one
+# against both LongMemEval dataset files: the first cut of this example
+# used "Miss Bee Providore ... Bandung", the gold answer of a question in
+# the very slice it was measured on. `tests/test_assistant_provenance.py`
+# makes that class un-repeatable and pins these blocks as the carrier.
+# Edit them only through a new measured artifact + ladder gate.
+_ASSISTANT_FACTS_INSTRUCTION = (
+    "THE ASSISTANT'S OWN STATEMENTS ARE FACTS TOO: the notes are turns of a "
+    "conversation, each rendered as \"role: content\". What the ASSISTANT "
+    "asserted, described, recommended, or specified is extractable on exactly "
+    "the same terms as what the user said — names, values, descriptions, "
+    "specifications, and the choices it presented all qualify. Key each such "
+    "claim to WHAT IT IS ABOUT: the entity is the thing described (the "
+    "restaurant, the book, the tool, the setting), never \"the assistant\" "
+    "and never \"the conversation\". A recommendation the assistant made is a "
+    "durable fact about the thing recommended.\n"
+)
+
+_ASSISTANT_SPEAKER_RULE = (
+    "EVERY CLAIM NAMES ITS SPEAKER: add a \"speaker\" field to every claim — "
+    "\"user\" when the note stating the fact is a user turn, \"assistant\" "
+    "when it is an assistant turn. Each note begins with its role, so read "
+    "the role there; never guess it, and never omit the field.\n"
+)
+
+_ASSISTANT_PROVENANCE_EXAMPLE = (
+    "Example. Notes: [7] assistant: For brunch in Marrowgate I'd suggest "
+    "The Quillon Larder on Fendrick Row — its signature dish is the "
+    "pepper-brisket bun. [8] user: I went, and the pepper-brisket bun was "
+    "too salty for me — I am sticking to vegetarian brunch from now on. "
+    "Output: "
+    '{"claims":[{"entity":"The Quillon Larder","attribute":"location",'
+    '"value":"Fendrick Row, Marrowgate","speaker":"assistant",'
+    '"confidence":0.9,"source":7},'
+    '{"entity":"The Quillon Larder","attribute":"signature dish",'
+    '"value":"pepper-brisket bun","speaker":"assistant","confidence":0.85,'
+    '"source":7},'
+    '{"entity":"user","attribute":"brunch preference","value":"vegetarian",'
+    '"speaker":"user","confidence":0.9,"source":8}]}\n'
+)
+
+# The shipped extraction prompt. ONE source of truth: this is exactly what
+# `evals/gen_assistant_facts_prompts.py` writes to
+# evals/prompts/assistant_facts_provenance.txt, so the measured artifact and
+# the shipped constant cannot drift (pinned byte-exact by
+# tests/test_assistant_provenance.py, which also regenerates the file).
+_SYSTEM_PROMPT = (_BASE_SYSTEM_PROMPT + "\n" + _ASSISTANT_FACTS_INSTRUCTION
+                  + _ASSISTANT_SPEAKER_RULE + _ASSISTANT_PROVENANCE_EXAMPLE)
 
 
 # Events-only prompt for the SEPARATE extraction pass (design doc

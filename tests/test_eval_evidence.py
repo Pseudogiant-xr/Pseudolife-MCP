@@ -6221,3 +6221,165 @@ for _cid, _doc, _needle, _art, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
         stated=_stated, places=_places))
+
+
+# ── the provenance-prompt ladder gate (2026-09-05) ────────────────────────
+# The ship decision rests on this run, so every cell of the ladder table —
+# in the CHANGELOG and again in evals/README.md — is pinned to the per-rung
+# artifact it came from, both replicates included, plus the naive-RAG bar
+# the threshold is derived from and the threshold verdict's own verdict
+# fields. A rewritten row fails `test_claim_text_still_appears_in_its_doc`
+# rather than quietly stopping guarding.
+_PL = RESULTS + "%s-assistprompt-%s.json"
+PL_QWEN_PRE = _PL % ("qwen-27b", "pre")
+PL_QWEN_POST = _PL % ("qwen-27b", "post")
+PL_E4B_PRE = _PL % ("e4b-v3", "pre")
+PL_E4B_POST = _PL % ("e4b-v3", "post")
+PL_E4B_PRE2 = _PL % ("e4b-v3", "pre-rep2")
+PL_E4B_POST2 = _PL % ("e4b-v3", "post-rep2")
+PL_NAIVE = RESULTS + "naive-rag.json"
+PL_THRESH = RESULTS + "ladder-assistprompt-paired-verdict-threshold.json"
+
+# Verbatim table rows. The CHANGELOG and evals/README render the same run
+# with different arm labels and an extra artifact column, so each doc gets
+# its own needle.
+_CL_QP = "| `qwen-27b` | pre (shipped prompt) | 1.0 | 0.0 | 13.4 | 16 / 16 |"
+_CL_QQ = "| `qwen-27b` | post (provenance prompt) | 1.0 | 0.0 | 14.2 | 16 / 16 |"
+_CL_EP = "| `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 |"
+_CL_EQ = "| `e4b-v3` | post | 1.0 | 0.1 | 14.8 | 19 / 18 |"
+_CL_EP2 = "| `e4b-v3` | pre, replicate 2 | 1.0 | **1.0** | **39.7** | 16 / 16 |"
+_CL_EQ2 = "| `e4b-v3` | post, replicate 2 | 1.0 | 0.1 | 14.8 | 19 / 18 |"
+_CL_BAR = ("gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is\n"
+           "  **34.98**")
+_CL_CLEAR = ("On the primary `qwen-27b` rung **both arms clear the ladder**")
+_CL_GATE = "both arms: **FAIL**, on the `e4b-v3` *baseline* arm)"
+_CL_NOREG = "`no_regression_gate` (did the post arm make anything worse: **PASS**)"
+
+_EV_QP = ("| `qwen-27b` | pre | 1.0 | 0.0 | 13.4 | 16 / 16 | "
+          "`qwen-27b-assistprompt-pre.json` |")
+_EV_QQ = ("| `qwen-27b` | post | 1.0 | 0.0 | 14.2 | 16 / 16 | "
+          "`qwen-27b-assistprompt-post.json` |")
+_EV_EP = ("| `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 | "
+          "`e4b-v3-assistprompt-pre.json` |")
+_EV_EQ = ("| `e4b-v3` | post | 1.0 | 0.1 | 14.8 | 19 / 18 | "
+          "`e4b-v3-assistprompt-post.json` |")
+_EV_EP2 = ("| `e4b-v3` | pre, rep 2 | 1.0 | **1.0** | **39.7** | 16 / 16 | "
+           "`e4b-v3-assistprompt-pre-rep2.json` |")
+_EV_EQ2 = ("| `e4b-v3` | post, rep 2 | 1.0 | 0.1 | 14.8 | 19 / 18 | "
+           "`e4b-v3-assistprompt-post-rep2.json` |")
+_EV_BAR = "gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is **34.98**"
+_EV_IDENT = "`tokens_per_query 13.4 \u2192 14.2`"
+_EV_THRESH = ('`failed_checks: ["pre.stale_leak", "pre.tokens_per_query"]`)')
+
+
+def _tally(field):
+    return lambda d: d["consolidation"][field]
+
+
+def _thr_rung(rung, field):
+    return lambda d: float(d["rungs"][rung][field])
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # -- CHANGELOG table -------------------------------------------------
+    ("prov-ladder-cl-qwen-pre-gold", CHANGELOG, _CL_QP, PL_QWEN_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-ladder-cl-qwen-pre-stale", CHANGELOG, _CL_QP, PL_QWEN_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-ladder-cl-qwen-pre-tokens", CHANGELOG, _CL_QP, PL_QWEN_PRE,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-ladder-cl-qwen-pre-claims", CHANGELOG, _CL_QP, PL_QWEN_PRE,
+     _tally("claims"), 16, 0),
+    ("prov-ladder-cl-qwen-post-gold", CHANGELOG, _CL_QQ, PL_QWEN_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-ladder-cl-qwen-post-stale", CHANGELOG, _CL_QQ, PL_QWEN_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-ladder-cl-qwen-post-tokens", CHANGELOG, _CL_QQ, PL_QWEN_POST,
+     lambda d: d["tokens_per_query"], 14.2, 1),
+    ("prov-ladder-cl-qwen-post-claims", CHANGELOG, _CL_QQ, PL_QWEN_POST,
+     _tally("claims"), 16, 0),
+    ("prov-ladder-cl-e4b-pre-stale", CHANGELOG, _CL_EP, PL_E4B_PRE,
+     lambda d: d["stale_leak"], 1.0, 1),
+    ("prov-ladder-cl-e4b-pre-tokens", CHANGELOG, _CL_EP, PL_E4B_PRE,
+     lambda d: d["tokens_per_query"], 39.7, 1),
+    ("prov-ladder-cl-e4b-pre-claims", CHANGELOG, _CL_EP, PL_E4B_PRE,
+     _tally("claims"), 16, 0),
+    ("prov-ladder-cl-e4b-post-stale", CHANGELOG, _CL_EQ, PL_E4B_POST,
+     lambda d: d["stale_leak"], 0.1, 1),
+    ("prov-ladder-cl-e4b-post-tokens", CHANGELOG, _CL_EQ, PL_E4B_POST,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("prov-ladder-cl-e4b-post-claims", CHANGELOG, _CL_EQ, PL_E4B_POST,
+     _tally("claims"), 19, 0),
+    ("prov-ladder-cl-e4b-post-inserted", CHANGELOG, _CL_EQ, PL_E4B_POST,
+     _tally("inserted"), 18, 0),
+    ("prov-ladder-cl-e4b-pre2-stale", CHANGELOG, _CL_EP2, PL_E4B_PRE2,
+     lambda d: d["stale_leak"], 1.0, 1),
+    ("prov-ladder-cl-e4b-pre2-tokens", CHANGELOG, _CL_EP2, PL_E4B_PRE2,
+     lambda d: d["tokens_per_query"], 39.7, 1),
+    ("prov-ladder-cl-e4b-post2-stale", CHANGELOG, _CL_EQ2, PL_E4B_POST2,
+     lambda d: d["stale_leak"], 0.1, 1),
+    ("prov-ladder-cl-e4b-post2-tokens", CHANGELOG, _CL_EQ2, PL_E4B_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("prov-ladder-cl-e4b-post2-claims", CHANGELOG, _CL_EQ2, PL_E4B_POST2,
+     _tally("claims"), 19, 0),
+    # -- the naive bar the threshold is derived from ---------------------
+    ("prov-ladder-cl-naive-gold", CHANGELOG, _CL_BAR, PL_NAIVE,
+     lambda d: d["gold_recoverable"], 0.7, 1),
+    ("prov-ladder-cl-naive-stale", CHANGELOG, _CL_BAR, PL_NAIVE,
+     lambda d: d["stale_leak"], 0.3, 1),
+    ("prov-ladder-cl-naive-tokens", CHANGELOG, _CL_BAR, PL_NAIVE,
+     lambda d: d["tokens_per_query"], 58.3, 1),
+    ("prov-ladder-cl-token-budget", CHANGELOG, _CL_BAR, PL_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # -- the threshold verdict's own verdict fields ----------------------
+    ("prov-ladder-cl-qwen-cleared", CHANGELOG, _CL_CLEAR, PL_THRESH,
+     _thr_rung("qwen-27b", "cleared"), 1, 0),
+    ("prov-ladder-cl-e4b-pre-clears", CHANGELOG, _CL_GATE, PL_THRESH,
+     _thr_rung("e4b-v3", "pre_clears"), 0, 0),
+    ("prov-ladder-cl-gate-fail", CHANGELOG, _CL_GATE, PL_THRESH,
+     lambda d: float(d["gate"] == "FAIL"), 1, 0),
+    ("prov-ladder-cl-no-regression", CHANGELOG, _CL_NOREG, PL_THRESH,
+     lambda d: float(d["no_regression_gate"] == "PASS"), 1, 0),
+    # -- evals/README table ----------------------------------------------
+    ("prov-ladder-ev-qwen-pre-tokens", EVALS, _EV_QP, PL_QWEN_PRE,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-ladder-ev-qwen-pre-stale", EVALS, _EV_QP, PL_QWEN_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-ladder-ev-qwen-post-tokens", EVALS, _EV_QQ, PL_QWEN_POST,
+     lambda d: d["tokens_per_query"], 14.2, 1),
+    ("prov-ladder-ev-qwen-post-gold", EVALS, _EV_QQ, PL_QWEN_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-ladder-ev-e4b-pre-stale", EVALS, _EV_EP, PL_E4B_PRE,
+     lambda d: d["stale_leak"], 1.0, 1),
+    ("prov-ladder-ev-e4b-pre-tokens", EVALS, _EV_EP, PL_E4B_PRE,
+     lambda d: d["tokens_per_query"], 39.7, 1),
+    ("prov-ladder-ev-e4b-post-stale", EVALS, _EV_EQ, PL_E4B_POST,
+     lambda d: d["stale_leak"], 0.1, 1),
+    ("prov-ladder-ev-e4b-post-tokens", EVALS, _EV_EQ, PL_E4B_POST,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("prov-ladder-ev-e4b-pre2-stale", EVALS, _EV_EP2, PL_E4B_PRE2,
+     lambda d: d["stale_leak"], 1.0, 1),
+    ("prov-ladder-ev-e4b-pre2-tokens", EVALS, _EV_EP2, PL_E4B_PRE2,
+     lambda d: d["tokens_per_query"], 39.7, 1),
+    ("prov-ladder-ev-e4b-post2-stale", EVALS, _EV_EQ2, PL_E4B_POST2,
+     lambda d: d["stale_leak"], 0.1, 1),
+    ("prov-ladder-ev-e4b-post2-claims", EVALS, _EV_EQ2, PL_E4B_POST2,
+     _tally("claims"), 19, 0),
+    ("prov-ladder-ev-token-budget", EVALS, _EV_BAR, PL_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    ("prov-ladder-ev-naive-tokens", EVALS, _EV_BAR, PL_NAIVE,
+     lambda d: d["tokens_per_query"], 58.3, 1),
+    # The identity-mode verdict's sole difference, quoted in evals/README
+    # as the reason that FAIL is not a finding about the prompt.
+    ("prov-ladder-ev-ident-tokens-pre", EVALS, _EV_IDENT, PL_QWEN_PRE,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-ladder-ev-ident-tokens-post", EVALS, _EV_IDENT, PL_QWEN_POST,
+     lambda d: d["tokens_per_query"], 14.2, 1),
+    ("prov-ladder-ev-thresh-pre-clears", EVALS, _EV_THRESH, PL_THRESH,
+     _thr_rung("e4b-v3", "pre_clears"), 0, 0),
+    ("prov-ladder-ev-thresh-post-clears", EVALS, _EV_THRESH, PL_THRESH,
+     _thr_rung("e4b-v3", "post_clears"), 1, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))

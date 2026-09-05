@@ -387,8 +387,9 @@ memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user
 # or accept=False -> discard the contender, current unchanged.
 ```
 
-`assistant` is the floor tier: a fact the **assistant** stated in a turn,
-written only by a dream whose extraction prompt asks for a `speaker` label
+`assistant` is the floor tier: a fact the **assistant** stated in a turn.
+The shipped extraction prompt asks for a `speaker` label since 2026-09-05,
+so this tier is **reachable on the default path**
 (`memory.dream.assistant_claims`, default `contender`). It may fill an empty
 slot, but against a current value of any other origin it always parks as a
 contender — that rule is not gated on `protect_provenance` below — and it
@@ -407,10 +408,12 @@ pollution check stays flat-to-up, and the guard costs nothing measurable
 against an unguarded variant of the same prompt — tables, paired tests and
 the adoption gate are in `evals/README.md` (the published run is the clean
 re-run `assist-prov2`; the first run's contaminated worked example and its
-retired numbers are retained in the same section). Nothing here is on by
-default: the shipped extraction prompt asks for no `speaker` label, so this
-tier is only reachable by a bank whose dream runs one of those candidate
-prompts.
+retired numbers are retained in the same section). That prompt then passed
+the extraction ladder on the primary rung and **shipped on 2026-09-05**, so
+a dream on stock settings now writes assistant-origin facts: they fill
+empty slots and park as contenders against anything else. A claim carrying
+no `speaker` label — an older prompt, or an extractor shim launched with
+`--system-prompt-file` — still writes exactly as it did before.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in

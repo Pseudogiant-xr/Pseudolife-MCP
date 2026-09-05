@@ -2,12 +2,22 @@
 
     PYTHONPATH=. python evals/gen_assistant_facts_prompts.py
 
-Both files are the shipped ``_SYSTEM_PROMPT`` VERBATIM (imported, never
-retyped) plus one appended instruction block, so an edit to the shipped
-prompt shows up as a diff here instead of silently drifting away from the
-measured artifacts. ``tests/test_assistant_provenance.py`` pins the
-"starts with the shipped prompt" property; edit the blocks below and
-re-run rather than hand-editing the .txt files.
+Since the provenance variant SHIPPED (2026-09-05), the two files are on
+opposite sides of the shipped prompt and neither retypes anything:
+
+* ``assistant_facts_provenance.txt`` **is** ``dream._SYSTEM_PROMPT``,
+  byte for byte. It is the measured artifact and the live prompt at once,
+  so they cannot drift.
+* ``assistant_facts_naive.txt`` is the pre-2026-09-05 base
+  (``dream._BASE_SYSTEM_PROMPT``) plus the same instruction paragraph and
+  a worked example that carries no ``speaker`` field — the unguarded
+  comparison arm, kept because the guard's case rests on measuring
+  against it.
+
+``tests/test_assistant_provenance.py`` pins both properties and
+regenerates the files byte-exactly; edit the blocks (in ``dream.py`` for
+the shipped tail, here for the naive example) and re-run rather than
+hand-editing the ``.txt`` files.
 
 Every proper noun in a worked example is INVENTED and registered in
 ``EXAMPLE_TOKENS``. The first cut of these files built its example around
@@ -18,26 +28,23 @@ handing the model an answer. ``tests/test_assistant_provenance.py`` now
 enforces both halves of the fix: no capitalised word may appear in an
 example unless it is a registered token or ordinary sentence English, and
 no registered token may occur anywhere in either LongMemEval dataset file.
+Since the shipped prompt now carries the provenance example, that guard
+covers the live extractor, not only an eval-only file.
 """
 from pathlib import Path
 
-from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
+from pseudolife_memory.memory.dream import (
+    _ASSISTANT_FACTS_INSTRUCTION,
+    _ASSISTANT_PROVENANCE_EXAMPLE,
+    _BASE_SYSTEM_PROMPT,
+    _SYSTEM_PROMPT,
+)
 
 OUT = Path(__file__).resolve().parent / "prompts"
 
 # Shared instruction: assistant-stated content is extractable, keyed to what
-# it is about.
-INSTRUCTION = (
-    "THE ASSISTANT'S OWN STATEMENTS ARE FACTS TOO: the notes are turns of a "
-    "conversation, each rendered as \"role: content\". What the ASSISTANT "
-    "asserted, described, recommended, or specified is extractable on exactly "
-    "the same terms as what the user said — names, values, descriptions, "
-    "specifications, and the choices it presented all qualify. Key each such "
-    "claim to WHAT IT IS ABOUT: the entity is the thing described (the "
-    "restaurant, the book, the tool, the setting), never \"the assistant\" "
-    "and never \"the conversation\". A recommendation the assistant made is a "
-    "durable fact about the thing recommended.\n"
-)
+# it is about. Imported, not retyped — it ships inside `_SYSTEM_PROMPT`.
+INSTRUCTION = _ASSISTANT_FACTS_INSTRUCTION
 
 # The invented proper nouns the worked examples are built from. Nothing
 # capitalised may appear in an example unless it is registered here (or
@@ -61,39 +68,36 @@ NAIVE_EXAMPLE = (
     '"value":"pepper-brisket bun","confidence":0.85,"source":7}]}\n'
 )
 
-SPEAKER_RULE = (
-    "EVERY CLAIM NAMES ITS SPEAKER: add a \"speaker\" field to every claim — "
-    "\"user\" when the note stating the fact is a user turn, \"assistant\" "
-    "when it is an assistant turn. Each note begins with its role, so read "
-    "the role there; never guess it, and never omit the field.\n"
-)
+# Re-exported so the example-token guard reads the SHIPPED block rather than
+# a copy of it: this is `dream._ASSISTANT_PROVENANCE_EXAMPLE`.
+PROVENANCE_EXAMPLE = _ASSISTANT_PROVENANCE_EXAMPLE
 
-PROVENANCE_EXAMPLE = (
-    "Example. Notes: [7] assistant: For brunch in Marrowgate I'd suggest "
-    "The Quillon Larder on Fendrick Row — its signature dish is the "
-    "pepper-brisket bun. [8] user: I went, and the pepper-brisket bun was "
-    "too salty for me — I am sticking to vegetarian brunch from now on. "
-    "Output: "
-    '{"claims":[{"entity":"The Quillon Larder","attribute":"location",'
-    '"value":"Fendrick Row, Marrowgate","speaker":"assistant",'
-    '"confidence":0.9,"source":7},'
-    '{"entity":"The Quillon Larder","attribute":"signature dish",'
-    '"value":"pepper-brisket bun","speaker":"assistant","confidence":0.85,'
-    '"source":7},'
-    '{"entity":"user","attribute":"brunch preference","value":"vegetarian",'
-    '"speaker":"user","confidence":0.9,"source":8}]}\n'
-)
+NAIVE_TEXT = _BASE_SYSTEM_PROMPT + "\n" + INSTRUCTION + NAIVE_EXAMPLE
+# The provenance variant is the shipped prompt itself. It carries the SAME
+# instruction plus the speaker rule, and one worked example of the same
+# scenario in which every claim names its speaker — the naive example is
+# deliberately NOT included, since a worked example without the field would
+# contradict the rule it illustrates.
+PROVENANCE_TEXT = _SYSTEM_PROMPT
 
-naive = _SYSTEM_PROMPT + "\n" + INSTRUCTION + NAIVE_EXAMPLE
-# The provenance variant carries the SAME instruction, and one worked
-# example of the same scenario in which every claim names its speaker —
-# the naive example is deliberately NOT included, since a worked example
-# without the field would contradict the rule it illustrates.
-prov = (_SYSTEM_PROMPT + "\n" + INSTRUCTION + SPEAKER_RULE
-        + PROVENANCE_EXAMPLE)
+FILES = {
+    "assistant_facts_naive.txt": NAIVE_TEXT,
+    "assistant_facts_provenance.txt": PROVENANCE_TEXT,
+}
 
-(OUT / "assistant_facts_naive.txt").write_text(naive, encoding="utf-8",
-                                               newline="\n")
-(OUT / "assistant_facts_provenance.txt").write_text(prov, encoding="utf-8",
-                                                    newline="\n")
-print("wrote", len(naive), len(prov))
+
+def write() -> None:
+    for name, text in FILES.items():
+        (OUT / name).write_text(text, encoding="utf-8", newline="\n")
+    print("wrote", *(len(t) for t in FILES.values()))
+
+
+# Writing is behind __main__ on purpose. The module body used to write on
+# IMPORT, which meant the guard tests that import it (for EXAMPLE_TOKENS and
+# the worked-example blocks) silently REGENERATED the committed artifacts as
+# a side effect — so a hand-edited or drifted .txt was overwritten by the
+# very suite that exists to catch it, and the run's second assertion passed
+# on the file the first assertion had just failed against. Found 2026-09-05
+# while RED-checking the byte-exact pin on the newly shipped prompt.
+if __name__ == "__main__":
+    write()

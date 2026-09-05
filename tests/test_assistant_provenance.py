@@ -15,8 +15,10 @@ The contract:
 
 * ``speaker`` is an optional claim field, whitelisted to
   ``"user"``/``"assistant"`` at the parse boundary exactly like ``op``
-  and ``stance``. The shipped prompt never asks for it, so every shipped
-  path is byte-identical.
+  and ``stance``. The shipped prompt has asked for it since 2026-09-05
+  (the provenance prompt), so a live dream normally carries it; a claim
+  WITHOUT the field still writes exactly as it did before, which is what
+  keeps an older prompt or a custom ``--system-prompt-file`` safe.
 * ``memory.dream.assistant_claims`` (default ``"contender"``) decides
   what a ``speaker == "assistant"`` claim becomes: an ``assistant``-origin
   write that may fill an empty slot but parks as a contender against a
@@ -91,8 +93,10 @@ def test_an_unknown_speaker_is_ignored_not_carried(bad):
 
 
 def test_a_claim_without_speaker_parses_exactly_as_before():
-    """Behaviour-neutrality at the parse boundary: the shipped prompt never
-    asks for ``speaker``, so a shipped claim must be byte-identical."""
+    """Behaviour-neutrality at the parse boundary for a claim that carries
+    no ``speaker`` — an older prompt, a custom ``--system-prompt-file``, or
+    a model that dropped the field. It must parse byte-identically to the
+    pre-2026-09-05 shape."""
     c = _extract_one({"entity": "e", "attribute": "a", "value": "v",
                       "confidence": 0.8, "source": 1})
     assert c == {"entity": "e", "attribute": "a", "value": "v",
@@ -242,9 +246,9 @@ def test_a_user_speaker_claim_is_an_ordinary_agent_write(svc):
 @pytest.mark.parametrize("policy", ["contender", "supersede", "drop"])
 def test_a_speakerless_claim_writes_exactly_as_before(svc, policy):
     """Behaviour-neutrality at the write path, under every policy value:
-    the shipped prompt emits no ``speaker``, so nothing about the shipped
-    dream moves. Both routing outcomes are pinned — the same-tier
-    supersede and the weaker-tier park."""
+    a claim with no ``speaker`` writes as it did before the label existed,
+    whatever the policy is set to. Both routing outcomes are pinned — the
+    same-tier supersede and the weaker-tier park."""
     svc.config.memory.dream.assistant_claims = policy
 
     svc.cortex_write("payments-db", "host", "db-prod-1", support="agent",
@@ -380,21 +384,71 @@ def test_the_policy_rides_in_the_bench_summary_stamp(monkeypatch):
 
 # ── the prompt artifacts ─────────────────────────────────────────────────
 
-def test_both_prompt_variants_extend_the_shipped_prompt_verbatim():
-    """The variants are the shipped ``_SYSTEM_PROMPT`` plus an appended
-    block — pinned so a shipped-prompt edit cannot silently leave the
-    measured variants describing a different extractor."""
+def test_the_provenance_variant_is_the_shipped_prompt():
+    """The provenance variant SHIPPED on 2026-09-05, so the measured
+    artifact and the live constant are one string. Pinned byte-exact in
+    both directions: an edit to `dream._SYSTEM_PROMPT` that does not reach
+    the file (or the reverse) means the ladder gate and the 164-question
+    run describe a prompt that is not the one running."""
     from pathlib import Path
 
     from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
+    path = (Path(__file__).resolve().parents[1] / "evals" / "prompts"
+            / "assistant_facts_provenance.txt")
+    assert path.read_text(encoding="utf-8") == _SYSTEM_PROMPT, (
+        "assistant_facts_provenance.txt is no longer the shipped prompt — "
+        "re-run `PYTHONPATH=. python evals/gen_assistant_facts_prompts.py` "
+        "instead of hand-editing either side")
+
+
+def test_the_naive_variant_extends_the_pre_ship_base_verbatim():
+    """The unguarded comparison arm stays anchored to the base the guard
+    was measured against — it is what the guard's "costs nothing" read
+    rests on, so it must not silently acquire the speaker rule."""
+    from pathlib import Path
+
+    from pseudolife_memory.memory.dream import _BASE_SYSTEM_PROMPT
+    path = (Path(__file__).resolve().parents[1] / "evals" / "prompts"
+            / "assistant_facts_naive.txt")
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith(_BASE_SYSTEM_PROMPT), (
+        "assistant_facts_naive.txt no longer opens with the pre-2026-09-05 "
+        "base verbatim — regenerate it instead of hand-editing")
+    assert len(text) > len(_BASE_SYSTEM_PROMPT)
+
+
+def test_regenerating_would_reproduce_both_files_exactly():
+    """The files are generated, so the generator is the thing under test:
+    a regeneration must be a no-op on a clean tree. Asserted against the
+    generator's own composition rather than by re-running it, so a
+    hand-edited ``.txt`` fails here instead of being silently overwritten
+    by the guard that is supposed to catch it."""
+    from pathlib import Path
+
+    g = _gen_module()
     prompts = Path(__file__).resolve().parents[1] / "evals" / "prompts"
-    for name in ("assistant_facts_naive.txt",
-                 "assistant_facts_provenance.txt"):
-        text = (prompts / name).read_text(encoding="utf-8")
-        assert text.startswith(_SYSTEM_PROMPT), (
-            f"{name} no longer opens with the shipped _SYSTEM_PROMPT "
-            "verbatim — regenerate it instead of hand-editing")
-        assert len(text) > len(_SYSTEM_PROMPT)
+    for name, text in g.FILES.items():
+        assert (prompts / name).read_text(encoding="utf-8") == text, (
+            f"{name} differs from what the generator would write — re-run "
+            "`PYTHONPATH=. python evals/gen_assistant_facts_prompts.py`")
+
+
+def test_importing_the_generator_does_not_rewrite_the_artifacts():
+    """The module used to write on import, so any suite that imported it
+    regenerated the committed prompts underneath its own assertions — a
+    drifted artifact was repaired by the guard instead of failing it
+    (found 2026-09-05). Writing is behind ``__main__`` now."""
+    from pathlib import Path
+
+    import importlib
+
+    prompts = Path(__file__).resolve().parents[1] / "evals" / "prompts"
+    names = ("assistant_facts_naive.txt", "assistant_facts_provenance.txt")
+    stamps = {n: (prompts / n).stat().st_mtime_ns for n in names}
+    # reload, not import: import_module is cached, so a cached module would
+    # make this assertion pass without ever re-running the body.
+    importlib.reload(_gen_module())
+    assert {n: (prompts / n).stat().st_mtime_ns for n in names} == stamps
 
 
 def test_only_the_provenance_variant_asks_for_a_speaker_field():
@@ -633,9 +687,8 @@ def test_drop_writes_no_member_and_retracts_none(svc):
 
 @pytest.mark.parametrize("policy", ["contender", "supersede", "drop"])
 def test_a_speakerless_set_claim_writes_exactly_as_before(svc, policy):
-    """Behaviour-neutrality extended to the member model: the shipped prompt
-    emits no ``speaker``, so conversion and retraction must still happen
-    under every policy value."""
+    """Behaviour-neutrality extended to the member model: a claim with no
+    ``speaker`` must still convert and retract under every policy value."""
     svc.config.memory.dream.assistant_claims = policy
 
     svc.cortex_write("the-quillon-larder", "menu", "seasonal tasting menu",
@@ -820,12 +873,28 @@ def test_no_worked_example_token_occurs_in_the_measured_dataset(dataset):
         "names")
 
 
+def test_the_shipped_prompt_is_covered_by_the_example_token_guard():
+    """Since 2026-09-05 the SHIPPED ``_SYSTEM_PROMPT`` carries the worked
+    example, so it is the live carrier of these invented names — not an
+    eval-only file. Asserting each registered token occurs in the shipped
+    prompt is what makes the dataset grep above a guard on the extractor
+    rather than on a variant nobody runs."""
+    from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
+
+    missing = [t for t in _gen_module().EXAMPLE_TOKENS
+               if t not in _SYSTEM_PROMPT]
+    assert missing == [], (
+        f"registered token(s) absent from the shipped prompt: {missing} — "
+        "the dataset grep would no longer be guarding what runs")
+
+
 def test_every_registered_token_is_actually_used_by_a_prompt_file():
     """A registry that has drifted away from the examples guards nothing."""
     from pathlib import Path
 
+    from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
     prompts = Path(__file__).resolve().parents[1] / "evals" / "prompts"
-    text = "".join(
+    text = _SYSTEM_PROMPT + "".join(
         (prompts / name).read_text(encoding="utf-8")
         for name in ("assistant_facts_naive.txt",
                      "assistant_facts_provenance.txt"))
