@@ -1,0 +1,382 @@
+{
+ "audit": "prompt-example-lift-blast-radius",
+ "date": "2026-09-05",
+ "code": "b63ca3c7",
+ "method": "leave-one-out from committed per-question rows; run era by git add-date vs the commit that added the example (a4686df6, 2026-08-01; the op block a day earlier, e4776729)",
+ "questions": {
+  "affe2881": "knowledge-update; gold '32'; the count-exclusion example states it",
+  "89941a94": "knowledge-update; gold 'Yes. (You have a road bike too.)'",
+  "gpt4_e414231f": "temporal-reasoning; gold 'road bike'",
+  "2b8f3739": "multi-session; gold '$495'; the events_pass_v2 jam example is its answer turn"
+ },
+ "leave_one_out": {
+  "longmemeval-all-oracle-qwen-27b-alltypes-0803": {
+   "n": 500,
+   "added": "2026-08-03",
+   "affe2881_verdicts": {
+    "rag": true,
+    "cortex": true,
+    "hybrid": true
+   },
+   "published": {
+    "rag": 0.688,
+    "cortex": 0.416,
+    "hybrid": 0.664
+   },
+   "loo_affe2881": {
+    "n": 499,
+    "rag": 0.6874,
+    "cortex": 0.4148,
+    "hybrid": 0.6633
+   },
+   "loo_both_ku_collisions": {
+    "n": 498,
+    "rag": 0.6867,
+    "cortex": 0.4157,
+    "hybrid": 0.6627
+   },
+   "ku_subrow": {
+    "n": 78,
+    "published": {
+     "rag": 0.859,
+     "cortex": 0.7564,
+     "hybrid": 0.9103
+    },
+    "loo_affe2881": {
+     "n": 77,
+     "rag": 0.8571,
+     "cortex": 0.7532,
+     "hybrid": 0.9091
+    }
+   }
+  },
+  "longmemeval-ku-oracle-qwen-27b-ceiling-v38": {
+   "n": 78,
+   "added": "2026-08-17",
+   "affe2881_verdicts": {
+    "rag": true,
+    "cortex": true,
+    "hybrid": true
+   },
+   "published": {
+    "rag": 0.859,
+    "cortex": 0.6667,
+    "hybrid": 0.8462
+   },
+   "loo_affe2881": {
+    "n": 77,
+    "rag": 0.8571,
+    "cortex": 0.6623,
+    "hybrid": 0.8442
+   },
+   "loo_both_ku_collisions": {
+    "n": 76,
+    "rag": 0.8684,
+    "cortex": 0.6579,
+    "hybrid": 0.8421
+   }
+  },
+  "longmemeval-ku-oracle-qwen-27b-raglite-v38": {
+   "n": 78,
+   "added": "2026-09-04",
+   "affe2881_verdicts": {
+    "rag": true,
+    "cortex": true,
+    "hybrid": true
+   },
+   "published": {
+    "rag": 0.859,
+    "cortex": 0.6667,
+    "hybrid": 0.8462
+   },
+   "loo_affe2881": {
+    "n": 77,
+    "rag": 0.8571,
+    "cortex": 0.6623,
+    "hybrid": 0.8442
+   },
+   "loo_both_ku_collisions": {
+    "n": 76,
+    "rag": 0.8684,
+    "cortex": 0.6579,
+    "hybrid": 0.8421
+   }
+  },
+  "longmemeval-all-oracle-qwen-27b-raglite-all-fresh": {
+   "n": 500,
+   "added": "2026-09-04",
+   "affe2881_verdicts": {
+    "rag": true,
+    "cortex": true,
+    "hybrid": true
+   },
+   "published": {
+    "rag": 0.69,
+    "cortex": 0.31,
+    "hybrid": 0.73
+   },
+   "loo_affe2881": {
+    "n": 499,
+    "rag": 0.6894,
+    "cortex": 0.3086,
+    "hybrid": 0.7295
+   },
+   "loo_both_ku_collisions": {
+    "n": 498,
+    "rag": 0.6908,
+    "cortex": 0.3072,
+    "hybrid": 0.7289
+   },
+   "ku_subrow": {
+    "n": 78,
+    "published": {
+     "rag": 0.859,
+     "cortex": 0.6667,
+     "hybrid": 0.8974
+    },
+    "loo_affe2881": {
+     "n": 77,
+     "rag": 0.8571,
+     "cortex": 0.6623,
+     "hybrid": 0.8961
+    }
+   }
+  },
+  "longmemeval-ku-oracle-e4b-ft-arm1-mtp": {
+   "n": 78,
+   "added": "2026-08-19",
+   "affe2881_verdicts": {
+    "rag": true,
+    "cortex": true,
+    "hybrid": true
+   },
+   "published": {
+    "rag": 0.5897,
+    "cortex": 0.6923,
+    "hybrid": 0.7692
+   },
+   "loo_affe2881": {
+    "n": 77,
+    "rag": 0.5844,
+    "cortex": 0.6883,
+    "hybrid": 0.7662
+   },
+   "loo_both_ku_collisions": {
+    "n": 76,
+    "rag": 0.5789,
+    "cortex": 0.6842,
+    "hybrid": 0.7632
+   }
+  },
+  "longmemeval-ku-oracle-opus-5-opusv2-0802": {
+   "n": 78,
+   "added": "2026-08-02",
+   "affe2881_verdicts": {
+    "rag": true,
+    "cortex": true,
+    "hybrid": true
+   },
+   "published": {
+    "rag": 0.859,
+    "cortex": 0.8846,
+    "hybrid": 0.9615
+   },
+   "loo_affe2881": {
+    "n": 77,
+    "rag": 0.8571,
+    "cortex": 0.8831,
+    "hybrid": 0.961
+   },
+   "loo_both_ku_collisions": {
+    "n": 76,
+    "rag": 0.8553,
+    "cortex": 0.8816,
+    "hybrid": 0.9605
+   }
+  },
+  "longmemeval-ku-oracle-sonnet-5-sonnetv2-0802": {
+   "n": 78,
+   "added": "2026-08-02",
+   "affe2881_verdicts": {
+    "rag": true,
+    "cortex": true,
+    "hybrid": true
+   },
+   "published": {
+    "rag": 0.859,
+    "cortex": 0.8205,
+    "hybrid": 0.9615
+   },
+   "loo_affe2881": {
+    "n": 77,
+    "rag": 0.8571,
+    "cortex": 0.8182,
+    "hybrid": 0.961
+   },
+   "loo_both_ku_collisions": {
+    "n": 76,
+    "rag": 0.8553,
+    "cortex": 0.8289,
+    "hybrid": 0.9605
+   }
+  },
+  "longmemeval-ku-oracle-sonnet-5-sonnetv3-0802": {
+   "n": 78,
+   "added": "2026-08-02",
+   "affe2881_verdicts": {
+    "rag": true,
+    "cortex": true,
+    "hybrid": true
+   },
+   "published": {
+    "rag": 0.859,
+    "cortex": 0.8205,
+    "hybrid": 0.9231
+   },
+   "loo_affe2881": {
+    "n": 77,
+    "rag": 0.8571,
+    "cortex": 0.8182,
+    "hybrid": 0.9221
+   },
+   "loo_both_ku_collisions": {
+    "n": 76,
+    "rag": 0.8553,
+    "cortex": 0.8158,
+    "hybrid": 0.9211
+   }
+  }
+ },
+ "affe2881_cortex_by_variant_and_era": {
+  "oracle_500/post": {
+   "cortex_correct": 7,
+   "runs": 7,
+   "cortex_wrong": []
+  },
+  "oracle_ku78/post": {
+   "cortex_correct": 72,
+   "runs": 73,
+   "cortex_wrong": [
+    "longmemeval-ku-oracle-qwen-27b-c2op-guard.jsonl"
+   ]
+  },
+  "oracle_ku78/pre": {
+   "cortex_correct": 82,
+   "runs": 90,
+   "cortex_wrong": [
+    "longmemeval-ku-oracle-e4b-ft-jepa-baseline.jsonl",
+    "longmemeval-ku-oracle-gemma-e2b.jsonl",
+    "longmemeval-ku-oracle-granite-h-tiny.jsonl",
+    "longmemeval-ku-oracle-lfm2-8b-a1b.jsonl",
+    "longmemeval-ku-oracle-ornith-9b.jsonl",
+    "longmemeval-ku-oracle-qwen-27b-c2-e2e.jsonl",
+    "longmemeval-ku-oracle-qwen-27b-c2op-e2e.jsonl",
+    "longmemeval-ku-oracle.v1-nohistory.jsonl"
+   ]
+  },
+  "s_full_haystack/post": {
+   "cortex_correct": 0,
+   "runs": 15,
+   "cortex_wrong": [
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-flat-off-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-flat-off-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-flat-off-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-flat-off-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-flat-off.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl25-flat-off-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl25-flat-off-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl25-flat-off-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl25-flat-off-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl25-flat-off.jsonl"
+   ]
+  },
+  "s_full_haystack/pre": {
+   "cortex_correct": 0,
+   "runs": 43,
+   "cortex_wrong": [
+    "longmemeval-ku-s-gemma-e2b.jsonl",
+    "longmemeval-ku-s-ornith-9b.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-hist-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-hist-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-hist-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-hist-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-hist.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-wall-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-wall-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-wall-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-wall-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-flat-wall.jsonl",
+    "longmemeval-ku-s-qwen-27b-bm25off.jsonl",
+    "longmemeval-ku-s-qwen-27b-bm25on.jsonl",
+    "longmemeval-ku-s-qwen-27b-casc-q8.jsonl",
+    "longmemeval-ku-s-qwen-27b-diag-knobs.jsonl",
+    "longmemeval-ku-s-qwen-27b-diag-knobs02.jsonl",
+    "longmemeval-ku-s-qwen-27b-diag.jsonl",
+    "longmemeval-ku-s-qwen-27b-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-hist-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-hist-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-hist-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-hist-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-hist.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall-r5.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall.jsonl",
+    "longmemeval-ku-s-qwen-27b.jsonl"
+   ]
+  }
+ },
+ "e4b_v3_train_on_test_overlap": {
+  "training_sets": [
+   "distill-extract-opus1.jsonl",
+   "distill-events-opus1.jsonl"
+  ],
+  "training_sessions": 1245,
+  "by_type": {
+   "knowledge-update": {
+    "answer_session_in_training": 0,
+    "n": 78
+   },
+   "multi-session": {
+    "answer_session_in_training": 11,
+    "n": 133
+   },
+   "single-session-assistant": {
+    "answer_session_in_training": 2,
+    "n": 56
+   },
+   "single-session-preference": {
+    "answer_session_in_training": 6,
+    "n": 30
+   },
+   "single-session-user": {
+    "answer_session_in_training": 6,
+    "n": 70
+   },
+   "temporal-reasoning": {
+    "answer_session_in_training": 5,
+    "n": 133
+   }
+  },
+  "total": 30
+ }
+}
