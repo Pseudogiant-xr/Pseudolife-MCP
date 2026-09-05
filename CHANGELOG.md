@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-05 — the Console's Cortex view now sees real contested slots)
+- **Against a real bank the Cortex view never showed a contender, and the
+  Observatory's contested count always read 0.** The view gates its
+  Accept/Discard pair on `contested` in the `/api/facts` rows, which come from
+  `cortex_dump` — and only `cortex_search` ever set `contested` /
+  `contender_value` / `contender_origin`; the dump never did. The web fixtures
+  synthesise the flag, so the devserver demo and `tests/test_web.py` both
+  looked right while every real install had a review affordance that could
+  not fire. `cortex_dump` now serves the same three fields through one shared
+  helper (`_contender_fields`), bucketing the store's active contenders in a
+  single pass rather than one per-row scan. A set slot's member rows each
+  carry the slot's flag (the contender is parked against the slot, not a
+  member), so `/api/overview` → `counts.facts_contested` counts contested
+  *slots*, not rows, and the Cortex view counts and renders one contender
+  block per slot rather than one per member. Both count slots the way the
+  store keys them (casefold, separator runs collapsed), because a converted
+  scalar keeps its own display strings while a later add keeps the
+  caller's, so a raw-string comparison split one slot in two. The view also
+  stops toasting "Contender adopted" on a `200` whose body says
+  `resolved: false`: on a slot that now holds a set the store refuses
+  Accept (`slot_holds_set`; adopt the value with a set add instead) and, on
+  this branch, Discard as well — the pair renders there with an honest
+  refusal toast until the set-slot retire fix
+  (`fix/set-slot-contender-retire`) lands and makes Discard live. A
+  `no_contender` refusal (another client settled the slot first) refreshes
+  the view instead of leaving the dead block on screen. Pinned against the
+  real service, not `FixtureService`: a parked scalar contender, a
+  contender parked against a converted set slot, and the aggregate-guard
+  contender all render `contested: true` in the dump and through
+  `/api/facts`; the flag clears after a resolve in either direction; and
+  the overview counts two contested slots for one scalar contest plus one
+  two-member set contest, and one for a set slot whose member rows spell
+  the attribute differently. No schema change; `cortex_search`'s payload is
+  byte-identical. Known cost: the `/api/facts` row is also the "before" of
+  the `memory_fact_get` lean-projection measurement in
+  `evals/agent_token_ledger.py`, whose allow-list drops `contested`, so a
+  rerun reads a slightly wider cut — disclosed in that docstring, not
+  re-measured.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported

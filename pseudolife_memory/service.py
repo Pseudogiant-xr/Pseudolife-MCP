@@ -213,6 +213,20 @@ def _cortex_record_to_dict(rec, relative_age: bool = True,
     return _apply_stale_policy(d, stale_policy)
 
 
+def _contender_fields(conts) -> dict[str, Any]:
+    """The served contested-slot fields for one fact row: ``contested`` is
+    always present; ``contender_value`` / ``contender_origin`` only when a
+    contender is parked (0 or 1 under the store's at-most-one invariant), so
+    an uncontested row's shape is unchanged. Shared by ``cortex_search`` and
+    ``cortex_dump`` so the Console reads exactly what recall serves."""
+    conts = list(conts)
+    if not conts:
+        return {"contested": False}
+    return {"contested": True,
+            "contender_value": conts[0].value,
+            "contender_origin": conts[0].origin}
+
+
 # A URL scheme per RFC 3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":".
 _URL_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]*:")
 
@@ -2888,13 +2902,8 @@ class MemoryService(DreamOps):
         pinned fact is served in exactly the shape a ranked one is."""
         d = {**_cortex_record_to_dict(r, stale_policy=self._stale_policy),
              "score": round(float(s), 4)}
-        conts = self._cortex.contenders_for(r.entity, r.attribute)
-        if conts:
-            d["contested"] = True
-            d["contender_value"] = conts[0].value
-            d["contender_origin"] = conts[0].origin
-        else:
-            d["contested"] = False
+        d.update(_contender_fields(
+            self._cortex.contenders_for(r.entity, r.attribute)))
         if self._storage is not None:
             from pseudolife_memory.memory.cortex import _norm_key
             d["source_entries"] = self._storage.traces_for_slot(
@@ -3656,14 +3665,32 @@ class MemoryService(DreamOps):
 
     def cortex_dump(self) -> dict[str, Any]:
         """All current canonical facts (entity, attribute, value, origin, …) for
-        introspection / cleanup. Sorted by (entity, attribute)."""
+        introspection / cleanup. Sorted by (entity, attribute).
+
+        Every row carries the same ``contested`` / ``contender_value`` /
+        ``contender_origin`` fields ``cortex_search`` serves (2026-09-05 —
+        until then only the search path set them, so the Console's Cortex
+        view, which reads this dump via ``/api/facts``, never showed a real
+        contender and the Observatory's contested count read 0). A set
+        slot's member rows each carry the slot's flag: the contender is
+        parked against the slot, not against one member. Active contenders
+        are bucketed in one pass over the store rather than one
+        ``contenders_for`` scan per row, which is quadratic on a bank of
+        thousands of facts."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
             ra = self.config.time.relative_age
-            rows = [_cortex_record_to_dict(r, relative_age=ra,
+            parked: dict[tuple[str, str], list] = {}
+            for c in self._cortex.records:
+                if c.status == "contested":
+                    parked.setdefault(c.key, []).append(c)
+            rows = []
+            for r in self._cortex.current_records():
+                d = _cortex_record_to_dict(r, relative_age=ra,
                                            stale_policy=self._stale_policy)
-                    for r in self._cortex.current_records()]
+                d.update(_contender_fields(parked.get(r.key, ())))
+                rows.append(d)
             rows.sort(key=lambda d: (d["entity"].lower(), d["attribute"].lower()))
             _demote_stale(rows, self._stale_policy)
             if self._storage is not None:
