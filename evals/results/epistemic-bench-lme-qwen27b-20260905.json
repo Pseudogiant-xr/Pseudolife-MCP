@@ -1,0 +1,241 @@
+{
+  "meta": {
+    "bench": "epistemic",
+    "source": "lme",
+    "tag": "lme-qwen27b-20260905",
+    "git_rev": "ea325906520d34254cab123870bf0f2fa9793ab7",
+    "timestamp": "2026-09-04T18:53:39Z",
+    "contexts_only": true,
+    "extractor": "qwen-27b",
+    "extractor_url": "http://127.0.0.1:1234/v1",
+    "derivation_file": "epistemic-bench-lme-derivation-20260905.jsonl",
+    "derivation_git_rev": "cdbee209dd1a93621e206fec95c4ada48d055f4e",
+    "dataset": "longmemeval_oracle.json",
+    "knowledge_update_questions": 78,
+    "derived_questions": 23,
+    "questions_scored": 23,
+    "limit": null,
+    "arms": [
+      "rag",
+      "cortex",
+      "hybrid",
+      "cascade",
+      "nomem"
+    ],
+    "dimensions": [
+      "update_following",
+      "stale_serving",
+      "staleness_marking",
+      "abstention_support",
+      "retraction_handling"
+    ],
+    "higher_is_better": {
+      "update_following": true,
+      "stale_serving": false,
+      "staleness_marking": true,
+      "abstention_support": true,
+      "retraction_handling": true
+    },
+    "companion_metric": "answer_coverage",
+    "spec": "docs/superpowers/specs/2026-09-05-epistemic-bench-design.md",
+    "stale_policy": "annotate",
+    "rag_top_k": 6,
+    "hybrid_top_k": 6,
+    "cortex_top_k": 24,
+    "cortex_min_score": 0.2,
+    "selectivity": {
+      "cortex_slots_in_bank_mean": 5.7,
+      "cortex_top_k": 24,
+      "turns_in_bank_mean": 23.2,
+      "rag_top_k": 6
+    },
+    "env_knobs": {
+      "thinking": null,
+      "sampler": null,
+      "candidate_pool": {
+        "candidate_pool_multiplier": null,
+        "fusion": null
+      }
+    },
+    "extract_seconds_total": 826.4,
+    "wall_seconds_this_process": 1216.1
+  },
+  "caveats": {
+    "scores_context_not_answers": "Every number is a property of the SERVED CONTEXT, not of a model answer. 'The current value is in the served text' is necessary for a correct answer and never sufficient, so each figure bounds an answerer from above and none of them is an accuracy.",
+    "cascade_proxy": "The cascade arm is a CONTEXT-level proxy — the cortex context when non-empty, else the rag context. The published cascade is an ANSWER-level policy routing on whether the cortex arm commits. The two are different objects and must not be compared.",
+    "marker_dimensions_have_a_structural_floor": "staleness_marking and the fact channel of retraction_handling are 0 by construction for the rag and nomem arms: a raw turn carries no freshness_class and no supersession chain. A delta there is a statement about what each representation can express, not about how well either retrieves.",
+    "stale_flag_is_payload_only": "staleness_marking reads the served PAYLOAD. No arm renders the stale flag into the flattened context string an answerer sees, so the marker reaches an agent reading the MCP payload and not an answerer reading the context block.",
+    "extraction_is_the_real_path": "Unlike the synthetic source, this bank is built by longmemeval_bench.ingest_and_dream — the product's own store-then-dream cadence — so the cortex and hybrid arms measure the DEPLOYED pipeline, retrieval and extraction together. A low cortex number here is a claim about the extractor at least as much as about the fact spine, and the extractor is named in meta.extractor.",
+    "dimensions_the_dataset_cannot_ground": "Only D1 (update_following), D2 (stale_serving) and D5 (retraction_handling) are graded, per section 4 of the spec. D3 (staleness_marking) needs a freshness_class and a TTL LongMemEval does not carry; D4 (abstention_support) needs questions whose answer was never stated, which the knowledge-update type does not contain by construction. Both report n=0 and a NULL rate — never a 0.0, which a reader would take for a failing arm.",
+    "d5_is_the_entry_channel_only": "The slot is synthetic (entity 'lme:<question_id>', attribute 'value') because LongMemEval has no entity/attribute structure, so a bench question never matches a served fact BY NAME and D5's fact channel — the supersession chain — cannot fire on this source. D5 here is the served text plus a served entry's superseded_by_text. The cortex arm serves no entries, so its D5 is 0 BY CONSTRUCTION: a measurement artefact, not a finding.",
+    "correction_is_implicit": "A knowledge-update question's later statement IS the retraction, but it is never phrased as one — no 'correction:', no 'not X, it is Y'. That differs from the synthetic source's explicit corrections, which is why the two sources are reported separately and their rates are never pooled.",
+    "one_question_one_bank": "Each question gets its own bank, built from its own haystack and truncated before the next — the LongMemEval protocol. No cross-question interference, and no measurement of a bank that has accumulated many sessions."
+  },
+  "arms": {
+    "rag": {
+      "update_following": {
+        "n": 23,
+        "hits": 23,
+        "rate": 1.0
+      },
+      "stale_serving": {
+        "n": 23,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "staleness_marking": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "abstention_support": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "retraction_handling": {
+        "n": 23,
+        "hits": 8,
+        "rate": 0.3478
+      },
+      "answer_coverage": {
+        "n": 23,
+        "hits": 23,
+        "rate": 1.0
+      },
+      "context_chars_mean": 5253.3
+    },
+    "cortex": {
+      "update_following": {
+        "n": 23,
+        "hits": 21,
+        "rate": 0.913
+      },
+      "stale_serving": {
+        "n": 23,
+        "hits": 1,
+        "rate": 0.0435
+      },
+      "staleness_marking": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "abstention_support": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "retraction_handling": {
+        "n": 23,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "answer_coverage": {
+        "n": 23,
+        "hits": 21,
+        "rate": 0.913
+      },
+      "context_chars_mean": 410.0
+    },
+    "hybrid": {
+      "update_following": {
+        "n": 23,
+        "hits": 23,
+        "rate": 1.0
+      },
+      "stale_serving": {
+        "n": 23,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "staleness_marking": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "abstention_support": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "retraction_handling": {
+        "n": 23,
+        "hits": 8,
+        "rate": 0.3478
+      },
+      "answer_coverage": {
+        "n": 23,
+        "hits": 23,
+        "rate": 1.0
+      },
+      "context_chars_mean": 5697.3
+    },
+    "cascade": {
+      "update_following": {
+        "n": 23,
+        "hits": 21,
+        "rate": 0.913
+      },
+      "stale_serving": {
+        "n": 23,
+        "hits": 1,
+        "rate": 0.0435
+      },
+      "staleness_marking": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "abstention_support": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "retraction_handling": {
+        "n": 23,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "answer_coverage": {
+        "n": 23,
+        "hits": 21,
+        "rate": 0.913
+      },
+      "context_chars_mean": 410.0
+    },
+    "nomem": {
+      "update_following": {
+        "n": 23,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "stale_serving": {
+        "n": 23,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "staleness_marking": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "abstention_support": {
+        "n": 0,
+        "hits": 0,
+        "rate": null
+      },
+      "retraction_handling": {
+        "n": 23,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "answer_coverage": {
+        "n": 23,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "context_chars_mean": 0.0
+    }
+  }
+}

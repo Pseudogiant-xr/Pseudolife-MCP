@@ -1,0 +1,234 @@
+{
+  "meta": {
+    "bench": "epistemic",
+    "source": "synthetic",
+    "tag": "smoke-20260905",
+    "git_rev": "cdbee209dd1a93621e206fec95c4ada48d055f4e",
+    "timestamp": "2026-09-04T15:31:45Z",
+    "contexts_only": true,
+    "arms": [
+      "rag",
+      "cortex",
+      "hybrid",
+      "cascade",
+      "nomem"
+    ],
+    "dimensions": [
+      "update_following",
+      "stale_serving",
+      "staleness_marking",
+      "abstention_support",
+      "retraction_handling"
+    ],
+    "higher_is_better": {
+      "update_following": true,
+      "stale_serving": false,
+      "staleness_marking": true,
+      "abstention_support": true,
+      "retraction_handling": true
+    },
+    "companion_metric": "answer_coverage",
+    "spec": "docs/superpowers/specs/2026-09-05-epistemic-bench-design.md",
+    "stale_policy": "annotate",
+    "rag_top_k": 6,
+    "hybrid_top_k": 6,
+    "cortex_top_k": 24,
+    "cortex_min_score": 0.2,
+    "selectivity": {
+      "cortex_slots_in_bank": 40,
+      "cortex_top_k": 24,
+      "turns_in_bank": 72,
+      "rag_top_k": 6
+    },
+    "wall_seconds": 25.9,
+    "seed": 20260905,
+    "entities": 10,
+    "attributes": 5,
+    "sessions": 4,
+    "filler_per_session": 3,
+    "anchor_epoch": 1788535871.1217365,
+    "questions_by_kind": {
+      "unstated": 10,
+      "correction": 10,
+      "update": 10,
+      "stable": 10,
+      "stale": 10
+    },
+    "turns": 72,
+    "fact_writes": 60
+  },
+  "caveats": {
+    "scores_context_not_answers": "Every number is a property of the SERVED CONTEXT, not of a model answer. 'The current value is in the served text' is necessary for a correct answer and never sufficient, so each figure bounds an answerer from above and none of them is an accuracy.",
+    "synthetic_extraction_is_perfect": "The synthetic source writes facts directly through cortex_write, so no extractor runs and extraction quality is held at perfect. The cortex and hybrid arms here are therefore a CEILING on the representation, not a measurement of a deployed bank, whose cortex is only as good as the dream pass that filled it.",
+    "cascade_proxy": "The cascade arm is a CONTEXT-level proxy — the cortex context when non-empty, else the rag context. The published cascade is an ANSWER-level policy routing on whether the cortex arm commits. The two are different objects and must not be compared.",
+    "marker_dimensions_have_a_structural_floor": "staleness_marking and the fact channel of retraction_handling are 0 by construction for the rag and nomem arms: a raw turn carries no freshness_class and no supersession chain. A delta there is a statement about what each representation can express, not about how well either retrieves.",
+    "stale_flag_is_payload_only": "staleness_marking reads the served PAYLOAD. No arm renders the stale flag into the flattened context string an answerer sees, so the marker reaches an agent reading the MCP payload and not an answerer reading the context block."
+  },
+  "arms": {
+    "rag": {
+      "update_following": {
+        "n": 20,
+        "hits": 20,
+        "rate": 1.0
+      },
+      "stale_serving": {
+        "n": 20,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "staleness_marking": {
+        "n": 10,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "abstention_support": {
+        "n": 10,
+        "hits": 7,
+        "rate": 0.7
+      },
+      "retraction_handling": {
+        "n": 10,
+        "hits": 6,
+        "rate": 0.6
+      },
+      "answer_coverage": {
+        "n": 40,
+        "hits": 40,
+        "rate": 1.0
+      },
+      "context_chars_mean": 373.1
+    },
+    "cortex": {
+      "update_following": {
+        "n": 20,
+        "hits": 20,
+        "rate": 1.0
+      },
+      "stale_serving": {
+        "n": 20,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "staleness_marking": {
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      "abstention_support": {
+        "n": 10,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "retraction_handling": {
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      "answer_coverage": {
+        "n": 40,
+        "hits": 40,
+        "rate": 1.0
+      },
+      "context_chars_mean": 1206.5
+    },
+    "hybrid": {
+      "update_following": {
+        "n": 20,
+        "hits": 20,
+        "rate": 1.0
+      },
+      "stale_serving": {
+        "n": 20,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "staleness_marking": {
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      "abstention_support": {
+        "n": 10,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "retraction_handling": {
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      "answer_coverage": {
+        "n": 40,
+        "hits": 40,
+        "rate": 1.0
+      },
+      "context_chars_mean": 1613.7
+    },
+    "cascade": {
+      "update_following": {
+        "n": 20,
+        "hits": 20,
+        "rate": 1.0
+      },
+      "stale_serving": {
+        "n": 20,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "staleness_marking": {
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      "abstention_support": {
+        "n": 10,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "retraction_handling": {
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      "answer_coverage": {
+        "n": 40,
+        "hits": 40,
+        "rate": 1.0
+      },
+      "context_chars_mean": 1206.5
+    },
+    "nomem": {
+      "update_following": {
+        "n": 20,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "stale_serving": {
+        "n": 20,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "staleness_marking": {
+        "n": 10,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "abstention_support": {
+        "n": 10,
+        "hits": 10,
+        "rate": 1.0
+      },
+      "retraction_handling": {
+        "n": 10,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "answer_coverage": {
+        "n": 40,
+        "hits": 0,
+        "rate": 0.0
+      },
+      "context_chars_mean": 0.0
+    }
+  }
+}
