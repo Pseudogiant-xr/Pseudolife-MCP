@@ -6,6 +6,64 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-09-05 — the reranker does not rescue the wide pool)
+- **The cross-encoder reranker recovers the candidate-pool width penalty
+  and converts none of it into a win.** The 2026-09-04 entry below measured
+  the wider dense pool with the reranker OFF, and it lost; the open question
+  was whether the reranker — the piece the whole retrieve-then-rerank shape
+  was built for — pays for the extra width. Two further judged runs over the
+  same LongMemEval knowledge-update **oracle** slice (n=78, qwen-27b
+  extraction, the same judge and answerer, `weighted_sum` fusion — never
+  `rrf`, under which the reranker's `fusion_weight` collapses to
+  cross-encoder-only ordering) answer no. With the wide pool
+  (`pool-m4rr`) the reranker lifts naive RAG from `pool-m4sum`'s 0.782 to
+  0.885 (+0.026 against the 0.859 control, p 0.694, 4W/2L) but serves 27%
+  more context tokens to do it, and the hybrid arm still lands at 0.885
+  (-0.013, p 1.0) under its 0.897 control. At the shipped width
+  (`pool-m1rr`) the reranker can only reorder the set that was already
+  going to be served — context tokens identical to the control on every
+  arm — and it moves roughly one question: rag 0.872 (+0.013, p 1.0),
+  hybrid and cascade -0.013 each, all at p 1.0. The cortex arm never
+  touches `cms.retrieve` and holds 0.667, 0W/0L, in both cells — 0 of 78
+  flipped, which bounds the noise floor at ≤3.8% at 95% (rule of three)
+  rather than measuring it at zero. The bound is tight for a causal
+  reason (deterministic answerer; the cortex arm's context is
+  byte-identical across all five cells), but it is still a bound, and
+  every `pool-m1rr` delta above is one question in 78 — inside it. Both
+  new summaries stamp
+  `bench_env.reranker.enabled: true`, which the control summary lacks —
+  that is the evidence the knob was live for these cells and not for the
+  control. Nothing is promoted: both pool knobs and the reranker stay at
+  their shipped defaults, and the reranker-on cell is now a measured wash
+  rather than an unmeasured option. Artifacts:
+  `evals/results/longmemeval-ku-oracle-qwen-27b-pool-{m1rr,m4rr}.jsonl`
+  with their `.summary.json`, and
+  `evals/results/compare-pool-{m1rr,m4rr}-pairs.json`; the table of all
+  five cells is in `evals/README.md`, "Reranker-on cells (2026-09-05)".
+
+### Changed (2026-09-05 — the bench can switch the reranker on)
+- The 2026-09-04 candidate-pool judged runs all measured the cross-encoder
+  reranker OFF, which left the reranker-on cell unmeasured until the entry
+  above. `evals/ladder_sweep.build_service`
+  now honours `PSEUDOLIFE_BENCH_RERANK` (`1`/`true`/`on`; unset or
+  `0`/`false`/`off` keeps the shipped default off; anything else aborts),
+  and `bench_env_knobs()` stamps it into every summary next to
+  `candidate_pool` — eval-only; the accuracy it went on to measure is the
+  entry above.
+- **`PSEUDOLIFE_BENCH_RERANK=0` now actually turns the reranker OFF.** Its
+  off-branch was a bare `pass`, which is indistinguishable from correct on
+  a stock config (the reranker ships off anyway) but silently wrong on any
+  config that has it on: the run would serve a reranker-ON retrieval while
+  `rerank_env_knobs()` stamped `enabled: false`, i.e. a judged artifact
+  whose retrieval stamp contradicts the retrieval it measured — the exact
+  failure the stamp exists to prevent. The existing off-path test could
+  not see it because it asserted against a fresh `MemoryConfig`; the new
+  one sets `reranker.enabled = True` first. No committed artifact is
+  affected: the branch only ever differed on a reranker-ON config, and all
+  five 2026-09-04/05 cells ran on a stock (reranker-off) config — the
+  three 2026-09-04 cells predate the knob and carry no `reranker` stamp,
+  the two 2026-09-05 cells set it to `1`.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported
