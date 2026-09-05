@@ -5,9 +5,20 @@ Preregistered offline analysis; the contract is
 — read that first for the design rationale. This module implements it
 exactly: no new arms, metrics, or statistics beyond what the spec states.
 
-Pure CPU replay over the existing v25 flat-band dumps
-(``evals/results/banks/s-qwen-27b-ablbands-flat/``, 78 knowledge-update
-questions). For each question, five synthetic pools are built by
+Pure CPU replay over the existing v25 flat-band dumps (78
+knowledge-update questions), resolved by content through
+:mod:`bank_dumps` — 1024-d backbone, ``flat`` preset, nothing evicted
+during the replay. It used to name a directory, and on a tree carrying
+both replays that name resolved to the RETIRED 384-d MiniLM dumps, which
+do not reproduce the published artifact — 116 of 390 cells
+agree through them, against 390 of 390 through the v25 replay (measured
+2026-09-05,
+``results/distractor-scale-probe-2026-09-05.reproduction.json`` and its
+``-retired384`` sibling). The refuse-overwrite guard below meant no run
+ever said so. Every artifact now records ``dump_dir`` and
+``embedding_dim``.
+
+For each question, five synthetic pools are built by
 concatenating the question's own dump with 0/2/6/14/30 *other* questions'
 dumps (a fixed, RNG-free rotation by sorted question_id, wrap-around), then
 re-selected through the G0-validated offline mirror
@@ -16,14 +27,22 @@ arm (own haystack only) doubles as the perfect-sweep oracle.
 
 Usage (repo root, venv python; CPU-only, no GPU/judge needed):
 
-    python evals/distractor_scale_probe.py
+    # regenerate under a new tag, checked against the committed artifact
+    python evals/distractor_scale_probe.py \
+        --out evals/results/distractor-scale-probe-<today>.json \
+        --compare-to evals/results/distractor-scale-probe-2026-08-15.json
 
-Writes ``evals/results/distractor-scale-probe-2026-08-15.json`` and prints
-the three preregistered gate verdicts (G-D1 quality, G-D2 latency, G-D3
-sanity).
+Writes the artifact named by ``--out`` (default: the canonical
+2026-08-15 path, which it then refuses to overwrite — canonical results
+are never rewritten in place) and prints the three preregistered gate
+verdicts (G-D1 quality, G-D2 latency, G-D3 sanity). With
+``--compare-to`` it also writes ``<out stem>.reproduction.json``: a
+cell-by-cell equality check of the quality fields against an earlier
+artifact, latency excluded.
 """
 from __future__ import annotations
 
+import argparse
 import gzip
 import json
 import os
@@ -39,10 +58,21 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from band_ablation import _evidence_texts, _paired_permutation_p, select_topk  # noqa: E402
+from bank_dumps import resolve_dump_dir  # noqa: E402
 
 SPEC = "docs/superpowers/specs/2026-08-15-distractor-scale-probe-preregistration.md"
-DUMP_DIR = Path(__file__).resolve().parent / "results" / "banks" / "s-qwen-27b-ablbands-flat"
-OUT_PATH = Path(__file__).resolve().parent / "results" / "distractor-scale-probe-2026-08-15.json"
+RESULTS = Path(__file__).resolve().parent / "results"
+OUT_PATH = RESULTS / "distractor-scale-probe-2026-08-15.json"
+
+# Resolved at run time by `bank_dumps.resolve_dump_dir`, never by name.
+# Callers that already know which dumps they want (the forgetting-sweep
+# probe passes the directory it resolved) set this before `load_dumps()`.
+DUMP_DIR: Path | None = None
+
+# Quality fields a rerun must reproduce cell-for-cell. Latency is excluded
+# by construction: it is machine- and load-dependent.
+QUALITY_FIELDS = ("n_pool_entries", "evidence_in_top6", "evidence_in_top3",
+                  "any_evidence_served", "rank_first_evidence")
 
 # arm label -> K (number of *other* questions' dumps pooled in, in the fixed
 # rotation) — table from the spec's "Design" section.
@@ -64,9 +94,16 @@ LIVE_BANK_ENTRIES = 682
 LIVE_BANK_GROWTH_PER_DAY = 10.0
 
 
-def load_dumps() -> dict[str, dict]:
+def load_dumps(dump_dir: Path | None = None) -> dict[str, dict]:
+    """Every dump in ``dump_dir``, keyed by question id.
+
+    Falls back to the module-level :data:`DUMP_DIR` (set by a caller that
+    resolved its own directory), and resolves by content when neither is
+    set. Never picks a directory by name.
+    """
+    dump_dir = dump_dir or DUMP_DIR or resolve_dump_dir()
     dumps: dict[str, dict] = {}
-    for p in sorted(DUMP_DIR.glob("*.json.gz")):
+    for p in sorted(Path(dump_dir).glob("*.json.gz")):
         qid = p.name[: -len(".json.gz")]
         with gzip.open(p, "rt", encoding="utf-8") as fh:
             dumps[qid] = json.load(fh)
@@ -98,12 +135,81 @@ def linfit(xs: list[float], ys: list[float]) -> tuple[float, float]:
     return slope, intercept
 
 
-def main() -> int:
+def reproduction_check(new: dict, old: dict, old_path: Path) -> dict:
+    """Cell-by-cell equality of the quality fields between two artifacts.
+
+    A cell is one (question, scale) pair; a mismatch names the field and
+    both values, so a partial reproduction is diagnosable rather than
+    just a count. Latency is excluded — see :data:`QUALITY_FIELDS`.
+    """
+    new_rows = {r["question_id"]: r["scales"] for r in new["per_question"]}
+    old_rows = {r["question_id"]: r["scales"] for r in old["per_question"]}
+    mismatches: list[dict] = []
+    compared = matched = skipped = 0
+    for qid in sorted(set(new_rows) & set(old_rows)):
+        for label, _ in SCALES:
+            a, b = new_rows[qid].get(label), old_rows[qid].get(label)
+            if a is None or b is None:
+                # A scale missing on either side is NOT a match. Counted
+                # separately so a truncated artifact cannot report a clean
+                # "N of N" over a smaller N than the reader assumes.
+                skipped += 1
+                continue
+            compared += 1
+            bad = [{"field": f, "new": a.get(f), "old": b.get(f)}
+                   for f in QUALITY_FIELDS if a.get(f) != b.get(f)]
+            if bad:
+                mismatches.append({"question_id": qid, "scale": label,
+                                   "diffs": bad})
+            else:
+                matched += 1
+    return {
+        "check": "distractor-scale-probe reproduction",
+        "new_artifact": new.get("out_path"),
+        "old_artifact": str(old_path.name),
+        "new_dump_dir": new.get("dump_dir"),
+        "old_dump_dir": old.get("dump_dir"),
+        "new_embedding_dim": new.get("embedding_dim"),
+        "fields": list(QUALITY_FIELDS),
+        "latency_excluded": True,
+        "questions_only_in_new": sorted(set(new_rows) - set(old_rows)),
+        "questions_only_in_old": sorted(set(old_rows) - set(new_rows)),
+        "cells_compared": compared,
+        "cells_matching": matched,
+        "cells_mismatching": len(mismatches),
+        "cells_skipped": skipped,
+        "mismatches": mismatches,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--dumps", type=Path, default=None,
+                    help="band-state dump directory (default: resolved by "
+                         "content — 1024-d, flat, no eviction)")
+    ap.add_argument("--out", type=Path, default=OUT_PATH,
+                    help="artifact path; an existing file is never "
+                         "overwritten")
+    ap.add_argument("--compare-to", type=Path, default=None,
+                    help="earlier artifact to reproduce; writes "
+                         "<out stem>.reproduction.json")
+    args = ap.parse_args(argv)
+
+    # Everything that can refuse, refuses BEFORE the 8-minute replay: an
+    # --out typo used to cost a full run, because the overwrite guard sat
+    # after the compute.
+    if args.out.exists():
+        sys.exit(f"refusing to overwrite existing artifact: {args.out}")
+    if args.compare_to is not None and not args.compare_to.is_file():
+        sys.exit(f"--compare-to artifact does not exist: {args.compare_to}")
+
     t_start = time.perf_counter()
     from longmemeval_bench import load_questions  # noqa: PLC0415 — heavy (torch)
 
+    dump_dir = resolve_dump_dir(args.dumps)
+    print(f"dumps: {dump_dir.name}", flush=True)
     questions = {q["question_id"]: q for q in load_questions("s")}
-    dumps = load_dumps()
+    dumps = load_dumps(dump_dir)
     missing = sorted(set(questions) - set(dumps))
     if missing:
         sys.exit(f"missing dumps for {len(missing)} questions: {missing[:5]}")
@@ -333,6 +439,12 @@ def main() -> int:
     out = {
         "spec": SPEC,
         "dataset": "s",
+        # Provenance, so a later reader never has to guess which replay
+        # produced these numbers. Directory NAME only: an absolute path
+        # would carry a home directory into a tracked artifact.
+        "dump_dir": dump_dir.name,
+        "embedding_dim": len(dumps[sorted_ids[0]]["query_emb"]),
+        "out_path": args.out.name,
         "n_questions": n_ids,
         "scales": scales_out,
         "gates": {"G-D1": g_d1, "G-D2": g_d2, "G-D3": g_d3},
@@ -342,10 +454,17 @@ def main() -> int:
         "runtime_s": round(time.perf_counter() - t_start, 1),
     }
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if OUT_PATH.exists():
-        sys.exit(f"refusing to overwrite existing artifact: {OUT_PATH}")
-    OUT_PATH.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    if args.out.exists():   # re-checked: a concurrent run may have landed
+        sys.exit(f"refusing to overwrite existing artifact: {args.out}")
+    args.out.write_text(json.dumps(out, indent=2), encoding="utf-8")
+
+    check = None
+    if args.compare_to is not None:
+        old = json.loads(args.compare_to.read_text(encoding="utf-8"))
+        check = reproduction_check(out, old, args.compare_to)
+        check_path = args.out.with_suffix(".reproduction.json")
+        check_path.write_text(json.dumps(check, indent=2), encoding="utf-8")
 
     print("\n" + "=" * 78)
     print(f"G-D3 (sanity)  1x evidence-in-top6 = {hit6_1x:.4f}  "
@@ -360,7 +479,13 @@ def main() -> int:
           f"  -> {g_d2['verdict']}")
     if interpretation:
         print(f"\nInterpretation: {interpretation}")
-    print(f"\nwrote {OUT_PATH}  ({out['runtime_s']}s)")
+    print(f"\nwrote {args.out}  ({out['runtime_s']}s)")
+    if check is not None:
+        print(f"reproduction vs {check['old_artifact']}: "
+              f"{check['cells_matching']}/{check['cells_compared']} cells "
+              f"match on {', '.join(QUALITY_FIELDS)} "
+              f"({check['cells_mismatching']} mismatching)")
+        print(f"wrote {check_path}")
     return 0
 
 

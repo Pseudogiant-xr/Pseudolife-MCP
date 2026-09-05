@@ -1191,6 +1191,86 @@ def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# The length of ``used_ids`` gets the same distrust as its contents: it is
+# a model-typed field, and an outcome names the handful of hits the work
+# actually turned on — 5–20 ids is the intended size (measured 2026-09-05
+# against the served guidance, which asks for the ids that mattered). Each
+# id past the cap would be one more storage round trip under the service
+# lock and one more entry echoed back as unmatched, so the tail is dropped
+# and the drop is reported.
+USED_IDS_CAP = 50
+
+
+def _parse_used_ids(value: Any) -> tuple[list[int], int, int]:
+    """Entry ids an agent says it used, from whatever shape a client sent.
+
+    Wider than :func:`_coerce_id_list` (which is all-or-nothing) because
+    this list is typed by a model mid-sentence, and the label is worth more
+    than the strictness: accepted are a real list of ints, a list of
+    int-like strings, a JSON-encoded list (Claude Code stringifies list
+    params — reconfirmed 2026-07-19 on the stdio shim), a comma- or
+    space-separated string, and a bare id. Returns
+    ``(ids, ignored, truncated)`` — ids deduped in first-seen order and
+    capped at :data:`USED_IDS_CAP`, the count of tokens that were not
+    integers, and the count of distinct ids dropped by the cap, so the
+    caller can say so instead of silently dropping them.
+    """
+    import json
+
+    items: list[Any]
+    if isinstance(value, (list, tuple)):
+        items = list(value)
+    elif isinstance(value, bool) or value is None:
+        return [], 0, 0
+    elif isinstance(value, int):
+        items = [value]
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return [], 0, 0
+        try:
+            decoded: Any = json.loads(text)
+        except ValueError:
+            decoded = None
+        if isinstance(decoded, (list, tuple)):
+            items = list(decoded)
+        elif isinstance(decoded, int) and not isinstance(decoded, bool):
+            items = [decoded]
+        else:
+            items = text.strip("[]() ").replace(",", " ").split()
+    else:
+        # One unreadable value is one ignored token: a bare 1.0 and a
+        # [1.0] are the same mistake and must report the same way.
+        return [], 1, 0
+
+    ids: list[int] = []
+    ignored = 0
+    seen: set[int] = set()
+    for item in items:
+        if isinstance(item, bool):
+            ignored += 1
+            continue
+        if isinstance(item, int):
+            n = item
+        elif isinstance(item, str):
+            token = item.strip().strip("\"'")
+            if not token:
+                continue
+            try:
+                n = int(token)
+            except ValueError:
+                ignored += 1
+                continue
+        else:
+            ignored += 1
+            continue
+        if n not in seen:
+            seen.add(n)
+            ids.append(n)
+    truncated = max(0, len(ids) - USED_IDS_CAP)
+    return ids[:USED_IDS_CAP], ignored, truncated
+
+
 @_tool(tier="minimal")
 def memory_outcome(
     task: Annotated[str, Field(
@@ -1207,16 +1287,35 @@ def memory_outcome(
                     "inferred from the outcome.")] = None,
     episode: Annotated[str | None, Field(
         description="Episode handle for attribution.")] = None,
+    used_ids: Annotated[list[int] | str | None, Field(
+        description="Ids of the search hits you actually used, e.g. "
+                    "[1421, 903] — the relevance label only you can "
+                    "write. At most 50.")] = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
     corrected. Dream synthesises signals into lessons surfaced next
     session; logging stops repeated mistakes.
 
-    Returns: ``{recorded, signal_id, task, outcome}``; needs Postgres.
+    Returns ``{recorded, signal_id, task, outcome}``; needs Postgres.
+    ``used_ids`` adds ``used_ids_recorded`` (credited),
+    ``used_ids_unmatched`` (none served it), ``used_ids_ignored`` (not
+    an id), ``used_ids_truncated`` (past the 50 cap),
+    ``used_ids_errors`` (write failed), ``used_ids_reason`` (why none
+    landed).
     """
-    return service.record_outcome(
+    ids, ignored, truncated = _parse_used_ids(used_ids)
+    out = service.record_outcome(
         task, outcome, about=about, detail=detail, polarity=polarity,
-        episode=episode)
+        episode=episode, used_ids=ids or None)
+    if ignored:
+        out["used_ids_ignored"] = ignored
+    if truncated:
+        out["used_ids_truncated"] = truncated
+    if used_ids is not None and not ids:
+        # Refuse the label, never the signal: a malformed used_ids must not
+        # cost the outcome the whole convention exists to capture.
+        out["used_ids_reason"] = "no usable entry ids"
+    return out
 
 
 @_tool(tier="core")
