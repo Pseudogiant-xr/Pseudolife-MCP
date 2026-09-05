@@ -733,3 +733,25 @@ def test_curation_retired_route_passes_store_and_limit(svc):
     assert "entries" in out
 
 
+
+
+def test_fixture_set_slot_contender_counts_once_in_overview(svc):
+    """The devserver demo carries a set-valued slot with a parked contender
+    (2026-09-05) so the Cortex view's once-per-slot contender block is
+    eyeball-checkable without a real bank. Two member rows, one contender,
+    ONE contested slot in the overview — same slot-counting rule as the
+    real service (pinned there in tests/test_cortex_contenders.py)."""
+    rows = svc.cortex_dump()["entries"]
+    members = [r for r in rows if r.get("kind") == "member"]
+    assert len(members) >= 2
+    slots = {(r["entity"], r["attribute"]) for r in members}
+    assert len(slots) == 1
+    assert all(r["contested"] is True for r in members)
+    assert len({r["contender_value"] for r in members}) == 1
+    scalars = [r for r in rows if r["kind"] == "scalar"]
+    assert all("contender_value" not in r for r in scalars if not r["contested"])
+    contested_rows = [r for r in rows if r["contested"]]
+    contested_slots = {(r["entity"], r["attribute"]) for r in contested_rows}
+    assert len(contested_rows) == len(contested_slots) + len(members) - 1
+    ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
+    assert ov["counts"]["facts_contested"] == len(contested_slots)

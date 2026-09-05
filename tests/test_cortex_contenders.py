@@ -404,3 +404,35 @@ def test_overview_facts_contested_keys_slots_like_the_store(pristine_service):
     assert sorted(r["attribute"] for r in rows) == ["Bikes-Owned", "bikes owned"]
     ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
     assert ov["counts"]["facts_contested"] == 1
+
+
+def test_fixture_fact_rows_carry_what_the_cortex_view_reads(pristine_service):
+    """Fixture-vs-real contract for the Cortex view (the class of drift that
+    hid this bug: ``web/fixtures.py`` synthesised ``contested`` while the
+    real dump never set it). Every key views/cortex.js reads must be present
+    on BOTH a real dump row and a fixture row, contested or not, scalar or
+    member, with the same presence rule for the contender fields."""
+    from pseudolife_memory.web.fixtures import FixtureService
+    view_keys = {"entity", "attribute", "value", "origin", "confidence",
+                 "age", "tx_time", "kind", "contested"}
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.cortex_write("project", "language", "rust", support="agent")
+    svc.cortex_write("project", "license", "apache-2.0", support="user")
+    svc.cortex_write("user", "bikes owned", "road bike", support="user")
+    svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")
+    svc.set_add("user", "bikes owned", "hybrid bike")
+    real = svc.cortex_dump()["entries"]
+    fixture = FixtureService().cortex_dump()["entries"]
+    for rows in (real, fixture):
+        kinds = {(r["kind"], r["contested"]) for r in rows}
+        # Both surfaces cover the three shapes the view distinguishes.
+        assert {("scalar", True), ("scalar", False), ("member", True)} <= kinds
+        for r in rows:
+            missing = view_keys - set(r)
+            assert not missing, (r["entity"], r["attribute"], missing)
+            if r["contested"]:
+                assert {"contender_value", "contender_origin"} <= set(r)
+            else:
+                assert "contender_value" not in r
+                assert "contender_origin" not in r

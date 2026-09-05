@@ -43,7 +43,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the `memory_fact_get` lean-projection measurement in
   `evals/agent_token_ledger.py`, whose allow-list drops `contested`, so a
   rerun reads a slightly wider cut — disclosed in that docstring, not
-  re-measured.
+  re-measured. The web fixtures, which masked the original gap, now carry
+  what they lacked: every fixture fact row has a `kind`, and a set-valued
+  slot with two `member` rows and one agent-origin contender parked against
+  it (the shape assistant-turn provenance produces) sits beside the scalar
+  contest, so the devserver demo shows the once-per-slot block and the
+  slot-counted Observatory chip. A contract test pins that a real dump row
+  and a fixture row carry every key the Cortex view reads, contested or
+  not, scalar or member, with the same presence rule for the contender
+  fields — the class of drift that hid this bug.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

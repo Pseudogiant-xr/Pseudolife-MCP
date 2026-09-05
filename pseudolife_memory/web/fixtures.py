@@ -32,6 +32,12 @@ def _age(seconds: float) -> str:
 
 
 # ── canonical facts (cortex) ────────────────────────────────────────────────
+# (entity, attribute, value, origin, confidence, age_s, contested[, kind,
+# (contender_value, contender_origin)]). ``kind`` defaults to "scalar"; a
+# set-valued slot dumps one "member" row per member, and — as the real
+# ``cortex_dump`` does since 2026-09-05 — every row of a contested slot
+# carries the slot's one contender, because it is parked against the slot,
+# not against a member. The Cortex view renders that block once per slot.
 _FACTS = [
     ("pseudolife-mcp", "status", "active", "agent", 1.0, 2 * _H, False),
     ("pseudolife-mcp", "transport", "streamable HTTP at /mcp", "agent", 0.95, 6 * _D, False),
@@ -45,6 +51,13 @@ _FACTS = [
     ("dream extractor", "model", "Gemma 4 E2B (Q4_K_M)", "agent", 0.85, 4 * _D, True),
     ("memory_recall", "driver", "mechanical (query-first)", "agent", 0.9, 8 * _H, False),
     ("cortex", "writer policy", "single-writer (dream + fact_set)", "agent", 0.95, 5 * _D, False),
+    # A user-origin set with an agent-origin add parked against it: the
+    # shape assistant-turn provenance produces, and the one the Console's
+    # Discard is the operator's path for (accept is refused on a set slot).
+    ("pseudolife-mcp", "supported clients", "Claude Code", "user", 1.0, 15 * _D, True,
+     "member", ("Cursor", "agent")),
+    ("pseudolife-mcp", "supported clients", "Claude Desktop", "user", 0.9, 10 * _D, True,
+     "member", ("Cursor", "agent")),
 ]
 
 # ── world cortex (cited external facts) ─────────────────────────────────────
@@ -86,13 +99,14 @@ _STREAM = [
 
 
 def _fact_dict(t):
-    e, a, v, origin, conf, age_s, contested = t
+    e, a, v, origin, conf, age_s, contested, *extra = t
+    kind = extra[0] if extra else "scalar"
+    contender = extra[1] if len(extra) > 1 else ("Gemma 4 E4B", "agent")
     d = {"entity": e, "attribute": a, "value": v, "origin": origin,
          "confidence": conf, "age": _age(age_s), "tx_time": _NOW - age_s,
-         "writer_id": "claude-code", "contested": contested}
+         "writer_id": "claude-code", "kind": kind, "contested": contested}
     if contested:
-        d["contender_value"] = "Gemma 4 E4B"
-        d["contender_origin"] = "agent"
+        d["contender_value"], d["contender_origin"] = contender
     return d
 
 
