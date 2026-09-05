@@ -1332,6 +1332,7 @@ the summary:
 ```powershell
 $env:PSEUDOLIFE_BENCH_POOL_MULT = "4"   # unset = shipped default 1
 $env:PSEUDOLIFE_BENCH_FUSION    = "rrf" # unset = shipped weighted_sum
+$env:PSEUDOLIFE_BENCH_RERANK    = "1"   # unset/0/false/off = shipped default off (cross-encoder)
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
     --tag arm1-pool --phase extract
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
@@ -1354,14 +1355,21 @@ and per-question wins/losses:
 |---|---|---|---|
 | naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 (-0.115, p 0.0506, 4W/13L) | 0.782 @ 1643.0 (-0.077, p 0.1071, 2W/8L) |
 | cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) |
-| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 (-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, 1W/3L) |
+| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 (-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, 1W/3L) |
 | commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 (0.000, p 1.0, 1W/1L) | 0.859 @ 544.5 (+0.013, p 1.0, 2W/1L) |
 
 **The cortex arm is the control with identical input.** It never touches
 `cms.retrieve`, so it scores 0.667 in all three runs with 0 wins and 0
-losses — a measured noise floor of exactly zero on this instrument. Every
-delta above is therefore a real difference in the served context, not
-judge jitter.
+losses. Corrected 2026-09-05: that is 0 of 78 flipped, which **bounds**
+the noise floor at ≤3.8% at 95% (rule of three) — it is not the "noise
+floor of exactly zero" this paragraph used to claim, because no finite
+run of identical inputs can measure a rate of zero. What makes the bound
+tight is causal rather than statistical: the answerer is deterministic
+and the cortex arm's served context is byte-identical across every cell,
+so it has nothing to flip on. The two RAG deltas above (-0.115, -0.077)
+are several times that bound and are real differences in the served
+context; the cascade's +0.013 is one question and sits inside it, which
+is why the reading below already calls it noise.
 
 **Reading it honestly.** Nothing is positive except the cascade's single
 +0.013 under weighted_sum, which is one question (2W/1L, p 1.0) and is
@@ -1374,13 +1382,15 @@ rag/hybrid/cascade, cortex unchanged). A
 knob that costs that much more context to lose 0.115 on its primary arm
 does not need a tighter p-value to be declined.
 
-**The reranker-on cell is untested.** Both runs had the cross-encoder OFF
-and an empty reference bank. That is the only combination measured, and
-it is the only one the CAUTION on `SearchConfig.fusion` permits: under
-rrf the reranker's `fusion_weight` collapses to cross-encoder-only
-ordering and un-rescaled reference cosines outrank every memory. Whether
-a widened pool pays off *with* the cross-encoder — the configuration the
-whole retrieve-then-rerank shape was built for — remains unmeasured.
+**All three runs above measured the cross-encoder OFF**, against an
+empty reference bank. That was deliberate, not an oversight: it is the
+only combination the CAUTION on `SearchConfig.fusion` permits, because
+under rrf the reranker's `fusion_weight` collapses to
+cross-encoder-only ordering and un-rescaled reference cosines outrank
+every memory. Whether a widened pool pays off *with* the cross-encoder
+— the configuration the whole retrieve-then-rerank shape was built for
+— was measured the next day under `weighted_sum`, in the two cells
+below. It does not change the verdict above.
 
 Artifacts (all committed):
 `results/longmemeval-ku-oracle-qwen-27b-pool-{ctl,m4rrf,m4sum}.jsonl`
@@ -1391,6 +1401,104 @@ and their `.summary.json`; paired comparisons
 This is why both knobs ship at today's behaviour, stay off the Console
 (`tests/test_console_knob_gapfill.py`), and are documented as measured
 losers rather than as unmeasured options.
+
+#### Reranker-on cells (2026-09-05): the reranker is a wash
+
+Turning the cross-encoder on recovers the width penalty and converts
+none of it into a win. Two more judged runs over the same slice
+(LongMemEval knowledge-update **oracle**, n=78, qwen-27b extraction,
+the reproducible Qwen3.8 server, the same judge and answerer as the
+three runs above), both with the reranker ON:
+
+```powershell
+$env:PSEUDOLIFE_BENCH_RERANK    = "1"
+$env:PSEUDOLIFE_BENCH_FUSION    = "weighted_sum"  # NOT rrf - see the CAUTION above
+$env:PSEUDOLIFE_BENCH_POOL_MULT = "4"             # "1" for the pool-m1rr cell
+```
+
+`weighted_sum` is not a preference: under `rrf` the reranker's
+`fusion_weight` collapses to cross-encoder-only ordering, so an
+rrf + reranker cell would measure the cross-encoder alone rather than
+the fusion, and would not be comparable to anything. `pool-m1rr`
+isolates the reranker at the shipped pool width; `pool-m4rr` is the
+wide pool the reranker was supposed to rescue.
+
+Accuracy @ mean context tokens, all five cells:
+
+| arm | shipped (`pool-ctl`) | m4 + rrf (`pool-m4rrf`) | m4 + sum (`pool-m4sum`) | m1 + rerank (`pool-m1rr`) | m4 + rerank (`pool-m4rr`) |
+|---|---|---|---|---|---|
+| naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 | 0.782 @ 1643.0 | 0.872 @ 1184.1 | 0.885 @ 1505.5 |
+| cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 | 0.667 @ 96.7 | 0.667 @ 96.7 | 0.667 @ 96.7 |
+| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 | 0.872 @ 1748.6 | 0.885 @ 1289.7 | 0.885 @ 1611.0 |
+| commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 | 0.859 @ 544.5 | 0.833 @ 389.4 | 0.872 @ 519.3 |
+
+Paired against the same `pool-ctl` control, with the bootstrap p
+(10 000 draws, seed 0) and per-question wins/losses:
+
+| arm | `pool-m1rr` vs ctl | `pool-m4rr` vs ctl |
+|---|---|---|
+| naive RAG (top-6 turns) | +0.013, p 1.0, 2W/1L | +0.026, p 0.694, 4W/2L |
+| cortex facts only | 0.000, p 1.0, 0W/0L | 0.000, p 1.0, 0W/0L |
+| hybrid (facts + top-6 turns) | -0.013, p 1.0, 0W/1L | -0.013, p 1.0, 1W/2L |
+| commit-gated cascade | -0.013, p 1.0, 0W/1L | +0.026, p 0.5053, 2W/0L |
+
+**The knob was live.** Both new summaries carry
+`bench_env.reranker.enabled: true`, and the `pool-ctl` summary carries
+no `reranker` key at all. That stamp is what makes these cells
+comparable: it is evidence the runs differ in the reranker and not in
+something unrecorded, the same role `bench_env.candidate_pool` already
+plays for the pool width. The cortex arm remains the control — 0.667
+with 0W/0L in both new cells, as in all three 2026-09-04 runs. Read that
+as a bound, not as a zero: 0 of 78 flipped puts the noise floor at ≤3.8%
+at 95% (rule of three), tight for the causal reason above — deterministic
+answerer, cortex context byte-identical across all five cells. It
+matters here in a way it did not on 2026-09-04, because these deltas are
+small: every `pool-m1rr` delta in the table above is ±0.013, exactly one
+question, and one question in 78 is 1.3% — inside the bound. On the same
+reading `pool-m4rr`'s +0.026 is two questions, 2.6%, also inside it. That
+is the quantitative form of the verdict below: these cells are a wash.
+
+**Reading it.** At the shipped width the reranker cannot change *what*
+is served, only the order: `pool-m1rr`'s context tokens are identical
+to the control's on every arm, to the tenth of a token, because at
+multiplier 1 the candidate pool equals the served count. What is left
+is ordering, and ordering moves about one question per arm in each
+direction — +0.013 on rag, -0.013 on hybrid and cascade, every one of
+them at p 1.0. At multiplier 4 the reranker does do the job it was
+built for: it undoes the width penalty, lifting rag from `pool-m4sum`'s
+0.782 back to 0.885, which is +0.026 *over* the control instead of the
+-0.077 without it. But +0.026 is two questions net at p 0.694, it buys
+that with 27% more context on the rag arm (1505.5 against 1184.1
+tokens), and the hybrid arm — the strongest arm on this slice — still
+lands 0.013 *below* control. The reranker rescues the wide pool from
+being a loser without making it a winner. Both pool knobs and the
+reranker stay at their shipped defaults, and the retrieve-then-rerank
+shape is now measured rather than assumed.
+
+Wall time comes from the artifacts, not from a stopwatch. Every judged
+row carries a `wall_seconds` field — the elapsed time of that question's
+`--phase extract` body, written per row by `longmemeval_bench.py` — so
+summing it across each cell's 78 rows gives that cell's extract leg
+exactly. With the cross-encoder ON: **96.5 min** (`pool-m4rr`) and
+**66.3 min** (`pool-m1rr`). With it off: **40.1 min** (`pool-ctl`),
+**39.1 min** (`pool-m4rrf`) and **38.9 min** (`pool-m4sum`). That is
+**2.45x** and **1.68x** the reranker-off mean — the range is
+**1.7-2.5x**, not the "2-3x" an earlier version of this paragraph
+quoted from the terminal rather than from the artifacts, and the
+reranker-off cells are 40 min rather than the 35 it also quoted.
+
+It is still not a controlled benchmark: the machine was running other
+jobs throughout, and `wall_seconds` times the whole per-question extract
+body rather than the cross-encoder alone. Read it as "the cross-encoder
+costs real time on a full re-extraction", directionally consistent with
+the 7-11x per-search latency the proxy table above measures under
+controlled conditions.
+
+Artifacts (all committed):
+`results/longmemeval-ku-oracle-qwen-27b-pool-{m1rr,m4rr}.jsonl` and
+their `.summary.json`; paired comparisons
+`results/compare-pool-m1rr-pairs.json` and
+`results/compare-pool-m4rr-pairs.json`.
 
 **Regression gate for the v35 label carrier (2026-09-03).** Two paired
 checks confirmed the write-time `authority`/`distortion_tolerance` labels
@@ -2349,7 +2457,7 @@ that only mean **served**, which is the distinction the raw numbers hide:
 
 | counter | what it actually means |
 | --- | --- |
-| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced |
+| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced (`used_via` `get` / `reinforce`), or named by the agent in `memory_outcome(used_ids=...)` (`outcome`) |
 | `entries.explicit_reinforcements` | consumption — moves only on `memory_reinforce` |
 | `entries.access_count` | **serve count** — `cms.py` bumps it for every entry in a merged result set |
 | `slot_reads.read_count` | **serve count** — `_track_slot_reads`: "count each slot SERVED as an answer" |
@@ -2400,6 +2508,21 @@ Option 2 is the one worth shipping: it is a single optional list
 parameter, it is written by the agent that just used the memories, and it
 labels the whole served set rather than the one id someone happened to
 dereference.
+
+**Shipped 2026-09-05.** `memory_outcome(..., used_ids=[...])` credits each
+id to the most recent event in the session window that served it, writing
+the ordinary `retrieval_uses` row under `used_via="outcome"` — so
+`retrieval_replay.py`'s `uses` label source and this script's `by_via`
+breakdown pick it up with no harness change, and the two dereference vias
+stay distinguishable from the asserted one. No schema bump, and no join:
+nothing links a signal row to the use rows it caused — the labels stand on
+their own, and which outcome named which ids is deliberately not recorded.
+The result reports `used_ids_recorded`, `used_ids_unmatched` and
+`used_ids_errors`, because an id no event served must not read the same as
+a landed label, and neither must a label the storage layer refused.
+Whether agents actually pass it is the open question — the served session-start block
+(`MEMORY_LOOP_BLOCK`) now asks for it in the REFLECT beat, and the next
+telemetry review measures the answer against the 1 label above.
 
 ## `retrieval_replay.py` — the shipped knobs on the queries agents really asked
 
@@ -2840,7 +2963,11 @@ text, so the escaping is not paid. (Its JSON size, 7,644, is in the artifact
 under `chars` for comparability and is not the cost.) The block is capped at
 `HOOK_CONTEXT_MAX_CHARS - 2,000` = 7,500 raw chars by
 `tests/test_plugin_packaging.py`, which is why it is the one surface here
-with almost no headroom.
+with almost no headroom. (Both rows above are the 2026-09-04 run. The
+2026-09-05 `used_ids` change re-priced them slightly — the block to 7,488
+raw chars, and the manifest by the new parameter's 81-char description in
+all three tiers — without a rerun of this ledger, which needs the live
+daemon.)
 
 ## What a call costs — before and after the cuts
 
