@@ -900,7 +900,11 @@ class SearchConfig:
     # never saw more than ~11 candidates. Not a tuned constant, and not
     # unmeasured either: multiplier 4 was run through a judged eval on
     # 2026-09-04 and LOST under both fusions (see the verdict on
-    # ``fusion`` below), so it ships at 1.
+    # ``fusion`` below), so it ships at 1. Amended 2026-09-05: with the
+    # cross-encoder reranker ON, multiplier 4 no longer loses on the rag
+    # arm (+0.026, p 0.694, at 27% more context) but does not win either
+    # and still trails on hybrid — a wash, so it still ships at 1
+    # (evals/README.md, "Reranker-on cells (2026-09-05)").
     candidate_pool_multiplier: int = 1
     # How the dense / slot / BM25 / timeline channels are merged.
     #   "weighted_sum" — today's behaviour: BM25 contributes
@@ -945,7 +949,11 @@ class SearchConfig:
     # Plainly: do NOT combine "rrf" with the cross-encoder reranker or a
     # populated reference bank until that combination has been measured.
     # The judged verdict below covers rrf with the reranker OFF and an
-    # empty reference bank; nothing else is measured.
+    # empty reference bank; nothing else is measured. Amended 2026-09-05:
+    # ``weighted_sum`` WITH the reranker is now measured too, at pool
+    # multipliers 1 and 4 — a wash, and still not rrf, which stays
+    # unmeasured in that combination for the reason above
+    # (evals/README.md, "Reranker-on cells (2026-09-05)").
     #
     # Judged verdict (2026-09-04, LongMemEval knowledge-update oracle,
     # n=78, qwen-27b extraction): "rrf" at multiplier 4 LOSES —

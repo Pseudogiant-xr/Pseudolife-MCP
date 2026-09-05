@@ -1806,6 +1806,212 @@ for _cid, _needle, _val, _stated, _places in [
         value=_val, stated=_stated, places=_places))
 
 
+# The forgetting sweep (evals/README.md, 2026-09-05): the follow-up the
+# distractor probe's interpretation rule called for. Every published cell of
+# the arm x scale x capacity table is pinned, plus the four gate deltas and
+# the survival numbers that explain them.
+SWEEP = RESULTS + "forgetting-sweep-probe-20260905.json"
+
+
+def _cell(capacity: str, scale: str, arm: str, field: str = "evidence_in_top6_mean"):
+    return lambda d: d["cells"][capacity][scale][arm][field]
+
+
+# The table rows: needle is the whole markdown row, so a rewrite that drops
+# any cell fails here rather than quietly stopping guarding.
+for _cap, _scale, _row in [
+    ("C1", "1x", "| C1 | 1x | 488.3 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 |"),
+    ("C1", "3x", "| C1 | 3x | 1464.8 | 0.7583 | 0.1528 | 0.0807 | 0.1528 | 0.4216 | 0.9030 |"),
+    ("C1", "7x", "| C1 | 7x | 3418.0 | 0.6840 | 0.0465 | 0.0064 | 0.0465 | 0.1390 | 0.9063 |"),
+    ("C1", "15x", "| C1 | 15x | 7324.2 | 0.5969 | 0.0192 | 0.0000 | 0.0192 | 0.0710 | 0.9191 |"),
+    ("C1", "31x", "| C1 | 31x | 15136.7 | 0.5130 | 0.0000 | 0.0000 | 0.0000 | 0.0198 | 0.9121 |"),
+    ("C3", "7x", "| C3 | 7x | 3418.0 | 0.6840 | 0.2736 | 0.0791 | 0.2736 | 0.3522 | 0.8571 |"),
+    ("C3", "15x", "| C3 | 15x | 7324.2 | 0.5969 | 0.0652 | 0.0064 | 0.0652 | 0.1491 | 0.8752 |"),
+    ("C3", "31x", "| C3 | 31x | 15136.7 | 0.5130 | 0.0454 | 0.0000 | 0.0454 | 0.0845 | 0.8666 |"),
+]:
+    _cells = [c.strip() for c in _row.strip("|").split("|")]
+    CLAIMS.append(Claim(
+        id=f"sweep-{_cap}-{_scale}-pool", doc=EVALS, needle=_row,
+        artifacts=(SWEEP,), value=_cell(_cap, _scale, "none", "n_pool_entries_mean"),
+        stated=float(_cells[2]), places=1))
+    for _arm, _stated in zip(
+            ("none", "balanced", "recency_heavy", "surprise_heavy", "random",
+             "oracle"), _cells[3:]):
+        CLAIMS.append(Claim(
+            id=f"sweep-{_cap}-{_scale}-{_arm}", doc=EVALS, needle=_row,
+            artifacts=(SWEEP,), value=_cell(_cap, _scale, _arm),
+            stated=float(_stated), places=4))
+
+# The swept pool sizes quoted under the table.
+for _cid, _needle, _cap, _stated in [
+    ("sweep-c1-kept", "488.3 entries at every scale under C1", "C1", 488.3),
+    ("sweep-c3-kept", "and 1464.8 under C3.)", "C3", 1464.8),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_cell(_cap, "15x", "balanced", "n_pool_entries_mean"),
+        stated=_stated, places=1))
+
+# Gate deltas and p-values.
+for _cid, _needle, _val, _stated, _places in [
+    ("sweep-gf0-cells", "all 390 question × scale cells",
+     lambda d: float(d["control"]["n_cells_checked"]), 390.0, 0),
+    ("sweep-gf1-balanced", "**−0.5777 (balanced)",
+     lambda d: d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"], -0.5777, 4),
+    ("sweep-gf1-recency", "−0.5969 (recency_heavy)",
+     lambda d: d["gates"]["G-F1"]["arms"]["recency_heavy"]["delta_mean"], -0.5969, 4),
+    ("sweep-gf1-surprise", "−0.5777\n  (surprise_heavy)",
+     lambda d: d["gates"]["G-F1"]["arms"]["surprise_heavy"]["delta_mean"], -0.5777, 4),
+    ("sweep-gf2-delta", "**+0.3222, p < 0.0001**",
+     lambda d: d["gates"]["G-F2"]["delta_mean"], 0.3222, 4),
+    ("sweep-gf3-balanced", "−0.0518 (p 0.0329)",
+     lambda d: d["gates"]["G-F3"]["arms"]["balanced"]["delta_mean"], -0.0518, 4),
+    ("sweep-gf3-balanced-p", "−0.0518 (p 0.0329)",
+     lambda d: d["gates"]["G-F3"]["arms"]["balanced"]["p"], 0.0329, 4),
+    ("sweep-gf3-recency", "−0.0710\n  (p 0.0002)",
+     lambda d: d["gates"]["G-F3"]["arms"]["recency_heavy"]["delta_mean"], -0.0710, 4),
+    ("sweep-gf3-recency-p", "−0.0710\n  (p 0.0002)",
+     lambda d: d["gates"]["G-F3"]["arms"]["recency_heavy"]["p"], 0.0002, 4),
+    ("sweep-gf4-sanity", "1x evidence-in-top-6 = 0.8299",
+     lambda d: d["gates"]["G-F4"]["evidence_in_top6_mean"], 0.8299, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_val, stated=_stated, places=_places))
+
+# Evidence survival at the gate cell — the mechanism sentence.
+for _arm, _needle, _stated in [
+    ("balanced", "0.0214 (balanced and surprise_heavy)", 0.0214),
+    ("surprise_heavy", "0.0214 (balanced and surprise_heavy)", 0.0214),
+    ("recency_heavy", "0.0000\n(recency_heavy)", 0.0000),
+    ("random", "0.0727 (random)", 0.0727),
+    ("oracle", "1.0000 (`none` and `oracle`)", 1.0000),
+]:
+    CLAIMS.append(Claim(
+        id=f"sweep-survival-{_arm}", doc=EVALS, needle=_needle,
+        artifacts=(SWEEP,),
+        value=_cell("C1", "15x", _arm, "evidence_survival_mean"),
+        stated=_stated, places=4))
+
+# The latency pair quoted beside the quality cliff.
+for _cid, _needle, _arm, _field, _stated in [
+    ("sweep-bm25-unswept", "from 812 ms unswept to 29 ms at C1", "none",
+     "bm25_latency_ms_median", 812.0),
+    ("sweep-bm25-swept", "from 812 ms unswept to 29 ms at C1", "balanced",
+     "bm25_latency_ms_median", 29.0),
+    ("sweep-select-unswept", "from 1052 ms to 44 ms", "none",
+     "select_topk_latency_ms_median", 1052.0),
+    ("sweep-select-swept", "from 1052 ms to 44 ms", "balanced",
+     "select_topk_latency_ms_median", 44.0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_cell("C1", "15x", _arm, _field), stated=_stated, places=0))
+
+# The mechanism sentence's corpus rates, in both docs that state them. These
+# are NOT derivable from the sweep artifact — it records retrieval metrics,
+# not supersession counts — so they carry their own committed artifact,
+# written by `forgetting_sweep_probe.py --corpus-props`.
+SWEEP_CORPUS = RESULTS + "forgetting-sweep-corpus-props-20260905.json"
+for _doc, _tag, _needle in [
+    (EVALS, "readme",
+     "**247 of 286 gold-evidence entries (0.8636) are flagged\nsuperseded**, against a 0.7341 base rate over 38,086 entries"),
+    (CHANGELOG, "changelog",
+     "247 of 286 gold-evidence entries\n  (0.8636) in this corpus are flagged superseded against a 0.7341 base\n  rate"),
+]:
+    for _field, _stated, _places in [
+        ("evidence_superseded_rate", 0.8636, 4),
+        ("n_evidence_superseded", 247, 0),
+        ("n_evidence_entries", 286, 0),
+        ("superseded_rate", 0.7341, 4),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"sweep-corpus-{_tag}-{_field}", doc=_doc, needle=_needle,
+            artifacts=(SWEEP_CORPUS,),
+            value=(lambda f: lambda d: float(d[f]))(_field),
+            stated=_stated, places=_places))
+CLAIMS.append(Claim(
+    id="sweep-corpus-readme-n-entries", doc=EVALS,
+    needle="0.7341 base rate over 38,086 entries",
+    artifacts=(SWEEP_CORPUS,), value=lambda d: float(d["n_entries"]),
+    stated=38086, places=0))
+
+
+# The sweep's cost stated as a ratio to accumulation's, in both docs that
+# state it. Neither doc's number is in the artifact as a ratio, so the
+# claim is COMPUTED from the two that are: the accumulation cost the
+# distractor probe measured (1x minus 15x on the `none` arm, 0.2330) and
+# the sweep cost G-F1 measured (balanced minus none at the gate cell,
+# 0.5777). Both docs published "roughly three times" until the 2026-09-05
+# review fold recomputed it at 2.48; they now say "two and a half", one
+# decimal, hence `places=1`.
+def _sweep_cost_ratio(d: dict) -> float:
+    c = d["cells"]["C1"]
+    accumulation = (c["1x"]["none"]["evidence_in_top6_mean"]
+                    - c["15x"]["none"]["evidence_in_top6_mean"])
+    sweeping = -d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"]
+    return sweeping / accumulation
+
+
+for _cid, _doc, _needle in [
+    ("sweep-cost-ratio-evals", EVALS,
+     "Sweeping to a lean bank costs\n  about two and a half times what "
+     "accumulating to 15x costs."),
+    ("sweep-cost-ratio-changelog", CHANGELOG,
+     "so sweeping costs about two and a half times what accumulating to "
+     "15x\n  costs"),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(SWEEP,),
+        value=_sweep_cost_ratio, stated=2.5, places=1))
+
+# The CHANGELOG restates the gate numbers in its own words, and a
+# restatement is a claim like any other — the 2026-09-02 queue-judge block
+# below pins CHANGELOG text the same way. The needles carry the
+# CHANGELOG's own wrapping, not the README's, so rewrapping either doc
+# alone still fails here rather than quietly stopping guarding.
+_CL_ORDERING = ("**oracle 0.9191, no\n  sweep 0.5969, random 0.0710, "
+                "balanced 0.0192, surprise_heavy 0.0192,\n  "
+                "recency_heavy 0.0000.**")
+_CL_GF1 = ("**−0.5777 / −0.5969 / −0.5777 against no sweep, "
+           "all p < 0.0001**")
+_CL_GF2 = "**oracle − none = +0.3222,\n  p < 0.0001**"
+for _cid, _needle, _val, _stated, _places in [
+    ("sweep-cl-oracle", _CL_ORDERING, _cell("C1", "15x", "oracle"), 0.9191, 4),
+    ("sweep-cl-none", _CL_ORDERING, _cell("C1", "15x", "none"), 0.5969, 4),
+    ("sweep-cl-random", _CL_ORDERING, _cell("C1", "15x", "random"), 0.0710, 4),
+    ("sweep-cl-balanced", _CL_ORDERING,
+     _cell("C1", "15x", "balanced"), 0.0192, 4),
+    ("sweep-cl-surprise", _CL_ORDERING,
+     _cell("C1", "15x", "surprise_heavy"), 0.0192, 4),
+    ("sweep-cl-recency", _CL_ORDERING,
+     _cell("C1", "15x", "recency_heavy"), 0.0000, 4),
+    ("sweep-cl-gf1-balanced", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"],
+     -0.5777, 4),
+    ("sweep-cl-gf1-recency", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["recency_heavy"]["delta_mean"],
+     -0.5969, 4),
+    ("sweep-cl-gf1-surprise", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["surprise_heavy"]["delta_mean"],
+     -0.5777, 4),
+    ("sweep-cl-gf2-delta", _CL_GF2,
+     lambda d: d["gates"]["G-F2"]["delta_mean"], 0.3222, 4),
+    ("sweep-cl-1x-none", "bank's 0.8299, so thinning helps",
+     _cell("C1", "1x", "none"), 0.8299, 4),
+    ("sweep-cl-gf0-cells", "across all 390 question × scale cells**",
+     lambda d: float(d["control"]["n_cells_checked"]), 390.0, 0),
+    # Runtime: the CHANGELOG kept the FIRST run's 1,040 s after the
+    # artifact was regenerated (de1ec39e) at 1195.9 s. Pinned here so the
+    # doc and the artifact cannot drift apart again unnoticed.
+    ("sweep-cl-runtime", "CPU only, 1,196 s",
+     lambda d: float(d["runtime_s"]), 1196.0, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(SWEEP,),
+        value=_val, stated=_stated, places=_places))
+
+
 # The judge-model ladder's published auto-reject precisions (CHANGELOG,
 # 2026-08-16): the measured floor for the autonomous Step-C judge.
 JUDGE_LADDER = RESULTS + "judge-ladder-20260816.json"
@@ -3749,7 +3955,7 @@ _POOL_JUDGED = [
      0.667, 96.7, 0.667, 96.7, 0.000, 1.0, 0, 0,
      0.667, 96.7, 0.000, 1.0, 0, 0),
     ("hybrid",
-     "| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
+     "| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
      "(-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, "
      "1W/3L) |",
      0.897, 1289.7, 0.833, 1898.6, -0.064, 0.1265, 1, 6,
@@ -3872,6 +4078,289 @@ for _cid, _needle, _art, _stated in [
         # carries the signed delta.
         value=lambda d: -_pool_paired("rag", "delta")(d),
         stated=_stated, places=3))
+
+# -- the reranker-on candidate-pool cells (2026-09-05) --------------------
+# The 2026-09-04 runs above all had the cross-encoder OFF, so the docs
+# carried a "remains unmeasured" caveat. These two cells retire it:
+# multiplier 1 + reranker (the reranker alone, on the shipped pool width)
+# and multiplier 4 + reranker (the wide pool the reranker was meant to
+# rescue), both under weighted_sum -- rrf is excluded by the CAUTION on
+# SearchConfig.fusion, not by preference. Verdict: a wash, so nothing is
+# promoted. Same split as above -- accuracies and token means come from
+# the summaries, every delta/p/win/loss from the pairing artifact.
+POOL_M1RR = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-m1rr.summary.json"
+POOL_M4RR = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-m4rr.summary.json"
+POOL_M1RR_PAIRS = RESULTS + "compare-pool-m1rr-pairs.json"
+POOL_M4RR_PAIRS = RESULTS + "compare-pool-m4rr-pairs.json"
+
+# The five-cell accuracy table. Each row is pinned across ALL five
+# columns, including the three 2026-09-04 cells: this is a second place a
+# reader meets those numbers, and the claim-text guard only protects the
+# needle it is given.
+# (verbatim README row, then (artifact, accuracy, context_tokens) x5)
+_POOL_RR_TABLE = [
+    ("| naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 | "
+     "0.782 @ 1643.0 | 0.872 @ 1184.1 | 0.885 @ 1505.5 |",
+     "rag",
+     ((POOL_CTL, 0.859, 1184.1), (POOL_M4RRF, 0.744, 1793.0),
+      (POOL_M4SUM, 0.782, 1643.0), (POOL_M1RR, 0.872, 1184.1),
+      (POOL_M4RR, 0.885, 1505.5))),
+    ("| cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 | 0.667 @ 96.7 "
+     "| 0.667 @ 96.7 | 0.667 @ 96.7 |",
+     "cortex",
+     ((POOL_CTL, 0.667, 96.7), (POOL_M4RRF, 0.667, 96.7),
+      (POOL_M4SUM, 0.667, 96.7), (POOL_M1RR, 0.667, 96.7),
+      (POOL_M4RR, 0.667, 96.7))),
+    ("| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
+     "| 0.872 @ 1748.6 | 0.885 @ 1289.7 | 0.885 @ 1611.0 |",
+     "hybrid",
+     ((POOL_CTL, 0.897, 1289.7), (POOL_M4RRF, 0.833, 1898.6),
+      (POOL_M4SUM, 0.872, 1748.6), (POOL_M1RR, 0.885, 1289.7),
+      (POOL_M4RR, 0.885, 1611.0))),
+    ("| commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 | "
+     "0.859 @ 544.5 | 0.833 @ 389.4 | 0.872 @ 519.3 |",
+     "cascade",
+     ((POOL_CTL, 0.846, 389.4), (POOL_M4RRF, 0.846, 598.7),
+      (POOL_M4SUM, 0.859, 544.5), (POOL_M1RR, 0.833, 389.4),
+      (POOL_M4RR, 0.872, 519.3))),
+]
+
+_POOL_RR_CELL = {POOL_CTL: "ctl", POOL_M4RRF: "m4rrf", POOL_M4SUM: "m4sum",
+                 POOL_M1RR: "m1rr", POOL_M4RR: "m4rr"}
+
+for _needle, _arm, _cells in _POOL_RR_TABLE:
+    for _art, _acc, _tok in _cells:
+        _tag = _POOL_RR_CELL[_art]
+        CLAIMS.append(Claim(
+            id=f"pool-rr-table-{_tag}-{_arm}-acc", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_arm(_arm, "accuracy"),
+            stated=_acc, places=3))
+        CLAIMS.append(Claim(
+            id=f"pool-rr-table-{_tag}-{_arm}-tokens", doc=EVALS,
+            needle=_needle, artifacts=(_art,),
+            value=_pool_arm(_arm, "context_tokens"), stated=_tok, places=1))
+
+# The paired table. The m1rr token columns above are the load-bearing half
+# of the "it only reorders the served set" reading, and they are pinned
+# against POOL_M1RR directly -- if that run had changed which turns were
+# served, those four pins go red, not the prose.
+# (verbatim README row, arm, m1rr d/p/W/L, m4rr d/p/W/L)
+_POOL_RR_PAIRED = [
+    ("| naive RAG (top-6 turns) | +0.013, p 1.0, 2W/1L | "
+     "+0.026, p 0.694, 4W/2L |",
+     "rag", (0.013, 1.0, 2, 1), (0.026, 0.694, 4, 2)),
+    ("| cortex facts only | 0.000, p 1.0, 0W/0L | 0.000, p 1.0, 0W/0L |",
+     "cortex", (0.000, 1.0, 0, 0), (0.000, 1.0, 0, 0)),
+    ("| hybrid (facts + top-6 turns) | -0.013, p 1.0, 0W/1L | "
+     "-0.013, p 1.0, 1W/2L |",
+     "hybrid", (-0.013, 1.0, 0, 1), (-0.013, 1.0, 1, 2)),
+    ("| commit-gated cascade | -0.013, p 1.0, 0W/1L | "
+     "+0.026, p 0.5053, 2W/0L |",
+     "cascade", (-0.013, 1.0, 0, 1), (0.026, 0.5053, 2, 0)),
+]
+
+for _needle, _arm, _m1, _m4 in _POOL_RR_PAIRED:
+    for _tag, _art, (_d, _pv, _w, _l) in (("m1rr", POOL_M1RR_PAIRS, _m1),
+                                          ("m4rr", POOL_M4RR_PAIRS, _m4)):
+        for _field, _stated, _places in (("delta", _d, 3), ("p", _pv, 4),
+                                         ("wins", _w, 0), ("losses", _l, 0)):
+            CLAIMS.append(Claim(
+                id=f"pool-rr-paired-{_tag}-{_arm}-{_field}", doc=EVALS,
+                needle=_needle, artifacts=(_art,),
+                value=_pool_paired(_arm, _field), stated=_stated,
+                places=_places))
+
+
+def _pool_token_pct(a, b):
+    """m4rr's rag context cost over the control's, as a percentage."""
+    return (a["arms"]["rag"]["context_tokens"]
+            / b["arms"]["rag"]["context_tokens"] - 1.0) * 100.0
+
+
+# Both docs state the width cost as a rounded percentage rather than as
+# the two token means, so the ratio gets its own pin in each.
+CLAIMS.append(Claim(
+    id="pool-rr-token-pct-evals", doc=EVALS,
+    needle="27% more context on the rag arm (1505.5 against 1184.1",
+    artifacts=(POOL_M4RR, POOL_CTL), value=_pool_token_pct,
+    stated=27, places=0))
+CLAIMS.append(Claim(
+    id="pool-rr-token-pct-changelog", doc=CHANGELOG,
+    needle="p 0.694, 4W/2L) but serves 27%",
+    artifacts=(POOL_M4RR, POOL_CTL), value=_pool_token_pct,
+    stated=27, places=0))
+
+# The CHANGELOG restates the verdict in prose. Pinned separately, per the
+# retire-at-the-old-site rule: a claim is guarded wherever it is made.
+_RR_CL_WIDE = ("0.885 (+0.026 against the 0.859 control, p 0.694, 4W/2L)")
+_RR_CL_HYB = ("hybrid arm still lands at 0.885\n  (-0.013, p 1.0) under its "
+              "0.897 control")
+_RR_CL_M1 = "rag 0.872 (+0.013, p 1.0),"
+_RR_CL_FLOOR = "holds 0.667, 0W/0L, in both cells"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("changelog-rr-m4sum-rag", "from `pool-m4sum`'s 0.782 to", POOL_M4SUM,
+     _pool_arm("rag", "accuracy"), 0.782, 3),
+    ("changelog-rr-m4rr-rag", _RR_CL_WIDE, POOL_M4RR,
+     _pool_arm("rag", "accuracy"), 0.885, 3),
+    ("changelog-rr-m4rr-rag-delta", _RR_CL_WIDE, POOL_M4RR_PAIRS,
+     _pool_paired("rag", "delta"), 0.026, 3),
+    ("changelog-rr-ctl-rag", _RR_CL_WIDE, POOL_CTL,
+     _pool_arm("rag", "accuracy"), 0.859, 3),
+    ("changelog-rr-m4rr-rag-p", _RR_CL_WIDE, POOL_M4RR_PAIRS,
+     _pool_paired("rag", "p"), 0.694, 4),
+    ("changelog-rr-m4rr-rag-wins", _RR_CL_WIDE, POOL_M4RR_PAIRS,
+     _pool_paired("rag", "wins"), 4, 0),
+    ("changelog-rr-m4rr-rag-losses", _RR_CL_WIDE, POOL_M4RR_PAIRS,
+     _pool_paired("rag", "losses"), 2, 0),
+    ("changelog-rr-m4rr-hybrid", _RR_CL_HYB, POOL_M4RR,
+     _pool_arm("hybrid", "accuracy"), 0.885, 3),
+    ("changelog-rr-m4rr-hybrid-delta", _RR_CL_HYB, POOL_M4RR_PAIRS,
+     _pool_paired("hybrid", "delta"), -0.013, 3),
+    ("changelog-rr-ctl-hybrid", _RR_CL_HYB, POOL_CTL,
+     _pool_arm("hybrid", "accuracy"), 0.897, 3),
+    ("changelog-rr-m1rr-rag", _RR_CL_M1, POOL_M1RR,
+     _pool_arm("rag", "accuracy"), 0.872, 3),
+    ("changelog-rr-m1rr-rag-delta", _RR_CL_M1, POOL_M1RR_PAIRS,
+     _pool_paired("rag", "delta"), 0.013, 3),
+    ("changelog-rr-m1rr-floor", _RR_CL_FLOOR, POOL_M1RR,
+     _pool_arm("cortex", "accuracy"), 0.667, 3),
+    ("changelog-rr-m4rr-floor", _RR_CL_FLOOR, POOL_M4RR,
+     _pool_arm("cortex", "accuracy"), 0.667, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+
+def test_reranker_on_cells_stamp_the_knob():
+    """The `bench_env.reranker` stamp is the only in-artifact evidence
+    that these two cells ran with the cross-encoder on and the control
+    did not. Both docs lean on it by name, so it is asserted, not
+    assumed -- a summary regenerated without the stamp would otherwise
+    leave the comparison resting on a claim in prose.
+    """
+    for path in (POOL_M1RR, POOL_M4RR):
+        env = _load_artifact(path).get("bench_env", {})
+        assert env.get("reranker", {}).get("enabled") is True, (
+            f"{path}: bench_env.reranker.enabled is not true, so this "
+            f"cell is not evidence for a reranker-on claim")
+        assert env["candidate_pool"]["fusion"] == "weighted_sum", (
+            f"{path}: fusion is not weighted_sum -- the CAUTION on "
+            f"SearchConfig.fusion excludes rrf from a reranker-on cell")
+    ctl = _load_artifact(POOL_CTL).get("bench_env", {})
+    assert not ctl.get("reranker", {}).get("enabled"), (
+        "pool-ctl summary claims the reranker was on; it is the "
+        "reranker-OFF control for both cells above")
+
+
+# -- the reranker's wall-time cost, summed from the rows (2026-09-05) -----
+# This paragraph used to quote the extract leg from the terminal -- "96
+# min, 75 min, roughly 35 min, call it 2-3x" -- and two of those four
+# figures were wrong, which is exactly the unbacked-number failure this
+# file exists to catch. Every judged row carries `wall_seconds` for its
+# --phase extract body, so each cell's leg is a sum over the committed
+# artifact: these pins COMPUTE it rather than restating a summary field.
+POOL_ROWS = {c: RESULTS + f"longmemeval-ku-oracle-qwen-27b-pool-{c}.jsonl"
+             for c in ("ctl", "m4rrf", "m4sum", "m1rr", "m4rr")}
+
+
+def _wall_minutes(rows) -> float:
+    """Sum of `wall_seconds` over one cell's judged rows, in minutes."""
+    return sum(r["wall_seconds"] for r in rows) / 60.0
+
+
+def _wall_ratio_vs_off(on, ctl, m4rrf, m4sum) -> float:
+    """A reranker-ON cell's leg over the mean of the three OFF cells.
+
+    The docs quote the ratio against the mean rather than against any one
+    off cell because the three are within 1.2 min of each other; pinning
+    it against the mean is what makes "1.7-2.5x" a range and not a pair
+    of cherry-picked pairwise numbers.
+    """
+    off = [_wall_minutes(c) for c in (ctl, m4rrf, m4sum)]
+    return _wall_minutes(on) / (sum(off) / len(off))
+
+
+_WALL_ON = "exactly. With the cross-encoder ON: **96.5 min** (`pool-m4rr`) and"
+_WALL_M1 = "**66.3 min** (`pool-m1rr`). With it off: **40.1 min** (`pool-ctl`),"
+_WALL_OFF = "**39.1 min** (`pool-m4rrf`) and **38.9 min** (`pool-m4sum`). That is"
+_WALL_RATIO = "**2.45x** and **1.68x** the reranker-off mean — the range is"
+
+for _cid, _needle, _cell, _stated in [
+        ("pool-rr-wall-m4rr", _WALL_ON, "m4rr", 96.5),
+        ("pool-rr-wall-m1rr", _WALL_M1, "m1rr", 66.3),
+        ("pool-rr-wall-ctl", _WALL_M1, "ctl", 40.1),
+        ("pool-rr-wall-m4rrf", _WALL_OFF, "m4rrf", 39.1),
+        ("pool-rr-wall-m4sum", _WALL_OFF, "m4sum", 38.9)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(POOL_ROWS[_cell],),
+        value=_wall_minutes, stated=_stated, places=1))
+
+for _cid, _cell, _stated in [("pool-rr-wall-ratio-m4rr", "m4rr", 2.45),
+                             ("pool-rr-wall-ratio-m1rr", "m1rr", 1.68)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_WALL_RATIO,
+        artifacts=(POOL_ROWS[_cell], POOL_ROWS["ctl"], POOL_ROWS["m4rrf"],
+                   POOL_ROWS["m4sum"]),
+        value=_wall_ratio_vs_off, stated=_stated, places=2))
+
+
+# -- the noise floor is a BOUND, not a zero (2026-09-05 review) -----------
+# 0 flips over 78 identical-input questions bounds the rate at <=3.8% at
+# 95% (rule of three); no finite run can measure it AT zero. Both docs
+# said "exactly zero" until this review. What is pinnable is the n they
+# divide by and the flip count itself, so both are.
+def _cortex_flips(d) -> float:
+    c = d["paired"]["a_vs_b"]["cortex"]
+    return float(c["wins"] + c["losses"])
+
+
+_FLOOR_EVALS_0904 = "losses. Corrected 2026-09-05: that is 0 of 78 flipped, which **bounds**"
+_FLOOR_EVALS_0905 = "as a bound, not as a zero: 0 of 78 flipped puts the noise floor at ≤3.8%"
+_FLOOR_CHANGELOG = "flipped, which bounds the noise floor at ≤3.8% at 95% (rule of three)"
+
+for _cid, _doc, _needle, _art in [
+        ("pool-floor-n-evals-0904", EVALS, _FLOOR_EVALS_0904, POOL_RRF_PAIRS),
+        ("pool-floor-n-evals-0905", EVALS, _FLOOR_EVALS_0905, POOL_M1RR_PAIRS),
+        ("pool-floor-n-changelog", CHANGELOG, _FLOOR_CHANGELOG,
+         POOL_M1RR_PAIRS)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=lambda d: float(d["n"]), stated=78, places=0))
+    CLAIMS.append(Claim(
+        id=_cid + "-flips", doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_cortex_flips, stated=0, places=0))
+
+
+def test_the_cortex_arm_is_byte_identical_across_all_five_pool_cells():
+    """The causal half of the noise-floor argument, asserted.
+
+    Both docs now state the floor as a BOUND (<=3.8%, rule of three over
+    78 questions) and then argue the bound is tight for a causal reason:
+    the answerer is deterministic and the cortex arm is served exactly
+    the same context in every cell, so it has nothing to flip on. That
+    clause is checkable, and unchecked it is only prose -- a re-extraction
+    that quietly moved the fact ranking would leave both docs claiming a
+    floor their own artifacts no longer support.
+    """
+    cells = {c: _load_artifact(p) for c, p in POOL_ROWS.items()}
+    base = {r["question_id"]: r for r in cells["ctl"]}
+    assert len(base) == 78, "pool-ctl is not the 78-question slice"
+    for name, rows in cells.items():
+        assert len(rows) == 78, f"pool-{name}: expected 78 judged rows"
+        for row in rows:
+            ref = base[row["question_id"]]
+            pairs = (("context", row["contexts"]["cortex"],
+                      ref["contexts"]["cortex"]),
+                     ("response", row["cortex_response"],
+                      ref["cortex_response"]),
+                     ("verdict", row["cortex_correct"], ref["cortex_correct"]))
+            for field, got, want in pairs:
+                assert got == want, (
+                    f"pool-{name}/{row['question_id']}: cortex {field} "
+                    f"differs from pool-ctl, so the cortex arm is not the "
+                    f"identical-input control both docs read it as")
+
 
 # ── the recall fan-out caps (2026-09-04) ─────────────────────────────────
 # CPU-only paired run on a restored copy of the live bank: the same 20

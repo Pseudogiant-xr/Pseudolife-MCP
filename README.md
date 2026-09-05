@@ -349,7 +349,7 @@ is agent context every session, so it stays lean.
 | `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
-| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
+| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits the serving `retrieval_events` row with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
 | `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
@@ -707,8 +707,9 @@ the loop: **RECALL at the start** (`memory_search` / `memory_lesson_search` /
 (`memory_store` with an honest `origin`, `memory_fact_set` for canonical
 facts, `memory_world_set` for cited external facts, `source="status"` for
 verbose logs so they stay out of the dream), **REFLECT at the end**
-(`memory_outcome` — the dream distils these signals into the lessons
-surfaced at your next session start).
+(`memory_outcome`, with `used_ids` naming the hits you actually used — the
+dream distils these signals into the lessons surfaced at your next session
+start).
 
 One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
 `ops/install-hook.sh --client codex` (Linux/macOS) — installs the

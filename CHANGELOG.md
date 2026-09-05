@@ -6,6 +6,181 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-09-05 — the reranker does not rescue the wide pool)
+- **The cross-encoder reranker recovers the candidate-pool width penalty
+  and converts none of it into a win.** The 2026-09-04 entry below measured
+  the wider dense pool with the reranker OFF, and it lost; the open question
+  was whether the reranker — the piece the whole retrieve-then-rerank shape
+  was built for — pays for the extra width. Two further judged runs over the
+  same LongMemEval knowledge-update **oracle** slice (n=78, qwen-27b
+  extraction, the same judge and answerer, `weighted_sum` fusion — never
+  `rrf`, under which the reranker's `fusion_weight` collapses to
+  cross-encoder-only ordering) answer no. With the wide pool
+  (`pool-m4rr`) the reranker lifts naive RAG from `pool-m4sum`'s 0.782 to
+  0.885 (+0.026 against the 0.859 control, p 0.694, 4W/2L) but serves 27%
+  more context tokens to do it, and the hybrid arm still lands at 0.885
+  (-0.013, p 1.0) under its 0.897 control. At the shipped width
+  (`pool-m1rr`) the reranker can only reorder the set that was already
+  going to be served — context tokens identical to the control on every
+  arm — and it moves roughly one question: rag 0.872 (+0.013, p 1.0),
+  hybrid and cascade -0.013 each, all at p 1.0. The cortex arm never
+  touches `cms.retrieve` and holds 0.667, 0W/0L, in both cells — 0 of 78
+  flipped, which bounds the noise floor at ≤3.8% at 95% (rule of three)
+  rather than measuring it at zero. The bound is tight for a causal
+  reason (deterministic answerer; the cortex arm's context is
+  byte-identical across all five cells), but it is still a bound, and
+  every `pool-m1rr` delta above is one question in 78 — inside it. Both
+  new summaries stamp
+  `bench_env.reranker.enabled: true`, which the control summary lacks —
+  that is the evidence the knob was live for these cells and not for the
+  control. Nothing is promoted: both pool knobs and the reranker stay at
+  their shipped defaults, and the reranker-on cell is now a measured wash
+  rather than an unmeasured option. Artifacts:
+  `evals/results/longmemeval-ku-oracle-qwen-27b-pool-{m1rr,m4rr}.jsonl`
+  with their `.summary.json`, and
+  `evals/results/compare-pool-{m1rr,m4rr}-pairs.json`; the table of all
+  five cells is in `evals/README.md`, "Reranker-on cells (2026-09-05)".
+
+### Changed (2026-09-05 — the bench can switch the reranker on)
+- The 2026-09-04 candidate-pool judged runs all measured the cross-encoder
+  reranker OFF, which left the reranker-on cell unmeasured until the entry
+  above. `evals/ladder_sweep.build_service`
+  now honours `PSEUDOLIFE_BENCH_RERANK` (`1`/`true`/`on`; unset or
+  `0`/`false`/`off` keeps the shipped default off; anything else aborts),
+  and `bench_env_knobs()` stamps it into every summary next to
+  `candidate_pool` — eval-only; the accuracy it went on to measure is the
+  entry above.
+- **`PSEUDOLIFE_BENCH_RERANK=0` now actually turns the reranker OFF.** Its
+  off-branch was a bare `pass`, which is indistinguishable from correct on
+  a stock config (the reranker ships off anyway) but silently wrong on any
+  config that has it on: the run would serve a reranker-ON retrieval while
+  `rerank_env_knobs()` stamped `enabled: false`, i.e. a judged artifact
+  whose retrieval stamp contradicts the retrieval it measured — the exact
+  failure the stamp exists to prevent. The existing off-path test could
+  not see it because it asserted against a fresh `MemoryConfig`; the new
+  one sets `reranker.enabled = True` first. No committed artifact is
+  affected: the branch only ever differed on a reranker-ON config, and all
+  five 2026-09-04/05 cells ran on a stock (reranker-off) config — the
+  three 2026-09-04 cells predate the knob and carry no `reranker` stamp,
+  the two 2026-09-05 cells set it to `1`.
+### Added (2026-09-05 — the agent labels what it used)
+- **The retrieval log had 1,349 events and one relevance label, so nothing
+  downstream could learn from it.** A label was only written when someone
+  dereferenced a served entry (`memory_get`) or reinforced it
+  (`memory_reinforce`), and agents read `memory_search`'s inline text instead
+  — `retrieval-telemetry-review-20260904.json` measured 0.074% of events
+  carrying any downstream signal. `memory_outcome` now takes an optional
+  **`used_ids`**: the entry ids the caller actually reasoned from. Each id
+  credits the most recent search in the session window that served it,
+  writing the ordinary `retrieval_uses` row under `used_via="outcome"` — the
+  table `retrieval_replay.py` and `retrieval_telemetry_review.py` already
+  read, so both pick the new via up with no harness change. The convention
+  already requires an outcome at task end; this makes the call carry the one
+  thing only the caller knows.
+- **No schema bump.** `outcome_signals` is untouched and nothing is appended
+  to `detail`, and nothing links a signal row to the use rows it caused: the
+  labels stand on their own, and which outcome named which ids is
+  deliberately not recorded (the event's `episode_id` is stamped by the
+  writer at search time, the signal's comes from the `episode=` handle —
+  they are not a join). The result reports `used_ids_recorded` (ids credited
+  to an event), `used_ids_unmatched` (ids no event in the window served) and
+  `used_ids_errors` (labels the storage layer refused — an error is not a
+  miss, and reporting it as one would tell the agent nothing had served its
+  ids), because a silent zero reads exactly like a landed label. The
+  `memory.retrieval_log.enabled` kill-switch covers the new label too, and
+  says so in the result.
+- **Input parsing is deliberately wide** (`_parse_used_ids`): a real list of
+  ints, a list of int-like strings, a JSON-encoded list, a comma- or
+  space-separated string, or a bare id all land — Claude Code stringifies
+  list params, and this list is typed by a model mid-sentence. Non-integer
+  tokens are dropped and counted (`used_ids_ignored`), and the LENGTH gets
+  the same distrust as the contents: at most 50 distinct ids are taken per
+  call and the drop is reported as `used_ids_truncated`, since a runaway
+  list would be one storage round trip per id under the service lock and
+  the whole junk list echoed back as unmatched. A `used_ids` with nothing
+  usable in it returns `used_ids_reason` and still records the outcome
+  signal, which is the payload the whole convention exists for.
+- Served guidance asks for it: the session-start block
+  (`web/session_hook.MEMORY_LOOP_BLOCK`, mirrored in
+  `examples/CLAUDE.memory.md`) names `used_ids` in the REFLECT beat, funded
+  by three trims of text it already said elsewhere (7,491 → 7,488 raw chars
+  against the 7,500 cap), and the per-turn discipline line (the plugin hook
+  plus both installers, all three kept in sync) ends "Outcome landed ->
+  memory_outcome with used_ids" — 614 chars against its 800-char budget. The `memory_outcome` param-description budgets for
+  the `core` and `full` tiers move by 150 chars in
+  `tests/test_tool_consolidation.py`: the 2026-08-25 headroom had been spent
+  down to 53 and 4 chars, where no argument contract of any length could
+  land.
+### Measured (2026-09-05 — a bank that forgets is worse than one that just grows; eval-only)
+
+- **The question was whether sweeping an accumulated bank back down to a
+  lean one beats letting it grow, and the answer is no — every eviction
+  policy this project ships loses to no sweep at all, and loses to
+  deleting at random.** The 2026-08-15 distractor-scale probe measured
+  what accumulation costs (evidence-in-top-6 0.830 at 1x → 0.597 at 15x)
+  and left its own follow-up open in as many words: no experiment had
+  forced eviction and asked which victims to pick, or whether not
+  evicting beats picking badly. `evals/forgetting_sweep_probe.py` runs
+  it, inheriting the distractor probe's construction wholesale (same 78
+  knowledge-update dumps, same RNG-free rotation, same
+  `band_ablation.select_topk` mirror, same five scales) and varying only
+  a sweep applied to the pool before selection. Six arms — `none`, the
+  three shipped retention policies scored through the real
+  `RetentionPolicy.source_weighted_score`, a seeded `random` floor and an
+  evidence-preserving `oracle` ceiling — at two per-question capacities,
+  the 1x pool size (C1, ~490 entries) and the 3x one (C3, ~1,470).
+  Eviction is one stable selection rather than a pop loop, because the
+  scores do not depend on which entries remain.
+  At the preregistered gate cell (C1, 15x, evidence-in-top-6, n=78,
+  paired sign-flip permutation, 10k perms, seed 0): **oracle 0.9191, no
+  sweep 0.5969, random 0.0710, balanced 0.0192, surprise_heavy 0.0192,
+  recency_heavy 0.0000.** No shipped arm meets the +0.05 bar — they come
+  in at **−0.5777 / −0.5969 / −0.5777 against no sweep, all p < 0.0001**,
+  so sweeping costs about two and a half times what accumulating to 15x
+  costs — and all three sit *significantly below the random floor*
+  (−0.0518 p 0.0329, −0.0710 p 0.0002, −0.0518 p 0.0329). Mechanism:
+  `source_weighted_score` puts every superseded entry below every live
+  one at a ×0.05 multiplier, and 247 of 286 gold-evidence entries
+  (0.8636) in this corpus are flagged superseded against a 0.7341 base
+  rate, so the policies delete the answer first. That is a finding about
+  the multiplier on knowledge-update material, not an argument it is
+  wrong in general — it exists because corrections were being evicted
+  before the stale facts they replaced.
+  Victim choice is not the hopeless part: **oracle − none = +0.3222,
+  p < 0.0001**, and the oracle's 0.9191 beats even the undiluted 1x
+  bank's 0.8299, so thinning helps when the right entries are thinned.
+  Validity: the `none` arm reproduces the 2026-08-15 artifact **exactly
+  across all 390 question × scale cells** on every published field
+  (latency excluded as machine-dependent) — an exact control was a
+  preregistered abort condition, not a nice-to-have. Every preregistered
+  expectation held, including two stated as analytic consequences of the
+  dumps carrying no `access_count`: `balanced` and `surprise_heavy` are
+  identical to four decimals everywhere, and `recency_heavy` degenerates
+  to a positional policy. Caveats, all preregistered: six substitutions
+  the band-state dumps force; foreign-haystack distractors, i.e. the
+  easiest material a sweep could hope to identify; two aggressive
+  capacities (7% and 20% of the 15x pool), so nothing here speaks to a
+  capacity set just below the accumulated size; a retrieval proxy, not a
+  judged run; single backbone (v25, 1024-d). CPU only, 1,196 s, no
+  defaults change.
+  Spec `docs/superpowers/specs/2026-09-05-forgetting-sweep-preregistration.md`,
+  artifact `evals/results/forgetting-sweep-probe-20260905.json`, section
+  "Forgetting sweep" in `evals/README.md`.
+- **The distractor-scale probe cannot regenerate its own published
+  artifact**, found while building the control above and recorded in the
+  new spec's amendment. Its `DUMP_DIR` constant names
+  `evals/results/banks/s-qwen-27b-ablbands-flat`, which on a tree
+  carrying both replays holds the retired 384-d MiniLM dump: through it
+  11 of 30 checked cells reproduce, and no `select_topk` knob closes the
+  gap. The v25 replay the artifact was measured on is 1024-d and sits in
+  a sibling directory whose suffix is machine-local; through it, 40 of 40
+  reproduce. The sweep probe therefore resolves its dumps by backbone
+  dimension, preset and "nothing was evicted during the replay", and
+  records the choice in its artifact. Nothing is changed in
+  `distractor_scale_probe.py` here — auditing the other consumers of that
+  constant is a follow-up. Worth noting why it went unnoticed: the probe
+  refuses to overwrite an existing result file, so the guard that
+  protects canonical numbers also hid that they had stopped reproducing.
 ### Measured (2026-09-05 — the hybrid win survives a judge swap)
 - **The budget-matched hybrid win of 2026-09-04 now has two independent
   judge families behind it, so it moves to the README.** The whole
