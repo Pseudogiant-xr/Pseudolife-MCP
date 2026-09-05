@@ -60,8 +60,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
 import beam_within_run_pairs  # noqa: E402
 import leak_check  # noqa: E402
 from beam_rejudge import DEFAULT_CLI, CliJudge, out_path_for  # noqa: E402
-from longmemeval_bench import (ARMS, _JUDGE_SYSTEM,  # noqa: E402
-                               _JUDGE_SYSTEM_GENERIC, load_rows)
+import longmemeval_bench as _lmb  # noqa: E402
+from longmemeval_bench import ARMS, load_rows  # noqa: E402
 
 # Canonical arm order for reporting. The harness's three, then the two
 # opt-in comparator arms; knob-minted arms (rag1/rag2/ragb400) are
@@ -121,11 +121,15 @@ def detect_arms(rows: list[dict], only: str | None = None) -> tuple[str, ...]:
 def judge_system_for(row: dict):
     """The harness's judge system prompt for this row's question type.
 
-    Returns the imported object, never a copy: the whole point of the
+    Returns the harness module's own object, never a copy — read off the
+    module at call time rather than bound at import, so it stays the same
+    object the harness would use even after a test reloads
+    ``longmemeval_bench`` (the bench production-port guard does). The
+    whole point of the
     re-judge is that the prompt is held fixed while the model varies.
     """
-    return (_JUDGE_SYSTEM if row.get("question_type", KU_TYPE) == KU_TYPE
-            else _JUDGE_SYSTEM_GENERIC)
+    return (_lmb._JUDGE_SYSTEM if row.get("question_type", KU_TYPE) == KU_TYPE
+            else _lmb._JUDGE_SYSTEM_GENERIC)
 
 
 def judge_user(row: dict, response: str) -> str:
