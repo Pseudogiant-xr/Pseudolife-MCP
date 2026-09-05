@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-05 — Firefox Console motion)
+- Limit reduced-motion animations to one iteration; the previous `.001ms` duration combined with infinite repetition could flash continuously.
+- Keep healthy Live/Postgres dots static across all views and replace warning/activity shadow animation with a gentle opacity pulse, including Dream Ready and Would Fire.
+- Honor explicit Graph replay under reduced motion while keeping simulation and camera motion disabled; expose play/pause state to assistive technology.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported

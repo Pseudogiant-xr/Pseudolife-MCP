@@ -229,8 +229,13 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
 .chip.warn { color:var(--c-warn); border-color:color-mix(in srgb, var(--c-warn) 35%, transparent); }
 .chip.bad { color:var(--c-danger); border-color:color-mix(in srgb, var(--c-danger) 40%, transparent); }
 .pulse-dot { width:7px; height:7px; border-radius:50%; background:currentColor;
-  box-shadow:0 0 0 0 currentColor; animation:pulse 2.4s var(--ease) infinite; }
-@keyframes pulse { 0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 60%,transparent);} 70%{box-shadow:0 0 0 7px transparent;} 100%{box-shadow:0 0 0 0 transparent;} }
+  opacity:1; animation:pulse 2.4s ease-in-out infinite; }
+/* Use an opacity-only pulse instead of repainting an expanding shadow on
+   status chips, which can flicker in Firefox-family browsers. */
+@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.38;} }
+/* Health is a state, not an activity indicator.  Keep every green state chip
+   static; warning/activity chips retain the compositor-safe pulse. */
+.chip.ok .pulse-dot { animation:none; opacity:1; }
 
 /* ── Cards / panels ─────────────────────────────────────────────────────── */
 .panel {
@@ -388,7 +393,7 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 .reveal:nth-child(4){animation-delay:.15s} .reveal:nth-child(5){animation-delay:.2s}
 .reveal:nth-child(6){animation-delay:.25s}
 @keyframes reveal { from { opacity:0; transform:translateY(10px); } }
-@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.001ms !important; transition-duration:.001ms !important; } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; } }
 
 /* Icons (CSS-drawn, no assets) */
 .ico-theme,.ico-key,.ico-refresh { width:15px; height:15px; display:inline-block; background:currentColor;
