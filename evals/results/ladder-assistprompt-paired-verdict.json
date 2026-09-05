@@ -1,0 +1,104 @@
+{
+  "what": "chip-5 (PR #245 label pair) extraction-ladder paired arms: pre-#245 tree vs master, same harness, same corpus, same extractor endpoint; prediction = verdict-identical on an unlabelled corpus",
+  "generated_at": "2026-09-05T11:30:40",
+  "tag": "assistprompt",
+  "pre": {
+    "worktree": "ladder-assistprompt",
+    "sha": "db6d5d619a786b105c3816b4c0027715c9765361"
+  },
+  "post": {
+    "worktree": "ladder-assistprompt",
+    "sha": "db6d5d619a786b105c3816b4c0027715c9765361"
+  },
+  "compared": [
+    "gold_recoverable",
+    "stale_leak",
+    "tokens_per_query",
+    "consolidation.pulled",
+    "consolidation.claims",
+    "consolidation.inserted",
+    "consolidation.superseded",
+    "consolidation.literal_flagged",
+    "consolidation.literal_dropped"
+  ],
+  "not_compared": [
+    "extract_seconds",
+    "search_latency_ms"
+  ],
+  "rungs": {
+    "floor": {
+      "identical": false,
+      "status": "missing",
+      "pre_file": "evals/results/floor-assistprompt-pre.json",
+      "pre_present": false,
+      "post_file": "evals/results/floor-assistprompt-post.json",
+      "post_present": false
+    },
+    "qwen-27b": {
+      "status": {
+        "pre": "ok",
+        "post": "ok"
+      },
+      "metrics": {
+        "gold_recoverable": {
+          "pre": 1.0,
+          "post": 1.0
+        },
+        "stale_leak": {
+          "pre": 0.0,
+          "post": 0.0
+        },
+        "tokens_per_query": {
+          "pre": 13.4,
+          "post": 14.2
+        }
+      },
+      "consolidation": {
+        "pulled": {
+          "pre": 26,
+          "post": 26
+        },
+        "claims": {
+          "pre": 16,
+          "post": 16
+        },
+        "inserted": {
+          "pre": 16,
+          "post": 16
+        },
+        "superseded": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_flagged": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_dropped": {
+          "pre": 0,
+          "post": 0
+        }
+      },
+      "timing": {
+        "extract_seconds": {
+          "pre": 34.2,
+          "post": 42.8
+        },
+        "search_latency_ms": {
+          "pre": 90.9,
+          "post": 94.8
+        }
+      },
+      "differences": {
+        "tokens_per_query": {
+          "pre": 13.4,
+          "post": 14.2
+        }
+      },
+      "identical": false,
+      "pre_file": "evals/results/qwen-27b-assistprompt-pre.json",
+      "post_file": "evals/results/qwen-27b-assistprompt-post.json"
+    }
+  },
+  "gate": "FAIL"
+}

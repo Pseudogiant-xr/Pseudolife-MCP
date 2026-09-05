@@ -42,6 +42,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 import argparse
 import json
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -395,6 +396,8 @@ def build_service(tmp_dir: Path):
     if LITERAL_GATE is not None:
         svc.config.memory.dream.literal_gate = LITERAL_GATE
     apply_pool_env(svc.config.memory.search)
+    apply_dream_env(svc.config.memory.dream)
+    apply_rerank_env(svc.config.memory)
     return svc
 
 
@@ -439,6 +442,140 @@ def apply_pool_env(search_cfg) -> None:
             sys.exit(f"PSEUDOLIFE_BENCH_FUSION={fusion!r}: want "
                      "'weighted_sum' or 'rrf'")
         search_cfg.fusion = fusion
+
+
+ASSISTANT_CLAIM_POLICIES = ("contender", "supersede", "drop")
+
+
+def dream_env_knobs() -> dict:
+    """Dream-path knob state, for stamping into artifacts.
+
+    Same contract as ``pool_env_knobs``: ``None`` means the shipped default
+    was in force. ``assistant_claims`` decides what a claim labelled
+    ``speaker: "assistant"`` becomes, so it is a term in any arm run against
+    ``evals/prompts/assistant_facts_provenance.txt`` — an artifact that
+    cannot say which policy produced it is not interpretable.
+    """
+    return {
+        "assistant_claims": (
+            os.environ.get("PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS", "").strip()
+            or None),
+    }
+
+
+def apply_dream_env(dream_cfg) -> None:
+    """Apply the dream-path env overrides to a bench config.
+
+    The assistant-turn arms (2026-09-05) are a prompt file plus this knob:
+
+        PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender|supersede|drop
+
+    Invalid values are a hard error, exactly as for the pool knobs — a
+    typo'd policy that quietly served the shipped default would mislabel
+    the whole arm.
+    """
+    policy = dream_env_knobs()["assistant_claims"]
+    if policy is not None:
+        if policy not in ASSISTANT_CLAIM_POLICIES:
+            sys.exit(f"PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS={policy!r}: want "
+                     + " or ".join(repr(p)
+                                   for p in ASSISTANT_CLAIM_POLICIES))
+        dream_cfg.assistant_claims = policy
+
+
+def rung_bench_env(dream_cfg) -> dict:
+    """The knob state a RUNG artifact records — resolved, not "was it
+    overridden".
+
+    ``dream_env_knobs`` reports the env override (``None`` = none given),
+    which is what the LongMemEval summary stamps. A rung file needs the
+    policy that was actually in force: the 2026-09-05 `e4b-v3` post arm
+    reported 19 claims against 18 inserted, and its artifact could not say
+    whether the missing one parked as a contender, was dropped, or
+    superseded — the tally sums neither ``contested`` nor ``confirmed``, so
+    the policy is the only handle left. Read AFTER ``apply_dream_env``.
+    """
+    return {"dream": {"assistant_claims": str(dream_cfg.assistant_claims)}}
+
+
+def git_rev() -> str | None:
+    """The commit this run was produced at, for stamping into the artifact.
+
+    ``ladder_pair_compare.py`` used to answer "which commit produced this
+    arm" from the worktree's HEAD at COMPARE time. For a re-gate — both arms
+    out of one worktree, at different commits — that is the same string for
+    both arms and is neither arm's; the 2026-09-05 rule-v2 shim verdict
+    recorded ``7083bc33`` for a ``pre`` arm produced at ``0b02e5ea``. Only
+    the run can answer it, so the run records it.
+
+    A DIRTY worktree gets a ``-dirty`` suffix, and that matters more than it
+    looks: eval runs here are routinely made from an uncommitted tree, and a
+    bare HEAD would then name a commit that does not describe the code that
+    ran — the same "plausible wrong sha" this function exists to stop,
+    moved one hop downstream. ``ladder_pair_compare.arm_provenance`` reads
+    the suffix and downgrades ``sha_source`` to ``artifact-dirty``.
+
+    ``None`` (not ``""``) when there is no checkout to ask: the verdict
+    distinguishes an artifact that could not say from one that said nothing.
+    """
+    here = str(Path(__file__).resolve().parent)
+
+    def _git(*args) -> str | None:
+        try:
+            out = subprocess.run(["git", "-C", here, *args],
+                                 capture_output=True, text=True)
+        except OSError:        # no git on PATH
+            return None
+        return out.stdout if out.returncode == 0 else None
+
+    head = (_git("rev-parse", "HEAD") or "").strip()
+    if not head:
+        return None
+    # Tracked-file changes only: untracked scratch files in the tree do not
+    # change the code that ran.
+    status = _git("status", "--porcelain", "--untracked-files=no")
+    return f"{head}-dirty" if (status or "").strip() else head
+
+
+def rerank_env_knobs() -> dict:
+    """Cross-encoder reranker knob state, for stamping into artifacts.
+
+    Same contract as ``pool_env_knobs`` above: a judged run whose retrieval
+    config cannot be audited afterwards is exactly the failure PR #165
+    closed. ``enabled`` reflects whether ``PSEUDOLIFE_BENCH_RERANK`` turned
+    the reranker on; the shipped default (``memory.reranker.enabled =
+    False``) is in force whenever the var is unset.
+    """
+    raw = os.environ.get("PSEUDOLIFE_BENCH_RERANK", "").strip().lower()
+    return {"enabled": raw in ("1", "true", "on")}
+
+
+def apply_rerank_env(memory_cfg) -> None:
+    """Apply the PSEUDOLIFE_BENCH_RERANK env override to a bench config.
+
+    The cross-encoder reranker (Tier B, ``memory.reranker``) ships OFF by
+    default. This is the ONLY sanctioned way to run a judged eval with it
+    on — same discipline as ``apply_pool_env`` above: an invalid value is a
+    hard error, not a silent fall-back to the default.
+
+        PSEUDOLIFE_BENCH_RERANK=1
+    """
+    raw = os.environ.get("PSEUDOLIFE_BENCH_RERANK", "").strip().lower()
+    if not raw:
+        return
+    if raw in ("1", "true", "on"):
+        memory_cfg.reranker.enabled = True
+    elif raw in ("0", "false", "off"):
+        # Not a no-op: the override is symmetric on purpose. The config
+        # handed in may already carry the reranker ON (a config file, a
+        # future default flip), and ``rerank_env_knobs`` stamps
+        # ``enabled: false`` for this value regardless — so leaving the
+        # config alone here would ship a judged artifact whose retrieval
+        # stamp contradicts the retrieval it measured (2026-09-05 review).
+        memory_cfg.reranker.enabled = False
+    else:
+        sys.exit(f"PSEUDOLIFE_BENCH_RERANK={raw!r}: want "
+                 "'1'/'true'/'on' or '0'/'false'/'off'")
 
 
 def ingest(svc) -> None:
@@ -570,8 +707,10 @@ def endpoint_stamp(rung: dict) -> dict:
 def run_rung(name: str) -> dict:
     rung = RUNGS[name]
     import tempfile
+    # git_rev first, so even the `unreachable` early return carries it: a
+    # run that never reached its endpoint is still evidence about a commit.
     result = {"rung": name, "label": rung["label"], "kind": rung["kind"],
-              **endpoint_stamp(rung)}
+              "git_rev": git_rev(), **endpoint_stamp(rung)}
 
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
         result["status"] = "unreachable"
@@ -584,6 +723,7 @@ def run_rung(name: str) -> dict:
     with tempfile.TemporaryDirectory(prefix=f"plbench_{name}_",
                                      ignore_cleanup_errors=True) as td:
         svc = build_service(Path(td))
+        result["bench_env"] = rung_bench_env(svc.config.memory.dream)
         ingest(svc)
         if rung["kind"] == "naive":
             result.update(measure_naive(svc))

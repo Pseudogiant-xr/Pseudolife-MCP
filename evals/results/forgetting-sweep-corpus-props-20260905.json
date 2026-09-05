@@ -1,0 +1,13 @@
+{
+  "n_questions": 78,
+  "n_entries": 38086,
+  "n_superseded": 27959,
+  "superseded_rate": 0.7341,
+  "n_evidence_entries": 286,
+  "n_evidence_superseded": 247,
+  "evidence_superseded_rate": 0.8636,
+  "spec": "docs/superpowers/specs/2026-09-05-forgetting-sweep-preregistration.md",
+  "dump_dir": "s-qwen-27b-ablbands-flat--awesome-bhaskara",
+  "dataset": "s",
+  "runtime_s": 19.8
+}
