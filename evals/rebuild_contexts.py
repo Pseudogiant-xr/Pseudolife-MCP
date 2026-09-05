@@ -106,6 +106,14 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
     mat = emb.encode(texts)                            # (n, d), normalized
     q = emb.encode_query(bank["question"])
     sims = (mat @ q).tolist()
+    # Assistant-origin demotion, mirroring CortexStore.search (positive
+    # cosines only, same ASSISTANT_FACT_SCORE_MULT). A dumped fact carries
+    # "origin"; every bank dumped before 2026-09-05 carries none, so this
+    # multiplies by 1.0 and the ranking is byte-identical.
+    from pseudolife_memory.memory.cortex import ASSISTANT_FACT_SCORE_MULT
+    sims = [s * ASSISTANT_FACT_SCORE_MULT
+            if s > 0 and f.get("origin") == "assistant" else s
+            for s, f in zip(sims, facts)]
     ranked = sorted((i for i, s in enumerate(sims) if s >= min_score),
                     key=lambda i: sims[i], reverse=True)[:top_k]
     score_map = {i: sims[i] for i in range(len(sims))}

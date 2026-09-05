@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "bench": "epistemic",
+    "source": "lme-derivation",
+    "tag": "lme-derivation-s-20260905",
+    "dataset": "longmemeval_s_cleaned.json",
+    "git_rev": "cdbee209dd1a93621e206fec95c4ada48d055f4e",
+    "timestamp": "2026-09-04T15:33:09Z",
+    "knowledge_update_questions": 78,
+    "qualified": 23,
+    "spec": "docs/superpowers/specs/2026-09-05-epistemic-bench-design.md"
+  },
+  "caveats": {
+    "derivation_is_parsing_only": "Pure parsing: a question that does not derive cleanly is skipped, never guessed at. The skip histogram is half the result."
+  },
+  "skips": {
+    "gold-has-no-value-token": 39,
+    "gold-not-in-later-evidence": 7,
+    "ambiguous-old-value(2)": 3,
+    "ambiguous-old-value(0)": 3,
+    "ambiguous-old-value(3)": 1,
+    "ambiguous-old-value(6)": 1,
+    "gold-also-in-earlier-evidence": 1
+  }
+}

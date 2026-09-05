@@ -34,6 +34,7 @@ REPO = Path(__file__).resolve().parents[1]
 # silently. `replicate` is import-light by design (no bench, no torch).
 sys.path.insert(0, str(REPO / "evals"))
 from replicate import cortex_commits as _commits  # noqa: E402
+from replicate import cascade_correct as _cascade_correct  # noqa: E402
 RESULTS = "evals/results/"
 
 # Artifact shorthands — every path is repo-relative so it can be checked
@@ -1803,6 +1804,212 @@ for _cid, _needle, _val, _stated, _places in [
 ]:
     CLAIMS.append(Claim(
         id=_cid, doc=PROBE_DOC, needle=_needle, artifacts=(PROBE,),
+        value=_val, stated=_stated, places=_places))
+
+
+# The forgetting sweep (evals/README.md, 2026-09-05): the follow-up the
+# distractor probe's interpretation rule called for. Every published cell of
+# the arm x scale x capacity table is pinned, plus the four gate deltas and
+# the survival numbers that explain them.
+SWEEP = RESULTS + "forgetting-sweep-probe-20260905.json"
+
+
+def _cell(capacity: str, scale: str, arm: str, field: str = "evidence_in_top6_mean"):
+    return lambda d: d["cells"][capacity][scale][arm][field]
+
+
+# The table rows: needle is the whole markdown row, so a rewrite that drops
+# any cell fails here rather than quietly stopping guarding.
+for _cap, _scale, _row in [
+    ("C1", "1x", "| C1 | 1x | 488.3 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 |"),
+    ("C1", "3x", "| C1 | 3x | 1464.8 | 0.7583 | 0.1528 | 0.0807 | 0.1528 | 0.4216 | 0.9030 |"),
+    ("C1", "7x", "| C1 | 7x | 3418.0 | 0.6840 | 0.0465 | 0.0064 | 0.0465 | 0.1390 | 0.9063 |"),
+    ("C1", "15x", "| C1 | 15x | 7324.2 | 0.5969 | 0.0192 | 0.0000 | 0.0192 | 0.0710 | 0.9191 |"),
+    ("C1", "31x", "| C1 | 31x | 15136.7 | 0.5130 | 0.0000 | 0.0000 | 0.0000 | 0.0198 | 0.9121 |"),
+    ("C3", "7x", "| C3 | 7x | 3418.0 | 0.6840 | 0.2736 | 0.0791 | 0.2736 | 0.3522 | 0.8571 |"),
+    ("C3", "15x", "| C3 | 15x | 7324.2 | 0.5969 | 0.0652 | 0.0064 | 0.0652 | 0.1491 | 0.8752 |"),
+    ("C3", "31x", "| C3 | 31x | 15136.7 | 0.5130 | 0.0454 | 0.0000 | 0.0454 | 0.0845 | 0.8666 |"),
+]:
+    _cells = [c.strip() for c in _row.strip("|").split("|")]
+    CLAIMS.append(Claim(
+        id=f"sweep-{_cap}-{_scale}-pool", doc=EVALS, needle=_row,
+        artifacts=(SWEEP,), value=_cell(_cap, _scale, "none", "n_pool_entries_mean"),
+        stated=float(_cells[2]), places=1))
+    for _arm, _stated in zip(
+            ("none", "balanced", "recency_heavy", "surprise_heavy", "random",
+             "oracle"), _cells[3:]):
+        CLAIMS.append(Claim(
+            id=f"sweep-{_cap}-{_scale}-{_arm}", doc=EVALS, needle=_row,
+            artifacts=(SWEEP,), value=_cell(_cap, _scale, _arm),
+            stated=float(_stated), places=4))
+
+# The swept pool sizes quoted under the table.
+for _cid, _needle, _cap, _stated in [
+    ("sweep-c1-kept", "488.3 entries at every scale under C1", "C1", 488.3),
+    ("sweep-c3-kept", "and 1464.8 under C3.)", "C3", 1464.8),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_cell(_cap, "15x", "balanced", "n_pool_entries_mean"),
+        stated=_stated, places=1))
+
+# Gate deltas and p-values.
+for _cid, _needle, _val, _stated, _places in [
+    ("sweep-gf0-cells", "all 390 question × scale cells",
+     lambda d: float(d["control"]["n_cells_checked"]), 390.0, 0),
+    ("sweep-gf1-balanced", "**−0.5777 (balanced)",
+     lambda d: d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"], -0.5777, 4),
+    ("sweep-gf1-recency", "−0.5969 (recency_heavy)",
+     lambda d: d["gates"]["G-F1"]["arms"]["recency_heavy"]["delta_mean"], -0.5969, 4),
+    ("sweep-gf1-surprise", "−0.5777\n  (surprise_heavy)",
+     lambda d: d["gates"]["G-F1"]["arms"]["surprise_heavy"]["delta_mean"], -0.5777, 4),
+    ("sweep-gf2-delta", "**+0.3222, p < 0.0001**",
+     lambda d: d["gates"]["G-F2"]["delta_mean"], 0.3222, 4),
+    ("sweep-gf3-balanced", "−0.0518 (p 0.0329)",
+     lambda d: d["gates"]["G-F3"]["arms"]["balanced"]["delta_mean"], -0.0518, 4),
+    ("sweep-gf3-balanced-p", "−0.0518 (p 0.0329)",
+     lambda d: d["gates"]["G-F3"]["arms"]["balanced"]["p"], 0.0329, 4),
+    ("sweep-gf3-recency", "−0.0710\n  (p 0.0002)",
+     lambda d: d["gates"]["G-F3"]["arms"]["recency_heavy"]["delta_mean"], -0.0710, 4),
+    ("sweep-gf3-recency-p", "−0.0710\n  (p 0.0002)",
+     lambda d: d["gates"]["G-F3"]["arms"]["recency_heavy"]["p"], 0.0002, 4),
+    ("sweep-gf4-sanity", "1x evidence-in-top-6 = 0.8299",
+     lambda d: d["gates"]["G-F4"]["evidence_in_top6_mean"], 0.8299, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_val, stated=_stated, places=_places))
+
+# Evidence survival at the gate cell — the mechanism sentence.
+for _arm, _needle, _stated in [
+    ("balanced", "0.0214 (balanced and surprise_heavy)", 0.0214),
+    ("surprise_heavy", "0.0214 (balanced and surprise_heavy)", 0.0214),
+    ("recency_heavy", "0.0000\n(recency_heavy)", 0.0000),
+    ("random", "0.0727 (random)", 0.0727),
+    ("oracle", "1.0000 (`none` and `oracle`)", 1.0000),
+]:
+    CLAIMS.append(Claim(
+        id=f"sweep-survival-{_arm}", doc=EVALS, needle=_needle,
+        artifacts=(SWEEP,),
+        value=_cell("C1", "15x", _arm, "evidence_survival_mean"),
+        stated=_stated, places=4))
+
+# The latency pair quoted beside the quality cliff.
+for _cid, _needle, _arm, _field, _stated in [
+    ("sweep-bm25-unswept", "from 812 ms unswept to 29 ms at C1", "none",
+     "bm25_latency_ms_median", 812.0),
+    ("sweep-bm25-swept", "from 812 ms unswept to 29 ms at C1", "balanced",
+     "bm25_latency_ms_median", 29.0),
+    ("sweep-select-unswept", "from 1052 ms to 44 ms", "none",
+     "select_topk_latency_ms_median", 1052.0),
+    ("sweep-select-swept", "from 1052 ms to 44 ms", "balanced",
+     "select_topk_latency_ms_median", 44.0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(SWEEP,),
+        value=_cell("C1", "15x", _arm, _field), stated=_stated, places=0))
+
+# The mechanism sentence's corpus rates, in both docs that state them. These
+# are NOT derivable from the sweep artifact — it records retrieval metrics,
+# not supersession counts — so they carry their own committed artifact,
+# written by `forgetting_sweep_probe.py --corpus-props`.
+SWEEP_CORPUS = RESULTS + "forgetting-sweep-corpus-props-20260905.json"
+for _doc, _tag, _needle in [
+    (EVALS, "readme",
+     "**247 of 286 gold-evidence entries (0.8636) are flagged\nsuperseded**, against a 0.7341 base rate over 38,086 entries"),
+    (CHANGELOG, "changelog",
+     "247 of 286 gold-evidence entries\n  (0.8636) in this corpus are flagged superseded against a 0.7341 base\n  rate"),
+]:
+    for _field, _stated, _places in [
+        ("evidence_superseded_rate", 0.8636, 4),
+        ("n_evidence_superseded", 247, 0),
+        ("n_evidence_entries", 286, 0),
+        ("superseded_rate", 0.7341, 4),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"sweep-corpus-{_tag}-{_field}", doc=_doc, needle=_needle,
+            artifacts=(SWEEP_CORPUS,),
+            value=(lambda f: lambda d: float(d[f]))(_field),
+            stated=_stated, places=_places))
+CLAIMS.append(Claim(
+    id="sweep-corpus-readme-n-entries", doc=EVALS,
+    needle="0.7341 base rate over 38,086 entries",
+    artifacts=(SWEEP_CORPUS,), value=lambda d: float(d["n_entries"]),
+    stated=38086, places=0))
+
+
+# The sweep's cost stated as a ratio to accumulation's, in both docs that
+# state it. Neither doc's number is in the artifact as a ratio, so the
+# claim is COMPUTED from the two that are: the accumulation cost the
+# distractor probe measured (1x minus 15x on the `none` arm, 0.2330) and
+# the sweep cost G-F1 measured (balanced minus none at the gate cell,
+# 0.5777). Both docs published "roughly three times" until the 2026-09-05
+# review fold recomputed it at 2.48; they now say "two and a half", one
+# decimal, hence `places=1`.
+def _sweep_cost_ratio(d: dict) -> float:
+    c = d["cells"]["C1"]
+    accumulation = (c["1x"]["none"]["evidence_in_top6_mean"]
+                    - c["15x"]["none"]["evidence_in_top6_mean"])
+    sweeping = -d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"]
+    return sweeping / accumulation
+
+
+for _cid, _doc, _needle in [
+    ("sweep-cost-ratio-evals", EVALS,
+     "Sweeping to a lean bank costs\n  about two and a half times what "
+     "accumulating to 15x costs."),
+    ("sweep-cost-ratio-changelog", CHANGELOG,
+     "so sweeping costs about two and a half times what accumulating to "
+     "15x\n  costs"),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(SWEEP,),
+        value=_sweep_cost_ratio, stated=2.5, places=1))
+
+# The CHANGELOG restates the gate numbers in its own words, and a
+# restatement is a claim like any other — the 2026-09-02 queue-judge block
+# below pins CHANGELOG text the same way. The needles carry the
+# CHANGELOG's own wrapping, not the README's, so rewrapping either doc
+# alone still fails here rather than quietly stopping guarding.
+_CL_ORDERING = ("**oracle 0.9191, no\n  sweep 0.5969, random 0.0710, "
+                "balanced 0.0192, surprise_heavy 0.0192,\n  "
+                "recency_heavy 0.0000.**")
+_CL_GF1 = ("**−0.5777 / −0.5969 / −0.5777 against no sweep, "
+           "all p < 0.0001**")
+_CL_GF2 = "**oracle − none = +0.3222,\n  p < 0.0001**"
+for _cid, _needle, _val, _stated, _places in [
+    ("sweep-cl-oracle", _CL_ORDERING, _cell("C1", "15x", "oracle"), 0.9191, 4),
+    ("sweep-cl-none", _CL_ORDERING, _cell("C1", "15x", "none"), 0.5969, 4),
+    ("sweep-cl-random", _CL_ORDERING, _cell("C1", "15x", "random"), 0.0710, 4),
+    ("sweep-cl-balanced", _CL_ORDERING,
+     _cell("C1", "15x", "balanced"), 0.0192, 4),
+    ("sweep-cl-surprise", _CL_ORDERING,
+     _cell("C1", "15x", "surprise_heavy"), 0.0192, 4),
+    ("sweep-cl-recency", _CL_ORDERING,
+     _cell("C1", "15x", "recency_heavy"), 0.0000, 4),
+    ("sweep-cl-gf1-balanced", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["balanced"]["delta_mean"],
+     -0.5777, 4),
+    ("sweep-cl-gf1-recency", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["recency_heavy"]["delta_mean"],
+     -0.5969, 4),
+    ("sweep-cl-gf1-surprise", _CL_GF1,
+     lambda d: d["gates"]["G-F1"]["arms"]["surprise_heavy"]["delta_mean"],
+     -0.5777, 4),
+    ("sweep-cl-gf2-delta", _CL_GF2,
+     lambda d: d["gates"]["G-F2"]["delta_mean"], 0.3222, 4),
+    ("sweep-cl-1x-none", "bank's 0.8299, so thinning helps",
+     _cell("C1", "1x", "none"), 0.8299, 4),
+    ("sweep-cl-gf0-cells", "across all 390 question × scale cells**",
+     lambda d: float(d["control"]["n_cells_checked"]), 390.0, 0),
+    # Runtime: the CHANGELOG kept the FIRST run's 1,040 s after the
+    # artifact was regenerated (de1ec39e) at 1195.9 s. Pinned here so the
+    # doc and the artifact cannot drift apart again unnoticed.
+    ("sweep-cl-runtime", "CPU only, 1,196 s",
+     lambda d: float(d["runtime_s"]), 1196.0, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(SWEEP,),
         value=_val, stated=_stated, places=_places))
 
 
@@ -3749,7 +3956,7 @@ _POOL_JUDGED = [
      0.667, 96.7, 0.667, 96.7, 0.000, 1.0, 0, 0,
      0.667, 96.7, 0.000, 1.0, 0, 0),
     ("hybrid",
-     "| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
+     "| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
      "(-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, "
      "1W/3L) |",
      0.897, 1289.7, 0.833, 1898.6, -0.064, 0.1265, 1, 6,
@@ -3872,6 +4079,289 @@ for _cid, _needle, _art, _stated in [
         # carries the signed delta.
         value=lambda d: -_pool_paired("rag", "delta")(d),
         stated=_stated, places=3))
+
+# -- the reranker-on candidate-pool cells (2026-09-05) --------------------
+# The 2026-09-04 runs above all had the cross-encoder OFF, so the docs
+# carried a "remains unmeasured" caveat. These two cells retire it:
+# multiplier 1 + reranker (the reranker alone, on the shipped pool width)
+# and multiplier 4 + reranker (the wide pool the reranker was meant to
+# rescue), both under weighted_sum -- rrf is excluded by the CAUTION on
+# SearchConfig.fusion, not by preference. Verdict: a wash, so nothing is
+# promoted. Same split as above -- accuracies and token means come from
+# the summaries, every delta/p/win/loss from the pairing artifact.
+POOL_M1RR = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-m1rr.summary.json"
+POOL_M4RR = RESULTS + "longmemeval-ku-oracle-qwen-27b-pool-m4rr.summary.json"
+POOL_M1RR_PAIRS = RESULTS + "compare-pool-m1rr-pairs.json"
+POOL_M4RR_PAIRS = RESULTS + "compare-pool-m4rr-pairs.json"
+
+# The five-cell accuracy table. Each row is pinned across ALL five
+# columns, including the three 2026-09-04 cells: this is a second place a
+# reader meets those numbers, and the claim-text guard only protects the
+# needle it is given.
+# (verbatim README row, then (artifact, accuracy, context_tokens) x5)
+_POOL_RR_TABLE = [
+    ("| naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 | "
+     "0.782 @ 1643.0 | 0.872 @ 1184.1 | 0.885 @ 1505.5 |",
+     "rag",
+     ((POOL_CTL, 0.859, 1184.1), (POOL_M4RRF, 0.744, 1793.0),
+      (POOL_M4SUM, 0.782, 1643.0), (POOL_M1RR, 0.872, 1184.1),
+      (POOL_M4RR, 0.885, 1505.5))),
+    ("| cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 | 0.667 @ 96.7 "
+     "| 0.667 @ 96.7 | 0.667 @ 96.7 |",
+     "cortex",
+     ((POOL_CTL, 0.667, 96.7), (POOL_M4RRF, 0.667, 96.7),
+      (POOL_M4SUM, 0.667, 96.7), (POOL_M1RR, 0.667, 96.7),
+      (POOL_M4RR, 0.667, 96.7))),
+    ("| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 "
+     "| 0.872 @ 1748.6 | 0.885 @ 1289.7 | 0.885 @ 1611.0 |",
+     "hybrid",
+     ((POOL_CTL, 0.897, 1289.7), (POOL_M4RRF, 0.833, 1898.6),
+      (POOL_M4SUM, 0.872, 1748.6), (POOL_M1RR, 0.885, 1289.7),
+      (POOL_M4RR, 0.885, 1611.0))),
+    ("| commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 | "
+     "0.859 @ 544.5 | 0.833 @ 389.4 | 0.872 @ 519.3 |",
+     "cascade",
+     ((POOL_CTL, 0.846, 389.4), (POOL_M4RRF, 0.846, 598.7),
+      (POOL_M4SUM, 0.859, 544.5), (POOL_M1RR, 0.833, 389.4),
+      (POOL_M4RR, 0.872, 519.3))),
+]
+
+_POOL_RR_CELL = {POOL_CTL: "ctl", POOL_M4RRF: "m4rrf", POOL_M4SUM: "m4sum",
+                 POOL_M1RR: "m1rr", POOL_M4RR: "m4rr"}
+
+for _needle, _arm, _cells in _POOL_RR_TABLE:
+    for _art, _acc, _tok in _cells:
+        _tag = _POOL_RR_CELL[_art]
+        CLAIMS.append(Claim(
+            id=f"pool-rr-table-{_tag}-{_arm}-acc", doc=EVALS, needle=_needle,
+            artifacts=(_art,), value=_pool_arm(_arm, "accuracy"),
+            stated=_acc, places=3))
+        CLAIMS.append(Claim(
+            id=f"pool-rr-table-{_tag}-{_arm}-tokens", doc=EVALS,
+            needle=_needle, artifacts=(_art,),
+            value=_pool_arm(_arm, "context_tokens"), stated=_tok, places=1))
+
+# The paired table. The m1rr token columns above are the load-bearing half
+# of the "it only reorders the served set" reading, and they are pinned
+# against POOL_M1RR directly -- if that run had changed which turns were
+# served, those four pins go red, not the prose.
+# (verbatim README row, arm, m1rr d/p/W/L, m4rr d/p/W/L)
+_POOL_RR_PAIRED = [
+    ("| naive RAG (top-6 turns) | +0.013, p 1.0, 2W/1L | "
+     "+0.026, p 0.694, 4W/2L |",
+     "rag", (0.013, 1.0, 2, 1), (0.026, 0.694, 4, 2)),
+    ("| cortex facts only | 0.000, p 1.0, 0W/0L | 0.000, p 1.0, 0W/0L |",
+     "cortex", (0.000, 1.0, 0, 0), (0.000, 1.0, 0, 0)),
+    ("| hybrid (facts + top-6 turns) | -0.013, p 1.0, 0W/1L | "
+     "-0.013, p 1.0, 1W/2L |",
+     "hybrid", (-0.013, 1.0, 0, 1), (-0.013, 1.0, 1, 2)),
+    ("| commit-gated cascade | -0.013, p 1.0, 0W/1L | "
+     "+0.026, p 0.5053, 2W/0L |",
+     "cascade", (-0.013, 1.0, 0, 1), (0.026, 0.5053, 2, 0)),
+]
+
+for _needle, _arm, _m1, _m4 in _POOL_RR_PAIRED:
+    for _tag, _art, (_d, _pv, _w, _l) in (("m1rr", POOL_M1RR_PAIRS, _m1),
+                                          ("m4rr", POOL_M4RR_PAIRS, _m4)):
+        for _field, _stated, _places in (("delta", _d, 3), ("p", _pv, 4),
+                                         ("wins", _w, 0), ("losses", _l, 0)):
+            CLAIMS.append(Claim(
+                id=f"pool-rr-paired-{_tag}-{_arm}-{_field}", doc=EVALS,
+                needle=_needle, artifacts=(_art,),
+                value=_pool_paired(_arm, _field), stated=_stated,
+                places=_places))
+
+
+def _pool_token_pct(a, b):
+    """m4rr's rag context cost over the control's, as a percentage."""
+    return (a["arms"]["rag"]["context_tokens"]
+            / b["arms"]["rag"]["context_tokens"] - 1.0) * 100.0
+
+
+# Both docs state the width cost as a rounded percentage rather than as
+# the two token means, so the ratio gets its own pin in each.
+CLAIMS.append(Claim(
+    id="pool-rr-token-pct-evals", doc=EVALS,
+    needle="27% more context on the rag arm (1505.5 against 1184.1",
+    artifacts=(POOL_M4RR, POOL_CTL), value=_pool_token_pct,
+    stated=27, places=0))
+CLAIMS.append(Claim(
+    id="pool-rr-token-pct-changelog", doc=CHANGELOG,
+    needle="p 0.694, 4W/2L) but serves 27%",
+    artifacts=(POOL_M4RR, POOL_CTL), value=_pool_token_pct,
+    stated=27, places=0))
+
+# The CHANGELOG restates the verdict in prose. Pinned separately, per the
+# retire-at-the-old-site rule: a claim is guarded wherever it is made.
+_RR_CL_WIDE = ("0.885 (+0.026 against the 0.859 control, p 0.694, 4W/2L)")
+_RR_CL_HYB = ("hybrid arm still lands at 0.885\n  (-0.013, p 1.0) under its "
+              "0.897 control")
+_RR_CL_M1 = "rag 0.872 (+0.013, p 1.0),"
+_RR_CL_FLOOR = "holds 0.667, 0W/0L, in both cells"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("changelog-rr-m4sum-rag", "from `pool-m4sum`'s 0.782 to", POOL_M4SUM,
+     _pool_arm("rag", "accuracy"), 0.782, 3),
+    ("changelog-rr-m4rr-rag", _RR_CL_WIDE, POOL_M4RR,
+     _pool_arm("rag", "accuracy"), 0.885, 3),
+    ("changelog-rr-m4rr-rag-delta", _RR_CL_WIDE, POOL_M4RR_PAIRS,
+     _pool_paired("rag", "delta"), 0.026, 3),
+    ("changelog-rr-ctl-rag", _RR_CL_WIDE, POOL_CTL,
+     _pool_arm("rag", "accuracy"), 0.859, 3),
+    ("changelog-rr-m4rr-rag-p", _RR_CL_WIDE, POOL_M4RR_PAIRS,
+     _pool_paired("rag", "p"), 0.694, 4),
+    ("changelog-rr-m4rr-rag-wins", _RR_CL_WIDE, POOL_M4RR_PAIRS,
+     _pool_paired("rag", "wins"), 4, 0),
+    ("changelog-rr-m4rr-rag-losses", _RR_CL_WIDE, POOL_M4RR_PAIRS,
+     _pool_paired("rag", "losses"), 2, 0),
+    ("changelog-rr-m4rr-hybrid", _RR_CL_HYB, POOL_M4RR,
+     _pool_arm("hybrid", "accuracy"), 0.885, 3),
+    ("changelog-rr-m4rr-hybrid-delta", _RR_CL_HYB, POOL_M4RR_PAIRS,
+     _pool_paired("hybrid", "delta"), -0.013, 3),
+    ("changelog-rr-ctl-hybrid", _RR_CL_HYB, POOL_CTL,
+     _pool_arm("hybrid", "accuracy"), 0.897, 3),
+    ("changelog-rr-m1rr-rag", _RR_CL_M1, POOL_M1RR,
+     _pool_arm("rag", "accuracy"), 0.872, 3),
+    ("changelog-rr-m1rr-rag-delta", _RR_CL_M1, POOL_M1RR_PAIRS,
+     _pool_paired("rag", "delta"), 0.013, 3),
+    ("changelog-rr-m1rr-floor", _RR_CL_FLOOR, POOL_M1RR,
+     _pool_arm("cortex", "accuracy"), 0.667, 3),
+    ("changelog-rr-m4rr-floor", _RR_CL_FLOOR, POOL_M4RR,
+     _pool_arm("cortex", "accuracy"), 0.667, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+
+def test_reranker_on_cells_stamp_the_knob():
+    """The `bench_env.reranker` stamp is the only in-artifact evidence
+    that these two cells ran with the cross-encoder on and the control
+    did not. Both docs lean on it by name, so it is asserted, not
+    assumed -- a summary regenerated without the stamp would otherwise
+    leave the comparison resting on a claim in prose.
+    """
+    for path in (POOL_M1RR, POOL_M4RR):
+        env = _load_artifact(path).get("bench_env", {})
+        assert env.get("reranker", {}).get("enabled") is True, (
+            f"{path}: bench_env.reranker.enabled is not true, so this "
+            f"cell is not evidence for a reranker-on claim")
+        assert env["candidate_pool"]["fusion"] == "weighted_sum", (
+            f"{path}: fusion is not weighted_sum -- the CAUTION on "
+            f"SearchConfig.fusion excludes rrf from a reranker-on cell")
+    ctl = _load_artifact(POOL_CTL).get("bench_env", {})
+    assert not ctl.get("reranker", {}).get("enabled"), (
+        "pool-ctl summary claims the reranker was on; it is the "
+        "reranker-OFF control for both cells above")
+
+
+# -- the reranker's wall-time cost, summed from the rows (2026-09-05) -----
+# This paragraph used to quote the extract leg from the terminal -- "96
+# min, 75 min, roughly 35 min, call it 2-3x" -- and two of those four
+# figures were wrong, which is exactly the unbacked-number failure this
+# file exists to catch. Every judged row carries `wall_seconds` for its
+# --phase extract body, so each cell's leg is a sum over the committed
+# artifact: these pins COMPUTE it rather than restating a summary field.
+POOL_ROWS = {c: RESULTS + f"longmemeval-ku-oracle-qwen-27b-pool-{c}.jsonl"
+             for c in ("ctl", "m4rrf", "m4sum", "m1rr", "m4rr")}
+
+
+def _wall_minutes(rows) -> float:
+    """Sum of `wall_seconds` over one cell's judged rows, in minutes."""
+    return sum(r["wall_seconds"] for r in rows) / 60.0
+
+
+def _wall_ratio_vs_off(on, ctl, m4rrf, m4sum) -> float:
+    """A reranker-ON cell's leg over the mean of the three OFF cells.
+
+    The docs quote the ratio against the mean rather than against any one
+    off cell because the three are within 1.2 min of each other; pinning
+    it against the mean is what makes "1.7-2.5x" a range and not a pair
+    of cherry-picked pairwise numbers.
+    """
+    off = [_wall_minutes(c) for c in (ctl, m4rrf, m4sum)]
+    return _wall_minutes(on) / (sum(off) / len(off))
+
+
+_WALL_ON = "exactly. With the cross-encoder ON: **96.5 min** (`pool-m4rr`) and"
+_WALL_M1 = "**66.3 min** (`pool-m1rr`). With it off: **40.1 min** (`pool-ctl`),"
+_WALL_OFF = "**39.1 min** (`pool-m4rrf`) and **38.9 min** (`pool-m4sum`). That is"
+_WALL_RATIO = "**2.45x** and **1.68x** the reranker-off mean — the range is"
+
+for _cid, _needle, _cell, _stated in [
+        ("pool-rr-wall-m4rr", _WALL_ON, "m4rr", 96.5),
+        ("pool-rr-wall-m1rr", _WALL_M1, "m1rr", 66.3),
+        ("pool-rr-wall-ctl", _WALL_M1, "ctl", 40.1),
+        ("pool-rr-wall-m4rrf", _WALL_OFF, "m4rrf", 39.1),
+        ("pool-rr-wall-m4sum", _WALL_OFF, "m4sum", 38.9)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(POOL_ROWS[_cell],),
+        value=_wall_minutes, stated=_stated, places=1))
+
+for _cid, _cell, _stated in [("pool-rr-wall-ratio-m4rr", "m4rr", 2.45),
+                             ("pool-rr-wall-ratio-m1rr", "m1rr", 1.68)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_WALL_RATIO,
+        artifacts=(POOL_ROWS[_cell], POOL_ROWS["ctl"], POOL_ROWS["m4rrf"],
+                   POOL_ROWS["m4sum"]),
+        value=_wall_ratio_vs_off, stated=_stated, places=2))
+
+
+# -- the noise floor is a BOUND, not a zero (2026-09-05 review) -----------
+# 0 flips over 78 identical-input questions bounds the rate at <=3.8% at
+# 95% (rule of three); no finite run can measure it AT zero. Both docs
+# said "exactly zero" until this review. What is pinnable is the n they
+# divide by and the flip count itself, so both are.
+def _cortex_flips(d) -> float:
+    c = d["paired"]["a_vs_b"]["cortex"]
+    return float(c["wins"] + c["losses"])
+
+
+_FLOOR_EVALS_0904 = "losses. Corrected 2026-09-05: that is 0 of 78 flipped, which **bounds**"
+_FLOOR_EVALS_0905 = "as a bound, not as a zero: 0 of 78 flipped puts the noise floor at ≤3.8%"
+_FLOOR_CHANGELOG = "flipped, which bounds the noise floor at ≤3.8% at 95% (rule of three)"
+
+for _cid, _doc, _needle, _art in [
+        ("pool-floor-n-evals-0904", EVALS, _FLOOR_EVALS_0904, POOL_RRF_PAIRS),
+        ("pool-floor-n-evals-0905", EVALS, _FLOOR_EVALS_0905, POOL_M1RR_PAIRS),
+        ("pool-floor-n-changelog", CHANGELOG, _FLOOR_CHANGELOG,
+         POOL_M1RR_PAIRS)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=lambda d: float(d["n"]), stated=78, places=0))
+    CLAIMS.append(Claim(
+        id=_cid + "-flips", doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_cortex_flips, stated=0, places=0))
+
+
+def test_the_cortex_arm_is_byte_identical_across_all_five_pool_cells():
+    """The causal half of the noise-floor argument, asserted.
+
+    Both docs now state the floor as a BOUND (<=3.8%, rule of three over
+    78 questions) and then argue the bound is tight for a causal reason:
+    the answerer is deterministic and the cortex arm is served exactly
+    the same context in every cell, so it has nothing to flip on. That
+    clause is checkable, and unchecked it is only prose -- a re-extraction
+    that quietly moved the fact ranking would leave both docs claiming a
+    floor their own artifacts no longer support.
+    """
+    cells = {c: _load_artifact(p) for c, p in POOL_ROWS.items()}
+    base = {r["question_id"]: r for r in cells["ctl"]}
+    assert len(base) == 78, "pool-ctl is not the 78-question slice"
+    for name, rows in cells.items():
+        assert len(rows) == 78, f"pool-{name}: expected 78 judged rows"
+        for row in rows:
+            ref = base[row["question_id"]]
+            pairs = (("context", row["contexts"]["cortex"],
+                      ref["contexts"]["cortex"]),
+                     ("response", row["cortex_response"],
+                      ref["cortex_response"]),
+                     ("verdict", row["cortex_correct"], ref["cortex_correct"]))
+            for field, got, want in pairs:
+                assert got == want, (
+                    f"pool-{name}/{row['question_id']}: cortex {field} "
+                    f"differs from pool-ctl, so the cortex arm is not the "
+                    f"identical-input control both docs read it as")
+
 
 # ── the recall fan-out caps (2026-09-04) ─────────────────────────────────
 # CPU-only paired run on a restored copy of the live bank: the same 20
@@ -5046,3 +5536,3249 @@ CLAIMS.append(Claim(
     needle="219.2 tokens against its 100-token name and producing a byte-identical",
     artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "context_tokens"),
     stated=219.2, places=1))
+
+# ── the assistant-turn extraction gap (2026-09-05) ────────────────────────
+# The CHANGELOG and evals/README both open the assistant-facts work with the
+# per-type scores that motivate it and the zero-claim row counts that
+# diagnose it. Per-type arm accuracies live in the run summary's `types`
+# block; the zero-claim counts are recomputed from the run's own rows.
+
+def _type_arm(qtype: str, arm: str):
+    return lambda d: d["types"][qtype]["arms"][arm]
+
+
+def _zero_claims(qtype: str):
+    """Rows of one question type whose consolidation extracted NO claims."""
+    return lambda rows: float(sum(
+        1 for r in rows
+        if r.get("question_type") == qtype
+        and (r.get("consolidation") or {}).get("claims") == 0))
+
+
+_ASSIST_CL_CORTEX_SSA = "`cortex` arm scores 0.054 on"
+_ASSIST_CL_CORTEX_SSP = "(56 questions) and 0.233 on"
+_ASSIST_CL_RAG = "against plain RAG's 0.911 / 0.533 —"
+_ASSIST_EV_CORTEX_SSA = (
+    "arm scores **0.054** on `single-session-assistant` (56 q) and")
+_ASSIST_EV_CORTEX_SSP = (
+    "**0.233** on `single-session-preference` (30 q), against `rag`'s")
+_ASSIST_EV_RAG = (
+    "**0.911** and **0.533**. The row-level cause is not retrieval: **50 of")
+
+for _cid, _doc, _needle, _val, _stated in [
+    ("assist-cl-cortex-ssa", CHANGELOG, _ASSIST_CL_CORTEX_SSA,
+     _type_arm("single-session-assistant", "cortex"), 0.054),
+    ("assist-cl-cortex-ssp", CHANGELOG, _ASSIST_CL_CORTEX_SSP,
+     _type_arm("single-session-preference", "cortex"), 0.233),
+    ("assist-cl-rag-ssa", CHANGELOG, _ASSIST_CL_RAG,
+     _type_arm("single-session-assistant", "rag"), 0.911),
+    ("assist-cl-rag-ssp", CHANGELOG, _ASSIST_CL_RAG,
+     _type_arm("single-session-preference", "rag"), 0.533),
+    ("assist-ev-cortex-ssa", EVALS, _ASSIST_EV_CORTEX_SSA,
+     _type_arm("single-session-assistant", "cortex"), 0.054),
+    ("assist-ev-cortex-ssp", EVALS, _ASSIST_EV_CORTEX_SSP,
+     _type_arm("single-session-preference", "cortex"), 0.233),
+    ("assist-ev-rag-ssa", EVALS, _ASSIST_EV_RAG,
+     _type_arm("single-session-assistant", "rag"), 0.911),
+    ("assist-ev-rag-ssp", EVALS, _ASSIST_EV_RAG,
+     _type_arm("single-session-preference", "rag"), 0.533),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(RL_ALL_SUM,),
+        value=_val, stated=_stated, places=3))
+
+CLAIMS.append(Claim(
+    id="assist-cl-zero-claims-ssa", doc=CHANGELOG,
+    needle="and 50 of those 56 sessions consolidated with **zero claims**",
+    artifacts=(RL_ALL_ROWS,),
+    value=_zero_claims("single-session-assistant"), stated=50, places=0))
+CLAIMS.append(Claim(
+    id="assist-ev-zero-claims-ssa", doc=EVALS, needle=_ASSIST_EV_RAG,
+    artifacts=(RL_ALL_ROWS,),
+    value=_zero_claims("single-session-assistant"), stated=50, places=0))
+CLAIMS.append(Claim(
+    id="assist-ev-zero-claims-ssp", doc=EVALS,
+    needle=("the 56** SSA sessions and **12 of the 30** SSP sessions "
+            "consolidated with"),
+    artifacts=(RL_ALL_ROWS,),
+    value=_zero_claims("single-session-preference"), stated=12, places=0))
+# ── the assistant-turn measurement (2026-09-05) ───────────────────────────
+# Three judged runs on the LongMemEval oracle slice SSA(56) + SSP(30) +
+# KU(78) = 164 questions, extractor qwen-27b. `assist-base` re-runs the
+# shipped prompt over the SSA rows only and is the determinism check that
+# licenses pairing the two variants against the committed 2026-09-04
+# six-type run; the paired tests themselves are `compare_arms.py`
+# artifacts, one per pairing and one per pairing-and-type.
+MEM_MODEL = "docs/guide/memory-model.md"
+_AS = RESULTS + "longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-"
+AS_PROV_SUM = _AS + "prov.summary.json"
+AS_NAIVE_SUM = _AS + "naive.summary.json"
+AS_PROV_ROWS = _AS + "prov.jsonl"
+AS_NAIVE_ROWS = _AS + "naive.jsonl"
+AS_BASE_ROWS = RESULTS + "longmemeval-ssa-oracle-qwen-27b-assist-base.jsonl"
+
+
+def _as_cmp(pair: str, scope: str = "") -> str:
+    """One compare_arms.py artifact; `scope` empty means the whole slice."""
+    tail = f"{scope}-" if scope else ""
+    return f"{RESULTS}compare-assist-{pair}-{tail}pairs.json"
+
+
+def _type_cascade(qtype: str):
+    """The cascade arm is derived, so it sits beside `arms`, not inside."""
+    return lambda d: d["types"][qtype]["cascade"]
+
+
+def _as_arm(arm: str, key: str = "accuracy"):
+    return lambda d: d["arms"][arm][key]
+
+
+def _as_base_arm(arm: str):
+    """The 09-04 baseline restricted to the 164 slice rows, as the compare
+    artifact recorded it — there is no separate baseline summary."""
+    return lambda d: d["b"]["arms"][arm]
+
+
+def _as_pair(arm: str, key: str):
+    return lambda d: float(d["paired"]["a_vs_b"][arm][key])
+
+
+def _median_extract(zero: bool):
+    """Median `extract_seconds` over rows that did / did not yield claims."""
+    def go(rows):
+        vals = sorted(r["consolidation"]["extract_seconds"] for r in rows
+                      if (r["consolidation"]["claims"] == 0) is zero)
+        mid = len(vals) // 2
+        return (vals[mid] if len(vals) % 2
+                else (vals[mid - 1] + vals[mid]) / 2)
+    return go
+
+
+_SSA = "single-session-assistant"
+
+
+def _as_repro(field: str):
+    """Rows of the `assist-base` rerun that match the 09-04 run exactly."""
+    def go(rerun, base):
+        prior = {r["question_id"]: r for r in base
+                 if r.get("question_type") == _SSA}
+        same = 0
+        for r in rerun:
+            other = prior.get(r["question_id"])
+            if other is None:
+                continue
+            if field == "claims":
+                same += (r["consolidation"]["claims"]
+                         == other["consolidation"]["claims"])
+            else:
+                same += r["contexts"][field] == other["contexts"][field]
+        return float(same)
+    return go
+
+
+def _as_flips(arm: str):
+    def go(rerun, base):
+        prior = {r["question_id"]: r for r in base
+                 if r.get("question_type") == _SSA}
+        return float(sum(
+            1 for r in rerun
+            if r["question_id"] in prior
+            and r[f"{arm}_correct"] != prior[r["question_id"]][f"{arm}_correct"]
+        ))
+    return go
+
+
+# ── evals/README.md: the per-type table (base | prov | naive) ────────────
+# Each row pins all three columns; the base column is the 2026-09-04
+# six-type summary's own `types` block, which is per type and so identical
+# whether the type was run inside 500 questions or inside this slice.
+for _qtype, _arm, _row, _base, _prov, _naive in [
+    (_SSA, "cortex",
+     "| single-session-assistant (56) | cortex | 0.054 | **0.518** | 0.500 |",
+     0.054, 0.518, 0.500),
+    (_SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | 0.911 | **0.964** | 0.929 |",
+     0.911, 0.964, 0.929),
+    (_SSA, "cascade",
+     "| single-session-assistant (56) | cascade | 0.893 | **0.929** | 0.911 |",
+     0.893, 0.929, 0.911),
+    (_SSA, "rag",
+     "| single-session-assistant (56) | rag (control) | 0.911 | 0.911 "
+     "| 0.911 |", 0.911, 0.911, 0.911),
+    ("single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | 0.233 | 0.100 | 0.167 |",
+     0.233, 0.100, 0.167),
+    ("single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | 0.500 | 0.533 | 0.500 |",
+     0.500, 0.533, 0.500),
+    ("single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | 0.467 | 0.367 | 0.467 |",
+     0.467, 0.367, 0.467),
+    ("single-session-preference", "rag",
+     "| single-session-preference (30) | rag (control) | 0.533 | 0.533 "
+     "| 0.533 |", 0.533, 0.533, 0.533),
+    ("knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | 0.667 | **0.744** | 0.705 |",
+     0.667, 0.744, 0.705),
+    ("knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | 0.897 | **0.923** | 0.885 |",
+     0.897, 0.923, 0.885),
+    ("knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | 0.846 | 0.872 | 0.872 |",
+     0.846, 0.872, 0.872),
+    ("knowledge-update", "rag",
+     "| knowledge-update (78) | rag (control) | 0.859 | 0.859 | 0.859 |",
+     0.859, 0.859, 0.859),
+]:
+    _acc = (_type_cascade(_qtype) if _arm == "cascade"
+            else _type_arm(_qtype, _arm))
+    _short = {"single-session-assistant": "ssa",
+              "single-session-preference": "ssp",
+              "knowledge-update": "ku"}[_qtype]
+    for _tag, _art, _stated in (("base", RL_ALL_SUM, _base),
+                                ("prov", AS_PROV_SUM, _prov),
+                                ("naive", AS_NAIVE_SUM, _naive)):
+        CLAIMS.append(Claim(
+            id=f"assist-type-{_short}-{_arm}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_acc, stated=_stated, places=3))
+
+# ── evals/README.md: the whole-slice table, accuracy + context tokens ────
+for _arm, _row, _base, _prov, _naive, _ptok, _ntok in [
+    ("cortex", "| cortex | 0.378 | **0.549** | 0.537 | 216 | 183 |",
+     0.378, 0.549, 0.537, 216, 183),
+    ("hybrid", "| hybrid | 0.829 | **0.866** | 0.829 | 1297 | 1263 |",
+     0.829, 0.866, 0.829, 1297, 1263),
+    ("cascade", "| cascade | 0.793 | 0.799 | 0.811 | 581 | 599 |",
+     0.793, 0.799, 0.811, 581, 599),
+    ("rag", "| rag (control) | 0.817 | 0.817 | 0.817 | 1072 | 1072 |",
+     0.817, 0.817, 0.817, 1072, 1072),
+]:
+    CLAIMS.append(Claim(
+        id=f"assist-slice-{_arm}-base", doc=EVALS, needle=_row,
+        artifacts=(_as_cmp("prov-vs-base"),), value=_as_base_arm(_arm),
+        stated=_base, places=3))
+    for _tag, _art, _stated, _tok in (
+            ("prov", AS_PROV_SUM, _prov, _ptok),
+            ("naive", AS_NAIVE_SUM, _naive, _ntok)):
+        CLAIMS.append(Claim(
+            id=f"assist-slice-{_arm}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_as_arm(_arm), stated=_stated, places=3))
+        CLAIMS.append(Claim(
+            id=f"assist-slice-tokens-{_arm}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_as_arm(_arm, "context_tokens"),
+            stated=_tok, places=0))
+
+# ── evals/README.md: the zero-claim table (the extraction-side diagnosis) ─
+for _qtype, _row, _base, _prov, _naive in [
+    (_SSA, "| single-session-assistant (56) | 50 | 20 | 23 |", 50, 20, 23),
+    ("single-session-preference",
+     "| single-session-preference (30) | 12 | 4 | 11 |", 12, 4, 11),
+    ("knowledge-update", "| knowledge-update (78) | 1 | 0 | 1 |", 1, 0, 1),
+]:
+    _short = {"single-session-assistant": "ssa",
+              "single-session-preference": "ssp",
+              "knowledge-update": "ku"}[_qtype]
+    for _tag, _art, _stated in (("base", RL_ALL_ROWS, _base),
+                                ("prov", AS_PROV_ROWS, _prov),
+                                ("naive", AS_NAIVE_ROWS, _naive)):
+        CLAIMS.append(Claim(
+            id=f"assist-zero-{_short}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_zero_claims(_qtype), stated=_stated,
+            places=0))
+
+# ── evals/README.md: "returns nothing, fast" inside the committed rerun ──
+CLAIMS.append(Claim(
+    id="assist-extract-seconds-zero", doc=EVALS,
+    needle="zero-claim rows have a **median `extract_seconds` of 2.05**",
+    artifacts=(AS_BASE_ROWS,), value=_median_extract(True), stated=2.05,
+    places=2))
+CLAIMS.append(Claim(
+    id="assist-extract-seconds-nonzero", doc=EVALS,
+    needle="**7.75** on the six rows that did produce claims",
+    artifacts=(AS_BASE_ROWS,), value=_median_extract(False), stated=7.75,
+    places=2))
+CLAIMS.append(Claim(
+    id="assist-extract-nonzero-n", doc=EVALS,
+    needle="**7.75** on the six rows that did produce claims",
+    artifacts=(AS_BASE_ROWS,),
+    value=lambda rows: float(sum(1 for r in rows
+                                 if r["consolidation"]["claims"] > 0)),
+    stated=6, places=0))
+
+# ── the determinism check, in both docs that lean on it ──────────────────
+_DET_EV_CLAIMS = "09-04 rows exactly — **56 of 56 identical claim counts, 56 of 56"
+_DET_EV_CTX = ("byte-identical `cortex`, `rag` and `hybrid` contexts, and 0 "
+               "verdict flips")
+_DET_CL = "counts, 56/56 byte-identical contexts, 0 verdict flips), which is"
+for _cid, _doc, _needle, _val, _stated in [
+    ("assist-repro-claims-ev", EVALS, _DET_EV_CLAIMS,
+     _as_repro("claims"), 56),
+    ("assist-repro-cortex-ev", EVALS, _DET_EV_CTX, _as_repro("cortex"), 56),
+    ("assist-repro-rag-ev", EVALS, _DET_EV_CTX, _as_repro("rag"), 56),
+    ("assist-repro-hybrid-ev", EVALS, _DET_EV_CTX, _as_repro("hybrid"), 56),
+    ("assist-repro-flips-cortex-ev", EVALS, _DET_EV_CTX,
+     _as_flips("cortex"), 0),
+    ("assist-repro-flips-rag-ev", EVALS, _DET_EV_CTX, _as_flips("rag"), 0),
+    ("assist-repro-flips-hybrid-ev", EVALS, _DET_EV_CTX,
+     _as_flips("hybrid"), 0),
+    ("assist-repro-claims-cl", CHANGELOG,
+     "arm reproduced the 2026-09-04 rows exactly (56/56 identical claim",
+     _as_repro("claims"), 56),
+    ("assist-repro-cortex-cl", CHANGELOG, _DET_CL, _as_repro("cortex"), 56),
+    ("assist-repro-flips-cortex-cl", CHANGELOG, _DET_CL,
+     _as_flips("cortex"), 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle,
+        artifacts=(AS_BASE_ROWS, RL_ALL_ROWS), value=_val, stated=_stated,
+        places=0))
+
+# ── evals/README.md: the three paired tables ─────────────────────────────
+# (pair, scope, arm, row, delta, p, wins, losses). `p: 0.0` in the artifact
+# is published as "< 0.0001" — 10,000 draws, none reaching the delta.
+_AS_PAIRED = [
+    # assist-prov vs assist-base
+    ("prov-vs-base", "", "cortex",
+     "| all 164 | cortex | **+0.171** | < 0.0001 | 36 / 8 |",
+     0.171, 0.0, 36, 8),
+    ("prov-vs-base", "", "hybrid",
+     "| all 164 | hybrid | +0.037 | 0.14 | 9 / 3 |", 0.037, 0.14, 9, 3),
+    ("prov-vs-base", "", "cascade",
+     "| all 164 | cascade | +0.006 | 1.00 | 8 / 7 |", 0.006, 1.00, 8, 7),
+    ("prov-vs-base", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("prov-vs-base", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | **+0.464** | < 0.0001 "
+     "| 26 / 0 |", 0.464, 0.0, 26, 0),
+    ("prov-vs-base", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.054 | 0.24 | 3 / 0 |",
+     0.054, 0.24, 3, 0),
+    ("prov-vs-base", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.036 | 0.51 | 2 / 0 |",
+     0.036, 0.51, 2, 0),
+    ("prov-vs-base", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.077 | 0.18 | 10 / 4 |",
+     0.077, 0.18, 10, 4),
+    ("prov-vs-base", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | +0.026 | 0.69 | 4 / 2 |",
+     0.026, 0.69, 4, 2),
+    ("prov-vs-base", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |",
+     0.026, 0.72, 5, 3),
+    ("prov-vs-base", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | \u22120.133 | 0.12 "
+     "| 0 / 4 |", -0.133, 0.12, 0, 4),
+    ("prov-vs-base", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | +0.033 | 1.00 | 2 / 1 |",
+     0.033, 1.00, 2, 1),
+    ("prov-vs-base", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | \u22120.100 | 0.37 "
+     "| 1 / 4 |", -0.100, 0.37, 1, 4),
+    # assist-naive vs assist-base
+    ("naive-vs-base", "", "cortex",
+     "| all 164 | cortex | **+0.159** | 0.0002 | 35 / 9 |",
+     0.159, 0.0002, 35, 9),
+    ("naive-vs-base", "", "hybrid",
+     "| all 164 | hybrid | 0.000 | 1.00 | 5 / 5 |", 0.0, 1.00, 5, 5),
+    ("naive-vs-base", "", "cascade",
+     "| all 164 | cascade | +0.018 | 0.60 | 9 / 6 |", 0.018, 0.60, 9, 6),
+    ("naive-vs-base", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("naive-vs-base", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | **+0.446** | < 0.0001 "
+     "| 25 / 0 |", 0.446, 0.0, 25, 0),
+    ("naive-vs-base", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.018 | 1.00 | 1 / 0 |",
+     0.018, 1.00, 1, 0),
+    ("naive-vs-base", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.018 | 1.00 | 1 / 0 |",
+     0.018, 1.00, 1, 0),
+    ("naive-vs-base", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.038 | 0.62 | 9 / 6 |",
+     0.038, 0.62, 9, 6),
+    ("naive-vs-base", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | \u22120.013 | 1.00 | 2 / 3 |",
+     -0.013, 1.00, 2, 3),
+    ("naive-vs-base", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |",
+     0.026, 0.72, 5, 3),
+    ("naive-vs-base", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | \u22120.067 | 0.61 "
+     "| 1 / 3 |", -0.067, 0.61, 1, 3),
+    ("naive-vs-base", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | 0.000 | 1.00 | 2 / 2 |",
+     0.0, 1.00, 2, 2),
+    ("naive-vs-base", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | 0.000 | 1.00 | 3 / 3 |",
+     0.0, 1.00, 3, 3),
+    # assist-prov vs assist-naive — the guard's own cost
+    ("prov-vs-naive", "", "cortex",
+     "| all 164 | cortex | +0.012 | 0.82 | 11 / 9 |", 0.012, 0.82, 11, 9),
+    ("prov-vs-naive", "", "hybrid",
+     "| all 164 | hybrid | +0.037 | 0.21 | 11 / 5 |", 0.037, 0.21, 11, 5),
+    ("prov-vs-naive", "", "cascade",
+     "| all 164 | cascade | \u22120.012 | 0.77 | 5 / 7 |",
+     -0.012, 0.77, 5, 7),
+    ("prov-vs-naive", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("prov-vs-naive", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | +0.018 | 1.00 | 4 / 3 |",
+     0.018, 1.00, 4, 3),
+    ("prov-vs-naive", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |",
+     0.036, 0.51, 2, 0),
+    ("prov-vs-naive", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.018 | 1.00 | 1 / 0 |",
+     0.018, 1.00, 1, 0),
+    ("prov-vs-naive", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.038 | 0.55 | 7 / 4 |",
+     0.038, 0.55, 7, 4),
+    ("prov-vs-naive", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | +0.038 | 0.45 | 5 / 2 |",
+     0.038, 0.45, 5, 2),
+    ("prov-vs-naive", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | 0.000 | 1.00 | 4 / 4 |",
+     0.0, 1.00, 4, 4),
+    ("prov-vs-naive", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | \u22120.067 | 0.51 "
+     "| 0 / 2 |", -0.067, 0.51, 0, 2),
+    ("prov-vs-naive", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | +0.033 | 1.00 | 4 / 3 |",
+     0.033, 1.00, 4, 3),
+    ("prov-vs-naive", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | \u22120.100 | 0.24 "
+     "| 0 / 3 |", -0.100, 0.24, 0, 3),
+]
+for _pair, _scope, _arm, _row, _d, _pv, _w, _l in _AS_PAIRED:
+    _art = _as_cmp(_pair, _scope)
+    _tag = f"{_pair}-{_scope or 'slice'}-{_arm}"
+    CLAIMS.append(Claim(
+        id=f"assist-paired-{_tag}-delta", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "delta"), stated=_d,
+        places=3))
+    CLAIMS.append(Claim(
+        id=f"assist-paired-{_tag}-p", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "p"), stated=_pv,
+        places=4 if _pv < 0.001 else 2))
+    CLAIMS.append(Claim(
+        id=f"assist-paired-{_tag}-wins", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "wins"), stated=_w, places=0))
+    CLAIMS.append(Claim(
+        id=f"assist-paired-{_tag}-losses", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "losses"), stated=_l,
+        places=0))
+
+# ── the CHANGELOG "Measured" paragraph and the memory-model pointer ──────
+_CL_RECOVER = "arm on `single-session-assistant` goes from **0.054** to **0.518** with"
+_CL_NAIVE = "the provenance prompt at `contender` and **0.500** with the naive prompt"
+_CL_PAIRED = "at `supersede` — paired **+0.464** and **+0.446**, both p < 0.0001, 26"
+_CL_WINS = "and 25 questions won against **zero** lost."
+_CL_KU = "0.744 provenance, → 0.705 naive; hybrid 0.897 → 0.923, → 0.885), so the"
+_CL_KU_BASE = "carried as the pollution check, is flat-to-up under both (cortex 0.667 →"
+_CL_HEAD = "hybrid +0.037, 11 W / 5 L, p = 0.21). `single-session-preference` is the"
+_CL_SSP = "one type both variants hurt slightly (cortex 0.233 → 0.100 provenance,"
+_CL_SSP_NAIVE = "→ 0.167 naive; n = 30). The `rag` control moved by 0.0000 with 0 wins"
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("assist-cl-recover-base", CHANGELOG, _CL_RECOVER, RL_ALL_SUM,
+     _type_arm(_SSA, "cortex"), 0.054, 3),
+    ("assist-cl-recover-prov", CHANGELOG, _CL_RECOVER, AS_PROV_SUM,
+     _type_arm(_SSA, "cortex"), 0.518, 3),
+    ("assist-cl-recover-naive", CHANGELOG, _CL_NAIVE, AS_NAIVE_SUM,
+     _type_arm(_SSA, "cortex"), 0.500, 3),
+    ("assist-cl-paired-prov-delta", CHANGELOG, _CL_PAIRED,
+     _as_cmp("prov-vs-base", _SSA), _as_pair("cortex", "delta"), 0.464, 3),
+    ("assist-cl-paired-prov-p", CHANGELOG, _CL_PAIRED,
+     _as_cmp("prov-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist-cl-paired-prov-wins", CHANGELOG, _CL_PAIRED,
+     _as_cmp("prov-vs-base", _SSA), _as_pair("cortex", "wins"), 26, 0),
+    ("assist-cl-paired-naive-delta", CHANGELOG, _CL_PAIRED,
+     _as_cmp("naive-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist-cl-paired-naive-p", CHANGELOG, _CL_PAIRED,
+     _as_cmp("naive-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist-cl-paired-naive-wins", CHANGELOG, _CL_WINS,
+     _as_cmp("naive-vs-base", _SSA), _as_pair("cortex", "wins"), 25, 0),
+    ("assist-cl-paired-prov-losses", CHANGELOG, _CL_WINS,
+     _as_cmp("prov-vs-base", _SSA), _as_pair("cortex", "losses"), 0, 0),
+    ("assist-cl-paired-naive-losses", CHANGELOG, _CL_WINS,
+     _as_cmp("naive-vs-base", _SSA), _as_pair("cortex", "losses"), 0, 0),
+    ("assist-cl-ku-base-cortex", CHANGELOG, _CL_KU_BASE, RL_ALL_SUM,
+     _type_arm("knowledge-update", "cortex"), 0.667, 3),
+    ("assist-cl-ku-base-hybrid", CHANGELOG, _CL_KU, RL_ALL_SUM,
+     _type_arm("knowledge-update", "hybrid"), 0.897, 3),
+    ("assist-cl-ku-prov-cortex", CHANGELOG, _CL_KU, AS_PROV_SUM,
+     _type_arm("knowledge-update", "cortex"), 0.744, 3),
+    ("assist-cl-ku-prov-hybrid", CHANGELOG, _CL_KU, AS_PROV_SUM,
+     _type_arm("knowledge-update", "hybrid"), 0.923, 3),
+    ("assist-cl-ku-naive-cortex", CHANGELOG, _CL_KU, AS_NAIVE_SUM,
+     _type_arm("knowledge-update", "cortex"), 0.705, 3),
+    ("assist-cl-ku-naive-hybrid", CHANGELOG, _CL_KU, AS_NAIVE_SUM,
+     _type_arm("knowledge-update", "hybrid"), 0.885, 3),
+    ("assist-cl-head-hybrid-delta", CHANGELOG, _CL_HEAD,
+     _as_cmp("prov-vs-naive"), _as_pair("hybrid", "delta"), 0.037, 3),
+    ("assist-cl-head-hybrid-wins", CHANGELOG, _CL_HEAD,
+     _as_cmp("prov-vs-naive"), _as_pair("hybrid", "wins"), 11, 0),
+    ("assist-cl-head-hybrid-losses", CHANGELOG, _CL_HEAD,
+     _as_cmp("prov-vs-naive"), _as_pair("hybrid", "losses"), 5, 0),
+    ("assist-cl-head-hybrid-p", CHANGELOG, _CL_HEAD,
+     _as_cmp("prov-vs-naive"), _as_pair("hybrid", "p"), 0.21, 2),
+    ("assist-cl-ssp-base", CHANGELOG, _CL_SSP, RL_ALL_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.233, 3),
+    ("assist-cl-ssp-prov", CHANGELOG, _CL_SSP, AS_PROV_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.100, 3),
+    ("assist-cl-ssp-naive", CHANGELOG, _CL_SSP_NAIVE, AS_NAIVE_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.167, 3),
+    ("assist-cl-rag-control", CHANGELOG, _CL_SSP_NAIVE,
+     _as_cmp("prov-vs-base"), _as_pair("rag", "delta"), 0.0, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+# ── the leave-one-out read after the prompt-contamination finding ────────
+# Merge review, 2026-09-05: the prompt variants' worked example named
+# `Miss Bee Providore`, the gold of `c4f10528` — an SSA question inside
+# the measured slice. Both docs now publish the same numbers with that one
+# question dropped, recomputed here from the artifacts' own qid lists and
+# rows rather than restated, so the qualification is as backed as the
+# claim it qualifies.
+_LOO_Q = "c4f10528"
+
+
+def _loo_delta(arm: str):
+    """Paired delta over n-1, with `c4f10528` removed from both qid lists."""
+    def go(d):
+        won = set(d["paired"]["a_vs_b"][arm]["win_qids"]) - {_LOO_Q}
+        lost = set(d["paired"]["a_vs_b"][arm]["loss_qids"]) - {_LOO_Q}
+        return (len(won) - len(lost)) / (int(d["n"]) - 1)
+    return go
+
+
+def _ssa_acc(arm: str, *, drop_leaked: bool):
+    def go(rows):
+        ssa = [r for r in rows if r["question_type"] == _SSA
+               and not (drop_leaked and r["question_id"] == _LOO_Q)]
+        return sum(1 for r in ssa if r[f"{arm}_correct"]) / len(ssa)
+    return go
+
+
+for _cid, _needle, _pair, _arm, _full, _loo in [
+    ("assist-loo-prov-cortex",
+     "| `assist-prov` vs `assist-base` | cortex | +0.4643 | +0.4545 |",
+     "prov-vs-base", "cortex", 0.4643, 0.4545),
+    ("assist-loo-prov-hybrid",
+     "| `assist-prov` vs `assist-base` | hybrid | +0.0536 | +0.0364 |",
+     "prov-vs-base", "hybrid", 0.0536, 0.0364),
+    ("assist-loo-prov-cascade",
+     "| `assist-prov` vs `assist-base` | cascade | +0.0357 | +0.0182 |",
+     "prov-vs-base", "cascade", 0.0357, 0.0182),
+    ("assist-loo-naive-cortex",
+     "| `assist-naive` vs `assist-base` | cortex | +0.4464 | +0.4364 |",
+     "naive-vs-base", "cortex", 0.4464, 0.4364),
+    ("assist-loo-naive-hybrid",
+     "| `assist-naive` vs `assist-base` | hybrid | +0.0179 | **0.0000** |",
+     "naive-vs-base", "hybrid", 0.0179, 0.0),
+    ("assist-loo-naive-cascade",
+     "| `assist-naive` vs `assist-base` | cascade | +0.0179 | **0.0000** |",
+     "naive-vs-base", "cascade", 0.0179, 0.0),
+    ("assist-loo-rag",
+     "| either vs base | rag (control) | 0.000 | 0.000 |",
+     "prov-vs-base", "rag", 0.0, 0.0),
+]:
+    _art = _as_cmp(_pair, _SSA)
+    CLAIMS.append(Claim(
+        id=_cid + "-full", doc=EVALS, needle=_needle, artifacts=(_art,),
+        value=_as_pair(_arm, "delta"), stated=_full,
+        places=(3 if _cid == "assist-loo-rag" else 4)))
+    CLAIMS.append(Claim(
+        id=_cid + "-loo", doc=EVALS, needle=_needle, artifacts=(_art,),
+        value=_loo_delta(_arm), stated=_loo,
+        places=(3 if _cid == "assist-loo-rag" else 4)))
+
+for _arm, _needle, _cells in [
+    ("cortex",
+     "| cortex | 0.0536 → 0.0545 | 0.5179 → 0.5091 | 0.5000 → 0.4909 |",
+     ((AS_BASE_ROWS, 0.0536, 0.0545), (AS_PROV_ROWS, 0.5179, 0.5091),
+      (AS_NAIVE_ROWS, 0.5000, 0.4909))),
+    ("hybrid",
+     "| hybrid | 0.9107 → 0.9273 | 0.9643 → 0.9636 | 0.9286 → 0.9273 |",
+     ((AS_BASE_ROWS, 0.9107, 0.9273), (AS_PROV_ROWS, 0.9643, 0.9636),
+      (AS_NAIVE_ROWS, 0.9286, 0.9273))),
+    ("rag",
+     "| rag (control) | 0.9107 → 0.9273 | 0.9107 → 0.9273 | 0.9107 → 0.9273 |",
+     ((AS_BASE_ROWS, 0.9107, 0.9273), (AS_PROV_ROWS, 0.9107, 0.9273),
+      (AS_NAIVE_ROWS, 0.9107, 0.9273))),
+]:
+    for _tag, (_rows, _full, _loo) in zip(("base", "prov", "naive"), _cells):
+        CLAIMS.append(Claim(
+            id=f"assist-looacc-{_arm}-{_tag}-full", doc=EVALS,
+            needle=_needle, artifacts=(_rows,),
+            value=_ssa_acc(_arm, drop_leaked=False), stated=_full, places=4))
+        CLAIMS.append(Claim(
+            id=f"assist-looacc-{_arm}-{_tag}-loo", doc=EVALS,
+            needle=_needle, artifacts=(_rows,),
+            value=_ssa_acc(_arm, drop_leaked=True), stated=_loo, places=4))
+
+for _cid, _needle, _pair, _arm, _stated, _places in [
+    ("assist-cl-loo-prov", "+0.464 → **+0.455** for `prov`,",
+     "prov-vs-base", "cortex", 0.455, 3),
+    ("assist-cl-loo-naive", "+0.446 → **+0.436** for `naive`)",
+     "naive-vs-base", "cortex", 0.436, 3),
+    ("assist-cl-loo-zero", "gains go to **exactly 0.0000**",
+     "naive-vs-base", "hybrid", 0.0, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle,
+        artifacts=(_as_cmp(_pair, _SSA),), value=_loo_delta(_arm),
+        stated=_stated, places=_places))
+
+
+# ── the CLEAN re-run (2026-09-05): the published assistant-turn numbers ──
+# The first measurement's worked example named the gold of `c4f10528`, so
+# both variants were re-run over the same 164 questions on the same
+# instrument under the tags `assist-prov2` / `assist-naive2`. Those are the
+# published numbers; every pin above that still points at the first run
+# now backs the "Superseded — first run" section of evals/README.md and
+# the matching CHANGELOG bullet, which are kept rather than deleted.
+AS_PROV2_SUM = _AS + "prov2.summary.json"
+AS_NAIVE2_SUM = _AS + "naive2.summary.json"
+AS_PROV2_ROWS = _AS + "prov2.jsonl"
+AS_NAIVE2_ROWS = _AS + "naive2.jsonl"
+
+# ── evals/README.md: the per-type table (base | prov2 | naive2) ──────────
+for _qtype, _arm, _row, _base, _prov, _naive in [
+    (_SSA, "cortex",
+     "| single-session-assistant (56) | cortex | 0.054 | **0.536** | 0.500 |",
+     0.054, 0.536, 0.500),
+    (_SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | 0.911 | **0.982** | 0.946 |",
+     0.911, 0.982, 0.946),
+    (_SSA, "cascade",
+     "| single-session-assistant (56) | cascade | 0.893 | **0.964** | 0.929 |",
+     0.893, 0.964, 0.929),
+    (_SSA, "rag",
+     "| single-session-assistant (56) | rag (control) | 0.911 | 0.911 "
+     "| 0.911 |", 0.911, 0.911, 0.911),
+    ("single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | 0.233 | 0.133 | 0.133 |",
+     0.233, 0.133, 0.133),
+    ("single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | 0.500 | **0.533** "
+     "| 0.433 |", 0.500, 0.533, 0.433),
+    ("single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | 0.467 | 0.400 | 0.400 |",
+     0.467, 0.400, 0.400),
+    ("single-session-preference", "rag",
+     "| single-session-preference (30) | rag (control) | 0.533 | 0.533 "
+     "| 0.533 |", 0.533, 0.533, 0.533),
+    ("knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | 0.667 | **0.731** | 0.718 |",
+     0.667, 0.731, 0.718),
+    ("knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | 0.897 | 0.897 | **0.910** |",
+     0.897, 0.897, 0.910),
+    ("knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | 0.846 | **0.885** | 0.859 |",
+     0.846, 0.885, 0.859),
+    ("knowledge-update", "rag",
+     "| knowledge-update (78) | rag (control) | 0.859 | 0.859 | 0.859 |",
+     0.859, 0.859, 0.859),
+]:
+    _acc = (_type_cascade(_qtype) if _arm == "cascade"
+            else _type_arm(_qtype, _arm))
+    _short = {"single-session-assistant": "ssa",
+              "single-session-preference": "ssp",
+              "knowledge-update": "ku"}[_qtype]
+    for _tag, _art, _stated in (("base", RL_ALL_SUM, _base),
+                                ("prov2", AS_PROV2_SUM, _prov),
+                                ("naive2", AS_NAIVE2_SUM, _naive)):
+        CLAIMS.append(Claim(
+            id=f"assist2-type-{_short}-{_arm}-{_tag}", doc=EVALS,
+            needle=_row, artifacts=(_art,), value=_acc, stated=_stated,
+            places=3))
+
+# ── evals/README.md: the whole-slice table, accuracy + context tokens ────
+for _arm, _row, _base, _prov, _naive, _ptok, _ntok in [
+    ("cortex", "| cortex | 0.378 | **0.555** | 0.537 | 216 | 188 |",
+     0.378, 0.555, 0.537, 216, 188),
+    ("hybrid", "| hybrid | 0.829 | **0.860** | 0.835 | 1296 | 1268 |",
+     0.829, 0.860, 0.835, 1296, 1268),
+    ("cascade", "| cascade | 0.793 | **0.823** | 0.799 | 608 | 569 |",
+     0.793, 0.823, 0.799, 608, 569),
+    ("rag", "| rag (control) | 0.817 | 0.817 | 0.817 | 1072 | 1072 |",
+     0.817, 0.817, 0.817, 1072, 1072),
+]:
+    CLAIMS.append(Claim(
+        id=f"assist2-slice-{_arm}-base", doc=EVALS, needle=_row,
+        artifacts=(_as_cmp("prov2-vs-base"),), value=_as_base_arm(_arm),
+        stated=_base, places=3))
+    for _tag, _art, _stated, _tok in (
+            ("prov2", AS_PROV2_SUM, _prov, _ptok),
+            ("naive2", AS_NAIVE2_SUM, _naive, _ntok)):
+        CLAIMS.append(Claim(
+            id=f"assist2-slice-{_arm}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_as_arm(_arm), stated=_stated,
+            places=3))
+        CLAIMS.append(Claim(
+            id=f"assist2-slice-tokens-{_arm}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_as_arm(_arm, "context_tokens"),
+            stated=_tok, places=0))
+
+# ── evals/README.md: the zero-claim table ────────────────────────────────
+for _qtype, _row, _base, _prov, _naive in [
+    (_SSA, "| single-session-assistant (56) | 50 | 19 | 23 |", 50, 19, 23),
+    ("single-session-preference",
+     "| single-session-preference (30) | 12 | 3 | 11 |", 12, 3, 11),
+    ("knowledge-update", "| knowledge-update (78) | 1 | 0 | 1 |", 1, 0, 1),
+]:
+    _short = {"single-session-assistant": "ssa",
+              "single-session-preference": "ssp",
+              "knowledge-update": "ku"}[_qtype]
+    for _tag, _art, _stated in (("base", RL_ALL_ROWS, _base),
+                                ("prov2", AS_PROV2_ROWS, _prov),
+                                ("naive2", AS_NAIVE2_ROWS, _naive)):
+        CLAIMS.append(Claim(
+            id=f"assist2-zero-{_short}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_zero_claims(_qtype), stated=_stated,
+            places=0))
+
+# ── evals/README.md: the three clean paired tables ───────────────────────
+_AS2_PAIRED = [
+    # assist-prov2 vs assist-base
+    ("prov2-vs-base", "", "cortex",
+     "| all 164 | cortex | **+0.177** | 0.0001 | 38 / 9 |",
+     0.177, 0.0001, 38, 9),
+    ("prov2-vs-base", "", "hybrid",
+     "| all 164 | hybrid | +0.030 | 0.23 | 8 / 3 |", 0.030, 0.23, 8, 3),
+    ("prov2-vs-base", "", "cascade",
+     "| all 164 | cascade | +0.030 | 0.33 | 11 / 6 |", 0.030, 0.33, 11, 6),
+    ("prov2-vs-base", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("prov2-vs-base", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | **+0.482** | < 0.0001 "
+     "| 27 / 0 |", 0.482, 0.0, 27, 0),
+    ("prov2-vs-base", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.071 | 0.12 | 4 / 0 |",
+     0.071, 0.12, 4, 0),
+    ("prov2-vs-base", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.071 | 0.12 | 4 / 0 |",
+     0.071, 0.12, 4, 0),
+    ("prov2-vs-base", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.064 | 0.31 | 10 / 5 |",
+     0.064, 0.31, 10, 5),
+    ("prov2-vs-base", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | 0.000 | 1.00 | 2 / 2 |",
+     0.0, 1.00, 2, 2),
+    ("prov2-vs-base", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | +0.038 | 0.45 | 5 / 2 |",
+     0.038, 0.45, 5, 2),
+    ("prov2-vs-base", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | −0.100 | 0.37 "
+     "| 1 / 4 |", -0.100, 0.37, 1, 4),
+    ("prov2-vs-base", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | +0.033 | 1.00 | 2 / 1 |",
+     0.033, 1.00, 2, 1),
+    ("prov2-vs-base", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | −0.067 | 0.69 "
+     "| 2 / 4 |", -0.067, 0.69, 2, 4),
+    # assist-naive2 vs assist-base
+    ("naive2-vs-base", "", "cortex",
+     "| all 164 | cortex | **+0.159** | < 0.0001 | 33 / 7 |",
+     0.159, 0.0, 33, 7),
+    ("naive2-vs-base", "", "hybrid",
+     "| all 164 | hybrid | +0.006 | 1.00 | 4 / 3 |", 0.006, 1.00, 4, 3),
+    ("naive2-vs-base", "", "cascade",
+     "| all 164 | cascade | +0.006 | 1.00 | 7 / 6 |", 0.006, 1.00, 7, 6),
+    ("naive2-vs-base", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("naive2-vs-base", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | **+0.446** | < 0.0001 "
+     "| 25 / 0 |", 0.446, 0.0, 25, 0),
+    ("naive2-vs-base", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |",
+     0.036, 0.51, 2, 0),
+    ("naive2-vs-base", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.036 | 0.51 | 2 / 0 |",
+     0.036, 0.51, 2, 0),
+    ("naive2-vs-base", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.051 | 0.39 | 8 / 4 |",
+     0.051, 0.39, 8, 4),
+    ("naive2-vs-base", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | +0.013 | 1.00 | 2 / 1 |",
+     0.013, 1.00, 2, 1),
+    ("naive2-vs-base", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | +0.013 | 1.00 | 4 / 3 |",
+     0.013, 1.00, 4, 3),
+    ("naive2-vs-base", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | −0.100 | 0.24 "
+     "| 0 / 3 |", -0.100, 0.24, 0, 3),
+    ("naive2-vs-base", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | −0.067 | 0.51 "
+     "| 0 / 2 |", -0.067, 0.51, 0, 2),
+    ("naive2-vs-base", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | −0.067 | 0.61 "
+     "| 1 / 3 |", -0.067, 0.61, 1, 3),
+    # assist-prov2 vs assist-naive2 — the guard's own cost
+    ("prov2-vs-naive2", "", "cortex",
+     "| all 164 | cortex | +0.018 | 0.68 | 13 / 10 |", 0.018, 0.68, 13, 10),
+    ("prov2-vs-naive2", "", "hybrid",
+     "| all 164 | hybrid | +0.024 | 0.34 | 7 / 3 |", 0.024, 0.34, 7, 3),
+    ("prov2-vs-naive2", "", "cascade",
+     "| all 164 | cascade | +0.024 | 0.42 | 9 / 5 |", 0.024, 0.42, 9, 5),
+    ("prov2-vs-naive2", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("prov2-vs-naive2", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | +0.036 | 0.72 | 5 / 3 |",
+     0.036, 0.72, 5, 3),
+    ("prov2-vs-naive2", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |",
+     0.036, 0.51, 2, 0),
+    ("prov2-vs-naive2", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.036 | 0.62 | 3 / 1 |",
+     0.036, 0.62, 3, 1),
+    ("prov2-vs-naive2", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.013 | 1.00 | 7 / 6 |",
+     0.013, 1.00, 7, 6),
+    ("prov2-vs-naive2", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | −0.013 | 1.00 | 2 / 3 |",
+     -0.013, 1.00, 2, 3),
+    ("prov2-vs-naive2", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |",
+     0.026, 0.72, 5, 3),
+    ("prov2-vs-naive2", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | 0.000 | 1.00 | 1 / 1 |",
+     0.0, 1.00, 1, 1),
+    ("prov2-vs-naive2", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | +0.100 | 0.24 | 3 / 0 |",
+     0.100, 0.24, 3, 0),
+    ("prov2-vs-naive2", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | 0.000 | 1.00 | 1 / 1 |",
+     0.0, 1.00, 1, 1),
+]
+for _pair, _scope, _arm, _row, _d, _pv, _w, _l in _AS2_PAIRED:
+    _art = _as_cmp(_pair, _scope)
+    _tag = f"{_pair}-{_scope or 'slice'}-{_arm}"
+    CLAIMS.append(Claim(
+        id=f"assist2-paired-{_tag}-delta", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "delta"), stated=_d,
+        places=3))
+    CLAIMS.append(Claim(
+        id=f"assist2-paired-{_tag}-p", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "p"), stated=_pv,
+        places=4 if _pv < 0.001 else 2))
+    CLAIMS.append(Claim(
+        id=f"assist2-paired-{_tag}-wins", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "wins"), stated=_w, places=0))
+    CLAIMS.append(Claim(
+        id=f"assist2-paired-{_tag}-losses", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "losses"), stated=_l,
+        places=0))
+
+# ── evals/README.md: "First run vs clean run" ────────────────────────────
+# Both columns of every row, so a reader can check that the re-run moved
+# the headline by the question counts the paragraph claims.
+for _cid, _row, _qtype, _arm, _first_art, _first, _clean_art, _clean in [
+    ("ssa-cortex-prov",
+     "| SSA cortex, provenance | 0.518 | 0.536 | +1 question |",
+     _SSA, "cortex", AS_PROV_SUM, 0.518, AS_PROV2_SUM, 0.536),
+    ("ssa-cortex-naive",
+     "| SSA cortex, naive | 0.500 | 0.500 | unchanged |",
+     _SSA, "cortex", AS_NAIVE_SUM, 0.500, AS_NAIVE2_SUM, 0.500),
+    ("ssa-hybrid-prov",
+     "| SSA hybrid, provenance | 0.964 | 0.982 | +1 question |",
+     _SSA, "hybrid", AS_PROV_SUM, 0.964, AS_PROV2_SUM, 0.982),
+    ("ssa-hybrid-naive",
+     "| SSA hybrid, naive | 0.929 | 0.946 | +1 question |",
+     _SSA, "hybrid", AS_NAIVE_SUM, 0.929, AS_NAIVE2_SUM, 0.946),
+    ("ku-cortex-prov",
+     "| KU cortex, provenance | 0.744 | 0.731 | −1 question |",
+     "knowledge-update", "cortex", AS_PROV_SUM, 0.744, AS_PROV2_SUM, 0.731),
+    ("ku-cortex-naive",
+     "| KU cortex, naive | 0.705 | 0.718 | +1 question |",
+     "knowledge-update", "cortex", AS_NAIVE_SUM, 0.705, AS_NAIVE2_SUM,
+     0.718),
+    ("ku-hybrid-prov",
+     "| KU hybrid, provenance | 0.923 | 0.897 | −2 questions |",
+     "knowledge-update", "hybrid", AS_PROV_SUM, 0.923, AS_PROV2_SUM, 0.897),
+    ("ku-hybrid-naive",
+     "| KU hybrid, naive | 0.885 | 0.910 | +2 questions |",
+     "knowledge-update", "hybrid", AS_NAIVE_SUM, 0.885, AS_NAIVE2_SUM,
+     0.910),
+    ("ssp-cortex-prov",
+     "| SSP cortex, provenance | 0.100 | 0.133 | +1 question |",
+     "single-session-preference", "cortex", AS_PROV_SUM, 0.100,
+     AS_PROV2_SUM, 0.133),
+    ("ssp-cortex-naive",
+     "| SSP cortex, naive | 0.167 | 0.133 | −1 question |",
+     "single-session-preference", "cortex", AS_NAIVE_SUM, 0.167,
+     AS_NAIVE2_SUM, 0.133),
+]:
+    _v = _type_arm(_qtype, _arm)
+    CLAIMS.append(Claim(
+        id=f"assist2-move-{_cid}-first", doc=EVALS, needle=_row,
+        artifacts=(_first_art,), value=_v, stated=_first, places=3))
+    CLAIMS.append(Claim(
+        id=f"assist2-move-{_cid}-clean", doc=EVALS, needle=_row,
+        artifacts=(_clean_art,), value=_v, stated=_clean, places=3))
+
+for _cid, _row, _arm, _first, _clean in [
+    ("slice-cortex-prov",
+     "| slice cortex, provenance | 0.549 | 0.555 | +1 question |",
+     "cortex", 0.549, 0.555),
+    ("slice-cascade-prov",
+     "| slice cascade, provenance | 0.799 | 0.823 | +4 questions |",
+     "cascade", 0.799, 0.823),
+]:
+    CLAIMS.append(Claim(
+        id=f"assist2-move-{_cid}-first", doc=EVALS, needle=_row,
+        artifacts=(AS_PROV_SUM,), value=_as_arm(_arm), stated=_first,
+        places=3))
+    CLAIMS.append(Claim(
+        id=f"assist2-move-{_cid}-clean", doc=EVALS, needle=_row,
+        artifacts=(AS_PROV2_SUM,), value=_as_arm(_arm), stated=_clean,
+        places=3))
+
+_MOVE_PAIRED = ("arm goes +0.464 → **+0.482** (26 → 27 questions "
+                "won, still zero lost);")
+_MOVE_ZERO = ("zero-claim counts barely move either: provenance 20 → "
+              "**19** on SSA and")
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("assist2-move-paired-prov-first", _MOVE_PAIRED,
+     _as_cmp("prov-vs-base", _SSA), _as_pair("cortex", "delta"), 0.464, 3),
+    ("assist2-move-paired-prov-clean", _MOVE_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.482, 3),
+    ("assist2-move-paired-prov-wins-first", _MOVE_PAIRED,
+     _as_cmp("prov-vs-base", _SSA), _as_pair("cortex", "wins"), 26, 0),
+    ("assist2-move-paired-prov-wins-clean", _MOVE_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "wins"), 27, 0),
+    ("assist2-move-paired-prov-losses-clean", _MOVE_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "losses"), 0, 0),
+    ("assist2-move-paired-naive-first",
+     "for the naive arm it is **+0.446** in both runs, the same 25 / 0.",
+     _as_cmp("naive-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist2-move-paired-naive-clean",
+     "for the naive arm it is **+0.446** in both runs, the same 25 / 0.",
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist2-move-paired-naive-wins-clean",
+     "for the naive arm it is **+0.446** in both runs, the same 25 / 0.",
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "wins"), 25, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+for _cid, _needle, _art, _qtype, _stated in [
+    ("assist2-move-zero-ssa-first", _MOVE_ZERO, AS_PROV_ROWS, _SSA, 20),
+    ("assist2-move-zero-ssa-clean", _MOVE_ZERO, AS_PROV2_ROWS, _SSA, 19),
+    ("assist2-move-zero-ssp-first",
+     "4 → **3** on SSP, naive unchanged at 23 and 11.",
+     AS_PROV_ROWS, "single-session-preference", 4),
+    ("assist2-move-zero-ssp-clean",
+     "4 → **3** on SSP, naive unchanged at 23 and 11.",
+     AS_PROV2_ROWS, "single-session-preference", 3),
+    ("assist2-move-zero-naive-ssa",
+     "4 → **3** on SSP, naive unchanged at 23 and 11.",
+     AS_NAIVE2_ROWS, _SSA, 23),
+    ("assist2-move-zero-naive-ssp",
+     "4 → **3** on SSP, naive unchanged at 23 and 11.",
+     AS_NAIVE2_ROWS, "single-session-preference", 11),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,),
+        value=_zero_claims(_qtype), stated=_stated, places=0))
+
+# ── the leave-one-out estimate vs what the clean re-run actually gave ────
+_LOO_VS = ("**+0.482** and **+0.036** instead — better than the "
+           "leave-one-out")
+for _cid, _art, _arm, _stated, _places in [
+    ("assist2-loovs-prov-est", _as_cmp("prov-vs-base", _SSA), "cortex",
+     0.455, 3),
+    ("assist2-loovs-naive-est", _as_cmp("naive-vs-base", _SSA), "hybrid",
+     0.0, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS,
+        needle="SSA `cortex` gain to +0.455 and the naive arm's SSA `hybrid` and",
+        artifacts=(_art,), value=_loo_delta(_arm), stated=_stated,
+        places=_places))
+CLAIMS.append(Claim(
+    id="assist2-loovs-prov-actual", doc=EVALS, needle=_LOO_VS,
+    artifacts=(_as_cmp("prov2-vs-base", _SSA),),
+    value=_as_pair("cortex", "delta"), stated=0.482, places=3))
+CLAIMS.append(Claim(
+    id="assist2-loovs-naive-actual", doc=EVALS, needle=_LOO_VS,
+    artifacts=(_as_cmp("naive2-vs-base", _SSA),),
+    value=_as_pair("hybrid", "delta"), stated=0.036, places=3))
+
+# ── `c4f10528` in the clean run, and the re-cut example's own tokens ─────
+# The contaminated run's counted win survives a prompt that never names
+# the gold, so the leak did not manufacture it. Read straight off the
+# rows, per arm, rather than restated.
+def _q_arm(qid: str, arm: str):
+    def go(rows):
+        row = next(r for r in rows if r["question_id"] == qid)
+        if arm == "cascade":
+            return float(bool(_cascade_correct(row)))
+        return float(bool(row[f"{arm}_correct"]))
+    return go
+
+
+_C4F_NEEDLE = ("**`c4f10528` is cortex-, hybrid- and cascade-correct in "
+               "both clean arms**,")
+for _tag, _rows in (("prov2", AS_PROV2_ROWS), ("naive2", AS_NAIVE2_ROWS)):
+    for _arm in ("cortex", "hybrid", "cascade"):
+        CLAIMS.append(Claim(
+            id=f"assist2-c4f-{_tag}-{_arm}", doc=EVALS, needle=_C4F_NEEDLE,
+            artifacts=(_rows,), value=_q_arm(_LOO_Q, _arm), stated=1,
+            places=0))
+
+# The re-cut example's invented proper nouns, straight from the generator
+# so a future edit to it cannot silently un-guard this claim.
+@lru_cache(maxsize=None)
+def _example_tokens() -> tuple[str, ...]:
+    """The re-cut examples' invented proper nouns, read out of
+    `evals/gen_assistant_facts_prompts.py` by AST rather than imported:
+    importing that module runs it (rewriting both prompt files) and pulls
+    the whole engine, torch included, into a parsing test."""
+    import ast
+
+    src = (REPO / "evals" / "gen_assistant_facts_prompts.py").read_text(
+        encoding="utf-8")
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", None) == "EXAMPLE_TOKENS"
+                for t in node.targets):
+            return tuple(ast.literal_eval(node.value))
+    raise AssertionError("EXAMPLE_TOKENS not found in the generator")
+
+
+def _example_token_hits(rows) -> float:
+    blob = json.dumps(rows, ensure_ascii=False)
+    return float(sum(blob.count(t) for t in _example_tokens()))
+
+
+for _tag, _rows in (("prov2", AS_PROV2_ROWS), ("naive2", AS_NAIVE2_ROWS)):
+    CLAIMS.append(Claim(
+        id=f"assist2-example-tokens-{_tag}", doc=EVALS,
+        needle="occur **0 times** in either clean run's rows, and",
+        artifacts=(_rows,), value=_example_token_hits, stated=0, places=0))
+
+# ── evals/README.md: "The read", the clean version ───────────────────────
+_EV2_RECOVER = "**0.536** (`assist-prov2`) and **0.500** (`assist-naive2`) on the"
+_EV2_PAIRED = "fact-only arm — paired **+0.482** and **+0.446**, both p < 0.0001, 27"
+_EV2_WINS = "and 25 questions won against **zero** lost. Asking for assistant-stated"
+_EV2_KU = "both variants (naive2 cortex +0.051, hybrid +0.013; prov2 cortex +0.064,"
+_EV2_KU2 = "hybrid 0.000), and none of those deltas is significant. On this"
+_EV2_HEAD = "significantly (slice hybrid +0.024, 7 W / 3 L, p = 0.34; slice cortex"
+_EV2_HEAD2 = "+0.018, 13 / 10). A delta this size is inside what this bench can"
+_EV2_SSP = "the fact-only arm: cortex 0.233 → **0.133** under both, a paired −0.100"
+_EV2_SSP2 = "naive2 0.433), so once turns are in the context the guarded variant is"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("assist2-read-recover-prov", _EV2_RECOVER, AS_PROV2_SUM,
+     _type_arm(_SSA, "cortex"), 0.536, 3),
+    ("assist2-read-recover-naive", _EV2_RECOVER, AS_NAIVE2_SUM,
+     _type_arm(_SSA, "cortex"), 0.500, 3),
+    ("assist2-read-paired-prov", _EV2_PAIRED, _as_cmp("prov2-vs-base", _SSA),
+     _as_pair("cortex", "delta"), 0.482, 3),
+    ("assist2-read-paired-naive", _EV2_PAIRED,
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist2-read-paired-prov-p", _EV2_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist2-read-paired-naive-p", _EV2_PAIRED,
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist2-read-wins-prov", _EV2_PAIRED, _as_cmp("prov2-vs-base", _SSA),
+     _as_pair("cortex", "wins"), 27, 0),
+    ("assist2-read-wins-naive", _EV2_WINS, _as_cmp("naive2-vs-base", _SSA),
+     _as_pair("cortex", "wins"), 25, 0),
+    ("assist2-read-losses-prov", _EV2_WINS, _as_cmp("prov2-vs-base", _SSA),
+     _as_pair("cortex", "losses"), 0, 0),
+    ("assist2-read-losses-naive", _EV2_WINS, _as_cmp("naive2-vs-base", _SSA),
+     _as_pair("cortex", "losses"), 0, 0),
+    ("assist2-read-ku-naive-cortex", _EV2_KU,
+     _as_cmp("naive2-vs-base", "knowledge-update"),
+     _as_pair("cortex", "delta"), 0.051, 3),
+    ("assist2-read-ku-naive-hybrid", _EV2_KU,
+     _as_cmp("naive2-vs-base", "knowledge-update"),
+     _as_pair("hybrid", "delta"), 0.013, 3),
+    ("assist2-read-ku-prov-cortex", _EV2_KU,
+     _as_cmp("prov2-vs-base", "knowledge-update"),
+     _as_pair("cortex", "delta"), 0.064, 3),
+    ("assist2-read-ku-prov-hybrid", _EV2_KU2,
+     _as_cmp("prov2-vs-base", "knowledge-update"),
+     _as_pair("hybrid", "delta"), 0.0, 3),
+    ("assist2-read-head-hybrid", _EV2_HEAD, _as_cmp("prov2-vs-naive2"),
+     _as_pair("hybrid", "delta"), 0.024, 3),
+    ("assist2-read-head-hybrid-wins", _EV2_HEAD, _as_cmp("prov2-vs-naive2"),
+     _as_pair("hybrid", "wins"), 7, 0),
+    ("assist2-read-head-hybrid-losses", _EV2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "losses"), 3, 0),
+    ("assist2-read-head-hybrid-p", _EV2_HEAD, _as_cmp("prov2-vs-naive2"),
+     _as_pair("hybrid", "p"), 0.34, 2),
+    ("assist2-read-head-cortex", _EV2_HEAD2, _as_cmp("prov2-vs-naive2"),
+     _as_pair("cortex", "delta"), 0.018, 3),
+    ("assist2-read-head-cortex-wins", _EV2_HEAD2,
+     _as_cmp("prov2-vs-naive2"), _as_pair("cortex", "wins"), 13, 0),
+    ("assist2-read-head-cortex-losses", _EV2_HEAD2,
+     _as_cmp("prov2-vs-naive2"), _as_pair("cortex", "losses"), 10, 0),
+    ("assist2-read-ssp-base", _EV2_SSP, RL_ALL_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.233, 3),
+    ("assist2-read-ssp-prov", _EV2_SSP, AS_PROV2_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.133, 3),
+    ("assist2-read-ssp-naive", _EV2_SSP, AS_NAIVE2_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.133, 3),
+    ("assist2-read-ssp-delta-prov", _EV2_SSP,
+     _as_cmp("prov2-vs-base", "single-session-preference"),
+     _as_pair("cortex", "delta"), -0.100, 3),
+    ("assist2-read-ssp-delta-naive", _EV2_SSP,
+     _as_cmp("naive2-vs-base", "single-session-preference"),
+     _as_pair("cortex", "delta"), -0.100, 3),
+    ("assist2-read-ssp-hybrid-prov", _EV2_SSP2, AS_PROV2_SUM,
+     _type_arm("single-session-preference", "hybrid"), 0.533, 3),
+    ("assist2-read-ssp-hybrid-naive", _EV2_SSP2, AS_NAIVE2_SUM,
+     _type_arm("single-session-preference", "hybrid"), 0.433, 3),
+    ("assist2-read-rag-control", _EV2_SSP2, _as_cmp("prov2-vs-naive2"),
+     _as_pair("rag", "delta"), 0.0, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# ── the distractor probe's dump-directory fix (2026-09-05) ───────────────
+# The 2026-08-15 artifact was unreproducible for three weeks because the
+# probe named its band-state dumps by string, and on this tree that name
+# resolves to the retired 384-d MiniLM replay. The regenerated run through
+# the content-resolved 1024-d dumps is the evidence that the published
+# numbers survive the fix, so its reproduction count is a published claim
+# in its own right — as is the latency that deliberately did NOT reproduce.
+DSP_09 = RESULTS + "distractor-scale-probe-2026-09-05.json"
+DSP_09_REPRO = RESULTS + "distractor-scale-probe-2026-09-05.reproduction.json"
+_REPRO_NEEDLES = [
+    (EVALS, "evals", "| **390 of 390 cells match** |"),
+    (CHANGELOG, "changelog",
+     "2026-08-15 artifact on **390 of 390** (question, scale) cells"),
+]
+for _doc, _slug, _needle in _REPRO_NEEDLES:
+    CLAIMS.append(Claim(
+        id=f"dumpdir-repro-matching-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_09_REPRO,), value=lambda d: d["cells_matching"],
+        stated=390, places=0))
+    CLAIMS.append(Claim(
+        id=f"dumpdir-repro-compared-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_09_REPRO,), value=lambda d: d["cells_compared"],
+        stated=390, places=0))
+    CLAIMS.append(Claim(
+        id=f"dumpdir-repro-mismatching-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_09_REPRO,), value=lambda d: d["cells_mismatching"],
+        stated=0, places=0))
+
+# Latency is excluded from that check precisely because it is machine- and
+# load-dependent; both docs publish the two medians to say so, and the new
+# one has to come from the new artifact.
+for _doc, _slug, _needle in [
+    (EVALS, "evals",
+     "2026-08-15 run, 675 ms here, same code, same pools, different day)"),
+    (CHANGELOG, "changelog",
+     "moved: median BM25 at 15x, 620 ms then, 675 ms now)"),
+]:
+    CLAIMS.append(Claim(
+        id=f"dumpdir-bm25-15x-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_09,), value=lambda d: d["bm25_latency_ms"]["15x"],
+        stated=675, places=0))
+    # …and the "then" side, from the artifact it is quoted against.
+    CLAIMS.append(Claim(
+        id=f"dumpdir-bm25-15x-2026-08-15-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(PROBE,), value=lambda d: d["bm25_latency_ms"]["15x"],
+        stated=620, places=0))
+
+# The regenerated run's own aggregates — that they are still the published
+# ones IS the claim the fix makes.
+_STAND = "run, so the published 0.830 / 0.597 / +0.233 numbers stand"
+for _cid, _key, _stated in [("dumpdir-09-1x", "1x", 0.830),
+                            ("dumpdir-09-15x", "15x", 0.597)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_STAND, artifacts=(DSP_09,),
+        value=(lambda k: lambda d:
+               d["scales"][k]["evidence_in_top6_mean"])(_key),
+        stated=_stated, places=3))
+CLAIMS.append(Claim(
+    id="dumpdir-09-delta", doc=EVALS, needle=_STAND, artifacts=(DSP_09,),
+    value=lambda d: d["gates"]["G-D1"]["delta_mean_1x_minus_15x"],
+    stated=0.233, places=3))
+
+# The negative control: the same probe through the retired 384-d dumps.
+# It is the half of the claim that says the two replays are not
+# interchangeable, so it is committed and pinned like any other number.
+DSP_384 = RESULTS + "distractor-scale-probe-2026-09-05-retired384.json"
+DSP_384_REPRO = (RESULTS
+                 + "distractor-scale-probe-2026-09-05-retired384"
+                   ".reproduction.json")
+for _doc, _slug, _needle in [
+    (EVALS, "evals", "| **116 of 390** — 274 cells differ |"),
+    (CHANGELOG, "changelog",
+     "through the retired 384-d dumps (`-retired384`) reproduces **116 of 390**"),
+]:
+    CLAIMS.append(Claim(
+        id=f"dumpdir-384-matching-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_384_REPRO,), value=lambda d: d["cells_matching"],
+        stated=116, places=0))
+    CLAIMS.append(Claim(
+        id=f"dumpdir-384-mismatching-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_384_REPRO,), value=lambda d: d["cells_mismatching"],
+        stated=274, places=0))
+for _doc, _slug, _needle in [
+    (EVALS, "evals",
+     "retired dumps against the published 0.830)"),
+    (CHANGELOG, "changelog",
+     "cells, with evidence-in-top-6 at 1x reading 0.667 against the published"),
+]:
+    CLAIMS.append(Claim(
+        id=f"dumpdir-384-hit6-1x-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_384,),
+        value=lambda d: d["scales"]["1x"]["evidence_in_top6_mean"],
+        stated=0.667, places=3))
+# ── the epistemic bench (2026-09-05) ──────────────────────────────────────
+# Judge-free by construction, so these are the cheapest claims in this file
+# to re-derive — which is exactly why nothing else would notice them
+# drifting. Spec: docs/superpowers/specs/2026-09-05-epistemic-bench-design.md
+EPI_SMOKE = RESULTS + "epistemic-bench-smoke-20260905.json"
+EPI_SMOKE_ROWS = RESULTS + "epistemic-bench-smoke-20260905.jsonl"
+EPI_SCALE = RESULTS + "epistemic-bench-scale-20260905.json"
+EPI_SCALE_ROWS = RESULTS + "epistemic-bench-scale-20260905.jsonl"
+EPI_LME = RESULTS + "epistemic-bench-lme-derivation-20260905.json"
+EPI_LME_S = RESULTS + "epistemic-bench-lme-derivation-s-20260905.json"
+
+
+def _epi(arm: str, dim: str):
+    return lambda d: d["arms"][arm][dim]["rate"]
+
+
+def _epi_n(dim: str):
+    """The scored denominator, read off the rag arm — every arm scores the
+    same questions, so a per-arm n that disagreed would be a harness bug."""
+    return lambda d: d["arms"]["rag"][dim]["n"]
+
+
+def _epi_chars(arm: str):
+    return lambda d: d["arms"][arm]["context_chars_mean"]
+
+
+def _epi_width_ratio(d):
+    return (d["arms"]["cortex"]["context_chars_mean"]
+            / d["arms"]["rag"]["context_chars_mean"])
+
+
+def _epi_qualified(d):
+    return d["meta"]["qualified"]
+
+
+# The smoke table in evals/README.md: one needle per row, every cell pinned.
+_EPI_TABLE = [
+    ("update_following",
+     "| `update_following` ↑ | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 20 |",
+     (("rag", 1.0), ("cortex", 1.0), ("hybrid", 1.0), ("cascade", 1.0),
+      ("nomem", 0.0)), 20),
+    ("stale_serving",
+     "| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 20 |",
+     (("rag", 0.0), ("cortex", 0.0), ("hybrid", 0.0), ("cascade", 0.0),
+      ("nomem", 0.0)), 20),
+    ("staleness_marking",
+     "| `staleness_marking` ↑ | 0.000 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |",
+     (("rag", 0.0), ("cortex", 1.0), ("hybrid", 1.0), ("cascade", 1.0),
+      ("nomem", 0.0)), 10),
+    ("abstention_support",
+     "| `abstention_support` ↑ | 0.700 | 0.000 | 0.000 | 0.000 | 1.000 | 10 |",
+     (("rag", 0.7), ("cortex", 0.0), ("hybrid", 0.0), ("cascade", 0.0),
+      ("nomem", 1.0)), 10),
+    ("retraction_handling",
+     "| `retraction_handling` ↑ | 0.600 | 1.000 | 1.000 | 1.000 | 0.000 | 10 |",
+     (("rag", 0.6), ("cortex", 1.0), ("hybrid", 1.0), ("cascade", 1.0),
+      ("nomem", 0.0)), 10),
+    ("answer_coverage",
+     "| `answer_coverage` | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 | 40 |",
+     (("rag", 1.0), ("cortex", 1.0), ("hybrid", 1.0), ("cascade", 1.0),
+      ("nomem", 0.0)), 40),
+]
+for _dim, _needle, _cells, _n in _EPI_TABLE:
+    for _arm, _rate in _cells:
+        CLAIMS.append(Claim(
+            id=f"epistemic-smoke-{_dim}-{_arm}", doc=EVALS, needle=_needle,
+            artifacts=(EPI_SMOKE,), value=_epi(_arm, _dim), stated=_rate,
+            places=3))
+    CLAIMS.append(Claim(
+        id=f"epistemic-smoke-{_dim}-n", doc=EVALS, needle=_needle,
+        artifacts=(EPI_SMOKE,), value=_epi_n(_dim), stated=_n, places=0))
+
+_EPI_CHARS = "| context chars (mean) | 373.1 | 1206.5 | 1613.7 | 1206.5 | 0.0 | |"
+for _arm, _chars in (("rag", 373.1), ("cortex", 1206.5), ("hybrid", 1613.7),
+                     ("cascade", 1206.5), ("nomem", 0.0)):
+    CLAIMS.append(Claim(
+        id=f"epistemic-smoke-chars-{_arm}", doc=EVALS, needle=_EPI_CHARS,
+        artifacts=(EPI_SMOKE,), value=_epi_chars(_arm), stated=_chars,
+        places=1))
+
+# The width confound the abstention result must be read against.
+CLAIMS.append(Claim(
+    id="epistemic-smoke-width-ratio", doc=EVALS,
+    needle="width (cortex serves 3.2× rag's characters, the column above), so it is",
+    artifacts=(EPI_SMOKE,), value=_epi_width_ratio, stated=3.2, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-cl-width-ratio", doc=CHANGELOG,
+    needle="served width — cortex serves 3.2× the characters, now recorded per arm),",
+    artifacts=(EPI_SMOKE,), value=_epi_width_ratio, stated=3.2, places=1))
+
+# The larger cell: only two rag rates move, and the docs name both.
+CLAIMS.append(Claim(
+    id="epistemic-scale-rag-abstention", doc=EVALS,
+    needle="identical at double the corpus except rag's `abstention_support` (0.750)",
+    artifacts=(EPI_SCALE,), value=_epi("rag", "abstention_support"),
+    stated=0.75, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-scale-rag-retraction", doc=EVALS,
+    needle="and rag's `retraction_handling` (0.400).",
+    artifacts=(EPI_SCALE,), value=_epi("rag", "retraction_handling"),
+    stated=0.4, places=3))
+
+
+def _epi_rag_serves_both(rows):
+    """Rows where the rag context carried BOTH the superseded value and the
+    current one — the reason stale_serving cannot fire on this corpus.
+    Recomputed with the harness's own matcher, not a local copy of it."""
+    from epistemic_bench import value_present
+
+    return sum(1 for r in rows if r["superseded_values"]
+               and value_present(r["rag_context"], r["current_value"])
+               and any(value_present(r["rag_context"], v)
+                       for v in r["superseded_values"]))
+
+
+# Both cells are cited, so both are pinned: the smoke's 20 changed slots
+# and the larger cell's 40. A single artifact here is how "40 of 40" came
+# to be published beside a 20-row smoke in the first draft.
+for _cid, _doc, _needle in (
+        ("epistemic-both-values-evals", EVALS,
+         "  *and* the current one on every changed slot in both cells (20 of 20 in"),
+        ("epistemic-both-values-cl", CHANGELOG,
+         "  because rag serves the old value and the current one on every changed")):
+    for _art, _suffix, _stated in ((EPI_SMOKE_ROWS, "smoke", 20),
+                                   (EPI_SCALE_ROWS, "scale", 40)):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_suffix}", doc=_doc, needle=_needle,
+            artifacts=(_art,), value=_epi_rag_serves_both, stated=_stated,
+            places=0))
+
+# The LongMemEval derivation, and the oracle/s parity the docs claim.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-qualified-evals", EVALS,
+         "guessed) and qualifies **23 of the 78** questions, identically on"),
+        ("epistemic-lme-qualified-cl", CHANGELOG,
+         "  qualifies **23 of the 78** questions, identically on the oracle and `s`")):
+    for _art, _suffix in ((EPI_LME, "oracle"), (EPI_LME_S, "s")):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_suffix}", doc=_doc, needle=_needle,
+            artifacts=(_art,), value=_epi_qualified, stated=23, places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-ku-total", doc=EVALS,
+    needle="guessed) and qualifies **23 of the 78** questions, identically on",
+    artifacts=(EPI_LME,),
+    value=lambda d: d["meta"]["knowledge_update_questions"], stated=78,
+    places=0))
+
+_EPI_SKIPS = "39 gold answers with no value token at all, 7 whose gold is a paraphrase"
+CLAIMS.append(Claim(
+    id="epistemic-lme-skip-no-token", doc=EVALS, needle=_EPI_SKIPS,
+    artifacts=(EPI_LME,),
+    value=lambda d: d["skips"]["gold-has-no-value-token"], stated=39,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-skip-paraphrase", doc=EVALS, needle=_EPI_SKIPS,
+    artifacts=(EPI_LME,),
+    value=lambda d: d["skips"]["gold-not-in-later-evidence"], stated=7,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-skip-ambiguous", doc=EVALS,
+    needle="of what the later evidence says, 8 with an ambiguous old-value candidate,",
+    artifacts=(EPI_LME,),
+    value=lambda d: sum(v for k, v in d["skips"].items()
+                        if k.startswith("ambiguous-old-value")),
+    stated=8, places=0))
+
+
+# ── the LongMemEval-source run (2026-09-05) ───────────────────────────────
+# The first epistemic cell on a bank an extractor actually built, so a
+# drift here is a claim about the DEPLOYED pipeline rather than about the
+# representation's ceiling. Numbers land in three docs — the evals table
+# and its read, the CHANGELOG `Measured` bullet, and the spec's A6
+# amendment — so each one is pinned at every site that states it, per the
+# retire-at-the-old-site rule.
+EPI_RUN = RESULTS + "epistemic-bench-lme-qwen27b-20260905.json"
+EPI_RUN_ROWS = RESULTS + "epistemic-bench-lme-qwen27b-20260905.jsonl"
+EPI_SPEC = "docs/superpowers/specs/2026-09-05-epistemic-bench-design.md"
+
+
+def _epi_hits(arm: str, dim: str):
+    return lambda d: d["arms"][arm][dim]["hits"]
+
+
+def _epi_width_pct(d):
+    """cortex characters as a PERCENTAGE of rag's — the width half of the
+    only trade this run measures cleanly. The smoke publishes the same
+    relationship as a ratio, hence a second accessor rather than a reuse."""
+    return 100.0 * (d["arms"]["cortex"]["context_chars_mean"]
+                    / d["arms"]["rag"]["context_chars_mean"])
+
+
+def _epi_meta(*path: str):
+    def read(d):
+        value = d["meta"]
+        for key in path:
+            value = value[key]
+        return value
+    return read
+
+
+def _epi_serves_both(arm: str):
+    """Rows where `arm` served the current value AND a superseded one.
+
+    This is the reason `stale_serving` cannot fire for the raw-turn arms
+    on this source, so the docs quote it as the explanation and it has to
+    be recomputed from the persisted contexts — with the harness's own
+    matcher, never a local copy of it.
+    """
+    from epistemic_bench import value_present
+
+    def count(rows):
+        return sum(1 for r in rows if r["superseded_values"]
+                   and value_present(r[f"{arm}_context"], r["current_value"])
+                   and any(value_present(r[f"{arm}_context"], v)
+                           for v in r["superseded_values"]))
+    return count
+
+
+# The LME table in evals/README.md: one needle per graded row, every cell.
+_EPI_LME_TABLE = [
+    ("update_following",
+     "| `update_following` ↑ | 1.000 | 0.913 | 1.000 | 0.913 | 0.000 | 23 |",
+     (("rag", 1.0), ("cortex", 0.913), ("hybrid", 1.0), ("cascade", 0.913),
+      ("nomem", 0.0)), 23),
+    ("stale_serving",
+     "| `stale_serving` ↓ | 0.000 | 0.043 | 0.000 | 0.043 | 0.000 | 23 |",
+     (("rag", 0.0), ("cortex", 0.043), ("hybrid", 0.0), ("cascade", 0.043),
+      ("nomem", 0.0)), 23),
+    ("retraction_handling",
+     "| `retraction_handling` ↑ | 0.348 | 0.000 | 0.348 | 0.000 | 0.000 | 23 |",
+     (("rag", 0.348), ("cortex", 0.0), ("hybrid", 0.348), ("cascade", 0.0),
+      ("nomem", 0.0)), 23),
+    ("answer_coverage",
+     "| `answer_coverage` | 1.000 | 0.913 | 1.000 | 0.913 | 0.000 | 23 |",
+     (("rag", 1.0), ("cortex", 0.913), ("hybrid", 1.0), ("cascade", 0.913),
+      ("nomem", 0.0)), 23),
+]
+for _dim, _needle, _cells, _n in _EPI_LME_TABLE:
+    for _arm, _rate in _cells:
+        CLAIMS.append(Claim(
+            id=f"epistemic-lme-run-{_dim}-{_arm}", doc=EVALS, needle=_needle,
+            artifacts=(EPI_RUN,), value=_epi(_arm, _dim), stated=_rate,
+            places=3))
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-run-{_dim}-n", doc=EVALS, needle=_needle,
+        artifacts=(EPI_RUN,), value=_epi_n(_dim), stated=_n, places=0))
+
+# The two ungradable rows publish `n/a` and a 0 denominator, never a rate.
+for _dim, _needle in (
+        ("staleness_marking",
+         "| `staleness_marking` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |"),
+        ("abstention_support",
+         "| `abstention_support` ↑ | n/a | n/a | n/a | n/a | n/a | 0 |")):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-run-{_dim}-n", doc=EVALS, needle=_needle,
+        artifacts=(EPI_RUN,), value=_epi_n(_dim), stated=0, places=0))
+
+_EPI_LME_CHARS = (
+    "| context chars (mean) | 5253.3 | 410.0 | 5697.3 | 410.0 | 0.0 | |")
+for _arm, _chars in (("rag", 5253.3), ("cortex", 410.0), ("hybrid", 5697.3),
+                     ("cascade", 410.0), ("nomem", 0.0)):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-run-chars-{_arm}", doc=EVALS,
+        needle=_EPI_LME_CHARS, artifacts=(EPI_RUN,), value=_epi_chars(_arm),
+        stated=_chars, places=1))
+
+# The read's prose, in evals/README.md.
+CLAIMS.append(Claim(
+    id="epistemic-lme-run-extract-seconds", doc=EVALS,
+    needle="extracted by `qwen-27b` (826.4s of extraction across the slice),",
+    artifacts=(EPI_RUN,), value=_epi_meta("extract_seconds_total"),
+    stated=826.4, places=1))
+
+# Why the raw-turn arms are saturated: the bank is small and top-6 takes a
+# quarter of it. Both halves of that sentence are numbers.
+_EPI_SELECTIVITY = (
+    "  here.** Each bank holds 23.2 turns on average against `rag_top_k` 6, so")
+CLAIMS.append(Claim(
+    id="epistemic-lme-run-turns-mean", doc=EVALS, needle=_EPI_SELECTIVITY,
+    artifacts=(EPI_RUN,),
+    value=_epi_meta("selectivity", "turns_in_bank_mean"), stated=23.2,
+    places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-run-rag-top-k", doc=EVALS, needle=_EPI_SELECTIVITY,
+    artifacts=(EPI_RUN,), value=_epi_meta("rag_top_k"), stated=6, places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-run-turns-mean-rounded", doc=EVALS,
+    needle="oracle slice hands it both values out of a 23-turn bank. Testing the",
+    artifacts=(EPI_RUN,),
+    value=_epi_meta("selectivity", "turns_in_bank_mean"), stated=23,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-run-rag-d1-hits", doc=EVALS,
+    needle="  context carries the current value on 23 of 23, and carries *both* the",
+    artifacts=(EPI_RUN,), value=_epi_hits("rag", "update_following"),
+    stated=23, places=0))
+
+# The both-values counts, recomputed from the served contexts.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-both-evals", EVALS,
+         "  current value and the superseded one on 22 of 23 (hybrid: 23 of 23) —"),
+        ("epistemic-lme-both-cl", CHANGELOG,
+         "  they carry BOTH values on 22 of 23 questions (hybrid 23 of 23) out of a"),
+        ("epistemic-lme-both-spec-rag", EPI_SPEC,
+         "    the current value *and* a superseded one on 22 of 23 questions"),
+        ("epistemic-lme-both-spec-hybrid", EPI_SPEC,
+         "    (hybrid 23 of 23), so the defect has no opportunity to occur. Section")):
+    for _arm, _stated in (("rag", 22), ("hybrid", 23)):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(EPI_RUN_ROWS,), value=_epi_serves_both(_arm),
+            stated=_stated, places=0))
+
+# The width/coverage trade — the one thing this run measures cleanly, so
+# it is stated in all three docs and pinned in all three.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-trade-evals", EVALS,
+         "- **The spine serves the current value in 21 of 23 questions at 7.8% of"),
+        ("epistemic-lme-trade-spec", EPI_SPEC,
+         "    21 of 23 questions at 7.8% of rag's characters — 410.0 against")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-hits", doc=_doc, needle=_needle, artifacts=(EPI_RUN,),
+        value=_epi_hits("cortex", "update_following"), stated=21, places=0))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-pct", doc=_doc, needle=_needle, artifacts=(EPI_RUN,),
+        value=_epi_width_pct, stated=7.8, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-trade-evals-cortex-chars", doc=EVALS,
+    needle="  rag's characters** — 410.0 against 5253.3 — and served a superseded",
+    artifacts=(EPI_RUN,), value=_epi_chars("cortex"), stated=410.0, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-trade-evals-rag-chars", doc=EVALS,
+    needle="  rag's characters** — 410.0 against 5253.3 — and served a superseded",
+    artifacts=(EPI_RUN,), value=_epi_chars("rag"), stated=5253.3, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-trade-spec-cortex-chars", doc=EPI_SPEC,
+    needle="    21 of 23 questions at 7.8% of rag's characters — 410.0 against",
+    artifacts=(EPI_RUN,), value=_epi_chars("cortex"), stated=410.0, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-trade-spec-rag-chars", doc=EPI_SPEC,
+    needle="    5253.3), and says nothing about the premise.",
+    artifacts=(EPI_RUN,), value=_epi_chars("rag"), stated=5253.3, places=1))
+
+# The single D2 event the bench has recorded on any source.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-d2-evals", EVALS,
+         "  value with no replacement present once (1 of 23). That trade is the one"),
+        ("epistemic-lme-d2-cl", CHANGELOG,
+         "  replacement present once (`stale_serving` 0.043, the only such event"),
+        ("epistemic-lme-d2-spec", EPI_SPEC,
+         "    possible on either source. `cortex` is 0.043 — one question of 23")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-hits", doc=_doc, needle=_needle, artifacts=(EPI_RUN,),
+        value=_epi_hits("cortex", "stale_serving"), stated=1, places=0))
+for _cid, _doc, _needle in (
+        ("epistemic-lme-d2-rate-cl", CHANGELOG,
+         "  replacement present once (`stale_serving` 0.043, the only such event"),
+        ("epistemic-lme-d2-rate-spec", EPI_SPEC,
+         "    possible on either source. `cortex` is 0.043 — one question of 23")):
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(EPI_RUN,),
+        value=_epi("cortex", "stale_serving"), stated=0.043, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-d2-spec-rag", doc=EPI_SPEC,
+    needle="    `stale_serving` is 0.000 for rag and hybrid; the rag context carries",
+    artifacts=(EPI_RUN,), value=_epi("rag", "stale_serving"), stated=0.0,
+    places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-d2-spec-hybrid", doc=EPI_SPEC,
+    needle="    `stale_serving` is 0.000 for rag and hybrid; the rag context carries",
+    artifacts=(EPI_RUN,), value=_epi("hybrid", "stale_serving"), stated=0.0,
+    places=3))
+
+# D5 on the entry channel, restated in the CHANGELOG and the spec.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-d5-cl", CHANGELOG,
+         "  0.348 for rag and hybrid on correction phrasing that never announces"),
+        ("epistemic-lme-d5-spec", EPI_SPEC,
+         "  - **E5 held, on the entry channel only.** `rag` = `hybrid` = 0.348,")):
+    for _arm in ("rag", "hybrid"):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(EPI_RUN,), value=_epi(_arm, "retraction_handling"),
+            stated=0.348, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-d5-cortex-cl", doc=CHANGELOG,
+    needle="  itself as one (the cortex 0.000 is the entry-channel construction, not",
+    artifacts=(EPI_RUN,), value=_epi("cortex", "retraction_handling"),
+    stated=0.0, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-d5-cortex-spec", doc=EPI_SPEC,
+    needle="    two are never pooled. `cortex` 0.000 is the construction described",
+    artifacts=(EPI_RUN,), value=_epi("cortex", "retraction_handling"),
+    stated=0.0, places=3))
+
+# The synthetic D5 numbers are restated beside the LME one at both new
+# sites, so the retire-at-the-old-site rule needs them pinned there too.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-synth-d5-evals", EVALS,
+         "  explicit corrections scored 0.600 / 0.400. The two are reported apart"),
+        ("epistemic-lme-synth-d5-spec", EPI_SPEC,
+         "    synthetic source's explicit corrections scored 0.600 / 0.400 and the")):
+    for _art, _suffix, _stated in ((EPI_SMOKE, "smoke", 0.6),
+                                   (EPI_SCALE, "scale", 0.4)):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_suffix}", doc=_doc, needle=_needle,
+            artifacts=(_art,), value=_epi("rag", "retraction_handling"),
+            stated=_stated, places=3))
+
+# The CHANGELOG `Measured` bullet.
+CLAIMS.append(Claim(
+    id="epistemic-lme-cl-cortex-d1-hits", doc=CHANGELOG,
+    needle="  current value on 21 of 23 questions — `update_following` 0.913 against",
+    artifacts=(EPI_RUN,), value=_epi_hits("cortex", "update_following"),
+    stated=21, places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-cl-cortex-d1", doc=CHANGELOG,
+    needle="  current value on 21 of 23 questions — `update_following` 0.913 against",
+    artifacts=(EPI_RUN,), value=_epi("cortex", "update_following"),
+    stated=0.913, places=3))
+for _arm in ("rag", "hybrid"):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-cl-{_arm}-d1", doc=CHANGELOG,
+        needle="  rag's and hybrid's 1.000 — while serving 410.0 characters against rag's",
+        artifacts=(EPI_RUN,), value=_epi(_arm, "update_following"),
+        stated=1.0, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-cl-cortex-chars", doc=CHANGELOG,
+    needle="  rag's and hybrid's 1.000 — while serving 410.0 characters against rag's",
+    artifacts=(EPI_RUN,), value=_epi_chars("cortex"), stated=410.0, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-cl-rag-chars", doc=CHANGELOG,
+    needle="  5253.3, i.e. 7.8% of the width. It served a superseded value with no",
+    artifacts=(EPI_RUN,), value=_epi_chars("rag"), stated=5253.3, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-cl-width-pct", doc=CHANGELOG,
+    needle="  5253.3, i.e. 7.8% of the width. It served a superseded value with no",
+    artifacts=(EPI_RUN,), value=_epi_width_pct, stated=7.8, places=1))
+_EPI_CL_SELECTIVITY = (
+    "  bank holding 23.2 turns against `rag_top_k` 6. `retraction_handling` is")
+CLAIMS.append(Claim(
+    id="epistemic-lme-cl-turns-mean", doc=CHANGELOG, needle=_EPI_CL_SELECTIVITY,
+    artifacts=(EPI_RUN,),
+    value=_epi_meta("selectivity", "turns_in_bank_mean"), stated=23.2,
+    places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-cl-rag-top-k", doc=CHANGELOG, needle=_EPI_CL_SELECTIVITY,
+    artifacts=(EPI_RUN,), value=_epi_meta("rag_top_k"), stated=6, places=0))
+
+# The spec's A6 amendment.
+CLAIMS.append(Claim(
+    id="epistemic-lme-spec-extract-seconds", doc=EPI_SPEC,
+    needle="  questions, `--contexts-only`, `qwen-27b` extraction (826.4s), one fresh",
+    artifacts=(EPI_RUN,), value=_epi_meta("extract_seconds_total"),
+    stated=826.4, places=1))
+_EPI_SPEC_E1_A = (
+    "    1.000 ≥ `cortex` 0.913, and `rag` 1.000 > `nomem` 0.000 — but the")
+_EPI_SPEC_E1_B = (
+    "    middle one does not: `cortex` 0.913 is **below** `rag` 1.000, which")
+for _cid, _needle, _arm, _stated in (
+        ("epistemic-lme-spec-e1-hybrid", _EPI_SPEC_E1_A, "hybrid", 1.0),
+        ("epistemic-lme-spec-e1-cortex", _EPI_SPEC_E1_A, "cortex", 0.913),
+        ("epistemic-lme-spec-e1-rag", _EPI_SPEC_E1_B, "rag", 1.0),
+        ("epistemic-lme-spec-e1-nomem", _EPI_SPEC_E1_B, "nomem", 0.0)):
+    CLAIMS.append(Claim(
+        id=_cid, doc=EPI_SPEC, needle=_needle, artifacts=(EPI_RUN,),
+        value=_epi(_arm, "update_following"), stated=_stated, places=3))
+_EPI_SPEC_SELECTIVITY = (
+    "    bank holds 23.2 turns and `rag_top_k` is 6, so a quarter of the whole")
+CLAIMS.append(Claim(
+    id="epistemic-lme-spec-turns-mean", doc=EPI_SPEC,
+    needle=_EPI_SPEC_SELECTIVITY, artifacts=(EPI_RUN,),
+    value=_epi_meta("selectivity", "turns_in_bank_mean"), stated=23.2,
+    places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-spec-rag-top-k", doc=EPI_SPEC,
+    needle=_EPI_SPEC_SELECTIVITY, artifacts=(EPI_RUN,),
+    value=_epi_meta("rag_top_k"), stated=6, places=0))
+
+
+def test_lme_ungradable_dimensions_report_null_not_zero():
+    """`n/a` in the docs must be a NULL rate in the artifact, never a 0.0.
+
+    A 0.0 published under a `↑` heading reads as a failing arm, and the
+    docs say `n/a` precisely because nothing was scored. The claim table
+    can pin the `n: 0` denominator but not the absent rate, so this is the
+    half of that guard a Claim row cannot express.
+    """
+    run = _load_artifact(EPI_RUN)
+    for dim in ("staleness_marking", "abstention_support"):
+        for arm in ("rag", "cortex", "hybrid", "cascade", "nomem"):
+            cell = run["arms"][arm][dim]
+            assert cell["n"] == 0, f"{arm}/{dim} scored {cell['n']} questions"
+            assert cell["rate"] is None, (
+                f"{arm}/{dim} publishes a rate of {cell['rate']!r}; the docs "
+                f"say n/a, which requires NULL")
+
+
+# ── the corrected LongMemEval derivation and rescore (2026-09-05) ─────────
+# The review that re-derived A6's numbers found the bench's only
+# stale_serving event was a compound-gold parsing artifact (spec A7). The
+# corrected slice and its rescored table land in the same three docs, so
+# each number is pinned at every site that states it — and the retired
+# numbers above stay pinned to the artifacts that still carry them, which
+# is what "retire at the old site, keep it visible" means here.
+EPI_LME_B = RESULTS + "epistemic-bench-lme-derivation-20260905b.json"
+EPI_LME_S_B = RESULTS + "epistemic-bench-lme-derivation-s-20260905b.json"
+EPI_RUN_B = RESULTS + "epistemic-bench-lme-qwen27b-20260905b.json"
+EPI_RUN_B_ROWS = RESULTS + "epistemic-bench-lme-qwen27b-20260905b.jsonl"
+
+_EPI_B_QUALIFIED = (
+    "guessed) and qualifies **21 of the 78** questions, identically on")
+for _art, _suffix in ((EPI_LME_B, "oracle"), (EPI_LME_S_B, "s")):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-qualified-evals-{_suffix}", doc=EVALS,
+        needle=_EPI_B_QUALIFIED, artifacts=(_art,), value=_epi_qualified,
+        stated=21, places=0))
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-qualified-cl-{_suffix}", doc=CHANGELOG,
+        needle="  slice is **21 of the 78** knowledge-update questions (was 23), still",
+        artifacts=(_art,), value=_epi_qualified, stated=21, places=0))
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-qualified-spec-{_suffix}", doc=EPI_SPEC,
+        needle="  **Qualifying count: 21 of the 78** knowledge-update questions (was 23),",
+        artifacts=(_art,), value=_epi_qualified, stated=21, places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-ku-total", doc=EVALS, needle=_EPI_B_QUALIFIED,
+    artifacts=(EPI_LME_B,),
+    value=lambda d: d["meta"]["knowledge_update_questions"], stated=78,
+    places=0))
+
+# The new skip class, and the ambiguous count it moved.
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-skip-compound", doc=EVALS,
+    needle="of what the later evidence says, **4 whose gold value token is only part",
+    artifacts=(EPI_LME_B,),
+    value=lambda d: d["skips"]["gold-value-is-compound-token"], stated=4,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-skip-ambiguous", doc=EVALS,
+    needle="of a compound token**, 6 with an ambiguous old-value candidate, 1 whose",
+    artifacts=(EPI_LME_B,),
+    value=lambda d: sum(v for k, v in d["skips"].items()
+                        if k.startswith("ambiguous-old-value")),
+    stated=6, places=0))
+
+# The corrected table in evals/README.md and spec A7 (identical rows, so
+# one needle serves both docs' copies).
+_EPI_B_TABLE = [
+    ("update_following",
+     "| `update_following` ↑ | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |",
+     (("rag", 1.0), ("cortex", 0.952), ("hybrid", 1.0), ("cascade", 0.952),
+      ("nomem", 0.0)), 21),
+    ("stale_serving",
+     "| `stale_serving` ↓ | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 21 |",
+     (("rag", 0.0), ("cortex", 0.0), ("hybrid", 0.0), ("cascade", 0.0),
+      ("nomem", 0.0)), 21),
+    ("retraction_handling",
+     "| `retraction_handling` ↑ | 0.333 | 0.000 | 0.333 | 0.000 | 0.000 | 21 |",
+     (("rag", 0.333), ("cortex", 0.0), ("hybrid", 0.333), ("cascade", 0.0),
+      ("nomem", 0.0)), 21),
+    ("answer_coverage",
+     "| `answer_coverage` | 1.000 | 0.952 | 1.000 | 0.952 | 0.000 | 21 |",
+     (("rag", 1.0), ("cortex", 0.952), ("hybrid", 1.0), ("cascade", 0.952),
+      ("nomem", 0.0)), 21),
+]
+for _dim, _needle, _cells, _n in _EPI_B_TABLE:
+    for _arm, _rate in _cells:
+        CLAIMS.append(Claim(
+            id=f"epistemic-lme-b-{_dim}-{_arm}", doc=EVALS, needle=_needle,
+            artifacts=(EPI_RUN_B,), value=_epi(_arm, _dim), stated=_rate,
+            places=3))
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-{_dim}-n", doc=EVALS, needle=_needle,
+        artifacts=(EPI_RUN_B,), value=_epi_n(_dim), stated=_n, places=0))
+
+_EPI_B_CHARS = (
+    "| context chars (mean) | 5397.0 | 378.1 | 5809.2 | 378.1 | 0.0 | |")
+for _arm, _chars in (("rag", 5397.0), ("cortex", 378.1), ("hybrid", 5809.2),
+                     ("cascade", 378.1), ("nomem", 0.0)):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-chars-{_arm}", doc=EVALS, needle=_EPI_B_CHARS,
+        artifacts=(EPI_RUN_B,), value=_epi_chars(_arm), stated=_chars,
+        places=1))
+
+# The rescored slice's share of the original run's extraction cost, and
+# the original total beside it — two artifacts, two numbers, one sentence.
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-extract-seconds", doc=EVALS,
+    needle="`longmemeval_bench.ingest_and_dream`, extracted by `qwen-27b` (714.7s of",
+    artifacts=(EPI_RUN_B,), value=_epi_meta("extract_seconds_total"),
+    stated=714.7, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-extract-seconds-source", doc=EVALS,
+    needle="the original run's 826.4s of extraction), `--contexts-only`,",
+    artifacts=(EPI_RUN,), value=_epi_meta("extract_seconds_total"),
+    stated=826.4, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-extract-seconds-spec", doc=EPI_SPEC,
+    needle="  questions, same `qwen-27b` extraction (714.7 s of the original run's",
+    artifacts=(EPI_RUN_B,), value=_epi_meta("extract_seconds_total"),
+    stated=714.7, places=1))
+
+# Why the raw-turn arms are still saturated on the narrower slice.
+_EPI_B_SELECTIVITY = (
+    "  here.** Each bank holds 23.1 turns on average against `rag_top_k` 6, so")
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-turns-mean", doc=EVALS, needle=_EPI_B_SELECTIVITY,
+    artifacts=(EPI_RUN_B,),
+    value=_epi_meta("selectivity", "turns_in_bank_mean"), stated=23.1,
+    places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-rag-top-k", doc=EVALS, needle=_EPI_B_SELECTIVITY,
+    artifacts=(EPI_RUN_B,), value=_epi_meta("rag_top_k"), stated=6,
+    places=0))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-turns-mean-spec", doc=EPI_SPEC,
+    needle="  saturated (23.1 turns per bank against `rag_top_k` 6, and rag carries",
+    artifacts=(EPI_RUN_B,),
+    value=_epi_meta("selectivity", "turns_in_bank_mean"), stated=23.1,
+    places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-rag-d1-hits", doc=EVALS,
+    needle="  context carries the current value on 21 of 21, and carries *both* the",
+    artifacts=(EPI_RUN_B,), value=_epi_hits("rag", "update_following"),
+    stated=21, places=0))
+
+# The both-values counts on the corrected slice, recomputed from contexts.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-b-both-evals", EVALS,
+         "  current value and the superseded one on 20 of 21 (hybrid: 21 of 21) — so"),
+        ("epistemic-lme-b-both-spec", EPI_SPEC,
+         "  both values on 20 of 21 questions; hybrid on 21 of 21). E5 moves from")):
+    for _arm, _stated in (("rag", 20), ("hybrid", 21)):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(EPI_RUN_B_ROWS,), value=_epi_serves_both(_arm),
+            stated=_stated, places=0))
+
+# The width/coverage trade on the corrected slice, in all three docs.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-b-trade-evals", EVALS,
+         "- **The spine serves the current value in 20 of 21 questions at 7.0% of"),
+        ("epistemic-lme-b-trade-spec", EPI_SPEC,
+         "  becomes 20 of 21 questions at 7.0% of rag's characters — 378.1 against")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-hits", doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi_hits("cortex", "update_following"), stated=20, places=0))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-pct", doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi_width_pct, stated=7.0, places=1))
+for _cid, _doc, _needle, _arm, _stated in (
+        ("epistemic-lme-b-chars-evals-cortex", EVALS,
+         "  rag's characters** — 378.1 against 5397.0 — with no `stale_serving`",
+         "cortex", 378.1),
+        ("epistemic-lme-b-chars-evals-rag", EVALS,
+         "  rag's characters** — 378.1 against 5397.0 — with no `stale_serving`",
+         "rag", 5397.0),
+        ("epistemic-lme-b-chars-spec-cortex", EPI_SPEC,
+         "  becomes 20 of 21 questions at 7.0% of rag's characters — 378.1 against",
+         "cortex", 378.1),
+        ("epistemic-lme-b-chars-spec-rag", EPI_SPEC,
+         "  5397.0. **E6 is unchanged: the premise is still not supported, and the",
+         "rag", 5397.0),
+        ("epistemic-lme-b-chars-cl-cortex", CHANGELOG,
+         "  and hybrid 1.000, at 378.1 characters against rag's 5397.0 — 7.0% of the",
+         "cortex", 378.1),
+        ("epistemic-lme-b-chars-cl-rag", CHANGELOG,
+         "  and hybrid 1.000, at 378.1 characters against rag's 5397.0 — 7.0% of the",
+         "rag", 5397.0)):
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi_chars(_arm), stated=_stated, places=1))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-width-pct-cl", doc=CHANGELOG,
+    needle="  and hybrid 1.000, at 378.1 characters against rag's 5397.0 — 7.0% of the",
+    artifacts=(EPI_RUN_B,), value=_epi_width_pct, stated=7.0, places=1))
+
+# D1 and D5 on the corrected slice, restated in the CHANGELOG.
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-cl-cortex-d1", doc=CHANGELOG,
+    needle="  never occurred. `update_following` is cortex 0.952 (20 of 21) against rag",
+    artifacts=(EPI_RUN_B,), value=_epi("cortex", "update_following"),
+    stated=0.952, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-cl-cortex-d1-hits", doc=CHANGELOG,
+    needle="  never occurred. `update_following` is cortex 0.952 (20 of 21) against rag",
+    artifacts=(EPI_RUN_B,), value=_epi_hits("cortex", "update_following"),
+    stated=20, places=0))
+for _arm in ("rag", "hybrid"):
+    CLAIMS.append(Claim(
+        id=f"epistemic-lme-b-cl-{_arm}-d5", doc=CHANGELOG,
+        needle="  width. `retraction_handling` is 0.333 for rag and hybrid, 0.000 for cortex",
+        artifacts=(EPI_RUN_B,), value=_epi(_arm, "retraction_handling"),
+        stated=0.333, places=3))
+CLAIMS.append(Claim(
+    id="epistemic-lme-b-cl-cortex-d5", doc=CHANGELOG,
+    needle="  width. `retraction_handling` is 0.333 for rag and hybrid, 0.000 for cortex",
+    artifacts=(EPI_RUN_B,), value=_epi("cortex", "retraction_handling"),
+    stated=0.0, places=3))
+for _cid, _doc, _needle in (
+        ("epistemic-lme-b-d5-evals", EVALS,
+         "  entries. rag/hybrid's 0.333 (7 of 21) *is* a real measurement of that"),
+        ("epistemic-lme-b-d5-spec", EPI_SPEC,
+         "  0.348 to 0.333 (7 of 21) for rag and hybrid. The width/coverage trade")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-rate", doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi("rag", "retraction_handling"), stated=0.333, places=3))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-hits", doc=_doc, needle=_needle, artifacts=(EPI_RUN_B,),
+        value=_epi_hits("rag", "retraction_handling"), stated=7, places=0))
+
+# The D2 zero is the headline of the correction, so it is pinned at each
+# site as an explicit hit count of 0 rather than only as a table cell.
+for _cid, _doc, _needle in (
+        ("epistemic-lme-b-d2-evals", EVALS,
+         "- **`stale_serving` is 0.000 on every arm of every source the bench has"),
+        ("epistemic-lme-b-d2-cl", CHANGELOG,
+         "  `stale_serving` is **0.000 on every arm**, which makes it 0.000 on every arm"),
+        ("epistemic-lme-b-d2-spec", EPI_SPEC,
+         "  now **0.000 on every arm of every source the bench has ever run** — the")):
+    for _arm in ("rag", "cortex", "hybrid", "cascade", "nomem"):
+        CLAIMS.append(Claim(
+            id=f"{_cid}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(EPI_RUN_B,), value=_epi_hits(_arm, "stale_serving"),
+            stated=0, places=0))
+
+
+def _epi_cascade_is_cortex(*artifacts) -> float:
+    """Rows where the cascade proxy served exactly the cortex context.
+
+    The docs say the column carries no independent information; that is a
+    count over every row of every run, so the claim cites all three rows
+    files at once rather than three separate near-identical claims."""
+    return sum(1 for rows in artifacts for r in rows
+               if r["cascade_context"] == r["cortex_context"])
+
+
+def _epi_row_total(*artifacts) -> float:
+    return sum(len(rows) for rows in artifacts)
+
+
+_EPI_ALL_ROWS = (EPI_SMOKE_ROWS, EPI_SCALE_ROWS, EPI_RUN_ROWS)
+for _cid, _doc, _needle in (
+        ("epistemic-cascade-dup-evals", EVALS,
+         "identical to `cortex` on **173 of 173** rows — every row of the smoke, the"),
+        ("epistemic-cascade-dup-cl", CHANGELOG,
+         "  identical to `cortex` on 173 of 173 rows across all three runs — it carries"),
+        ("epistemic-cascade-dup-spec", EPI_SPEC,
+         "    `cortex` on 173 of 173 rows across the smoke, scale and LongMemEval")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-same", doc=_doc, needle=_needle, artifacts=_EPI_ALL_ROWS,
+        value=_epi_cascade_is_cortex, stated=173, places=0))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-total", doc=_doc, needle=_needle, artifacts=_EPI_ALL_ROWS,
+        value=_epi_row_total, stated=173, places=0))
+
+
+def _epi_decoys_in_cortex(rows) -> float:
+    """Decoy values that reached the cortex context on the never-stated
+    questions — the arithmetic under D4's cortex 0.000, recomputed with
+    the harness's own matcher."""
+    from epistemic_bench import value_present
+
+    return sum(1 for r in rows if r["kind"] == "unstated"
+               for v in r["decoy_values"]
+               if value_present(r["cortex_context"], v))
+
+
+def _epi_decoys_total(rows) -> float:
+    return sum(len(r["decoy_values"]) for r in rows if r["kind"] == "unstated")
+
+
+for _cid, _doc, _needle in (
+        ("epistemic-d4-decoys-evals", EVALS,
+         "  **71 of the 72 decoy values reached the cortex context**, every decoy on"),
+        ("epistemic-d4-decoys-cl", CHANGELOG,
+         "  by `cortex_top_k` 24 against a 40-slot bank than by served width: 71 of the"),
+        ("epistemic-d4-decoys-spec", EPI_SPEC,
+         "  on the smoke rows, 71 of the 72 decoy values reached the cortex")):
+    CLAIMS.append(Claim(
+        id=f"{_cid}-hit", doc=_doc, needle=_needle,
+        artifacts=(EPI_SMOKE_ROWS,), value=_epi_decoys_in_cortex, stated=71,
+        places=0))
+    CLAIMS.append(Claim(
+        id=f"{_cid}-total", doc=_doc, needle=_needle,
+        artifacts=(EPI_SMOKE_ROWS,), value=_epi_decoys_total, stated=72,
+        places=0))
+CLAIMS.append(Claim(
+    id="epistemic-d4-slots-evals", doc=EVALS,
+    needle="  out of a bank that holds 40 — the `selectivity` block in the artifact —",
+    artifacts=(EPI_SMOKE,),
+    value=lambda d: d["meta"]["selectivity"]["cortex_slots_in_bank"],
+    stated=40, places=0))
+CLAIMS.append(Claim(
+    id="epistemic-d4-topk-evals", doc=EVALS,
+    needle="  width (cortex serves 3.2× rag's characters, the column above), so it is",
+    artifacts=(EPI_SMOKE,),
+    value=lambda d: d["meta"]["selectivity"]["cortex_top_k"], stated=24,
+    places=0))
+
+
+def test_the_corrected_slice_is_a_subset_of_the_run_it_rescored():
+    """A rescore may only narrow a slice.
+
+    If the corrected derivation ever admits a question the source run
+    never scored, its numbers stop being a rescore and become a run that
+    was never made — the exact failure `rescore_rows` refuses at runtime,
+    pinned here against the committed artifacts.
+    """
+    derived = {p["question_id"] for p in _load_artifact(
+        RESULTS + "epistemic-bench-lme-derivation-20260905b.jsonl")}
+    scored = {r["question_id"] for r in _load_artifact(EPI_RUN_ROWS)}
+    assert derived <= scored, sorted(derived - scored)
+    assert {r["question_id"] for r in _load_artifact(EPI_RUN_B_ROWS)} == derived
+
+
+def test_the_rescored_artifact_names_what_it_supersedes_and_why():
+    """A retired number stays quotable unless the thing replacing it says
+    what it replaced. The pointer is data in the artifact, not prose in a
+    doc that a reader may never open."""
+    for rel, retired in ((EPI_RUN_B, "epistemic-bench-lme-qwen27b-20260905.json"),
+                         (EPI_LME_B, "epistemic-bench-lme-derivation-20260905.json"),
+                         (EPI_LME_S_B,
+                          "epistemic-bench-lme-derivation-s-20260905.json")):
+        meta = _load_artifact(rel)["meta"]
+        assert meta["supersedes"]["artifact"] == retired
+        assert len(meta["supersedes"]["reason"]) > 40
+
+
+def test_the_corrected_run_records_which_verdicts_were_recomputed():
+    """The rescore recomputes the text-only predicates and CARRIES the
+    payload ones; an artifact that did not say so would look like a full
+    re-run of every dimension."""
+    meta = _load_artifact(EPI_RUN_B)["meta"]
+    assert meta["rescored_from"] == "epistemic-bench-lme-qwen27b-20260905.jsonl"
+    assert set(meta["rescored_metrics"]) == {
+        "update_following", "stale_serving", "answer_coverage"}
+    assert set(meta["carried_metrics"]) == {
+        "staleness_marking", "abstention_support", "retraction_handling"}
+    assert "rescored_not_rerun" in _load_artifact(EPI_RUN_B)["caveats"]
+# ── the second judge family over run C (2026-09-05) ──────────────────────
+# The budget-matched hybrid win is the first whole-benchmark memory-arm win
+# this project has measured, so it does not reach the README until a second,
+# independent judge family has seen the same rows. `evals/lme_rejudge.py`
+# replayed every recorded per-arm response through a `claude-opus-5` judge;
+# the Opus paired column is produced by the SAME beam_within_run_pairs.py
+# under `--score-key correct_opus5`, so both judges' numbers come off
+# identical arithmetic and both sides below read off their own artifact.
+RL_ALL_OPUS_SUM = (RESULTS + "longmemeval-all-oracle-qwen-27b-"
+                             "raglite-all-fresh.rejudge-opus5.summary.json")
+RL_ALL_OPUS_PAIRS = (RESULTS + "longmemeval-all-oracle-qwen-27b-"
+                               "raglite-all-fresh.rejudge-opus5"
+                               ".arms-vs-rag.json")
+
+# evals/README.md, per-arm table: both judges' accuracy, the transfer
+# between them, and the item-level agreement, all four off the re-judge
+# summary except the Qwen column, which is the source run's own.
+for _arm, _needle, _qwen, _opus, _xfer, _agree in [
+    ("rag", "| `rag` (control) | 0.690 | 0.694 | +0.004 | 0.976 |",
+     0.690, 0.694, 0.004, 0.976),
+    ("hybrid", "| `hybrid` | 0.730 | 0.736 | +0.006 | 0.982 |",
+     0.730, 0.736, 0.006, 0.982),
+    ("cortex", "| `cortex` | 0.310 | 0.320 | +0.010 | 0.978 |",
+     0.310, 0.320, 0.010, 0.978),
+    ("rag1", "| `rag1` | 0.316 | 0.320 | +0.004 | 0.980 |",
+     0.316, 0.320, 0.004, 0.980),
+]:
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-{_arm}-qwen", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_SUM,), value=_arm_metric(_arm, "accuracy"),
+        stated=_qwen, places=3))
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-{_arm}-opus", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_OPUS_SUM,), value=_arm_metric(_arm, "accuracy"),
+        stated=_opus, places=3))
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-{_arm}-transfer", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_OPUS_SUM,), value=_arm_metric(_arm, "delta"),
+        stated=_xfer, places=3))
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-{_arm}-agreement", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_OPUS_SUM,), value=_arm_metric(_arm, "agreement"),
+        stated=_agree, places=3))
+
+# evals/README.md, paired-vs-rag table: delta / CI / p / W / L per judge.
+# A p-value needs the artifact that computed it, so each side cites its own.
+_REJUDGE_PAIRED = [
+    ("hybrid",
+     "| `hybrid` | **+0.040** \u00b1 0.031 | 0.0153 | 41 / 21 | "
+     "**+0.042** \u00b1 0.031 | 0.0126 | 42 / 21 |",
+     (0.040, 0.031, 0.0153, 41, 21), (0.042, 0.031, 0.0126, 42, 21)),
+    ("cascade",
+     "| `cascade` | +0.002 \u00b1 0.022 | 1.0000 | 16 / 15 | "
+     "+0.010 \u00b1 0.021 | 0.4576 | 17 / 12 |",
+     (0.002, 0.022, 1.0000, 16, 15), (0.010, 0.021, 0.4576, 17, 12)),
+    ("cortex",
+     "| `cortex` | \u22120.380 \u00b1 0.048 | 0.0001 | 16 / 206 | "
+     "\u22120.374 \u00b1 0.048 | 0.0001 | 17 / 204 |",
+     (-0.380, 0.048, 0.0001, 16, 206), (-0.374, 0.048, 0.0001, 17, 204)),
+    ("rag1",
+     "| `rag1` | \u22120.374 \u00b1 0.045 | 0.0001 | 8 / 195 | "
+     "\u22120.374 \u00b1 0.046 | 0.0001 | 11 / 198 |",
+     (-0.374, 0.045, 0.0001, 8, 195), (-0.374, 0.046, 0.0001, 11, 198)),
+]
+for _arm, _needle, _q, _o in _REJUDGE_PAIRED:
+    for _judge, _art, _vals in (("qwen", RL_ALL_PAIRS, _q),
+                                ("opus", RL_ALL_OPUS_PAIRS, _o)):
+        _delta, _ci, _p, _w, _l = _vals
+        for _key, _stated, _places in (
+                ("delta_vs_control", _delta, 3),
+                ("ci95_halfwidth", _ci, 3),
+                ("perm_p", _p, 4),
+                ("wins", _w, 0),
+                ("losses", _l, 0)):
+            CLAIMS.append(Claim(
+                id=f"rejudge-ev-paired-{_arm}-{_judge}-{_key}", doc=EVALS,
+                needle=_needle, artifacts=(_art,),
+                value=_arm_metric(_arm, _key), stated=_stated,
+                places=_places))
+
+# evals/README.md, the leak-free reads under the second judge, and the
+# statement that the same 25 rows are flagged under both.
+_REJUDGE_LEAKFREE = ("unleaked rows Opus reads **rag 0.6989, hybrid 0.7389, "
+                     "cortex\n0.3263, rag1 0.3347**")
+for _arm, _stated in (("rag", 0.6989), ("hybrid", 0.7389),
+                      ("cortex", 0.3263), ("rag1", 0.3347)):
+    CLAIMS.append(Claim(
+        id=f"rejudge-ev-leak-free-{_arm}", doc=EVALS,
+        needle=_REJUDGE_LEAKFREE, artifacts=(RL_ALL_OPUS_SUM,),
+        value=(lambda a: lambda d: d["leak_check"]["arms"][a]["accuracy"])(
+            _arm),
+        stated=_stated, places=4))
+CLAIMS.append(Claim(
+    id="rejudge-ev-leaked-n", doc=EVALS,
+    needle="The gold-answer leak check flags the same 25 rows under both "
+           "judges. Over",
+    artifacts=(RL_ALL_OPUS_SUM,), value=lambda d: d["leak_check"]["n_leaked"],
+    stated=25, places=0))
+
+# evals/README.md, the instrument's own cost and its stability floor.
+# The call count is published as a SPLIT (2026-09-05 merge review): the
+# timed window opens after the launch probe, so the probe is one of the
+# 2,061 calls and none of the 2,060 the rate is taken over. This run's
+# artifact predates the `cli_calls_total` / `judged_calls` fields and
+# carries the combined `cli_calls`; the probe is exactly one call by
+# construction (`main` fires it once before `started`), so the judged count
+# and the corrected rate are DERIVED here rather than read, which is also
+# what makes them checkable against the artifact instead of the prose.
+_REJUDGE_COST = "Instrument cost and floor: **2,061** CLI judge calls (2,060 judged calls +"
+_REJUDGE_COST2 = "1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall."
+for _cid, _needle, _val, _stated, _places in [
+    ("rejudge-ev-cli-calls", _REJUDGE_COST, lambda d: d["cli_calls"],
+     2061, 0),
+    ("rejudge-ev-judged-calls", _REJUDGE_COST,
+     lambda d: d["cli_calls"] - 1, 2060, 0),
+    ("rejudge-ev-cli-errors", _REJUDGE_COST2, lambda d: d["cli_errors"],
+     0, 0),
+    ("rejudge-ev-sec-per-call", _REJUDGE_COST2,
+     lambda d: d["seconds_per_call"], 2.61, 2),
+    ("rejudge-ev-sec-per-judged-call", _REJUDGE_COST2,
+     lambda d: d["wall_seconds"] / (d["cli_calls"] - 1), 2.61, 2),
+    ("rejudge-ev-wall", _REJUDGE_COST2,
+     lambda d: d["wall_seconds"], 5379.7, 1),
+    ("rejudge-ev-stability-pairs",
+     "(row, arm) pairs a second time and the CLI judge agreed with itself on",
+     lambda d: d["stability_sample"]["n_pairs"], 60, 0),
+    ("rejudge-ev-stability-agreement",
+     "**0.9667** of them, a flip rate of ~0.033",
+     lambda d: d["stability_sample"]["agreement"], 0.9667, 4),
+    ("rejudge-ev-tooling-stability", "itself on 0.9667 of 60 sampled pairs",
+     lambda d: d["stability_sample"]["agreement"], 0.9667, 4),
+    ("rejudge-ev-tooling-pairs", "itself on 0.9667 of 60 sampled pairs",
+     lambda d: d["stability_sample"]["n_pairs"], 60, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(RL_ALL_OPUS_SUM,),
+        value=_val, stated=_stated, places=_places))
+
+# evals/README.md, the read paragraph — the same numbers restated in prose,
+# pinned at that site too, because a reader meets the prose first.
+_READ_1 = "**Read.** The win holds. Hybrid beats the raw-turn control by +0.040 under"
+_READ_2 = "the local judge and +0.042 under Opus, both at p < 0.02, and both judges"
+_READ_3 = "agree on which rows carry it (42 W / 21 L under Opus, 41 W / 21 L under"
+_READ_4 = "Qwen). No arm's accuracy moves more than +0.010 between judges and item"
+_READ_5 = "agreement runs 0.976\u20130.982, so judge transfer here is well inside the CLI"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-ev-read-qwen-delta", _READ_1, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.040, 3),
+    ("rejudge-ev-read-opus-delta", _READ_2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.042, 3),
+    ("rejudge-ev-read-opus-wins", _READ_3, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "wins"), 42, 0),
+    ("rejudge-ev-read-opus-losses", _READ_3, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-ev-read-qwen-wins", _READ_3, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "wins"), 41, 0),
+    ("rejudge-ev-read-qwen-losses", _READ_3, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-ev-read-max-transfer", _READ_4, RL_ALL_OPUS_SUM,
+     _arm_metric("cortex", "delta"), 0.010, 3),
+    ("rejudge-ev-read-agreement-low", _READ_5, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "agreement"), 0.976, 3),
+    ("rejudge-ev-read-agreement-high", _READ_5, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "agreement"), 0.982, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# The BEAM judge-transfer floor, restated in the LongMemEval read as the
+# comparison it is. Pinned at this site too — the existing pins guard a
+# different sentence, and a reader meets whichever one they land on.
+_REJUDGE_BEAM = ("gave (rag \u22120.002, cortex +0.007, hybrid \u22120.016 "
+                 "against a 0.073 floor).")
+for _cid, _val, _stated in [
+    ("rejudge-ev-beam-rag", lambda d: d["arms"]["rag"]["delta"], -0.002),
+    ("rejudge-ev-beam-cortex",
+     lambda d: d["arms"]["cortex"]["delta"], 0.007),
+    ("rejudge-ev-beam-hybrid",
+     lambda d: d["arms"]["hybrid"]["delta"], -0.016),
+    ("rejudge-ev-beam-floor",
+     lambda d: d["stability_sample"]["mean_abs_delta"], 0.073),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_REJUDGE_BEAM, artifacts=(BEAM_OPUS,),
+        value=_val, stated=_stated, places=3))
+
+# ── the promoted claim at the two front doors ────────────────────────────
+# docs/guide/benchmarks.md — the two-judge table and the prose under it.
+_BM_ROW_RAG = "| naive RAG (top-6 turns, control) | 0.690 | 0.694 | \u2014 | ~1124 |"
+_BM_ROW_HYB = ("| **hybrid (facts + top-6 turns)** | **0.730** | **0.736** | "
+               "**+0.040 / +0.042**, p 0.015 / 0.013 | ~1229 |")
+_BM_PAIRED = "(10,000 permutations, \u00b10.031 at 95% under both judges): 41 W / 21 L under"
+_BM_PAIRED2 = "the local judge, 42 W / 21 L under Opus. Across the run no arm's accuracy"
+_BM_XFER = "moved more than +0.010 between the two judges and per-arm item agreement"
+_BM_AGREE = "was 0.976\u20130.982, so the win is a property of the memory, not of the"
+_BM_COST = "not less \u2014 ~1229 tokens against the control's ~1124 \u2014 so it is accuracy"
+_BM_CASC = "context, stays a wash under both judges (+0.002 under Qwen, +0.010 under"
+_BM_CASC_P = "Opus at p 0.4576) and is not promoted with it. **(3)** The win is not"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-bm-rag-qwen", _BM_ROW_RAG, RL_ALL_SUM,
+     _arm_metric("rag", "accuracy"), 0.690, 3),
+    ("rejudge-bm-rag-opus", _BM_ROW_RAG, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "accuracy"), 0.694, 3),
+    ("rejudge-bm-rag-tokens", _BM_ROW_RAG, RL_ALL_PAIRS,
+     lambda d: d["control_context_tokens_mean"], 1124, 0),
+    ("rejudge-bm-hybrid-qwen", _BM_ROW_HYB, RL_ALL_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.730, 3),
+    ("rejudge-bm-hybrid-opus", _BM_ROW_HYB, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.736, 3),
+    ("rejudge-bm-hybrid-qwen-delta", _BM_ROW_HYB, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.040, 3),
+    ("rejudge-bm-hybrid-opus-delta", _BM_ROW_HYB, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.042, 3),
+    ("rejudge-bm-hybrid-qwen-p", _BM_ROW_HYB, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.015, 3),
+    ("rejudge-bm-hybrid-opus-p", _BM_ROW_HYB, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.013, 3),
+    ("rejudge-bm-hybrid-tokens", _BM_ROW_HYB, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "context_tokens_mean"), 1229, 0),
+    ("rejudge-bm-qwen-ci", _BM_PAIRED, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "ci95_halfwidth"), 0.031, 3),
+    ("rejudge-bm-opus-ci", _BM_PAIRED, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "ci95_halfwidth"), 0.031, 3),
+    ("rejudge-bm-qwen-wins", _BM_PAIRED, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "wins"), 41, 0),
+    ("rejudge-bm-qwen-losses", _BM_PAIRED, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-bm-opus-wins", _BM_PAIRED2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "wins"), 42, 0),
+    ("rejudge-bm-opus-losses", _BM_PAIRED2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-bm-max-transfer", _BM_XFER, RL_ALL_OPUS_SUM,
+     _arm_metric("cortex", "delta"), 0.010, 3),
+    ("rejudge-bm-agreement-low", _BM_AGREE, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "agreement"), 0.976, 3),
+    ("rejudge-bm-agreement-high", _BM_AGREE, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "agreement"), 0.982, 3),
+    ("rejudge-bm-cost-hybrid", _BM_COST, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "context_tokens_mean"), 1229, 0),
+    ("rejudge-bm-cost-control", _BM_COST, RL_ALL_PAIRS,
+     lambda d: d["control_context_tokens_mean"], 1124, 0),
+    ("rejudge-bm-cascade-qwen", _BM_CASC, RL_ALL_PAIRS,
+     _arm_metric("cascade", "delta_vs_control"), 0.002, 3),
+    ("rejudge-bm-cascade-opus", _BM_CASC, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cascade", "delta_vs_control"), 0.010, 3),
+    ("rejudge-bm-cascade-opus-p", _BM_CASC_P, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cascade", "perm_p"), 0.4576, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=BENCH, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# README.md — the one promoted sentence at the measured headline.
+_RM_1 = "hybrid **0.730** against naive RAG's 0.690 under the local judge and"
+_RM_2 = ("**0.736** against 0.694 under `claude-opus-5` \u2014 paired "
+         "**+0.040 / +0.042**,")
+_RM_3 = "p 0.015 / 0.013 \u2014 bought with *more* context, ~1229 tokens against the"
+_RM_4 = "control's ~1124, not less, and carried mostly by temporal-reasoning"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-rm-hybrid-qwen", _RM_1, RL_ALL_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.730, 3),
+    ("rejudge-rm-rag-qwen", _RM_1, RL_ALL_SUM,
+     _arm_metric("rag", "accuracy"), 0.690, 3),
+    ("rejudge-rm-hybrid-opus", _RM_2, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.736, 3),
+    ("rejudge-rm-rag-opus", _RM_2, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "accuracy"), 0.694, 3),
+    ("rejudge-rm-qwen-delta", _RM_2, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.040, 3),
+    ("rejudge-rm-opus-delta", _RM_2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.042, 3),
+    ("rejudge-rm-qwen-p", _RM_3, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.015, 3),
+    ("rejudge-rm-opus-p", _RM_3, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.013, 3),
+    ("rejudge-rm-hybrid-tokens", _RM_3, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "context_tokens_mean"), 1229, 0),
+    ("rejudge-rm-control-tokens", _RM_4, RL_ALL_PAIRS,
+     lambda d: d["control_context_tokens_mean"], 1124, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=READ_ME, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# CHANGELOG.md — the same numbers where the release notes state them.
+_CL_ACC_1 = "Per-arm accuracy, Qwen3.8 \u2192 Opus: rag 0.690 \u2192 0.694, hybrid 0.730 \u2192"
+_CL_ACC_2 = "0.736, cortex 0.310 \u2192 0.320, rag1 0.316 \u2192 0.320 \u2014 **no arm moves more"
+_CL_XFER = "than +0.010**, and per-arm item agreement is 0.976\u20130.982. Paired against"
+_CL_Q = "the rag control over all 500 rows, hybrid is **+0.040 \u00b1 0.031 (p 0.0153,"
+_CL_O = "41 W / 21 L)** under the local judge and **+0.042 \u00b1 0.031 (p 0.0126,"
+_CL_OWL = "42 W / 21 L)** under Opus. The cascade arm stays a wash under both"
+_CL_CASC = "(+0.002 at p 1.0000, +0.010 at p 0.4576) and is deliberately **not**"
+_CL_LOW = "promoted with it; cortex and rag1 stay far below the control (\u22120.380 and"
+_CL_LOW2 = "\u22120.374 under Qwen, both \u22120.374 under Opus, all p 0.0001). The"
+_CL_LEAK = "gold-answer leak check flags the same 25 rows under both judges."
+_CL_COST = "Instrument cost and floor: **2,061** CLI judge calls (2,060 judged"
+_CL_COST2 = "calls + 1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall,"
+_CL_STAB_N = "and a `--stability-sample 60`"
+_CL_STAB = "self-agreement of **0.9667** \u2014 a ~0.033 flip rate that every per-arm"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-cl-rag-qwen", _CL_ACC_1, RL_ALL_SUM,
+     _arm_metric("rag", "accuracy"), 0.690, 3),
+    ("rejudge-cl-rag-opus", _CL_ACC_1, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "accuracy"), 0.694, 3),
+    ("rejudge-cl-hybrid-qwen", _CL_ACC_1, RL_ALL_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.730, 3),
+    ("rejudge-cl-hybrid-opus", _CL_ACC_2, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "accuracy"), 0.736, 3),
+    ("rejudge-cl-cortex-qwen", _CL_ACC_2, RL_ALL_SUM,
+     _arm_metric("cortex", "accuracy"), 0.310, 3),
+    ("rejudge-cl-cortex-opus", _CL_ACC_2, RL_ALL_OPUS_SUM,
+     _arm_metric("cortex", "accuracy"), 0.320, 3),
+    ("rejudge-cl-rag1-qwen", _CL_ACC_2, RL_ALL_SUM,
+     _arm_metric("rag1", "accuracy"), 0.316, 3),
+    ("rejudge-cl-rag1-opus", _CL_ACC_2, RL_ALL_OPUS_SUM,
+     _arm_metric("rag1", "accuracy"), 0.320, 3),
+    ("rejudge-cl-max-transfer", _CL_XFER, RL_ALL_OPUS_SUM,
+     _arm_metric("cortex", "delta"), 0.010, 3),
+    ("rejudge-cl-agreement-low", _CL_XFER, RL_ALL_OPUS_SUM,
+     _arm_metric("rag", "agreement"), 0.976, 3),
+    ("rejudge-cl-agreement-high", _CL_XFER, RL_ALL_OPUS_SUM,
+     _arm_metric("hybrid", "agreement"), 0.982, 3),
+    ("rejudge-cl-qwen-delta", _CL_Q, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.040, 3),
+    ("rejudge-cl-qwen-ci", _CL_Q, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "ci95_halfwidth"), 0.031, 3),
+    ("rejudge-cl-qwen-p", _CL_Q, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.0153, 4),
+    ("rejudge-cl-qwen-wins", _CL_O, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "wins"), 41, 0),
+    ("rejudge-cl-qwen-losses", _CL_O, RL_ALL_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-cl-opus-delta", _CL_O, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "delta_vs_control"), 0.042, 3),
+    ("rejudge-cl-opus-ci", _CL_O, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "ci95_halfwidth"), 0.031, 3),
+    ("rejudge-cl-opus-p", _CL_O, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "perm_p"), 0.0126, 4),
+    ("rejudge-cl-opus-wins", _CL_OWL, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "wins"), 42, 0),
+    ("rejudge-cl-opus-losses", _CL_OWL, RL_ALL_OPUS_PAIRS,
+     _arm_metric("hybrid", "losses"), 21, 0),
+    ("rejudge-cl-cascade-qwen", _CL_CASC, RL_ALL_PAIRS,
+     _arm_metric("cascade", "delta_vs_control"), 0.002, 3),
+    ("rejudge-cl-cascade-qwen-p", _CL_CASC, RL_ALL_PAIRS,
+     _arm_metric("cascade", "perm_p"), 1.0000, 4),
+    ("rejudge-cl-cascade-opus", _CL_CASC, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cascade", "delta_vs_control"), 0.010, 3),
+    ("rejudge-cl-cascade-opus-p", _CL_CASC, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cascade", "perm_p"), 0.4576, 4),
+    ("rejudge-cl-cortex-qwen-delta", _CL_LOW, RL_ALL_PAIRS,
+     _arm_metric("cortex", "delta_vs_control"), -0.380, 3),
+    ("rejudge-cl-rag1-qwen-delta", _CL_LOW2, RL_ALL_PAIRS,
+     _arm_metric("rag1", "delta_vs_control"), -0.374, 3),
+    ("rejudge-cl-cortex-opus-delta", _CL_LOW2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cortex", "delta_vs_control"), -0.374, 3),
+    ("rejudge-cl-rag1-opus-delta", _CL_LOW2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("rag1", "delta_vs_control"), -0.374, 3),
+    ("rejudge-cl-cortex-opus-p", _CL_LOW2, RL_ALL_OPUS_PAIRS,
+     _arm_metric("cortex", "perm_p"), 0.0001, 4),
+    ("rejudge-cl-leaked-n", _CL_LEAK, RL_ALL_OPUS_SUM,
+     lambda d: d["leak_check"]["n_leaked"], 25, 0),
+    ("rejudge-cl-cli-calls", _CL_COST, RL_ALL_OPUS_SUM,
+     lambda d: d["cli_calls"], 2061, 0),
+    ("rejudge-cl-judged-calls", _CL_COST, RL_ALL_OPUS_SUM,
+     lambda d: d["cli_calls"] - 1, 2060, 0),
+    ("rejudge-cl-cli-errors", _CL_COST2, RL_ALL_OPUS_SUM,
+     lambda d: d["cli_errors"], 0, 0),
+    ("rejudge-cl-sec-per-call", _CL_COST2, RL_ALL_OPUS_SUM,
+     lambda d: d["seconds_per_call"], 2.61, 2),
+    ("rejudge-cl-sec-per-judged-call", _CL_COST2, RL_ALL_OPUS_SUM,
+     lambda d: d["wall_seconds"] / (d["cli_calls"] - 1), 2.61, 2),
+    ("rejudge-cl-wall", _CL_COST2, RL_ALL_OPUS_SUM,
+     lambda d: d["wall_seconds"], 5379.7, 1),
+    ("rejudge-cl-stability-pairs", _CL_STAB_N, RL_ALL_OPUS_SUM,
+     lambda d: d["stability_sample"]["n_pairs"], 60, 0),
+    ("rejudge-cl-stability-agreement", _CL_STAB, RL_ALL_OPUS_SUM,
+     lambda d: d["stability_sample"]["agreement"], 0.9667, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+# ── where the hybrid win comes from, per question type (2026-09-05) ──────
+# The merge review of the re-judge found the promoted +0.040 / +0.042 is
+# not spread evenly: one of the six types carries most of it under BOTH
+# judges, and no doc said so. Every cell of the published table is COMPUTED
+# from the judged rows here rather than read off the summaries' `types`
+# blocks, because the load-bearing quantity is the NET row count (rows the
+# hybrid arm wins minus rows the control wins), which no summary carries at
+# all — the summaries hold per-arm per-type accuracies, whose difference
+# would be a rounded restatement of a number computed elsewhere. Each judge
+# reads its own file: the Qwen column off the source run's rows, the Opus
+# column off the re-judge's, so neither can be edited to match the other.
+RL_ALL_OPUS_ROWS = (RESULTS + "longmemeval-all-oracle-qwen-27b-"
+                              "raglite-all-fresh.rejudge-opus5.jsonl")
+_Q_KEYS = ("hybrid_correct", "rag_correct")
+_O_KEYS = ("hybrid_correct_opus5", "rag_correct_opus5")
+_TYPES = ("temporal-reasoning", "single-session-user",
+          "single-session-assistant", "knowledge-update", "multi-session",
+          "single-session-preference")
+
+
+def _sel(rows: list[dict], qtype: str | None) -> list[dict]:
+    return rows if qtype is None else [r for r in rows
+                                       if r.get("question_type") == qtype]
+
+
+def _net(qtype: str | None, keys: tuple[str, str]):
+    """Net rows for one type: hybrid-only wins minus control-only wins."""
+    hk, rk = keys
+    return lambda rows: sum(int(bool(r[hk])) - int(bool(r[rk]))
+                            for r in _sel(rows, qtype))
+
+
+def _net_delta(qtype: str | None, keys: tuple[str, str]):
+    """That net expressed as an accuracy delta over the type's questions."""
+    return lambda rows: _net(qtype, keys)(rows) / len(_sel(rows, qtype))
+
+
+def _type_n(qtype: str):
+    return lambda rows: len(_sel(rows, qtype))
+
+
+def _net_share(qtype: str, keys: tuple[str, str]):
+    """The fraction of the whole run's net win that one type carries."""
+    return lambda rows: _net(qtype, keys)(rows) / _net(None, keys)(rows)
+
+
+def _net_lead(qtype: str, keys: tuple[str, str]):
+    """How far the top type's net leads the best of the other five."""
+    return lambda rows: _net(qtype, keys)(rows) / max(
+        _net(t, keys)(rows) for t in _TYPES if t != qtype)
+
+
+# evals/README.md — the per-type table itself, one row per question type
+# plus the total, both judges' net counts and deltas in each row.
+_TYPE_TABLE = [
+    ("temporal-reasoning",
+     "| `temporal-reasoning` | 133 | **+12** | **+0.0902** | **+13** | "
+     "**+0.0977** |", 133, 12, 0.0902, 13, 0.0977),
+    ("single-session-user",
+     "| `single-session-user` | 70 | +3 | +0.0429 | +2 | +0.0286 |",
+     70, 3, 0.0429, 2, 0.0286),
+    ("single-session-assistant",
+     "| `single-session-assistant` | 56 | +2 | +0.0357 | 0 | 0.0000 |",
+     56, 2, 0.0357, 0, 0.0000),
+    ("knowledge-update",
+     "| `knowledge-update` | 78 | +2 | +0.0256 | +3 | +0.0385 |",
+     78, 2, 0.0256, 3, 0.0385),
+    ("multi-session",
+     "| `multi-session` | 133 | +2 | +0.0150 | +3 | +0.0226 |",
+     133, 2, 0.0150, 3, 0.0226),
+    ("single-session-preference",
+     "| `single-session-preference` | 30 | 0 | 0.0000 | −1 | −0.0333 |",
+     30, 0, 0.0000, -1, -0.0333),
+]
+for _t, _needle, _n, _onet, _odelta, _qnet, _qdelta in _TYPE_TABLE:
+    CLAIMS.append(Claim(
+        id=f"rejudge-type-{_t}-n", doc=EVALS, needle=_needle,
+        artifacts=(RL_ALL_OPUS_ROWS,), value=_type_n(_t), stated=_n,
+        places=0))
+    for _judge, _rows_art, _keys, _net_v, _delta_v in (
+            ("opus", RL_ALL_OPUS_ROWS, _O_KEYS, _onet, _odelta),
+            ("qwen", RL_ALL_ROWS, _Q_KEYS, _qnet, _qdelta)):
+        CLAIMS.append(Claim(
+            id=f"rejudge-type-{_t}-{_judge}-net", doc=EVALS, needle=_needle,
+            artifacts=(_rows_art,), value=_net(_t, _keys), stated=_net_v,
+            places=0))
+        CLAIMS.append(Claim(
+            id=f"rejudge-type-{_t}-{_judge}-delta", doc=EVALS,
+            needle=_needle, artifacts=(_rows_art,),
+            value=_net_delta(_t, _keys), stated=_delta_v, places=4))
+
+_TYPE_TOTAL = ("| **all 500** | 500 | **+21** | **+0.0420** | **+20** | "
+               "**+0.0400** |")
+for _cid, _art, _val, _stated, _places in [
+    ("rejudge-type-total-n", RL_ALL_OPUS_ROWS, len, 500, 0),
+    ("rejudge-type-total-opus-net", RL_ALL_OPUS_ROWS, _net(None, _O_KEYS),
+     21, 0),
+    ("rejudge-type-total-opus-delta", RL_ALL_OPUS_ROWS,
+     _net_delta(None, _O_KEYS), 0.0420, 4),
+    ("rejudge-type-total-qwen-net", RL_ALL_ROWS, _net(None, _Q_KEYS), 20, 0),
+    ("rejudge-type-total-qwen-delta", RL_ALL_ROWS, _net_delta(None, _Q_KEYS),
+     0.0400, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_TYPE_TOTAL, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+# evals/README.md — the prose reading of that table.
+_TYPE_SHARE_1 = ("`temporal-reasoning` is **0.27** of the benchmark and "
+                 "carries **0.57** of")
+_TYPE_SHARE_2 = ("the net win under Opus and **0.65** of it under Qwen "
+                 "— four times the next")
+_TR = "temporal-reasoning"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-type-share-benchmark", _TYPE_SHARE_1, RL_ALL_OPUS_ROWS,
+     lambda rows: _type_n(_TR)(rows) / len(rows), 0.27, 2),
+    ("rejudge-type-share-opus", _TYPE_SHARE_1, RL_ALL_OPUS_ROWS,
+     _net_share(_TR, _O_KEYS), 0.57, 2),
+    ("rejudge-type-share-qwen", _TYPE_SHARE_2, RL_ALL_ROWS,
+     _net_share(_TR, _Q_KEYS), 0.65, 2),
+    ("rejudge-type-lead-opus", _TYPE_SHARE_2, RL_ALL_OPUS_ROWS,
+     _net_lead(_TR, _O_KEYS), 4, 0),
+    ("rejudge-type-lead-qwen", _TYPE_SHARE_2, RL_ALL_ROWS,
+     _net_lead(_TR, _Q_KEYS), 4, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+CLAIMS.append(Claim(
+    id="assist2-gate-prov", doc=EVALS,
+    needle="arm on `single-session-assistant` from 0.054 to **0.536** says the prompt",
+    artifacts=(AS_PROV2_SUM,), value=_type_arm(_SSA, "cortex"),
+    stated=0.536, places=3))
+CLAIMS.append(Claim(
+    id="assist2-gate-base", doc=EVALS,
+    needle="arm on `single-session-assistant` from 0.054 to **0.536** says the prompt",
+    artifacts=(RL_ALL_SUM,), value=_type_arm(_SSA, "cortex"),
+    stated=0.054, places=3))
+
+# ── the CHANGELOG "Measured" bullet, now the clean run ───────────────────
+_CL2_RECOVER = "arm on `single-session-assistant` goes from **0.054** to **0.536** with"
+_CL2_PAIRED = "at `supersede` — paired **+0.482** and **+0.446**, both p < 0.0001, 27"
+_CL2_KU = "0.731 provenance, → 0.718 naive; hybrid 0.897 → 0.897, → 0.910), so the"
+_CL2_HEAD = "hybrid +0.024, 7 W / 3 L, p = 0.34). `single-session-preference` is the"
+_CL2_SSP = "one type both variants hurt slightly on the fact-only arm (cortex 0.233"
+_CL2_SSP2 = "→ 0.133 under both; n = 30). The `rag` control moved by 0.0000 with 0"
+_MM2 = "`single-session-assistant` from 0.054 to 0.536 while the knowledge-update"
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("assist2-cl-recover-base", CHANGELOG, _CL2_RECOVER, RL_ALL_SUM,
+     _type_arm(_SSA, "cortex"), 0.054, 3),
+    ("assist2-cl-recover-prov", CHANGELOG, _CL2_RECOVER, AS_PROV2_SUM,
+     _type_arm(_SSA, "cortex"), 0.536, 3),
+    ("assist2-cl-paired-prov-delta", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.482, 3),
+    ("assist2-cl-paired-prov-p", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist2-cl-paired-prov-wins", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "wins"), 27, 0),
+    ("assist2-cl-paired-naive-delta", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist2-cl-paired-naive-p", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist2-cl-ku-prov-cortex", CHANGELOG, _CL2_KU, AS_PROV2_SUM,
+     _type_arm("knowledge-update", "cortex"), 0.731, 3),
+    ("assist2-cl-ku-naive-cortex", CHANGELOG, _CL2_KU, AS_NAIVE2_SUM,
+     _type_arm("knowledge-update", "cortex"), 0.718, 3),
+    ("assist2-cl-ku-prov-hybrid", CHANGELOG, _CL2_KU, AS_PROV2_SUM,
+     _type_arm("knowledge-update", "hybrid"), 0.897, 3),
+    ("assist2-cl-ku-naive-hybrid", CHANGELOG, _CL2_KU, AS_NAIVE2_SUM,
+     _type_arm("knowledge-update", "hybrid"), 0.910, 3),
+    ("assist2-cl-head-hybrid-delta", CHANGELOG, _CL2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "delta"), 0.024, 3),
+    ("assist2-cl-head-hybrid-wins", CHANGELOG, _CL2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "wins"), 7, 0),
+    ("assist2-cl-head-hybrid-losses", CHANGELOG, _CL2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "losses"), 3, 0),
+    ("assist2-cl-head-hybrid-p", CHANGELOG, _CL2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "p"), 0.34, 2),
+    ("assist2-cl-ssp-base", CHANGELOG, _CL2_SSP, RL_ALL_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.233, 3),
+    ("assist2-cl-ssp-prov", CHANGELOG, _CL2_SSP2, AS_PROV2_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.133, 3),
+    ("assist2-cl-ssp-naive", CHANGELOG, _CL2_SSP2, AS_NAIVE2_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.133, 3),
+    ("assist2-cl-rag-control", CHANGELOG, _CL2_SSP2,
+     _as_cmp("prov2-vs-base"), _as_pair("rag", "delta"), 0.0, 4),
+    ("assist2-mm-base", MEM_MODEL, _MM2, RL_ALL_SUM,
+     _type_arm(_SSA, "cortex"), 0.054, 3),
+    ("assist2-mm-prov", MEM_MODEL, _MM2, AS_PROV2_SUM,
+     _type_arm(_SSA, "cortex"), 0.536, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+# ── the provenance-prompt ladder gate (2026-09-05) ────────────────────────
+# The ship decision rests on this run, so every cell of the ladder table —
+# in the CHANGELOG and again in evals/README.md — is pinned to the per-rung
+# artifact it came from, both replicates included, plus the naive-RAG bar
+# the threshold is derived from and the threshold verdict's own verdict
+# fields. A rewritten row fails `test_claim_text_still_appears_in_its_doc`
+# rather than quietly stopping guarding.
+_PL = RESULTS + "%s-assistprompt-%s.json"
+PL_QWEN_PRE = _PL % ("qwen-27b", "pre")
+PL_QWEN_POST = _PL % ("qwen-27b", "post")
+PL_E4B_PRE = _PL % ("e4b-v3", "pre")
+PL_E4B_POST = _PL % ("e4b-v3", "post")
+PL_E4B_PRE2 = _PL % ("e4b-v3", "pre-rep2")
+PL_E4B_POST2 = _PL % ("e4b-v3", "post-rep2")
+PL_NAIVE = RESULTS + "naive-rag.json"
+PL_THRESH = RESULTS + "ladder-assistprompt-paired-verdict-threshold.json"
+
+# Verbatim table rows. The CHANGELOG and evals/README render the same run
+# with different arm labels and an extra artifact column, so each doc gets
+# its own needle.
+_CL_QP = "| `qwen-27b` | pre (shipped prompt) | 1.0 | 0.0 | 13.4 | 16 / 16 |"
+_CL_QQ = ("| `qwen-27b` | post (provenance prompt, speaker rule v1) | 1.0 | "
+          "0.0 | 14.2 | 16 / 16 |")
+_CL_EP = "| `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 |"
+_CL_EQ = "| `e4b-v3` | post (rule v1) | 1.0 | 0.1 | 14.8 | 19 / 18 |"
+_CL_EP2 = "| `e4b-v3` | pre, replicate 2 | 1.0 | **1.0** | **39.7** | 16 / 16 |"
+_CL_EQ2 = ("| `e4b-v3` | post (rule v1), replicate 2 | 1.0 | 0.1 | 14.8 | "
+           "19 / 18 |")
+_CL_BAR = ("gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is\n"
+           "  **34.98**")
+_CL_CLEAR = ("On the primary `qwen-27b` rung **every arm clears the ladder**")
+_CL_GATE = "both arms: **FAIL**, on the `e4b-v3` *baseline* arm)"
+_CL_NOREG = "`no_regression_gate` (did the post arm make anything worse: **PASS**)"
+
+_EV_QP = ("| `qwen-27b` | pre | 1.0 | 0.0 | 13.4 | 16 / 16 | "
+          "`qwen-27b-assistprompt-pre.json` |")
+_EV_QQ = ("| `qwen-27b` | post (rule v1, superseded) | 1.0 | 0.0 | 14.2 | "
+          "16 / 16 | `qwen-27b-assistprompt-post.json` |")
+_EV_EP = ("| `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 | "
+          "`e4b-v3-assistprompt-pre.json` |")
+_EV_EQ = ("| `e4b-v3` | post (rule v1, superseded) | 1.0 | 0.1 | 14.8 | "
+          "19 / 18 | `e4b-v3-assistprompt-post.json` |")
+_EV_EP2 = ("| `e4b-v3` | pre, rep 2 | 1.0 | **1.0** | **39.7** | 16 / 16 | "
+           "`e4b-v3-assistprompt-pre-rep2.json` |")
+_EV_EQ2 = ("| `e4b-v3` | post (rule v1, superseded), rep 2 | 1.0 | 0.1 | "
+           "14.8 | 19 / 18 | `e4b-v3-assistprompt-post-rep2.json` |")
+_EV_BAR = "gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is **34.98**"
+_EV_IDENT = "`tokens_per_query 13.4 \u2192 14.2`"
+_EV_THRESH = ('`failed_checks: ["pre.stale_leak", "pre.tokens_per_query"]`)')
+
+
+def _tally(field):
+    return lambda d: d["consolidation"][field]
+
+
+def _thr_rung(rung, field):
+    return lambda d: float(d["rungs"][rung][field])
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # -- CHANGELOG table -------------------------------------------------
+    ("prov-ladder-cl-qwen-pre-gold", CHANGELOG, _CL_QP, PL_QWEN_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-ladder-cl-qwen-pre-stale", CHANGELOG, _CL_QP, PL_QWEN_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-ladder-cl-qwen-pre-tokens", CHANGELOG, _CL_QP, PL_QWEN_PRE,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-ladder-cl-qwen-pre-claims", CHANGELOG, _CL_QP, PL_QWEN_PRE,
+     _tally("claims"), 16, 0),
+    ("prov-ladder-cl-qwen-post-gold", CHANGELOG, _CL_QQ, PL_QWEN_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-ladder-cl-qwen-post-stale", CHANGELOG, _CL_QQ, PL_QWEN_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-ladder-cl-qwen-post-tokens", CHANGELOG, _CL_QQ, PL_QWEN_POST,
+     lambda d: d["tokens_per_query"], 14.2, 1),
+    ("prov-ladder-cl-qwen-post-claims", CHANGELOG, _CL_QQ, PL_QWEN_POST,
+     _tally("claims"), 16, 0),
+    ("prov-ladder-cl-e4b-pre-stale", CHANGELOG, _CL_EP, PL_E4B_PRE,
+     lambda d: d["stale_leak"], 1.0, 1),
+    ("prov-ladder-cl-e4b-pre-tokens", CHANGELOG, _CL_EP, PL_E4B_PRE,
+     lambda d: d["tokens_per_query"], 39.7, 1),
+    ("prov-ladder-cl-e4b-pre-claims", CHANGELOG, _CL_EP, PL_E4B_PRE,
+     _tally("claims"), 16, 0),
+    ("prov-ladder-cl-e4b-post-stale", CHANGELOG, _CL_EQ, PL_E4B_POST,
+     lambda d: d["stale_leak"], 0.1, 1),
+    ("prov-ladder-cl-e4b-post-tokens", CHANGELOG, _CL_EQ, PL_E4B_POST,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("prov-ladder-cl-e4b-post-claims", CHANGELOG, _CL_EQ, PL_E4B_POST,
+     _tally("claims"), 19, 0),
+    ("prov-ladder-cl-e4b-post-inserted", CHANGELOG, _CL_EQ, PL_E4B_POST,
+     _tally("inserted"), 18, 0),
+    ("prov-ladder-cl-e4b-pre2-stale", CHANGELOG, _CL_EP2, PL_E4B_PRE2,
+     lambda d: d["stale_leak"], 1.0, 1),
+    ("prov-ladder-cl-e4b-pre2-tokens", CHANGELOG, _CL_EP2, PL_E4B_PRE2,
+     lambda d: d["tokens_per_query"], 39.7, 1),
+    ("prov-ladder-cl-e4b-post2-stale", CHANGELOG, _CL_EQ2, PL_E4B_POST2,
+     lambda d: d["stale_leak"], 0.1, 1),
+    ("prov-ladder-cl-e4b-post2-tokens", CHANGELOG, _CL_EQ2, PL_E4B_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("prov-ladder-cl-e4b-post2-claims", CHANGELOG, _CL_EQ2, PL_E4B_POST2,
+     _tally("claims"), 19, 0),
+    # -- the naive bar the threshold is derived from ---------------------
+    ("prov-ladder-cl-naive-gold", CHANGELOG, _CL_BAR, PL_NAIVE,
+     lambda d: d["gold_recoverable"], 0.7, 1),
+    ("prov-ladder-cl-naive-stale", CHANGELOG, _CL_BAR, PL_NAIVE,
+     lambda d: d["stale_leak"], 0.3, 1),
+    ("prov-ladder-cl-naive-tokens", CHANGELOG, _CL_BAR, PL_NAIVE,
+     lambda d: d["tokens_per_query"], 58.3, 1),
+    ("prov-ladder-cl-token-budget", CHANGELOG, _CL_BAR, PL_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # -- the threshold verdict's own verdict fields ----------------------
+    ("prov-ladder-cl-qwen-cleared", CHANGELOG, _CL_CLEAR, PL_THRESH,
+     _thr_rung("qwen-27b", "cleared"), 1, 0),
+    ("prov-ladder-cl-e4b-pre-clears", CHANGELOG, _CL_GATE, PL_THRESH,
+     _thr_rung("e4b-v3", "pre_clears"), 0, 0),
+    ("prov-ladder-cl-gate-fail", CHANGELOG, _CL_GATE, PL_THRESH,
+     lambda d: float(d["gate"] == "FAIL"), 1, 0),
+    ("prov-ladder-cl-no-regression", CHANGELOG, _CL_NOREG, PL_THRESH,
+     lambda d: float(d["no_regression_gate"] == "PASS"), 1, 0),
+    # -- evals/README table ----------------------------------------------
+    ("prov-ladder-ev-qwen-pre-tokens", EVALS, _EV_QP, PL_QWEN_PRE,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-ladder-ev-qwen-pre-stale", EVALS, _EV_QP, PL_QWEN_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-ladder-ev-qwen-post-tokens", EVALS, _EV_QQ, PL_QWEN_POST,
+     lambda d: d["tokens_per_query"], 14.2, 1),
+    ("prov-ladder-ev-qwen-post-gold", EVALS, _EV_QQ, PL_QWEN_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-ladder-ev-e4b-pre-stale", EVALS, _EV_EP, PL_E4B_PRE,
+     lambda d: d["stale_leak"], 1.0, 1),
+    ("prov-ladder-ev-e4b-pre-tokens", EVALS, _EV_EP, PL_E4B_PRE,
+     lambda d: d["tokens_per_query"], 39.7, 1),
+    ("prov-ladder-ev-e4b-post-stale", EVALS, _EV_EQ, PL_E4B_POST,
+     lambda d: d["stale_leak"], 0.1, 1),
+    ("prov-ladder-ev-e4b-post-tokens", EVALS, _EV_EQ, PL_E4B_POST,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("prov-ladder-ev-e4b-pre2-stale", EVALS, _EV_EP2, PL_E4B_PRE2,
+     lambda d: d["stale_leak"], 1.0, 1),
+    ("prov-ladder-ev-e4b-pre2-tokens", EVALS, _EV_EP2, PL_E4B_PRE2,
+     lambda d: d["tokens_per_query"], 39.7, 1),
+    ("prov-ladder-ev-e4b-post2-stale", EVALS, _EV_EQ2, PL_E4B_POST2,
+     lambda d: d["stale_leak"], 0.1, 1),
+    ("prov-ladder-ev-e4b-post2-claims", EVALS, _EV_EQ2, PL_E4B_POST2,
+     _tally("claims"), 19, 0),
+    ("prov-ladder-ev-token-budget", EVALS, _EV_BAR, PL_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    ("prov-ladder-ev-naive-tokens", EVALS, _EV_BAR, PL_NAIVE,
+     lambda d: d["tokens_per_query"], 58.3, 1),
+    # The identity-mode verdict's sole difference, quoted in evals/README
+    # as the reason that FAIL is not a finding about the prompt.
+    ("prov-ladder-ev-ident-tokens-pre", EVALS, _EV_IDENT, PL_QWEN_PRE,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-ladder-ev-ident-tokens-post", EVALS, _EV_IDENT, PL_QWEN_POST,
+     lambda d: d["tokens_per_query"], 14.2, 1),
+    ("prov-ladder-ev-thresh-pre-clears", EVALS, _EV_THRESH, PL_THRESH,
+     _thr_rung("e4b-v3", "pre_clears"), 0, 0),
+    ("prov-ladder-ev-thresh-post-clears", EVALS, _EV_THRESH, PL_THRESH,
+     _thr_rung("e4b-v3", "post_clears"), 1, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+# ── the rule-v2 re-gate (2026-09-05) ──────────────────────────────────────
+# The prompt was rewritten by the same day's merge review AFTER the ladder
+# gate had run, so every `post` row above measures text that is no longer
+# shipped. `qwen-27b-assistprompt-post2.json` is the re-run on the shipped
+# text and `…-post2-paired-verdict-threshold.json` its paired verdict; both
+# tables publish the row, so both get pinned. Three things beyond the four
+# cells are pinned because a reader cannot otherwise check them:
+#   * the verdict's own `gate` / `no_regression_gate` / `failed_checks`,
+#     which is the whole claim that the rewrite cost nothing;
+#   * the `bench_env.dream.assistant_claims` stamp, present here for the
+#     first time — a `Claim` expresses it fine as a 0/1 predicate, the same
+#     shape the `gate == "FAIL"` rows above already use;
+#   * its ABSENCE on the six earlier rung files, which the docs state
+#     explicitly. A "the artifact does not carry X" sentence is as
+#     falsifiable as a number and rots the same way.
+PL_QWEN_POST2 = _PL % ("qwen-27b", "post2")
+PL_THRESH2 = (RESULTS +
+              "ladder-assistprompt-post2-paired-verdict-threshold.json")
+
+_CL_QQ2 = ("| `qwen-27b` | post (provenance prompt, speaker rule v2 — the "
+           "shipped text) | 1.0 | 0.0 | 13.4 | 16 / 16 |")
+_EV_QQ2 = ("| `qwen-27b` | post (rule v2, the shipped text) | 1.0 | 0.0 | "
+           "13.4 | 16 / 16 | `qwen-27b-assistprompt-post2.json` |")
+_CL_V2_VERDICT = "`gate: PASS`, `no_regression_gate: PASS`, `failed_checks: []`"
+_EV_V2_VERDICT = "`gate: PASS`, `no_regression_gate: PASS`, `cleared: true`"
+_STAMP = '`bench_env.dream.assistant_claims: "contender"`'
+_CL_NO_STAMP = "predates it and has no `bench_env` key at all"
+_EV_NO_STAMP = "predates the stamp and carries **no `bench_env` key at all**"
+
+
+def _stamped(policy):
+    """1.0 when the artifact stamps that resolved dream policy, else 0.0."""
+    return lambda d: float(
+        d.get("bench_env", {}).get("dream", {}).get("assistant_claims")
+        == policy)
+
+
+def _has_bench_env(d):
+    return float("bench_env" in d)
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # -- the four published cells of the post2 row, in both tables --------
+    ("prov-regate-cl-gold", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-regate-cl-stale", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-regate-cl-tokens", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-regate-cl-claims", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     _tally("claims"), 16, 0),
+    ("prov-regate-cl-inserted", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     _tally("inserted"), 16, 0),
+    ("prov-regate-ev-gold", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-regate-ev-stale", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-regate-ev-tokens", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-regate-ev-claims", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     _tally("claims"), 16, 0),
+    ("prov-regate-ev-inserted", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     _tally("inserted"), 16, 0),
+    # -- the re-gate verdict's own fields --------------------------------
+    ("prov-regate-cl-gate", CHANGELOG, _CL_V2_VERDICT, PL_THRESH2,
+     lambda d: float(d["gate"] == "PASS"), 1, 0),
+    ("prov-regate-cl-no-regression", CHANGELOG, _CL_V2_VERDICT, PL_THRESH2,
+     lambda d: float(d["no_regression_gate"] == "PASS"), 1, 0),
+    ("prov-regate-cl-failed-checks", CHANGELOG, _CL_V2_VERDICT, PL_THRESH2,
+     lambda d: float(len(d["rungs"]["qwen-27b"]["failed_checks"])), 0, 0),
+    ("prov-regate-ev-gate", EVALS, _EV_V2_VERDICT, PL_THRESH2,
+     lambda d: float(d["gate"] == "PASS"), 1, 0),
+    ("prov-regate-ev-no-regression", EVALS, _EV_V2_VERDICT, PL_THRESH2,
+     lambda d: float(d["no_regression_gate"] == "PASS"), 1, 0),
+    ("prov-regate-ev-cleared", EVALS, _EV_V2_VERDICT, PL_THRESH2,
+     _thr_rung("qwen-27b", "cleared"), 1, 0),
+    ("prov-regate-ev-no-differences", EVALS, _EV_V2_VERDICT, PL_THRESH2,
+     lambda d: float(len(d["rungs"]["qwen-27b"]["differences"])), 0, 0),
+    # The CHANGELOG's "every arm clears the ladder" now spans both
+    # verdicts, so it is pinned to both.
+    ("prov-regate-cl-qwen-cleared", CHANGELOG, _CL_CLEAR, PL_THRESH2,
+     _thr_rung("qwen-27b", "cleared"), 1, 0),
+    # -- the bench_env stamp, present for the first time ------------------
+    ("prov-regate-cl-stamp", CHANGELOG, _STAMP, PL_QWEN_POST2,
+     _stamped("contender"), 1, 0),
+    ("prov-regate-ev-stamp", EVALS, _STAMP, PL_QWEN_POST2,
+     _stamped("contender"), 1, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# ...and absent on every earlier rung file of this tag, which is why the
+# docs tell a reader to date those runs instead of reading them.
+for _rung, _arm in (("qwen-27b", "pre"), ("qwen-27b", "post"),
+                    ("e4b-v3", "pre"), ("e4b-v3", "post"),
+                    ("e4b-v3", "pre-rep2"), ("e4b-v3", "post-rep2")):
+    for _doc, _needle, _slug in ((CHANGELOG, _CL_NO_STAMP, "cl"),
+                                 (EVALS, _EV_NO_STAMP, "ev")):
+        CLAIMS.append(Claim(
+            id=f"prov-regate-{_slug}-no-stamp-{_rung}-{_arm}", doc=_doc,
+            needle=_needle, artifacts=(_PL % (_rung, _arm),),
+            value=_has_bench_env, stated=0, places=0))
+
+
+# ── the shim prompt's own ladder gate (2026-09-05) ───────────────────────
+#
+# The daemon-side provenance prompt shipped earlier the same day, but an
+# install whose primary extractor is the Claude CLI shim never saw it:
+# `--system-prompt-file` REPLACES the shipped prefix. `sonnet_extractor_v4.md`
+# closes that, and this is the gate the default flip rests on. Two replicates
+# per arm, because the rung is a CLI-served model and is not
+# bit-reproducible — the replicates are what license the "inside the noise"
+# reading of the token move, so they are pinned like any other published
+# number.
+SP_PRE = RESULTS + "opus-5-shimprompt-pre.json"
+SP_POST = RESULTS + "opus-5-shimprompt-post.json"
+SP_PRE2 = RESULTS + "opus-5-shimprompt-pre-rep2.json"
+SP_POST2 = RESULTS + "opus-5-shimprompt-post-rep2.json"
+SP_THRESH = RESULTS + "ladder-shimprompt-paired-verdict-threshold.json"
+
+_SP_ROW_PRE = ("| pre | v2 | 1.0 | 0.0 | 15.2 | 16 / 16 | "
+               "`opus-5-shimprompt-pre.json` |")
+_SP_ROW_POST = ("| post | v4 | 1.0 | 0.0 | 16.1 | 16 / 16 | "
+                "`opus-5-shimprompt-post.json` |")
+_SP_ROW_PRE2 = ("| pre, rep 2 | v2 | 1.0 | 0.0 | 14.0 | 16 / 16 | "
+                "`opus-5-shimprompt-pre-rep2.json` |")
+_SP_ROW_POST2 = ("| post, rep 2 | v4 | 1.0 | 0.0 | 14.8 | 16 / 16 | "
+                 "`opus-5-shimprompt-post-rep2.json` |")
+_SP_GATE = '`no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`,'
+_SP_SPREAD = "*same prompt* spanning 14.0–15.2 (pre) and 14.8–16.1 (post)"
+_SP_CL_TALLY = "consolidation tally (26 pulled, 16 claims, 16 inserted, 0 superseded)."
+_SP_CL_NOISE = "noise**: the same prompt spans 14.0-15.2 (pre) and 14.8-16.1 (post)"
+
+
+def _sp_tally(key):
+    return lambda d: d["consolidation"][key]
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # the four ladder rows, each cell against its own run file
+    ("shimprompt-pre-gold", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-pre-stale", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-pre-tokens", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shimprompt-pre-claims", EVALS, _SP_ROW_PRE, SP_PRE,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-post-gold", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-post-stale", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-post-tokens", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+    ("shimprompt-post-claims", EVALS, _SP_ROW_POST, SP_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-pre2-gold", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-pre2-stale", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-pre2-tokens", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-post2-gold", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-post2-stale", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-post2-tokens", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    # the verdict itself — the thing the default flip rests on
+    ("shimprompt-thresh-cleared", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("shimprompt-thresh-pre-clears", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "pre_clears"), 1, 0),
+    ("shimprompt-thresh-post-clears", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "post_clears"), 1, 0),
+    ("shimprompt-thresh-no-regression", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("shimprompt-budget", EVALS, _SP_ROW_PRE, SP_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # the replicate spread, which is what licenses "inside the noise"
+    ("shimprompt-spread-pre-lo", EVALS, _SP_SPREAD, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-spread-pre-hi", EVALS, _SP_SPREAD, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shimprompt-spread-post-lo", EVALS, _SP_SPREAD, SP_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shimprompt-spread-post-hi", EVALS, _SP_SPREAD, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+    # the CHANGELOG restates the tally and the spread
+    ("shimprompt-cl-pulled", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("pulled"), 26, 0),
+    ("shimprompt-cl-claims", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-cl-inserted", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("inserted"), 16, 0),
+    ("shimprompt-cl-superseded", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("superseded"), 0, 0),
+    ("shimprompt-cl-noise-pre-lo", CHANGELOG, _SP_CL_NOISE, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-cl-noise-post-hi", CHANGELOG, _SP_CL_NOISE, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+# ── the same gate, re-run under speaker rule v2 (2026-09-05) ─────────────
+#
+# `sonnet_extractor_v4.md` is GENERATED from `_ASSISTANT_SPEAKER_RULE`, so
+# the same day's rule rewrite changed the file the shim is launched with and
+# the gate above stopped describing it. Only the POST arm was re-run (the v2
+# pre comparator carries none of the assistant blocks, so the rewrite cannot
+# reach it), which is why the verdict names a `post2` arm.
+#
+# One published statement deliberately does NOT reappear below: "an
+# identical consolidation tally every time". It is true of the four rule-v1
+# runs and false under rule v2, whose second replicate returned 17 claims —
+# and inserted all 17. What is pinned instead is that claim count and its
+# insert count, so the docs cannot quietly restate the stronger version.
+SP2_POST = RESULTS + "opus-5-shimprompt-post2.json"
+SP2_POST2 = RESULTS + "opus-5-shimprompt-post2-rep2.json"
+SP2_THRESH = RESULTS + "ladder-shimprompt-rule2-paired-verdict-threshold.json"
+
+_SP2_ROW_PRE = ("| pre | v2 | none | 1.0 | 0.0 | 15.2 | 16 / 16 | "
+                "`opus-5-shimprompt-pre.json` |")
+_SP2_ROW_PRE2 = ("| pre, rep 2 | v2 | none | 1.0 | 0.0 | 14.0 | 16 / 16 | "
+                 "`opus-5-shimprompt-pre-rep2.json` |")
+_SP2_ROW_POST = ("| post2 | v4 | v2 | 1.0 | 0.0 | 15.5 | 16 / 16 | "
+                 "`opus-5-shimprompt-post2.json` |")
+_SP2_ROW_POST2 = ("| post2, rep 2 | v4 | v2 | 1.0 | 0.0 | 14.8 | 17 / 17 | "
+                  "`opus-5-shimprompt-post2-rep2.json` |")
+_SP2_GATE = ('`gate: PASS`, `no_regression_gate: PASS`, '
+             '`rungs["opus-5"].cleared: true`')
+_SP2_TALLY = ("rule v2 the second replicate returned **17 claims and "
+              "inserted all 17**")
+_SP2_SPREAD = ("replicates the post2 arm spans 14.8–15.5 against the "
+               "pre arm's 14.0–15.2:")
+_SP2_DIFF = "`differences` block reports `tokens_per_query 15.2 → 15.5`"
+_SP2_BUDGET = "45% of the same 34.98 token budget"
+_SP2_CL_TOK = ("tokens/query 15.5 and 14.8 against the pre arm's 15.2 and "
+               "14.0 — still")
+_SP2_CL_TALLY = "second replicate returned 17 claims and inserted all"
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # the re-gate table, cell by cell against its own run file
+    ("shim2-pre-gold", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-pre-stale", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-pre-tokens", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-pre2-gold", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-pre2-stale", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-pre2-tokens", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-post-gold", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-post-stale", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-post-tokens", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-post-claims", EVALS, _SP2_ROW_POST, SP2_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shim2-post-inserted", EVALS, _SP2_ROW_POST, SP2_POST,
+     _sp_tally("inserted"), 16, 0),
+    ("shim2-post2-gold", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-post2-stale", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-post2-tokens", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-post2-claims", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-post2-inserted", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+    # the rule-v2 verdict — what the default flip now rests on
+    ("shim2-thresh-cleared", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("shim2-thresh-pre-clears", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "pre_clears"), 1, 0),
+    ("shim2-thresh-post-clears", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "post_clears"), 1, 0),
+    ("shim2-thresh-no-regression", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("shim2-budget", EVALS, _SP2_BUDGET, SP2_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # the tally sentence, which is the one claim that did NOT carry over
+    ("shim2-tally-claims", EVALS, _SP2_TALLY, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-tally-inserted", EVALS, _SP2_TALLY, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+    # the replicate spread that licenses "inside the noise", and the
+    # verdict's own reported move
+    ("shim2-spread-post-lo", EVALS, _SP2_SPREAD, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-spread-post-hi", EVALS, _SP2_SPREAD, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-spread-pre-lo", EVALS, _SP2_SPREAD, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-spread-pre-hi", EVALS, _SP2_SPREAD, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-diff-pre", EVALS, _SP2_DIFF, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-diff-post", EVALS, _SP2_DIFF, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    # the CHANGELOG restates the four token figures and the tally move
+    ("shim2-cl-tok-post", CHANGELOG, _SP2_CL_TOK, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-cl-tok-post2", CHANGELOG, _SP2_CL_TOK, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-cl-tok-pre", CHANGELOG, _SP2_CL_TOK, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-cl-tok-pre2", CHANGELOG, _SP2_CL_TOK, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-cl-tally-claims", CHANGELOG, _SP2_CL_TALLY, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-cl-tally-inserted", CHANGELOG, _SP2_CL_TALLY, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+# ── the shim launchers must cite the gate that validated their default ────
+#
+# Review finding, 2026-09-05. `ops/install-shim-autostart.ps1` and its `.sh`
+# sibling flipped `--prompt-file` to `sonnet_extractor_v4.md` and justified
+# the flip in a header comment — naming the rule-v1 verdict and its token
+# range, both of which the same day's re-gate superseded. An `ops/` comment
+# is where an operator reads why a default is what it is, and nothing was
+# checking it, so it drifted the moment the re-gate landed.
+#
+# The `Claim` rows below pin the quoted range to the four runs of the
+# CURRENT gate; the test after them pins the artifact the comment names.
+SHIM_LAUNCH_PS1 = "ops/install-shim-autostart.ps1"
+SHIM_LAUNCH_SH = "ops/install-shim-autostart.sh"
+
+# The rule-v2 gate is four runs: an unchanged `pre` pair and the re-run
+# `post2` pair. The verdict itself names only one file per arm, so the
+# replicates have to be listed here for the range to mean anything.
+SHIM_GATE_RUNS = (SP_PRE, SP_PRE2, SP2_POST, SP2_POST2)
+_SHIM_TOKENS = "tokens 14.0-15.5 across both arms"
+
+
+def _tok_min(*runs):
+    return min(r["tokens_per_query"] for r in runs)
+
+
+def _tok_max(*runs):
+    return max(r["tokens_per_query"] for r in runs)
+
+
+for _doc, _slug in ((SHIM_LAUNCH_PS1, "ps1"), (SHIM_LAUNCH_SH, "sh")):
+    CLAIMS.append(Claim(
+        id=f"shim-launcher-{_slug}-tok-lo", doc=_doc, needle=_SHIM_TOKENS,
+        artifacts=SHIM_GATE_RUNS, value=_tok_min, stated=14.0, places=1))
+    CLAIMS.append(Claim(
+        id=f"shim-launcher-{_slug}-tok-hi", doc=_doc, needle=_SHIM_TOKENS,
+        artifacts=SHIM_GATE_RUNS, value=_tok_max, stated=15.5, places=1))
+
+
+def test_the_shim_launchers_cite_the_gate_that_validated_their_default():
+    """Every ladder verdict an `ops/` launcher names must be committed, and
+    the one it rests its default on must be the CURRENT gate.
+
+    The rule-v1 verdict stays in the tree — a superseded number keeps its
+    evidence — and the comment is allowed to name it, but only in its
+    retired role: as a bare filename beside the word "superseded", never as
+    the `evals/results/...` path the operator is pointed at.
+    """
+    import re
+
+    tracked = _tracked()
+    for rel in (SHIM_LAUNCH_PS1, SHIM_LAUNCH_SH):
+        text = _read_doc(rel)
+        named = set(re.findall(r"evals/results/[\w.-]+\.json", text))
+        assert named, f"{rel} names no verdict artifact at all"
+        missing = sorted(a for a in named if a not in tracked)
+        assert missing == [], (
+            f"{rel} cites uncommitted evidence: {missing} — a reader "
+            "following the comment finds nothing.")
+        assert SP2_THRESH in named, (
+            f"{rel} does not point at {SP2_THRESH}, the gate its default "
+            "rests on")
+        assert SP_THRESH not in named, (
+            f"{rel} still points at {SP_THRESH}, which the rule-v2 re-gate "
+            "superseded — the operator reading it would check the wrong run")
+        if SP_THRESH.split("/")[-1] in text:
+            assert "superseded" in text, (
+                f"{rel} names the rule-v1 verdict without saying it is "
+                "superseded — retire the number where a reader meets it")
+# docs/guide/benchmarks.md — the third honest limit.
+_BM_TYPE_1 = ("spread evenly across question types: `temporal-reasoning` "
+              "carries **+12 of")
+_BM_TYPE_2 = ("the +21** net rows under Opus and **+13 of the +20** under "
+              "Qwen — most of")
+_BM_TYPE_3 = "the effect out of 133 of the 500 questions — while"
+_BM_TYPE_4 = ("`single-session-preference` is flat-to-negative under both. "
+              "Both judges")
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("rejudge-bm-type-opus-net", _BM_TYPE_1, RL_ALL_OPUS_ROWS,
+     _net(_TR, _O_KEYS), 12, 0),
+    ("rejudge-bm-type-opus-total", _BM_TYPE_2, RL_ALL_OPUS_ROWS,
+     _net(None, _O_KEYS), 21, 0),
+    ("rejudge-bm-type-qwen-net", _BM_TYPE_2, RL_ALL_ROWS,
+     _net(_TR, _Q_KEYS), 13, 0),
+    ("rejudge-bm-type-qwen-total", _BM_TYPE_2, RL_ALL_ROWS,
+     _net(None, _Q_KEYS), 20, 0),
+    ("rejudge-bm-type-n", _BM_TYPE_3, RL_ALL_OPUS_ROWS, _type_n(_TR),
+     133, 0),
+    ("rejudge-bm-type-rows", _BM_TYPE_3, RL_ALL_OPUS_ROWS, len, 500, 0),
+    ("rejudge-bm-type-pref-opus", _BM_TYPE_4, RL_ALL_OPUS_ROWS,
+     _net("single-session-preference", _O_KEYS), 0, 0),
+    ("rejudge-bm-type-pref-qwen", _BM_TYPE_4, RL_ALL_ROWS,
+     _net("single-session-preference", _Q_KEYS), -1, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=BENCH, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# README.md — the clause on the promoted sentence. "Mostly" is a claim
+# about the share, so the share is what is pinned to it.
+for _cid, _art, _val, _stated in [
+    ("rejudge-rm-type-share-opus", RL_ALL_OPUS_ROWS,
+     _net_share(_TR, _O_KEYS), 0.57),
+    ("rejudge-rm-type-share-qwen", RL_ALL_ROWS,
+     _net_share(_TR, _Q_KEYS), 0.65),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=READ_ME, needle=_RM_4, artifacts=(_art,), value=_val,
+        stated=_stated, places=2))
+
+# CHANGELOG.md — the same reading in the Measured entry.
+_CL_TYPE_1 = ("**+12 of the +21** net rows under Opus and **+13 of the "
+              "+20** under Qwen,")
+_CL_TYPE_2 = ("most of the effect out of 133 of the 500 questions, with "
+              "both judges")
+for _cid, _needle, _art, _val, _stated in [
+    ("rejudge-cl-type-opus-net", _CL_TYPE_1, RL_ALL_OPUS_ROWS,
+     _net(_TR, _O_KEYS), 12),
+    ("rejudge-cl-type-opus-total", _CL_TYPE_1, RL_ALL_OPUS_ROWS,
+     _net(None, _O_KEYS), 21),
+    ("rejudge-cl-type-qwen-net", _CL_TYPE_1, RL_ALL_ROWS,
+     _net(_TR, _Q_KEYS), 13),
+    ("rejudge-cl-type-qwen-total", _CL_TYPE_1, RL_ALL_ROWS,
+     _net(None, _Q_KEYS), 20),
+    ("rejudge-cl-type-n", _CL_TYPE_2, RL_ALL_OPUS_ROWS, _type_n(_TR), 133),
+    ("rejudge-cl-type-rows", _CL_TYPE_2, RL_ALL_OPUS_ROWS, len, 500),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=0))
