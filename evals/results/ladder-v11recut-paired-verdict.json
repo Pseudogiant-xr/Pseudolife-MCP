@@ -1,0 +1,151 @@
+{
+  "what": "chip-5 (PR #245 label pair) extraction-ladder paired arms: pre-#245 tree vs master, same harness, same corpus, same extractor endpoint; prediction = verdict-identical on an unlabelled corpus",
+  "generated_at": "2026-09-06T00:37:30",
+  "tag": "v11recut",
+  "pre": {
+    "worktree": "elastic-lichterman-f752f3",
+    "sha": "bbca62d0eb684700add4d6c952cdcc70a6289bee"
+  },
+  "post": {
+    "worktree": "elastic-lichterman-f752f3",
+    "sha": "bbca62d0eb684700add4d6c952cdcc70a6289bee"
+  },
+  "compared": [
+    "gold_recoverable",
+    "stale_leak",
+    "tokens_per_query",
+    "consolidation.pulled",
+    "consolidation.claims",
+    "consolidation.inserted",
+    "consolidation.superseded",
+    "consolidation.literal_flagged",
+    "consolidation.literal_dropped"
+  ],
+  "not_compared": [
+    "extract_seconds",
+    "search_latency_ms"
+  ],
+  "rungs": {
+    "floor": {
+      "status": {
+        "pre": "ok",
+        "post": "ok"
+      },
+      "metrics": {
+        "gold_recoverable": {
+          "pre": 0.1,
+          "post": 0.1
+        },
+        "stale_leak": {
+          "pre": 0.1,
+          "post": 0.1
+        },
+        "tokens_per_query": {
+          "pre": 3.4,
+          "post": 3.4
+        }
+      },
+      "consolidation": {
+        "pulled": {
+          "pre": 26,
+          "post": 26
+        },
+        "claims": {
+          "pre": 2,
+          "post": 2
+        },
+        "inserted": {
+          "pre": 2,
+          "post": 2
+        },
+        "superseded": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_flagged": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_dropped": {
+          "pre": 0,
+          "post": 0
+        }
+      },
+      "timing": {
+        "extract_seconds": {
+          "pre": 0.5,
+          "post": 0.5
+        },
+        "search_latency_ms": {
+          "pre": 48.8,
+          "post": 48.1
+        }
+      },
+      "differences": {},
+      "identical": true,
+      "pre_file": "evals/results/floor-v11recut-pre.json",
+      "post_file": "evals/results/floor-v11recut-post.json"
+    },
+    "qwen-27b": {
+      "status": {
+        "pre": "ok",
+        "post": "ok"
+      },
+      "metrics": {
+        "gold_recoverable": {
+          "pre": 1.0,
+          "post": 1.0
+        },
+        "stale_leak": {
+          "pre": 0.0,
+          "post": 0.0
+        },
+        "tokens_per_query": {
+          "pre": 13.4,
+          "post": 13.4
+        }
+      },
+      "consolidation": {
+        "pulled": {
+          "pre": 26,
+          "post": 26
+        },
+        "claims": {
+          "pre": 16,
+          "post": 16
+        },
+        "inserted": {
+          "pre": 16,
+          "post": 16
+        },
+        "superseded": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_flagged": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_dropped": {
+          "pre": 0,
+          "post": 0
+        }
+      },
+      "timing": {
+        "extract_seconds": {
+          "pre": 35.3,
+          "post": 40.9
+        },
+        "search_latency_ms": {
+          "pre": 63.0,
+          "post": 52.9
+        }
+      },
+      "differences": {},
+      "identical": true,
+      "pre_file": "evals/results/qwen-27b-v11recut-pre.json",
+      "post_file": "evals/results/qwen-27b-v11recut-post.json"
+    }
+  },
+  "gate": "PASS"
+}

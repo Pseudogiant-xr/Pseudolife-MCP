@@ -5094,3 +5094,141 @@ for _cid, _needle, _art, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
+
+# ── v11 example re-cut gate (2026-09-06) — measured, not shipped ─────────
+RECUT_V11 = RESULTS + "prompt-recut-v11-ku-paired-verdict.json"
+RECUT_LADDER = RESULTS + "ladder-v11recut-paired-verdict.json"
+RECUT_PROBE_32K = RESULTS + "op-probe-v11-recut-q8-ctx32k.json"
+RECUT_PROBE_100K = RESULTS + "op-probe-v11-recut-q8.json"
+_RECUT_ARMS = ("cortex 0.667 → 0.705 (7W/4L, p = 0.55), hybrid 0.897 →\n"
+               "  0.936 (3W/0L, p = 0.25), cascade 0.859 → 0.872 (5W/4L, p = 1.0)")
+_RECUT_README_ARMS = ("cortex 0.667 → 0.705, hybrid 0.897 → 0.936, "
+                      "cascade 0.859 → 0.872; rag 0 flips")
+
+
+def _recut(arm: str, field: str) -> Callable[[dict], float]:
+    return lambda d: d["comparisons"][arm][field]
+
+
+def _identical_probe_notes(a: dict, b: dict) -> int:
+    """Claim sets that agree note-for-note between the two server contexts."""
+    return sum(
+        json.dumps(pa.get("claims"), sort_keys=True)
+        == json.dumps(pb.get("claims"), sort_keys=True)
+        for name in a["variants"]
+        for pa, pb in zip(a["variants"][name]["per_note"],
+                          b["variants"][name]["per_note"]))
+
+
+for _doc, _needle in ((CHANGELOG, _RECUT_ARMS), (EVALS, _RECUT_README_ARMS)):
+    for _arm, _pre, _post in (("cortex", 0.667, 0.705),
+                              ("hybrid", 0.897, 0.936),
+                              ("cascade", 0.859, 0.872)):
+        CLAIMS.append(Claim(
+            id=f"recut-v11-{_arm}-pre-{_doc.split('/')[0]}", doc=_doc,
+            needle=_needle, artifacts=(RECUT_V11,),
+            value=_recut(_arm, "reference_accuracy"), stated=_pre, places=3))
+        CLAIMS.append(Claim(
+            id=f"recut-v11-{_arm}-post-{_doc.split('/')[0]}", doc=_doc,
+            needle=_needle, artifacts=(RECUT_V11,),
+            value=_recut(_arm, "accuracy"), stated=_post, places=3))
+for _arm, _wins, _losses, _p, _places in (("cortex", 7, 4, 0.55, 2),
+                                          ("hybrid", 3, 0, 0.25, 2),
+                                          ("cascade", 5, 4, 1.0, 1)):
+    CLAIMS.append(Claim(
+        id=f"recut-v11-{_arm}-wins", doc=CHANGELOG, needle=_RECUT_ARMS,
+        artifacts=(RECUT_V11,), value=_recut(_arm, "wins"),
+        stated=_wins, places=0))
+    CLAIMS.append(Claim(
+        id=f"recut-v11-{_arm}-losses", doc=CHANGELOG, needle=_RECUT_ARMS,
+        artifacts=(RECUT_V11,), value=_recut(_arm, "losses"),
+        stated=_losses, places=0))
+    CLAIMS.append(Claim(
+        id=f"recut-v11-{_arm}-p", doc=CHANGELOG, needle=_RECUT_ARMS,
+        artifacts=(RECUT_V11,), value=_recut(_arm, "p_mcnemar_exact"),
+        stated=_p, places=_places))
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("recut-v11-rag-flips", "rag control 0 flips\n  on 78/78 identical contexts",
+     RECUT_V11, lambda d: d["noise_floor_rag_control"]["rag_disagreement"], 0, 0),
+    ("recut-v11-n", "n = 78, rag control 0 flips", RECUT_V11,
+     lambda d: d["n"], 78, 0),
+    ("recut-v11-leave-out-n", "(n = 76) the direction is the same", RECUT_V11,
+     lambda d: d["leave_out"]["n"], 76, 0),
+    ("recut-v11-frozen-losses", "3 lost cascade correctness", RECUT_V11,
+     lambda d: len(d["frozen_total_losses_on_six"]), 3, 0),
+    ("recut-v11-digit-cortex-pre", "cortex 26 → 29 of 39, cascade 35 → 35",
+     RECUT_V11, lambda d: d["count_class"]["digit_gold_n39"]["cortex"]["pre"], 26, 0),
+    ("recut-v11-digit-cortex-post", "cortex 26 → 29 of 39, cascade 35 → 35",
+     RECUT_V11, lambda d: d["count_class"]["digit_gold_n39"]["cortex"]["post"], 29, 0),
+    ("recut-v11-digit-cascade-pre", "cortex 26 → 29 of 39, cascade 35 → 35",
+     RECUT_V11, lambda d: d["count_class"]["digit_gold_n39"]["cascade"]["pre"], 35, 0),
+    ("recut-v11-digit-cascade-post", "cortex 26 → 29 of 39, cascade 35 → 35",
+     RECUT_V11, lambda d: d["count_class"]["digit_gold_n39"]["cascade"]["post"], 35, 0),
+    ("recut-v11-gate-fail", "The pre-registered gate nevertheless reads FAIL",
+     RECUT_V11, lambda d: 0.0 if d["gate"] == "FAIL" else 1.0, 0.0, 0),
+    ("recut-v11-ladder-tokens-pre", "gold 1.0, stale 0.0, 13.4 tokens\n  per query on both arms",
+     RECUT_LADDER, lambda d: d["rungs"]["qwen-27b"]["metrics"]["tokens_per_query"]["pre"], 13.4, 1),
+    ("recut-v11-ladder-tokens-post", "gold 1.0, stale 0.0, 13.4 tokens\n  per query on both arms",
+     RECUT_LADDER, lambda d: d["rungs"]["qwen-27b"]["metrics"]["tokens_per_query"]["post"], 13.4, 1),
+    ("recut-v11-ladder-gold-post", "gold 1.0, stale 0.0, 13.4 tokens\n  per query on both arms",
+     RECUT_LADDER, lambda d: d["rungs"]["qwen-27b"]["metrics"]["gold_recoverable"]["post"], 1.0, 1),
+    ("recut-v11-ladder-stale-post", "gold 1.0, stale 0.0, 13.4 tokens\n  per query on both arms",
+     RECUT_LADDER, lambda d: d["rungs"]["qwen-27b"]["metrics"]["stale_leak"]["post"], 0.0, 1),
+    ("recut-v11-probe-v11-adoption", "7/7 adoption and 7/7 decoys for\n  v10 and v11 alike",
+     RECUT_PROBE_32K, lambda d: d["variants"]["v11-example-recut"]["adoption"], 1.0, 3),
+    ("recut-v11-probe-v11-decoy", "7/7 adoption and 7/7 decoys for\n  v10 and v11 alike",
+     RECUT_PROBE_32K, lambda d: d["variants"]["v11-example-recut"]["decoy_ok"], 1.0, 3),
+    ("recut-v11-probe-v10-decoy", "7/7 adoption and 7/7 decoys for\n  v10 and v11 alike",
+     RECUT_PROBE_32K, lambda d: d["variants"]["v10-stance-update"]["decoy_ok"], 1.0, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+CLAIMS.append(Claim(
+    id="recut-v11-ctx-inert-notes", doc=CHANGELOG,
+    needle="all 26\n  op-probe notes came back byte-identical at both sizes",
+    artifacts=(RECUT_PROBE_100K, RECUT_PROBE_32K),
+    value=_identical_probe_notes, stated=26, places=0))
+
+# Sidecar rung readings quoted in the same entry (informational, not a gate).
+RECUT_SIDECAR = {
+    "pre": RESULTS + "e4b-v3-v11recut-pre.json",
+    "pre2": RESULTS + "e4b-v3-v11recut2-pre.json",
+    "pre3": RESULTS + "e4b-v3-v11recut2-pre2.json",
+    "v5ctl": RESULTS + "e4b-v3-v11recut2-v5ctl.json",
+    "opless": RESULTS + "e4b-v3-v11recut2-opless.json",
+    "post": RESULTS + "e4b-v3-v11recut-post.json",
+    "post2": RESULTS + "e4b-v3-v11recut2-post.json",
+}
+_SIDECAR_SHIPPED = "scores stale_leak 1.0\n  at 39.7 tokens per query and 16 claims in three separate runs"
+for _k in ("pre", "pre2", "pre3"):
+    CLAIMS.append(Claim(
+        id=f"recut-v11-sidecar-shipped-stale-{_k}", doc=CHANGELOG,
+        needle=_SIDECAR_SHIPPED, artifacts=(RECUT_SIDECAR[_k],),
+        value=lambda d: d["stale_leak"], stated=1.0, places=1))
+    CLAIMS.append(Claim(
+        id=f"recut-v11-sidecar-shipped-tokens-{_k}", doc=CHANGELOG,
+        needle=_SIDECAR_SHIPPED, artifacts=(RECUT_SIDECAR[_k],),
+        value=lambda d: d["tokens_per_query"], stated=39.7, places=1))
+    CLAIMS.append(Claim(
+        id=f"recut-v11-sidecar-shipped-claims-{_k}", doc=CHANGELOG,
+        needle=_SIDECAR_SHIPPED, artifacts=(RECUT_SIDECAR[_k],),
+        value=lambda d: d["consolidation"]["claims"], stated=16, places=0))
+for _cid, _needle, _k, _field, _stated, _places in [
+    ("recut-v11-sidecar-v5-stale", "scores 0.1 at 16.9 tokens", "v5ctl", "stale_leak", 0.1, 1),
+    ("recut-v11-sidecar-v5-tokens", "scores 0.1 at 16.9 tokens", "v5ctl", "tokens_per_query", 16.9, 1),
+    ("recut-v11-sidecar-opless-stale", "op-less control 0.2", "opless", "stale_leak", 0.2, 1),
+    ("recut-v11-sidecar-post-stale", "v11 0.2 at 13.2\n  tokens in two runs", "post", "stale_leak", 0.2, 1),
+    ("recut-v11-sidecar-post-tokens", "v11 0.2 at 13.2\n  tokens in two runs", "post", "tokens_per_query", 13.2, 1),
+    ("recut-v11-sidecar-post2-stale", "v11 0.2 at 13.2\n  tokens in two runs", "post2", "stale_leak", 0.2, 1),
+    ("recut-v11-sidecar-post2-tokens", "v11 0.2 at 13.2\n  tokens in two runs", "post2", "tokens_per_query", 13.2, 1),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(RECUT_SIDECAR[_k],),
+        value=(lambda f: (lambda d: d[f]))(_field), stated=_stated, places=_places))
+CLAIMS.append(Claim(
+    id="recut-v11-affe-recovers-without-example", doc=CHANGELOG,
+    needle="still recovers `32` without it", artifacts=(RECUT_V11,),
+    value=lambda d: 1.0 if d["frozen_total"]["affe2881"]["answer_in_current_fact"]["post"] else 0.0,
+    stated=1.0, places=0))
+
