@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-05 — offline cortex cosine parity)
+- Normalize offline fact/query vectors on CPU in float32 like live cortex search before applying score floors and BM25 fusion. Add a magnitude-sensitive regression test.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported

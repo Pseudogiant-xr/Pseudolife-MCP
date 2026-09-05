@@ -41,6 +41,33 @@ _FILLER = [
 ]
 
 
+def test_rebuild_uses_single_document_cosine_contract():
+    """Backend norm drift must not turn offline cosine into magnitude rank."""
+    import sys
+    from pathlib import Path
+    import torch
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from rebuild_contexts import rebuild_fact_lines
+
+    class Embedder:
+        def encode_single(self, text):
+            return torch.tensor([1.0, 0.0] if text.startswith("aligned")
+                                else [2.0, 2.0])
+
+        def encode(self, texts):
+            return torch.stack([self.encode_single(t) for t in texts])
+
+        def encode_query(self, text):
+            return torch.tensor([2.0, 0.0])
+
+    bank = {"question": "aligned", "facts": [
+        {"entity": "aligned", "attribute": "a", "value": "v"},
+        {"entity": "diagonal", "attribute": "a", "value": "v"},
+    ]}
+    assert rebuild_fact_lines(bank, Embedder(), top_k=2, min_score=0.8,
+                              bm25=True) == ["aligned — a: v"]
+
+
 def _seed(svc: MemoryService) -> None:
     for e, a, v in _FILLER:
         svc.cortex_write(e, a, v, provenance=["seed"])
