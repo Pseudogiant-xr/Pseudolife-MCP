@@ -19,9 +19,10 @@ Label sources (``--label-source``)
 ``uses``
     The real implicit relevance labels — a ``retrieval_uses`` row (a
     ``memory_get`` / ``memory_reinforce`` on a served entry within the
-    session window). This is the label set Phase 1 would train on. On the
-    2026-09-04 bank there is exactly ONE such event, so this mode is a
-    plumbing check, not a measurement.
+    session window, or an id the agent named in
+    ``memory_outcome(used_ids=...)``, added 2026-09-05). This is the label
+    set Phase 1 would train on. On the 2026-09-04 bank there is exactly ONE
+    such event, so this mode is a plumbing check, not a measurement.
 ``logged-top1`` / ``logged-top3``
     The entry ids the daemon itself served at rank 0 (or ranks 0-2) for
     that query, used as pseudo-labels. This is NOT a relevance measurement

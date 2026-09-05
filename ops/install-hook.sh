@@ -35,7 +35,7 @@ COMMAND="${2:-pseudolife-mcp briefing --hook-json}"
 # (no daemon call): the one-shot session-start briefing loses salience over
 # a long session; this keeps the loop — including recall-before-review —
 # mechanical. Keep the line free of quote characters (it nests in JSON+sh).
-DISCIPLINE_LINE="Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome."
+DISCIPLINE_LINE="Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
 UPS_COMMAND=""
 if [ "$CLIENT" = claude ]; then
   UPS_COMMAND="echo '$DISCIPLINE_LINE'"

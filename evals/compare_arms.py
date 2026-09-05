@@ -15,6 +15,14 @@ The ``rag`` arm never touches the extractor, so its A-vs-B delta bounds the
 measurement noise of the whole comparison: on the reproducible bench server
 it must be exactly 0, and a nonzero rag delta invalidates the run.
 
+Carve-out (2026-09-05 review): that holds only when neither run set a
+``PSEUDOLIFE_BENCH_*`` RETRIEVAL override (candidate pool, fusion,
+reranker). Those reach the service config, so they change what the rag arm
+is served and make it a treatment arm — the 2026-09-04/05 pool cells move
+it by up to 0.115. Under such a run the zero-delta control is the
+``cortex`` arm, which never touches ``cms.retrieve``; check the runs'
+``bench_env`` stamps before reading a rag delta as noise.
+
 Usage (tags resolve against evals/results/):
 
   python evals/compare_arms.py --a c2v6-literal --b c2op-count \
