@@ -800,11 +800,15 @@ def test_history_set_order_is_deterministic_under_timestamp_ties(
     ]
 
 
-def test_resolve_refuses_when_slot_converted_to_set(store, emb):
+def test_resolve_refuses_to_promote_when_slot_converted_to_set(store, emb):
     """Item 3 (resolve() bypass): a contender parked on a scalar slot before
-    the slot converts to a set must not be promotable/retirable through
-    resolve() afterwards — that would bypass write_fact's scalar/set
-    exclusivity guard. Refused, members untouched."""
+    the slot converts to a set must not be PROMOTABLE through resolve()
+    afterwards — a scalar contender cannot replace a member set, and
+    registering it as current would bypass write_fact's scalar/set
+    exclusivity guard. Refused, members untouched. Retiring the same
+    contender is allowed (see the next test): it never touches
+    ``_current``/``_members``, so refusing it too left an operator with no
+    way to dismiss the contender at all (2026-09-05)."""
     store.write_fact(Slot("user", "bikes owned", "road bike"), emb("road bike"),
                       support="user")
     store.write_fact(Slot("user", "bikes owned", "gravel bike"), emb("gravel bike"),
@@ -823,7 +827,95 @@ def test_resolve_refuses_when_slot_converted_to_set(store, emb):
     assert [c.value for c in store.contenders_for("user", "bikes owned")] == ["gravel bike"]
 
 
-def test_cortex_resolve_service_reports_slot_holds_set(pristine_service):
+def test_resolve_retires_a_contender_at_a_set_slot(store, emb):
+    """The other half of the same guard. Rejection does not register the
+    contender anywhere — it flips one record to ``retired`` and writes the
+    audit row — so a set slot is no reason to refuse it. Before 2026-09-05
+    both directions were refused and the contender was stuck in the review
+    queue forever."""
+    store.write_fact(Slot("user", "bikes owned", "road bike"), emb("road bike"),
+                     support="user", now=1000.0)
+    store.write_fact(Slot("user", "bikes owned", "gravel bike"),
+                     emb("gravel bike"), support="agent", now=1001.0)
+    store.add_member(Slot("user", "bikes owned", "hybrid bike"),
+                     emb("hybrid bike"), now=1002.0)
+    before = sorted(m.value for m in store.members("user", "bikes owned"))
+    log_at = len(store.supersession_log)
+    store.dirty_slots.clear()
+
+    res = store.resolve("user", "bikes owned", accept=False, now=1003.0)
+
+    assert res.action == "contested"
+    assert res.record.value == "gravel bike"
+    assert res.record.status == "retired" and res.record.superseded_at == 1003.0
+    assert store.contenders_for("user", "bikes owned") == []
+
+    # The member set is untouched and the slot is still a set: nothing was
+    # registered in _current, nothing added to or removed from _members.
+    assert sorted(m.value for m in store.members("user", "bikes owned")) == before
+    assert store.slot_kind("user", "bikes owned") == "set"
+    slot_key = res.record.key            # normalised ("user", "bikes-owned")
+    assert slot_key not in store._current
+
+    # Audit written exactly as the scalar rejection writes it, and the
+    # retirement is marked for per-slot write-through.
+    entry = store.supersession_log[log_at]
+    assert (entry["decision"], entry["reason"]) == ("resolved", "rejected")
+    # No current scalar at a set slot, so the row is logged against the
+    # contender itself (same `cur or contender` fallback as an empty slot).
+    assert entry["old_value"] == "gravel bike"
+    assert entry["new_value"] == "gravel bike"
+    assert slot_key in store.dirty_slots
+
+
+def test_resolve_reject_at_a_scalar_slot_is_unchanged(store, emb):
+    """Control for the test above: the scalar rejection path it must match."""
+    store.write_fact(Slot("user", "bike", "road bike"), emb("road bike"),
+                     support="user", now=1000.0)
+    store.write_fact(Slot("user", "bike", "gravel bike"), emb("gravel bike"),
+                     support="agent", now=1001.0)
+    log_at = len(store.supersession_log)
+
+    res = store.resolve("user", "bike", accept=False, now=1003.0)
+
+    assert res.action == "contested"
+    assert res.record.value == "road bike"        # the surviving current
+    assert store.lookup("user", "bike").value == "road bike"
+    assert store.contenders_for("user", "bike") == []
+    entry = store.supersession_log[log_at]
+    assert (entry["decision"], entry["reason"]) == ("resolved", "rejected")
+    assert entry["old_value"] == "road bike"      # logged against the current
+    assert entry["new_value"] == "gravel bike"
+
+
+def test_cortex_resolve_service_reject_dismisses_a_set_slot_contender(
+        pristine_service):
+    """Service view of the same fix: the reject round-trips and persists,
+    and the response keeps its shape (``current`` is None because the slot
+    holds members, not a scalar)."""
+    svc = pristine_service
+    svc.cortex_write("user", "bikes owned", "road bike", support="user")
+    svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")
+    svc.set_add("user", "bikes owned", "hybrid bike")
+
+    res = svc.cortex_resolve("user", "bikes owned", accept=False)
+
+    assert res["resolved"] is True and res["accepted"] is False
+    assert res["action"] == "contested"
+    assert res["record"]["value"] == "gravel bike"
+    assert res["current"] is None
+    assert svc.cortex_contenders("user", "bikes owned")["contenders"] == []
+    got = svc.cortex_lookup("user", "bikes owned")
+    assert got["kind"] == "set"
+    assert sorted(m["value"] for m in got["members"]) == [
+        "hybrid bike", "road bike"]
+
+
+def test_cortex_resolve_service_refuses_accept_when_slot_holds_set(
+        pristine_service):
+    """Promotion only — the reject direction is pinned by
+    ``test_cortex_resolve_service_reject_dismisses_a_set_slot_contender``
+    above."""
     svc = pristine_service
     svc.cortex_write("user", "bikes owned", "road bike", support="user")
     svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")

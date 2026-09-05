@@ -66,8 +66,21 @@ function groupByEntity(entries) {
     .map(([entity, facts]) => ({ entity, facts: facts.sort((x, y) => String(x.attribute).localeCompare(String(y.attribute))) }));
 }
 
+// Slot identity as the store keys it (cortex.py `_norm_key`: casefold and
+// collapse every run of separators to one hyphen). Rows of one set slot can
+// carry different display attributes — the converted scalar keeps its own
+// strings while a later add keeps the caller's — so a raw-string comparison
+// would split one slot into two.
+function slotKey(attribute) {
+  return String(attribute || "").toLowerCase().replace(/[\s._\-\/]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 function entityCard(g, ctx) {
-  const contested = g.facts.filter((f) => f.contested).length;
+  // Contested SLOTS: a set slot arrives as one row per member, each carrying
+  // the slot's flag, so count slots rather than rows and render the
+  // contender block (Accept/Discard) once per slot, under its first row.
+  const contested = new Set(g.facts.filter((f) => f.contested).map((f) => slotKey(f.attribute))).size;
+  const shown = new Set();
   return el("div", { class: "panel entity-card reveal" },
     el("div", { class: "entity-head" },
       el("span", { class: "nav-dot", style: { "--dot": TONE } }),
@@ -79,10 +92,10 @@ function entityCard(g, ctx) {
       el("button", { class: "btn sm", title: "Explore in the graph",
         onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(g.entity); } }, "graph ↗"),
       el("span", { class: "n", style: { marginLeft: "10px" } }, `${g.facts.length} fact${g.facts.length === 1 ? "" : "s"}`)),
-    g.facts.map((f) => factRow(f, ctx)));
+    g.facts.map((f) => factRow(f, ctx, shown)));
 }
 
-function factRow(f, ctx) {
+function factRow(f, ctx, shown) {
   const row = el("div", { class: "fact-row" + (f.contested ? " is-contested" : ""),
     "aria-label": `${f.entity}.${f.attribute} — open history`,
     ...pressable(() => openHistory(f)) },
@@ -96,7 +109,8 @@ function factRow(f, ctx) {
       el("button", { class: "btn sm danger fact-forget", title: "Forget this fact",
         onclick: (e) => { e.stopPropagation(); forgetFact(f, ctx); } }, "forget"),
       el("span", { class: "hist-ico" }, "history ↗")));
-  if (f.contested) {
+  if (f.contested && !shown.has(slotKey(f.attribute))) {
+    shown.add(slotKey(f.attribute));
     row.appendChild(el("div", { class: "contender", onclick: (e) => e.stopPropagation() },
       el("span", { class: "dim" }, "contender:"),
       el("span", { class: "cv" }, f.contender_value ?? "(value)"),
@@ -116,7 +130,21 @@ async function resolve(f, accept, ctx) {
       : `Keep ${f.entity}.${f.attribute} = "${f.value}" and retire the parked contender.`,
     confirmLabel: accept ? "Adopt" : "Discard", danger: !accept }))) return;
   try {
-    await api.post("/api/facts/resolve", { entity: f.entity, attribute: f.attribute, accept });
+    const res = await api.post("/api/facts/resolve", { entity: f.entity, attribute: f.attribute, accept });
+    if (res && res.resolved === false) {
+      // A 200 with resolved:false is a refusal, not a success. slot_holds_set:
+      // a scalar contender cannot be adopted onto a slot that now holds a set
+      // (adopt it with a set add instead); Discard there is refused too until
+      // the set-slot retire fix lands, after which it retires the contender.
+      // no_contender: another client already settled the slot, so the block
+      // on screen is stale — refresh so it goes away instead of re-toasting.
+      toast(res.reason === "slot_holds_set"
+        ? (accept ? "Not adopted: the slot now holds a set — add the value as a member instead, or Discard it"
+                  : "Not discarded: the slot holds a set (slot_holds_set)")
+        : "Not resolved: " + (res.reason || "unknown reason"), "bad");
+      if (res.reason === "no_contender") ctx.refresh();
+      return;
+    }
     toast(accept ? "Contender adopted" : "Contender discarded", "ok");
     ctx.refresh();
   } catch (e) { toast("Resolve failed: " + e.message, "bad"); }

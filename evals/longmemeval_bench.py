@@ -66,7 +66,8 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import hybrid_context  # noqa: E402
 from ladder_sweep import (approx_tokens, build_service,  # noqa: E402
-                          pool_env_knobs, probe, rerank_env_knobs)
+                          dream_env_knobs, pool_env_knobs, probe,
+                          rerank_env_knobs)
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 import answerability_probe  # noqa: E402
 import leak_check  # noqa: E402
@@ -237,6 +238,14 @@ def bench_env_knobs() -> dict:
         # only on a --phase extract run — rebuild_contexts.py copies the
         # associative context verbatim and cannot honour them.
         "candidate_pool": pool_env_knobs(),
+        # Dream-path knobs (memory.dream). Applied by the same
+        # ladder_sweep.build_service; None means the shipped default.
+        # assistant_claims is a term for any arm whose extraction prompt
+        # asks for a speaker label — which the SHIPPED prompt has done
+        # since 2026-09-05, so it is a live term on a default run and not
+        # only on an `assistant_facts_*.txt` arm. It still means nothing
+        # for a pre-2026-09-05 artifact, where no claim carried the field.
+        "dream": dream_env_knobs(),
         # Cross-encoder reranker (memory.reranker.enabled). Same
         # build_service/--phase extract constraint as candidate_pool above.
         "reranker": rerank_env_knobs(),
