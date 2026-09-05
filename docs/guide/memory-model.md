@@ -387,6 +387,13 @@ memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user
 # or accept=False -> discard the contender, current unchanged.
 ```
 
+If the slot has since become a **set** (see [Conversion
+rules](#conversion-rules)), `accept=True` is refused with
+`reason: "slot_holds_set"` — a scalar contender cannot replace a member set,
+so adopt the value with `memory_set_add` instead — while `accept=False`
+always works and is how an operator dismisses such a contender from the
+review queue.
+
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in
 search, and in `memory_fact_get`) so the agent can check in rather than

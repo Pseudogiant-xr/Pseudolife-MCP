@@ -366,6 +366,45 @@ def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
         "slot holds a set; use memory_set_add / memory_set_remove")
 
 
+def test_memory_fact_resolve_dismisses_a_set_slot_contender_via_mcp(
+        tmp_path: Path, monkeypatch) -> None:
+    """A contender parked against a slot that later became a set can be
+    DISMISSED through the tool (accept=false) but not adopted (accept=true):
+    a scalar contender cannot replace a member set, while retiring it
+    touches no members. Before 2026-09-05 both calls returned
+    ``slot_holds_set`` and the contender could never leave the queue."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_fact_set", {"entity": "user", "attribute": "bikes owned",
+                                "value": "road bike", "origin": "user"})
+    parked = _invoke("memory_fact_set", {
+        "entity": "user", "attribute": "bikes owned",
+        "value": "gravel bike", "origin": "agent"})
+    assert parked["action"] == "contested"
+    _invoke("memory_set_add", {"entity": "user", "attribute": "bikes owned",
+                               "member": "hybrid bike"})
+
+    refused = _invoke("memory_fact_resolve", {
+        "entity": "user", "attribute": "bikes owned", "accept": True})
+    assert refused == {"resolved": False, "reason": "slot_holds_set",
+                       "entity": "user", "attribute": "bikes owned"}
+
+    dismissed = _invoke("memory_fact_resolve", {
+        "entity": "user", "attribute": "bikes owned", "accept": False})
+    assert dismissed["resolved"] is True and dismissed["accepted"] is False
+    assert dismissed["record"]["value"] == "gravel bike"
+
+    got = _invoke("memory_fact_get", {"entity": "user",
+                                      "attribute": "bikes owned"})
+    assert got["record"]["kind"] == "set"
+    assert sorted(m["value"] for m in got["record"]["members"]) == [
+        "hybrid bike", "road bike"]
+    assert not got.get("contenders")
+
+
 def test_memory_fact_get_on_a_fully_emptied_set_slot_reads_as_empty(
         tmp_path: Path, monkeypatch) -> None:
     """Task 5 review finding: cortex_lookup's set shape stays a truthy dict

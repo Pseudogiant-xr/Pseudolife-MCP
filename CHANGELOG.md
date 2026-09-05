@@ -263,6 +263,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `facts_current` / `facts_dump_truncated`) instead of leaving it a
   hand-checked sentence, and picks its five widest slots from the whole
   cortex rather than the first 2,000 rows of the fact dump.
+### Fixed (2026-09-05 — a contender parked against a set slot can now be dismissed)
+- **A contender parked against a set-valued cortex slot could not be settled
+  in either direction, so it sat in the review queue forever with no way to
+  clear it.** `CortexStore.resolve` refused any slot holding current members
+  for both `accept=True` and `accept=False`. The refusal is right for
+  promotion — a scalar contender cannot replace a member set, and registering
+  it as current would bypass `write_fact`'s scalar/set exclusivity guard — but
+  rejection never touches `_current` or `_members`, so it could never bypass
+  anything. The guard is now gated on `accept`: promotion still returns
+  `{"resolved": false, "reason": "slot_holds_set"}` (adopt the value with
+  `memory_set_add` / `memory_set_remove` instead), while
+  `memory_fact_resolve(..., accept=false)` retires the contender, leaves every
+  member untouched, and writes the same `resolved`/`rejected` audit row a
+  scalar rejection writes — logged against the contender itself, since a set
+  slot has no current scalar to log against. The response shape is unchanged;
+  `current` reads `null` at a set slot because the slot holds members. Rare
+  while only number-led set adds parked there; routine once assistant-origin
+  adds park against user-origin sets.
+
 ### Fixed (2026-09-04 — pre-merge review of the retrieval-replay branch)
 - **A machine hostname reached a public artifact.** `graph-ablation-20260904.json`
   published a homelab hostname carrying the maintainer name as a top-degree
