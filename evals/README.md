@@ -1039,6 +1039,12 @@ the bar — gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is
 | pre, rep 2 | v2 | 1.0 | 0.0 | 14.0 | 16 / 16 | `opus-5-shimprompt-pre-rep2.json` |
 | post, rep 2 | v4 | 1.0 | 0.0 | 14.8 | 16 / 16 | `opus-5-shimprompt-post-rep2.json` |
 
+**The two `post` rows are superseded.** They measured v4 while it carried
+speaker rule v1, which the same day's merge review rewrote; the re-gate under
+"[Re-gated under speaker rule v2](#re-gated-under-speaker-rule-v2-2026-09-05)"
+below replaces them. The `pre` rows still stand — the v2 comparator carries
+none of the assistant blocks, so the rule rewrite cannot reach it.
+
 **The gate passes on both predicates.**
 `ladder-shimprompt-paired-verdict-threshold.json` reads `gate: PASS`,
 `no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`,
@@ -1063,6 +1069,58 @@ file on purpose, so it already runs the shipped `_SYSTEM_PROMPT` and needed
 no change. An existing install picks the new prompt up when the autostart is
 re-installed or the shim is restarted with the new file — rebuilding the
 daemon image alone does not reach the shim path.
+
+##### Re-gated under speaker rule v2 (2026-09-05)
+
+The four rows above measured v4 while it still carried **speaker rule v1**,
+which told the model that "each note begins with its role". The same day's
+merge review found that premise false on a real bank — only the eval
+harnesses write a `role:` prefix — and rewrote `_ASSISTANT_SPEAKER_RULE` to
+read a marker where the note carries one, infer only where the note is
+unmistakably the assistant speaking, and OMIT the field under doubt.
+`sonnet_extractor_v4.md` is generated from that constant, so the file the
+shim is launched with changed and the gate above stopped describing it.
+Only the POST arm was re-run: the `pre` comparator is v2, which carries none
+of the assistant blocks, so the rule rewrite cannot reach it. Same rung,
+same corpus, same dedicated port 8083; the live shim on :8082 was again
+never started, stopped or reconfigured.
+
+| arm | prompt | speaker rule | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|---|
+| pre | v2 | none | 1.0 | 0.0 | 15.2 | 16 / 16 | `opus-5-shimprompt-pre.json` |
+| pre, rep 2 | v2 | none | 1.0 | 0.0 | 14.0 | 16 / 16 | `opus-5-shimprompt-pre-rep2.json` |
+| post2 | v4 | v2 | 1.0 | 0.0 | 15.5 | 16 / 16 | `opus-5-shimprompt-post2.json` |
+| post2, rep 2 | v4 | v2 | 1.0 | 0.0 | 14.8 | 17 / 17 | `opus-5-shimprompt-post2-rep2.json` |
+
+**The gate still passes on both predicates**, on the rule-v2 verdict
+`ladder-shimprompt-rule2-paired-verdict-threshold.json` (`post_arm: post2`):
+`gate: PASS`, `no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`
+and `failed_checks: []`. Gold stays 1.0 and stale 0.0 on both replicates, so
+the quality claim the default flip rests on survives the rule rewrite.
+
+**What does not carry over is the identical tally.** Under rule v1 all four
+runs consolidated 26 pulled / 16 claims / 16 inserted / 0 superseded. Under
+rule v2 the second replicate returned **17 claims and inserted all 17** —
+same corpus, one extra claim, nothing lost, since `claims == inserted` in
+every run under both rules. "An identical consolidation tally every time" is
+therefore a statement about the rule-v1 runs only, and is not restated here.
+A one-claim move across two replicates of a rung that is not
+bit-reproducible is not evidence in either direction; it is reported because
+the artifact shows it. `bench_env.dream.assistant_claims` reads `contender`
+on both new runs, so the write policy is not a hidden term in the move.
+
+**The token move stays inside the noise.** The rule-v2 verdict's
+`differences` block reports `tokens_per_query 15.2 → 15.5`. Across
+replicates the post2 arm spans 14.8–15.5 against the pre arm's 14.0–15.2:
+the ranges overlap, and the 0.55 gap between the arm means (14.6 pre, 15.15
+post2) is smaller than the pre arm's own 1.2 spread. All four runs sit under
+45% of the same 34.98 token budget. Nothing is claimed for the difference.
+
+The rule-v1 verdict and its two `post` artifacts stay committed — a
+superseded number keeps its evidence. `evals/ladder_pair_compare.py` gained
+`--post-suffix` for exactly this shape of re-run: a re-gate that keeps the
+pre arm writes `…-post2.json`, and without the flag the tool would read the
+superseded `…-post.json` sitting beside it.
 
 #### Superseded — first run (contaminated worked example)
 

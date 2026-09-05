@@ -1,0 +1,112 @@
+{
+  "what": "extraction-ladder paired arms under the ladder's own threshold rule: both arms must beat naive-RAG on staleness and gold recovery inside 60% of its tokens/query, and the post arm must not go backwards on either quality metric",
+  "mode": "threshold",
+  "generated_at": "2026-09-05T13:18:50",
+  "tag": "shimprompt",
+  "post_arm": "post2",
+  "pre": {
+    "worktree": "shim-prov-prompt",
+    "sha": "7083bc33d3786e9c70e8f4dff68d069fd1701aa9"
+  },
+  "post": {
+    "worktree": "shim-prov-prompt",
+    "sha": "7083bc33d3786e9c70e8f4dff68d069fd1701aa9"
+  },
+  "compared": [
+    "gold_recoverable",
+    "stale_leak",
+    "tokens_per_query",
+    "consolidation.pulled",
+    "consolidation.claims",
+    "consolidation.inserted",
+    "consolidation.superseded",
+    "consolidation.literal_flagged",
+    "consolidation.literal_dropped"
+  ],
+  "not_compared": [
+    "extract_seconds",
+    "search_latency_ms"
+  ],
+  "rungs": {
+    "opus-5": {
+      "status": {
+        "pre": "ok",
+        "post": "ok"
+      },
+      "metrics": {
+        "gold_recoverable": {
+          "pre": 1.0,
+          "post": 1.0
+        },
+        "stale_leak": {
+          "pre": 0.0,
+          "post": 0.0
+        },
+        "tokens_per_query": {
+          "pre": 15.2,
+          "post": 15.5
+        }
+      },
+      "consolidation": {
+        "pulled": {
+          "pre": 26,
+          "post": 26
+        },
+        "claims": {
+          "pre": 16,
+          "post": 16
+        },
+        "inserted": {
+          "pre": 16,
+          "post": 16
+        },
+        "superseded": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_flagged": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_dropped": {
+          "pre": 0,
+          "post": 0
+        }
+      },
+      "timing": {
+        "extract_seconds": {
+          "pre": 54.4,
+          "post": 58.2
+        },
+        "search_latency_ms": {
+          "pre": 91.2,
+          "post": 64.1
+        }
+      },
+      "differences": {
+        "tokens_per_query": {
+          "pre": 15.2,
+          "post": 15.5
+        }
+      },
+      "identical": false,
+      "pre_clears": true,
+      "post_clears": true,
+      "no_regression": true,
+      "failed_checks": [],
+      "cleared": true,
+      "pre_file": "evals/results/opus-5-shimprompt-pre.json",
+      "post_file": "evals/results/opus-5-shimprompt-post2.json"
+    }
+  },
+  "gate": "PASS",
+  "rule": "stale_leak < naive.stale_leak; gold_recoverable > naive.gold_recoverable; tokens_per_query <= 0.6 * naive.tokens_per_query \u2014 applied to BOTH arms; plus post.stale_leak <= pre.stale_leak and post.gold_recoverable >= pre.gold_recoverable. The consolidation tally is reported, not gated.",
+  "naive": {
+    "file": "evals/results/naive-rag.json",
+    "gold_recoverable": 0.7,
+    "stale_leak": 0.3,
+    "tokens_per_query": 58.3,
+    "token_budget": 34.98
+  },
+  "no_regression_gate": "PASS"
+}

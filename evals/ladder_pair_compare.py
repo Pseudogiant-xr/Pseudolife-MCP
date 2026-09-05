@@ -222,6 +222,9 @@ def main() -> int:
         "mode": a.mode,
         "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "tag": a.tag,
+        # Which post-arm files were read. A verdict that does not say this
+        # cannot be told apart from one built on a superseded post run.
+        "post_arm": a.post_suffix,
         "pre": {"worktree": Path(a.pre).name, "sha": sha(a.pre)},
         "post": {"worktree": Path(a.post).name, "sha": sha(a.post)},
         "compared": list(METRICS) + [f"consolidation.{k}" for k in TALLY],

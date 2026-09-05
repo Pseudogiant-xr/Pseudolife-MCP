@@ -258,3 +258,37 @@ def test_the_default_post_suffix_is_still_post(monkeypatch, tmp_path):
     r = v["rungs"]["qwen-27b"]
     assert r["post_file"].endswith("qwen-27b-t-post.json")
     assert r["metrics"]["tokens_per_query"] == {"pre": 13.4, "post": 14.2}
+
+
+# ...and the verdict says which post arm it read.
+
+def test_post_suffix_reads_a_differently_named_post_arm(monkeypatch,
+                                                        tmp_path):
+    """A re-gate keeps the pre arm and re-runs only the post one, so the two
+    arms no longer share a tag suffix. The shim re-gate wrote
+    ``opus-5-shimprompt-post2.json`` beside an unchanged
+    ``opus-5-shimprompt-pre.json``; without this flag the tool looks for a
+    ``-post.json`` that belongs to the SUPERSEDED run and would silently
+    compare the wrong file."""
+    rc, v = _run(monkeypatch, tmp_path,
+                 {"qwen-27b-t-pre.json": _rung(tokens=13.4)},
+                 {"qwen-27b-t-post2.json": _rung(tokens=14.2)},
+                 "--mode", "threshold", "--rungs", "qwen-27b",
+                 "--post-suffix", "post2")
+    r = v["rungs"]["qwen-27b"]
+    assert r["post_file"] == "evals/results/qwen-27b-t-post2.json"
+    assert r["cleared"] is True
+    assert v["post_arm"] == "post2"
+    assert rc == 0
+
+
+def test_the_default_post_arm_is_still_post(monkeypatch, tmp_path):
+    """The flag is additive: every existing invocation keeps reading
+    ``-post.json`` and the verdict says so."""
+    _, v = _run(monkeypatch, tmp_path,
+                {"qwen-27b-t-pre.json": _rung()},
+                {"qwen-27b-t-post.json": _rung()},
+                "--mode", "threshold", "--rungs", "qwen-27b")
+    assert v["post_arm"] == "post"
+    assert (v["rungs"]["qwen-27b"]["post_file"]
+            == "evals/results/qwen-27b-t-post.json")

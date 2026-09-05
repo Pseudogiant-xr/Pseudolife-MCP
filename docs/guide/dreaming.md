@@ -149,7 +149,13 @@ blocks the shipped prompt carries, composed by `evals/gen_shim_prompt.py`
 from `dream.py`'s own constants so the two paths cannot drift in what they
 ask for. Gated on the ladder `opus-5` rung, v2 vs v4, two replicates per arm
 (`evals/results/ladder-shimprompt-paired-verdict-threshold.json`: `gate:
-PASS`, gold 1.0 and stale 0.0 on every run). v2 stays in the tree as the
+PASS`, gold 1.0 and stale 0.0 on every run), and **re-gated** after the
+speaker rule was rewritten the same day — v4 is generated from that
+constant, so the file changed and the first gate stopped describing it. The
+re-run of the post arm is
+`evals/results/ladder-shimprompt-rule2-paired-verdict-threshold.json`
+(`gate: PASS`, `no_regression_gate: PASS`, gold 1.0 and stale 0.0 on both
+replicates). v2 stays in the tree as the
 gate's pre arm; `sonnet_extractor_v3.md` is an unrelated, never-adopted
 2026-08-02 lineage.
 

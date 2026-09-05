@@ -46,6 +46,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   across replicates, so the gap between arm means is smaller than either
   arm's own spread and nothing is claimed for it. Both arms sit at ~45% of
   the 34.98 token budget. Table in `evals/README.md`.
+  **Superseded 2026-09-05** by the re-gate below: the two `post` runs
+  measured v4 under speaker rule v1, which the same day's merge review
+  rewrote. The `pre` arm and the gate's verdict on it are unaffected.
+- **Re-gated after the same day's speaker-rule fix.**
+  `evals/prompts/sonnet_extractor_v4.md` is generated from
+  `_ASSISTANT_SPEAKER_RULE`, so the rule-v2 rewrite — read a marker where
+  the note carries one, infer only where the note is unmistakably the
+  assistant, omit the field under doubt — changed the file the shim is
+  launched with, and the gate above stopped describing it. The POST arm was
+  re-run twice on the same `opus-5` rung (same dedicated port 8083; the live
+  shim on :8082 was again never touched) against the unchanged v2 pre arm.
+  `evals/results/ladder-shimprompt-rule2-paired-verdict-threshold.json`
+  (`post_arm: post2`) reads `gate: PASS` and `no_regression_gate: PASS`,
+  with gold_recoverable 1.0 and stale_leak 0.0 on both replicates and
+  tokens/query 15.5 and 14.8 against the pre arm's 15.2 and 14.0 — still
+  inside the arms' own spread. **The identical-tally claim does not carry
+  over**: the rule-v2 second replicate returned 17 claims and inserted all
+  17, so under the new rule only "nothing lost" (`claims == inserted`) is
+  claimed. The rule-v1 post artifacts and their verdict stay committed.
+- **`evals/ladder_pair_compare.py` gained `--post-suffix`**, which names a
+  post arm not called `post`. A re-gate keeps the pre arm and re-runs only
+  the post one, so its files carry a new suffix; without the flag the tool
+  reads the superseded `…-post.json` sitting beside them and compares the
+  wrong run. The default is unchanged and the verdict now records
+  `post_arm`.
 - **`tests/test_shim_prompt.py`** pins the composition through the shim's
   own body-extraction rule, pins that regeneration is a no-op, pins that
   importing the generator writes nothing, and extends the example-token

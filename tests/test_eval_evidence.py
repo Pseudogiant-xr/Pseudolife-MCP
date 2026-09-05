@@ -6593,3 +6593,124 @@ for _cid, _doc, _needle, _art, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
         stated=_stated, places=_places))
+
+
+# ── the same gate, re-run under speaker rule v2 (2026-09-05) ─────────────
+#
+# `sonnet_extractor_v4.md` is GENERATED from `_ASSISTANT_SPEAKER_RULE`, so
+# the same day's rule rewrite changed the file the shim is launched with and
+# the gate above stopped describing it. Only the POST arm was re-run (the v2
+# pre comparator carries none of the assistant blocks, so the rewrite cannot
+# reach it), which is why the verdict names a `post2` arm.
+#
+# One published statement deliberately does NOT reappear below: "an
+# identical consolidation tally every time". It is true of the four rule-v1
+# runs and false under rule v2, whose second replicate returned 17 claims —
+# and inserted all 17. What is pinned instead is that claim count and its
+# insert count, so the docs cannot quietly restate the stronger version.
+SP2_POST = RESULTS + "opus-5-shimprompt-post2.json"
+SP2_POST2 = RESULTS + "opus-5-shimprompt-post2-rep2.json"
+SP2_THRESH = RESULTS + "ladder-shimprompt-rule2-paired-verdict-threshold.json"
+
+_SP2_ROW_PRE = ("| pre | v2 | none | 1.0 | 0.0 | 15.2 | 16 / 16 | "
+                "`opus-5-shimprompt-pre.json` |")
+_SP2_ROW_PRE2 = ("| pre, rep 2 | v2 | none | 1.0 | 0.0 | 14.0 | 16 / 16 | "
+                 "`opus-5-shimprompt-pre-rep2.json` |")
+_SP2_ROW_POST = ("| post2 | v4 | v2 | 1.0 | 0.0 | 15.5 | 16 / 16 | "
+                 "`opus-5-shimprompt-post2.json` |")
+_SP2_ROW_POST2 = ("| post2, rep 2 | v4 | v2 | 1.0 | 0.0 | 14.8 | 17 / 17 | "
+                  "`opus-5-shimprompt-post2-rep2.json` |")
+_SP2_GATE = ('`gate: PASS`, `no_regression_gate: PASS`, '
+             '`rungs["opus-5"].cleared: true`')
+_SP2_TALLY = ("rule v2 the second replicate returned **17 claims and "
+              "inserted all 17**")
+_SP2_SPREAD = ("replicates the post2 arm spans 14.8–15.5 against the "
+               "pre arm's 14.0–15.2:")
+_SP2_DIFF = "`differences` block reports `tokens_per_query 15.2 → 15.5`"
+_SP2_BUDGET = "45% of the same 34.98 token budget"
+_SP2_CL_TOK = ("tokens/query 15.5 and 14.8 against the pre arm's 15.2 and "
+               "14.0 — still")
+_SP2_CL_TALLY = "second replicate returned 17 claims and inserted all"
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # the re-gate table, cell by cell against its own run file
+    ("shim2-pre-gold", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-pre-stale", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-pre-tokens", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-pre2-gold", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-pre2-stale", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-pre2-tokens", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-post-gold", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-post-stale", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-post-tokens", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-post-claims", EVALS, _SP2_ROW_POST, SP2_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shim2-post-inserted", EVALS, _SP2_ROW_POST, SP2_POST,
+     _sp_tally("inserted"), 16, 0),
+    ("shim2-post2-gold", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-post2-stale", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-post2-tokens", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-post2-claims", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-post2-inserted", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+    # the rule-v2 verdict — what the default flip now rests on
+    ("shim2-thresh-cleared", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("shim2-thresh-pre-clears", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "pre_clears"), 1, 0),
+    ("shim2-thresh-post-clears", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "post_clears"), 1, 0),
+    ("shim2-thresh-no-regression", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("shim2-budget", EVALS, _SP2_BUDGET, SP2_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # the tally sentence, which is the one claim that did NOT carry over
+    ("shim2-tally-claims", EVALS, _SP2_TALLY, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-tally-inserted", EVALS, _SP2_TALLY, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+    # the replicate spread that licenses "inside the noise", and the
+    # verdict's own reported move
+    ("shim2-spread-post-lo", EVALS, _SP2_SPREAD, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-spread-post-hi", EVALS, _SP2_SPREAD, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-spread-pre-lo", EVALS, _SP2_SPREAD, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-spread-pre-hi", EVALS, _SP2_SPREAD, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-diff-pre", EVALS, _SP2_DIFF, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-diff-post", EVALS, _SP2_DIFF, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    # the CHANGELOG restates the four token figures and the tally move
+    ("shim2-cl-tok-post", CHANGELOG, _SP2_CL_TOK, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-cl-tok-post2", CHANGELOG, _SP2_CL_TOK, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-cl-tok-pre", CHANGELOG, _SP2_CL_TOK, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-cl-tok-pre2", CHANGELOG, _SP2_CL_TOK, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-cl-tally-claims", CHANGELOG, _SP2_CL_TALLY, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-cl-tally-inserted", CHANGELOG, _SP2_CL_TALLY, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
