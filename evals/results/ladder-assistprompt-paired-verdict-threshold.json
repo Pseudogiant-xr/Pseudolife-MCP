@@ -1,0 +1,196 @@
+{
+  "what": "extraction-ladder paired arms under the ladder's own threshold rule: both arms must beat naive-RAG on staleness and gold recovery inside 60% of its tokens/query, and the post arm must not go backwards on either quality metric",
+  "mode": "threshold",
+  "generated_at": "2026-09-05T11:50:36",
+  "tag": "assistprompt",
+  "pre": {
+    "worktree": "ladder-assistprompt",
+    "sha": "db6d5d619a786b105c3816b4c0027715c9765361"
+  },
+  "post": {
+    "worktree": "ladder-assistprompt",
+    "sha": "db6d5d619a786b105c3816b4c0027715c9765361"
+  },
+  "compared": [
+    "gold_recoverable",
+    "stale_leak",
+    "tokens_per_query",
+    "consolidation.pulled",
+    "consolidation.claims",
+    "consolidation.inserted",
+    "consolidation.superseded",
+    "consolidation.literal_flagged",
+    "consolidation.literal_dropped"
+  ],
+  "not_compared": [
+    "extract_seconds",
+    "search_latency_ms"
+  ],
+  "rungs": {
+    "qwen-27b": {
+      "status": {
+        "pre": "ok",
+        "post": "ok"
+      },
+      "metrics": {
+        "gold_recoverable": {
+          "pre": 1.0,
+          "post": 1.0
+        },
+        "stale_leak": {
+          "pre": 0.0,
+          "post": 0.0
+        },
+        "tokens_per_query": {
+          "pre": 13.4,
+          "post": 14.2
+        }
+      },
+      "consolidation": {
+        "pulled": {
+          "pre": 26,
+          "post": 26
+        },
+        "claims": {
+          "pre": 16,
+          "post": 16
+        },
+        "inserted": {
+          "pre": 16,
+          "post": 16
+        },
+        "superseded": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_flagged": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_dropped": {
+          "pre": 0,
+          "post": 0
+        }
+      },
+      "timing": {
+        "extract_seconds": {
+          "pre": 34.2,
+          "post": 42.8
+        },
+        "search_latency_ms": {
+          "pre": 90.9,
+          "post": 94.8
+        }
+      },
+      "differences": {
+        "tokens_per_query": {
+          "pre": 13.4,
+          "post": 14.2
+        }
+      },
+      "identical": false,
+      "pre_clears": true,
+      "post_clears": true,
+      "no_regression": true,
+      "failed_checks": [],
+      "cleared": true,
+      "pre_file": "evals/results/qwen-27b-assistprompt-pre.json",
+      "post_file": "evals/results/qwen-27b-assistprompt-post.json"
+    },
+    "e4b-v3": {
+      "status": {
+        "pre": "ok",
+        "post": "ok"
+      },
+      "metrics": {
+        "gold_recoverable": {
+          "pre": 1.0,
+          "post": 1.0
+        },
+        "stale_leak": {
+          "pre": 1.0,
+          "post": 0.1
+        },
+        "tokens_per_query": {
+          "pre": 39.7,
+          "post": 14.8
+        }
+      },
+      "consolidation": {
+        "pulled": {
+          "pre": 26,
+          "post": 26
+        },
+        "claims": {
+          "pre": 16,
+          "post": 19
+        },
+        "inserted": {
+          "pre": 16,
+          "post": 18
+        },
+        "superseded": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_flagged": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_dropped": {
+          "pre": 0,
+          "post": 0
+        }
+      },
+      "timing": {
+        "extract_seconds": {
+          "pre": 445.1,
+          "post": 305.5
+        },
+        "search_latency_ms": {
+          "pre": 110.3,
+          "post": 124.5
+        }
+      },
+      "differences": {
+        "stale_leak": {
+          "pre": 1.0,
+          "post": 0.1
+        },
+        "tokens_per_query": {
+          "pre": 39.7,
+          "post": 14.8
+        },
+        "consolidation.claims": {
+          "pre": 16,
+          "post": 19
+        },
+        "consolidation.inserted": {
+          "pre": 16,
+          "post": 18
+        }
+      },
+      "identical": false,
+      "pre_clears": false,
+      "post_clears": true,
+      "no_regression": true,
+      "failed_checks": [
+        "pre.stale_leak",
+        "pre.tokens_per_query"
+      ],
+      "cleared": false,
+      "pre_file": "evals/results/e4b-v3-assistprompt-pre.json",
+      "post_file": "evals/results/e4b-v3-assistprompt-post.json"
+    }
+  },
+  "gate": "FAIL",
+  "rule": "stale_leak < naive.stale_leak; gold_recoverable > naive.gold_recoverable; tokens_per_query <= 0.6 * naive.tokens_per_query \u2014 applied to BOTH arms; plus post.stale_leak <= pre.stale_leak and post.gold_recoverable >= pre.gold_recoverable. The consolidation tally is reported, not gated.",
+  "naive": {
+    "file": "evals/results/naive-rag.json",
+    "gold_recoverable": 0.7,
+    "stale_leak": 0.3,
+    "tokens_per_query": 58.3,
+    "token_budget": 34.98
+  },
+  "no_regression_gate": "PASS"
+}
