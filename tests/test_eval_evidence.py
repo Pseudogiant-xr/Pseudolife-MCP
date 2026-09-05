@@ -5046,3 +5046,98 @@ CLAIMS.append(Claim(
     needle="219.2 tokens against its 100-token name and producing a byte-identical",
     artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "context_tokens"),
     stated=219.2, places=1))
+
+
+# ── the distractor probe's dump-directory fix (2026-09-05) ───────────────
+# The 2026-08-15 artifact was unreproducible for three weeks because the
+# probe named its band-state dumps by string, and on this tree that name
+# resolves to the retired 384-d MiniLM replay. The regenerated run through
+# the content-resolved 1024-d dumps is the evidence that the published
+# numbers survive the fix, so its reproduction count is a published claim
+# in its own right — as is the latency that deliberately did NOT reproduce.
+DSP_09 = RESULTS + "distractor-scale-probe-2026-09-05.json"
+DSP_09_REPRO = RESULTS + "distractor-scale-probe-2026-09-05.reproduction.json"
+_REPRO_NEEDLES = [
+    (EVALS, "evals", "| **390 of 390 cells match** |"),
+    (CHANGELOG, "changelog",
+     "2026-08-15 artifact on **390 of 390** (question, scale) cells"),
+]
+for _doc, _slug, _needle in _REPRO_NEEDLES:
+    CLAIMS.append(Claim(
+        id=f"dumpdir-repro-matching-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_09_REPRO,), value=lambda d: d["cells_matching"],
+        stated=390, places=0))
+    CLAIMS.append(Claim(
+        id=f"dumpdir-repro-compared-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_09_REPRO,), value=lambda d: d["cells_compared"],
+        stated=390, places=0))
+    CLAIMS.append(Claim(
+        id=f"dumpdir-repro-mismatching-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_09_REPRO,), value=lambda d: d["cells_mismatching"],
+        stated=0, places=0))
+
+# Latency is excluded from that check precisely because it is machine- and
+# load-dependent; both docs publish the two medians to say so, and the new
+# one has to come from the new artifact.
+for _doc, _slug, _needle in [
+    (EVALS, "evals",
+     "2026-08-15 run, 675 ms here, same code, same pools, different day)"),
+    (CHANGELOG, "changelog",
+     "moved: median BM25 at 15x, 620 ms then, 675 ms now)"),
+]:
+    CLAIMS.append(Claim(
+        id=f"dumpdir-bm25-15x-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_09,), value=lambda d: d["bm25_latency_ms"]["15x"],
+        stated=675, places=0))
+    # …and the "then" side, from the artifact it is quoted against.
+    CLAIMS.append(Claim(
+        id=f"dumpdir-bm25-15x-2026-08-15-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(PROBE,), value=lambda d: d["bm25_latency_ms"]["15x"],
+        stated=620, places=0))
+
+# The regenerated run's own aggregates — that they are still the published
+# ones IS the claim the fix makes.
+_STAND = "run, so the published 0.830 / 0.597 / +0.233 numbers stand"
+for _cid, _key, _stated in [("dumpdir-09-1x", "1x", 0.830),
+                            ("dumpdir-09-15x", "15x", 0.597)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_STAND, artifacts=(DSP_09,),
+        value=(lambda k: lambda d:
+               d["scales"][k]["evidence_in_top6_mean"])(_key),
+        stated=_stated, places=3))
+CLAIMS.append(Claim(
+    id="dumpdir-09-delta", doc=EVALS, needle=_STAND, artifacts=(DSP_09,),
+    value=lambda d: d["gates"]["G-D1"]["delta_mean_1x_minus_15x"],
+    stated=0.233, places=3))
+
+# The negative control: the same probe through the retired 384-d dumps.
+# It is the half of the claim that says the two replays are not
+# interchangeable, so it is committed and pinned like any other number.
+DSP_384 = RESULTS + "distractor-scale-probe-2026-09-05-retired384.json"
+DSP_384_REPRO = (RESULTS
+                 + "distractor-scale-probe-2026-09-05-retired384"
+                   ".reproduction.json")
+for _doc, _slug, _needle in [
+    (EVALS, "evals", "| **116 of 390** — 274 cells differ |"),
+    (CHANGELOG, "changelog",
+     "through the retired 384-d dumps (`-retired384`) reproduces **116 of 390**"),
+]:
+    CLAIMS.append(Claim(
+        id=f"dumpdir-384-matching-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_384_REPRO,), value=lambda d: d["cells_matching"],
+        stated=116, places=0))
+    CLAIMS.append(Claim(
+        id=f"dumpdir-384-mismatching-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_384_REPRO,), value=lambda d: d["cells_mismatching"],
+        stated=274, places=0))
+for _doc, _slug, _needle in [
+    (EVALS, "evals",
+     "retired dumps against the published 0.830)"),
+    (CHANGELOG, "changelog",
+     "cells, with evidence-in-top-6 at 1x reading 0.667 against the published"),
+]:
+    CLAIMS.append(Claim(
+        id=f"dumpdir-384-hit6-1x-{_slug}", doc=_doc, needle=_needle,
+        artifacts=(DSP_384,),
+        value=lambda d: d["scales"]["1x"]["evidence_in_top6_mean"],
+        stated=0.667, places=3))

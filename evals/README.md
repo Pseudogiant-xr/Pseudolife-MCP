@@ -1282,16 +1282,20 @@ python evals/retrieval_pool_probe.py --haystack 0   # synthetic corpus alone
 Corpus: the 10 knowledge-update pairs + 6 distractors from
 `ladder_sweep.py`, ingested initials → distractors → updates, buried in
 400 real conversational turns whose TEXT is read from the
-`band_ablation.py` band-state dumps (`results/banks/s-qwen-27b-ablbands-flat`)
-and re-encoded with the current backbone. That directory is gitignored, so
-a fresh worktree has to copy it from the main checkout; without it the
-probe runs synthetic-only and says so in the artifact.
+`band_ablation.py` band-state dumps under `results/banks/` — resolved by
+content through `bank_dumps.py`, never by directory name (see "Which
+replay a probe reads") — and re-encoded with the current backbone. Those
+directories are gitignored, so a fresh worktree has to copy or link one
+from the main checkout; without it the probe runs synthetic-only and says
+so in the artifact.
 
 Why not LongMemEval gold: no dump under `results/banks/` can score recall
 over `cms.retrieve()`. `dump_bank` persists cortex facts only (turns
 absent, `source_entries` stripped), and the band-state dumps carry no
 gold-turn labels — the `has_answer` markers live in the dataset, not the
-dump — and their own vectors are 384-d from the retired MiniLM backbone.
+dump. Only their turn text is borrowed here; the dumps' own vectors are
+never read, which is why the committed `20260904` numbers do not depend
+on which replay supplied the text.
 
 **Result — `results/retrieval-pool-probe-20260904.json` (null):**
 
@@ -2039,6 +2043,117 @@ python evals/needle_survival.py --dataset s --extractor qwen-27b
 That artifact (72 questions, 35,117 turns ingested, 144 needles) is pinned by
 `tests/test_eval_evidence.py`, which re-derives 37.5 / 31.1 / 58 from it and
 fails if the prose and the file diverge.
+
+---
+
+# Which replay a probe reads (`bank_dumps.py`)
+
+`band_ablation.py replay` writes one gzipped dump per question under
+`results/banks/<stem>-ablbands[-<preset>]`. Those directories are
+gitignored, hand-copied between checkouts and re-tagged there, so one tree
+can hold **several replays of the same dataset under names that differ
+only by a machine-local suffix**. Naming one by string literal therefore
+does not identify a corpus — and for three weeks it identified the wrong
+one.
+
+`distractor_scale_probe.py`, `bench_store_latency.py` and
+`retrieval_pool_probe.py` all hardcoded `s-qwen-27b-ablbands-flat`. On a
+tree carrying both replays that name resolves to the **retired 384-d
+MiniLM** dumps, while the published 2026-08-15 distractor artifact was
+measured on the **1024-d v25** replay sitting in a sibling directory.
+Nothing surfaced the mismatch because the probe refuses to overwrite its
+own artifact: the run that would have contradicted the file could never
+write one.
+
+`bank_dumps.resolve_dump_dir()` picks by **content**, not by name — three
+facts read from the dumps themselves:
+
+* backbone dimension (1024-d v25 `Qwen3-Embedding-0.6B`, not 384-d MiniLM);
+* band preset `flat` (not `continuum` / `flat257` / `scaled257`);
+* nothing evicted during the replay (`turns_stored` equals the resident
+  entry count).
+
+Zero or several matches is a **refusal with the full candidate listing**,
+never a guess; an explicitly named directory always wins. Probes that
+resolve through it record `dump_dir` and `embedding_dim` (directory *name*
+only — an absolute path would carry a home directory into a tracked
+artifact). `tests/test_bank_dumps.py` pins both ends: the resolver's
+choice and its refusals, and that none of the three probes names the
+retired directory again.
+
+## The distractor-scale probe is regenerable again (2026-09-05)
+
+```bash
+python evals/distractor_scale_probe.py \
+    --out evals/results/distractor-scale-probe-<today>.json \
+    --compare-to evals/results/distractor-scale-probe-2026-08-15.json
+```
+
+`--out` is required for a rerun because the canonical 2026-08-15 artifact
+is never overwritten in place. `--compare-to` writes
+`<out stem>.reproduction.json`: a cell-by-cell equality check of the
+**quality** fields — pool size, evidence-in-top-6, evidence-in-top-3,
+any-evidence-served, first-evidence rank — over all 78 questions × 5
+scales. Latency is excluded by construction; it is machine- and
+load-dependent, and it did move (median BM25 at 15x: 620 ms in the
+2026-08-15 run, 675 ms here, same code, same pools, different day).
+
+| run | dumps | reproduction vs 2026-08-15 |
+|---|---|---|
+| `distractor-scale-probe-2026-09-05.json` | 1024-d v25, resolved | **390 of 390 cells match** |
+| `distractor-scale-probe-2026-09-05-retired384.json` | 384-d MiniLM, the old hardcoded name | **116 of 390** — 274 cells differ |
+
+The second row is the negative control, and it is committed rather than
+described: the two directories are not interchangeable, and the
+difference is not subtle (evidence-in-top-6 at 1x reads 0.667 off the
+retired dumps against the published 0.830). Both reproduction checks are
+committed (`distractor-scale-probe-2026-09-05.reproduction.json`,
+`…-retired384.reproduction.json`) and pinned in
+`tests/test_eval_evidence.py`. Every aggregate and every gate verdict of
+the 2026-08-15 artifact is reproduced exactly by the resolved
+run, so the published 0.830 / 0.597 / +0.233 numbers stand unchanged; the
+2026-08-15 file remains canonical and was not touched.
+
+## What the two sibling probes were measured on
+
+Both hardcoded the same directory name, so both had to be checked rather
+than assumed.
+
+**`bench_store_latency.py` → `results/store-latency-by-bank-size.json`
+(2026-07-25) was measured on the 384-d MiniLM dumps** — its own `corpus`
+field records "real MiniLM embeddings", and it predates the v25 backbone
+swap, so at the time that was simply the current corpus. It is **not**
+regenerated here, and it should be read as a **MiniLM-era** measurement:
+the store path's cost scales with the embedding dimension, so those
+medians (and the before/after table in the CHANGELOG's 2026-07-25 entry)
+do not describe what a 1024-d bank costs to write. Reproduce them with
+`--dumps <the 384-d directory> --dim 384`; the default is now the
+resolved 1024-d replay, and a rerun records `dump_dir` and `dim`.
+
+**`retrieval_pool_probe.py` → `results/retrieval-pool-probe-20260904.json`
+is unaffected.** It reads only the dumps' turn TEXT and re-encodes it with
+the current backbone (the artifact records `embedder.dim = 1024`), so the
+dumps' own vectors — and hence the replay's dimension — never enter the
+result. The 400 haystack turns it takes are byte-identical across the two
+replays, so the numbers would not move either way. The committed
+`20260904` artifact predates the check, so the digest is published here
+instead: both directories give
+`f0784268b0e28bd4af77405f9af8c61b25907c24ec2b3761527a49257d603e57`
+(measured 2026-09-05), reproducible in a second —
+
+```bash
+python -c "import sys; sys.path.insert(0,'evals'); import bank_dumps as b; \
+    print(b.haystack_digest(b.BANKS_ROOT / '<dump dir>', 400))"
+```
+
+Every future run of the probe records that digest in its own artifact, so
+this is the last time it has to be argued rather than read.
+
+The strict resolution is deliberate for this probe too, even though it
+reads text only: relaxing the dimension makes both replays equally valid,
+which is a refusal, which would silently drop the probe to its synthetic
+corpus. A tree carrying only the retired replay names it with
+`--haystack-dir`.
 
 ---
 

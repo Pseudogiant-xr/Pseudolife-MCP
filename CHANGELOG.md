@@ -6,6 +6,54 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-05 — the distractor probe can regenerate its own artifact again)
+- **The 2026-08-15 distractor-scale probe could not reproduce its own
+  published numbers, and nothing said so.** It named the band-state dump
+  directory it replays by string —
+  `evals/results/banks/s-qwen-27b-ablbands-flat` — and on a tree carrying
+  both replays of that dataset, the name resolves to the RETIRED 384-d
+  MiniLM dumps, while the committed artifact was measured on the 1024-d
+  v25 replay in a sibling directory whose suffix is machine-local. The
+  probe's refuse-overwrite guard hid it for three weeks: the run that
+  would have contradicted the artifact could never write one. Two sibling
+  scripts, `evals/bench_store_latency.py` and
+  `evals/retrieval_pool_probe.py`, carried the same literal.
+- **`evals/bank_dumps.py` resolves the dumps by CONTENT instead** —
+  backbone dimension (1024-d v25, not 384-d MiniLM), `flat` preset, and
+  nothing evicted during the replay. Zero or several matches is a refusal
+  with the full candidate listing rather than a guess, and an explicitly
+  named directory always wins, so a differently-shaped tree stays one flag
+  away from running. All three probes go through it and record `dump_dir`
+  and `embedding_dim` (directory name only — an absolute path would carry
+  a home directory into a tracked artifact). Pure functions, no filesystem
+  access at import. Lifted from the resolver written for
+  `evals/forgetting_sweep_probe.py` (branch `eval/forgetting-sweep`),
+  whose local copy it can replace without behaviour change.
+- **Regenerated under a new tag, and it reproduces exactly.**
+  `evals/results/distractor-scale-probe-2026-09-05.json` matches the
+  2026-08-15 artifact on **390 of 390** (question, scale) cells across
+  pool size, evidence-in-top-6, evidence-in-top-3, any-evidence-served and
+  first-evidence rank; every per-scale aggregate and all three gate
+  verdicts are identical, so the published 0.830 / 0.597 / +0.233 numbers
+  stand. Latency is excluded from the comparison as machine-dependent (it
+  moved: median BM25 at 15x, 620 ms then, 675 ms now). The negative
+  control is committed beside it rather than described: the same probe run
+  through the retired 384-d dumps (`-retired384`) reproduces **116 of 390**
+  cells, with evidence-in-top-6 at 1x reading 0.667 against the published
+  0.830 — the two directories are not interchangeable, and nothing about
+  the disagreement is subtle. The 2026-08-15 artifact was not touched.
+- **Sibling artifact provenance, checked rather than assumed.**
+  `store-latency-by-bank-size.json` (2026-07-25) was measured on the 384-d
+  MiniLM dumps — its own `corpus` field says so, and it predates the v25
+  swap — so it is a MiniLM-era write-cost measurement and does not
+  describe a 1024-d bank; that is now stated in `evals/README.md` beside
+  the numbers rather than the file being silently regenerated.
+  `retrieval-pool-probe-20260904.json` is unaffected: it reads only the
+  dumps' turn text and re-encodes with the current backbone, and the 400
+  haystack turns are byte-identical across both replays. The probe now
+  writes a `haystack_digest` so a future run can show that instead of
+  asserting it.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported
