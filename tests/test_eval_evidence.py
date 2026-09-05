@@ -6244,11 +6244,13 @@ PL_THRESH = RESULTS + "ladder-assistprompt-paired-verdict-threshold.json"
 # with different arm labels and an extra artifact column, so each doc gets
 # its own needle.
 _CL_QP = "| `qwen-27b` | pre (shipped prompt) | 1.0 | 0.0 | 13.4 | 16 / 16 |"
-_CL_QQ = "| `qwen-27b` | post (provenance prompt) | 1.0 | 0.0 | 14.2 | 16 / 16 |"
+_CL_QQ = ("| `qwen-27b` | post (provenance prompt, speaker rule v1) | 1.0 | "
+          "0.0 | 14.2 | 16 / 16 |")
 _CL_EP = "| `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 |"
-_CL_EQ = "| `e4b-v3` | post | 1.0 | 0.1 | 14.8 | 19 / 18 |"
+_CL_EQ = "| `e4b-v3` | post (rule v1) | 1.0 | 0.1 | 14.8 | 19 / 18 |"
 _CL_EP2 = "| `e4b-v3` | pre, replicate 2 | 1.0 | **1.0** | **39.7** | 16 / 16 |"
-_CL_EQ2 = "| `e4b-v3` | post, replicate 2 | 1.0 | 0.1 | 14.8 | 19 / 18 |"
+_CL_EQ2 = ("| `e4b-v3` | post (rule v1), replicate 2 | 1.0 | 0.1 | 14.8 | "
+           "19 / 18 |")
 _CL_BAR = ("gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is\n"
            "  **34.98**")
 _CL_CLEAR = ("On the primary `qwen-27b` rung **both arms clear the ladder**")
@@ -6257,16 +6259,16 @@ _CL_NOREG = "`no_regression_gate` (did the post arm make anything worse: **PASS*
 
 _EV_QP = ("| `qwen-27b` | pre | 1.0 | 0.0 | 13.4 | 16 / 16 | "
           "`qwen-27b-assistprompt-pre.json` |")
-_EV_QQ = ("| `qwen-27b` | post | 1.0 | 0.0 | 14.2 | 16 / 16 | "
-          "`qwen-27b-assistprompt-post.json` |")
+_EV_QQ = ("| `qwen-27b` | post (rule v1, superseded) | 1.0 | 0.0 | 14.2 | "
+          "16 / 16 | `qwen-27b-assistprompt-post.json` |")
 _EV_EP = ("| `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 | "
           "`e4b-v3-assistprompt-pre.json` |")
-_EV_EQ = ("| `e4b-v3` | post | 1.0 | 0.1 | 14.8 | 19 / 18 | "
-          "`e4b-v3-assistprompt-post.json` |")
+_EV_EQ = ("| `e4b-v3` | post (rule v1, superseded) | 1.0 | 0.1 | 14.8 | "
+          "19 / 18 | `e4b-v3-assistprompt-post.json` |")
 _EV_EP2 = ("| `e4b-v3` | pre, rep 2 | 1.0 | **1.0** | **39.7** | 16 / 16 | "
            "`e4b-v3-assistprompt-pre-rep2.json` |")
-_EV_EQ2 = ("| `e4b-v3` | post, rep 2 | 1.0 | 0.1 | 14.8 | 19 / 18 | "
-           "`e4b-v3-assistprompt-post-rep2.json` |")
+_EV_EQ2 = ("| `e4b-v3` | post (rule v1, superseded), rep 2 | 1.0 | 0.1 | "
+           "14.8 | 19 / 18 | `e4b-v3-assistprompt-post-rep2.json` |")
 _EV_BAR = "gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is **34.98**"
 _EV_IDENT = "`tokens_per_query 13.4 \u2192 14.2`"
 _EV_THRESH = ('`failed_checks: ["pre.stale_leak", "pre.tokens_per_query"]`)')

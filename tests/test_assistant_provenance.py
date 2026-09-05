@@ -372,6 +372,43 @@ def test_a_bad_policy_aborts_rather_than_serving_the_default(
         ladder.apply_dream_env(dream_cfg)
 
 
+def test_a_rung_stamp_reports_the_resolved_policy_not_the_override(
+        ladder, dream_cfg, monkeypatch):
+    """``dream_env_knobs`` answers "was an override given" (None = no); a
+    rung artifact needs the policy that was actually in force, because a
+    reader asking why a rung extracted more claims than it inserted has to
+    know whether an assistant-labelled claim parked, dropped or
+    superseded."""
+    monkeypatch.delenv("PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS", raising=False)
+    ladder.apply_dream_env(dream_cfg)
+    assert ladder.rung_bench_env(dream_cfg) == {
+        "dream": {"assistant_claims": "contender"}}
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS", "drop")
+    ladder.apply_dream_env(dream_cfg)
+    assert ladder.rung_bench_env(dream_cfg) == {
+        "dream": {"assistant_claims": "drop"}}
+
+
+def test_the_rung_artifact_carries_the_stamp(ladder, monkeypatch):
+    """Load-bearing half: a stamp helper nobody calls is decoration. The
+    2026-09-05 `e4b-v3` post arm reported 19 claims / 18 inserted and its
+    artifact could not say which policy produced that gap."""
+    from types import SimpleNamespace
+
+    from pseudolife_memory.utils.config import DreamConfig
+
+    dream = DreamConfig()
+    dream.assistant_claims = "drop"
+    svc = SimpleNamespace(
+        config=SimpleNamespace(memory=SimpleNamespace(dream=dream)))
+    monkeypatch.setattr(ladder, "build_service", lambda _td: svc)
+    monkeypatch.setattr(ladder, "ingest", lambda _svc: None)
+    monkeypatch.setattr(ladder, "measure_naive",
+                        lambda _svc: {"gold_recoverable": 1.0})
+    out = ladder.run_rung("naive-rag")
+    assert out["bench_env"] == {"dream": {"assistant_claims": "drop"}}
+
+
 def test_the_policy_rides_in_the_bench_summary_stamp(monkeypatch):
     import sys
     from pathlib import Path

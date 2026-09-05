@@ -111,10 +111,17 @@ superseded:
   skipped a step, and you get two facts (the documented rule, and the
   incident), not one blurred into the other.
 - **What the ASSISTANT said, labelled as the assistant's** (since
-  2026-09-05). The turns render as `role: content`, and what the assistant
-  asserted, described or recommended is extractable on the same terms as
-  what you said — keyed to the *thing described*, never to "the
-  assistant". Every claim carries a `speaker` field, and an
+  2026-09-05). What the assistant asserted, described or recommended is
+  extractable on the same terms as what you said — keyed to the *thing
+  described*, never to "the assistant". A claim carries a `speaker` field
+  **where the note makes the speaker knowable**: the extractor reads it off
+  an explicit role marker (a leading `user:` / `assistant:`) when the note
+  carries one, infers `assistant` only where the content is unmistakably
+  the assistant's, and omits the field when unsure. Nothing in the daemon
+  writes a role prefix — the dream sends your notes as they were stored,
+  and the `[date] role: content` rendering is an eval-harness convention —
+  so on a bank whose notes carry no marker many claims are simply
+  unlabelled, which writes exactly as it did before 2026-09-05. An
   assistant-stated fact is written at the floor `assistant` provenance
   tier: it fills an empty slot, but parks as a contender against a value
   of any other origin rather than overwriting it

@@ -1438,8 +1438,10 @@ memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user
 ```
 
 `assistant` is the floor tier: a fact the **assistant** stated in a turn.
-The shipped extraction prompt asks for a `speaker` label since 2026-09-05,
-so this tier is **reachable on the default path**
+The shipped extraction prompt asks for a `speaker` label since 2026-09-05
+— where the note makes the speaker knowable; see
+[dreaming](dreaming.md#what-the-extractor-captures) — so this tier is
+**reachable on the default path**
 (`memory.dream.assistant_claims`, default `contender`). It may fill an empty
 slot, but against a current value of any other origin it always parks as a
 contender — that rule is not gated on `protect_provenance` below — and it
@@ -1462,8 +1464,10 @@ retired numbers are retained in the same section). That prompt then passed
 the extraction ladder on the primary rung and **shipped on 2026-09-05**, so
 a dream on stock settings now writes assistant-origin facts: they fill
 empty slots and park as contenders against anything else. A claim carrying
-no `speaker` label — an older prompt, or an extractor shim launched with
-`--system-prompt-file` — still writes exactly as it did before.
+no `speaker` label — a note with no role marker to read it from, an older
+prompt, or an extractor shim launched with `--system-prompt-file` — still
+writes exactly as it did before, and on a bank of unmarked notes that is
+the common case.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in
@@ -2160,10 +2164,17 @@ superseded:
   skipped a step, and you get two facts (the documented rule, and the
   incident), not one blurred into the other.
 - **What the ASSISTANT said, labelled as the assistant's** (since
-  2026-09-05). The turns render as `role: content`, and what the assistant
-  asserted, described or recommended is extractable on the same terms as
-  what you said — keyed to the *thing described*, never to "the
-  assistant". Every claim carries a `speaker` field, and an
+  2026-09-05). What the assistant asserted, described or recommended is
+  extractable on the same terms as what you said — keyed to the *thing
+  described*, never to "the assistant". A claim carries a `speaker` field
+  **where the note makes the speaker knowable**: the extractor reads it off
+  an explicit role marker (a leading `user:` / `assistant:`) when the note
+  carries one, infers `assistant` only where the content is unmistakably
+  the assistant's, and omits the field when unsure. Nothing in the daemon
+  writes a role prefix — the dream sends your notes as they were stored,
+  and the `[date] role: content` rendering is an eval-harness convention —
+  so on a bank whose notes carry no marker many claims are simply
+  unlabelled, which writes exactly as it did before 2026-09-05. An
   assistant-stated fact is written at the floor `assistant` provenance
   tier: it fills an empty slot, but parks as a contender against a value
   of any other origin rather than overwriting it
@@ -3366,13 +3377,16 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `supersede` treats it as an ordinary agent-tier dream claim, and `drop`
   discards it. An unrecognised value falls back to `contender` — a typo
   must not open the overwrite path. **Live on the default path since
-  2026-09-05**, when the provenance extraction prompt shipped: every
-  extraction now carries a `speaker` label, so the knob decides what
+  2026-09-05**, when the provenance extraction prompt shipped: an
+  extraction can now carry a `speaker` label, so the knob decides what
   happens to assistant-stated claims on a stock install. (It was inert
-  before that, because the old prompt never asked for the field; a claim
-  that still arrives without one — an older prompt, or an extractor shim
-  launched with `--system-prompt-file` — writes exactly as it did before,
-  whatever this is set to.) Kept off the Console deliberately: `supersede`
+  before that, because the old prompt never asked for the field. The
+  label is asked for only where the note makes the speaker knowable, so
+  on a bank whose notes carry no `user:` / `assistant:` marker most
+  claims still arrive without one — as do claims from an older prompt or
+  an extractor shim launched with `--system-prompt-file` — and those
+  write exactly as they did before, whatever this is set to.) Kept off
+  the Console deliberately: `supersede`
   is the setting that lets model-stated content overwrite a user-stated
   fact, which is a provenance decision rather than an operator dial. The
   measured comparison of the three values is in `evals/README.md`

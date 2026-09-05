@@ -525,7 +525,7 @@ decides what the extra claims are allowed to do:
 | file / knob | what it changes |
 |---|---|
 | `evals/prompts/assistant_facts_naive.txt` | the PRE-2026-09-05 prompt base (`dream._BASE_SYSTEM_PROMPT`) verbatim + one paragraph saying assistant-asserted content is extractable, keyed to the thing described (never "the assistant"), + one worked example built from an assistant recommendation. Same claim JSON as the old prompt; no speaker field. Eval-only — it did not ship. |
-| `evals/prompts/assistant_facts_provenance.txt` | the same paragraph, plus a rule that every claim carries `"speaker": "user"` or `"assistant"` (the turns render as `[date] role: content`, so the role is readable) and a worked example showing both values. **This IS the shipped `_SYSTEM_PROMPT` since 2026-09-05** — the file and the live constant are one string. |
+| `evals/prompts/assistant_facts_provenance.txt` | the same paragraph, plus a rule that a claim carries `"speaker": "user"` or `"assistant"` **where the note makes the speaker knowable** — read off an explicit role marker when the note has one, inferred only for unmistakably assistant-produced content, omitted under doubt — and a worked example showing both values. The `[date] role: content` rendering is a convention of these eval harnesses; a production bank stores notes without a role prefix, which is why omission is the documented answer rather than a guess (speaker rule v2, 2026-09-05). **This IS the shipped `_SYSTEM_PROMPT` since 2026-09-05** — the file and the live constant are one string. |
 | `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender\|supersede\|drop` | what a `speaker: "assistant"` claim becomes — see below. Applied by `ladder_sweep.build_service`, stamped into the summary as `bench_env.dream.assistant_claims`. An unrecognised value aborts the run rather than silently serving the default. |
 
 The knob is `memory.dream.assistant_claims` (product default `contender`):
@@ -809,11 +809,12 @@ gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is **34.98**:
 | rung | arm | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
 |---|---|---|---|---|---|---|
 | `qwen-27b` | pre | 1.0 | 0.0 | 13.4 | 16 / 16 | `qwen-27b-assistprompt-pre.json` |
-| `qwen-27b` | post | 1.0 | 0.0 | 14.2 | 16 / 16 | `qwen-27b-assistprompt-post.json` |
+| `qwen-27b` | post (rule v1, superseded) | 1.0 | 0.0 | 14.2 | 16 / 16 | `qwen-27b-assistprompt-post.json` |
+| `qwen-27b` | post (rule v2, the shipped text) | — | — | — | — | **pending re-run** → `qwen-27b-assistprompt-post2.json` |
 | `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 | `e4b-v3-assistprompt-pre.json` |
-| `e4b-v3` | post | 1.0 | 0.1 | 14.8 | 19 / 18 | `e4b-v3-assistprompt-post.json` |
+| `e4b-v3` | post (rule v1, superseded) | 1.0 | 0.1 | 14.8 | 19 / 18 | `e4b-v3-assistprompt-post.json` |
 | `e4b-v3` | pre, rep 2 | 1.0 | **1.0** | **39.7** | 16 / 16 | `e4b-v3-assistprompt-pre-rep2.json` |
-| `e4b-v3` | post, rep 2 | 1.0 | 0.1 | 14.8 | 19 / 18 | `e4b-v3-assistprompt-post-rep2.json` |
+| `e4b-v3` | post (rule v1, superseded), rep 2 | 1.0 | 0.1 | 14.8 | 19 / 18 | `e4b-v3-assistprompt-post-rep2.json` |
 
 **`qwen-27b` clears the ladder on both arms.** The consolidation tally is
 identical (26 pulled, 16 claims, 16 inserted, 0 superseded) and the only
@@ -821,18 +822,82 @@ movement is 13.4 → 14.2 tokens/query, 41% of the budget. That is the gate
 the ship rests on, and `assistant_facts_provenance.txt` became the shipped
 `_SYSTEM_PROMPT` on the strength of it.
 
-**`e4b-v3` is bimodal, and its baseline arm fails the ladder's own bar** —
-read as "no evidence of regression", not as an improvement. The mode split
-predates this prompt: on the shipped prompt alone, `e4b-v3-stale-rep2.json`
-and `-rep3.json` sit at 16 claims / stale 1.0 / 39.8 tokens, while
+**Every post row above was measured with speaker rule v1, which the same
+day's merge review retired.** Rule v1 told the model "Each note begins with
+its role, so read the role there; never guess it, and never omit the
+field" — false on a production bank, where `OpenAICompatExtractor.extract`
+numbers the raw entry text and writes no role prefix (the `[date] role:
+content` shape belongs to these harnesses). Rule v2 asks for the marker
+where a note has one, allows an inference only for unmistakably
+assistant-produced content, and makes omission the answer under doubt. The
+shipped `_SYSTEM_PROMPT` is rule v2, the rows above are rule v1, so the
+primary rung's **re-gate on the shipped text is outstanding**. It runs from
+the branch worktree as:
+
+```
+PYTHONPATH=. python evals/ladder_sweep.py --rung qwen-27b \
+    --out-tag assistprompt-post2 \
+    --system-prompt-file evals/prompts/assistant_facts_provenance.txt
+```
+
+and lands as `evals/results/qwen-27b-assistprompt-post2.json` — the
+artifact the pending row above and the CHANGELOG's table expect. The `pre`
+arm is unaffected: it is the same shipped-prompt baseline either way.
+
+**`e4b-v3` is bimodal, its baseline arm fails the ladder's own bar, and its
+two arms are not established as independent** — read the rung as "no
+evidence of regression" and nothing further. The mode split predates this
+prompt: on the shipped prompt alone, `e4b-v3-stale-rep2.json` and
+`-rep3.json` sit at 16 claims / stale 1.0 / 39.8 tokens, while
 `e4b-v3.json`, `-stale-rep1`, `-stale-rep4-fresh` and the three
 `-warmrep-p*` files sit at 19–26 claims / stale 0.1–0.2 / 16.6–20.5
-tokens. Here each arm reproduced its own mode across both replicates and
-the pre arm landed in the bad mode twice — outside the bar on staleness
-*and* tokens. Two replicates cannot attribute the mode to the prompt, and
-the direction favours the new prompt anyway, so nothing is claimed for it.
-That the sidecar has a mode failing the ladder at all is a **separate,
-pre-existing finding**.
+tokens.
+
+The four `e4b-v3` rows were **not** produced by `evals/ladder_replicate.py`.
+They are plain `ladder_sweep --rung e4b-v3 --out-tag …` passes against the
+live sidecar container — the deployed fallback extractor on this install,
+which is why it was not restarted between passes and why its lifecycle
+across them went unrecorded. Three consequences:
+
+- **Within-arm agreement is not confirmation.** The extractor serves at
+  temperature 0 with the request prompt cache pinned off, so two passes of
+  one arm agreeing is the expected result, not evidence that the arm
+  survives an environment change. It bounds nothing.
+- **The pre arm landed in the warm-container mode.**
+  `ladder_replicate.py` exists for exactly this fingerprint and its
+  docstring names it: stale_leak 1.0 on passes 2–3 against 0.1 on every
+  fresh-container pass (evlora, 2026-08-08). Stale 1.0 with 39.7 tokens
+  *is* that signature, so container state is a live alternative
+  explanation for the whole pre/post gap, and the arms cannot be read as
+  independent samples of a prompt effect.
+- **Nothing is claimed for the prompt on this rung** — not the stale_leak
+  difference, not the token drop.
+
+Something did move, though: **14.8 tokens/query is a value this rung has
+never produced before.** Every other committed `e4b-v3` ladder file sits at
+16.6–20.5 (good mode) or 39.7–39.8 (warm mode). The direction of that move
+is unattributable between prompt and container state on this evidence.
+
+One detail of the post rows is worth naming because the artifact cannot
+settle it: **19 claims against 18 inserted**, where every previous
+good-mode run of this rung (`e4b-v3.json`, `-stale-rep1`,
+`-stale-rep4-fresh`) inserted all 19. So one claim reached the write path
+and became no row. The likely route is the one this prompt newly opens — a
+`speaker: "assistant"` label on a corpus with no role markers at all,
+parking the claim as a contender (or, for a retraction, being dropped) —
+but the rung artifact does not record it: `ladder_sweep`'s tally sums
+`pulled/claims/inserted/superseded/literal_*` and drops `dream_run`'s
+`contested` and `confirmed`, and the run kept no per-claim detail. A
+duplicate of an already-current value (`confirmed`) is the other candidate
+and cannot be excluded. Rung artifacts now stamp the resolved
+`memory.dream.assistant_claims` policy in `bench_env`, so a future run at
+least says which policy could have produced such a gap.
+
+The verdict is therefore "no evidence of regression", and that the sidecar
+has a mode failing the ladder at all remains a **separate, pre-existing
+finding**. Settling either question means re-running the rung under
+`ladder_replicate.py` (fresh container per pass) against a candidate
+container rather than the deployed one.
 
 Two verdict artifacts are committed, and they disagree on purpose:
 
@@ -848,9 +913,15 @@ Two verdict artifacts are committed, and they disagree on purpose:
   predicted inert on an unlabelled corpus, so *any* difference is a bug.
   Its sole `differences` entry on `qwen-27b` is
   `tokens_per_query 13.4 → 14.2` — a move the ladder's own rule permits
-  five times over. Its `floor` rung reads `missing` because the run
-  compared `qwen-27b` and `e4b-v3`. Applying it to a prompt change was the
-  wrong bar, and threshold mode exists because of it.
+  five times over. Two things about the file itself, so it is not misread:
+  it compared the **default** rung pair, `floor` and `qwen-27b` (`--rungs`
+  did not exist when it ran), and its `floor` rung reads `missing` because
+  no `floor-assistprompt-{pre,post}.json` were ever produced — the floor
+  rung was never run, not excluded. It also predates the `mode` key that
+  `ladder_pair_compare.py` now writes, so it carries no `mode` field; a
+  re-run of the same command would emit `"mode": "identity"`. Applying it
+  to a prompt change was the wrong bar, and threshold mode exists because
+  of it.
 
 What the ship changes and does not: the `assistant` origin, the
 unconditional contender park, the ×0.85 demotion and
@@ -862,6 +933,43 @@ install whose extractor is a CLI shim launched with `--system-prompt-file`
 prefix with that file**, so the change reaches such an install only via
 the fallback sidecar. Giving the Sonnet override prompt the same
 instruction is a separate change needing its own gate.
+
+#### What these numbers do not cover
+
+- **Every LongMemEval accuracy in this section came from the `qwen-27b`
+  extractor.** Neither prompt variant has been run on that slice with the
+  `e4b-v3` sidecar; the sidecar's only evidence here is the ladder rung
+  above, a 26-note corpus rather than 164 questions. Nothing in the SSA
+  recovery finding transfers to a sidecar-served install by measurement.
+- **On the maintainer's install the flip is close to a no-op until the
+  shim follow-up lands.** Resolved from the deployed config —
+  `ops/.env` sets `PSEUDOLIFE_DREAM_BASE_URL` to the host CLI shim on
+  `:8082`, `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` to the in-stack sidecar,
+  and `PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto` (the same default
+  `ops/docker-compose.yml` supplies) — `auto` probes the primary per dream
+  and reaches the sidecar **only when the shim is unreachable**. The shim
+  replaces the shipped prompt prefix with `sonnet_extractor_v2.md`, so
+  until that override file carries the same instruction the new prompt
+  serves approximately nothing on this install.
+- **Restart the shim after `ops/update.ps1`.** A shim process holds the
+  `_SYSTEM_PROMPT` of the tree it was launched from and swaps exactly that
+  prefix (`evals/claude_shim.py`, `system.startswith(_SYSTEM_PROMPT)`).
+  After a deploy that changes the constant, a still-running shim either
+  splices its own file onto the *new* tail (when the new prompt still
+  starts with the old constant, as on 2026-09-05) or stops overriding at
+  all (when it does not, as after the rule-v2 rewrite). Both are unmeasured
+  hybrids; a restart resolves either.
+- **The `e4b-v3` fine-tune predates the prompt it is served.** Its training
+  data was generated before the v10 update-anchored base, so serving-time
+  prompt drift is pre-existing; this change widens it by the
+  assistant-facts tail — about 1,840 characters (~460 tokens) on top of a
+  3,273-character base.
+- **Sidecar context headroom is fine on this corpus and unmeasured at the
+  largest batch.** The shipped system prompt grew from 3,273 to 5,114
+  characters (~1,300 tokens) against the sidecar's `--ctx-size 8192`
+  (`ops/Dockerfile.extractor`, `ops/docker-compose.yml`); the 26-entry
+  ladder ran clean at that size. A full 100-entry dream batch of long notes
+  has not been measured against the smaller window.
 
 #### Superseded — first run (contaminated worked example)
 

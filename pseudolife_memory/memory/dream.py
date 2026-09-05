@@ -51,10 +51,12 @@ class Claim(_ClaimRequired, total=False):
     # normalisation rule as stance.
     quote: str
     # Who STATED the fact in the cited turn ("user" | "assistant"). The
-    # shipped ``_SYSTEM_PROMPT`` asks for it since 2026-09-05, so a live
-    # dream normally carries it; absent = unstated, which is still valid and
-    # writes exactly as it did before (an older prompt, a custom
-    # ``--system-prompt-file``, a model that dropped the field).
+    # shipped ``_SYSTEM_PROMPT`` asks for it since 2026-09-05 — but only
+    # where the note makes the speaker determinable, so absent is a NORMAL
+    # outcome on a bank whose notes carry no role marker, not a
+    # malfunction. Absent = unstated, which is still valid and writes
+    # exactly as it did before (an unlabelled note, an older prompt, a
+    # custom ``--system-prompt-file``, a model that dropped the field).
     # ``service_dream`` maps "assistant" to the ``assistant`` write origin
     # under ``memory.dream.assistant_claims``; "user" is a label about the
     # TURN and never a tier promotion (support is never taken from claim
@@ -62,9 +64,14 @@ class Claim(_ClaimRequired, total=False):
     speaker: str
 
 
-# The only two speaker labels a claim may carry: the dream renders turns as
-# "[date] role: content", so these are exactly the roles a model can read off
-# the note it cites.
+# The only two speaker labels a claim may carry. NOTE what the dream does
+# NOT do: ``OpenAICompatExtractor.extract`` numbers the raw entry text and
+# adds no role prefix, so a production note names its speaker only if
+# whoever stored it wrote one in. The "[date] role: content" rendering is a
+# convention of the EVAL harnesses (``evals/gate_firing_probe.py``,
+# ``evals/band_ablation.py``, the LongMemEval loaders), not of a bank —
+# hence the shipped rule below asks for the label only where the note makes
+# it determinable, and for omission otherwise.
 _SPEAKERS = ("user", "assistant")
 
 
@@ -230,6 +237,19 @@ _BASE_SYSTEM_PROMPT = (
 # a pre-existing finding. Tables and the retired first (contaminated) run
 # are in evals/README.md, "Assistant-stated facts".
 #
+# Speaker rule v2 (2026-09-05, merge review). The rule shipped that morning
+# read "Each note begins with its role, so read the role there; never guess
+# it, and never omit the field" — a premise that is FALSE on a production
+# bank: `OpenAICompatExtractor.extract` numbers the raw entry text and
+# prefixes no role, so the instruction ordered the model to read a marker
+# that is usually absent and forbade the safe way out. The rewrite below
+# asks for the label off an explicit marker, allows an inference only where
+# the note is unmistakably the assistant's, and makes OMISSION the answer
+# under doubt — an omitted speaker is the pre-2026-09-05 write path, while a
+# wrong "assistant" demotes a user-stated fact to a contender. Every number
+# above was measured with rule v1; the qwen-27b re-gate on this text is
+# pending as artifact tag `assistprompt-post2` (evals/README.md).
+#
 # Every proper noun below is INVENTED and registered in
 # `gen_assistant_facts_prompts.EXAMPLE_TOKENS`, which greps each one
 # against both LongMemEval dataset files: the first cut of this example
@@ -239,7 +259,7 @@ _BASE_SYSTEM_PROMPT = (
 # Edit them only through a new measured artifact + ladder gate.
 _ASSISTANT_FACTS_INSTRUCTION = (
     "THE ASSISTANT'S OWN STATEMENTS ARE FACTS TOO: the notes are turns of a "
-    "conversation, each rendered as \"role: content\". What the ASSISTANT "
+    "conversation, some of which the assistant produced. What the ASSISTANT "
     "asserted, described, recommended, or specified is extractable on exactly "
     "the same terms as what the user said — names, values, descriptions, "
     "specifications, and the choices it presented all qualify. Key each such "
@@ -250,10 +270,15 @@ _ASSISTANT_FACTS_INSTRUCTION = (
 )
 
 _ASSISTANT_SPEAKER_RULE = (
-    "EVERY CLAIM NAMES ITS SPEAKER: add a \"speaker\" field to every claim — "
-    "\"user\" when the note stating the fact is a user turn, \"assistant\" "
-    "when it is an assistant turn. Each note begins with its role, so read "
-    "the role there; never guess it, and never omit the field.\n"
+    "NAME THE SPEAKER WHERE THE NOTE MAKES IT KNOWABLE: add a \"speaker\" "
+    "field — \"user\" or \"assistant\" — to each claim. When the cited note "
+    "carries an explicit role marker (a leading \"user:\" or \"assistant:\"), "
+    "read the speaker off it. When it does not, use \"assistant\" only where "
+    "the note is unmistakably the assistant speaking — advice it gave, a "
+    "recommendation it made, a description it produced. When you are unsure, "
+    "OMIT the field rather than guess: an unlabelled claim is an ordinary "
+    "claim, while a wrong \"assistant\" label demotes a fact the user "
+    "stated.\n"
 )
 
 _ASSISTANT_PROVENANCE_EXAMPLE = (

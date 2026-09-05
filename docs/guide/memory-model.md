@@ -388,8 +388,10 @@ memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user
 ```
 
 `assistant` is the floor tier: a fact the **assistant** stated in a turn.
-The shipped extraction prompt asks for a `speaker` label since 2026-09-05,
-so this tier is **reachable on the default path**
+The shipped extraction prompt asks for a `speaker` label since 2026-09-05
+— where the note makes the speaker knowable; see
+[dreaming](dreaming.md#what-the-extractor-captures) — so this tier is
+**reachable on the default path**
 (`memory.dream.assistant_claims`, default `contender`). It may fill an empty
 slot, but against a current value of any other origin it always parks as a
 contender — that rule is not gated on `protect_provenance` below — and it
@@ -412,8 +414,10 @@ retired numbers are retained in the same section). That prompt then passed
 the extraction ladder on the primary rung and **shipped on 2026-09-05**, so
 a dream on stock settings now writes assistant-origin facts: they fill
 empty slots and park as contenders against anything else. A claim carrying
-no `speaker` label — an older prompt, or an extractor shim launched with
-`--system-prompt-file` — still writes exactly as it did before.
+no `speaker` label — a note with no role marker to read it from, an older
+prompt, or an extractor shim launched with `--system-prompt-file` — still
+writes exactly as it did before, and on a bank of unmarked notes that is
+the common case.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in

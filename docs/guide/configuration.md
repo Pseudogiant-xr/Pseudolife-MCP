@@ -309,13 +309,16 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `supersede` treats it as an ordinary agent-tier dream claim, and `drop`
   discards it. An unrecognised value falls back to `contender` — a typo
   must not open the overwrite path. **Live on the default path since
-  2026-09-05**, when the provenance extraction prompt shipped: every
-  extraction now carries a `speaker` label, so the knob decides what
+  2026-09-05**, when the provenance extraction prompt shipped: an
+  extraction can now carry a `speaker` label, so the knob decides what
   happens to assistant-stated claims on a stock install. (It was inert
-  before that, because the old prompt never asked for the field; a claim
-  that still arrives without one — an older prompt, or an extractor shim
-  launched with `--system-prompt-file` — writes exactly as it did before,
-  whatever this is set to.) Kept off the Console deliberately: `supersede`
+  before that, because the old prompt never asked for the field. The
+  label is asked for only where the note makes the speaker knowable, so
+  on a bank whose notes carry no `user:` / `assistant:` marker most
+  claims still arrive without one — as do claims from an older prompt or
+  an extractor shim launched with `--system-prompt-file` — and those
+  write exactly as they did before, whatever this is set to.) Kept off
+  the Console deliberately: `supersede`
   is the setting that lets model-stated content overwrite a user-stated
   fact, which is a provenance decision rather than an operator dial. The
   measured comparison of the three values is in `evals/README.md`
