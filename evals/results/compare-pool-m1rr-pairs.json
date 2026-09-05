@@ -1,0 +1,70 @@
+{
+  "n": 78,
+  "dropped_a": 0,
+  "dropped_b": 0,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-ku-oracle-qwen-27b-pool-m1rr.jsonl",
+    "arms": {
+      "rag": 0.8718,
+      "cortex": 0.6667,
+      "hybrid": 0.8846,
+      "cascade": 0.8333
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-ku-oracle-qwen-27b-pool-ctl.jsonl",
+    "arms": {
+      "rag": 0.859,
+      "cortex": 0.6667,
+      "hybrid": 0.8974,
+      "cascade": 0.8462
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag": {
+        "delta": 0.0128,
+        "p": 1.0,
+        "wins": 2,
+        "losses": 1,
+        "win_qids": [
+          "ce6d2d27",
+          "dad224aa"
+        ],
+        "loss_qids": [
+          "2133c1b5"
+        ]
+      },
+      "cortex": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "hybrid": {
+        "delta": -0.0128,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 1,
+        "win_qids": [],
+        "loss_qids": [
+          "89941a94"
+        ]
+      },
+      "cascade": {
+        "delta": -0.0128,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 1,
+        "win_qids": [],
+        "loss_qids": [
+          "2133c1b5"
+        ]
+      }
+    }
+  }
+}

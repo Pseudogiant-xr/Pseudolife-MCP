@@ -66,7 +66,8 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import hybrid_context  # noqa: E402
 from ladder_sweep import (approx_tokens, build_service,  # noqa: E402
-                          dream_env_knobs, pool_env_knobs, probe)
+                          dream_env_knobs, pool_env_knobs, probe,
+                          rerank_env_knobs)
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 import answerability_probe  # noqa: E402
 import leak_check  # noqa: E402
@@ -244,6 +245,9 @@ def bench_env_knobs() -> dict:
         # the shipped prompt never does, so it reads as the default and
         # means nothing for every pre-2026-09-05 artifact.
         "dream": dream_env_knobs(),
+        # Cross-encoder reranker (memory.reranker.enabled). Same
+        # build_service/--phase extract constraint as candidate_pool above.
+        "reranker": rerank_env_knobs(),
     }
 
 
@@ -774,6 +778,16 @@ def build_contexts(svc, question: str, variants: bool = False,
     # test. The hybrid/memory arm follows the CLI/config knobs. With
     # knobs at their defaults the two calls return identical entries and
     # every pre-Phase-1 artifact stays byte-identical.
+    #
+    # CARVE-OUT (2026-09-05 review): "pinned" covers the Phase-1 knobs
+    # this call names — contiguity and timeline — and nothing else. The
+    # PSEUDOLIFE_BENCH_* retrieval overrides (candidate pool, fusion,
+    # reranker) are applied to the SERVICE config, so they reach this
+    # call too and the rag arm becomes a treatment arm under them: the
+    # 2026-09-04/05 pool cells move rag by up to 0.115. Under any of
+    # those overrides the zero-delta control is the CORTEX arm, which
+    # never touches ``cms.retrieve`` — which is what the pool/reranker
+    # tables in evals/README.md are read against.
     #
     # ``variants=True`` (spec Amendment 2026-08-03): five hybrid variants
     # built from the SAME live service — vanilla (shares the pinned

@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "bench": "epistemic",
+    "source": "lme-derivation",
+    "tag": "lme-derivation-s-20260905b",
+    "dataset": "longmemeval_s_cleaned.json",
+    "git_rev": "f690dcde6dc4adaaa424a7727597fe91faf27171",
+    "timestamp": "2026-09-04T19:48:35Z",
+    "knowledge_update_questions": 78,
+    "qualified": 21,
+    "spec": "docs/superpowers/specs/2026-09-05-epistemic-bench-design.md",
+    "supersedes": {
+      "artifact": "epistemic-bench-lme-derivation-s-20260905.json",
+      "reason": "the number family took the LEADING numeric token of a compound gold, so 'a 70-200mm zoom lens' derived as 70 and was paired with 18 out of an '18-55mm kit lens' (question 41698283), and a 5-2 volleyball record derived as 5 against a 3 out of 3-2 (c7dc5443). Those two pairs are values from different facts, and 41698283 produced the only stale_serving event the bench had recorded. Golds whose value token is only part of a larger token are now skipped."
+    }
+  },
+  "caveats": {
+    "derivation_is_parsing_only": "Pure parsing: a question that does not derive cleanly is skipped, never guessed at. The skip histogram is half the result.",
+    "compound_gold_tokens_are_skipped": "A gold whose value token is only PART of its whitespace token — a hyphenated range (70-200mm), a win-loss record (5-2), a comma-grouped number, a digit welded to a unit — is skipped as gold-value-is-compound-token. The rule is not applied to the old-value candidates: doing so changes which questions qualify and so needs a fresh extraction run, which is why one derived pair (ba61f0b9) still takes its old value out of '25%'."
+  },
+  "skips": {
+    "gold-has-no-value-token": 39,
+    "gold-not-in-later-evidence": 7,
+    "gold-value-is-compound-token": 4,
+    "ambiguous-old-value(2)": 2,
+    "ambiguous-old-value(0)": 2,
+    "ambiguous-old-value(3)": 1,
+    "ambiguous-old-value(6)": 1,
+    "gold-also-in-earlier-evidence": 1
+  }
+}

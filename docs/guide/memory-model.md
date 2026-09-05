@@ -387,6 +387,12 @@ memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user
 # or accept=False -> discard the contender, current unchanged.
 ```
 
+If the slot has since become a **set** (see [Conversion
+rules](#conversion-rules)), `accept=True` is refused with
+`reason: "slot_holds_set"` — a scalar contender cannot replace a member set,
+so adopt the value with `memory_set_add` instead — while `accept=False`
+always works and is how an operator dismisses such a contender.
+
 `assistant` is the floor tier: a fact the **assistant** stated in a turn,
 written only by a dream whose extraction prompt asks for a `speaker` label
 (`memory.dream.assistant_claims`, default `contender`). It may fill an empty
@@ -480,7 +486,8 @@ Capture is cheap and in-session; synthesis is single-writer (the dream):
 # during a task, log what happened — this writes a SIGNAL, not a lesson:
 memory_outcome("deploy engine to host", "failure",
                about="tar --same-owner", detail="chown errors aborted the extract")
-memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
+memory_outcome("deploy engine to host", "success", about="tar --no-same-owner",
+               used_ids=[1421, 903])   # the search hits the work turned on
 # user corrections are auto-captured when a user-tier memory_fact_set supersedes a value.
 
 # the dream later distils accumulated signals into durable lessons; recall them at task start:
@@ -514,6 +521,19 @@ entity in `src` (no `|attribute`) restores every retired aspect of that
 entity. `GET /api/curation/retired` lists what's currently retired across
 both stores, and the Console's undo route is `POST /api/lessons/restore`.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
+
+`used_ids` is a second, unrelated payload riding the same call: the ids of
+the `memory_search` hits the work actually turned on. Each one credits the
+serving `retrieval_events` row with a `retrieval_uses` label
+(`used_via="outcome"`) — the relevance signal a learned reranker trains on,
+which otherwise only `memory_get` / `memory_reinforce` produce. Nothing is
+written to the signal itself, and nothing links a signal to the labels it
+caused: the labels stand on their own, and which outcome named which ids is
+deliberately not recorded. The result reports `used_ids_recorded`,
+`used_ids_unmatched` (ids no search in the window served) and
+`used_ids_errors` (labels the storage layer refused, which is not the same
+answer as a miss); at most 50 ids are taken per call, any beyond that
+reported as `used_ids_truncated`.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,

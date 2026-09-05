@@ -31,6 +31,12 @@ def search_cfg():
     return SearchConfig()
 
 
+@pytest.fixture()
+def memory_cfg():
+    from pseudolife_memory.utils.config import MemoryConfig
+    return MemoryConfig()
+
+
 def test_no_env_leaves_the_shipped_defaults(ladder, search_cfg, monkeypatch):
     monkeypatch.delenv("PSEUDOLIFE_BENCH_POOL_MULT", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_BENCH_FUSION", raising=False)
@@ -82,6 +88,45 @@ def test_the_knob_state_rides_in_the_bench_summary_stamp(monkeypatch):
         "candidate_pool_multiplier": "4", "fusion": "rrf"}
 
 
+@pytest.mark.parametrize("spelling", ["1", "true", "on", "TRUE", "On"])
+def test_accepted_spellings_turn_the_reranker_on(ladder, memory_cfg,
+                                                 monkeypatch, spelling):
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", spelling)
+    ladder.apply_rerank_env(memory_cfg)
+    assert memory_cfg.reranker.enabled is True
+    assert ladder.rerank_env_knobs() == {"enabled": True}
+
+
+@pytest.mark.parametrize("spelling", [None, "0", "false", "off"])
+def test_unset_or_off_leaves_the_shipped_default(ladder, memory_cfg,
+                                                  monkeypatch, spelling):
+    if spelling is None:
+        monkeypatch.delenv("PSEUDOLIFE_BENCH_RERANK", raising=False)
+    else:
+        monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", spelling)
+    ladder.apply_rerank_env(memory_cfg)
+    assert memory_cfg.reranker.enabled is False
+    assert ladder.rerank_env_knobs() == {"enabled": False}
+
+
+def test_a_bad_rerank_value_aborts_rather_than_serving_the_default(
+        ladder, memory_cfg, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", "yes")
+    with pytest.raises(SystemExit):
+        ladder.apply_rerank_env(memory_cfg)
+
+
+def test_the_rerank_knob_state_rides_in_the_bench_summary_stamp(monkeypatch):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    import longmemeval_bench as B
+
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", "1")
+    stamp = B.bench_env_knobs()
+    assert stamp["reranker"] == {"enabled": True}
+
+
 def test_rebuild_contexts_does_not_claim_to_honour_the_pool_knobs():
     """Scope guard. ``rebuild_contexts.py`` is the regression gate's stage 1
     and rebuilds the CORTEX ranking only; it copies the associative context
@@ -108,3 +153,24 @@ def test_rebuild_contexts_does_not_claim_to_honour_the_pool_knobs():
             "cortex ranking only. Teaching it the associative path needs an "
             "associative lockstep test beside "
             "test_rebuild_fact_ranking_matches_service_fusion.")
+
+
+@pytest.mark.parametrize("spelling", ["0", "false", "off", "OFF", "False"])
+def test_off_turns_the_reranker_off_on_a_config_that_has_it_on(
+        ladder, memory_cfg, monkeypatch, spelling):
+    """``=0`` must mean OFF, not "leave whatever the config says".
+
+    The 2026-09-05 review found the off-branch was a bare ``pass``: on a
+    fresh ``MemoryConfig`` the reranker is already off, so the existing
+    unset/off test passed while the branch did nothing. Against a config
+    that ships or overrides the reranker ON, ``PSEUDOLIFE_BENCH_RERANK=0``
+    would then have served a reranker-ON run while ``rerank_env_knobs``
+    stamped ``enabled: false`` — a judged artifact whose retrieval stamp
+    contradicts the retrieval it measured, which is exactly the failure
+    the stamp exists to prevent.
+    """
+    memory_cfg.reranker.enabled = True
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", spelling)
+    ladder.apply_rerank_env(memory_cfg)
+    assert memory_cfg.reranker.enabled is False
+    assert ladder.rerank_env_knobs() == {"enabled": False}

@@ -65,7 +65,14 @@ not recall — in the budget-matched five-arm run of 2026-09-02 (rag 0.725 there
 one replicate, local judge) an arm served no memory at all scores 1.000 on
 the same questions, because refusing is the right answer there and an
 empty context always refuses. The fact spine loses where an answer has to
-be aggregated across sessions. Graded by a local, byte-reproducible judge (the cross-judge check
+be aggregated across sessions. The second claim to survive a judge swap is
+a win rather than a wash: re-run on 2026-09-04 with the hybrid arm
+**budget-matched** to the control at 6 turns, the same 500 questions give
+hybrid **0.730** against naive RAG's 0.690 under the local judge and
+**0.736** against 0.694 under `claude-opus-5` — paired **+0.040 / +0.042**,
+p 0.015 / 0.013 — bought with *more* context, ~1229 tokens against the
+control's ~1124, not less, and carried mostly by temporal-reasoning
+questions. Graded by a local, byte-reproducible judge (the cross-judge check
 names its second judge) — compare within rows, never against GPT-judged
 leaderboards.
 
@@ -348,7 +355,7 @@ is agent context every session, so it stays lean.
 | `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
-| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
+| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits the serving `retrieval_events` row with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
 | `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
@@ -706,8 +713,9 @@ the loop: **RECALL at the start** (`memory_search` / `memory_lesson_search` /
 (`memory_store` with an honest `origin`, `memory_fact_set` for canonical
 facts, `memory_world_set` for cited external facts, `source="status"` for
 verbose logs so they stay out of the dream), **REFLECT at the end**
-(`memory_outcome` — the dream distils these signals into the lessons
-surfaced at your next session start).
+(`memory_outcome`, with `used_ids` naming the hits you actually used — the
+dream distils these signals into the lessons surfaced at your next session
+start).
 
 One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
 `ops/install-hook.sh --client codex` (Linux/macOS) — installs the
@@ -1437,6 +1445,12 @@ memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user
 # or accept=False -> discard the contender, current unchanged.
 ```
 
+If the slot has since become a **set** (see [Conversion
+rules](#conversion-rules)), `accept=True` is refused with
+`reason: "slot_holds_set"` — a scalar contender cannot replace a member set,
+so adopt the value with `memory_set_add` instead — while `accept=False`
+always works and is how an operator dismisses such a contender.
+
 `assistant` is the floor tier: a fact the **assistant** stated in a turn,
 written only by a dream whose extraction prompt asks for a `speaker` label
 (`memory.dream.assistant_claims`, default `contender`). It may fill an empty
@@ -1530,7 +1544,8 @@ Capture is cheap and in-session; synthesis is single-writer (the dream):
 # during a task, log what happened — this writes a SIGNAL, not a lesson:
 memory_outcome("deploy engine to host", "failure",
                about="tar --same-owner", detail="chown errors aborted the extract")
-memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
+memory_outcome("deploy engine to host", "success", about="tar --no-same-owner",
+               used_ids=[1421, 903])   # the search hits the work turned on
 # user corrections are auto-captured when a user-tier memory_fact_set supersedes a value.
 
 # the dream later distils accumulated signals into durable lessons; recall them at task start:
@@ -1564,6 +1579,19 @@ entity in `src` (no `|attribute`) restores every retired aspect of that
 entity. `GET /api/curation/retired` lists what's currently retired across
 both stores, and the Console's undo route is `POST /api/lessons/restore`.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
+
+`used_ids` is a second, unrelated payload riding the same call: the ids of
+the `memory_search` hits the work actually turned on. Each one credits the
+serving `retrieval_events` row with a `retrieval_uses` label
+(`used_via="outcome"`) — the relevance signal a learned reranker trains on,
+which otherwise only `memory_get` / `memory_reinforce` produce. Nothing is
+written to the signal itself, and nothing links a signal to the labels it
+caused: the labels stand on their own, and which outcome named which ids is
+deliberately not recorded. The result reports `used_ids_recorded`,
+`used_ids_unmatched` (ids no search in the window served) and
+`used_ids_errors` (labels the storage layer refused, which is not the same
+answer as a miss); at most 50 ids are taken per call, any beyond that
+reported as `used_ids_truncated`.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,
@@ -3755,6 +3783,8 @@ The milestones:
 | v36 | Review-queue autonomy (2026-09-02). `edge_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` / `judge_relation` / `decided_by` / `decided_at` — the link judge's opinion on a pending link proposal (the retype verdict's corrected relation in `judge_relation`) and who settled the row; `entity_proposals.judge2_verdict` / `judge2_confidence` / `judge2_model` / `judged2_at` — the merge judge's SECOND opinion beside the v30 first one (two-vote agreement is the apply gate for rows the single-vote 0.8 reject gate leaves pending); and `curation_judgments` (`store`, sorted slot keys, verdict, keep, fold, confidence, note, model, judged_at) — the store-curation judge's memo, because the lesson/world duplicate listings are recomputed per pass and would otherwise be re-sent every sweep. `NULL` judge columns = not yet judged, exactly the pre-v36 behaviour, so the migration is a no-op on existing banks. Gates measured by `evals/queue_judge_ladder.py` against `evals/results/queue-judge-panel-20260902.json`. Additive/idempotent |
 | v37 | Retire-not-delete (2026-09-03). `store_decisions` (`id`, `store`, `entity_norm`, `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB, `decided_at`) — the FK-free audit of lesson/world forgets and restores. A `memory_forget(scope="lesson"\|"world")` now retires the slot's rows (`status='retired'`, rows kept; `memory.compaction` treats them like any non-live record) instead of deleting them, and the audit row carries the verbatim record so `lesson_restore` / `world_restore` (`memory_graph_review(action="restore_slot")`, `POST /api/lessons/restore`, `POST /api/world/restore`) still work after compaction has purged the retired row. Also (no DDL): merge and junk rejects write text-keyed tombstones to `dismissed_pairs` (canonical pair / `junk:<canonical>` self-pair) so a verdict outlives the CASCADE-deleted proposal row. No column changes; the table starts empty on an existing bank, so the migration is a no-op there. Additive/idempotent |
 
+Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05) labels served entries under `used_via="outcome"` — see the memory-model guide.
+
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 
 A kind you set by hand is locked against later classifier runs — `evals/apply_entity_kinds.py --apply` overlays the model's labels onto the existing table rather than replacing it, so a deliberate marking is never reverted by a re-apply. The R@10 figures behind the v25 swap, and the rest of the shootout, are in [Benchmarks — embedding backbone](benchmarks.md#embedding-backbone--chosen-on-our-own-corpus).
@@ -4027,7 +4057,10 @@ right-hand column
 where both stacks are published side by side).
 The instrument is a term in every number below: compare within a stack, and
 treat a claim that has not been reproduced across judge families as
-provisional.
+provisional. One number on this page has graduated out of that caveat:
+the budget-matched hybrid arm of 2026-09-04, re-judged 2026-09-05 by a
+second, independent judge family and still a win
+([below](#the-budget-matched-hybrid-arm-2026-09-04)).
 
 Nearly every number on this page was measured on the **pre-v25 stack**: the
 384-d MiniLM backbone, with the BM25 hybrid pool off. Both defaults have
@@ -4127,6 +4160,49 @@ half-budget arm and is not comparable to post-flip hybrid numbers. **(2)**
 It was graded by the Qwen3.6 judge and has not been re-judged since the
 2026-08-17 migration — and on the one slice that *was* re-run, the cascade
 row moved by −0.090 (below). Read the cascade row here as an upper bound.
+
+### The budget-matched hybrid arm (2026-09-04)
+
+The wash above is a half-budget hybrid arm on a retired instrument. The
+same 500 questions were re-run on 2026-09-04 with fresh `qwen-27b`
+extraction, the Qwen3.8-27B answerer and judge, and the hybrid arm
+**budget-matched** to the control at 6 raw turns
+(`longmemeval-all-oracle-qwen-27b-raglite-all-fresh`). At a matched budget
+the hybrid arm does not tie the raw-turn control — it beats it, and it is
+**the one claim on this page reproduced across judge families**: the whole
+run was re-judged on 2026-09-05 by `claude-opus-5` over the identical
+recorded answers.
+
+| arm | Qwen3.8-27B judge | claude-opus-5 judge | paired vs naive RAG | context tokens/question |
+|---|---:|---:|---:|---:|
+| naive RAG (top-6 turns, control) | 0.690 | 0.694 | — | ~1124 |
+| **hybrid (facts + top-6 turns)** | **0.730** | **0.736** | **+0.040 / +0.042**, p 0.015 / 0.013 | ~1229 |
+
+The paired column is a within-row permutation test over all 500 rows
+(10,000 permutations, ±0.031 at 95% under both judges): 41 W / 21 L under
+the local judge, 42 W / 21 L under Opus. Across the run no arm's accuracy
+moved more than +0.010 between the two judges and per-arm item agreement
+was 0.976–0.982, so the win is a property of the memory, not of the
+instrument.
+
+Three honest limits. **(1)** The hybrid arm buys accuracy with **more** context,
+not less — ~1229 tokens against the control's ~1124 — so it is accuracy
+bought, not budget saved. **(2)** The **cascade**, the arm that does save
+context, stays a wash under both judges (+0.002 under Qwen, +0.010 under
+Opus at p 0.4576) and is not promoted with it. **(3)** The win is not
+spread evenly across question types: `temporal-reasoning` carries **+12 of
+the +21** net rows under Opus and **+13 of the +20** under Qwen — most of
+the effect out of 133 of the 500 questions — while
+`single-session-preference` is flat-to-negative under both. Both judges
+agree on that shape, and the per-type table is in
+[`evals/README.md`](../../evals/README.md#second-judge-family-2026-09-05).
+Artifacts:
+`evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.summary.json`,
+`…arms-vs-rag.json`, `…rejudge-opus5.summary.json`,
+`…rejudge-opus5.arms-vs-rag.json`; full per-arm tables, including the
+token-matched `cortex`-vs-`rag1` pair, in
+[`docs/runbooks/raglite-runs-20260904.md`](../runbooks/raglite-runs-20260904.md)
+and [`evals/README.md`](../../evals/README.md).
 
 ## The knowledge-update slice (78 of the 500)
 
