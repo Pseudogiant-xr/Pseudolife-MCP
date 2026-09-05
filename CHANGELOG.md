@@ -414,11 +414,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   by `cortex_top_k` 24 against a 40-slot bank than by served width: 71 of the
   72 decoy values reached the cortex context across the 10 never-stated
   questions.
-### Fixed (2026-09-05 — Firefox Console motion)
-- Limit reduced-motion animations to one iteration; the previous `.001ms` duration combined with infinite repetition could flash continuously.
-- Keep healthy Live/Postgres dots static across all views and replace warning/activity shadow animation with a gentle opacity pulse, including Dream Ready and Would Fire.
-- Honor explicit Graph replay under reduced motion while keeping simulation and camera motion disabled; expose play/pause state to assistive technology.
-
+### Fixed (2026-09-05 — reduced motion no longer flickers the Console)
+- **Under `prefers-reduced-motion`, the Console's looping animations were
+  shortened to `.001ms` but still ran forever**, so every `infinite` pulse
+  re-fired about a thousand times a second and read as a flicker instead of
+  standing still. The reduced-motion rule now also sets
+  `animation-iteration-count: 1`, so a shortened animation plays once and
+  stops (pinned in `tests/test_console_static_js.py`). The Graph scrubber's
+  play button also reports its state to assistive technology
+  (`aria-pressed`, with `aria-label` and `title` kept in step); the
+  design-mandated "no scrubber auto-play under reduced motion" no-op is
+  unchanged and now pinned. Contributed by @blacksheep25 (#269).
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported
