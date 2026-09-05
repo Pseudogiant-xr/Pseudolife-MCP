@@ -95,6 +95,11 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
     only ever contains CURRENT facts (``cortex_dump``), so the "full
     membership" a group composes over is exactly the member rows present
     in ``facts``, same as the live store's ``members()``.
+
+    ``emb.encode`` / ``emb.encode_query`` must return ``torch.Tensor``: the
+    vectors are detached, moved to CPU float32 and re-normalised here,
+    mirroring ``CortexStore.search``'s cosine contract, so a non-normalising
+    embedder cannot turn the cosine floor into a magnitude ranking.
     """
     facts = bank["facts"]
     if not facts:
@@ -108,7 +113,8 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
     # Mirror CortexStore.search's cosine contract, including normalization.
     mat = emb.encode(texts).detach().to("cpu", torch.float32)
     mat = mat / (mat.norm(dim=1, keepdim=True) + 1e-12)
-    q = emb.encode_query(bank["question"]).detach().to("cpu", torch.float32).reshape(-1)
+    q = emb.encode_query(bank["question"]).detach().to("cpu", torch.float32)
+    q = q.reshape(-1)
     q = q / (q.norm() + 1e-12)
     sims = (mat @ q).tolist()
     ranked = sorted((i for i, s in enumerate(sims) if s >= min_score),

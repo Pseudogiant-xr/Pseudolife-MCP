@@ -414,9 +414,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   by `cortex_top_k` 24 against a 40-slot bank than by served width: 71 of the
   72 decoy values reached the cortex context across the 10 never-stated
   questions.
-### Fixed (2026-09-05 — offline cortex cosine parity)
-- Normalize offline fact/query vectors on CPU in float32 like live cortex search before applying score floors and BM25 fusion. Add a magnitude-sensitive regression test.
-
+### Fixed (2026-09-05 — the offline rebuild pins the live cosine contract)
+- **`evals/rebuild_contexts.py` ranked facts by a raw dot product and
+  trusted the embedder to have normalised.** It had: `EmbeddingPipeline`
+  returns unit-norm CPU float32 vectors, and the regression gate's stage-1
+  rebuild over all 78 pinned banks is byte-identical before and after this
+  change — nothing published moves. The rebuild now detaches, moves to CPU
+  float32 and re-normalises both sides itself, mirroring
+  `CortexStore.search`, so a future or non-normalising embedder cannot
+  silently turn the cosine floor into a magnitude ranking. A
+  magnitude-sensitive test pins it with and without BM25 fusion (the gate
+  runs dense-only). Contributed by @blacksheep25 (#268).
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported

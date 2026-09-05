@@ -41,8 +41,13 @@ _FILLER = [
 ]
 
 
-def test_rebuild_uses_single_document_cosine_contract():
-    """Backend norm drift must not turn offline cosine into magnitude rank."""
+@pytest.mark.parametrize("bm25", [False, True])
+def test_rebuild_uses_single_document_cosine_contract(bm25):
+    """Backend norm drift must not turn offline cosine into magnitude rank.
+
+    Both fusion modes: ``regression_gate.ps1`` stage 1 runs the rebuild
+    dense-only (no ``--bm25``), so the ``bm25=False`` case is the one the
+    gate actually exercises."""
     import sys
     from pathlib import Path
     import torch
@@ -65,7 +70,7 @@ def test_rebuild_uses_single_document_cosine_contract():
         {"entity": "diagonal", "attribute": "a", "value": "v"},
     ]}
     assert rebuild_fact_lines(bank, Embedder(), top_k=2, min_score=0.8,
-                              bm25=True) == ["aligned — a: v"]
+                              bm25=bm25) == ["aligned — a: v"]
 
 
 def _seed(svc: MemoryService) -> None:
