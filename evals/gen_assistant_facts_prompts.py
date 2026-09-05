@@ -58,6 +58,44 @@ EXAMPLE_TOKENS = (
     "pepper-brisket bun",
 )
 
+# Proper nouns in the SHIPPED prompt's older worked examples, which predate
+# the invented-token rule above. `EXAMPLE_TOKENS` governs what a NEW example
+# may name; these are what the existing ones already do.
+#
+# `_BASE_SYSTEM_PROMPT` carries three worked examples of its own (a deploy
+# runbook, a collection-membership example, a count-exclusion example), and
+# none of them was ever checked against the corpus. `sonnet_extractor_v2.md`
+# — and therefore v4, which is v2 plus the shipped blocks — carries the same
+# two names, so the shim path and the daemon path share the debt.
+PRE_RULE_PROPER_NOUNS = frozenset({
+    "Northern Flicker",   # COUNTS, TOTALS, AND QUANTITIES example
+    "Rosa's Diner",       # COLLECTION MEMBERSHIP example
+})
+
+# The subset of `PRE_RULE_PROPER_NOUNS` that ACTUALLY occurs in the measured
+# corpus, i.e. real contamination. Recorded 2026-09-05 by the merge review of
+# the shim-prompt gate; the guards treat this as an EQUALITY, so the debt can
+# neither grow nor rot into decoration.
+#
+# This is not a technicality. The count-exclusion example (shipped
+# 2026-08-01) reads "[5] saw a Northern Flicker today, that makes 32 species
+# at the park now" and yields the value "32". LongMemEval question
+# `affe2881` (knowledge-update) asks how many bird species the user has seen
+# in their local park; its gold answer is "32", and all 13 occurrences of
+# "Northern Flicker" in EACH dataset file sit inside that question's own
+# sessions. Every extraction run since — on every extractor, not only the
+# shim — had that example in the prompt.
+#
+# Re-cutting the example is a change to the shipped extraction prompt and
+# needs its own ladder gate; it is deliberately not done in the change that
+# recorded this.
+KNOWN_CORPUS_COLLISIONS = {
+    "Northern Flicker": (
+        "LongMemEval affe2881 (knowledge-update, gold '32'); the "
+        "count-exclusion example states the same number. Recorded "
+        "2026-09-05."),
+}
+
 NAIVE_EXAMPLE = (
     "Example. Notes: [7] assistant: For brunch in Marrowgate I'd suggest "
     "The Quillon Larder on Fendrick Row — it is a garden cafe, and its "

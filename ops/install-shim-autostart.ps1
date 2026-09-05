@@ -30,8 +30,13 @@
 # assistant-facts blocks that shipped in dream.py that day. --system-prompt-file
 # REPLACES the shipped prompt prefix, so on this path the daemon-side change
 # alone never reached the model. Gated on the ladder opus-5 rung (v2 vs v4, two
-# replicates per arm): evals/results/ladder-shimprompt-paired-verdict-threshold.json
-# — gold 1.0, stale 0.0 on every run, tokens 14.0-16.1 across both arms.
+# replicates per arm): evals/results/ladder-shimprompt-rule2-paired-verdict-threshold.json
+# — gold 1.0, stale 0.0 on every run, tokens 14.0-15.5 across both arms.
+# That is the RE-GATE, and it is the one this default rests on: the speaker
+# rule was rewritten after the first gate ran and v4 is generated from it, so
+# the rule-v1 verdict (ladder-shimprompt-paired-verdict-threshold.json, tokens
+# 14.0-16.1) measured a text this script no longer launches. It stays in the
+# tree as superseded evidence.
 param(
     [string]$PythonExe = "",
     [int]$Port = 8082,

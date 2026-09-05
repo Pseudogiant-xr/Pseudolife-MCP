@@ -6714,3 +6714,73 @@ for _cid, _doc, _needle, _art, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
         stated=_stated, places=_places))
+
+
+# ── the shim launchers must cite the gate that validated their default ────
+#
+# Review finding, 2026-09-05. `ops/install-shim-autostart.ps1` and its `.sh`
+# sibling flipped `--prompt-file` to `sonnet_extractor_v4.md` and justified
+# the flip in a header comment — naming the rule-v1 verdict and its token
+# range, both of which the same day's re-gate superseded. An `ops/` comment
+# is where an operator reads why a default is what it is, and nothing was
+# checking it, so it drifted the moment the re-gate landed.
+#
+# The `Claim` rows below pin the quoted range to the four runs of the
+# CURRENT gate; the test after them pins the artifact the comment names.
+SHIM_LAUNCH_PS1 = "ops/install-shim-autostart.ps1"
+SHIM_LAUNCH_SH = "ops/install-shim-autostart.sh"
+
+# The rule-v2 gate is four runs: an unchanged `pre` pair and the re-run
+# `post2` pair. The verdict itself names only one file per arm, so the
+# replicates have to be listed here for the range to mean anything.
+SHIM_GATE_RUNS = (SP_PRE, SP_PRE2, SP2_POST, SP2_POST2)
+_SHIM_TOKENS = "tokens 14.0-15.5 across both arms"
+
+
+def _tok_min(*runs):
+    return min(r["tokens_per_query"] for r in runs)
+
+
+def _tok_max(*runs):
+    return max(r["tokens_per_query"] for r in runs)
+
+
+for _doc, _slug in ((SHIM_LAUNCH_PS1, "ps1"), (SHIM_LAUNCH_SH, "sh")):
+    CLAIMS.append(Claim(
+        id=f"shim-launcher-{_slug}-tok-lo", doc=_doc, needle=_SHIM_TOKENS,
+        artifacts=SHIM_GATE_RUNS, value=_tok_min, stated=14.0, places=1))
+    CLAIMS.append(Claim(
+        id=f"shim-launcher-{_slug}-tok-hi", doc=_doc, needle=_SHIM_TOKENS,
+        artifacts=SHIM_GATE_RUNS, value=_tok_max, stated=15.5, places=1))
+
+
+def test_the_shim_launchers_cite_the_gate_that_validated_their_default():
+    """Every ladder verdict an `ops/` launcher names must be committed, and
+    the one it rests its default on must be the CURRENT gate.
+
+    The rule-v1 verdict stays in the tree — a superseded number keeps its
+    evidence — and the comment is allowed to name it, but only in its
+    retired role: as a bare filename beside the word "superseded", never as
+    the `evals/results/...` path the operator is pointed at.
+    """
+    import re
+
+    tracked = _tracked()
+    for rel in (SHIM_LAUNCH_PS1, SHIM_LAUNCH_SH):
+        text = _read_doc(rel)
+        named = set(re.findall(r"evals/results/[\w.-]+\.json", text))
+        assert named, f"{rel} names no verdict artifact at all"
+        missing = sorted(a for a in named if a not in tracked)
+        assert missing == [], (
+            f"{rel} cites uncommitted evidence: {missing} — a reader "
+            "following the comment finds nothing.")
+        assert SP2_THRESH in named, (
+            f"{rel} does not point at {SP2_THRESH}, the gate its default "
+            "rests on")
+        assert SP_THRESH not in named, (
+            f"{rel} still points at {SP_THRESH}, which the rule-v2 re-gate "
+            "superseded — the operator reading it would check the wrong run")
+        if SP_THRESH.split("/")[-1] in text:
+            assert "superseded" in text, (
+                f"{rel} names the rule-v1 verdict without saying it is "
+                "superseded — retire the number where a reader meets it")

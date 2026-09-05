@@ -6,6 +6,103 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-05 — the shim launchers cite the gate that validated their default, and the extraction prompt's example contamination is disclosed)
+- **The shim launchers pointed operators at the gate their default no
+  longer rests on.** `ops/install-shim-autostart.ps1` and its `.sh` sibling
+  explained the v4 default by naming
+  `evals/results/ladder-shimprompt-paired-verdict-threshold.json` and its
+  range "tokens 14.0-16.1" — the rule-v1 verdict, superseded hours later by
+  the rule-v2 re-gate, whose four runs span 14.0-15.5. Both comments now
+  name `ladder-shimprompt-rule2-paired-verdict-threshold.json` with the
+  right range and say plainly that the rule-v1 verdict is retired evidence.
+  The generated header of `evals/prompts/sonnet_extractor_v4.md` carried the
+  same stale citation and is regenerated. `tests/test_eval_evidence.py` now
+  treats those launcher comments as published claims: the quoted range is
+  pinned to the four run artifacts, and every `evals/results/…json` a
+  launcher names must be committed and must be the current gate. An `ops/`
+  comment is where an operator reads *why* a default is what it is, and
+  nothing was checking it.
+- **A paired verdict could not say which commit produced either arm.**
+  `evals/ladder_pair_compare.py` stamped `git rev-parse HEAD` of each
+  worktree **at compare time**. For a re-gate — both arms out of one
+  worktree at different commits — that is the same string for both arms and
+  is neither arm's: the rule-v2 shim verdict recorded `7083bc33` for a `pre`
+  arm actually produced at `0b02e5ea`. `evals/ladder_sweep.py` now stamps
+  `git_rev` into every rung artifact (including an `unreachable` one), and
+  the verdict reads each arm's sha off that arm's own artifacts, reporting
+  `sha_source` — `artifact`, `mixed`, `unstamped`, or `no_arm_files` — for
+  what it could establish. The compare-time HEAD is kept under
+  `worktree_head_at_compare`, which is what it always was. A plausible wrong
+  sha is worse than none: nothing downstream can tell it from a real one.
+  The rule-v2 verdict is regenerated on the new shape; **only its two sha
+  blocks and `generated_at` change** — every metric, tally, rung result and
+  gate verdict is byte-identical, because the verdict is a pure function of
+  the unchanged run artifacts. Both arms now read `sha: null`,
+  `sha_source: "unstamped"`, which is the true answer for runs made before
+  the stamp existed. The superseded rule-v1 verdict is left exactly as it
+  was.
+- **The re-gate's isolation claim was stronger than the facts.**
+  `evals/README.md` said "the live shim on :8082 was again never started,
+  stopped or reconfigured"; the maintainer restarted its scheduled task at
+  13:17, two minutes before that verdict was written. The claim is now
+  scoped to what the rung's isolation actually supports — the gate run
+  neither started, stopped nor reconfigured it, because the rung addresses
+  port 8083 and never :8082 at all.
+- **`--system-prompt-file` failing to apply was silent.**
+  `evals/claude_shim.py` swaps the prompt only when the incoming system
+  message starts with `dream._SYSTEM_PROMPT`; on a miss the override
+  vanished and the shipped text went to the model with nothing said. That is
+  the same class of silent substitution that made `sonnet_extractor_v4.md`
+  necessary, seen from the other side. It now logs one WARNING per distinct
+  missed prompt (deduped, because the relations and lessons prompts miss by
+  design and a per-call line would train an operator to ignore it). No
+  behaviour change: the prompt still passes through untouched.
+- **Disclosed: the SHIPPED extraction prompt names a LongMemEval answer.**
+  The guard added with `sonnet_extractor_v4.md` grepped only the four
+  registered invented tokens of the *new* assistant-facts blocks while its
+  docstring claimed the whole prompt. Scanning the whole prompt instead finds
+  that the "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS" example — in
+  `dream._BASE_SYSTEM_PROMPT` since 2026-08-01, and therefore in
+  `_SYSTEM_PROMPT`, in `assistant_facts_provenance.txt`, and (via the v2
+  body) in `sonnet_extractor_v2.md` and `v4` — reads *"[5] saw a Northern
+  Flicker today, that makes 32 species at the park now"* and yields the value
+  `32`. LongMemEval question `affe2881` (knowledge-update) asks how many bird
+  species the user has seen in their local park; its gold answer is `32`, and
+  all 13 occurrences of "Northern Flicker" in **each** dataset file sit
+  inside that question's own sessions.
+  - **This is not a shim-only debt.** The first cut of this disclosure said
+    "any run that used the shim as its extractor", which is wrong and
+    falsely reassuring: the example is in the prompt EVERY extractor
+    receives — the CPU sidecar, the Claude and Codex shims, and every ladder
+    rung alike — for every extraction run since 2026-08-01.
+  - **The paired shim gate is immune.** Both arms carry the identical text,
+    so the example cannot move a pre-vs-post difference; every gate number in
+    the entries above stands as measured. The same holds for any paired
+    comparison whose two arms share the prompt.
+  - **What is suspect is any ABSOLUTE accuracy on that one question**, in any
+    run since 2026-08-01.
+  - **Neither carrier is re-cut here.** `sonnet_extractor_v2.md` is the pre
+    arm of a committed gate, so editing it would retroactively change what
+    that gate compared; and re-cutting `dream.py`'s example is a change to
+    the shipped extraction prompt, which needs its own ladder gate. Recording
+    the debt and gating a prompt change are separate pieces of work.
+  - **Guarded in both places now.** `tests/test_shim_prompt.py` and
+    `tests/test_assistant_provenance.py` each scan every Titlecase phrase —
+    of the shim prompt body and of `dream._SYSTEM_PROMPT` respectively —
+    against both dataset files, sharing one dated `KNOWN_CORPUS_COLLISIONS`
+    allowlist in `evals/gen_assistant_facts_prompts.py`. The check is an
+    equality, not a subset, so the debt can neither grow nor rot into
+    decoration. ALL-CAPS, lowercase and digit-bearing names are out of scope
+    and said to be, rather than implied away.
+  - **Half the filed follow-up is already answered.**
+    `evals/distill_datagen_arm1.py` builds both its teacher and stored
+    prompts as `dream._SYSTEM_PROMPT + hints` (pinned by
+    `tests/test_claude_shim_contract.py`), so any distillation run **dated
+    after 2026-08-01** carried the example and any run before it did not —
+    dating each run is the remaining work. **Still filed, not attempted
+    here:** that dating, and an audit of which published absolute numbers
+    were measured on `affe2881` since 2026-08-01.
+
 ### Changed (2026-09-05 — the CLI shim's extraction prompt asks for assistant-stated facts too)
 - **The assistant-facts instruction that shipped earlier today never reached
   the maintainer's own extractor, because that install does not use the
@@ -55,8 +152,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the note carries one, infer only where the note is unmistakably the
   assistant, omit the field under doubt — changed the file the shim is
   launched with, and the gate above stopped describing it. The POST arm was
-  re-run twice on the same `opus-5` rung (same dedicated port 8083; the live
-  shim on :8082 was again never touched) against the unchanged v2 pre arm.
+  re-run twice on the same `opus-5` rung (same dedicated port 8083; the gate
+  run itself never addressed :8082 — but see the isolation correction in the
+  `Fixed` entry above) against the unchanged v2 pre arm.
   `evals/results/ladder-shimprompt-rule2-paired-verdict-threshold.json`
   (`post_arm: post2`) reads `gate: PASS` and `no_regression_gate: PASS`,
   with gold_recoverable 1.0 and stale_leak 0.0 on both replicates and
@@ -76,7 +174,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   importing the generator writes nothing, and extends the example-token
   dataset grep to the shim prompt — the worked example is now a live
   carrier on the path the maintainer's install actually extracts through,
-  so the LongMemEval contamination guard has to cover it.
+  so the LongMemEval contamination guard has to cover it. **That first cut
+  grepped only the four registered tokens of the new blocks**; it now scans
+  every capitalised phrase in the prompt body, which is what surfaced the
+  inherited v2 contamination disclosed in the `Fixed` entry above.
 
 ### Added (2026-09-05 — assistant-stated facts, labelled and unable to overwrite the user)
 - **The fact spine scores near zero on questions whose answer the assistant

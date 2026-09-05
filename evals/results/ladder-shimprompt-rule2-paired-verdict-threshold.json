@@ -1,16 +1,20 @@
 {
   "what": "extraction-ladder paired arms under the ladder's own threshold rule: both arms must beat naive-RAG on staleness and gold recovery inside 60% of its tokens/query, and the post arm must not go backwards on either quality metric",
   "mode": "threshold",
-  "generated_at": "2026-09-05T13:18:50",
+  "generated_at": "2026-09-05T14:05:55",
   "tag": "shimprompt",
   "post_arm": "post2",
   "pre": {
     "worktree": "shim-prov-prompt",
-    "sha": "7083bc33d3786e9c70e8f4dff68d069fd1701aa9"
+    "sha": null,
+    "sha_source": "unstamped",
+    "worktree_head_at_compare": "825f1fb36700afe55184cc004120c4fcfdfafcf6"
   },
   "post": {
     "worktree": "shim-prov-prompt",
-    "sha": "7083bc33d3786e9c70e8f4dff68d069fd1701aa9"
+    "sha": null,
+    "sha_source": "unstamped",
+    "worktree_head_at_compare": "825f1fb36700afe55184cc004120c4fcfdfafcf6"
   },
   "compared": [
     "gold_recoverable",

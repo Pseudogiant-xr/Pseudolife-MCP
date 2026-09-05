@@ -16,9 +16,13 @@ file stacks on v2, the variant the deployed config actually names.
 
 Gate: ladder `opus-5` rung (the Max-plan CLI shim on its dedicated port,
 same model the shim autostart serves), v2 vs v4 —
-`evals/results/ladder-shimprompt-paired-verdict-threshold.json`. The JSON
-schema stays byte-compatible with production apart from the `speaker`
-field, which the parser already accepts and ignores when absent.
+`evals/results/ladder-shimprompt-rule2-paired-verdict-threshold.json`. That
+is the re-gate: the speaker rule was rewritten after the first gate ran and
+this file is generated from it, so `ladder-shimprompt-paired-verdict-threshold.json`
+is superseded (it measured a body no longer shipped) and stays committed as
+retired evidence. The JSON schema stays byte-compatible with production
+apart from the `speaker` field, which the parser already accepts and
+ignores when absent.
 
 ---
 

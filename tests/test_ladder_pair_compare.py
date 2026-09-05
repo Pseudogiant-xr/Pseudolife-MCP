@@ -292,3 +292,92 @@ def test_the_default_post_arm_is_still_post(monkeypatch, tmp_path):
     assert v["post_arm"] == "post"
     assert (v["rungs"]["qwen-27b"]["post_file"]
             == "evals/results/qwen-27b-t-post.json")
+
+
+# -- whose commit produced each arm (2026-09-05 merge review) --------------
+#
+# The verdict used to stamp `git rev-parse HEAD` of each worktree AT COMPARE
+# TIME and call it the arm's sha. When the two arms are runs from different
+# commits of ONE worktree — which is what a re-gate is — that value is the
+# same string for both and it names neither run. The rule-v2 shim verdict
+# recorded 7083bc33 for both arms while its `pre` files had been produced at
+# 0b02e5ea. The arm's own artifact is the only thing that can answer this,
+# so the verdict now reads `git_rev` off the artifacts and says plainly when
+# they do not carry one.
+
+def test_the_verdict_reads_each_arms_git_rev_off_its_own_artifacts(
+        monkeypatch, tmp_path):
+    """Stamped artifacts: the verdict reports the run's commit, not the
+    compare's."""
+    rc, v = _run(monkeypatch, tmp_path,
+                 {"qwen-27b-t-pre.json": _rung(git_rev="a" * 40)},
+                 {"qwen-27b-t-post.json": _rung(git_rev="b" * 40)},
+                 "--mode", "threshold", "--rungs", "qwen-27b")
+    assert v["pre"]["sha"] == "a" * 40
+    assert v["pre"]["sha_source"] == "artifact"
+    assert v["post"]["sha"] == "b" * 40
+    assert v["post"]["sha_source"] == "artifact"
+    assert rc == 0
+
+
+def test_an_unstamped_arm_reports_null_not_the_compare_time_head(
+        monkeypatch, tmp_path):
+    """The failure this closes. An artifact written before `ladder_sweep`
+    stamped `git_rev` cannot say which commit produced it, and guessing from
+    the worktree's current HEAD produces a confident wrong answer. `null`
+    plus a named reason is the honest report."""
+    _, v = _run(monkeypatch, tmp_path,
+                {"qwen-27b-t-pre.json": _rung()},
+                {"qwen-27b-t-post.json": _rung()},
+                "--mode", "threshold", "--rungs", "qwen-27b")
+    assert v["pre"]["sha"] is None
+    assert v["pre"]["sha_source"] == "unstamped"
+    assert v["post"]["sha"] is None
+    assert v["post"]["sha_source"] == "unstamped"
+    # The compare-time HEAD is still recorded, under a name that says what
+    # it is — it dates the verdict, it does not identify the run.
+    assert "worktree_head_at_compare" in v["pre"]
+
+
+def test_an_arm_whose_rungs_disagree_reports_mixed(monkeypatch, tmp_path):
+    """One arm, two rungs, two commits: there is no single answer, so the
+    verdict must not pick one."""
+    _, v = _run(monkeypatch, tmp_path,
+                {"qwen-27b-t-pre.json": _rung(git_rev="a" * 40),
+                 "floor-t-pre.json": _rung(git_rev="c" * 40)},
+                {"qwen-27b-t-post.json": _rung(git_rev="b" * 40),
+                 "floor-t-post.json": _rung(git_rev="b" * 40)},
+                "--mode", "threshold", "--rungs", "qwen-27b,floor")
+    assert v["pre"]["sha"] is None
+    assert v["pre"]["sha_source"] == "mixed"
+    assert v["post"]["sha"] == "b" * 40
+    assert v["post"]["sha_source"] == "artifact"
+
+
+def test_a_missing_rung_contributes_no_rev(monkeypatch, tmp_path):
+    """A rung that could not be read contributes nothing — it must not drag
+    a fully stamped arm down to `unstamped`."""
+    _, v = _run(monkeypatch, tmp_path,
+                {"qwen-27b-t-pre.json": _rung(git_rev="a" * 40)},
+                {"qwen-27b-t-post.json": _rung(git_rev="a" * 40)},
+                "--mode", "threshold", "--rungs", "qwen-27b,floor")
+    assert v["rungs"]["floor"]["status"] == "missing"
+    assert v["pre"]["sha"] == "a" * 40
+    assert v["pre"]["sha_source"] == "artifact"
+
+
+def test_a_dirty_run_is_not_reported_as_a_clean_artifact_sha(
+        monkeypatch, tmp_path):
+    """`ladder_sweep.git_rev` suffixes `-dirty` when the run was made from
+    an uncommitted tree, which is the normal case here. Reporting that as a
+    plain `artifact` would be the confident-wrong-answer failure this whole
+    block exists to stop, one hop along: the sha is a real commit, the code
+    that ran was not it."""
+    _, v = _run(monkeypatch, tmp_path,
+                {"qwen-27b-t-pre.json": _rung(git_rev="a" * 40 + "-dirty")},
+                {"qwen-27b-t-post.json": _rung(git_rev="b" * 40)},
+                "--mode", "threshold", "--rungs", "qwen-27b")
+    assert v["pre"]["sha"] == "a" * 40 + "-dirty"
+    assert v["pre"]["sha_source"] == "artifact-dirty"
+    # The clean arm is unaffected — the downgrade is per arm, not global.
+    assert v["post"]["sha_source"] == "artifact"

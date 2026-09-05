@@ -49,8 +49,14 @@ names a post arm written under a different suffix, which is what a re-gate
 looks like: the 2026-09-05 provenance prompt was rewritten after its gate
 ran, so the shipped text's arm landed as ``…-assistprompt-post2.json``
 beside the superseded ``…-post.json`` and the same ``pre`` baseline was
-paired against it. The verdict records the worktrees by basename and the
-per-rung files repo-relative, so it carries no machine paths.
+paired against it. The verdict names the arm it read in ``post_arm``, so a
+verdict built on a superseded post run cannot be mistaken for a current one.
+
+The verdict records the worktrees by basename and the per-rung files
+repo-relative, so it carries no machine paths. Each arm's ``sha`` is read
+off that arm's OWN artifacts (``git_rev``, stamped by ``ladder_sweep.py``)
+rather than from the worktree's HEAD at compare time — see
+``arm_provenance``, and ``sha_source`` for what the tool could establish.
 """
 from __future__ import annotations
 
@@ -74,8 +80,61 @@ TOKEN_BUDGET_FRACTION = 0.6
 
 
 def sha(wt: str) -> str:
-    return subprocess.run(["git", "-C", wt, "rev-parse", "HEAD"],
-                          capture_output=True, text=True).stdout.strip()
+    # OSError-tolerant to match `ladder_sweep.git_rev`: on a machine with no
+    # git the tool should still produce a verdict that says it cannot tell,
+    # not die inside the provenance block.
+    try:
+        return subprocess.run(["git", "-C", wt, "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return ""
+
+
+def arm_provenance(wt: str, revs: list) -> dict:
+    """Which commit produced ONE arm, read from that arm's own artifacts.
+
+    This used to be ``sha(wt)`` — the worktree's HEAD at compare time — and
+    that answer is wrong in exactly the case the tool exists for. A re-gate
+    runs both arms out of one worktree at different commits, so both arms
+    got the same string and neither was the run's. The 2026-09-05 rule-v2
+    shim verdict recorded ``7083bc33`` for both while its ``pre`` files had
+    been produced at ``0b02e5ea``.
+
+    ``ladder_sweep.py`` stamps ``git_rev`` into every rung artifact, so the
+    answer is in the file for any run made after that change. Every artifact
+    written before it — which is all of them at the time of writing —
+    cannot answer, and ``null`` with a named ``sha_source`` is the honest
+    report — a plausible wrong sha is worse than no sha, because nothing
+    downstream can tell it apart from a real one.
+
+    ``sha_source``:
+      ``artifact``        every rung carries the same ``git_rev``, clean tree
+      ``artifact-dirty``  ditto, but the run was made from a dirty worktree,
+                          so the sha names a commit the code differed from
+      ``mixed``           the rungs disagree, or only some carry one
+      ``unstamped``       none carries one (runs predating the stamp)
+      ``no_arm_files``    no rung of this arm could be read at all
+    """
+    if not revs:
+        sha_v, source = None, "no_arm_files"
+    elif all(revs) and len(set(revs)) == 1:
+        sha_v = revs[0]
+        # `ladder_sweep.git_rev` suffixes a dirty tree. Reporting that as a
+        # plain `artifact` would be the confident-wrong-answer failure again,
+        # one hop along: the sha is real, the code that ran was not it.
+        source = "artifact-dirty" if sha_v.endswith("-dirty") else "artifact"
+    elif not any(revs):
+        sha_v, source = None, "unstamped"
+    else:
+        sha_v, source = None, "mixed"
+    return {
+        "worktree": Path(wt).name,
+        "sha": sha_v,
+        "sha_source": source,
+        # Kept, but named for what it is: it dates the COMPARE, and says
+        # nothing about which commit produced the runs being compared.
+        "worktree_head_at_compare": sha(wt) or None,
+    }
 
 
 def load(wt: str, rung: str, tag: str, arm: str) -> tuple[Path, dict | None]:
@@ -188,9 +247,15 @@ def main() -> int:
         naive_file, naive = load_naive(a.post, a.pre)
 
     rungs = {}
+    # Per-ARM run provenance, gathered off the artifacts as they are read.
+    # A rung that could not be read contributes nothing to either arm.
+    revs = {"pre": [], "post": []}
     for rung in selected:
         p_pre, pre = load(a.pre, rung, a.tag, "pre")
         p_post, post = load(a.post, rung, a.tag, a.post_suffix)
+        for arm, doc in (("pre", pre), ("post", post)):
+            if doc is not None:
+                revs[arm].append(doc.get("git_rev"))
         if pre is None or post is None:
             rungs[rung] = {"identical": False, "cleared": False,
                            "no_regression": False, "status": "missing",
@@ -225,8 +290,8 @@ def main() -> int:
         # Which post-arm files were read. A verdict that does not say this
         # cannot be told apart from one built on a superseded post run.
         "post_arm": a.post_suffix,
-        "pre": {"worktree": Path(a.pre).name, "sha": sha(a.pre)},
-        "post": {"worktree": Path(a.post).name, "sha": sha(a.post)},
+        "pre": arm_provenance(a.pre, revs["pre"]),
+        "post": arm_provenance(a.post, revs["post"]),
         "compared": list(METRICS) + [f"consolidation.{k}" for k in TALLY],
         "not_compared": list(TIMING),
         "rungs": rungs,

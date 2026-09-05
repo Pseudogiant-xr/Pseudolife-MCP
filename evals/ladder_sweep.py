@@ -42,6 +42,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 import argparse
 import json
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -476,6 +477,45 @@ def rung_bench_env(dream_cfg) -> dict:
     return {"dream": {"assistant_claims": str(dream_cfg.assistant_claims)}}
 
 
+def git_rev() -> str | None:
+    """The commit this run was produced at, for stamping into the artifact.
+
+    ``ladder_pair_compare.py`` used to answer "which commit produced this
+    arm" from the worktree's HEAD at COMPARE time. For a re-gate — both arms
+    out of one worktree, at different commits — that is the same string for
+    both arms and is neither arm's; the 2026-09-05 rule-v2 shim verdict
+    recorded ``7083bc33`` for a ``pre`` arm produced at ``0b02e5ea``. Only
+    the run can answer it, so the run records it.
+
+    A DIRTY worktree gets a ``-dirty`` suffix, and that matters more than it
+    looks: eval runs here are routinely made from an uncommitted tree, and a
+    bare HEAD would then name a commit that does not describe the code that
+    ran — the same "plausible wrong sha" this function exists to stop,
+    moved one hop downstream. ``ladder_pair_compare.arm_provenance`` reads
+    the suffix and downgrades ``sha_source`` to ``artifact-dirty``.
+
+    ``None`` (not ``""``) when there is no checkout to ask: the verdict
+    distinguishes an artifact that could not say from one that said nothing.
+    """
+    here = str(Path(__file__).resolve().parent)
+
+    def _git(*args) -> str | None:
+        try:
+            out = subprocess.run(["git", "-C", here, *args],
+                                 capture_output=True, text=True)
+        except OSError:        # no git on PATH
+            return None
+        return out.stdout if out.returncode == 0 else None
+
+    head = (_git("rev-parse", "HEAD") or "").strip()
+    if not head:
+        return None
+    # Tracked-file changes only: untracked scratch files in the tree do not
+    # change the code that ran.
+    status = _git("status", "--porcelain", "--untracked-files=no")
+    return f"{head}-dirty" if (status or "").strip() else head
+
+
 def ingest(svc) -> None:
     """Store all turns (initials, then distractors, then updates) in order."""
     for p in PAIRS:
@@ -592,7 +632,10 @@ def measure_naive(svc) -> dict:
 def run_rung(name: str) -> dict:
     rung = RUNGS[name]
     import tempfile
-    result = {"rung": name, "label": rung["label"], "kind": rung["kind"]}
+    # git_rev first, so even the `unreachable` early return carries it: a
+    # run that never reached its endpoint is still evidence about a commit.
+    result = {"rung": name, "label": rung["label"], "kind": rung["kind"],
+              "git_rev": git_rev()}
 
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
         result["status"] = "unreachable"
