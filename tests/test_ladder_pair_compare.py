@@ -220,3 +220,41 @@ def test_the_default_rungs_and_mode_are_unchanged(monkeypatch, tmp_path):
     assert sorted(v["rungs"]) == ["floor", "qwen-27b"]
     assert v["rungs"]["qwen-27b"]["identical"] is True
     assert v["rungs"]["floor"]["status"] == "missing"
+
+
+# -- --post-suffix (the 2026-09-05 re-gate) -------------------------------
+
+def test_post_suffix_pairs_the_pre_arm_with_a_re_run_post_arm(monkeypatch,
+                                                              tmp_path):
+    """A prompt rewritten *after* its gate ran leaves the shipped text's
+    arm beside the original one — `<tag>-post2.json` next to
+    `<tag>-post.json` — while the `pre` arm is the same baseline either
+    way. Without a way to name the post arm, the re-gate can only be
+    verdicted by renaming files, which loses the run it supersedes."""
+    rc, v = _run(monkeypatch, tmp_path,
+                 {"qwen-27b-t-pre.json": _rung(tokens=13.4)},
+                 {"qwen-27b-t-post.json": _rung(tokens=14.2),
+                  "qwen-27b-t-post2.json": _rung(tokens=13.4)},
+                 "--mode", "threshold", "--rungs", "qwen-27b",
+                 "--post-suffix", "post2")
+    r = v["rungs"]["qwen-27b"]
+    assert r["post_file"].endswith("qwen-27b-t-post2.json")
+    assert r["metrics"]["tokens_per_query"] == {"pre": 13.4, "post": 13.4}
+    assert r["differences"] == {}
+    assert r["identical"] is True
+    assert r["cleared"] is True
+    assert (v["gate"], v["no_regression_gate"]) == ("PASS", "PASS")
+    assert rc == 0
+
+
+def test_the_default_post_suffix_is_still_post(monkeypatch, tmp_path):
+    """The chip-5 contract again: with both arms on disk and no flag, the
+    verdict pairs `-post.json`, not whichever file sorts last."""
+    _, v = _run(monkeypatch, tmp_path,
+                {"qwen-27b-t-pre.json": _rung(tokens=13.4)},
+                {"qwen-27b-t-post.json": _rung(tokens=14.2),
+                 "qwen-27b-t-post2.json": _rung(tokens=13.4)},
+                "--mode", "threshold", "--rungs", "qwen-27b")
+    r = v["rungs"]["qwen-27b"]
+    assert r["post_file"].endswith("qwen-27b-t-post.json")
+    assert r["metrics"]["tokens_per_query"] == {"pre": 13.4, "post": 14.2}

@@ -44,9 +44,13 @@ Reported but NOT compared: extract_seconds, search_latency_ms (timing).
         --out evals/results/ladder-assistprompt-paired-verdict-threshold.json
 
 Each worktree must already hold ``evals/results/<rung>-<tag>-{pre,post}.json``
-from ``ladder_sweep.py --rung <rung> --out-tag <tag>-<arm>``. The verdict
-records the worktrees by basename and the per-rung files repo-relative,
-so it carries no machine paths.
+from ``ladder_sweep.py --rung <rung> --out-tag <tag>-<arm>``. ``--post-suffix``
+names a post arm written under a different suffix, which is what a re-gate
+looks like: the 2026-09-05 provenance prompt was rewritten after its gate
+ran, so the shipped text's arm landed as ``…-assistprompt-post2.json``
+beside the superseded ``…-post.json`` and the same ``pre`` baseline was
+paired against it. The verdict records the worktrees by basename and the
+per-rung files repo-relative, so it carries no machine paths.
 """
 from __future__ import annotations
 
@@ -169,6 +173,13 @@ def main() -> int:
     ap.add_argument("--rungs", default=",".join(RUNGS),
                     help="comma-separated ladder rungs to compare "
                          f"(default: {','.join(RUNGS)})")
+    ap.add_argument("--post-suffix", default="post",
+                    help="arm suffix of the POST file, i.e. "
+                         "<rung>-<tag>-<suffix>.json (default: post). A "
+                         "change re-gated after its first run leaves the "
+                         "superseded arm in place and lands the new one "
+                         "beside it, e.g. `post2`; the pre arm is the same "
+                         "baseline either way.")
     a = ap.parse_args()
 
     selected = [r.strip() for r in a.rungs.split(",") if r.strip()]
@@ -179,7 +190,7 @@ def main() -> int:
     rungs = {}
     for rung in selected:
         p_pre, pre = load(a.pre, rung, a.tag, "pre")
-        p_post, post = load(a.post, rung, a.tag, "post")
+        p_post, post = load(a.post, rung, a.tag, a.post_suffix)
         if pre is None or post is None:
             rungs[rung] = {"identical": False, "cleared": False,
                            "no_regression": False, "status": "missing",
