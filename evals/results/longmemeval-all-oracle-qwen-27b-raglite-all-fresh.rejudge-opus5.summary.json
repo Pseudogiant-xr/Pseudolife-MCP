@@ -1,0 +1,672 @@
+{
+  "benchmark": "LongMemEval-rejudge",
+  "source": "longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl",
+  "judge": "claude-opus-5",
+  "tag": "opus5",
+  "n_questions": 500,
+  "arms": {
+    "rag": {
+      "n": 500,
+      "accuracy": 0.694,
+      "accuracy_orig": 0.69,
+      "delta": 0.004,
+      "agreement": 0.976
+    },
+    "cortex": {
+      "n": 500,
+      "accuracy": 0.32,
+      "accuracy_orig": 0.31,
+      "delta": 0.01,
+      "agreement": 0.978
+    },
+    "hybrid": {
+      "n": 500,
+      "accuracy": 0.736,
+      "accuracy_orig": 0.73,
+      "delta": 0.006,
+      "agreement": 0.982
+    },
+    "rag1": {
+      "n": 500,
+      "accuracy": 0.32,
+      "accuracy_orig": 0.316,
+      "delta": 0.004,
+      "agreement": 0.98
+    }
+  },
+  "types": {
+    "knowledge-update": {
+      "n": 78,
+      "rag": 0.8718,
+      "rag_orig": 0.859,
+      "cortex": 0.6923,
+      "cortex_orig": 0.6667,
+      "hybrid": 0.8974,
+      "hybrid_orig": 0.8974,
+      "rag1": 0.3205,
+      "rag1_orig": 0.3205
+    },
+    "multi-session": {
+      "n": 133,
+      "rag": 0.5714,
+      "rag_orig": 0.5564,
+      "cortex": 0.2105,
+      "cortex_orig": 0.203,
+      "hybrid": 0.5865,
+      "hybrid_orig": 0.5789,
+      "rag1": 0.0977,
+      "rag1_orig": 0.0827
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "rag": 0.9107,
+      "rag_orig": 0.9107,
+      "cortex": 0.0714,
+      "cortex_orig": 0.0536,
+      "hybrid": 0.9464,
+      "hybrid_orig": 0.9107,
+      "rag1": 0.5893,
+      "rag1_orig": 0.5893
+    },
+    "single-session-preference": {
+      "n": 30,
+      "rag": 0.5,
+      "rag_orig": 0.5333,
+      "cortex": 0.2667,
+      "cortex_orig": 0.2333,
+      "hybrid": 0.5,
+      "hybrid_orig": 0.5,
+      "rag1": 0.4333,
+      "rag1_orig": 0.3667
+    },
+    "single-session-user": {
+      "n": 70,
+      "rag": 0.9286,
+      "rag_orig": 0.9429,
+      "cortex": 0.6571,
+      "cortex_orig": 0.6571,
+      "hybrid": 0.9714,
+      "hybrid_orig": 0.9714,
+      "rag1": 0.7571,
+      "rag1_orig": 0.7714
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "rag": 0.5414,
+      "rag_orig": 0.5338,
+      "cortex": 0.1504,
+      "cortex_orig": 0.1504,
+      "hybrid": 0.6316,
+      "hybrid_orig": 0.6316,
+      "rag1": 0.1729,
+      "rag1_orig": 0.1805
+    }
+  },
+  "leak_check": {
+    "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+    "n_rows": 500,
+    "n_leaked": 25,
+    "leaked": [
+      "gpt4_2312f94c",
+      "gpt4_76048e76",
+      "gpt4_2487a7cb",
+      "gpt4_385a5000",
+      "gpt4_0b2f1d21",
+      "gpt4_6ed717ea",
+      "gpt4_70e84552",
+      "gpt4_2d58bcd6",
+      "gpt4_65aabe59",
+      "gpt4_483dd43c",
+      "gpt4_b4a80587",
+      "gpt4_8c8961ae",
+      "gpt4_d9af6064",
+      "gpt4_7de946e7",
+      "gpt4_d31cdae3",
+      "gpt4_93f6379c",
+      "gpt4_1a1dc16d",
+      "gpt4_0a05b494",
+      "gpt4_2f584639",
+      "gpt4_213fd887",
+      "gpt4_c27434e8",
+      "gpt4_5438fa52",
+      "gpt4_fe651585",
+      "gpt4_4929293a",
+      "gpt4_ec93e27f"
+    ],
+    "n_leak_free": 475,
+    "note": "headline means above span every row; these exclude the rows whose question names its own gold answer",
+    "arms": {
+      "rag": {
+        "n": 475,
+        "accuracy": 0.6989,
+        "accuracy_orig": 0.6947,
+        "delta": 0.0042
+      },
+      "cortex": {
+        "n": 475,
+        "accuracy": 0.3263,
+        "accuracy_orig": 0.3158,
+        "delta": 0.0105
+      },
+      "hybrid": {
+        "n": 475,
+        "accuracy": 0.7389,
+        "accuracy_orig": 0.7326,
+        "delta": 0.0063
+      },
+      "rag1": {
+        "n": 475,
+        "accuracy": 0.3347,
+        "accuracy_orig": 0.3305,
+        "delta": 0.0042
+      }
+    }
+  },
+  "stability_sample": {
+    "n_pairs": 60,
+    "agreement": 0.9667,
+    "pairs": [
+      {
+        "key": [
+          "gpt4_59149c77",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "7405e8b1",
+          "cortex"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "f9e8c073",
+          "cortex"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_7fce9456",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "852ce960",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "09ba9854_abs",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "51a45a95",
+          "rag"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "gpt4_f420262d",
+          "hybrid"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "a2f3aa27",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "993da5e2",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "7e00a6cb",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_ab202e7f",
+          "cortex"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "gpt4_1d80365e",
+          "hybrid"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "gpt4_4929293a",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "60472f9c",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_f49edff3",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "95228167",
+          "cortex"
+        ],
+        "first": false,
+        "second": true
+      },
+      {
+        "key": [
+          "6e984302",
+          "hybrid"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "bc149d6b",
+          "rag"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "gpt4_8279ba02",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_93f6379c",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "4100d0a0",
+          "rag1"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "a11281a2",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "2311e44b_abs",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "58bf7951",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "2311e44b_abs",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "f685340e_abs",
+          "rag1"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "1903aded",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "c8c3f81d",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_2ba83207",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "4fd1909e",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_98f46fc6",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "a9f6b44c",
+          "rag"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "e66b632c",
+          "cortex"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_2f8be40d",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "c4ea545c",
+          "cortex"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_8e165409",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "2698e78f_abs",
+          "cortex"
+        ],
+        "first": true,
+        "second": false
+      },
+      {
+        "key": [
+          "60bf93ed_abs",
+          "rag1"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "19b5f2b3",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "edced276_abs",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "118b2229",
+          "rag1"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_8c8961ae",
+          "cortex"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_5dcc0aab",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "e25c3b8d",
+          "cortex"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "681a1674",
+          "cortex"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "92a0aa75",
+          "rag"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "b46e15ee",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "19b5f2b3_abs",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "6d550036",
+          "cortex"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "87f22b4a",
+          "hybrid"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "61f8c8f8",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "c7cf7dfd",
+          "rag1"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "ce6d2d27",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "gpt4_a1b77f9c",
+          "hybrid"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "3ba21379",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_f420262d",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "b29f3365",
+          "rag1"
+        ],
+        "first": false,
+        "second": false
+      },
+      {
+        "key": [
+          "8979f9ec",
+          "rag"
+        ],
+        "first": true,
+        "second": true
+      },
+      {
+        "key": [
+          "gpt4_70e84552_abs",
+          "cortex"
+        ],
+        "first": true,
+        "second": true
+      }
+    ]
+  },
+  "cli_calls": 2061,
+  "cli_errors": 0,
+  "wall_seconds": 5379.7,
+  "seconds_per_call": 2.61,
+  "date": "2026-09-05",
+  "git_rev": "b8bc4ac4",
+  "pairing_command": [
+    "beam_within_run_pairs.py",
+    "--prefix",
+    "",
+    "--tag",
+    "longmemeval-all-oracle-qwen-27b-raglite-all-fresh.rejudge-opus5",
+    "--arms",
+    "cortex,hybrid,rag1,cascade",
+    "--score-key",
+    "correct_opus5",
+    "--type-key",
+    "question_type",
+    "--pairs",
+    "cortex:rag1"
+  ]
+}

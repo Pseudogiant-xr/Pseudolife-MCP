@@ -1,0 +1,116 @@
+{
+  "arms": {
+    "cascade": {
+      "ci95_halfwidth": 0.0211,
+      "context_chars_mean": null,
+      "context_tokens_mean": 844,
+      "delta_vs_control": 0.01,
+      "full_marks_rows": 352,
+      "losses": 12,
+      "mean": 0.704,
+      "n": 500,
+      "perm_p": 0.4576,
+      "ties": 471,
+      "types": {
+        "knowledge-update": 0.8718,
+        "multi-session": 0.5714,
+        "single-session-assistant": 0.9107,
+        "single-session-preference": 0.5,
+        "single-session-user": 0.9571,
+        "temporal-reasoning": 0.5639
+      },
+      "wins": 17
+    },
+    "cortex": {
+      "ci95_halfwidth": 0.0482,
+      "context_chars_mean": null,
+      "context_tokens_mean": 97,
+      "delta_vs_control": -0.374,
+      "full_marks_rows": 160,
+      "losses": 204,
+      "mean": 0.32,
+      "n": 500,
+      "perm_p": 0.0001,
+      "ties": 279,
+      "types": {
+        "knowledge-update": 0.6923,
+        "multi-session": 0.2105,
+        "single-session-assistant": 0.0714,
+        "single-session-preference": 0.2667,
+        "single-session-user": 0.6571,
+        "temporal-reasoning": 0.1504
+      },
+      "wins": 17
+    },
+    "hybrid": {
+      "ci95_halfwidth": 0.0309,
+      "context_chars_mean": null,
+      "context_tokens_mean": 1229,
+      "delta_vs_control": 0.042,
+      "full_marks_rows": 368,
+      "losses": 21,
+      "mean": 0.736,
+      "n": 500,
+      "perm_p": 0.0126,
+      "ties": 437,
+      "types": {
+        "knowledge-update": 0.8974,
+        "multi-session": 0.5865,
+        "single-session-assistant": 0.9464,
+        "single-session-preference": 0.5,
+        "single-session-user": 0.9714,
+        "temporal-reasoning": 0.6316
+      },
+      "wins": 42
+    },
+    "rag1": {
+      "ci95_halfwidth": 0.0463,
+      "context_chars_mean": null,
+      "context_tokens_mean": 206,
+      "delta_vs_control": -0.374,
+      "full_marks_rows": 160,
+      "losses": 198,
+      "mean": 0.32,
+      "n": 500,
+      "perm_p": 0.0001,
+      "ties": 291,
+      "types": {
+        "knowledge-update": 0.3205,
+        "multi-session": 0.0977,
+        "single-session-assistant": 0.5893,
+        "single-session-preference": 0.4333,
+        "single-session-user": 0.7571,
+        "temporal-reasoning": 0.1729
+      },
+      "wins": 11
+    }
+  },
+  "control": "rag",
+  "control_context_chars_mean": null,
+  "control_context_tokens_mean": 1124,
+  "control_mean": 0.694,
+  "control_types": {
+    "knowledge-update": 0.8718,
+    "multi-session": 0.5714,
+    "single-session-assistant": 0.9107,
+    "single-session-preference": 0.5,
+    "single-session-user": 0.9286,
+    "temporal-reasoning": 0.5414
+  },
+  "n_rows": 500,
+  "note": "paired vs the rag control over all 500 rows, including the 25 rows the summary's leak check flags as naming their own gold answer, so every arm is paired over the same 500; the summary's arm accuracies span those rows too -- the leak-free means are the separate leak_check.arms block in the summary (rag 0.6989, hybrid 0.7389, cortex 0.3263), and the deltas here are not those; the cascade arm is derived by replicate.cascade_correct / cascade_context_tokens from the judged cortex and rag arms, never answered; note added 2026-09-05 post hoc; no measured field changed",
+  "pairs": {
+    "cortex-rag1": {
+      "ci95_halfwidth": 0.0493,
+      "delta": 0.0,
+      "losses": 79,
+      "n": 500,
+      "perm_p": 1.0,
+      "ties": 342,
+      "wins": 79
+    }
+  },
+  "perms": 10000,
+  "seed": 0,
+  "source": "longmemeval-all-oracle-qwen-27b-raglite-all-fresh.rejudge-opus5.jsonl"
+}
