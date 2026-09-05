@@ -1080,7 +1080,7 @@ class CortexStore:
         Rejection is NOT refused there (2026-09-05): retiring touches neither
         ``_current`` nor ``_members``, so it cannot bypass that guard, and
         refusing it left a contender parked against a set slot unresolvable
-        in either direction — permanently stuck in the review queue with no
+        in either direction — permanently parked with no
         operator path to dismiss it. Rare while only number-led set adds
         parked; routine once assistant-origin adds park against user-origin
         sets. A set slot has no current scalar, so the retirement's audit row

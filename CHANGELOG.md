@@ -263,10 +263,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `facts_current` / `facts_dump_truncated`) instead of leaving it a
   hand-checked sentence, and picks its five widest slots from the whole
   cortex rather than the first 2,000 rows of the fact dump.
+
 ### Fixed (2026-09-05 — a contender parked against a set slot can now be dismissed)
 - **A contender parked against a set-valued cortex slot could not be settled
-  in either direction, so it sat in the review queue forever with no way to
-  clear it.** `CortexStore.resolve` refused any slot holding current members
+  in either direction, so it stayed parked forever with no way to clear
+  it.** `CortexStore.resolve` refused any slot holding current members
   for both `accept=True` and `accept=False`. The refusal is right for
   promotion — a scalar contender cannot replace a member set, and registering
   it as current would bypass `write_fact`'s scalar/set exclusivity guard — but
