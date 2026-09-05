@@ -1451,8 +1451,11 @@ rules](#conversion-rules)), `accept=True` is refused with
 so adopt the value with `memory_set_add` instead — while `accept=False`
 always works and is how an operator dismisses such a contender.
 
-`assistant` is the floor tier: a fact the **assistant** stated in a turn,
-written only by a dream whose extraction prompt asks for a `speaker` label
+`assistant` is the floor tier: a fact the **assistant** stated in a turn.
+The shipped extraction prompt asks for a `speaker` label since 2026-09-05
+— where the note makes the speaker knowable; see
+[dreaming](dreaming.md#what-the-extractor-captures) — so this tier is
+**reachable on the default path**
 (`memory.dream.assistant_claims`, default `contender`). It may fill an empty
 slot, but against a current value of any other origin it always parks as a
 contender — that rule is not gated on `protect_provenance` below — and it
@@ -1471,10 +1474,14 @@ pollution check stays flat-to-up, and the guard costs nothing measurable
 against an unguarded variant of the same prompt — tables, paired tests and
 the adoption gate are in `evals/README.md` (the published run is the clean
 re-run `assist-prov2`; the first run's contaminated worked example and its
-retired numbers are retained in the same section). Nothing here is on by
-default: the shipped extraction prompt asks for no `speaker` label, so this
-tier is only reachable by a bank whose dream runs one of those candidate
-prompts.
+retired numbers are retained in the same section). That prompt then passed
+the extraction ladder on the primary rung and **shipped on 2026-09-05**, so
+a dream on stock settings now writes assistant-origin facts: they fill
+empty slots and park as contenders against anything else. A claim carrying
+no `speaker` label — a note with no role marker to read it from, an older
+prompt, or an extractor shim launched with `--system-prompt-file` — still
+writes exactly as it did before, and on a bank of unmarked notes that is
+the common case.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in
@@ -2164,7 +2171,7 @@ ignore the field.
 
 The tier-2 prompt (`_SYSTEM_PROMPT` in `pseudolife_memory/memory/dream.py`,
 shared by the bundled sidecar and any endpoint you point the daemon at)
-asks for three things and deliberately skips the rest — narrative,
+asks for four things and deliberately skips the rest — narrative,
 opinions, meta-chat about the conversation, and values a later note already
 superseded:
 
@@ -2184,8 +2191,28 @@ superseded:
   was actually done. Paste your deploy runbook, then mention a deploy that
   skipped a step, and you get two facts (the documented rule, and the
   incident), not one blurred into the other.
+- **What the ASSISTANT said, labelled as the assistant's** (since
+  2026-09-05). What the assistant asserted, described or recommended is
+  extractable on the same terms as what you said — keyed to the *thing
+  described*, never to "the assistant". A claim carries a `speaker` field
+  **where the note makes the speaker knowable**: the extractor reads it off
+  an explicit role marker (a leading `user:` / `assistant:`) when the note
+  carries one, infers `assistant` only where the content is unmistakably
+  the assistant's, and omits the field when unsure. Nothing in the daemon
+  writes a role prefix — the dream sends your notes as they were stored,
+  and the `[date] role: content` rendering is an eval-harness convention —
+  so on a bank whose notes carry no marker many claims are simply
+  unlabelled, which writes exactly as it did before 2026-09-05. An
+  assistant-stated fact is written at the floor `assistant` provenance
+  tier: it fills an empty slot, but parks as a contender against a value
+  of any other origin rather than overwriting it
+  (`memory.dream.assistant_claims`, default `contender`). Before this, a
+  session whose answer lived entirely in an assistant turn consolidated
+  with *zero* claims — see
+  [Benchmarks](benchmarks.md#longmemeval-v2--agent-trajectories-and-procedures)
+  and the "Assistant-stated facts" section of `evals/README.md`.
 
-That third one is deliberate, and it is the reason the prompt names its
+That document class is deliberate, and it is the reason the prompt names its
 content classes rather than merely forbidding noise: an extraction prompt
 that enumerates what to extract makes an obedient model **silently discard
 whatever it doesn't name** — no error, no partial result, just a class of
@@ -2194,8 +2221,12 @@ to find (see [Benchmarks](benchmarks.md#longmemeval-v2--agent-trajectories-and-p
 and it is worth remembering before narrowing this prompt further.
 
 The Sonnet override prompt (`evals/prompts/sonnet_extractor_v2.md`, used
-when you run the shim below) carries the same three, tuned for a larger
-model.
+when you run the shim below) carries the first three, tuned for a larger
+model. It does **not** carry the assistant-facts instruction: a shim
+launched with `--system-prompt-file` replaces the shipped prompt with that
+file, so on such an install assistant-stated facts are extracted only by
+the fallback sidecar. Adding the instruction there is a separate change
+needing its own ladder gate.
 
 **Literal-faithfulness gate.** After extraction, every claim's digit-bearing
 tokens (dates exempt — format variance makes digit matching unsafe there)
@@ -3373,14 +3404,21 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   contender, and it ranks below user-origin facts at equal similarity),
   `supersede` treats it as an ordinary agent-tier dream claim, and `drop`
   discards it. An unrecognised value falls back to `contender` — a typo
-  must not open the overwrite path. **Inert with the shipped extraction
-  prompt**, which never asks for a `speaker` field: with no label on the
-  claim the knob is never consulted at any setting, so all three values
-  are today's behaviour on a shipped install. It is settable only for the
-  prompt-variant experiment in `evals/README.md` ("Assistant-stated
-  facts"), and it is deliberately **not** on the Console for the same
-  reason as the candidate-pool knobs: adoption of either variant is gated
-  on the extraction ladder, which has not been run on them.
+  must not open the overwrite path. **Live on the default path since
+  2026-09-05**, when the provenance extraction prompt shipped: an
+  extraction can now carry a `speaker` label, so the knob decides what
+  happens to assistant-stated claims on a stock install. (It was inert
+  before that, because the old prompt never asked for the field. The
+  label is asked for only where the note makes the speaker knowable, so
+  on a bank whose notes carry no `user:` / `assistant:` marker most
+  claims still arrive without one — as do claims from an older prompt or
+  an extractor shim launched with `--system-prompt-file` — and those
+  write exactly as they did before, whatever this is set to.) Kept off
+  the Console deliberately: `supersede`
+  is the setting that lets model-stated content overwrite a user-stated
+  fact, which is a provenance decision rather than an operator dial. The
+  measured comparison of the three values is in `evals/README.md`
+  ("Assistant-stated facts").
 - **Staleness served as annotation** (`memory.search.stale_policy =
   "annotate"`) — stale records (past 2×TTL for their freshness class)
   carry `effective_confidence`/`stale` flags and nothing more, today's
