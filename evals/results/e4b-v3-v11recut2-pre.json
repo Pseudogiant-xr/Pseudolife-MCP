@@ -1,0 +1,19 @@
+{
+  "rung": "e4b-v3",
+  "label": "E4B v3 multi-task QLoRA (Opus claims+events, candidate)",
+  "kind": "llm",
+  "extract_seconds": 364.9,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 16,
+    "inserted": 16,
+    "superseded": 0,
+    "literal_flagged": 0,
+    "literal_dropped": 0
+  },
+  "gold_recoverable": 1.0,
+  "stale_leak": 1.0,
+  "tokens_per_query": 39.7,
+  "search_latency_ms": 50.9,
+  "status": "ok"
+}

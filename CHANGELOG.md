@@ -6,6 +6,83 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-06 — the lifted worked examples re-cut on invented tokens, gated, and not shipped)
+- **`evals/prompts/ku_op_prompt_v11_example_recut.txt` is the shipped v10
+  prompt with its two corpus-lifted worked examples replaced by invented
+  tokens** — `road bike` → `penny-farthing`, and "saw a Northern Flicker
+  today, that makes 32 species at the park now" → "saw a Gallowmere Teal
+  today, that makes 41 species at Kelmarsh Reserve now" — with every rule
+  byte-identical (`op_probe` variant `v11-example-recut`, construction-pinned
+  like its predecessors). The tokens were vetted at zero occurrences in both
+  LongMemEval files and against every gold answer, and the new lift guard
+  passes on the file with no allowlist entry. Gated the way v10 was, on the
+  reproducible Qwen3.8 server in one window against a fresh shipped-prompt
+  arm: the extraction ladder is verdict-identical
+  (`ladder-v11recut-paired-verdict.json`: gold 1.0, stale 0.0, 13.4 tokens
+  per query on both arms); the op-probe battery is 7/7 adoption and 7/7
+  count decoys for both prompts, the Flicker decoy now being a held-out
+  test that v11 still keeps as a plain `32`; and the paired KU-oracle e2e
+  (`prompt-recut-v11-ku-paired-verdict.json`, n = 78, rag control 0 flips
+  on 78/78 identical contexts) moved every extractor arm up and none
+  significantly — cortex 0.667 → 0.705 (7W/4L, p = 0.55), hybrid 0.897 →
+  0.936 (3W/0L, p = 0.25), cascade 0.859 → 0.872 (5W/4L, p = 1.0). With the
+  two questions whose golds the old examples stated dropped from both arms
+  (n = 76) the direction is the same, the digit-gold count class improved
+  (cortex 26 → 29 of 39, cascade 35 → 35), and `affe2881` — the question the
+  count example was cut from — still recovers `32` without it.
+  **The pre-registered gate nevertheless reads FAIL**, on its third check:
+  of the six other `frozen-total` questions the count rule was written for,
+  3 lost cascade correctness. Two (`01493427`, `41698283`) are cortex-wrong
+  under both prompts and differ only because the answerer abstained under
+  v10 and committed a wrong answer under v11; one (`45dc21b6`) is a real
+  extraction loss — v11 routed "3 of Emma's recipes" into a set member, the
+  exact failure the rule exists to stop. The prompt is therefore committed
+  as a measured variant only: `_SYSTEM_PROMPT` stays on v10, and whether a
+  six-question check is the right bar for a re-cut whose every aggregate
+  moved up is the maintainer's call, recorded here rather than made by
+  relaxing the gate after the fact. Run notes: the KU arms ran with the
+  server's KV capacity at 32k tokens instead of the helper's 100k default
+  after three concurrent test suites from other sessions pushed the 100k
+  server into VRAM paging (3 tokens/s at 94 W); the setting is
+  capacity-only and was checked compute-inert before the resume — all 26
+  op-probe notes came back byte-identical at both sizes.
+- `evals/recut_verdict.py` writes that verdict — McNemar's exact test on the
+  discordant pairs, the rag noise floor, the leave-out, the count-class
+  census split and the seven frozen-total rows — and reproduces the
+  committed `stance-v10-ku-paired-verdict.json` numbers on the sg2 v5/v10
+  pair.
+- **The live sidecar was run as an informational ladder rung and turned up
+  a reproducible finding about the SHIPPED prompt, not about v11.** On the
+  deployed `e4b-v3` extractor (through a temporary forwarder, prompt cache
+  pinned off, temperature 0) the shipped v10 prompt scores stale_leak 1.0
+  at 39.7 tokens per query and 16 claims in three separate runs
+  (`e4b-v3-v11recut-pre.json`, `-v11recut2-pre.json`, `-v11recut2-pre2.json`),
+  while the v5 prompt the sidecar was gated with scores 0.1 at 16.9 tokens
+  (`-v11recut2-v5ctl.json`, matching the committed `e4b-v3.json`), the
+  op-less control 0.2 (`-v11recut2-opless.json`) and v11 0.2 at 13.2
+  tokens in two runs (`-v11recut-post.json`, `-v11recut2-post.json`). The
+  2026-09-05 session saw the same shipped-prompt reading once and filed it
+  as warm-container bimodality; three identical repeats with the cache pin
+  in place rule that out. The v10 ship gate ran its ladder on the Qwen rung
+  only, so this pair — the production extractor with the production prompt
+  — was never measured; the ladder is a ten-pair synthetic corpus and says
+  nothing about the sidecar's LongMemEval accuracy, but every stale value
+  still being served is the one thing the ladder exists to catch. Filed
+  for the maintainer; no prompt or deploy change made here.
+
+### Fixed (2026-09-06 — the op-probe read v10's count decoys as 0/7)
+- **`evals/op_probe.py` scored the v10 prompt's count-update decoys as 0/7
+  since 2026-08-17 (`op-probe-qwen38-0817.json`) while the claims were
+  right.** The "op required on every claim" scoring mode was selected by a
+  `v1` name-prefix match that also caught `v10` and `v11`. `requires_op()`
+  now names the one variant whose schema requires it, and
+  `tests/test_op_prompt_artifact.py` pins that every other variant is scored
+  op-less. Re-scored, tonight's battery is 7/7 adoption and 7/7 decoys for
+  v10 and v11 alike (`op-probe-v11-recut-q8-ctx32k.json`; its twin at the
+  100k-token server context, `op-probe-v11-recut-q8.json`, carries the
+  pre-fix summary lines over the same 26 claim sets and is the
+  compute-inertness record for the 32k setting above).
+
 ### Added (2026-09-05 — worked examples in extraction prompts are checked against the benchmark corpus)
 - **Three worked examples in the extraction-prompt lineage were written from
   LongMemEval itself, and one of them states a gold answer.** The

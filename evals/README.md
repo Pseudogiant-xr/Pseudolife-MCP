@@ -2158,6 +2158,7 @@ KU-oracle e2e runs to answer. Artifacts, in order:
 | op block, firing | `c2op-gate-verdict.json` | cascade −0.141 (p = 0.006) vs the op-less control → **block held** |
 | op block + apply-time aggregate guard | `c2op-guard-verdict.json` | 0/78 flips — damage is extraction-side (count updates re-routed to member-adds), not apply-side |
 | op block + count-exclusion rule (`ku_op_prompt_v5.txt`) | `c2op-count-verdict.json` | cascade back to exactly the control (delta 0.0, p = 1.0); count-class recovered; sets still form |
+| the two lifted examples re-cut on invented tokens (`ku_op_prompt_v11_example_recut.txt`, 2026-09-06) | `prompt-recut-v11-ku-paired-verdict.json` | every arm up, none significant (cortex 0.667 → 0.705, hybrid 0.897 → 0.936, cascade 0.859 → 0.872; rag 0 flips); the pre-registered six-frozen-total check reads FAIL on 3 rows (one real extraction loss, `45dc21b6`) → **not shipped**, maintainer's call |
 
 Supporting pieces: `op_probe.py` (prompt-format battery; count-update
 decoys added 2026-08-01), `analyze_frozen_totals.py` + `c2op-count-census.json`
