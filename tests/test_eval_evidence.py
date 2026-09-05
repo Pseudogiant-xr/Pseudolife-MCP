@@ -5046,3 +5046,51 @@ CLAIMS.append(Claim(
     needle="219.2 tokens against its 100-token name and producing a byte-identical",
     artifacts=(RL_V38_SUM,), value=_arm_metric("ragb100", "context_tokens"),
     stated=219.2, places=1))
+
+# ── the prompt-example lift audit (2026-09-05) ────────────────────────────
+# The CHANGELOG's blast-radius sentence for the Northern Flicker example is a
+# set of measured counts, not a narrative: they come from
+# `evals/prompt_lift_audit.py`, which recomputes them from committed rows.
+LIFT_AUDIT = RESULTS + "prompt-example-lift-audit-20260905.json"
+LIFT_CENSUS = RESULTS + "c2op-count-census.json"
+_LIFT_ERA = "affe2881_cortex_by_variant_and_era"
+_LIFT_V38 = "longmemeval-ku-oracle-qwen-27b-ceiling-v38"
+_LIFT_PRE = "82 of 90 pre-change oracle-KU artifacts"
+_LIFT_S = "wrong in all 58 `_s` artifacts"
+_LIFT_MAX = "more than 0.0044 (ceiling-v38 cortex,\n  0.6667 → 0.6623;"
+_LIFT_SEVEN = "lists that question among the seven\n  `frozen-total` losses"
+
+
+def _lift_max_shift(d: dict) -> float:
+    """Largest |published − leave-one-out| over the extractor-built arms of
+    every doc-cited artifact the audit covers."""
+    return max(abs(e["published"][arm] - e["loo_affe2881"][arm])
+               for e in d["leave_one_out"].values()
+               for arm in ("cortex", "hybrid") if arm in e["published"])
+
+
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("lift-audit-affe-pre-correct", _LIFT_PRE, LIFT_AUDIT,
+     lambda d: d[_LIFT_ERA]["oracle_ku78/pre"]["cortex_correct"], 82, 0),
+    ("lift-audit-affe-pre-runs", _LIFT_PRE, LIFT_AUDIT,
+     lambda d: d[_LIFT_ERA]["oracle_ku78/pre"]["runs"], 90, 0),
+    ("lift-audit-s-runs", _LIFT_S, LIFT_AUDIT,
+     lambda d: (d[_LIFT_ERA]["s_full_haystack/pre"]["runs"]
+                + d[_LIFT_ERA]["s_full_haystack/post"]["runs"]), 58, 0),
+    ("lift-audit-s-correct", _LIFT_S, LIFT_AUDIT,
+     lambda d: (d[_LIFT_ERA]["s_full_haystack/pre"]["cortex_correct"]
+                + d[_LIFT_ERA]["s_full_haystack/post"]["cortex_correct"]), 0, 0),
+    ("lift-audit-v38-cortex-published", _LIFT_MAX, LIFT_AUDIT,
+     lambda d: d["leave_one_out"][_LIFT_V38]["published"]["cortex"], 0.6667, 4),
+    ("lift-audit-v38-cortex-loo", _LIFT_MAX, LIFT_AUDIT,
+     lambda d: d["leave_one_out"][_LIFT_V38]["loo_affe2881"]["cortex"], 0.6623, 4),
+    ("lift-audit-max-shift", _LIFT_MAX, LIFT_AUDIT, _lift_max_shift, 0.0044, 4),
+    # The count-exclusion rule was written to recover the census's seven
+    # "frozen-total" losses; affe2881 is one of them.
+    ("lift-audit-frozen-total-seven", _LIFT_SEVEN, LIFT_CENSUS,
+     lambda d: d["summary"]["lost_by_class"]["frozen-total (rule-recoverable)"],
+     7, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
