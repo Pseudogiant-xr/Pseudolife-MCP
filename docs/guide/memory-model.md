@@ -372,11 +372,11 @@ it came from a live `memory_set_add` call or a dream claim.
 ## Provenance contenders — never silently overwrite a user fact
 
 Every cortex fact carries a provenance tier: **`user` > `action` >
-`agent`** (set via `origin=`, or defaulted from `source`). A write may only
-*supersede* a slot whose current value is backed by an equal-or-weaker
-tier. A **weaker-tier** write (e.g. an `agent` value conflicting with a
-`user`-stated fact), or one below the confidence margin, is **not
-applied** — it's parked as a *contender*:
+`agent` > `assistant`** (set via `origin=`, or defaulted from `source`). A
+write may only *supersede* a slot whose current value is backed by an
+equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
+conflicting with a `user`-stated fact), or one below the confidence margin,
+is **not applied** — it's parked as a *contender*:
 
 ```python
 memory_fact_set("db", "host", "10.0.0.5", origin="user")   # current
@@ -386,6 +386,37 @@ memory_fact_set("db", "host", "10.0.0.9", origin="agent")  # -> action="conteste
 memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user-confirmed)
 # or accept=False -> discard the contender, current unchanged.
 ```
+
+If the slot has since become a **set** (see [Conversion
+rules](#conversion-rules)), `accept=True` is refused with
+`reason: "slot_holds_set"` — a scalar contender cannot replace a member set,
+so adopt the value with `memory_set_add` instead — while `accept=False`
+always works and is how an operator dismisses such a contender.
+
+`assistant` is the floor tier: a fact the **assistant** stated in a turn,
+written only by a dream whose extraction prompt asks for a `speaker` label
+(`memory.dream.assistant_claims`, default `contender`). It may fill an empty
+slot, but against a current value of any other origin it always parks as a
+contender — that rule is not gated on `protect_provenance` below — and it
+ranks after user-origin facts at equal similarity. The same rule covers
+**scalar and set-valued slots**: an assistant claim cannot trigger the
+one-way scalar→set conversion, cannot join a member set that carries any
+non-assistant member (it parks as a contender), and cannot retract a
+member another tier added (the retraction is dropped, `action:
+"member_remove_refused"`). It may fill an empty slot, extend a set it
+alone built, and retract its own members. Nothing supersedes *it*
+in return: an assistant-origin value is replaced by any later write.
+Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
+for assistant-stated facts lifts the fact-only arm on
+`single-session-assistant` from 0.054 to 0.536 while the knowledge-update
+pollution check stays flat-to-up, and the guard costs nothing measurable
+against an unguarded variant of the same prompt — tables, paired tests and
+the adoption gate are in `evals/README.md` (the published run is the clean
+re-run `assist-prov2`; the first run's contaminated worked example and its
+retired numbers are retained in the same section). Nothing here is on by
+default: the shipped extraction prompt asks for no `speaker` label, so this
+tier is only reachable by a bank whose dream runs one of those candidate
+prompts.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in
@@ -455,7 +486,8 @@ Capture is cheap and in-session; synthesis is single-writer (the dream):
 # during a task, log what happened — this writes a SIGNAL, not a lesson:
 memory_outcome("deploy engine to host", "failure",
                about="tar --same-owner", detail="chown errors aborted the extract")
-memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
+memory_outcome("deploy engine to host", "success", about="tar --no-same-owner",
+               used_ids=[1421, 903])   # the search hits the work turned on
 # user corrections are auto-captured when a user-tier memory_fact_set supersedes a value.
 
 # the dream later distils accumulated signals into durable lessons; recall them at task start:
@@ -489,6 +521,19 @@ entity in `src` (no `|attribute`) restores every retired aspect of that
 entity. `GET /api/curation/retired` lists what's currently retired across
 both stores, and the Console's undo route is `POST /api/lessons/restore`.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
+
+`used_ids` is a second, unrelated payload riding the same call: the ids of
+the `memory_search` hits the work actually turned on. Each one credits the
+serving `retrieval_events` row with a `retrieval_uses` label
+(`used_via="outcome"`) — the relevance signal a learned reranker trains on,
+which otherwise only `memory_get` / `memory_reinforce` produce. Nothing is
+written to the signal itself, and nothing links a signal to the labels it
+caused: the labels stand on their own, and which outcome named which ids is
+deliberately not recorded. The result reports `used_ids_recorded`,
+`used_ids_unmatched` (ids no search in the window served) and
+`used_ids_errors` (labels the storage layer refused, which is not the same
+answer as a miss); at most 50 ids are taken per call, any beyond that
+reported as `used_ids_truncated`.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,

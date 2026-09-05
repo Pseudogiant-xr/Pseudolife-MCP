@@ -300,6 +300,22 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   a populated reference bank (its raw cosines are not rescaled and
   outrank every memory once the reranker fires). Neither combination has
   been measured.
+- **Assistant-stated claims parked, not adopted**
+  (`memory.dream.assistant_claims = "contender"`) — what a dream claim
+  labelled `speaker: "assistant"` becomes: `contender` writes it at the
+  floor `assistant` provenance tier (it may fill an empty slot, but
+  against a value or member set of any other origin it parks as a
+  contender, and it ranks below user-origin facts at equal similarity),
+  `supersede` treats it as an ordinary agent-tier dream claim, and `drop`
+  discards it. An unrecognised value falls back to `contender` — a typo
+  must not open the overwrite path. **Inert with the shipped extraction
+  prompt**, which never asks for a `speaker` field: with no label on the
+  claim the knob is never consulted at any setting, so all three values
+  are today's behaviour on a shipped install. It is settable only for the
+  prompt-variant experiment in `evals/README.md` ("Assistant-stated
+  facts"), and it is deliberately **not** on the Console for the same
+  reason as the candidate-pool knobs: adoption of either variant is gated
+  on the extraction ladder, which has not been run on them.
 - **Staleness served as annotation** (`memory.search.stale_policy =
   "annotate"`) — stale records (past 2×TTL for their freshness class)
   carry `effective_confidence`/`stale` flags and nothing more, today's
@@ -701,6 +717,8 @@ The milestones:
 | v35 | `entries.authority` / `entries.distortion_tolerance` and `facts.authority` / `facts.distortion_tolerance` — the write-time label pair (authority collapse, arXiv 2608.01679; the compaction cliff, arXiv 2608.22752). `authority` is the SPEECH ACT of the text (`directive` \| `observation` \| `quoted`), deliberately a separate axis from the `origin` tier (who wrote — which drives supersession arithmetic and which entries never persisted anyway); `distortion_tolerance` is the fidelity class (`constraint` \| `procedural` \| `belief` \| `preference` \| `episodic`). Set at write time — explicit `memory_store` / `memory_fact_set` parameters, or a deterministic heuristic under the `auto` default that asserts only `constraint` (rule-sized deontic/imperative text) and `quoted`/`directive` — and inherited through `memory_supersede` / `memory_consolidate` / fact supersession unless the new write restates one. Consumers: the dream carries a `constraint` source's text verbatim onto a derived fact and a post-dream guard reports any constraint entry left without a verbatim carrier (`constraint_verbatim` / `constraint_misses`); a `quoted` source is low-trust for the two-man rule; `constraint` facts are pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` (`memory.cortex.pin_constraints`). `NULL` = observation / unlabelled, exactly the pre-v35 reading, so the migration is a no-op on an existing bank — no backfill, by design. Additive/idempotent |
 | v36 | Review-queue autonomy (2026-09-02). `edge_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` / `judge_relation` / `decided_by` / `decided_at` — the link judge's opinion on a pending link proposal (the retype verdict's corrected relation in `judge_relation`) and who settled the row; `entity_proposals.judge2_verdict` / `judge2_confidence` / `judge2_model` / `judged2_at` — the merge judge's SECOND opinion beside the v30 first one (two-vote agreement is the apply gate for rows the single-vote 0.8 reject gate leaves pending); and `curation_judgments` (`store`, sorted slot keys, verdict, keep, fold, confidence, note, model, judged_at) — the store-curation judge's memo, because the lesson/world duplicate listings are recomputed per pass and would otherwise be re-sent every sweep. `NULL` judge columns = not yet judged, exactly the pre-v36 behaviour, so the migration is a no-op on existing banks. Gates measured by `evals/queue_judge_ladder.py` against `evals/results/queue-judge-panel-20260902.json`. Additive/idempotent |
 | v37 | Retire-not-delete (2026-09-03). `store_decisions` (`id`, `store`, `entity_norm`, `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB, `decided_at`) — the FK-free audit of lesson/world forgets and restores. A `memory_forget(scope="lesson"\|"world")` now retires the slot's rows (`status='retired'`, rows kept; `memory.compaction` treats them like any non-live record) instead of deleting them, and the audit row carries the verbatim record so `lesson_restore` / `world_restore` (`memory_graph_review(action="restore_slot")`, `POST /api/lessons/restore`, `POST /api/world/restore`) still work after compaction has purged the retired row. Also (no DDL): merge and junk rejects write text-keyed tombstones to `dismissed_pairs` (canonical pair / `junk:<canonical>` self-pair) so a verdict outlives the CASCADE-deleted proposal row. No column changes; the table starts empty on an existing bank, so the migration is a no-op there. Additive/idempotent |
+
+Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 

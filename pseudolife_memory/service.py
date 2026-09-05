@@ -518,6 +518,23 @@ def _onnx_embedding_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
 
 
+class _UseLabelFailed:
+    """Sentinel: a retrieval-use label the storage layer refused.
+
+    Distinct from ``None``, which means "no search in the window served
+    this id" — a real answer about retrieval. A caught psycopg failure is
+    not that answer, and reporting it as one tells an agent its ids were
+    never served when in fact the write raised."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "<use-label failed>"
+
+
+_USE_LABEL_FAILED = _UseLabelFailed()
+
+
 class MemoryService(DreamOps):
     """Thin orchestration over CMS + embedder + reference bank + contrastive.
 
@@ -2268,18 +2285,28 @@ class MemoryService(DreamOps):
                 "members_count": len(self._cortex.members(entity, attribute)),
             }
 
-    def set_remove(self, entity: str, attribute: str, member: str) -> dict[str, Any]:
+    def set_remove(self, entity: str, attribute: str, member: str,
+                   origin: str | None = None) -> dict[str, Any]:
         """Retract one current member of a set-valued slot (audit row kept,
         ``status`` -> ``"removed"``). Persists via the same per-slot
         write-through path ``cortex_write`` uses.
 
+        ``origin`` is the retracting write's provenance tier. Only the
+        ``assistant`` floor is consulted: an assistant-stated retraction of a
+        member some other tier put there is refused
+        (``"member_remove_refused"``), so an assistant-origin claim can never
+        take a member out of the user's set. Callers that pass nothing (the
+        MCP tool, the dream rollback replay) are unguarded exactly as before.
+
         Returns ``{"action", "entity", "attribute", "member", "members_count"}``
-        — ``action`` is ``"member_removed"`` or ``"member_not_found"``.
+        — ``action`` is ``"member_removed"``, ``"member_not_found"`` or
+        ``"member_remove_refused"``.
         """
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
-            res = self._cortex.remove_member(entity, attribute, member)
+            res = self._cortex.remove_member(entity, attribute, member,
+                                             support=origin)
             self._save_cortex()
             return {
                 "action": res.action,
@@ -2707,10 +2734,19 @@ class MemoryService(DreamOps):
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
         there is nothing parked to resolve, and ``{"resolved": False,
-        "reason": "slot_holds_set"}`` when the slot was converted to a set
-        (``memory_set_add``) after the contender was parked against the
-        scalar it used to hold — resolve it via ``memory_set_add`` /
-        ``memory_set_remove`` instead.
+        "reason": "slot_holds_set"}`` on ``accept=True`` when the slot was
+        converted to a set (``memory_set_add``) after the contender was
+        parked against the scalar it used to hold — a scalar contender
+        cannot replace a member set, so adopt the value via
+        ``memory_set_add`` / ``memory_set_remove`` instead. ``accept=False``
+        is always available: retiring touches no members, and it is the
+        operator's only way to dismiss such a contender (today via this
+        tool or ``POST /api/facts/resolve``; the Console's Cortex view does
+        not yet flag contested slots from the fact dump). On a set slot the
+        returned ``current`` is ``None`` (the slot holds members, not a
+        scalar) and ``record`` is the retired contender itself, where a
+        scalar-slot rejection returns the kept current; the response shape
+        is otherwise the same as the scalar case.
 
         ``support`` (internal): the tier stamped on an accepted contender —
         "user" for the MCP tool path; the consolidation quarantine passes
@@ -3178,7 +3214,8 @@ class MemoryService(DreamOps):
     def record_outcome(self, task: str, outcome: str, about: str | None = None,
                        detail: str | None = None, polarity: str | None = None,
                        origin: str = "action",
-                       episode: str | None = None) -> dict[str, Any]:
+                       episode: str | None = None,
+                       used_ids: list[int] | None = None) -> dict[str, Any]:
         """Record a cheap in-session outcome signal (success | failure |
         correction). Single-writer: this never writes a lesson — the dream
         synthesises lessons from the accumulated signals.
@@ -3187,7 +3224,21 @@ class MemoryService(DreamOps):
         prefix (>=8 chars) — attributes this signal to that episode instead
         of the global current one. An unknown/closed/ambiguous handle
         degrades silently: the signal is still recorded, and
-        ``"episode_warning"`` is added to the result."""
+        ``"episode_warning"`` is added to the result.
+
+        ``used_ids``: entry ids the caller actually reasoned from. Each one
+        credits the most recent search in this session that served it with
+        a ``retrieval_uses`` row under ``used_via="outcome"`` — the same
+        table ``memory_get`` / ``memory_reinforce`` write to, so the replay
+        and telemetry harnesses read it unchanged. Nothing is written on
+        ``outcome_signals`` itself, and nothing links the signal row to the
+        use rows it caused: the labels stand on their own, and which
+        outcome named which ids is deliberately not recorded (the event's
+        ``episode_id`` comes from the writer at search time, the signal's
+        from the ``episode=`` handle — they are not a join). That is what
+        costs no schema bump and no prose in ``detail``. Reported back as
+        ``used_ids_recorded`` (ids credited to an event) and
+        ``used_ids_unmatched`` (ids no event in the window served)."""
         # Refuse — never coerce — an unknown outcome: silently mapping e.g.
         # "failed" to "success" would invert a dead-end into a do-this lesson.
         if outcome not in ("success", "failure", "correction"):
@@ -3209,7 +3260,54 @@ class MemoryService(DreamOps):
             out = {"recorded": True, "signal_id": sid, "task": task, "outcome": outcome}
             if episode_warning:
                 out["episode_warning"] = "unknown or closed episode handle"
+            if used_ids:
+                out.update(self._label_used_entries(used_ids))
             return out
+
+    def _label_used_entries(self, used_ids: list[int]) -> dict[str, Any]:
+        """Credit each id in ``used_ids`` to the search that served it.
+
+        Returns the reporting keys for :meth:`record_outcome`. An id the
+        window never served is reported rather than dropped: a silent zero
+        reads the same as a landed label, and the whole point of the
+        parameter is that the caller can tell. A label the database refused
+        is a THIRD answer and is counted separately (``used_ids_errors``):
+        folding it into ``used_ids_unmatched`` would tell the agent no
+        search ever served the id, which is a claim about its retrieval
+        rather than about the write that failed.
+
+        Caller holds ``self._lock`` (see
+        ``tests/test_service_lock_discipline.py``)."""
+        if not self.config.memory.retrieval_log.enabled:
+            return {"used_ids_recorded": 0,
+                    "used_ids_reason": "retrieval log disabled"}
+        credited, unmatched, errors = 0, [], 0
+        seen: set[int] = set()
+        for raw in used_ids:
+            try:
+                entry_id = int(raw)
+            except (TypeError, ValueError):
+                # Belt and braces: the MCP layer parses and counts junk
+                # (``used_ids_ignored``) before it gets here. A direct
+                # service caller's bad element is skipped, not raised —
+                # this rides an outcome that must be recorded regardless.
+                continue
+            if entry_id in seen:
+                continue
+            seen.add(entry_id)
+            labelled = self._record_retrieval_use(entry_id, "outcome")
+            if labelled is _USE_LABEL_FAILED:
+                errors += 1
+            elif labelled is None:
+                unmatched.append(entry_id)
+            else:
+                credited += 1
+        out: dict[str, Any] = {"used_ids_recorded": credited}
+        if unmatched:
+            out["used_ids_unmatched"] = unmatched
+        if errors:
+            out["used_ids_errors"] = errors
+        return out
 
     def lesson_write(self, task: str, aspect: str, lesson: str, *,
                      about: str | None = None, outcome: str = "success",
@@ -3981,22 +4079,32 @@ class MemoryService(DreamOps):
             self._retrieval_log_errors += 1
             logger.warning("served-facts attach failed", exc_info=True)
 
-    def _record_retrieval_use(self, entry_id: int, used_via: str) -> None:
+    def _record_retrieval_use(self, entry_id: int,
+                              used_via: str) -> int | _UseLabelFailed | None:
         """Implicit relevance label (schema v31): the most recent search in
         this session that served ``entry_id`` gains a ``retrieval_uses``
         row. Never raises: a label failure must not break the fetch it
-        rides on."""
+        rides on.
+
+        Three distinct answers, because the ``used_ids`` reporting tells an
+        agent which one it got (the get/reinforce callers ignore the return
+        entirely): the event id credited; None when nothing in the window
+        served this entry, or logging is off; and :data:`_USE_LABEL_FAILED`
+        when the write raised — that one is a fact about the database, not
+        about what the search served."""
         cfg = self.config.memory.retrieval_log
         if self._storage is None or not cfg.enabled:
-            return
+            return None
         try:
             _, session_id = self._resolve_writer()
-            self._storage.record_retrieval_use(
+            event_id, _rows = self._storage.credit_retrieval_use(
                 int(entry_id), session_id, used_via,
                 float(cfg.use_window_seconds))
+            return event_id
         except Exception:  # noqa: BLE001
             self._retrieval_log_errors += 1
             logger.warning("retrieval-use label failed", exc_info=True)
+            return _USE_LABEL_FAILED
 
     def prune_retrieval_log(self) -> int:
         """Drop retrieval events older than the configured retention (their
