@@ -277,3 +277,162 @@ def test_cortex_search_flags_contested_entries(pristine_service):
     entries = svc.cortex_search("project language", top_k=5)["entries"]
     assert entries and entries[0]["contested"] is True
     assert entries[0]["contender_value"] == "rust"
+
+
+# ── cortex_dump carries the contested flag (the Console's /api/facts path) ──
+#
+# Before 2026-09-05 only ``cortex_search`` set ``contested`` /
+# ``contender_value``; ``cortex_dump`` never did, so the Console's Cortex
+# view (which reads the dump) never showed Accept/Discard against a real
+# bank and the Observatory's ``facts_contested`` read 0. The web fixtures
+# synthesised the flag, which is why the demo looked right. These run
+# against the REAL service, never FixtureService.
+
+def test_cortex_dump_flags_contested_scalar_slot(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.cortex_write("project", "language", "rust", support="agent")
+    svc.cortex_write("project", "license", "apache-2.0", support="user")
+    rows = {(r["entity"], r["attribute"]): r
+            for r in svc.cortex_dump()["entries"]}
+    lang = rows[("project", "language")]
+    assert lang["value"] == "go"                  # the current value is served
+    assert lang["contested"] is True
+    assert lang["contender_value"] == "rust"
+    assert lang["contender_origin"] == "agent"
+    lic = rows[("project", "license")]
+    assert lic["contested"] is False
+    assert "contender_value" not in lic           # same shape cortex_search serves
+
+
+def test_cortex_dump_flags_contender_parked_against_set_slot(pristine_service):
+    """A contender parked before the slot converted to a set stays parked
+    against the set (dismissable via ``cortex_resolve(accept=False)`` once
+    fix/set-slot-contender-retire lands). Every member row of that slot
+    carries the flag, so a reader filtering rows sees the truth per row."""
+    svc = pristine_service
+    svc.cortex_write("user", "bikes owned", "road bike", support="user")
+    svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")
+    svc.set_add("user", "bikes owned", "hybrid bike")
+    members = [r for r in svc.cortex_dump()["entries"]
+               if (r["entity"], r["attribute"]) == ("user", "bikes owned")]
+    assert sorted(m["value"] for m in members) == ["hybrid bike", "road bike"]
+    assert all(m["kind"] == "member" for m in members)
+    assert all(m["contested"] is True for m in members)
+    assert all(m["contender_value"] == "gravel bike" for m in members)
+
+
+def test_cortex_dump_flags_aggregate_guard_contender(pristine_service):
+    """The other way a set add parks: a number-led scalar keeps the slot
+    scalar and the blocked member sits as its contender."""
+    svc = pristine_service
+    svc.cortex_write("user", "birds", "27", support="user")
+    svc.set_add("user", "birds", "Northern Flicker")
+    row = next(r for r in svc.cortex_dump()["entries"]
+               if (r["entity"], r["attribute"]) == ("user", "birds"))
+    assert row["kind"] == "scalar" and row["value"] == "27"
+    assert row["contested"] is True
+    assert row["contender_value"] == "Northern Flicker"
+
+
+def test_overview_facts_contested_counts_real_contested_slots(pristine_service):
+    """``/api/overview`` → ``counts.facts_contested`` is the number of
+    contested SLOTS on the real service: a set slot with two member rows
+    and one contender counts once, not twice."""
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.cortex_write("project", "language", "rust", support="agent")
+    svc.cortex_write("user", "bikes owned", "road bike", support="user")
+    svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")
+    svc.set_add("user", "bikes owned", "hybrid bike")
+    svc.cortex_write("project", "license", "apache-2.0", support="user")
+    ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
+    assert ov["counts"]["facts"] == 4              # go, road, hybrid, apache
+    assert ov["counts"]["facts_contested"] == 2
+
+
+def test_cortex_dump_flag_clears_after_resolve_in_either_direction(pristine_service):
+    """The dump's bucket is filtered on ``status == "contested"`` over ALL
+    records — retired and superseded contenders live in the same list, so
+    that filter is the only thing that stops a settled contest flagging its
+    slot forever."""
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.cortex_write("project", "language", "rust", support="agent")
+    svc.cortex_resolve("project", "language", accept=False)      # retire
+    row = next(r for r in svc.cortex_dump()["entries"]
+               if (r["entity"], r["attribute"]) == ("project", "language"))
+    assert row["value"] == "go"
+    assert row["contested"] is False and "contender_value" not in row
+
+    svc.cortex_write("project", "language", "zig", support="agent")
+    svc.cortex_resolve("project", "language", accept=True)       # promote
+    row = next(r for r in svc.cortex_dump()["entries"]
+               if (r["entity"], r["attribute"]) == ("project", "language"))
+    assert row["value"] == "zig"
+    assert row["contested"] is False and "contender_value" not in row
+
+
+def test_api_facts_route_carries_contested_from_real_service(pristine_service):
+    """End to end through the route the Console reads (``/api/facts`` →
+    ``_limited(cortex_dump)``), not the service method alone."""
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.cortex_write("project", "language", "rust", support="agent")
+    out = ConsoleRoutes(svc).dispatch("GET", "/api/facts", {"limit": "500"}, {})
+    row = next(r for r in out["entries"]
+               if (r["entity"], r["attribute"]) == ("project", "language"))
+    assert row["contested"] is True
+    assert row["contender_value"] == "rust"
+    assert row["contender_origin"] == "agent"
+
+
+def test_overview_facts_contested_keys_slots_like_the_store(pristine_service):
+    """A set slot's member rows can spell the attribute differently — the
+    converted scalar keeps its own strings, a later add keeps the caller's —
+    while sharing one normalised key (casefold, separator runs collapsed).
+    One slot, one contender, ONE in the count."""
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    svc = pristine_service
+    svc.cortex_write("user", "bikes owned", "road bike", support="user")
+    svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")
+    svc.set_add("user", "Bikes-Owned", "hybrid bike")
+    rows = [r for r in svc.cortex_dump()["entries"]
+            if r["contested"] and r["kind"] == "member"]
+    assert sorted(r["attribute"] for r in rows) == ["Bikes-Owned", "bikes owned"]
+    ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
+    assert ov["counts"]["facts_contested"] == 1
+
+
+def test_fixture_fact_rows_carry_what_the_cortex_view_reads(pristine_service):
+    """Fixture-vs-real contract for the Cortex view (the class of drift that
+    hid this bug: ``web/fixtures.py`` synthesised ``contested`` while the
+    real dump never set it). Every key views/cortex.js reads must be present
+    on BOTH a real dump row and a fixture row, contested or not, scalar or
+    member, with the same presence rule for the contender fields."""
+    from pseudolife_memory.web.fixtures import FixtureService
+    view_keys = {"entity", "attribute", "value", "origin", "confidence",
+                 "age", "tx_time", "kind", "contested"}
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.cortex_write("project", "language", "rust", support="agent")
+    svc.cortex_write("project", "license", "apache-2.0", support="user")
+    svc.cortex_write("user", "bikes owned", "road bike", support="user")
+    svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")
+    svc.set_add("user", "bikes owned", "hybrid bike")
+    real = svc.cortex_dump()["entries"]
+    fixture = FixtureService().cortex_dump()["entries"]
+    for rows in (real, fixture):
+        kinds = {(r["kind"], r["contested"]) for r in rows}
+        # Both surfaces cover the three shapes the view distinguishes.
+        assert {("scalar", True), ("scalar", False), ("member", True)} <= kinds
+        for r in rows:
+            missing = view_keys - set(r)
+            assert not missing, (r["entity"], r["attribute"], missing)
+            if r["contested"]:
+                assert {"contender_value", "contender_origin"} <= set(r)
+            else:
+                assert "contender_value" not in r
+                assert "contender_origin" not in r

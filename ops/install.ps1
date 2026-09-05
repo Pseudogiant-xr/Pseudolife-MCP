@@ -475,7 +475,7 @@ if ($claudeShimMode) {
         Write-Warning "Shim autostart registration failed (usually elevation): $_"
         Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-shim-autostart.ps1):"
         Write-Host "    ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model"
-        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v2.md"
+        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v4.md"
     }
 } elseif ($codexShimMode) {
     Step "Registering the Codex shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."

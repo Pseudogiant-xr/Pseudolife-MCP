@@ -1,0 +1,114 @@
+{
+  "n": 164,
+  "dropped_a": 0,
+  "dropped_b": 0,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-prov2.jsonl",
+    "arms": {
+      "rag": 0.8171,
+      "cortex": 0.5549,
+      "hybrid": 0.8598,
+      "cascade": 0.8232
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-naive2.jsonl",
+    "arms": {
+      "rag": 0.8171,
+      "cortex": 0.5366,
+      "hybrid": 0.8354,
+      "cascade": 0.7988
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "cortex": {
+        "delta": 0.0183,
+        "p": 0.6794,
+        "wins": 13,
+        "losses": 10,
+        "win_qids": [
+          "1a1907b4",
+          "2698e78f_abs",
+          "41275add",
+          "42ec0761",
+          "51b23612",
+          "618f13b2",
+          "71315a70",
+          "778164c6",
+          "89941a93",
+          "9ea5eabc",
+          "cc539528",
+          "d7c942c3",
+          "f523d9fe"
+        ],
+        "loss_qids": [
+          "07b6f563",
+          "18dcd5a5",
+          "2bf43736",
+          "352ab8bd",
+          "7401057b",
+          "7e974930",
+          "a2f3aa27",
+          "b6019101",
+          "cf22b7bf",
+          "e493bb7c"
+        ]
+      },
+      "hybrid": {
+        "delta": 0.0244,
+        "p": 0.3423,
+        "wins": 7,
+        "losses": 3,
+        "win_qids": [
+          "195a1a1b",
+          "778164c6",
+          "95228167",
+          "afdc33df",
+          "cc539528",
+          "d7c942c3",
+          "eace081b"
+        ],
+        "loss_qids": [
+          "0977f2af",
+          "89941a94",
+          "a2f3aa27"
+        ]
+      },
+      "cascade": {
+        "delta": 0.0244,
+        "p": 0.4225,
+        "wins": 9,
+        "losses": 5,
+        "win_qids": [
+          "1a1907b4",
+          "2698e78f_abs",
+          "41275add",
+          "45dc21b6",
+          "778164c6",
+          "89941a93",
+          "9ea5eabc",
+          "cc539528",
+          "d7c942c3"
+        ],
+        "loss_qids": [
+          "07b6f563",
+          "2bf43736",
+          "7401057b",
+          "a2f3aa27",
+          "b01defab"
+        ]
+      }
+    }
+  }
+}
