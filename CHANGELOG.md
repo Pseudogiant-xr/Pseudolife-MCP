@@ -48,6 +48,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   warning naming the production ports, and drops two stale claims it carried
   (`--list` does not probe; there are seven rungs outside `LADDER_ORDER`, not
   five).
+- **`longmemeval_bench.py` had the same collision with no override at all**:
+  `EXTRACTORS["diffusiongemma"]` and `EXTRACTORS["sonnet-5"]` were pinned to
+  `:8082` — in the harness behind the published README accuracy numbers, two
+  lines below a comment saying ":8082 stays the production sonnet shim". Both
+  now read the SAME variables as the ladder rungs (`PSEUDOLIFE_BENCH_DG_URL`,
+  `PSEUDOLIFE_BENCH_SONNET_URL`), so one export redirects a run that crosses
+  both harnesses. `tests/test_bench_production_port_guard.py` pins the
+  invariant for both: the set of endpoints on a production port must equal
+  the declared set and every one must be redirectable, so a new entry added
+  on `:8082`/`:8086` without an override fails CI instead of silently
+  benchmarking production.
+- **`evals/bench_diffusiongemma.ps1` now checks *identity*, not liveness,
+  before trusting `:8082`.** Its `Start-Shim` accepted any `200` on
+  `/health` as "dg_shim is up" — and `claude_shim.py` serves `/health` — so
+  with the production shim running it never launched dg_shim and ran both
+  harnesses against Claude. It now requires `/v1/models` to list
+  `diffusiongemma` (dg_shim's only id; claude_shim's list never contains
+  it), refuses loudly if something else already holds the port, and exports
+  `PSEUDOLIFE_BENCH_DG_URL` so both harnesses agree on the endpoint.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

@@ -92,9 +92,11 @@ runs locally" under the LongMemEval bench below for the same caveat.
 > `results/sonnet-5-sonnetv3-0802.json`). An *untagged* rerun is stopped
 > earlier by the canonical-clobber guard, and there is no all-rungs sweep
 > mode — every rung is named with `--rung`, so nothing reaches these ports by
-> accident. `evals/bench_diffusiongemma.ps1` is the one committed script that
-> walks into it unaided: its `Start-Shim` treats a `200` on `:8082/health` as
-> "dg_shim is up", and `claude_shim.py` serves `/health` too.
+> accident. `evals/bench_diffusiongemma.ps1` used to walk into it unaided: its
+> `Start-Shim` treated a `200` on `:8082/health` as "dg_shim is up", and
+> `claude_shim.py` serves `/health` too. It now requires `/v1/models` to list
+> `diffusiongemma` before trusting the port, and refuses if anything else
+> already holds it.
 >
 > Set the rung's env var to a dedicated port before running (the way
 > `opus-5`/`fable-5` avoid the problem by construction), and check the
@@ -324,6 +326,13 @@ CLI, so **selecting one of those rungs sends the corpus turns to Anthropic**.
 They are never selected by default (they sit outside `LADDER_ORDER` and are
 not the default `--extractor`); you have to ask for them by name. The
 answerer and judge remain local in every configuration.
+
+The same production-port caveat as the ladder applies here: `--extractor
+sonnet-5` and `--extractor diffusiongemma` default to `:8082`, the deployed
+Claude shim's port, and read the same `PSEUDOLIFE_BENCH_SONNET_URL` /
+`PSEUDOLIFE_BENCH_DG_URL` overrides — one export redirects both harnesses.
+`tests/test_bench_production_port_guard.py` pins that every entry on a
+production port in either harness is redirectable.
 
 ## Dataset
 

@@ -95,12 +95,21 @@ EXTRACTORS = {
     "lfm2-8b-a1b": "http://127.0.0.1:8081/v1",
     "ornith-9b": "http://127.0.0.1:8081/v1",
     # DiffusionGemma has no llama-server support (PR #24423); serve it with
-    # evals/dg_shim.py, which wraps the patched llama-diffusion-cli.
-    "diffusiongemma": "http://127.0.0.1:8082/v1",
+    # evals/dg_shim.py, which wraps the patched llama-diffusion-cli. The :8082
+    # default is ALSO the production Claude shim's port, which answers /models
+    # and so passes probe(): with dg_shim down and that shim up, this arm
+    # benchmarks Claude under the DiffusionGemma label. Same var as the ladder
+    # rung, so one export redirects both harnesses.
+    "diffusiongemma": os.environ.get("PSEUDOLIFE_BENCH_DG_URL",
+                                     "http://127.0.0.1:8082/v1"),
     "gemma4-26b-qat": "http://127.0.0.1:8081/v1",
     # Claude Sonnet 5 ceiling probe (2026-07-11): served by evals/claude_shim.py
-    # wrapping the Max-plan claude CLI (same :8082 shim-swap slot as dg).
-    "sonnet-5": "http://127.0.0.1:8082/v1",
+    # wrapping the Max-plan claude CLI (same :8082 shim-swap slot as dg). That
+    # slot is the production shim's, so by default this arm measures whatever
+    # --model / --system-prompt-file the autostart shim was launched with;
+    # redirect to a dedicated launch the way opus-5/fable-5 are by construction.
+    "sonnet-5": os.environ.get("PSEUDOLIFE_BENCH_SONNET_URL",
+                               "http://127.0.0.1:8082/v1"),
     # Smarter-teacher comparators (2026-07-26): claude_shim.py --model
     # claude-opus-5 / claude-fable-5 on dedicated ports (:8082 stays the
     # production sonnet shim).
