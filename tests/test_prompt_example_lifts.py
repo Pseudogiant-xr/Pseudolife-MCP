@@ -34,6 +34,11 @@ Carriers are the live ``dream.py`` constants plus every file under
 ``evals/prompts``; the Titlecase-only name scan on the shim-prompt branch
 misses both lowercase values and paraphrased prose, which is why this guard
 exists as well as that one.
+
+Coverage caveat: the two dataset tests skip where ``evals/data`` is absent —
+that is CI, which fetches no benchmark data — so a NEW lift is caught only
+by the mandatory local full-suite run on a machine holding the LongMemEval
+files. A green CI here proves the structural half only.
 """
 from __future__ import annotations
 
@@ -131,6 +136,11 @@ def _example_values(text: str) -> set[str]:
 # The count-exclusion block shipped 2026-08-01 (a4686df6) into the live
 # prompt and, in the same commit, into the v1/v2 shim files; v3 and the
 # v5..v10 op-prompt artifacts were cut from it.
+#
+# Pending: `feat/shim-provenance-prompt` adds `sonnet_extractor_v4.md` (v2
+# plus the assistant-facts blocks), which inherits both examples. When that
+# branch lands, add "sonnet_extractor_v4.md" here — the glob will pick the
+# file up and both dataset tests will go red by equality until it is.
 _COUNT_RULE_CARRIERS = (
     "dream._SYSTEM_PROMPT",
     "sonnet_extractor_v1.md", "sonnet_extractor_v2.md", "sonnet_extractor_v3.md",
@@ -184,15 +194,23 @@ def test_the_scan_finds_examples_in_every_prompt_family():
     assert any(_shingles(n) for n in _notes(c["dream._SYSTEM_PROMPT"]))
 
 
+_LAUNCHERS = ("install-shim-autostart.ps1", "install-shim-autostart.sh",
+              "install.ps1", "install.sh")
+
+
 def test_the_deployed_shim_default_is_a_scanned_carrier():
     """The maintainer's install extracts through the CLI shim, whose
-    ``--system-prompt-file`` REPLACES the shipped prompt. Whatever the
-    launcher defaults to must be in scope or the guard misses production."""
-    launcher = (_REPO / "ops" / "install-shim-autostart.ps1").read_text(encoding="utf-8")
-    named = set(re.findall(r"sonnet_extractor_v\d+\.md", launcher))
-    assert named, "launcher names no shim prompt file"
-    missing = sorted(named - set(_carriers()))
-    assert missing == [], f"shim default(s) not under evals/prompts: {missing}"
+    ``--system-prompt-file`` REPLACES the shipped prompt. Every launcher
+    hardcodes its own default (four of them, per platform and install
+    path), so each is read: whatever any of them names must be in scope
+    or the guard misses production on that platform."""
+    for launcher in _LAUNCHERS:
+        text = (_REPO / "ops" / launcher).read_text(encoding="utf-8")
+        named = set(re.findall(r"sonnet_extractor_v\d+\.md", text))
+        assert named, f"ops/{launcher} names no shim prompt file"
+        missing = sorted(named - set(_carriers()))
+        assert missing == [], (
+            f"ops/{launcher} defaults to a prompt not under evals/prompts: {missing}")
 
 
 def test_every_allowlisted_example_is_really_in_its_carrier():

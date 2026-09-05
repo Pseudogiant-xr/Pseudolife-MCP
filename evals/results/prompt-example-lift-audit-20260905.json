@@ -1,8 +1,8 @@
 {
  "audit": "prompt-example-lift-blast-radius",
  "date": "2026-09-05",
- "code": "b63ca3c7",
- "method": "leave-one-out from committed per-question rows; run era by git add-date vs the commit that added the example (a4686df6, 2026-08-01; the op block a day earlier, e4776729)",
+ "code": "93e4de10",
+ "method": "leave-one-out from committed per-question rows; run era by git add-date vs the commit that added the example (a4686df6, 2026-08-01; the op block a day earlier, e4776729); one run = one committed artifact, replicates and sweeps included",
  "questions": {
   "affe2881": "knowledge-update; gold '32'; the count-exclusion example states it",
   "89941a94": "knowledge-update; gold 'Yes. (You have a road bike too.)'",

@@ -12,26 +12,36 @@ a terminal:
   for ``affe2881`` alone and for both knowledge-update collisions;
 * ``affe2881``'s cortex verdict in every committed LongMemEval run, split by
   dataset variant and by whether the run predates the example (the ``_s``
-  rows are the negative control);
+  rows are the negative control). A "run" here is one committed artifact;
+  replicate files and knob sweeps of the same configuration each count;
 * the e4b-v3 sidecar's train-on-test overlap with the oracle-500 answer
   sessions, by question type (the distillation guard holds out KU only).
 
-Run dates are the artifact's git add-date (a sound upper bound). No GPU, no
-model call, no network. Usage::
+Run dates are the artifact's git add-date (a sound upper bound), read in one
+``git log`` walk; a file whose add commit is not in the local history stops
+the script rather than being bucketed — a shallow clone cannot produce this
+artifact. Row loading and accuracy come from ``replicate`` so the numbers are
+the harness's own. No GPU, no model call, no network. Usage::
 
     python evals/prompt_lift_audit.py
 """
 from __future__ import annotations
 
 import collections
+import functools
 import json
+import re
 import subprocess
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 RESULTS = REPO / "evals" / "results"
 DATA = REPO / "evals" / "data"
 OUT = RESULTS / "prompt-example-lift-audit-20260905.json"
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from replicate import accuracy, is_judged, load_rows  # noqa: E402
 
 # The example entered the shipped prompt and the shim files in one commit.
 BRIGHT_LINE = "2026-08-01"
@@ -52,23 +62,53 @@ DOC_CITED = [
     "longmemeval-ku-oracle-sonnet-5-sonnetv2-0802",
     "longmemeval-ku-oracle-sonnet-5-sonnetv3-0802",
 ]
-ARMS = ("rag_correct", "cortex_correct", "hybrid_correct")
+ARMS = ("rag", "cortex", "hybrid")
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+@functools.lru_cache(maxsize=None)
 def _rows(tag: str) -> list[dict]:
-    with (RESULTS / f"{tag}.jsonl").open(encoding="utf-8") as fh:
-        return [json.loads(line) for line in fh if line.strip()]
+    rows = load_rows(RESULTS / f"{tag}.jsonl")
+    if not rows or not all(is_judged(r) for r in rows):
+        raise RuntimeError(f"{tag}: missing or not fully judged; refusing to average it")
+    return rows
+
+
+@functools.lru_cache(maxsize=None)
+def _add_dates() -> dict[str, str]:
+    """Repo-relative path -> date of the commit that ADDED it, one git walk.
+
+    Newest-first output, so a path added twice keeps its oldest add-date."""
+    out = subprocess.run(
+        ["git", "log", "--diff-filter=A", "--name-only", "--format=%ad",
+         "--date=short", "--", "evals/results/"],
+        cwd=REPO, capture_output=True, text=True, check=True).stdout
+    dates: dict[str, str] = {}
+    current = None
+    for line in out.splitlines():
+        line = line.strip()
+        if _DATE.match(line):
+            current = line
+        elif line and current:
+            dates[line.replace("\\", "/")] = current
+    return dates
 
 
 def _add_date(rel: str) -> str:
-    out = subprocess.run(
-        ["git", "log", "--diff-filter=A", "--format=%ad", "--date=short", "--", rel],
-        cwd=REPO, capture_output=True, text=True, check=False).stdout.split()
-    return out[-1] if out else "unknown"
+    try:
+        return _add_dates()[rel]
+    except KeyError:
+        raise RuntimeError(
+            f"{rel}: no add commit in the local history (shallow clone?); the "
+            "pre/post split cannot be computed") from None
 
 
 def _acc(rows: list[dict], arm: str) -> float:
-    return round(sum(1 for r in rows if r.get(arm)) / len(rows), 4)
+    return round(accuracy(rows, arm), 4)
+
+
+def _accs(rows: list[dict]) -> dict[str, float]:
+    return {arm: _acc(rows, arm) for arm in ARMS}
 
 
 def leave_one_out() -> dict:
@@ -79,34 +119,27 @@ def leave_one_out() -> dict:
         entry = {
             "n": len(rows),
             "added": _add_date(f"evals/results/{tag}.jsonl"),
-            "affe2881_verdicts": {a[:-8]: hit.get(a) for a in ARMS if hit and a in hit},
-            "published": {a[:-8]: _acc(rows, a) for a in ARMS if a in rows[0]},
+            "affe2881_verdicts": {a: hit.get(f"{a}_correct") for a in ARMS} if hit else {},
+            "published": _accs(rows),
         }
         for label, drop in (("loo_affe2881", {"affe2881"}),
                             ("loo_both_ku_collisions", {"affe2881", "89941a94"})):
             kept = [r for r in rows if r["question_id"] not in drop]
-            entry[label] = {"n": len(kept),
-                            **{a[:-8]: _acc(kept, a) for a in ARMS if a in rows[0]}}
-        if "knowledge-update" in {r.get("question_type") for r in rows} and len(rows) > 78:
-            ku = [r for r in rows if r.get("question_type") == "knowledge-update"]
+            entry[label] = {"n": len(kept), **_accs(kept)}
+        ku = [r for r in rows if r.get("question_type") == "knowledge-update"]
+        if ku and len(rows) > len(ku):
             kept = [r for r in ku if r["question_id"] != "affe2881"]
-            entry["ku_subrow"] = {
-                "n": len(ku),
-                "published": {a[:-8]: _acc(ku, a) for a in ARMS if a in ku[0]},
-                "loo_affe2881": {"n": len(kept),
-                                 **{a[:-8]: _acc(kept, a) for a in ARMS if a in ku[0]}},
-            }
+            entry["ku_subrow"] = {"n": len(ku), "published": _accs(ku),
+                                  "loo_affe2881": {"n": len(kept), **_accs(kept)}}
         out[tag] = entry
     return out
 
 
 def affe2881_by_variant_and_era() -> dict:
-    cells: dict = collections.defaultdict(lambda: {"cortex_correct": 0, "runs": 0, "cortex_wrong": []})
+    cells: dict = collections.defaultdict(
+        lambda: {"cortex_correct": 0, "runs": 0, "cortex_wrong": []})
     for path in sorted(RESULTS.glob("longmemeval-*.jsonl")):
-        try:
-            rows = _rows(path.stem)
-        except (OSError, json.JSONDecodeError):
-            continue
+        rows = load_rows(path)
         hit = next((r for r in rows if r.get("question_id") == "affe2881"), None)
         if hit is None:
             continue
@@ -120,7 +153,8 @@ def affe2881_by_variant_and_era() -> dict:
             cell["cortex_correct"] += 1
         else:
             cell["cortex_wrong"].append(name)
-    return {k: {**v, "cortex_wrong": sorted(v["cortex_wrong"])} for k, v in sorted(cells.items())}
+    return {k: {**v, "cortex_wrong": sorted(v["cortex_wrong"])}
+            for k, v in sorted(cells.items())}
 
 
 def train_on_test_overlap() -> dict | None:
@@ -132,10 +166,12 @@ def train_on_test_overlap() -> dict | None:
     for s in sets:
         with (DATA / s).open(encoding="utf-8") as fh:
             for line in fh:
-                if line.strip():
-                    rid = json.loads(line)["id"]
-                    if ":" in rid:
-                        sids.add(rid.split(":", 1)[1])
+                if not line.strip():
+                    continue
+                rid = json.loads(line)["id"]
+                if ":" not in rid:
+                    raise RuntimeError(f"{s}: row id {rid!r} is not 'qid:sid'")
+                sids.add(rid.split(":", 1)[1])
     rows = json.loads(oracle.read_text(encoding="utf-8"))
     by: dict = collections.defaultdict(lambda: {"answer_session_in_training": 0, "n": 0})
     for r in rows:
@@ -157,7 +193,8 @@ def main() -> None:
         "code": head,
         "method": ("leave-one-out from committed per-question rows; run era by git "
                    "add-date vs the commit that added the example (a4686df6, "
-                   f"{BRIGHT_LINE}; the op block a day earlier, e4776729)"),
+                   f"{BRIGHT_LINE}; the op block a day earlier, e4776729); one run = "
+                   "one committed artifact, replicates and sweeps included"),
         "questions": QIDS,
         "leave_one_out": leave_one_out(),
         "affe2881_cortex_by_variant_and_era": affe2881_by_variant_and_era(),
