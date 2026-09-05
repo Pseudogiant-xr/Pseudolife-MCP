@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Pseudolife-MCP memory daemon — the whole compute side in one image.
 #
 #   docker compose -f ops/docker-compose.yml up -d --build   # start / rebuild
@@ -47,11 +48,12 @@ RUN apt-get update && apt-get -y upgrade && rm -rf /var/lib/apt/lists/*
 #    the pinned torch — not the setuptools pin — and walked forward to a torch
 #    with no ceiling. What actually holds torch to the CPU build is the pin in
 #    the lockfile applied as a constraint in step 2. Keep both.
-RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    env -u PIP_NO_CACHE_DIR pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
 
-# 2) The package + its remaining deps, PINNED to the captured lockfile so a
+# 2) Install the remaining runtime deps, PINNED to the captured lockfile so a
 #    rebuild reproduces the known-good set (no silent dependency drift). The
-#    lock pins torch==2.12.0+cpu, which the step above already satisfies: the
+#    lock pins torch==2.13.0+cpu, which the step above already satisfies: the
 #    constraint is what stops pip re-resolving it. Because that exact version
 #    exists only on the CPU index (not on PyPI), a future dependency that
 #    genuinely needs a newer torch fails this build LOUDLY rather than quietly
@@ -61,11 +63,16 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
 #    2026-08-02); torch 2.13.0 has no setuptools ceiling, so the old <82
 #    coupling constraint no longer binds. It matches the lock, so the line
 #    below is a belt-and-braces no-op.
-COPY pyproject.toml README.md /app/
+#
+#    This layer intentionally precedes the application-source COPY. A CSS, JS,
+#    or Python edit must not invalidate the multi-GB dependency/model layers.
 COPY ops/requirements.lock.txt /app/requirements.lock.txt
-COPY pseudolife_memory /app/pseudolife_memory
-RUN pip install -c /app/requirements.lock.txt "/app[onnx]" \
-    && pip install -U "setuptools==83.0.0"
+COPY pyproject.toml /app/
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    env -u PIP_NO_CACHE_DIR python -c "import subprocess,sys,tomllib; \
+p=tomllib.load(open('/app/pyproject.toml','rb'))['project']; \
+subprocess.check_call([sys.executable,'-m','pip','install','-c','/app/requirements.lock.txt', \
+*p['dependencies'],*p['optional-dependencies']['onnx'],'setuptools==83.0.0'])"
 
 # 3) Bake the embedding model(s) into the image so cold start needs no
 #    network — kills the HF HEAD-check flakiness and the slow first run.
@@ -79,16 +86,27 @@ RUN pip install -c /app/requirements.lock.txt "/app[onnx]" \
 #    can never drift apart again). Torch-only: there is no in-repo ONNX
 #    export for this model, so the daemon always runs the torch backend for
 #    it (fails soft to torch if 'onnx' is ever requested — see embedding.py).
-RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
+RUN --mount=type=cache,id=pseudolife-hf,target=/tmp/hf-cache,sharing=locked \
+    HF_HOME=/tmp/hf-cache HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
     python -c "from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('Qwen/Qwen3-Embedding-0.6B')"
+SentenceTransformer('Qwen/Qwen3-Embedding-0.6B'); \
+SentenceTransformer('all-MiniLM-L6-v2'); \
+SentenceTransformer('all-MiniLM-L6-v2', backend='onnx', model_kwargs={'file_name': 'onnx/model.onnx'})" \
+    && mkdir -p /opt/hf/hub \
+    && cp -a /tmp/hf-cache/hub/models--Qwen--Qwen3-Embedding-0.6B /opt/hf/hub/ \
+    && cp -a /tmp/hf-cache/hub/models--sentence-transformers--all-MiniLM-L6-v2 /opt/hf/hub/ \
+    && find /opt/hf -name '*.incomplete' -delete
 #    MiniLM stays baked too (both torch and onnx/model.onnx, +90 MB) — tests
 #    pin it as the symmetric regression model, and it is the one model that
 #    DOES exercise the ONNX backend.
-RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
-    python -c "from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('all-MiniLM-L6-v2'); \
-SentenceTransformer('all-MiniLM-L6-v2', backend='onnx', model_kwargs={'file_name': 'onnx/model.onnx'})"
+
+# 4) Application code changes frequently; install it only after the expensive
+#    immutable layers above. All declared runtime and ONNX requirements are
+#    already installed with lock constraints; do not resolve them again here.
+COPY README.md /app/
+COPY pseudolife_memory /app/pseudolife_memory
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    env -u PIP_NO_CACHE_DIR pip install --no-deps "/app" && pip check
 
 # Runtime data (neural weights, ChromaDB, cortex snapshot) lives here on a
 # mounted volume so it survives container recreation.

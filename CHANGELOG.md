@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance (2026-09-05 — incremental daemon builds)
+- Install declared runtime/ONNX dependencies with CPU-only lock constraints before copying application source, so code edits reuse dependency and model layers.
+- Preserve pip and model downloads in locked BuildKit caches; bake only the supported model directories and validate installed dependencies with `pip check`.
+
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported

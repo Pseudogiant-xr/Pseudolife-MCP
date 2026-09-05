@@ -149,6 +149,72 @@ def test_dockerfile_installs_torch_from_the_cpu_wheel_index() -> None:
     )
 
 
+def test_source_changes_do_not_invalidate_dependencies_or_baked_models() -> None:
+    """CSS/JS/Python edits must not trigger the multi-GB model downloads.
+
+    Docker invalidates every layer after a changed ``COPY``.  Keep the pinned
+    runtime dependency install and both network-bound model bakes ahead of the
+    application-source copy, then install the local package without resolving
+    dependencies again.  This makes ordinary code deploys rebuild only the
+    small package layer.
+    """
+    dockerfile = _DOCKERFILE.read_text(encoding="utf-8")
+    lock_install = dockerfile.index(
+        "subprocess.check_call"
+    )
+    qwen_bake = dockerfile.index(
+        "SentenceTransformer('Qwen/Qwen3-Embedding-0.6B')"
+    )
+    minilm_bake = dockerfile.index(
+        "SentenceTransformer('all-MiniLM-L6-v2')"
+    )
+    source_copy = dockerfile.index("COPY pseudolife_memory /app/pseudolife_memory")
+    assert lock_install < qwen_bake < minilm_bake < source_copy, (
+        "dependency/model layers must precede the source COPY or every code "
+        "edit redownloads the embedding models"
+    )
+    assert 'pip install --no-deps "/app"' in dockerfile[source_copy:], (
+        "the post-COPY app install must not resolve the already-pinned runtime "
+        "dependencies again"
+    )
+
+
+def test_model_downloads_survive_interrupted_builds() -> None:
+    """A slow/failed model fetch must resume from BuildKit's cache mount."""
+    dockerfile = _DOCKERFILE.read_text(encoding="utf-8")
+    cache_mount = "--mount=type=cache,id=pseudolife-hf,target=/tmp/hf-cache"
+    assert cache_mount + ",sharing=locked" in dockerfile
+    assert "HF_HOME=/tmp/hf-cache" in dockerfile
+    assert "cp -a /tmp/hf-cache/." not in dockerfile
+    assert "models--Qwen--Qwen3-Embedding-0.6B /opt/hf/hub/" in dockerfile
+    assert "models--sentence-transformers--all-MiniLM-L6-v2 /opt/hf/hub/" in dockerfile
+
+
+def test_image_installs_declared_dependencies_with_constraints(monkeypatch):
+    """Exercise the Docker dependency command without network or installing."""
+    import builtins
+    tomllib = pytest.importorskip("tomllib", reason="image command uses Python 3.12")
+    dockerfile = _DOCKERFILE.read_text(encoding="utf-8")
+    command = re.search(r'python -c "(import subprocess,sys,tomllib;.*?)"',
+                        dockerfile, re.S).group(1).replace("\\\n", "")
+    calls = []
+    monkeypatch.setattr(subprocess, "check_call", calls.append)
+    real_open = builtins.open
+    monkeypatch.setattr(builtins, "open", lambda path, *a, **kw:
+                        real_open(_REPO / "pyproject.toml" if path ==
+                                  "/app/pyproject.toml" else path, *a, **kw))
+    exec(command, {})
+    project = tomllib.loads((_REPO / "pyproject.toml").read_text())["project"]
+    assert len(calls) == 1
+    assert calls[0][3:6] == ["install", "-c", "/app/requirements.lock.txt"]
+    assert calls[0][6:] == (project["dependencies"] +
+                            project["optional-dependencies"]["onnx"] +
+                            ["setuptools==83.0.0"])
+    assert "pip check" in dockerfile
+    assert "PIP_NO_CACHE_DIR=0" not in dockerfile
+    assert "env -u PIP_NO_CACHE_DIR" in dockerfile
+
+
 # ── the actual regression: a ceiling collision, not a floor ───────────────
 
 
