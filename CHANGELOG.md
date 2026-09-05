@@ -57,7 +57,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the knob to a bench run (`ladder_sweep.build_service`) and rides into the
   summary as `bench_env.dream.assistant_claims`; an invalid value aborts
   the run rather than silently serving the default, as for the pool knobs.
-- **Measured (2026-09-05) — CONTAMINATED, PENDING RERUN.** The worked
+- **Measured (2026-09-05).** Asking the extractor for assistant-stated
+  facts works, and the guard that stops those facts overwriting the user's
+  costs nothing we can measure. On the LongMemEval oracle slice
+  `single-session-assistant` + `single-session-preference` +
+  `knowledge-update` (164 questions, extractor `qwen-27b`), the fact-only
+  arm on `single-session-assistant` goes from **0.054** to **0.536** with
+  the provenance prompt at `contender` and **0.500** with the naive prompt
+  at `supersede` — paired **+0.482** and **+0.446**, both p < 0.0001, 27
+  and 25 questions won against **zero** lost. The knowledge-update family,
+  carried as the pollution check, is flat-to-up under both (cortex 0.667 →
+  0.731 provenance, → 0.718 naive; hybrid 0.897 → 0.897, → 0.910), so the
+  pollution a naive extraction was expected to cause is **not detectable
+  in accuracy at this n** — the guard's case is the safety property, not
+  an accuracy gain. Head to head the guarded arm leads on every
+  fact-reading arm directionally and on none of them significantly (slice
+  hybrid +0.024, 7 W / 3 L, p = 0.34). `single-session-preference` is the
+  one type both variants hurt slightly on the fact-only arm (cortex 0.233
+  → 0.133 under both; n = 30). The `rag` control moved by 0.0000 with 0
+  wins and 0 losses in all twelve paired comparisons, and the
+  shipped-prompt arm reproduced the 2026-09-04 rows exactly (56/56
+  identical claim counts, 56/56 byte-identical contexts, 0 verdict flips),
+  which is what makes these paired tests rather than a comparison of two
+  benches. Artifacts:
+  `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-{prov2,naive2}`,
+  `longmemeval-ssa-oracle-qwen-27b-assist-base` and the twelve
+  `compare-assist-{prov2,naive2}-*-pairs.json`, all under
+  `evals/results/`; the tables are in `evals/README.md`. These are numbers
+  from a **clean re-run**: the first measurement of the same two variants
+  used a worked example that named a benchmark gold answer, and its
+  artifacts and tables are kept as **superseded** — next bullet, and the
+  "Superseded — first run" section of `evals/README.md` — rather than
+  deleted. **Defaults are unchanged** — the shipped prompt emits no
+  `speaker`, so every mechanism above stays inert — and **adoption of
+  either prompt is gated on the extraction ladder**
+  (`evals/ladder_sweep.py`), which has not been run on them.
+- **Superseded (2026-09-05) — the same two variants, first
+  measurement, contaminated worked example.** The worked
   example in both prompt variants named `Miss Bee Providore` in `Bandung`,
   which is the gold answer of LongMemEval question `c4f10528` — a
   `single-session-assistant` question inside the measured slice, and a
@@ -69,9 +105,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   +0.446 → **+0.436** for `naive`), the naive arm's marginal SSA
   `hybrid`/`cascade` gains go to **exactly 0.0000**, and the
   guard-vs-naive comparisons are untouched (`c4f10528` is neither a win
-  nor a loss in any of them). The example has been re-cut on invented
-  names and both variants are being re-run under the tags `assist-prov2` /
-  `assist-naive2`; **those numbers will replace these**. What follows is
+  nor a loss in any of them). The example was re-cut on invented
+  names and both variants were re-run under the tags `assist-prov2` /
+  `assist-naive2`; **those numbers are the published ones, in the
+  bullet above**. What follows is
   the original text, kept so the superseded claim is legible where it was
   made. Asking the extractor for assistant-stated
   facts works, and the guard that stops those facts overwriting the user's

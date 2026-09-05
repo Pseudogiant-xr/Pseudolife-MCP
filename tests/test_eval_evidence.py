@@ -34,6 +34,7 @@ REPO = Path(__file__).resolve().parents[1]
 # silently. `replicate` is import-light by design (no bench, no torch).
 sys.path.insert(0, str(REPO / "evals"))
 from replicate import cortex_commits as _commits  # noqa: E402
+from replicate import cascade_correct as _cascade_correct  # noqa: E402
 RESULTS = "evals/results/"
 
 # Artifact shorthands — every path is repo-relative so it can be checked
@@ -5488,7 +5489,6 @@ _CL_KU_BASE = "carried as the pollution check, is flat-to-up under both (cortex 
 _CL_HEAD = "hybrid +0.037, 11 W / 5 L, p = 0.21). `single-session-preference` is the"
 _CL_SSP = "one type both variants hurt slightly (cortex 0.233 → 0.100 provenance,"
 _CL_SSP_NAIVE = "→ 0.167 naive; n = 30). The `rag` control moved by 0.0000 with 0 wins"
-_MM = "`single-session-assistant` from 0.054 to 0.518 while the knowledge-update"
 
 for _cid, _doc, _needle, _art, _val, _stated, _places in [
     ("assist-cl-recover-base", CHANGELOG, _CL_RECOVER, RL_ALL_SUM,
@@ -5541,10 +5541,6 @@ for _cid, _doc, _needle, _art, _val, _stated, _places in [
      _type_arm("single-session-preference", "cortex"), 0.167, 3),
     ("assist-cl-rag-control", CHANGELOG, _CL_SSP_NAIVE,
      _as_cmp("prov-vs-base"), _as_pair("rag", "delta"), 0.0, 4),
-    ("assist-mm-base", MEM_MODEL, _MM, RL_ALL_SUM,
-     _type_arm(_SSA, "cortex"), 0.054, 3),
-    ("assist-mm-prov", MEM_MODEL, _MM, AS_PROV_SUM,
-     _type_arm(_SSA, "cortex"), 0.518, 3),
 ]:
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
@@ -5646,4 +5642,582 @@ for _cid, _needle, _pair, _arm, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=CHANGELOG, needle=_needle,
         artifacts=(_as_cmp(_pair, _SSA),), value=_loo_delta(_arm),
+        stated=_stated, places=_places))
+
+
+# ── the CLEAN re-run (2026-09-05): the published assistant-turn numbers ──
+# The first measurement's worked example named the gold of `c4f10528`, so
+# both variants were re-run over the same 164 questions on the same
+# instrument under the tags `assist-prov2` / `assist-naive2`. Those are the
+# published numbers; every pin above that still points at the first run
+# now backs the "Superseded — first run" section of evals/README.md and
+# the matching CHANGELOG bullet, which are kept rather than deleted.
+AS_PROV2_SUM = _AS + "prov2.summary.json"
+AS_NAIVE2_SUM = _AS + "naive2.summary.json"
+AS_PROV2_ROWS = _AS + "prov2.jsonl"
+AS_NAIVE2_ROWS = _AS + "naive2.jsonl"
+
+# ── evals/README.md: the per-type table (base | prov2 | naive2) ──────────
+for _qtype, _arm, _row, _base, _prov, _naive in [
+    (_SSA, "cortex",
+     "| single-session-assistant (56) | cortex | 0.054 | **0.536** | 0.500 |",
+     0.054, 0.536, 0.500),
+    (_SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | 0.911 | **0.982** | 0.946 |",
+     0.911, 0.982, 0.946),
+    (_SSA, "cascade",
+     "| single-session-assistant (56) | cascade | 0.893 | **0.964** | 0.929 |",
+     0.893, 0.964, 0.929),
+    (_SSA, "rag",
+     "| single-session-assistant (56) | rag (control) | 0.911 | 0.911 "
+     "| 0.911 |", 0.911, 0.911, 0.911),
+    ("single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | 0.233 | 0.133 | 0.133 |",
+     0.233, 0.133, 0.133),
+    ("single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | 0.500 | **0.533** "
+     "| 0.433 |", 0.500, 0.533, 0.433),
+    ("single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | 0.467 | 0.400 | 0.400 |",
+     0.467, 0.400, 0.400),
+    ("single-session-preference", "rag",
+     "| single-session-preference (30) | rag (control) | 0.533 | 0.533 "
+     "| 0.533 |", 0.533, 0.533, 0.533),
+    ("knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | 0.667 | **0.731** | 0.718 |",
+     0.667, 0.731, 0.718),
+    ("knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | 0.897 | 0.897 | **0.910** |",
+     0.897, 0.897, 0.910),
+    ("knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | 0.846 | **0.885** | 0.859 |",
+     0.846, 0.885, 0.859),
+    ("knowledge-update", "rag",
+     "| knowledge-update (78) | rag (control) | 0.859 | 0.859 | 0.859 |",
+     0.859, 0.859, 0.859),
+]:
+    _acc = (_type_cascade(_qtype) if _arm == "cascade"
+            else _type_arm(_qtype, _arm))
+    _short = {"single-session-assistant": "ssa",
+              "single-session-preference": "ssp",
+              "knowledge-update": "ku"}[_qtype]
+    for _tag, _art, _stated in (("base", RL_ALL_SUM, _base),
+                                ("prov2", AS_PROV2_SUM, _prov),
+                                ("naive2", AS_NAIVE2_SUM, _naive)):
+        CLAIMS.append(Claim(
+            id=f"assist2-type-{_short}-{_arm}-{_tag}", doc=EVALS,
+            needle=_row, artifacts=(_art,), value=_acc, stated=_stated,
+            places=3))
+
+# ── evals/README.md: the whole-slice table, accuracy + context tokens ────
+for _arm, _row, _base, _prov, _naive, _ptok, _ntok in [
+    ("cortex", "| cortex | 0.378 | **0.555** | 0.537 | 216 | 188 |",
+     0.378, 0.555, 0.537, 216, 188),
+    ("hybrid", "| hybrid | 0.829 | **0.860** | 0.835 | 1296 | 1268 |",
+     0.829, 0.860, 0.835, 1296, 1268),
+    ("cascade", "| cascade | 0.793 | **0.823** | 0.799 | 608 | 569 |",
+     0.793, 0.823, 0.799, 608, 569),
+    ("rag", "| rag (control) | 0.817 | 0.817 | 0.817 | 1072 | 1072 |",
+     0.817, 0.817, 0.817, 1072, 1072),
+]:
+    CLAIMS.append(Claim(
+        id=f"assist2-slice-{_arm}-base", doc=EVALS, needle=_row,
+        artifacts=(_as_cmp("prov2-vs-base"),), value=_as_base_arm(_arm),
+        stated=_base, places=3))
+    for _tag, _art, _stated, _tok in (
+            ("prov2", AS_PROV2_SUM, _prov, _ptok),
+            ("naive2", AS_NAIVE2_SUM, _naive, _ntok)):
+        CLAIMS.append(Claim(
+            id=f"assist2-slice-{_arm}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_as_arm(_arm), stated=_stated,
+            places=3))
+        CLAIMS.append(Claim(
+            id=f"assist2-slice-tokens-{_arm}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_as_arm(_arm, "context_tokens"),
+            stated=_tok, places=0))
+
+# ── evals/README.md: the zero-claim table ────────────────────────────────
+for _qtype, _row, _base, _prov, _naive in [
+    (_SSA, "| single-session-assistant (56) | 50 | 19 | 23 |", 50, 19, 23),
+    ("single-session-preference",
+     "| single-session-preference (30) | 12 | 3 | 11 |", 12, 3, 11),
+    ("knowledge-update", "| knowledge-update (78) | 1 | 0 | 1 |", 1, 0, 1),
+]:
+    _short = {"single-session-assistant": "ssa",
+              "single-session-preference": "ssp",
+              "knowledge-update": "ku"}[_qtype]
+    for _tag, _art, _stated in (("base", RL_ALL_ROWS, _base),
+                                ("prov2", AS_PROV2_ROWS, _prov),
+                                ("naive2", AS_NAIVE2_ROWS, _naive)):
+        CLAIMS.append(Claim(
+            id=f"assist2-zero-{_short}-{_tag}", doc=EVALS, needle=_row,
+            artifacts=(_art,), value=_zero_claims(_qtype), stated=_stated,
+            places=0))
+
+# ── evals/README.md: the three clean paired tables ───────────────────────
+_AS2_PAIRED = [
+    # assist-prov2 vs assist-base
+    ("prov2-vs-base", "", "cortex",
+     "| all 164 | cortex | **+0.177** | 0.0001 | 38 / 9 |",
+     0.177, 0.0001, 38, 9),
+    ("prov2-vs-base", "", "hybrid",
+     "| all 164 | hybrid | +0.030 | 0.23 | 8 / 3 |", 0.030, 0.23, 8, 3),
+    ("prov2-vs-base", "", "cascade",
+     "| all 164 | cascade | +0.030 | 0.33 | 11 / 6 |", 0.030, 0.33, 11, 6),
+    ("prov2-vs-base", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("prov2-vs-base", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | **+0.482** | < 0.0001 "
+     "| 27 / 0 |", 0.482, 0.0, 27, 0),
+    ("prov2-vs-base", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.071 | 0.12 | 4 / 0 |",
+     0.071, 0.12, 4, 0),
+    ("prov2-vs-base", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.071 | 0.12 | 4 / 0 |",
+     0.071, 0.12, 4, 0),
+    ("prov2-vs-base", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.064 | 0.31 | 10 / 5 |",
+     0.064, 0.31, 10, 5),
+    ("prov2-vs-base", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | 0.000 | 1.00 | 2 / 2 |",
+     0.0, 1.00, 2, 2),
+    ("prov2-vs-base", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | +0.038 | 0.45 | 5 / 2 |",
+     0.038, 0.45, 5, 2),
+    ("prov2-vs-base", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | −0.100 | 0.37 "
+     "| 1 / 4 |", -0.100, 0.37, 1, 4),
+    ("prov2-vs-base", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | +0.033 | 1.00 | 2 / 1 |",
+     0.033, 1.00, 2, 1),
+    ("prov2-vs-base", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | −0.067 | 0.69 "
+     "| 2 / 4 |", -0.067, 0.69, 2, 4),
+    # assist-naive2 vs assist-base
+    ("naive2-vs-base", "", "cortex",
+     "| all 164 | cortex | **+0.159** | < 0.0001 | 33 / 7 |",
+     0.159, 0.0, 33, 7),
+    ("naive2-vs-base", "", "hybrid",
+     "| all 164 | hybrid | +0.006 | 1.00 | 4 / 3 |", 0.006, 1.00, 4, 3),
+    ("naive2-vs-base", "", "cascade",
+     "| all 164 | cascade | +0.006 | 1.00 | 7 / 6 |", 0.006, 1.00, 7, 6),
+    ("naive2-vs-base", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("naive2-vs-base", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | **+0.446** | < 0.0001 "
+     "| 25 / 0 |", 0.446, 0.0, 25, 0),
+    ("naive2-vs-base", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |",
+     0.036, 0.51, 2, 0),
+    ("naive2-vs-base", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.036 | 0.51 | 2 / 0 |",
+     0.036, 0.51, 2, 0),
+    ("naive2-vs-base", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.051 | 0.39 | 8 / 4 |",
+     0.051, 0.39, 8, 4),
+    ("naive2-vs-base", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | +0.013 | 1.00 | 2 / 1 |",
+     0.013, 1.00, 2, 1),
+    ("naive2-vs-base", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | +0.013 | 1.00 | 4 / 3 |",
+     0.013, 1.00, 4, 3),
+    ("naive2-vs-base", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | −0.100 | 0.24 "
+     "| 0 / 3 |", -0.100, 0.24, 0, 3),
+    ("naive2-vs-base", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | −0.067 | 0.51 "
+     "| 0 / 2 |", -0.067, 0.51, 0, 2),
+    ("naive2-vs-base", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | −0.067 | 0.61 "
+     "| 1 / 3 |", -0.067, 0.61, 1, 3),
+    # assist-prov2 vs assist-naive2 — the guard's own cost
+    ("prov2-vs-naive2", "", "cortex",
+     "| all 164 | cortex | +0.018 | 0.68 | 13 / 10 |", 0.018, 0.68, 13, 10),
+    ("prov2-vs-naive2", "", "hybrid",
+     "| all 164 | hybrid | +0.024 | 0.34 | 7 / 3 |", 0.024, 0.34, 7, 3),
+    ("prov2-vs-naive2", "", "cascade",
+     "| all 164 | cascade | +0.024 | 0.42 | 9 / 5 |", 0.024, 0.42, 9, 5),
+    ("prov2-vs-naive2", "", "rag",
+     "| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |", 0.0, 1.00, 0, 0),
+    ("prov2-vs-naive2", _SSA, "cortex",
+     "| single-session-assistant (56) | cortex | +0.036 | 0.72 | 5 / 3 |",
+     0.036, 0.72, 5, 3),
+    ("prov2-vs-naive2", _SSA, "hybrid",
+     "| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |",
+     0.036, 0.51, 2, 0),
+    ("prov2-vs-naive2", _SSA, "cascade",
+     "| single-session-assistant (56) | cascade | +0.036 | 0.62 | 3 / 1 |",
+     0.036, 0.62, 3, 1),
+    ("prov2-vs-naive2", "knowledge-update", "cortex",
+     "| knowledge-update (78) | cortex | +0.013 | 1.00 | 7 / 6 |",
+     0.013, 1.00, 7, 6),
+    ("prov2-vs-naive2", "knowledge-update", "hybrid",
+     "| knowledge-update (78) | hybrid | −0.013 | 1.00 | 2 / 3 |",
+     -0.013, 1.00, 2, 3),
+    ("prov2-vs-naive2", "knowledge-update", "cascade",
+     "| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |",
+     0.026, 0.72, 5, 3),
+    ("prov2-vs-naive2", "single-session-preference", "cortex",
+     "| single-session-preference (30) | cortex | 0.000 | 1.00 | 1 / 1 |",
+     0.0, 1.00, 1, 1),
+    ("prov2-vs-naive2", "single-session-preference", "hybrid",
+     "| single-session-preference (30) | hybrid | +0.100 | 0.24 | 3 / 0 |",
+     0.100, 0.24, 3, 0),
+    ("prov2-vs-naive2", "single-session-preference", "cascade",
+     "| single-session-preference (30) | cascade | 0.000 | 1.00 | 1 / 1 |",
+     0.0, 1.00, 1, 1),
+]
+for _pair, _scope, _arm, _row, _d, _pv, _w, _l in _AS2_PAIRED:
+    _art = _as_cmp(_pair, _scope)
+    _tag = f"{_pair}-{_scope or 'slice'}-{_arm}"
+    CLAIMS.append(Claim(
+        id=f"assist2-paired-{_tag}-delta", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "delta"), stated=_d,
+        places=3))
+    CLAIMS.append(Claim(
+        id=f"assist2-paired-{_tag}-p", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "p"), stated=_pv,
+        places=4 if _pv < 0.001 else 2))
+    CLAIMS.append(Claim(
+        id=f"assist2-paired-{_tag}-wins", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "wins"), stated=_w, places=0))
+    CLAIMS.append(Claim(
+        id=f"assist2-paired-{_tag}-losses", doc=EVALS, needle=_row,
+        artifacts=(_art,), value=_as_pair(_arm, "losses"), stated=_l,
+        places=0))
+
+# ── evals/README.md: "First run vs clean run" ────────────────────────────
+# Both columns of every row, so a reader can check that the re-run moved
+# the headline by the question counts the paragraph claims.
+for _cid, _row, _qtype, _arm, _first_art, _first, _clean_art, _clean in [
+    ("ssa-cortex-prov",
+     "| SSA cortex, provenance | 0.518 | 0.536 | +1 question |",
+     _SSA, "cortex", AS_PROV_SUM, 0.518, AS_PROV2_SUM, 0.536),
+    ("ssa-cortex-naive",
+     "| SSA cortex, naive | 0.500 | 0.500 | unchanged |",
+     _SSA, "cortex", AS_NAIVE_SUM, 0.500, AS_NAIVE2_SUM, 0.500),
+    ("ssa-hybrid-prov",
+     "| SSA hybrid, provenance | 0.964 | 0.982 | +1 question |",
+     _SSA, "hybrid", AS_PROV_SUM, 0.964, AS_PROV2_SUM, 0.982),
+    ("ssa-hybrid-naive",
+     "| SSA hybrid, naive | 0.929 | 0.946 | +1 question |",
+     _SSA, "hybrid", AS_NAIVE_SUM, 0.929, AS_NAIVE2_SUM, 0.946),
+    ("ku-cortex-prov",
+     "| KU cortex, provenance | 0.744 | 0.731 | −1 question |",
+     "knowledge-update", "cortex", AS_PROV_SUM, 0.744, AS_PROV2_SUM, 0.731),
+    ("ku-cortex-naive",
+     "| KU cortex, naive | 0.705 | 0.718 | +1 question |",
+     "knowledge-update", "cortex", AS_NAIVE_SUM, 0.705, AS_NAIVE2_SUM,
+     0.718),
+    ("ku-hybrid-prov",
+     "| KU hybrid, provenance | 0.923 | 0.897 | −2 questions |",
+     "knowledge-update", "hybrid", AS_PROV_SUM, 0.923, AS_PROV2_SUM, 0.897),
+    ("ku-hybrid-naive",
+     "| KU hybrid, naive | 0.885 | 0.910 | +2 questions |",
+     "knowledge-update", "hybrid", AS_NAIVE_SUM, 0.885, AS_NAIVE2_SUM,
+     0.910),
+    ("ssp-cortex-prov",
+     "| SSP cortex, provenance | 0.100 | 0.133 | +1 question |",
+     "single-session-preference", "cortex", AS_PROV_SUM, 0.100,
+     AS_PROV2_SUM, 0.133),
+    ("ssp-cortex-naive",
+     "| SSP cortex, naive | 0.167 | 0.133 | −1 question |",
+     "single-session-preference", "cortex", AS_NAIVE_SUM, 0.167,
+     AS_NAIVE2_SUM, 0.133),
+]:
+    _v = _type_arm(_qtype, _arm)
+    CLAIMS.append(Claim(
+        id=f"assist2-move-{_cid}-first", doc=EVALS, needle=_row,
+        artifacts=(_first_art,), value=_v, stated=_first, places=3))
+    CLAIMS.append(Claim(
+        id=f"assist2-move-{_cid}-clean", doc=EVALS, needle=_row,
+        artifacts=(_clean_art,), value=_v, stated=_clean, places=3))
+
+for _cid, _row, _arm, _first, _clean in [
+    ("slice-cortex-prov",
+     "| slice cortex, provenance | 0.549 | 0.555 | +1 question |",
+     "cortex", 0.549, 0.555),
+    ("slice-cascade-prov",
+     "| slice cascade, provenance | 0.799 | 0.823 | +4 questions |",
+     "cascade", 0.799, 0.823),
+]:
+    CLAIMS.append(Claim(
+        id=f"assist2-move-{_cid}-first", doc=EVALS, needle=_row,
+        artifacts=(AS_PROV_SUM,), value=_as_arm(_arm), stated=_first,
+        places=3))
+    CLAIMS.append(Claim(
+        id=f"assist2-move-{_cid}-clean", doc=EVALS, needle=_row,
+        artifacts=(AS_PROV2_SUM,), value=_as_arm(_arm), stated=_clean,
+        places=3))
+
+_MOVE_PAIRED = ("arm goes +0.464 → **+0.482** (26 → 27 questions "
+                "won, still zero lost);")
+_MOVE_ZERO = ("zero-claim counts barely move either: provenance 20 → "
+              "**19** on SSA and")
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("assist2-move-paired-prov-first", _MOVE_PAIRED,
+     _as_cmp("prov-vs-base", _SSA), _as_pair("cortex", "delta"), 0.464, 3),
+    ("assist2-move-paired-prov-clean", _MOVE_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.482, 3),
+    ("assist2-move-paired-prov-wins-first", _MOVE_PAIRED,
+     _as_cmp("prov-vs-base", _SSA), _as_pair("cortex", "wins"), 26, 0),
+    ("assist2-move-paired-prov-wins-clean", _MOVE_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "wins"), 27, 0),
+    ("assist2-move-paired-prov-losses-clean", _MOVE_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "losses"), 0, 0),
+    ("assist2-move-paired-naive-first",
+     "for the naive arm it is **+0.446** in both runs, the same 25 / 0.",
+     _as_cmp("naive-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist2-move-paired-naive-clean",
+     "for the naive arm it is **+0.446** in both runs, the same 25 / 0.",
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist2-move-paired-naive-wins-clean",
+     "for the naive arm it is **+0.446** in both runs, the same 25 / 0.",
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "wins"), 25, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+for _cid, _needle, _art, _qtype, _stated in [
+    ("assist2-move-zero-ssa-first", _MOVE_ZERO, AS_PROV_ROWS, _SSA, 20),
+    ("assist2-move-zero-ssa-clean", _MOVE_ZERO, AS_PROV2_ROWS, _SSA, 19),
+    ("assist2-move-zero-ssp-first",
+     "4 → **3** on SSP, naive unchanged at 23 and 11.",
+     AS_PROV_ROWS, "single-session-preference", 4),
+    ("assist2-move-zero-ssp-clean",
+     "4 → **3** on SSP, naive unchanged at 23 and 11.",
+     AS_PROV2_ROWS, "single-session-preference", 3),
+    ("assist2-move-zero-naive-ssa",
+     "4 → **3** on SSP, naive unchanged at 23 and 11.",
+     AS_NAIVE2_ROWS, _SSA, 23),
+    ("assist2-move-zero-naive-ssp",
+     "4 → **3** on SSP, naive unchanged at 23 and 11.",
+     AS_NAIVE2_ROWS, "single-session-preference", 11),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,),
+        value=_zero_claims(_qtype), stated=_stated, places=0))
+
+# ── the leave-one-out estimate vs what the clean re-run actually gave ────
+_LOO_VS = ("**+0.482** and **+0.036** instead — better than the "
+           "leave-one-out")
+for _cid, _art, _arm, _stated, _places in [
+    ("assist2-loovs-prov-est", _as_cmp("prov-vs-base", _SSA), "cortex",
+     0.455, 3),
+    ("assist2-loovs-naive-est", _as_cmp("naive-vs-base", _SSA), "hybrid",
+     0.0, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS,
+        needle="SSA `cortex` gain to +0.455 and the naive arm's SSA `hybrid` and",
+        artifacts=(_art,), value=_loo_delta(_arm), stated=_stated,
+        places=_places))
+CLAIMS.append(Claim(
+    id="assist2-loovs-prov-actual", doc=EVALS, needle=_LOO_VS,
+    artifacts=(_as_cmp("prov2-vs-base", _SSA),),
+    value=_as_pair("cortex", "delta"), stated=0.482, places=3))
+CLAIMS.append(Claim(
+    id="assist2-loovs-naive-actual", doc=EVALS, needle=_LOO_VS,
+    artifacts=(_as_cmp("naive2-vs-base", _SSA),),
+    value=_as_pair("hybrid", "delta"), stated=0.036, places=3))
+
+# ── `c4f10528` in the clean run, and the re-cut example's own tokens ─────
+# The contaminated run's counted win survives a prompt that never names
+# the gold, so the leak did not manufacture it. Read straight off the
+# rows, per arm, rather than restated.
+def _q_arm(qid: str, arm: str):
+    def go(rows):
+        row = next(r for r in rows if r["question_id"] == qid)
+        if arm == "cascade":
+            return float(bool(_cascade_correct(row)))
+        return float(bool(row[f"{arm}_correct"]))
+    return go
+
+
+_C4F_NEEDLE = ("**`c4f10528` is cortex-, hybrid- and cascade-correct in "
+               "both clean arms**,")
+for _tag, _rows in (("prov2", AS_PROV2_ROWS), ("naive2", AS_NAIVE2_ROWS)):
+    for _arm in ("cortex", "hybrid", "cascade"):
+        CLAIMS.append(Claim(
+            id=f"assist2-c4f-{_tag}-{_arm}", doc=EVALS, needle=_C4F_NEEDLE,
+            artifacts=(_rows,), value=_q_arm(_LOO_Q, _arm), stated=1,
+            places=0))
+
+# The re-cut example's invented proper nouns, straight from the generator
+# so a future edit to it cannot silently un-guard this claim.
+@lru_cache(maxsize=None)
+def _example_tokens() -> tuple[str, ...]:
+    """The re-cut examples' invented proper nouns, read out of
+    `evals/gen_assistant_facts_prompts.py` by AST rather than imported:
+    importing that module runs it (rewriting both prompt files) and pulls
+    the whole engine, torch included, into a parsing test."""
+    import ast
+
+    src = (REPO / "evals" / "gen_assistant_facts_prompts.py").read_text(
+        encoding="utf-8")
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", None) == "EXAMPLE_TOKENS"
+                for t in node.targets):
+            return tuple(ast.literal_eval(node.value))
+    raise AssertionError("EXAMPLE_TOKENS not found in the generator")
+
+
+def _example_token_hits(rows) -> float:
+    blob = json.dumps(rows, ensure_ascii=False)
+    return float(sum(blob.count(t) for t in _example_tokens()))
+
+
+for _tag, _rows in (("prov2", AS_PROV2_ROWS), ("naive2", AS_NAIVE2_ROWS)):
+    CLAIMS.append(Claim(
+        id=f"assist2-example-tokens-{_tag}", doc=EVALS,
+        needle="occur **0 times** in either clean run's rows, and",
+        artifacts=(_rows,), value=_example_token_hits, stated=0, places=0))
+
+# ── evals/README.md: "The read", the clean version ───────────────────────
+_EV2_RECOVER = "**0.536** (`assist-prov2`) and **0.500** (`assist-naive2`) on the"
+_EV2_PAIRED = "fact-only arm — paired **+0.482** and **+0.446**, both p < 0.0001, 27"
+_EV2_WINS = "and 25 questions won against **zero** lost. Asking for assistant-stated"
+_EV2_KU = "both variants (naive2 cortex +0.051, hybrid +0.013; prov2 cortex +0.064,"
+_EV2_KU2 = "hybrid 0.000), and none of those deltas is significant. On this"
+_EV2_HEAD = "significantly (slice hybrid +0.024, 7 W / 3 L, p = 0.34; slice cortex"
+_EV2_HEAD2 = "+0.018, 13 / 10). A delta this size is inside what this bench can"
+_EV2_SSP = "the fact-only arm: cortex 0.233 → **0.133** under both, a paired −0.100"
+_EV2_SSP2 = "naive2 0.433), so once turns are in the context the guarded variant is"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("assist2-read-recover-prov", _EV2_RECOVER, AS_PROV2_SUM,
+     _type_arm(_SSA, "cortex"), 0.536, 3),
+    ("assist2-read-recover-naive", _EV2_RECOVER, AS_NAIVE2_SUM,
+     _type_arm(_SSA, "cortex"), 0.500, 3),
+    ("assist2-read-paired-prov", _EV2_PAIRED, _as_cmp("prov2-vs-base", _SSA),
+     _as_pair("cortex", "delta"), 0.482, 3),
+    ("assist2-read-paired-naive", _EV2_PAIRED,
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist2-read-paired-prov-p", _EV2_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist2-read-paired-naive-p", _EV2_PAIRED,
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist2-read-wins-prov", _EV2_PAIRED, _as_cmp("prov2-vs-base", _SSA),
+     _as_pair("cortex", "wins"), 27, 0),
+    ("assist2-read-wins-naive", _EV2_WINS, _as_cmp("naive2-vs-base", _SSA),
+     _as_pair("cortex", "wins"), 25, 0),
+    ("assist2-read-losses-prov", _EV2_WINS, _as_cmp("prov2-vs-base", _SSA),
+     _as_pair("cortex", "losses"), 0, 0),
+    ("assist2-read-losses-naive", _EV2_WINS, _as_cmp("naive2-vs-base", _SSA),
+     _as_pair("cortex", "losses"), 0, 0),
+    ("assist2-read-ku-naive-cortex", _EV2_KU,
+     _as_cmp("naive2-vs-base", "knowledge-update"),
+     _as_pair("cortex", "delta"), 0.051, 3),
+    ("assist2-read-ku-naive-hybrid", _EV2_KU,
+     _as_cmp("naive2-vs-base", "knowledge-update"),
+     _as_pair("hybrid", "delta"), 0.013, 3),
+    ("assist2-read-ku-prov-cortex", _EV2_KU,
+     _as_cmp("prov2-vs-base", "knowledge-update"),
+     _as_pair("cortex", "delta"), 0.064, 3),
+    ("assist2-read-ku-prov-hybrid", _EV2_KU2,
+     _as_cmp("prov2-vs-base", "knowledge-update"),
+     _as_pair("hybrid", "delta"), 0.0, 3),
+    ("assist2-read-head-hybrid", _EV2_HEAD, _as_cmp("prov2-vs-naive2"),
+     _as_pair("hybrid", "delta"), 0.024, 3),
+    ("assist2-read-head-hybrid-wins", _EV2_HEAD, _as_cmp("prov2-vs-naive2"),
+     _as_pair("hybrid", "wins"), 7, 0),
+    ("assist2-read-head-hybrid-losses", _EV2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "losses"), 3, 0),
+    ("assist2-read-head-hybrid-p", _EV2_HEAD, _as_cmp("prov2-vs-naive2"),
+     _as_pair("hybrid", "p"), 0.34, 2),
+    ("assist2-read-head-cortex", _EV2_HEAD2, _as_cmp("prov2-vs-naive2"),
+     _as_pair("cortex", "delta"), 0.018, 3),
+    ("assist2-read-head-cortex-wins", _EV2_HEAD2,
+     _as_cmp("prov2-vs-naive2"), _as_pair("cortex", "wins"), 13, 0),
+    ("assist2-read-head-cortex-losses", _EV2_HEAD2,
+     _as_cmp("prov2-vs-naive2"), _as_pair("cortex", "losses"), 10, 0),
+    ("assist2-read-ssp-base", _EV2_SSP, RL_ALL_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.233, 3),
+    ("assist2-read-ssp-prov", _EV2_SSP, AS_PROV2_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.133, 3),
+    ("assist2-read-ssp-naive", _EV2_SSP, AS_NAIVE2_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.133, 3),
+    ("assist2-read-ssp-delta-prov", _EV2_SSP,
+     _as_cmp("prov2-vs-base", "single-session-preference"),
+     _as_pair("cortex", "delta"), -0.100, 3),
+    ("assist2-read-ssp-delta-naive", _EV2_SSP,
+     _as_cmp("naive2-vs-base", "single-session-preference"),
+     _as_pair("cortex", "delta"), -0.100, 3),
+    ("assist2-read-ssp-hybrid-prov", _EV2_SSP2, AS_PROV2_SUM,
+     _type_arm("single-session-preference", "hybrid"), 0.533, 3),
+    ("assist2-read-ssp-hybrid-naive", _EV2_SSP2, AS_NAIVE2_SUM,
+     _type_arm("single-session-preference", "hybrid"), 0.433, 3),
+    ("assist2-read-rag-control", _EV2_SSP2, _as_cmp("prov2-vs-naive2"),
+     _as_pair("rag", "delta"), 0.0, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+CLAIMS.append(Claim(
+    id="assist2-gate-prov", doc=EVALS,
+    needle="arm on `single-session-assistant` from 0.054 to **0.536** says the prompt",
+    artifacts=(AS_PROV2_SUM,), value=_type_arm(_SSA, "cortex"),
+    stated=0.536, places=3))
+CLAIMS.append(Claim(
+    id="assist2-gate-base", doc=EVALS,
+    needle="arm on `single-session-assistant` from 0.054 to **0.536** says the prompt",
+    artifacts=(RL_ALL_SUM,), value=_type_arm(_SSA, "cortex"),
+    stated=0.054, places=3))
+
+# ── the CHANGELOG "Measured" bullet, now the clean run ───────────────────
+_CL2_RECOVER = "arm on `single-session-assistant` goes from **0.054** to **0.536** with"
+_CL2_PAIRED = "at `supersede` — paired **+0.482** and **+0.446**, both p < 0.0001, 27"
+_CL2_KU = "0.731 provenance, → 0.718 naive; hybrid 0.897 → 0.897, → 0.910), so the"
+_CL2_HEAD = "hybrid +0.024, 7 W / 3 L, p = 0.34). `single-session-preference` is the"
+_CL2_SSP = "one type both variants hurt slightly on the fact-only arm (cortex 0.233"
+_CL2_SSP2 = "→ 0.133 under both; n = 30). The `rag` control moved by 0.0000 with 0"
+_MM2 = "`single-session-assistant` from 0.054 to 0.536 while the knowledge-update"
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("assist2-cl-recover-base", CHANGELOG, _CL2_RECOVER, RL_ALL_SUM,
+     _type_arm(_SSA, "cortex"), 0.054, 3),
+    ("assist2-cl-recover-prov", CHANGELOG, _CL2_RECOVER, AS_PROV2_SUM,
+     _type_arm(_SSA, "cortex"), 0.536, 3),
+    ("assist2-cl-paired-prov-delta", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.482, 3),
+    ("assist2-cl-paired-prov-p", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist2-cl-paired-prov-wins", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("prov2-vs-base", _SSA), _as_pair("cortex", "wins"), 27, 0),
+    ("assist2-cl-paired-naive-delta", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "delta"), 0.446, 3),
+    ("assist2-cl-paired-naive-p", CHANGELOG, _CL2_PAIRED,
+     _as_cmp("naive2-vs-base", _SSA), _as_pair("cortex", "p"), 0.0, 4),
+    ("assist2-cl-ku-prov-cortex", CHANGELOG, _CL2_KU, AS_PROV2_SUM,
+     _type_arm("knowledge-update", "cortex"), 0.731, 3),
+    ("assist2-cl-ku-naive-cortex", CHANGELOG, _CL2_KU, AS_NAIVE2_SUM,
+     _type_arm("knowledge-update", "cortex"), 0.718, 3),
+    ("assist2-cl-ku-prov-hybrid", CHANGELOG, _CL2_KU, AS_PROV2_SUM,
+     _type_arm("knowledge-update", "hybrid"), 0.897, 3),
+    ("assist2-cl-ku-naive-hybrid", CHANGELOG, _CL2_KU, AS_NAIVE2_SUM,
+     _type_arm("knowledge-update", "hybrid"), 0.910, 3),
+    ("assist2-cl-head-hybrid-delta", CHANGELOG, _CL2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "delta"), 0.024, 3),
+    ("assist2-cl-head-hybrid-wins", CHANGELOG, _CL2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "wins"), 7, 0),
+    ("assist2-cl-head-hybrid-losses", CHANGELOG, _CL2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "losses"), 3, 0),
+    ("assist2-cl-head-hybrid-p", CHANGELOG, _CL2_HEAD,
+     _as_cmp("prov2-vs-naive2"), _as_pair("hybrid", "p"), 0.34, 2),
+    ("assist2-cl-ssp-base", CHANGELOG, _CL2_SSP, RL_ALL_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.233, 3),
+    ("assist2-cl-ssp-prov", CHANGELOG, _CL2_SSP2, AS_PROV2_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.133, 3),
+    ("assist2-cl-ssp-naive", CHANGELOG, _CL2_SSP2, AS_NAIVE2_SUM,
+     _type_arm("single-session-preference", "cortex"), 0.133, 3),
+    ("assist2-cl-rag-control", CHANGELOG, _CL2_SSP2,
+     _as_cmp("prov2-vs-base"), _as_pair("rag", "delta"), 0.0, 4),
+    ("assist2-mm-base", MEM_MODEL, _MM2, RL_ALL_SUM,
+     _type_arm(_SSA, "cortex"), 0.054, 3),
+    ("assist2-mm-prov", MEM_MODEL, _MM2, AS_PROV2_SUM,
+     _type_arm(_SSA, "cortex"), 0.536, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
         stated=_stated, places=_places))

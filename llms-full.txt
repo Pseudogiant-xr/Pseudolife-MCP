@@ -1452,12 +1452,15 @@ alone built, and retract its own members. Nothing supersedes *it*
 in return: an assistant-origin value is replaced by any later write.
 Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
 for assistant-stated facts lifts the fact-only arm on
-`single-session-assistant` from 0.054 to 0.518 while the knowledge-update
+`single-session-assistant` from 0.054 to 0.536 while the knowledge-update
 pollution check stays flat-to-up, and the guard costs nothing measurable
 against an unguarded variant of the same prompt — tables, paired tests and
-the adoption gate are in `evals/README.md`. Nothing here is on by default:
-the shipped extraction prompt asks for no `speaker` label, so this tier is
-only reachable by a bank whose dream runs one of those candidate prompts.
+the adoption gate are in `evals/README.md` (the published run is the clean
+re-run `assist-prov2`; the first run's contaminated worked example and its
+retired numbers are retained in the same section). Nothing here is on by
+default: the shipped extraction prompt asks for no `speaker` label, so this
+tier is only reachable by a bank whose dream runs one of those candidate
+prompts.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in
