@@ -5,10 +5,19 @@ write, so store cost scales with the resident set. Profiling put 94% of a
 saturated store there (2026-07-25), against ~4% for the capacity-eviction
 path that was assumed to be the problem.
 
-Uses REAL MiniLM embeddings and REAL conversation text from the
-LongMemEval `s` band dumps. Random unit vectors sit near zero cosine and
-would flatter any similarity-based shortcut badly (99.7% of random pairs
-fall below the lowest state-transition floor, against 76.4% of real ones).
+Uses REAL embeddings and REAL conversation text from the LongMemEval `s`
+band dumps. Random unit vectors sit near zero cosine and would flatter any
+similarity-based shortcut badly (99.7% of random pairs fall below the
+lowest state-transition floor, against 76.4% of real ones).
+
+The dumps are resolved by CONTENT through :mod:`bank_dumps` (1024-d v25
+backbone, ``flat`` preset, nothing evicted), not by directory name — the
+tree can hold several replays under names differing by a machine-local
+suffix, and this module used to name the one that now holds the retired
+384-d MiniLM replay. ``--dumps`` names a directory explicitly; the
+committed ``store-latency-by-bank-size.json`` was measured in July 2026
+on those 384-d MiniLM dumps and is reproduced with
+``--dumps <the 384-d directory> --dim 384``.
 
     python evals/bench_store_latency.py --sizes 500 5250 9000
 
@@ -29,20 +38,23 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
+
+from bank_dumps import V25_EMBEDDING_DIM, resolve_dump_dir  # noqa: E402
+
 RESULTS = Path(__file__).resolve().parent / "results"
-DUMPS = RESULTS / "banks" / "s-qwen-27b-ablbands-flat"
 WARMUP = 12
 SAMPLES = 25
 
 
-def corpus(n: int):
+def corpus(n: int, dumps: Path):
     """Real texts + embeddings from the replay dumps. Files touched in
     the last 120 s are skipped — a concurrent replay writes these dumps
     non-atomically and a half-written gzip would crash the load."""
     import torch
     texts, embs = [], []
     cutoff = time.time() - 120
-    for f in sorted(glob.glob(str(DUMPS / "*.json.gz"))):
+    for f in sorted(glob.glob(str(Path(dumps) / "*.json.gz"))):
         if "_abs" in Path(f).name or Path(f).stat().st_mtime > cutoff:
             continue
         with gzip.open(f, "rt", encoding="utf-8") as fh:
@@ -52,7 +64,7 @@ def corpus(n: int):
                 if len(texts) >= n:
                     return texts, torch.tensor(embs, dtype=torch.float32)
     raise SystemExit(
-        f"only {len(texts)} entries available in {DUMPS} — need {n}. "
+        f"only {len(texts)} entries available in {dumps} — need {n}. "
         "Run `band_ablation.py replay --band-preset flat` first.")
 
 
@@ -84,8 +96,8 @@ def _make_config(preset: str, dim: int):
     return cfg
 
 
-def run_one(n: int, preset: str = "continuum", dim: int = 384,
-            queries: int = 0) -> dict:
+def run_one(n: int, dumps: Path, preset: str = "continuum",
+            dim: int = V25_EMBEDDING_DIM, queries: int = 0) -> dict:
     """Store (and optionally retrieve) latency with the bank hydrated to
     n entries. Returns a dict of medians/p95s in ms."""
     import torch
@@ -93,7 +105,7 @@ def run_one(n: int, preset: str = "continuum", dim: int = 384,
     from pseudolife_memory.memory.cms import ContinuumMemorySystem
     from pseudolife_memory.storage.sync import hydrate_cms
 
-    texts, E = corpus(n + WARMUP + SAMPLES)
+    texts, E = corpus(n + WARMUP + SAMPLES, dumps)
     E = F.normalize(E, dim=1)
     probe_t, probe_E = texts[n:], E[n:]
 
@@ -109,9 +121,10 @@ def run_one(n: int, preset: str = "continuum", dim: int = 384,
         def load_episodes(self):
             return []
 
-    # ``--dim`` must match the embeddings in DUMPS: 384 for the legacy
-    # committed MiniLM corpus, 1024 for dumps regenerated under
-    # embedding-backbone-v25 (Qwen3-Embedding-0.6B). The child asserts.
+    # ``--dim`` must match the embeddings in the resolved dumps: 1024 for
+    # the v25 replay (Qwen3-Embedding-0.6B, the default), 384 for the
+    # retired MiniLM corpus the July 2026 artifact was measured on. The
+    # child asserts.
     if E.shape[1] != dim:
         raise SystemExit(f"--dim {dim} but corpus embeddings are "
                          f"{E.shape[1]}-d — pass the matching --dim")
@@ -164,9 +177,12 @@ def main() -> int:
                     default=[500, 5250, 9000])
     ap.add_argument("--preset", choices=("continuum", "flat"),
                     default="continuum")
-    ap.add_argument("--dim", type=int, default=384,
-                    help="embedding dim of the DUMPS corpus (384 legacy "
-                         "MiniLM, 1024 for v25 regenerated dumps)")
+    ap.add_argument("--dumps", type=Path, default=None,
+                    help="band-state dump directory (default: resolved by "
+                         "content — 1024-d, flat, no eviction)")
+    ap.add_argument("--dim", type=int, default=V25_EMBEDDING_DIM,
+                    help="embedding dim of the --dumps corpus (1024 v25, "
+                         "384 for the retired MiniLM dumps)")
     ap.add_argument("--queries", type=int, default=0,
                     help="also measure retrieve() latency over this many "
                          "held-out queries (dense and dense+bm25)")
@@ -175,8 +191,12 @@ def main() -> int:
     ap.add_argument("--_child", type=int, help=argparse.SUPPRESS)
     args = ap.parse_args()
 
+    # Resolve once in the parent and hand the child an explicit path, so
+    # every size measures the same corpus even if the tree changes mid-run.
+    dumps = resolve_dump_dir(args.dumps)
+
     if args._child is not None:
-        print(json.dumps(run_one(args._child, preset=args.preset,
+        print(json.dumps(run_one(args._child, dumps, preset=args.preset,
                                  dim=args.dim, queries=args.queries)))
         return 0
 
@@ -184,6 +204,7 @@ def main() -> int:
     for n in args.sizes:
         proc = subprocess.run(
             [sys.executable, __file__, "--_child", str(n),
+             "--dumps", str(dumps),
              "--preset", args.preset, "--dim", str(args.dim),
              "--queries", str(args.queries)],
             capture_output=True, text=True)
@@ -200,6 +221,9 @@ def main() -> int:
     args.out.write_text(json.dumps(
         {"warmup_stores": WARMUP, "samples": SAMPLES,
          "preset": args.preset, "dim": args.dim, "queries": args.queries,
+         # Directory NAME only — an absolute path would carry a home
+         # directory into a tracked artifact.
+         "dump_dir": dumps.name,
          "corpus": f"longmemeval-s replay dumps ({args.dim}-d)",
          "rows": rows}, indent=2), encoding="utf-8")
     print(f"wrote {args.out}")

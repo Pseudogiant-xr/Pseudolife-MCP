@@ -1188,28 +1188,25 @@ class CortexStore:
         parked stamp stands. valid_time is never moved: when the fact became
         true is not when it was accepted.
 
-        Service-adjacent routing guard (Task 4): if the slot was converted to
-        a set (:meth:`add_member`) after this contender was parked against the
-        scalar it used to hold, the contender's original ``cur`` no longer
-        exists in ``self._current`` — promoting it here would silently
-        register a second current record for the key (bypassing the
-        write_fact scalar/set exclusivity guard) instead of routing through
-        :meth:`add_member`/:meth:`remove_member` like every other write to a
-        set slot. Refused (``WriteResult("refused", contender)``) without
-        touching any state; nothing is marked dirty.
+        Service-adjacent routing guard (Task 4), ACCEPT only: if the slot was
+        converted to a set (:meth:`add_member`) after this contender was
+        parked against the scalar it used to hold, the contender's original
+        ``cur`` no longer exists in ``self._current`` — promoting it here
+        would silently register a second current record for the key
+        (bypassing the write_fact scalar/set exclusivity guard) instead of
+        routing through :meth:`add_member`/:meth:`remove_member` like every
+        other write to a set slot. Refused (``WriteResult("refused",
+        contender)``) without touching any state; nothing is marked dirty.
 
-        That refusal covers ``accept=False`` too, and only ``accept=True``
-        needs it: retiring a contender never touches ``_current`` or
-        ``_members``. Left as-is deliberately (2026-09-05 review) rather
-        than narrowed to the accept branch — it is pre-existing behaviour
-        with its own pin (``test_cortex_sets`` Item 3, whose docstring says
-        "promotable/retirable"), and narrowing it is a decision about the
-        review queue's contract, not part of the assistant-guard fold. It
-        matters more than it used to: the assistant guard parks against a
-        live member set (:meth:`add_member`), so once a ``speaker``-labelled
-        extraction prompt is adopted this stops being the rare
-        parked-then-converted race and becomes the routine outcome — an
-        operator would then have no way to dismiss such a contender.
+        Rejection is NOT refused there (2026-09-05): retiring touches neither
+        ``_current`` nor ``_members``, so it cannot bypass that guard, and
+        refusing it left a contender parked against a set slot unresolvable
+        in either direction — permanently parked with no
+        operator path to dismiss it. Rare while only number-led set adds
+        parked; routine once assistant-origin adds park against user-origin
+        sets. A set slot has no current scalar, so the retirement's audit row
+        is logged against the contender itself, the same ``cur or contender``
+        fallback an empty-slot rejection already used.
         """
         key = (_norm_key(entity), _norm_key(attribute))
         t = time.time() if now is None else float(now)
@@ -1221,7 +1218,7 @@ class CortexStore:
         if c_idx is None:
             return None
         contender = self.records[c_idx]
-        if self._members.get(key):
+        if accept and self._members.get(key):
             return WriteResult("refused", contender)
         self.dirty_slots.add(key)
         cur_idx = self._current.get(key)

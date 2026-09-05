@@ -86,6 +86,9 @@ CALLER_HOLDS_LOCK = {
     "_pin_constraint_facts",
     "_log_retrieval_event",
     "_record_retrieval_use",
+    # used_ids labelling: loops _record_retrieval_use inside record_outcome's
+    # lock, so it inherits the same requirement (the fixpoint verifies it).
+    "_label_used_entries",
     "_track_slot_reads",
     "_persist_episodes",
     "_persist_tombstones",

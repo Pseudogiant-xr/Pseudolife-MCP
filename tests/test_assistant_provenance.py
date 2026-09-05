@@ -745,16 +745,16 @@ def test_a_speakerless_set_claim_writes_exactly_as_before(svc, policy):
     assert svc.cortex_lookup("kedai-sembilir", "menu")["members"] == []
 
 
-def test_a_set_slot_contender_cannot_be_resolved_in_either_direction(svc):
-    """Characterisation, not a fix (2026-09-05 review). The guard parks
-    through the SCALAR contender machinery, and ``CortexStore.resolve``
-    refuses any slot holding current members in BOTH directions — so an
-    assistant contender parked against a live member set can be read but
-    neither promoted nor rejected. Only promotion needs that refusal;
-    narrowing it is a decision about the review queue's contract and was
-    deliberately left outside this fold. Pinned here so the limit is a
-    watched fact rather than a surprise, and so narrowing it later is a
-    conscious edit to this test."""
+def test_a_set_slot_contender_is_dismissable_but_not_promotable(svc):
+    """The guard parks through the SCALAR contender machinery, and
+    ``CortexStore.resolve`` refuses to PROMOTE a scalar contender at a slot
+    holding current members — adopting it would register a second current
+    record behind the write_fact scalar/set guard, so the operator adopts
+    the value with ``set_add`` instead. Rejection is NOT refused (the
+    set-slot retirement landed alongside this guard, 2026-09-05): retiring
+    touches no members, and it is the operator's way to dismiss a claim the
+    assistant parked against the user's set. Pinned so the asymmetry stays
+    a watched fact rather than a surprise."""
     svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
     svc.store("The Quillon Larder also serves an ember-plum tart",
               source="agent")
@@ -763,16 +763,23 @@ def test_a_set_slot_contender_cannot_be_resolved_in_either_direction(svc):
     assert [c["value"] for c in svc.cortex_contenders(
         "the-quillon-larder", "menu")["contenders"]] == ["ember-plum tart"]
 
-    for accept in (True, False):
-        res = svc.cortex_resolve("the-quillon-larder", "menu", accept=accept)
-        assert res["resolved"] is False and res["reason"] == "slot_holds_set"
-
-    # Nothing moved in either direction: the user's member is still the
-    # only current one, and the contender is still parked.
+    res = svc.cortex_resolve("the-quillon-larder", "menu", accept=True)
+    assert res["resolved"] is False and res["reason"] == "slot_holds_set"
+    # Nothing moved: the user's member is still the only current one, and
+    # the contender is still parked.
     got = svc.cortex_lookup("the-quillon-larder", "menu")
     assert [m["value"] for m in got["members"]] == ["kaya toast"]
     assert [c["value"] for c in svc.cortex_contenders(
         "the-quillon-larder", "menu")["contenders"]] == ["ember-plum tart"]
+
+    res = svc.cortex_resolve("the-quillon-larder", "menu", accept=False)
+    assert res["resolved"] is True and res["accepted"] is False
+    assert res["record"]["value"] == "ember-plum tart"
+    assert res["current"] is None          # a set slot has no current scalar
+    assert svc.cortex_contenders(
+        "the-quillon-larder", "menu")["contenders"] == []
+    got = svc.cortex_lookup("the-quillon-larder", "menu")
+    assert [m["value"] for m in got["members"]] == ["kaya toast"]
 
 
 # ── the same guard, at the engine boundary ───────────────────────────────
