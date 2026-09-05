@@ -458,8 +458,151 @@ unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**.
 The paired column is a committed artifact
 (`…raglite-all-fresh.arms-vs-rag.json`) written by
 `evals/beam_within_run_pairs.py` — harness-agnostic since 2026-09-04
-(`--score-key correct|score`, `--type-key`, `--prefix`, `--pairs left:right`,
-and a derived `cascade` arm) — and pinned by a byte-exact regeneration test.
+(`--score-key`, `--type-key`, `--prefix`, `--pairs left:right`, and a
+derived `cascade` arm) — and pinned by a byte-exact regeneration test.
+
+#### Second judge family (2026-09-05)
+
+That hybrid delta is the first whole-benchmark memory-arm win this project
+has measured, and one instrument scored all of it. So before it went
+anywhere near the front door the entire run was re-judged by a second,
+independent judge family — `claude-opus-5`, through `evals/lme_rejudge.py`
+(the section below). Retrieval and answering were not re-run: the recorded
+per-arm responses were replayed through the harness's own judge prompts,
+so the judge model is the only term that changed and any movement is pure
+judge effect.
+
+| arm | Qwen3.8-27B | claude-opus-5 | transfer | item agreement |
+|---|---:|---:|---:|---:|
+| `rag` (control) | 0.690 | 0.694 | +0.004 | 0.976 |
+| `hybrid` | 0.730 | 0.736 | +0.006 | 0.982 |
+| `cortex` | 0.310 | 0.320 | +0.010 | 0.978 |
+| `rag1` | 0.316 | 0.320 | +0.004 | 0.980 |
+
+The paired column, recomputed by the *same* `beam_within_run_pairs.py`
+against each judge's own verdict key, so both sides come off identical
+arithmetic (all 500 rows, 10,000 permutations, seed 0):
+
+| arm vs `rag` | Qwen delta | p | W / L | Opus delta | p | W / L |
+|---|---:|---:|---:|---:|---:|---:|
+| `hybrid` | **+0.040** ± 0.031 | 0.0153 | 41 / 21 | **+0.042** ± 0.031 | 0.0126 | 42 / 21 |
+| `cascade` | +0.002 ± 0.022 | 1.0000 | 16 / 15 | +0.010 ± 0.021 | 0.4576 | 17 / 12 |
+| `cortex` | −0.380 ± 0.048 | 0.0001 | 16 / 206 | −0.374 ± 0.048 | 0.0001 | 17 / 204 |
+| `rag1` | −0.374 ± 0.045 | 0.0001 | 8 / 195 | −0.374 ± 0.046 | 0.0001 | 11 / 198 |
+
+**Where the win comes from.** That paired column is a sum over six
+question types, and they do not contribute equally. Net rows per type —
+questions the hybrid arm gets right and the control does not, minus the
+reverse — counted off each judge's own verdict column:
+
+| question type | n | Opus net | Opus Δ | Qwen net | Qwen Δ |
+|---|---:|---:|---:|---:|---:|
+| `temporal-reasoning` | 133 | **+12** | **+0.0902** | **+13** | **+0.0977** |
+| `single-session-user` | 70 | +3 | +0.0429 | +2 | +0.0286 |
+| `single-session-assistant` | 56 | +2 | +0.0357 | 0 | 0.0000 |
+| `knowledge-update` | 78 | +2 | +0.0256 | +3 | +0.0385 |
+| `multi-session` | 133 | +2 | +0.0150 | +3 | +0.0226 |
+| `single-session-preference` | 30 | 0 | 0.0000 | −1 | −0.0333 |
+| **all 500** | 500 | **+21** | **+0.0420** | **+20** | **+0.0400** |
+
+`temporal-reasoning` is **0.27** of the benchmark and carries **0.57** of
+the net win under Opus and **0.65** of it under Qwen — four times the next
+type's net rows under either judge. Both judges rank the six types the
+same way at the top and the bottom, so the concentration is a property of
+the questions, not of the instrument; `single-session-preference` is the
+only cell that is negative at all (−1 row under Qwen, 0 under Opus, over
+just 30 questions). Read the headline +0.040 / +0.042 as an average over a
+benchmark whose types the fact spine helps very unevenly, not as a uniform
+lift.
+
+The gold-answer leak check flags the same 25 rows under both judges. Over
+the 475 unleaked rows Opus reads **rag 0.6989, hybrid 0.7389, cortex
+0.3263, rag1 0.3347** — the same shape as the Qwen leak-free block above,
+and again not the headline figures.
+
+Instrument cost and floor: **2,061** CLI judge calls (2,060 judged calls +
+1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall.
+`--stability-sample 60` re-judged 60 random
+(row, arm) pairs a second time and the CLI judge agreed with itself on
+**0.9667** of them, a flip rate of ~0.033 — the control floor any
+judge-to-judge delta has to clear before it is a finding.
+
+**Read.** The win holds. Hybrid beats the raw-turn control by +0.040 under
+the local judge and +0.042 under Opus, both at p < 0.02, and both judges
+agree on which rows carry it (42 W / 21 L under Opus, 41 W / 21 L under
+Qwen). No arm's accuracy moves more than +0.010 between judges and item
+agreement runs 0.976–0.982, so judge transfer here is well inside the CLI
+judge's own flip rate — the same reading the 2026-08-22 BEAM re-judge
+gave (rag −0.002, cortex +0.007, hybrid −0.016 against a 0.073 floor).
+The budget-matched hybrid win therefore meets the two-judge-family rule
+and is promoted to `README.md` and `docs/guide/benchmarks.md`. The cascade
+arm is a wash under both judges and is **not** promoted. Artifacts:
+`…raglite-all-fresh.rejudge-opus5.summary.json` and
+`…rejudge-opus5.arms-vs-rag.json`, committed beside the source run's own.
+What it does **not** support is a uniform reading: the win is carried
+mostly by `temporal-reasoning` under both judges (the per-type table
+above), so it is closer to a claim about one question type than about the
+benchmark average.
+
+### Second-judge-family re-judge (`lme_rejudge.py`, added 2026-09-05)
+
+The hybrid win above was first judged by **one** instrument, the local
+Qwen3.8-27B server. A claim does not reach the README on that: determinism is not
+validity — the retired cascade headline replicated at std 0.0000 three
+times and still did not survive a change of judge. `evals/lme_rejudge.py`
+is the second family for LongMemEval rows — the counterpart to
+`beam_rejudge.py`, which does the same for BEAM's rubric-scored ones.
+
+Retrieval and answering are **not** re-run. The recorded per-arm responses
+are replayed through a headless `claude -p` judge (the same pooled CLI
+contract `beam_rejudge` uses; its `CliJudge` is imported, not copied) with
+the harness's **own** judge prompts imported from `longmemeval_bench` —
+`_JUDGE_SYSTEM` for knowledge-update rows, `_JUDGE_SYSTEM_GENERIC` for the
+other five types, the same user message and the same `startswith("yes")`
+parse. The judge model is the only term that changes, so any movement is
+pure judge effect.
+
+```bash
+PYTHONPATH=. python evals/lme_rejudge.py \
+    --in evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl \
+    --tag opus5 --arms rag,hybrid,cortex,rag1 --workers 4 \
+    --stability-sample 60
+```
+
+Three artifacts, none of which touch the source: `…rejudge-<tag>.jsonl`
+(the rows with `{arm}_correct_<tag>` added and the original
+`{arm}_correct` kept beside it, so every comparison pairs within-row),
+`…rejudge-<tag>.summary.json` (per-arm and per-type accuracy under both
+judges, item-level agreement per arm, the gold-leak exclusion with its
+excluded ids, and the instrument's own cost — `cli_calls_total` counts
+every call including the launch probe, `judged_calls` counts only the ones
+inside the timed window, and `seconds_per_call` divides the wall time by
+the latter, because the window opens after the probe), and
+`…rejudge-<tag>.arms-vs-rag.json` — the *same* paired comparison the
+original claim was made from, produced by `beam_within_run_pairs.py` with
+`--score-key correct_<tag>`, so the two numbers come off identical
+arithmetic; `--note` defaults to the standing pairing caveats so that
+artifact is never written bare. An existing output is refused rather than
+overwritten (`--resume` continues it, `--force` discards it), and a resume
+whose `--arms` differ from the file's — in either direction, checked on
+every row rather than the first — is refused too, because a column absent
+from some rows reads as a run of False verdicts rather than as a gap.
+
+**Known gap (follow-up).** Raw judge verdict text is not persisted and a
+wholesale per-arm failure increments no summary counter — the same shape
+as `beam_rejudge.py`, and unfixed here because closing it means re-running
+the judge over rows already judged.
+
+`--stability-sample N` judges N random (row, arm) pairs a second time. A
+CLI judge, unlike the pinned q8_0 server, is not bit-reproducible, and its
+own flip rate is the control floor: a judge-to-judge delta smaller than it
+is not a finding. On the 500-question run above the CLI judge agreed with
+itself on 0.9667 of 60 sampled pairs; the full run's three artifacts are
+committed beside their source
+(`…raglite-all-fresh.rejudge-opus5.jsonl`, `.summary.json`,
+`.arms-vs-rag.json`) and its numbers are in
+[Second judge family (2026-09-05)](#second-judge-family-2026-09-05)
+above.
 
 Model roles are split so extraction quality is the **only** variable:
 
@@ -1754,6 +1897,7 @@ the summary:
 ```powershell
 $env:PSEUDOLIFE_BENCH_POOL_MULT = "4"   # unset = shipped default 1
 $env:PSEUDOLIFE_BENCH_FUSION    = "rrf" # unset = shipped weighted_sum
+$env:PSEUDOLIFE_BENCH_RERANK    = "1"   # unset/0/false/off = shipped default off (cross-encoder)
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
     --tag arm1-pool --phase extract
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
@@ -1776,14 +1920,21 @@ and per-question wins/losses:
 |---|---|---|---|
 | naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 (-0.115, p 0.0506, 4W/13L) | 0.782 @ 1643.0 (-0.077, p 0.1071, 2W/8L) |
 | cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) | 0.667 @ 96.7 (0.000, p 1.0, 0W/0L) |
-| hybrid (facts + top-3 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 (-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, 1W/3L) |
+| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 (-0.064, p 0.1265, 1W/6L) | 0.872 @ 1748.6 (-0.026, p 0.6194, 1W/3L) |
 | commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 (0.000, p 1.0, 1W/1L) | 0.859 @ 544.5 (+0.013, p 1.0, 2W/1L) |
 
 **The cortex arm is the control with identical input.** It never touches
 `cms.retrieve`, so it scores 0.667 in all three runs with 0 wins and 0
-losses — a measured noise floor of exactly zero on this instrument. Every
-delta above is therefore a real difference in the served context, not
-judge jitter.
+losses. Corrected 2026-09-05: that is 0 of 78 flipped, which **bounds**
+the noise floor at ≤3.8% at 95% (rule of three) — it is not the "noise
+floor of exactly zero" this paragraph used to claim, because no finite
+run of identical inputs can measure a rate of zero. What makes the bound
+tight is causal rather than statistical: the answerer is deterministic
+and the cortex arm's served context is byte-identical across every cell,
+so it has nothing to flip on. The two RAG deltas above (-0.115, -0.077)
+are several times that bound and are real differences in the served
+context; the cascade's +0.013 is one question and sits inside it, which
+is why the reading below already calls it noise.
 
 **Reading it honestly.** Nothing is positive except the cascade's single
 +0.013 under weighted_sum, which is one question (2W/1L, p 1.0) and is
@@ -1796,13 +1947,15 @@ rag/hybrid/cascade, cortex unchanged). A
 knob that costs that much more context to lose 0.115 on its primary arm
 does not need a tighter p-value to be declined.
 
-**The reranker-on cell is untested.** Both runs had the cross-encoder OFF
-and an empty reference bank. That is the only combination measured, and
-it is the only one the CAUTION on `SearchConfig.fusion` permits: under
-rrf the reranker's `fusion_weight` collapses to cross-encoder-only
-ordering and un-rescaled reference cosines outrank every memory. Whether
-a widened pool pays off *with* the cross-encoder — the configuration the
-whole retrieve-then-rerank shape was built for — remains unmeasured.
+**All three runs above measured the cross-encoder OFF**, against an
+empty reference bank. That was deliberate, not an oversight: it is the
+only combination the CAUTION on `SearchConfig.fusion` permits, because
+under rrf the reranker's `fusion_weight` collapses to
+cross-encoder-only ordering and un-rescaled reference cosines outrank
+every memory. Whether a widened pool pays off *with* the cross-encoder
+— the configuration the whole retrieve-then-rerank shape was built for
+— was measured the next day under `weighted_sum`, in the two cells
+below. It does not change the verdict above.
 
 Artifacts (all committed):
 `results/longmemeval-ku-oracle-qwen-27b-pool-{ctl,m4rrf,m4sum}.jsonl`
@@ -1813,6 +1966,104 @@ and their `.summary.json`; paired comparisons
 This is why both knobs ship at today's behaviour, stay off the Console
 (`tests/test_console_knob_gapfill.py`), and are documented as measured
 losers rather than as unmeasured options.
+
+#### Reranker-on cells (2026-09-05): the reranker is a wash
+
+Turning the cross-encoder on recovers the width penalty and converts
+none of it into a win. Two more judged runs over the same slice
+(LongMemEval knowledge-update **oracle**, n=78, qwen-27b extraction,
+the reproducible Qwen3.8 server, the same judge and answerer as the
+three runs above), both with the reranker ON:
+
+```powershell
+$env:PSEUDOLIFE_BENCH_RERANK    = "1"
+$env:PSEUDOLIFE_BENCH_FUSION    = "weighted_sum"  # NOT rrf - see the CAUTION above
+$env:PSEUDOLIFE_BENCH_POOL_MULT = "4"             # "1" for the pool-m1rr cell
+```
+
+`weighted_sum` is not a preference: under `rrf` the reranker's
+`fusion_weight` collapses to cross-encoder-only ordering, so an
+rrf + reranker cell would measure the cross-encoder alone rather than
+the fusion, and would not be comparable to anything. `pool-m1rr`
+isolates the reranker at the shipped pool width; `pool-m4rr` is the
+wide pool the reranker was supposed to rescue.
+
+Accuracy @ mean context tokens, all five cells:
+
+| arm | shipped (`pool-ctl`) | m4 + rrf (`pool-m4rrf`) | m4 + sum (`pool-m4sum`) | m1 + rerank (`pool-m1rr`) | m4 + rerank (`pool-m4rr`) |
+|---|---|---|---|---|---|
+| naive RAG (top-6 turns) | 0.859 @ 1184.1 tok | 0.744 @ 1793.0 | 0.782 @ 1643.0 | 0.872 @ 1184.1 | 0.885 @ 1505.5 |
+| cortex facts only | 0.667 @ 96.7 tok | 0.667 @ 96.7 | 0.667 @ 96.7 | 0.667 @ 96.7 | 0.667 @ 96.7 |
+| hybrid (facts + top-6 turns) | 0.897 @ 1289.7 tok | 0.833 @ 1898.6 | 0.872 @ 1748.6 | 0.885 @ 1289.7 | 0.885 @ 1611.0 |
+| commit-gated cascade | 0.846 @ 389.4 tok | 0.846 @ 598.7 | 0.859 @ 544.5 | 0.833 @ 389.4 | 0.872 @ 519.3 |
+
+Paired against the same `pool-ctl` control, with the bootstrap p
+(10 000 draws, seed 0) and per-question wins/losses:
+
+| arm | `pool-m1rr` vs ctl | `pool-m4rr` vs ctl |
+|---|---|---|
+| naive RAG (top-6 turns) | +0.013, p 1.0, 2W/1L | +0.026, p 0.694, 4W/2L |
+| cortex facts only | 0.000, p 1.0, 0W/0L | 0.000, p 1.0, 0W/0L |
+| hybrid (facts + top-6 turns) | -0.013, p 1.0, 0W/1L | -0.013, p 1.0, 1W/2L |
+| commit-gated cascade | -0.013, p 1.0, 0W/1L | +0.026, p 0.5053, 2W/0L |
+
+**The knob was live.** Both new summaries carry
+`bench_env.reranker.enabled: true`, and the `pool-ctl` summary carries
+no `reranker` key at all. That stamp is what makes these cells
+comparable: it is evidence the runs differ in the reranker and not in
+something unrecorded, the same role `bench_env.candidate_pool` already
+plays for the pool width. The cortex arm remains the control — 0.667
+with 0W/0L in both new cells, as in all three 2026-09-04 runs. Read that
+as a bound, not as a zero: 0 of 78 flipped puts the noise floor at ≤3.8%
+at 95% (rule of three), tight for the causal reason above — deterministic
+answerer, cortex context byte-identical across all five cells. It
+matters here in a way it did not on 2026-09-04, because these deltas are
+small: every `pool-m1rr` delta in the table above is ±0.013, exactly one
+question, and one question in 78 is 1.3% — inside the bound. On the same
+reading `pool-m4rr`'s +0.026 is two questions, 2.6%, also inside it. That
+is the quantitative form of the verdict below: these cells are a wash.
+
+**Reading it.** At the shipped width the reranker cannot change *what*
+is served, only the order: `pool-m1rr`'s context tokens are identical
+to the control's on every arm, to the tenth of a token, because at
+multiplier 1 the candidate pool equals the served count. What is left
+is ordering, and ordering moves about one question per arm in each
+direction — +0.013 on rag, -0.013 on hybrid and cascade, every one of
+them at p 1.0. At multiplier 4 the reranker does do the job it was
+built for: it undoes the width penalty, lifting rag from `pool-m4sum`'s
+0.782 back to 0.885, which is +0.026 *over* the control instead of the
+-0.077 without it. But +0.026 is two questions net at p 0.694, it buys
+that with 27% more context on the rag arm (1505.5 against 1184.1
+tokens), and the hybrid arm — the strongest arm on this slice — still
+lands 0.013 *below* control. The reranker rescues the wide pool from
+being a loser without making it a winner. Both pool knobs and the
+reranker stay at their shipped defaults, and the retrieve-then-rerank
+shape is now measured rather than assumed.
+
+Wall time comes from the artifacts, not from a stopwatch. Every judged
+row carries a `wall_seconds` field — the elapsed time of that question's
+`--phase extract` body, written per row by `longmemeval_bench.py` — so
+summing it across each cell's 78 rows gives that cell's extract leg
+exactly. With the cross-encoder ON: **96.5 min** (`pool-m4rr`) and
+**66.3 min** (`pool-m1rr`). With it off: **40.1 min** (`pool-ctl`),
+**39.1 min** (`pool-m4rrf`) and **38.9 min** (`pool-m4sum`). That is
+**2.45x** and **1.68x** the reranker-off mean — the range is
+**1.7-2.5x**, not the "2-3x" an earlier version of this paragraph
+quoted from the terminal rather than from the artifacts, and the
+reranker-off cells are 40 min rather than the 35 it also quoted.
+
+It is still not a controlled benchmark: the machine was running other
+jobs throughout, and `wall_seconds` times the whole per-question extract
+body rather than the cross-encoder alone. Read it as "the cross-encoder
+costs real time on a full re-extraction", directionally consistent with
+the 7-11x per-search latency the proxy table above measures under
+controlled conditions.
+
+Artifacts (all committed):
+`results/longmemeval-ku-oracle-qwen-27b-pool-{m1rr,m4rr}.jsonl` and
+their `.summary.json`; paired comparisons
+`results/compare-pool-m1rr-pairs.json` and
+`results/compare-pool-m4rr-pairs.json`.
 
 **Regression gate for the v35 label carrier (2026-09-03).** Two paired
 checks confirmed the write-time `authority`/`distortion_tolerance` labels
@@ -1836,6 +2087,134 @@ Bank dumps and served contexts persist per run under
 `evals/results/banks/beam-<tier>-<extractor>-<tag>/` (gitignored), so a
 serving-knob rerun or a re-judge recomposes from persisted state instead of
 re-paying the ~5h ingest/extraction phase.
+
+## Forgetting sweep (`forgetting_sweep_probe.py`, 2026-09-05)
+
+The distractor-scale probe (`distractor_scale_probe.py`, 2026-08-15,
+preregistered in
+`docs/superpowers/specs/2026-08-15-distractor-scale-probe-preregistration.md`)
+measured what accumulation costs: evidence-in-top-6 falls 0.830 (1x) →
+0.597 (15x) → 0.513 (31x) as the pool grows, while nothing ever evicts on
+the flat default. It left its own follow-up open in as many words — no
+experiment had forced eviction and asked *which* victims to pick, or
+whether not evicting at all beats picking badly. **This probe answers
+that, and the answer is that keeping everything wins.**
+
+Same construction, CPU only, no GPU/judge/daemon: the same 78
+knowledge-update dumps, the same RNG-free rotation, the same
+`band_ablation.select_topk` mirror (flat, recency off, BM25 on), the same
+five scales. The only new step is a **sweep** that reduces the pooled bank
+to a capacity `C` before selection.
+
+```bash
+python evals/forgetting_sweep_probe.py     # writes results/forgetting-sweep-probe-20260905.json
+python evals/forgetting_sweep_probe.py --dumps <band-state-dir> --limit 3
+```
+
+| arm | evicts |
+|---|---|
+| `none` | nothing — the distractor probe's own numbers, reproduced as the control |
+| `balanced` / `recency_heavy` / `surprise_heavy` | the lowest `RetentionPolicy.source_weighted_score`, the shipped `_evict_one` scoring, called offline |
+| `random` | uniformly at random, seeded — the floor a policy must beat |
+| `oracle` | never a gold-evidence entry, randomly among the rest — the ceiling victim choice can reach |
+
+Capacities are per question: **C1** = that question's 1x pool size
+(~490), **C3** = its 3x pool size (~1,470). A scale already at or below
+the capacity is a no-op and is reported as one.
+
+**Result — `results/forgetting-sweep-probe-20260905.json`,
+evidence-in-top-6 (n=78, mean pool size in the second column):**
+
+| capacity | scale | pool | `none` | `balanced` | `recency_heavy` | `surprise_heavy` | `random` | `oracle` |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1x | 488.3 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 | 0.8299 |
+| C1 | 3x | 1464.8 | 0.7583 | 0.1528 | 0.0807 | 0.1528 | 0.4216 | 0.9030 |
+| C1 | 7x | 3418.0 | 0.6840 | 0.0465 | 0.0064 | 0.0465 | 0.1390 | 0.9063 |
+| C1 | 15x | 7324.2 | 0.5969 | 0.0192 | 0.0000 | 0.0192 | 0.0710 | 0.9191 |
+| C1 | 31x | 15136.7 | 0.5130 | 0.0000 | 0.0000 | 0.0000 | 0.0198 | 0.9121 |
+| C3 | 7x | 3418.0 | 0.6840 | 0.2736 | 0.0791 | 0.2736 | 0.3522 | 0.8571 |
+| C3 | 15x | 7324.2 | 0.5969 | 0.0652 | 0.0064 | 0.0652 | 0.1491 | 0.8752 |
+| C3 | 31x | 15136.7 | 0.5130 | 0.0454 | 0.0000 | 0.0454 | 0.0845 | 0.8666 |
+
+(C1/1x, C3/1x and C3/3x are capacity no-ops — the pool is already at or
+under C, so every arm returns the control's numbers. The swept pool holds
+488.3 entries at every scale under C1, and 1464.8 under C3.)
+
+**Verdict against the preregistered bars**
+(`docs/superpowers/specs/2026-09-05-forgetting-sweep-preregistration.md`;
+the gate cell is C1/15x, paired sign-flip permutation, 10k perms, seed 0):
+
+- **G-F0 (control): PASS, exactly.** The `none` arm reproduces the
+  2026-08-15 artifact across all 390 question × scale cells on pool size,
+  evidence-in-top-6, -top-3, any-served and rank-of-first-evidence.
+  Latency is excluded as machine-dependent.
+- **G-F1 (does a shipped sweep pay?): NO, by a mile.** The bar was
+  ≥ +0.05 with p < 0.05; the measured deltas against no sweep are
+  **−0.5777 (balanced), −0.5969 (recency_heavy), −0.5777
+  (surprise_heavy), all p < 0.0001**. Sweeping to a lean bank costs
+  about two and a half times what accumulating to 15x costs.
+- **G-F2 (is victim choice worth anything?): YES.** `oracle − none` =
+  **+0.3222, p < 0.0001**, and the oracle at 0.9191 beats even the
+  undiluted 1x bank's 0.8299 — thinning a pool helps when you thin the
+  right entries. The loss is in the scores, not in forgetting.
+- **G-F3 (do the shipped scores beat coin-flipping?): NO.** All three sit
+  significantly **below** the random floor: −0.0518 (p 0.0329), −0.0710
+  (p 0.0002), −0.0518 (p 0.0329).
+- **G-F4 (sanity): PASS** — 1x evidence-in-top-6 = 0.8299, above the 0.5
+  floor inherited from the distractor probe's G-D3.
+
+**Why the shipped policies lose to a coin flip.**
+`RetentionPolicy.source_weighted_score` multiplies a superseded entry's
+score by 0.05, putting every superseded entry below every live one — and
+on this corpus **247 of 286 gold-evidence entries (0.8636) are flagged
+superseded**, against a 0.7341 base rate over 38,086 entries
+(`results/forgetting-sweep-corpus-props-20260905.json`, written by
+`forgetting_sweep_probe.py --corpus-props`). The policies
+delete the answer first, by design. Evidence survival at C1/15x makes it
+concrete: 0.0214 (balanced and surprise_heavy), 0.0000
+(recency_heavy), 0.0727 (random), 1.0000 (`none` and `oracle`). This is a
+finding about `source_weighted_score` on knowledge-update material, not
+an argument that the multiplier is wrong in general — it was added
+because a correction was scoring below the stale fact it replaced
+(`miras/protocols.py`).
+
+**Every preregistered expectation held**, including the two stated as
+analytic consequences of the dumps carrying no `access_count`:
+`balanced` and `surprise_heavy` are identical to four decimal places at
+every cell (both reduce to a strictly increasing function of surprise),
+and `recency_heavy` degenerates to a positional policy that deletes the
+anchor's own turns first — a construction artifact, called out in the
+spec before the run, not a verdict on that policy.
+
+**The sweep is a large latency win and it does not matter.** Median BM25
+build+score at 15x falls from 812 ms unswept to 29 ms at C1, and
+`select_topk` from 1052 ms to 44 ms. The quality cliff arrives long before
+the latency ceiling does, which is the same conclusion the distractor
+probe's G-D2 reached from the other direction. Read those four as ratios,
+not constants: the probe was run twice and every quality number came back
+bit-identical while the latency medians moved 10-20% with machine load,
+which is why the control gate excludes them.
+
+Caveats, all preregistered: six substitutions the dumps force (chiefly
+`access_count = 0`, never dumped; surprise reconstructed exactly as
+`MIRASBand.compute_surprise` over each dump's own insertion order);
+distractors are foreign haystacks, i.e. the easiest possible material for
+a sweep to identify, so a sweep that loses here loses on realistic
+near-duplicate chatter too; both capacities are aggressive (7% and 20% of
+the 15x pool), so nothing here speaks to a capacity set just below the
+accumulated size; a retrieval proxy, not a judged run; single backbone
+(v25, 1024-d).
+
+**Note for anyone re-running the distractor probe**: its `DUMP_DIR`
+constant names `results/banks/s-qwen-27b-ablbands-flat`, which on a tree
+carrying both replays is the retired 384-d MiniLM dump — through it, 11
+of 30 checked cells reproduce the published numbers and no `select_topk`
+knob closes the gap. The v25 replay the artifact was measured on is
+1024-d and lives in a sibling directory whose suffix is machine-local, so
+the sweep probe resolves the directory by backbone dimension, preset and
+"nothing was evicted during the replay", and records its choice in the
+artifact. Those dumps are gitignored: a fresh worktree must link or copy
+them from the main checkout.
 
 ---
 
@@ -2643,7 +3022,7 @@ that only mean **served**, which is the distinction the raw numbers hide:
 
 | counter | what it actually means |
 | --- | --- |
-| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced |
+| `retrieval_uses` | consumption — a served entry was later dereferenced or reinforced (`used_via` `get` / `reinforce`), or named by the agent in `memory_outcome(used_ids=...)` (`outcome`) |
 | `entries.explicit_reinforcements` | consumption — moves only on `memory_reinforce` |
 | `entries.access_count` | **serve count** — `cms.py` bumps it for every entry in a merged result set |
 | `slot_reads.read_count` | **serve count** — `_track_slot_reads`: "count each slot SERVED as an answer" |
@@ -2694,6 +3073,21 @@ Option 2 is the one worth shipping: it is a single optional list
 parameter, it is written by the agent that just used the memories, and it
 labels the whole served set rather than the one id someone happened to
 dereference.
+
+**Shipped 2026-09-05.** `memory_outcome(..., used_ids=[...])` credits each
+id to the most recent event in the session window that served it, writing
+the ordinary `retrieval_uses` row under `used_via="outcome"` — so
+`retrieval_replay.py`'s `uses` label source and this script's `by_via`
+breakdown pick it up with no harness change, and the two dereference vias
+stay distinguishable from the asserted one. No schema bump, and no join:
+nothing links a signal row to the use rows it caused — the labels stand on
+their own, and which outcome named which ids is deliberately not recorded.
+The result reports `used_ids_recorded`, `used_ids_unmatched` and
+`used_ids_errors`, because an id no event served must not read the same as
+a landed label, and neither must a label the storage layer refused.
+Whether agents actually pass it is the open question — the served session-start block
+(`MEMORY_LOOP_BLOCK`) now asks for it in the REFLECT beat, and the next
+telemetry review measures the answer against the 1 label above.
 
 ## `retrieval_replay.py` — the shipped knobs on the queries agents really asked
 
@@ -3134,7 +3528,11 @@ text, so the escaping is not paid. (Its JSON size, 7,644, is in the artifact
 under `chars` for comparability and is not the cost.) The block is capped at
 `HOOK_CONTEXT_MAX_CHARS - 2,000` = 7,500 raw chars by
 `tests/test_plugin_packaging.py`, which is why it is the one surface here
-with almost no headroom.
+with almost no headroom. (Both rows above are the 2026-09-04 run. The
+2026-09-05 `used_ids` change re-priced them slightly — the block to 7,488
+raw chars, and the manifest by the new parameter's 81-char description in
+all three tiers — without a rerun of this ledger, which needs the live
+daemon.)
 
 ## What a call costs — before and after the cuts
 
