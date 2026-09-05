@@ -1145,6 +1145,207 @@ instruction is a separate change needing its own gate.
   ladder ran clean at that size. A full 100-entry dream batch of long notes
   has not been measured against the smaller window.
 
+#### The CLI shim's own prompt — a second gate, on the deployed path
+
+The gate above measured the prompt the *daemon* sends. On the maintainer's
+install the daemon does not get the last word: `ops/.env` points
+`PSEUDOLIFE_DREAM_BASE_URL` at `host.docker.internal:8082/v1`, which is the
+Claude CLI shim, and `ops/install-shim-autostart.ps1` launches that shim
+with `--system-prompt-file`. That flag **replaces** the shipped
+`_SYSTEM_PROMPT` prefix (keeping only the appended vocab/known-facts
+hints), so an instruction added to `dream.py` reaches such an install only
+through the fallback sidecar. The assistant-facts blocks shipped on
+2026-09-05 landed in exactly that blind spot, which the section above flags
+as needing its own gate. This is that gate.
+
+`evals/prompts/sonnet_extractor_v4.md` is the v2 body plus the same three
+shipped blocks, composed by `evals/gen_shim_prompt.py` from `dream.py`'s
+own constants — the shim path and the daemon path cannot drift in what they
+ask for. It is **v4, not v3**: `sonnet_extractor_v3.md` is an unrelated,
+never-adopted 2026-08-02 lineage (coverage mandates), and v2 is the file the
+deployed config actually names.
+
+The run, 2026-09-05, on the `opus-5` rung — the Max-plan CLI shim on its
+**dedicated port 8083**, serving `claude-opus-5`, which is the model
+`ops/install-shim-autostart.ps1` defaults to. The rung exists precisely so
+"the production sonnet shim on :8082 is never repurposed mid-run"; the live
+shim was never started, stopped or reconfigured. The prompt variant is set
+on the **shim** (`--system-prompt-file` at launch), not via the ladder's own
+flag, because the shim is what replaces the prompt. `naive-rag.json` sets
+the bar — gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is
+**34.98**:
+
+| arm | prompt | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|
+| pre | v2 | 1.0 | 0.0 | 15.2 | 16 / 16 | `opus-5-shimprompt-pre.json` |
+| post | v4 | 1.0 | 0.0 | 16.1 | 16 / 16 | `opus-5-shimprompt-post.json` |
+| pre, rep 2 | v2 | 1.0 | 0.0 | 14.0 | 16 / 16 | `opus-5-shimprompt-pre-rep2.json` |
+| post, rep 2 | v4 | 1.0 | 0.0 | 14.8 | 16 / 16 | `opus-5-shimprompt-post-rep2.json` |
+
+**The two `post` rows are superseded.** They measured v4 while it carried
+speaker rule v1, which the same day's merge review rewrote; the re-gate under
+"[Re-gated under speaker rule v2](#re-gated-under-speaker-rule-v2-2026-09-05)"
+below replaces them. The `pre` rows still stand — the v2 comparator carries
+none of the assistant blocks, so the rule rewrite cannot reach it.
+
+**The gate passes on both predicates.**
+`ladder-shimprompt-paired-verdict-threshold.json` reads `gate: PASS`,
+`no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`,
+`failed_checks: []`. Quality is pinned across all four runs: gold 1.0,
+stale 0.0, and an identical consolidation tally every time (26 pulled, 16
+claims, 16 inserted, 0 superseded).
+
+**The token move is inside the noise, and the replicates are what say so.**
+The verdict's `differences` block reports `tokens_per_query 15.2 → 16.1`,
+which the ladder's own rule permits twice over. But the replicates show the
+*same prompt* spanning 14.0–15.2 (pre) and 14.8–16.1 (post): the arms'
+ranges overlap, and the 0.85 gap between arm means is smaller than either
+arm's own 1.2–1.3 spread. The shim rung is a CLI-served model and is not
+bit-reproducible, so a single run per arm could not have distinguished the
+two — nothing is claimed for the difference in either direction. Both arms
+sit at ~45% of the token budget.
+
+What this changes: `ops/install-shim-autostart.ps1`, its `.sh` sibling and
+the manual-start hints in `ops/install.{ps1,sh}` now default to v4. The
+Codex shim (`ops/install-codex-shim-autostart.ps1`) passes **no** prompt
+file on purpose, so it already runs the shipped `_SYSTEM_PROMPT` and needed
+no change. An existing install picks the new prompt up when the autostart is
+re-installed or the shim is restarted with the new file — rebuilding the
+daemon image alone does not reach the shim path.
+
+##### Re-gated under speaker rule v2 (2026-09-05)
+
+The four rows above measured v4 while it still carried **speaker rule v1**,
+which told the model that "each note begins with its role". The same day's
+merge review found that premise false on a real bank — only the eval
+harnesses write a `role:` prefix — and rewrote `_ASSISTANT_SPEAKER_RULE` to
+read a marker where the note carries one, infer only where the note is
+unmistakably the assistant speaking, and OMIT the field under doubt.
+`sonnet_extractor_v4.md` is generated from that constant, so the file the
+shim is launched with changed and the gate above stopped describing it.
+Only the POST arm was re-run: the `pre` comparator is v2, which carries none
+of the assistant blocks, so the rule rewrite cannot reach it. Same rung,
+same corpus, same dedicated port 8083; **the gate run neither started,
+stopped nor reconfigured the live shim on :8082**. That is the claim the
+rung's isolation supports, and it is narrower than the one first written
+here ("was again never started, stopped or reconfigured"), which was not
+true of the window: the maintainer restarted the shim's scheduled task at
+13:17, two minutes before this verdict was first written (`generated_at:
+2026-09-05T13:18:50`; the file now carries a later stamp — see the sha note
+above, which explains why it was regenerated). The rung is isolated
+because it never addresses :8082 at all — not because nothing else on the
+machine touched it.
+
+| arm | prompt | speaker rule | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|---|
+| pre | v2 | none | 1.0 | 0.0 | 15.2 | 16 / 16 | `opus-5-shimprompt-pre.json` |
+| pre, rep 2 | v2 | none | 1.0 | 0.0 | 14.0 | 16 / 16 | `opus-5-shimprompt-pre-rep2.json` |
+| post2 | v4 | v2 | 1.0 | 0.0 | 15.5 | 16 / 16 | `opus-5-shimprompt-post2.json` |
+| post2, rep 2 | v4 | v2 | 1.0 | 0.0 | 14.8 | 17 / 17 | `opus-5-shimprompt-post2-rep2.json` |
+
+**The gate still passes on both predicates**, on the rule-v2 verdict
+`ladder-shimprompt-rule2-paired-verdict-threshold.json` (`post_arm: post2`):
+`gate: PASS`, `no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`
+and `failed_checks: []`. Gold stays 1.0 and stale 0.0 on both replicates, so
+the quality claim the default flip rests on survives the rule rewrite.
+
+**What does not carry over is the identical tally.** Under rule v1 all four
+runs consolidated 26 pulled / 16 claims / 16 inserted / 0 superseded. Under
+rule v2 the second replicate returned **17 claims and inserted all 17** —
+same corpus, one extra claim, nothing lost, since `claims == inserted` in
+every run under both rules. "An identical consolidation tally every time" is
+therefore a statement about the rule-v1 runs only, and is not restated here.
+A one-claim move across two replicates of a rung that is not
+bit-reproducible is not evidence in either direction; it is reported because
+the artifact shows it. `bench_env.dream.assistant_claims` reads `contender`
+on both new runs, so the write policy is not a hidden term in the move.
+
+**The token move stays inside the noise.** The rule-v2 verdict's
+`differences` block reports `tokens_per_query 15.2 → 15.5`. Across
+replicates the post2 arm spans 14.8–15.5 against the pre arm's 14.0–15.2:
+the ranges overlap, and the 0.55 gap between the arm means (14.6 pre, 15.15
+post2) is smaller than the pre arm's own 1.2 spread. All four runs sit under
+45% of the same 34.98 token budget. Nothing is claimed for the difference.
+
+The rule-v1 verdict and its two `post` artifacts stay committed — a
+superseded number keeps its evidence. `evals/ladder_pair_compare.py` gained
+`--post-suffix` for exactly this shape of re-run: a re-gate that keeps the
+pre arm writes `…-post2.json`, and without the flag the tool would read the
+superseded `…-post.json` sitting beside it.
+
+**The two verdicts have different `pre`/`post` sha blocks, on purpose.** The
+rule-v1 verdict records `sha: 0b02e5ea` for both arms and the rule-v2 one
+`sha: null, sha_source: "unstamped"`. Neither is a correction of a number:
+the field used to hold each worktree's HEAD **at compare time**, which for a
+re-gate out of one worktree is the same string for both arms and is neither
+arm's — the rule-v2 verdict claimed `7083bc33` for a `pre` arm produced at
+`0b02e5ea`. It now reads `git_rev` off each arm's own artifacts, which these
+runs predate, so the honest answer is `null` with the reason named. Rung
+files written by `ladder_sweep.py` from that change onward carry the stamp;
+every artifact already in the tree, these four included, does not. Only the
+sha blocks
+and `generated_at` differ from the verdict as first written; every metric,
+tally and gate result is unchanged, the verdict being a pure function of the
+run artifacts.
+
+
+##### The extraction prompt names a benchmark answer (disclosed 2026-09-05)
+
+`sonnet_extractor_v4.md` is the v2 body plus the shipped assistant-facts
+blocks. The guard that shipped with it grepped only the four registered
+invented tokens — the names the 2026-09-05 provenance example made up —
+while claiming to cover the whole prompt. It does now, and the wider scan
+found something the narrow one could not. The finding turned out to be
+bigger than the shim: it starts in `dream.py`, so it reaches every
+extractor, and this section was rewritten once already for saying otherwise.
+
+**The SHIPPED prompt names a LongMemEval answer.** The
+"COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS" example reads *"[5] saw a
+Northern Flicker today, that makes 32 species at the park now"* and yields the
+value `32`. LongMemEval question `affe2881` (knowledge-update) asks how many
+bird species the user has seen in their local park; its gold answer is `32`,
+and all 13 occurrences of "Northern Flicker" in **each** dataset file sit
+inside that question's own sessions.
+
+It is **not** a shim-only debt, though the first cut of this note said so. The
+example lives in `dream._BASE_SYSTEM_PROMPT` (shipped 2026-08-01), hence in
+`_SYSTEM_PROMPT`, in `assistant_facts_provenance.txt`, and — via the v2 body —
+in `sonnet_extractor_v2.md` and `v4`. Every extraction run since has had it, on
+every extractor: the CPU sidecar, both CLI shims, and every ladder rung.
+
+What this does and does not affect:
+
+- **The paired gates above are immune.** Both arms carry the identical text, so
+  the example cannot move a pre-vs-post difference. Every number in the two
+  tables above stands as measured, and the same holds for any paired
+  comparison whose arms share the prompt.
+- **Absolute accuracies are what is suspect**, on that one question, in any run
+  since 2026-08-01.
+- **Neither carrier is re-cut here.** `sonnet_extractor_v2.md` is the `pre` arm
+  of a committed gate; editing it would retroactively change what that gate
+  compared. And re-cutting `dream.py`'s example changes the shipped extraction
+  prompt, which needs its own ladder gate. Recording the debt and gating a
+  prompt change are separate pieces of work.
+
+**Half the follow-up is already answered.** `evals/distill_datagen_arm1.py`
+builds its teacher and stored prompts as `dream._SYSTEM_PROMPT + hints` (pinned
+by `tests/test_claude_shim_contract.py`), so a distillation run dated after
+2026-08-01 carried the example and one before it did not. **Still filed, not
+attempted here:** dating those runs, and auditing which published absolute
+numbers were measured on `affe2881` since 2026-08-01.
+
+The guards are `tests/test_shim_prompt.py` (the shim prompt body) and
+`tests/test_assistant_provenance.py` (`dream._SYSTEM_PROMPT`). Each scans every
+Titlecase phrase against both dataset files and shares one dated
+`KNOWN_CORPUS_COLLISIONS` allowlist in `evals/gen_assistant_facts_prompts.py`.
+The check is an equality: a newly contaminated name fails, and so does a listed
+one that has stopped hitting. ALL-CAPS, lowercase and digit-bearing names are
+out of scope — the prompts use ALL-CAPS for emphasis throughout, so a
+caps-inclusive scan would need an exemption list that rots faster than it
+guards — and that limit is stated rather than implied away. (The dataset half
+skips when `evals/data` is absent, which is gitignored; the structural half
+runs regardless.)
+
 #### Superseded — first run (contaminated worked example)
 
 Everything below is the **first** measurement of the two variants, kept
