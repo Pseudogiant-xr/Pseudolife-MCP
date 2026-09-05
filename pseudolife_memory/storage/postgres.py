@@ -671,6 +671,19 @@ class PostgresStorage:
         strict (``IS NOT DISTINCT FROM`` — a None session only labels
         None-session events, never another session's). Idempotent per
         (event, entry, via). Returns rows written (0 or 1)."""
+        return self.credit_retrieval_use(
+            entry_id, session_id, used_via, window_s, now=now)[1]
+
+    def credit_retrieval_use(self, entry_id: int, session_id: str | None,
+                             used_via: str, window_s: float,
+                             now: float | None = None) -> tuple[int | None, int]:
+        """:meth:`record_retrieval_use`, returning ``(event id credited or
+        None, rows written)``.
+
+        The two halves differ: a repeat label writes no row but the entry
+        WAS served, so a caller reporting "this id matched no event" back to
+        an agent (``memory_outcome(used_ids=...)``) must read the event id,
+        not the rowcount."""
         t = time.time() if now is None else float(now)
         with self._txn():
             row = self.conn.execute(
@@ -682,14 +695,14 @@ class PostgresStorage:
                  Jsonb([{"entry_id": int(entry_id)}])),
             ).fetchone()
             if row is None:
-                return 0
+                return None, 0
             cur = self.conn.execute(
                 "INSERT INTO retrieval_uses "
                 "(event_id, entry_id, used_via, created_at) "
                 "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
                 (int(row[0]), int(entry_id), used_via, t),
             )
-        return cur.rowcount
+        return int(row[0]), cur.rowcount
 
     def attach_served_facts(self, event_id: int,
                             served_facts: list[dict]) -> int:
