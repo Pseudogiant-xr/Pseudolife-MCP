@@ -810,29 +810,30 @@ gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is **34.98**:
 |---|---|---|---|---|---|---|
 | `qwen-27b` | pre | 1.0 | 0.0 | 13.4 | 16 / 16 | `qwen-27b-assistprompt-pre.json` |
 | `qwen-27b` | post (rule v1, superseded) | 1.0 | 0.0 | 14.2 | 16 / 16 | `qwen-27b-assistprompt-post.json` |
-| `qwen-27b` | post (rule v2, the shipped text) | — | — | — | — | **pending re-run** → `qwen-27b-assistprompt-post2.json` |
+| `qwen-27b` | post (rule v2, the shipped text) | 1.0 | 0.0 | 13.4 | 16 / 16 | `qwen-27b-assistprompt-post2.json` |
 | `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 | `e4b-v3-assistprompt-pre.json` |
 | `e4b-v3` | post (rule v1, superseded) | 1.0 | 0.1 | 14.8 | 19 / 18 | `e4b-v3-assistprompt-post.json` |
 | `e4b-v3` | pre, rep 2 | 1.0 | **1.0** | **39.7** | 16 / 16 | `e4b-v3-assistprompt-pre-rep2.json` |
 | `e4b-v3` | post (rule v1, superseded), rep 2 | 1.0 | 0.1 | 14.8 | 19 / 18 | `e4b-v3-assistprompt-post-rep2.json` |
 
-**`qwen-27b` clears the ladder on both arms.** The consolidation tally is
-identical (26 pulled, 16 claims, 16 inserted, 0 superseded) and the only
-movement is 13.4 → 14.2 tokens/query, 41% of the budget. That is the gate
+**`qwen-27b` clears the ladder on all three arms.** The consolidation tally
+is identical across every one of them (26 pulled, 16 claims, 16 inserted,
+0 superseded), and the only movement anywhere is the rule-v1 arm's 13.4 →
+14.2 tokens/query, 41% of the budget. On the text that actually ships —
+rule v2, the `post2` row — even that movement is gone. That is the gate
 the ship rests on, and `assistant_facts_provenance.txt` became the shipped
 `_SYSTEM_PROMPT` on the strength of it.
 
-**Every post row above was measured with speaker rule v1, which the same
-day's merge review retired.** Rule v1 told the model "Each note begins with
-its role, so read the role there; never guess it, and never omit the
-field" — false on a production bank, where `OpenAICompatExtractor.extract`
-numbers the raw entry text and writes no role prefix (the `[date] role:
-content` shape belongs to these harnesses). Rule v2 asks for the marker
-where a note has one, allows an inference only for unmistakably
-assistant-produced content, and makes omission the answer under doubt. The
-shipped `_SYSTEM_PROMPT` is rule v2, the rows above are rule v1, so the
-primary rung's **re-gate on the shipped text is outstanding**. It runs from
-the branch worktree as:
+**The rule-v1 post rows were superseded the same day by the merge review;
+the `post2` row is the re-gate on the text that ships.** Rule v1 told the
+model "Each note begins with its role, so read the role there; never guess
+it, and never omit the field" — false on a production bank, where
+`OpenAICompatExtractor.extract` numbers the raw entry text and writes no
+role prefix (the `[date] role: content` shape belongs to these harnesses).
+Rule v2 asks for the marker where a note has one, allows an inference only
+for unmistakably assistant-produced content, and makes omission the answer
+under doubt. The shipped `_SYSTEM_PROMPT` is rule v2, so the primary rung
+was re-run on it (2026-09-05) from the branch worktree as:
 
 ```
 PYTHONPATH=. python evals/ladder_sweep.py --rung qwen-27b \
@@ -840,9 +841,33 @@ PYTHONPATH=. python evals/ladder_sweep.py --rung qwen-27b \
     --system-prompt-file evals/prompts/assistant_facts_provenance.txt
 ```
 
-and lands as `evals/results/qwen-27b-assistprompt-post2.json` — the
-artifact the pending row above and the CHANGELOG's table expect. The `pre`
-arm is unaffected: it is the same shipped-prompt baseline either way.
+landing as `evals/results/qwen-27b-assistprompt-post2.json`. It reads gold
+1.0, stale 0.0, **13.4 tokens/query** on the same 16 / 16 tally — rule v2
+is **token-identical to the shipped prompt** on this rung, where rule v1
+read 14.2. The `pre` arm was not re-run and did not need to be: it is the
+same shipped-prompt baseline either way, which is what makes the pairing
+valid. The rule-v1 rows stay in the table, labelled superseded, rather
+than being deleted or overwritten.
+
+That arm has its own paired verdict,
+`ladder-assistprompt-post2-paired-verdict-threshold.json`, from
+`ladder_pair_compare.py --mode threshold --rungs qwen-27b --tag
+assistprompt --post-suffix post2` (the `--post-suffix` option exists so a
+re-gate can be verdicted without renaming the run it supersedes). It reads
+`gate: PASS`, `no_regression_gate: PASS`, `cleared: true` and
+`failed_checks: []`, with `identical: true` and an empty `differences` —
+so this arm also passes the stricter identity predicate that the rule-v1
+run failed on tokens alone. `e4b-v3` was not re-run, so the earlier
+threshold verdict remains the only evidence for that rung.
+
+**Only the `post2` file carries a `bench_env` stamp.**
+`ladder_sweep.run_rung` began recording the resolved dream policy that
+same day, so `qwen-27b-assistprompt-post2.json` is the first ladder
+artifact to say which one it ran under:
+`bench_env.dream.assistant_claims: "contender"`. Every other row in the
+table above — both `qwen-27b` rule-v1 arms and all four `e4b-v3` files —
+predates the stamp and carries **no `bench_env` key at all**; their policy
+has to be read from the run date and the tree, not off the artifact.
 
 **`e4b-v3` is bimodal, its baseline arm fails the ladder's own bar, and its
 two arms are not established as independent** — read the rung as "no
@@ -899,8 +924,14 @@ finding**. Settling either question means re-running the rung under
 `ladder_replicate.py` (fresh container per pass) against a candidate
 container rather than the deployed one.
 
-Two verdict artifacts are committed, and they disagree on purpose:
+Three verdict artifacts are committed. The first two cover the rule-v1
+run and disagree on purpose; the third is the rule-v2 re-gate described
+above:
 
+- `ladder-assistprompt-post2-paired-verdict-threshold.json` — the
+  `qwen-27b` re-gate on the shipped text, `gate: PASS` /
+  `no_regression_gate: PASS`, `differences: {}`. It covers that one rung
+  only.
 - `ladder-assistprompt-paired-verdict-threshold.json` —
   `ladder_pair_compare.py --mode threshold`, the predicate for a change
   expected to move the numbers. `gate: FAIL` (the `e4b-v3` **pre** arm,

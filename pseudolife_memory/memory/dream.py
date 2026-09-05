@@ -247,8 +247,15 @@ _BASE_SYSTEM_PROMPT = (
 # the note is unmistakably the assistant's, and makes OMISSION the answer
 # under doubt — an omitted speaker is the pre-2026-09-05 write path, while a
 # wrong "assistant" demotes a user-stated fact to a contender. Every number
-# above was measured with rule v1; the qwen-27b re-gate on this text is
-# pending as artifact tag `assistprompt-post2` (evals/README.md).
+# above was measured with rule v1, so the primary rung was re-gated on THIS
+# text (2026-09-05, evals/results/qwen-27b-assistprompt-post2.json and
+# ladder-assistprompt-post2-paired-verdict-threshold.json): gold 1.0 /
+# stale 0.0 / 13.4 tok on the identical 26-pulled, 16-claim, 16-inserted
+# tally — metric-identical to the shipped-prompt baseline arm, where rule
+# v1 read 14.2 tok. gate PASS, no_regression_gate PASS, no differences.
+# The rewrite therefore costs no accuracy and no tokens on this rung; the
+# LongMemEval numbers above are still rule-v1 measurements and have not
+# been re-run. Tables in evals/README.md, "Assistant-stated facts".
 #
 # Every proper noun below is INVENTED and registered in
 # `gen_assistant_facts_prompts.EXAMPLE_TOKENS`, which greps each one

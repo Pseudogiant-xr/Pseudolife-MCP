@@ -190,19 +190,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   |---|---|---|---|---|---|
   | `qwen-27b` | pre (shipped prompt) | 1.0 | 0.0 | 13.4 | 16 / 16 |
   | `qwen-27b` | post (provenance prompt, speaker rule v1) | 1.0 | 0.0 | 14.2 | 16 / 16 |
+  | `qwen-27b` | post (provenance prompt, speaker rule v2 — the shipped text) | 1.0 | 0.0 | 13.4 | 16 / 16 |
   | `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 |
   | `e4b-v3` | post (rule v1) | 1.0 | 0.1 | 14.8 | 19 / 18 |
   | `e4b-v3` | pre, replicate 2 | 1.0 | **1.0** | **39.7** | 16 / 16 |
   | `e4b-v3` | post (rule v1), replicate 2 | 1.0 | 0.1 | 14.8 | 19 / 18 |
 
-  On the primary `qwen-27b` rung **both arms clear the ladder**, the
-  consolidation tally is identical (26 pulled, 16 claims, 16 inserted, 0
-  superseded), and the only movement is 13.4 → 14.2 tokens/query — 41% of
-  the budget. That is the gate this ship rests on. Every `post` row was
-  measured with **speaker rule v1**, which the same day's merge review
-  retired as resting on a false premise (the `Fixed` entry below); the
-  primary rung's re-gate on the shipped text is outstanding and lands as
-  `evals/results/qwen-27b-assistprompt-post2.json`.
+  On the primary `qwen-27b` rung **every arm clears the ladder**, the
+  consolidation tally is identical across all three (26 pulled, 16 claims,
+  16 inserted, 0 superseded), and the only movement anywhere is the
+  rule-v1 arm's 13.4 → 14.2 tokens/query — 41% of the budget. That is the
+  gate this ship rests on. The two rule-v1 `post` rows were superseded the
+  same day by the merge review, which retired that rule as resting on a
+  false premise (the `Fixed` entry below); they are kept here labelled
+  rather than deleted. The re-gate on the shipped rule-v2 text,
+  `evals/results/qwen-27b-assistprompt-post2.json`, lands
+  **metric-identical to the `pre` baseline** — 1.0 / 0.0 / 13.4 on the
+  same 16 / 16 tally — so rule v2 costs nothing at all against the shipped
+  prompt where rule v1 cost 0.8 tokens/query. Its own paired verdict,
+  `evals/results/ladder-assistprompt-post2-paired-verdict-threshold.json`,
+  reads `gate: PASS` and `no_regression_gate: PASS` with an empty
+  `differences`.
 - **The `e4b-v3` sidecar rung is bimodal, its baseline arm fails the
   ladder's own bar, and its two arms are not established as independent.**
   Read this as "no evidence of regression" and nothing further. The rung's
@@ -265,12 +273,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not been run on them" statements in the two 2026-09-05 entries below.
   The ladder ran; the provenance prompt shipped. The naive variant did
   **not** ship and remains an eval-only comparison arm.
-- Artifacts: `evals/results/qwen-27b-assistprompt-{pre,post}.json`,
+- Artifacts: `evals/results/qwen-27b-assistprompt-{pre,post,post2}.json`,
   `evals/results/e4b-v3-assistprompt-{pre,post}.json` and their
   `-rep2` replicates, `evals/results/naive-rag.json`,
-  `evals/results/ladder-assistprompt-paired-verdict-threshold.json` and
-  the identity-mode `…-paired-verdict.json`. Tables and the retired first
-  (contaminated) run are in `evals/README.md`, "Assistant-stated facts".
+  `evals/results/ladder-assistprompt-paired-verdict-threshold.json`, the
+  rule-v2 re-gate's
+  `evals/results/ladder-assistprompt-post2-paired-verdict-threshold.json`
+  and the identity-mode `…-paired-verdict.json`. Tables and the retired
+  first (contaminated) run are in `evals/README.md`, "Assistant-stated
+  facts".
 
 ### Fixed (2026-09-05 — the speaker rule no longer assumes a role prefix)
 - **The shipped speaker rule rested on a premise that is false on a real
@@ -293,14 +304,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   convention, and both prompt files are regenerated — the provenance
   variant stays byte-identical to `_SYSTEM_PROMPT`, the naive variant still
   carries no speaker field, and the example-token guard still passes.
-- **The ladder gate now names the text it gated.** Every `post` row of the
-  2026-09-05 ladder run was measured with rule v1, so the tables in this
-  file and in `evals/README.md` label those rows as such, and the primary
-  rung's re-gate on the shipped text is recorded as outstanding
-  (`--rung qwen-27b --out-tag assistprompt-post2 --system-prompt-file
-  evals/prompts/assistant_facts_provenance.txt`, landing as
-  `evals/results/qwen-27b-assistprompt-post2.json`). The `pre` arm is
-  unaffected.
+- **The ladder gate now names the text it gated, and the shipped text is
+  re-gated.** Every `post` row of the first 2026-09-05 ladder run was
+  measured with rule v1, so the tables in this file and in
+  `evals/README.md` label those rows superseded and keep them. The primary
+  rung then re-ran on the shipped rule-v2 text (`--rung qwen-27b --out-tag
+  assistprompt-post2 --system-prompt-file
+  evals/prompts/assistant_facts_provenance.txt`), landing
+  `evals/results/qwen-27b-assistprompt-post2.json`: gold 1.0, stale 0.0,
+  13.4 tokens/query, 26 pulled / 16 claims / 16 inserted / 0 superseded —
+  identical to the `pre` baseline on every compared field, where rule v1
+  read 14.2 tokens/query. So the rewrite that fixed the false premise cost
+  no accuracy and no tokens. The `pre` arm is unaffected and was not
+  re-run: it is the same shipped-prompt baseline either way, which is what
+  makes the pairing valid. The paired verdict is
+  `evals/results/ladder-assistprompt-post2-paired-verdict-threshold.json`
+  (`gate: PASS`, `no_regression_gate: PASS`, `failed_checks: []`, empty
+  `differences`, so the arm clears the stricter identity predicate too).
+  It needed a new `ladder_pair_compare.py --post-suffix` — defaulting to
+  `post`, so every existing invocation is unchanged — because the tool
+  could otherwise only read `<rung>-<tag>-post.json`, and verdicting a
+  re-run would have meant renaming the run it supersedes. `e4b-v3` was not
+  re-run and its rows still rest on the earlier verdict.
 - **The "two replicates" argument for the `e4b-v3` rung is withdrawn.**
   Those passes ran against the live sidecar container rather than through
   `evals/ladder_replicate.py`, so within-arm agreement on a temperature-0
@@ -315,7 +340,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `e4b-v3` post arm: 19 claims against 18 inserted, with no way to tell
   from the artifact whether the missing claim parked as a contender, was
   dropped, or merely confirmed an existing value — the rung tally sums
-  neither `contested` nor `confirmed`.
+  neither `contested` nor `confirmed`. `qwen-27b-assistprompt-post2.json`
+  is the first ladder artifact to carry the stamp
+  (`bench_env.dream.assistant_claims: "contender"`); every earlier
+  `assistprompt` rung file — both `qwen-27b` rule-v1 arms and all four
+  `e4b-v3` files — predates it and has no `bench_env` key at all, so their
+  policy is readable only from the run date and the tree.
 - **Corrections to the committed identity-mode verdict's description.**
   `ladder-assistprompt-paired-verdict.json` compared the **default** rung
   pair `floor` + `qwen-27b`, not `qwen-27b` + `e4b-v3`, and its `floor`

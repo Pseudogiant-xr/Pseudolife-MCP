@@ -6253,7 +6253,7 @@ _CL_EQ2 = ("| `e4b-v3` | post (rule v1), replicate 2 | 1.0 | 0.1 | 14.8 | "
            "19 / 18 |")
 _CL_BAR = ("gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is\n"
            "  **34.98**")
-_CL_CLEAR = ("On the primary `qwen-27b` rung **both arms clear the ladder**")
+_CL_CLEAR = ("On the primary `qwen-27b` rung **every arm clears the ladder**")
 _CL_GATE = "both arms: **FAIL**, on the `e4b-v3` *baseline* arm)"
 _CL_NOREG = "`no_regression_gate` (did the post arm make anything worse: **PASS**)"
 
@@ -6385,3 +6385,108 @@ for _cid, _doc, _needle, _art, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
         stated=_stated, places=_places))
+
+
+# ── the rule-v2 re-gate (2026-09-05) ──────────────────────────────────────
+# The prompt was rewritten by the same day's merge review AFTER the ladder
+# gate had run, so every `post` row above measures text that is no longer
+# shipped. `qwen-27b-assistprompt-post2.json` is the re-run on the shipped
+# text and `…-post2-paired-verdict-threshold.json` its paired verdict; both
+# tables publish the row, so both get pinned. Three things beyond the four
+# cells are pinned because a reader cannot otherwise check them:
+#   * the verdict's own `gate` / `no_regression_gate` / `failed_checks`,
+#     which is the whole claim that the rewrite cost nothing;
+#   * the `bench_env.dream.assistant_claims` stamp, present here for the
+#     first time — a `Claim` expresses it fine as a 0/1 predicate, the same
+#     shape the `gate == "FAIL"` rows above already use;
+#   * its ABSENCE on the six earlier rung files, which the docs state
+#     explicitly. A "the artifact does not carry X" sentence is as
+#     falsifiable as a number and rots the same way.
+PL_QWEN_POST2 = _PL % ("qwen-27b", "post2")
+PL_THRESH2 = (RESULTS +
+              "ladder-assistprompt-post2-paired-verdict-threshold.json")
+
+_CL_QQ2 = ("| `qwen-27b` | post (provenance prompt, speaker rule v2 — the "
+           "shipped text) | 1.0 | 0.0 | 13.4 | 16 / 16 |")
+_EV_QQ2 = ("| `qwen-27b` | post (rule v2, the shipped text) | 1.0 | 0.0 | "
+           "13.4 | 16 / 16 | `qwen-27b-assistprompt-post2.json` |")
+_CL_V2_VERDICT = "`gate: PASS`, `no_regression_gate: PASS`, `failed_checks: []`"
+_EV_V2_VERDICT = "`gate: PASS`, `no_regression_gate: PASS`, `cleared: true`"
+_STAMP = '`bench_env.dream.assistant_claims: "contender"`'
+_CL_NO_STAMP = "predates it and has no `bench_env` key at all"
+_EV_NO_STAMP = "predates the stamp and carries **no `bench_env` key at all**"
+
+
+def _stamped(policy):
+    """1.0 when the artifact stamps that resolved dream policy, else 0.0."""
+    return lambda d: float(
+        d.get("bench_env", {}).get("dream", {}).get("assistant_claims")
+        == policy)
+
+
+def _has_bench_env(d):
+    return float("bench_env" in d)
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # -- the four published cells of the post2 row, in both tables --------
+    ("prov-regate-cl-gold", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-regate-cl-stale", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-regate-cl-tokens", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-regate-cl-claims", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     _tally("claims"), 16, 0),
+    ("prov-regate-cl-inserted", CHANGELOG, _CL_QQ2, PL_QWEN_POST2,
+     _tally("inserted"), 16, 0),
+    ("prov-regate-ev-gold", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("prov-regate-ev-stale", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("prov-regate-ev-tokens", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     lambda d: d["tokens_per_query"], 13.4, 1),
+    ("prov-regate-ev-claims", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     _tally("claims"), 16, 0),
+    ("prov-regate-ev-inserted", EVALS, _EV_QQ2, PL_QWEN_POST2,
+     _tally("inserted"), 16, 0),
+    # -- the re-gate verdict's own fields --------------------------------
+    ("prov-regate-cl-gate", CHANGELOG, _CL_V2_VERDICT, PL_THRESH2,
+     lambda d: float(d["gate"] == "PASS"), 1, 0),
+    ("prov-regate-cl-no-regression", CHANGELOG, _CL_V2_VERDICT, PL_THRESH2,
+     lambda d: float(d["no_regression_gate"] == "PASS"), 1, 0),
+    ("prov-regate-cl-failed-checks", CHANGELOG, _CL_V2_VERDICT, PL_THRESH2,
+     lambda d: float(len(d["rungs"]["qwen-27b"]["failed_checks"])), 0, 0),
+    ("prov-regate-ev-gate", EVALS, _EV_V2_VERDICT, PL_THRESH2,
+     lambda d: float(d["gate"] == "PASS"), 1, 0),
+    ("prov-regate-ev-no-regression", EVALS, _EV_V2_VERDICT, PL_THRESH2,
+     lambda d: float(d["no_regression_gate"] == "PASS"), 1, 0),
+    ("prov-regate-ev-cleared", EVALS, _EV_V2_VERDICT, PL_THRESH2,
+     _thr_rung("qwen-27b", "cleared"), 1, 0),
+    ("prov-regate-ev-no-differences", EVALS, _EV_V2_VERDICT, PL_THRESH2,
+     lambda d: float(len(d["rungs"]["qwen-27b"]["differences"])), 0, 0),
+    # The CHANGELOG's "every arm clears the ladder" now spans both
+    # verdicts, so it is pinned to both.
+    ("prov-regate-cl-qwen-cleared", CHANGELOG, _CL_CLEAR, PL_THRESH2,
+     _thr_rung("qwen-27b", "cleared"), 1, 0),
+    # -- the bench_env stamp, present for the first time ------------------
+    ("prov-regate-cl-stamp", CHANGELOG, _STAMP, PL_QWEN_POST2,
+     _stamped("contender"), 1, 0),
+    ("prov-regate-ev-stamp", EVALS, _STAMP, PL_QWEN_POST2,
+     _stamped("contender"), 1, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+# ...and absent on every earlier rung file of this tag, which is why the
+# docs tell a reader to date those runs instead of reading them.
+for _rung, _arm in (("qwen-27b", "pre"), ("qwen-27b", "post"),
+                    ("e4b-v3", "pre"), ("e4b-v3", "post"),
+                    ("e4b-v3", "pre-rep2"), ("e4b-v3", "post-rep2")):
+    for _doc, _needle, _slug in ((CHANGELOG, _CL_NO_STAMP, "cl"),
+                                 (EVALS, _EV_NO_STAMP, "ev")):
+        CLAIMS.append(Claim(
+            id=f"prov-regate-{_slug}-no-stamp-{_rung}-{_arm}", doc=_doc,
+            needle=_needle, artifacts=(_PL % (_rung, _arm),),
+            value=_has_bench_env, stated=0, places=0))
