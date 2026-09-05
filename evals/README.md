@@ -1002,6 +1002,68 @@ instruction is a separate change needing its own gate.
   ladder ran clean at that size. A full 100-entry dream batch of long notes
   has not been measured against the smaller window.
 
+#### The CLI shim's own prompt — a second gate, on the deployed path
+
+The gate above measured the prompt the *daemon* sends. On the maintainer's
+install the daemon does not get the last word: `ops/.env` points
+`PSEUDOLIFE_DREAM_BASE_URL` at `host.docker.internal:8082/v1`, which is the
+Claude CLI shim, and `ops/install-shim-autostart.ps1` launches that shim
+with `--system-prompt-file`. That flag **replaces** the shipped
+`_SYSTEM_PROMPT` prefix (keeping only the appended vocab/known-facts
+hints), so an instruction added to `dream.py` reaches such an install only
+through the fallback sidecar. The assistant-facts blocks shipped on
+2026-09-05 landed in exactly that blind spot, which the section above flags
+as needing its own gate. This is that gate.
+
+`evals/prompts/sonnet_extractor_v4.md` is the v2 body plus the same three
+shipped blocks, composed by `evals/gen_shim_prompt.py` from `dream.py`'s
+own constants — the shim path and the daemon path cannot drift in what they
+ask for. It is **v4, not v3**: `sonnet_extractor_v3.md` is an unrelated,
+never-adopted 2026-08-02 lineage (coverage mandates), and v2 is the file the
+deployed config actually names.
+
+The run, 2026-09-05, on the `opus-5` rung — the Max-plan CLI shim on its
+**dedicated port 8083**, serving `claude-opus-5`, which is the model
+`ops/install-shim-autostart.ps1` defaults to. The rung exists precisely so
+"the production sonnet shim on :8082 is never repurposed mid-run"; the live
+shim was never started, stopped or reconfigured. The prompt variant is set
+on the **shim** (`--system-prompt-file` at launch), not via the ladder's own
+flag, because the shim is what replaces the prompt. `naive-rag.json` sets
+the bar — gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is
+**34.98**:
+
+| arm | prompt | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|
+| pre | v2 | 1.0 | 0.0 | 15.2 | 16 / 16 | `opus-5-shimprompt-pre.json` |
+| post | v4 | 1.0 | 0.0 | 16.1 | 16 / 16 | `opus-5-shimprompt-post.json` |
+| pre, rep 2 | v2 | 1.0 | 0.0 | 14.0 | 16 / 16 | `opus-5-shimprompt-pre-rep2.json` |
+| post, rep 2 | v4 | 1.0 | 0.0 | 14.8 | 16 / 16 | `opus-5-shimprompt-post-rep2.json` |
+
+**The gate passes on both predicates.**
+`ladder-shimprompt-paired-verdict-threshold.json` reads `gate: PASS`,
+`no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`,
+`failed_checks: []`. Quality is pinned across all four runs: gold 1.0,
+stale 0.0, and an identical consolidation tally every time (26 pulled, 16
+claims, 16 inserted, 0 superseded).
+
+**The token move is inside the noise, and the replicates are what say so.**
+The verdict's `differences` block reports `tokens_per_query 15.2 → 16.1`,
+which the ladder's own rule permits twice over. But the replicates show the
+*same prompt* spanning 14.0–15.2 (pre) and 14.8–16.1 (post): the arms'
+ranges overlap, and the 0.85 gap between arm means is smaller than either
+arm's own 1.2–1.3 spread. The shim rung is a CLI-served model and is not
+bit-reproducible, so a single run per arm could not have distinguished the
+two — nothing is claimed for the difference in either direction. Both arms
+sit at ~45% of the token budget.
+
+What this changes: `ops/install-shim-autostart.ps1`, its `.sh` sibling and
+the manual-start hints in `ops/install.{ps1,sh}` now default to v4. The
+Codex shim (`ops/install-codex-shim-autostart.ps1`) passes **no** prompt
+file on purpose, so it already runs the shipped `_SYSTEM_PROMPT` and needed
+no change. An existing install picks the new prompt up when the autostart is
+re-installed or the shim is restarted with the new file — rebuilding the
+daemon image alone does not reach the shim path.
+
 #### Superseded — first run (contaminated worked example)
 
 Everything below is the **first** measurement of the two variants, kept

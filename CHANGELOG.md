@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-05 — the CLI shim's extraction prompt asks for assistant-stated facts too)
+- **The assistant-facts instruction that shipped earlier today never reached
+  the maintainer's own extractor, because that install does not use the
+  shipped prompt.** When the primary extractor is the Claude CLI shim — the
+  default since the 2026-07-11 cutover, and what `ops/.env` selects with
+  `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1` —
+  `ops/install-shim-autostart.ps1` launches it with `--system-prompt-file`,
+  and that flag **replaces** the shipped `_SYSTEM_PROMPT` prefix, keeping
+  only the appended vocab/known-facts hints. So the daemon-side change was
+  live and inert at the same time: assistant-stated facts were extracted
+  only by the fallback sidecar. **`evals/prompts/sonnet_extractor_v4.md`**
+  is the fix — the v2 body plus the same three shipped blocks
+  (`_ASSISTANT_FACTS_INSTRUCTION`, `_ASSISTANT_SPEAKER_RULE`,
+  `_ASSISTANT_PROVENANCE_EXAMPLE`), composed by
+  `evals/gen_shim_prompt.py` from `dream.py`'s own constants rather than
+  retyped, so the shim path and the daemon path cannot drift in what they
+  ask for. It is **v4, not v3**: `sonnet_extractor_v3.md` is an unrelated,
+  never-adopted 2026-08-02 lineage, and v2 is the file the deployed config
+  actually names.
+  **Your install's primary extractor picks this up when the shim autostart
+  is re-installed (`ops/install-shim-autostart.ps1`) or the shim is
+  restarted with the new file; the daemon image change alone does not reach
+  the shim path.**
+- **`ops/install-shim-autostart.ps1`, its `.sh` sibling, and the
+  manual-start hints in `ops/install.{ps1,sh}` now default to v4** instead
+  of v2. `ops/install-codex-shim-autostart.ps1` passes no prompt file on
+  purpose, so it already ran the shipped prompt and is unchanged.
+- **Gated on the extraction ladder before the default moved** — the
+  `opus-5` rung (the Max-plan CLI shim on its dedicated port 8083, serving
+  the `claude-opus-5` the autostart defaults to; the live shim on :8082 was
+  never touched), v2 vs v4, two replicates per arm.
+  `evals/results/ladder-shimprompt-paired-verdict-threshold.json` reads
+  `gate: PASS` and `no_regression_gate: PASS`. Quality is pinned across all
+  four runs — gold_recoverable 1.0, stale_leak 0.0, and an identical
+  consolidation tally (26 pulled, 16 claims, 16 inserted, 0 superseded).
+  The verdict's reported `tokens_per_query 15.2 -> 16.1` is **inside the
+  noise**: the same prompt spans 14.0-15.2 (pre) and 14.8-16.1 (post)
+  across replicates, so the gap between arm means is smaller than either
+  arm's own spread and nothing is claimed for it. Both arms sit at ~45% of
+  the 34.98 token budget. Table in `evals/README.md`.
+- **`tests/test_shim_prompt.py`** pins the composition through the shim's
+  own body-extraction rule, pins that regeneration is a no-op, pins that
+  importing the generator writes nothing, and extends the example-token
+  dataset grep to the shim prompt — the worked example is now a live
+  carrier on the path the maintainer's install actually extracts through,
+  so the LongMemEval contamination guard has to cover it.
+
 ### Added (2026-09-05 — assistant-stated facts, labelled and unable to overwrite the user)
 - **The fact spine scores near zero on questions whose answer the assistant
   said, because the extractor never writes those facts down.** On the

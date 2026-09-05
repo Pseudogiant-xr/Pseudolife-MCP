@@ -17,7 +17,7 @@
 # of this script being elevated from a Claude Desktop session on
 # 2026-08-31 (inferred from timing, not proven).
 #
-#   ops\install-shim-autostart.ps1              # default port 8082, v2 prompt, opus
+#   ops\install-shim-autostart.ps1              # default port 8082, v4 prompt, opus
 #   ops\install-shim-autostart.ps1 -Model claude-sonnet-5   # pick the served model
 #
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on
@@ -26,11 +26,17 @@
 # 2026-07-11-sonnet-sidecar-cutover-design.md). Requires a logged-in CLI.
 # -Model default is claude-opus-5 per the 2026-08-02 same-harness comparison
 # (evals/results/dreamer-choice-verdict.json: cortex 0.885 vs 0.821, 5/0).
+# -PromptFile default is sonnet_extractor_v4.md since 2026-09-05: v2 plus the
+# assistant-facts blocks that shipped in dream.py that day. --system-prompt-file
+# REPLACES the shipped prompt prefix, so on this path the daemon-side change
+# alone never reached the model. Gated on the ladder opus-5 rung (v2 vs v4, two
+# replicates per arm): evals/results/ladder-shimprompt-paired-verdict-threshold.json
+# — gold 1.0, stale 0.0 on every run, tokens 14.0-16.1 across both arms.
 param(
     [string]$PythonExe = "",
     [int]$Port = 8082,
     [string]$Model = "claude-opus-5",
-    [string]$PromptFile = "evals\prompts\sonnet_extractor_v2.md",
+    [string]$PromptFile = "evals\prompts\sonnet_extractor_v4.md",
     [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\claude-shim.log"
 )
 

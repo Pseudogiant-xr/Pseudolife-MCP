@@ -506,7 +506,7 @@ if [ -n "$claude_shim_mode" ]; then
     if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
         echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
         echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT --model $MODEL" >&2
-        echo "  Or start it manually: python evals/claude_shim.py --port $SHIM_PORT --model $MODEL --system-prompt-file evals/prompts/sonnet_extractor_v2.md" >&2
+        echo "  Or start it manually: python evals/claude_shim.py --port $SHIM_PORT --model $MODEL --system-prompt-file evals/prompts/sonnet_extractor_v4.md" >&2
     fi
 elif [ -n "$codex_shim_mode" ]; then
     step "Registering the Codex shim autostart (systemd --user)..."

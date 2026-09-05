@@ -6490,3 +6490,106 @@ for _rung, _arm in (("qwen-27b", "pre"), ("qwen-27b", "post"),
             id=f"prov-regate-{_slug}-no-stamp-{_rung}-{_arm}", doc=_doc,
             needle=_needle, artifacts=(_PL % (_rung, _arm),),
             value=_has_bench_env, stated=0, places=0))
+
+
+# ── the shim prompt's own ladder gate (2026-09-05) ───────────────────────
+#
+# The daemon-side provenance prompt shipped earlier the same day, but an
+# install whose primary extractor is the Claude CLI shim never saw it:
+# `--system-prompt-file` REPLACES the shipped prefix. `sonnet_extractor_v4.md`
+# closes that, and this is the gate the default flip rests on. Two replicates
+# per arm, because the rung is a CLI-served model and is not
+# bit-reproducible — the replicates are what license the "inside the noise"
+# reading of the token move, so they are pinned like any other published
+# number.
+SP_PRE = RESULTS + "opus-5-shimprompt-pre.json"
+SP_POST = RESULTS + "opus-5-shimprompt-post.json"
+SP_PRE2 = RESULTS + "opus-5-shimprompt-pre-rep2.json"
+SP_POST2 = RESULTS + "opus-5-shimprompt-post-rep2.json"
+SP_THRESH = RESULTS + "ladder-shimprompt-paired-verdict-threshold.json"
+
+_SP_ROW_PRE = ("| pre | v2 | 1.0 | 0.0 | 15.2 | 16 / 16 | "
+               "`opus-5-shimprompt-pre.json` |")
+_SP_ROW_POST = ("| post | v4 | 1.0 | 0.0 | 16.1 | 16 / 16 | "
+                "`opus-5-shimprompt-post.json` |")
+_SP_ROW_PRE2 = ("| pre, rep 2 | v2 | 1.0 | 0.0 | 14.0 | 16 / 16 | "
+                "`opus-5-shimprompt-pre-rep2.json` |")
+_SP_ROW_POST2 = ("| post, rep 2 | v4 | 1.0 | 0.0 | 14.8 | 16 / 16 | "
+                 "`opus-5-shimprompt-post-rep2.json` |")
+_SP_GATE = '`no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`,'
+_SP_SPREAD = "*same prompt* spanning 14.0–15.2 (pre) and 14.8–16.1 (post)"
+_SP_CL_TALLY = "consolidation tally (26 pulled, 16 claims, 16 inserted, 0 superseded)."
+_SP_CL_NOISE = "noise**: the same prompt spans 14.0-15.2 (pre) and 14.8-16.1 (post)"
+
+
+def _sp_tally(key):
+    return lambda d: d["consolidation"][key]
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # the four ladder rows, each cell against its own run file
+    ("shimprompt-pre-gold", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-pre-stale", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-pre-tokens", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shimprompt-pre-claims", EVALS, _SP_ROW_PRE, SP_PRE,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-post-gold", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-post-stale", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-post-tokens", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+    ("shimprompt-post-claims", EVALS, _SP_ROW_POST, SP_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-pre2-gold", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-pre2-stale", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-pre2-tokens", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-post2-gold", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-post2-stale", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-post2-tokens", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    # the verdict itself — the thing the default flip rests on
+    ("shimprompt-thresh-cleared", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("shimprompt-thresh-pre-clears", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "pre_clears"), 1, 0),
+    ("shimprompt-thresh-post-clears", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "post_clears"), 1, 0),
+    ("shimprompt-thresh-no-regression", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("shimprompt-budget", EVALS, _SP_ROW_PRE, SP_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # the replicate spread, which is what licenses "inside the noise"
+    ("shimprompt-spread-pre-lo", EVALS, _SP_SPREAD, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-spread-pre-hi", EVALS, _SP_SPREAD, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shimprompt-spread-post-lo", EVALS, _SP_SPREAD, SP_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shimprompt-spread-post-hi", EVALS, _SP_SPREAD, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+    # the CHANGELOG restates the tally and the spread
+    ("shimprompt-cl-pulled", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("pulled"), 26, 0),
+    ("shimprompt-cl-claims", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-cl-inserted", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("inserted"), 16, 0),
+    ("shimprompt-cl-superseded", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("superseded"), 0, 0),
+    ("shimprompt-cl-noise-pre-lo", CHANGELOG, _SP_CL_NOISE, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-cl-noise-post-hi", CHANGELOG, _SP_CL_NOISE, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
