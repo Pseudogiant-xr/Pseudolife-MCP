@@ -333,15 +333,26 @@ export async function createGalaxy(host, data, opts = {}) {
         poke();
       };
       function stopPlay() {
-        if (playing) { clearInterval(playing); playing = null; playBtn.textContent = "▶"; }
+        if (playing) clearInterval(playing);
+        playing = null;
+        playBtn.textContent = "▶";
+        playBtn.setAttribute("aria-label", "replay growth");
+        playBtn.setAttribute("aria-pressed", "false");
       }
       slider.oninput = () => { stopPlay(); apply(+slider.value); };
-      const playBtn = el("button", { class: "scrub-play", title: "replay growth",
-        "aria-label": "replay growth", onclick: () => {
-          if (reduce) return;                      // no auto-animation
+      const playBtn = el("button", { type: "button", class: "scrub-play",
+        title: "replay growth", "aria-label": "replay growth",
+        "aria-pressed": "false", onclick: () => {
           if (playing) { stopPlay(); return; }
           let v = 0;
           playBtn.textContent = "❚❚";
+          playBtn.setAttribute("aria-label", "pause growth replay");
+          playBtn.setAttribute("aria-pressed", "true");
+          slider.value = "0";
+          // Reduced motion already freezes the simulation and camera.  This
+          // explicit replay only changes discrete visibility, so honour the
+          // user's click instead of leaving an enabled-looking silent no-op.
+          apply(v);
           playing = setInterval(() => {
             v += 12;
             if (v >= 1000) { v = 1000; stopPlay(); }
