@@ -63,6 +63,54 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   five 2026-09-04/05 cells ran on a stock (reranker-off) config — the
   three 2026-09-04 cells predate the knob and carry no `reranker` stamp,
   the two 2026-09-05 cells set it to `1`.
+### Added (2026-09-05 — the agent labels what it used)
+- **The retrieval log had 1,349 events and one relevance label, so nothing
+  downstream could learn from it.** A label was only written when someone
+  dereferenced a served entry (`memory_get`) or reinforced it
+  (`memory_reinforce`), and agents read `memory_search`'s inline text instead
+  — `retrieval-telemetry-review-20260904.json` measured 0.074% of events
+  carrying any downstream signal. `memory_outcome` now takes an optional
+  **`used_ids`**: the entry ids the caller actually reasoned from. Each id
+  credits the most recent search in the session window that served it,
+  writing the ordinary `retrieval_uses` row under `used_via="outcome"` — the
+  table `retrieval_replay.py` and `retrieval_telemetry_review.py` already
+  read, so both pick the new via up with no harness change. The convention
+  already requires an outcome at task end; this makes the call carry the one
+  thing only the caller knows.
+- **No schema bump.** `outcome_signals` is untouched and nothing is appended
+  to `detail`, and nothing links a signal row to the use rows it caused: the
+  labels stand on their own, and which outcome named which ids is
+  deliberately not recorded (the event's `episode_id` is stamped by the
+  writer at search time, the signal's comes from the `episode=` handle —
+  they are not a join). The result reports `used_ids_recorded` (ids credited
+  to an event), `used_ids_unmatched` (ids no event in the window served) and
+  `used_ids_errors` (labels the storage layer refused — an error is not a
+  miss, and reporting it as one would tell the agent nothing had served its
+  ids), because a silent zero reads exactly like a landed label. The
+  `memory.retrieval_log.enabled` kill-switch covers the new label too, and
+  says so in the result.
+- **Input parsing is deliberately wide** (`_parse_used_ids`): a real list of
+  ints, a list of int-like strings, a JSON-encoded list, a comma- or
+  space-separated string, or a bare id all land — Claude Code stringifies
+  list params, and this list is typed by a model mid-sentence. Non-integer
+  tokens are dropped and counted (`used_ids_ignored`), and the LENGTH gets
+  the same distrust as the contents: at most 50 distinct ids are taken per
+  call and the drop is reported as `used_ids_truncated`, since a runaway
+  list would be one storage round trip per id under the service lock and
+  the whole junk list echoed back as unmatched. A `used_ids` with nothing
+  usable in it returns `used_ids_reason` and still records the outcome
+  signal, which is the payload the whole convention exists for.
+- Served guidance asks for it: the session-start block
+  (`web/session_hook.MEMORY_LOOP_BLOCK`, mirrored in
+  `examples/CLAUDE.memory.md`) names `used_ids` in the REFLECT beat, funded
+  by three trims of text it already said elsewhere (7,491 → 7,488 raw chars
+  against the 7,500 cap), and the per-turn discipline line (the plugin hook
+  plus both installers, all three kept in sync) ends "Outcome landed ->
+  memory_outcome with used_ids" — 614 chars against its 800-char budget. The `memory_outcome` param-description budgets for
+  the `core` and `full` tiers move by 150 chars in
+  `tests/test_tool_consolidation.py`: the 2026-08-25 headroom had been spent
+  down to 53 and 4 chars, where no argument contract of any length could
+  land.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
