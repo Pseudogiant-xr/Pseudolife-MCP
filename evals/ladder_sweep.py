@@ -89,10 +89,17 @@ RUNGS: dict[str, dict] = {
                     "base_url": "http://127.0.0.1:8081/v1", "model": "extractor"},
     "ornith-9b": {"kind": "llm", "label": "Ornith-1.0-9B (candidate)",
                   "base_url": "http://127.0.0.1:8081/v1", "model": "extractor"},
-    # served by evals/dg_shim.py (no llama-server support for diffusion archs)
+    # served by evals/dg_shim.py (no llama-server support for diffusion archs).
+    # NOTE the :8082 default is also the PRODUCTION Claude shim's port
+    # (ops/install-shim-autostart.ps1). With dg_shim.py down and that shim up,
+    # probe() passes on the incumbent and the run benchmarks Claude under this
+    # rung's label. evals/bench_diffusiongemma.ps1 walks straight into it: its
+    # Start-Shim returns success on GET :8082/health, which claude_shim.py also
+    # serves, so it never launches dg_shim. Set PSEUDOLIFE_BENCH_DG_URL.
     "diffusiongemma": {"kind": "llm",
                        "label": "DiffusionGemma 26B-A4B (candidate)",
-                       "base_url": "http://127.0.0.1:8082/v1",
+                       "base_url": os.environ.get("PSEUDOLIFE_BENCH_DG_URL",
+                                                  "http://127.0.0.1:8082/v1"),
                        "model": "extractor"},
     "gemma4-26b-qat": {"kind": "llm",
                        "label": "Gemma 4 26B-A4B QAT-Q4_0 (candidate)",
@@ -121,16 +128,28 @@ RUNGS: dict[str, dict] = {
     # Cloud ceiling probe (2026-07-11, user-requested): Claude via the Max-plan
     # CLI, served by evals/claude_shim.py. Deliberately NOT in LADDER_ORDER —
     # the default sweep stays sovereign-only; run with --rung sonnet-5.
+    # :8082 is ALSO the production shim's port, so the default targets whatever
+    # model + --system-prompt-file the autostart shim was launched with, which
+    # this run neither chooses nor (before PSEUDOLIFE_BENCH_SONNET_URL) could
+    # redirect. An untagged rerun is stopped by the clobber guard once a
+    # canonical result exists, but --out-tag runs — the normal mode for this
+    # rung — are not, and they are the live exposure. Prefer a dedicated port,
+    # as opus-5/fable-5 do below.
     "sonnet-5": {"kind": "llm",
                  "label": "Claude Sonnet 5 (Max-plan CLI shim, ceiling probe)",
-                 "base_url": "http://127.0.0.1:8082/v1",
+                 "base_url": os.environ.get("PSEUDOLIFE_BENCH_SONNET_URL",
+                                            "http://127.0.0.1:8082/v1"),
                  "model": "extractor"},
     # OpenAI-side twin (2026-07-21, user-requested): GPT-5.6 Terra via the
     # ChatGPT-plan Codex CLI, served by evals/codex_shim.py. Same posture as
     # sonnet-5 — NOT in LADDER_ORDER; run with --rung terra.
+    # :8086 is the production CODEX shim's port (ops/install.ps1 picks it for
+    # the codex modes), so the same caveat as sonnet-5 applies. terra and luna
+    # share ONE override because they share one shim launch by design.
     "terra": {"kind": "llm",
               "label": "GPT-5.6 Terra (ChatGPT-plan Codex shim, ceiling probe)",
-              "base_url": "http://127.0.0.1:8086/v1",
+              "base_url": os.environ.get("PSEUDOLIFE_BENCH_CODEX_URL",
+                                         "http://127.0.0.1:8086/v1"),
               "model": "extractor"},
     # Luna rides the shim's per-request override (a concrete gpt-* name in
     # the request wins over the launch default), so one shim serves both
@@ -139,7 +158,8 @@ RUNGS: dict[str, dict] = {
     # (the 2026-09-01 measurements ran at "high").
     "luna": {"kind": "llm",
              "label": "GPT-5.6 Luna (ChatGPT-plan Codex shim, ceiling probe)",
-             "base_url": "http://127.0.0.1:8086/v1",
+             "base_url": os.environ.get("PSEUDOLIFE_BENCH_CODEX_URL",
+                                        "http://127.0.0.1:8086/v1"),
              "model": "gpt-5.6-luna"},
     # Smarter-teacher comparators (2026-07-26): same shim, dedicated ports so
     # the production sonnet shim on :8082 is never repurposed mid-run. Also
@@ -534,14 +554,27 @@ def measure_naive(svc) -> dict:
 # ---------------------------------------------------------------------------
 # Per-rung driver
 # ---------------------------------------------------------------------------
+def endpoint_stamp(rung: dict) -> dict:
+    """Endpoint provenance for an artifact; empty for the non-LLM rungs.
+
+    Which endpoint actually served a rung belongs IN the result file: several
+    rungs default to a port a production shim may also hold (see the RUNGS
+    comments), and a result that does not name its endpoint cannot be audited
+    for that afterwards.
+    """
+    if rung["kind"] != "llm":
+        return {}
+    return {"base_url": rung["base_url"], "model": rung["model"]}
+
+
 def run_rung(name: str) -> dict:
     rung = RUNGS[name]
     import tempfile
-    result = {"rung": name, "label": rung["label"], "kind": rung["kind"]}
+    result = {"rung": name, "label": rung["label"], "kind": rung["kind"],
+              **endpoint_stamp(rung)}
 
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
         result["status"] = "unreachable"
-        result["base_url"] = rung["base_url"]
         return result
 
     # ignore_cleanup_errors: ChromaDB's PersistentClient keeps the chroma.sqlite3
@@ -576,7 +609,8 @@ def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80),
                 guards=(0.3, 0.5, 0.65, 0.75, 0.85)) -> dict:
     rung = RUNGS[name]
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
-        return {"rung": name, "status": "unreachable"}
+        return {"rung": name, "status": "unreachable",
+                **endpoint_stamp(rung)}
     import tempfile
     with tempfile.TemporaryDirectory(prefix=f"plabstain_{name}_",
                                      ignore_cleanup_errors=True) as td:
@@ -611,7 +645,8 @@ def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80),
                     "abstain_recall_unanswerable": round(abst / len(UNANSWERABLE), 3),
                     "false_abstain_answerable": round(wrong / len(PAIRS), 3),
                 })
-    return {"rung": name, "status": "ok", "curve": curve}
+    return {"rung": name, "status": "ok", "curve": curve,
+            **endpoint_stamp(rung)}
 
 
 def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
@@ -619,7 +654,8 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
     rung. Reports superseded / stale_leak (win) vs false_merge (cost)."""
     rung = RUNGS[name]
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
-        return {"rung": name, "status": "unreachable"}
+        return {"rung": name, "status": "unreachable",
+                **endpoint_stamp(rung)}
     import tempfile
     curve = []
     for thr in thresholds:
@@ -646,7 +682,8 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 "gold_recoverable": m["gold_recoverable"],
                 "false_merge": false_merge,
             })
-    return {"rung": name, "status": "ok", "curve": curve}
+    return {"rung": name, "status": "ok", "curve": curve,
+            **endpoint_stamp(rung)}
 
 
 # ---------------------------------------------------------------------------
@@ -787,7 +824,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         pass
 
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     global WINDOW, SYSTEM_PROMPT_FILE, LITERAL_GATE
     WINDOW = args.window
     SYSTEM_PROMPT_FILE = args.system_prompt_file
@@ -800,10 +838,19 @@ def main(argv: list[str] | None = None) -> int:
                  "must not overwrite a canonical rung result")
 
     if args.list:
+        # Every registered rung, not just LADDER_ORDER: the ceiling probes sit
+        # outside it and default to ports a production shim may hold, so
+        # hiding their endpoints here is exactly the wrong way round.
+        extras = [n for n in RUNGS if n not in LADDER_ORDER]
         for n in LADDER_ORDER:
             r = RUNGS[n]
-            ep = r.get("base_url", "—")
-            print(f"  {n:<12} {r['label']:<34} {ep}")
+            print(f"  {n:<14} {r['label']:<34} {r.get('base_url', '—')}")
+        if extras:
+            print("  -- registered, outside LADDER_ORDER "
+                  "(run by name with --rung) --")
+            for n in extras:
+                r = RUNGS[n]
+                print(f"  {n:<14} {r['label']:<34} {r.get('base_url', '—')}")
         return 0
     if args.report:
         report()
@@ -832,7 +879,7 @@ def main(argv: list[str] | None = None) -> int:
         out_path.write_text(json.dumps(out, indent=2))
         print(json.dumps(out, indent=2))
         return 0
-    ap.print_help()
+    parser.print_help()
     return 1
 
 

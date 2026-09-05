@@ -36,9 +36,10 @@ extractor change.
 ## Rungs
 
 `LADDER_ORDER` (`ladder_sweep.py`) is the sweep, in rung order — 14 rungs.
-`--list` prints the same set with live reachability; the table here is the
-authoritative copy only until the code changes, so read the code if they
-disagree.
+`--list` prints every registered rung and its resolved endpoint (the sweep
+order first, then the rungs outside it); it is a static table and does not
+probe. The tables here are the authoritative copy only until the code
+changes, so read the code if they disagree.
 
 | rung             | extractor                                    | endpoint                     |
 |------------------|----------------------------------------------|------------------------------|
@@ -50,30 +51,64 @@ disagree.
 | `granite-h-tiny` | Granite 4.0-H-Tiny 7B-A1B (candidate)         | `http://127.0.0.1:8081/v1`   |
 | `lfm2-8b-a1b`    | LFM2-8B-A1B (candidate)                       | `http://127.0.0.1:8081/v1`   |
 | `ornith-9b`      | Ornith-1.0-9B (candidate)                     | `http://127.0.0.1:8081/v1`   |
-| `diffusiongemma` | DiffusionGemma 26B-A4B (candidate)            | `http://127.0.0.1:8082/v1` (via `evals/dg_shim.py` — no llama-server support for diffusion archs) |
+| `diffusiongemma` | DiffusionGemma 26B-A4B (candidate)            | `$PSEUDOLIFE_BENCH_DG_URL` (default `http://127.0.0.1:8082/v1`, via `evals/dg_shim.py` — no llama-server support for diffusion archs) ⚠️ |
 | `gemma4-26b-qat` | Gemma 4 26B-A4B QAT-Q4_0 (candidate)          | `http://127.0.0.1:8081/v1`   |
 | `gemma-e4b-qat`  | Gemma 4 E4B QAT UD-Q4_K_XL (sidecar-swap candidate) | `http://127.0.0.1:8081/v1` |
 | `e4b-ft`         | **E4B QLoRA extractor fine-tune Q4_K_M — the shipped default** | `http://127.0.0.1:8081/v1` |
 | `qwen-a3b`       | Qwen3.6-35B-A3B (homelab 5800X3D)             | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
 | `qwen-27b`       | Qwen3.8-27B (4090; migrated 2026-08-17, previously Qwen3.6-27B) | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
-Five further rungs are **registered but deliberately outside `LADDER_ORDER`**,
-so the default sweep is sovereign-only. They are runnable — `--rung sonnet-5`
-etc. — and are ceiling probes, not candidates:
+Seven further rungs are **registered but deliberately outside
+`LADDER_ORDER`**, so the sweep order stays sovereign-only. `e4b-v2`/`e4b-v3`
+are the evlora comparators (both on `:8081`); the five below are cloud
+ceiling probes, not candidates, and are runnable by name — `--rung sonnet-5`:
 
 | rung       | extractor                                        | endpoint                   |
 |------------|--------------------------------------------------|----------------------------|
-| `sonnet-5` | Claude Sonnet 5 (Max-plan CLI shim)               | `http://127.0.0.1:8082/v1` |
+| `sonnet-5` | Claude Sonnet 5 (Max-plan CLI shim)               | `$PSEUDOLIFE_BENCH_SONNET_URL` (default `http://127.0.0.1:8082/v1`) ⚠️ |
 | `opus-5`   | Claude Opus 5 (Max-plan CLI shim)                 | `http://127.0.0.1:8083/v1` |
 | `fable-5`  | Claude Fable 5 (Max-plan CLI shim)                | `http://127.0.0.1:8084/v1` |
-| `terra`    | GPT-5.6 Terra (ChatGPT-plan Codex CLI shim)       | `http://127.0.0.1:8086/v1` |
-| `luna`     | GPT-5.6 Luna (same shim, per-request override)    | `http://127.0.0.1:8086/v1` |
+| `terra`    | GPT-5.6 Terra (ChatGPT-plan Codex CLI shim)       | `$PSEUDOLIFE_BENCH_CODEX_URL` (default `http://127.0.0.1:8086/v1`) ⚠️ |
+| `luna`     | GPT-5.6 Luna (same shim, per-request override)    | `$PSEUDOLIFE_BENCH_CODEX_URL` (default `http://127.0.0.1:8086/v1`) ⚠️ |
 
 The Claude three are served by `evals/claude_shim.py` (shells out to the
 `claude` CLI) and the GPT two by `evals/codex_shim.py` (shells out to
 `codex exec`; `luna` names its model per request, so one shim launch
 serves both) — the only rungs that leave the machine. See "Everything
 runs locally" under the LongMemEval bench below for the same caveat.
+
+> ⚠️ **Four rungs default to a port a production shim already owns.**
+> `:8082` is the deployed Claude shim (`ops/install-shim-autostart.ps1`
+> defaults `-Port 8082`; the daemon routes dream extraction through it) and
+> `:8086` the deployed Codex shim (`ops/install.ps1` picks it for the codex
+> modes). If that shim is up, the rung benchmarks **whatever model and
+> `--system-prompt-file` the shim was launched with** — a configuration the
+> run does not choose, and one it could not previously record. The failure is
+> quiet, not loud: the incumbent answers `/models`, so the reachability probe
+> passes and the result file looks clean.
+>
+> The exposure is **`--out-tag` runs**, which is the normal mode for these
+> rungs (`results/sonnet-5-v1-ladder.json`,
+> `results/sonnet-5-sonnetv3-0802.json`). An *untagged* rerun is stopped
+> earlier by the canonical-clobber guard, and there is no all-rungs sweep
+> mode — every rung is named with `--rung`, so nothing reaches these ports by
+> accident. `evals/bench_diffusiongemma.ps1` is the one committed script that
+> walks into it unaided: its `Start-Shim` treats a `200` on `:8082/health` as
+> "dg_shim is up", and `claude_shim.py` serves `/health` too.
+>
+> Set the rung's env var to a dedicated port before running (the way
+> `opus-5`/`fable-5` avoid the problem by construction), and check the
+> `base_url` + `model` that every run now stamps into its
+> `results/<rung>.json`. Separate vars for `sonnet-5` and `diffusiongemma`
+> are deliberate: they are different shims that merely collide on a port, so
+> redirecting one must not move the other. `terra`/`luna` share one var
+> because they share one shim launch.
+>
+> **The four canonical results for these rungs predate endpoint stamping**
+> (`sonnet-5.json`, `diffusiongemma.json`, `terra.json`, `luna.json` record
+> no `base_url`/`model`), so they cannot be audited for this after the fact.
+> Nothing suggests they are wrong — the Claude rungs were measured against a
+> Claude shim either way — but a rerun is what would settle it.
 
 `terra` and `luna` were first measured 2026-09-01 (single runs, ChatGPT
 free tier, 3 batched extraction calls each): both score
