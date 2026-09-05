@@ -181,6 +181,99 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   constant is a follow-up. Worth noting why it went unnoticed: the probe
   refuses to overwrite an existing result file, so the guard that
   protects canonical numbers also hid that they had stopped reproducing.
+### Measured (2026-09-05 — the hybrid win survives a judge swap)
+- **The budget-matched hybrid win of 2026-09-04 now has two independent
+  judge families behind it, so it moves to the README.** The whole
+  500-question LongMemEval run was re-judged by `claude-opus-5` through the
+  new `evals/lme_rejudge.py` — retrieval and answering untouched, the
+  harness's own judge prompts, the judge model the only term that changed.
+  Per-arm accuracy, Qwen3.8 → Opus: rag 0.690 → 0.694, hybrid 0.730 →
+  0.736, cortex 0.310 → 0.320, rag1 0.316 → 0.320 — **no arm moves more
+  than +0.010**, and per-arm item agreement is 0.976–0.982. Paired against
+  the rag control over all 500 rows, hybrid is **+0.040 ± 0.031 (p 0.0153,
+  41 W / 21 L)** under the local judge and **+0.042 ± 0.031 (p 0.0126,
+  42 W / 21 L)** under Opus. The cascade arm stays a wash under both
+  (+0.002 at p 1.0000, +0.010 at p 0.4576) and is deliberately **not**
+  promoted with it; cortex and rag1 stay far below the control (−0.380 and
+  −0.374 under Qwen, both −0.374 under Opus, all p 0.0001). The
+  gold-answer leak check flags the same 25 rows under both judges. The win
+  is **not uniform across question types**: `temporal-reasoning` carries
+  **+12 of the +21** net rows under Opus and **+13 of the +20** under Qwen,
+  most of the effect out of 133 of the 500 questions, with both judges
+  ranking it first and `single-session-preference` last — so the headline
+  is an average over a benchmark the fact spine helps very unevenly, and
+  all three docs now say so. The middle four types the two judges order
+  differently, which is why only the ends are claimed.
+  Instrument cost and floor: **2,061** CLI judge calls (2,060 judged
+  calls + 1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall,
+  and a `--stability-sample 60`
+  self-agreement of **0.9667** — a ~0.033 flip rate that every per-arm
+  transfer above sits inside, the same reading the 2026-08-22 BEAM
+  re-judge gave. Artifacts:
+  `longmemeval-all-oracle-qwen-27b-raglite-all-fresh.rejudge-opus5.jsonl`,
+  `…rejudge-opus5.summary.json`, `…rejudge-opus5.arms-vs-rag.json`.
+  `README.md`, `docs/guide/benchmarks.md` and `evals/README.md` carry the
+  promoted claim; the 2026-08-03 "wash" table stays where it is, on its
+  own older instrument, and says so.
+
+### Fixed (2026-09-05 — three holes the merge review of the re-judge found)
+- **`evals/lme_rejudge.py`'s resume arm-guard inspected `rows[0]` only**, so
+  a narrowed `--resume` followed by a wide one appended rows carrying no
+  verdict column for the dropped arm while the first row still looked
+  complete — and `summarize` reads an absent column as a run of False
+  verdicts, not as a gap. The guard now checks **every** row's arm set and
+  refuses any resume whose `--arms` differ from the file's in **either**
+  direction, naming the offending row and the arms on both sides.
+- **`seconds_per_call` divided a wall window that excludes the launch probe
+  by a call count that includes it.** The summary now records
+  `cli_calls_total` (every call) and `judged_calls` (only the calls inside
+  the timed window) and takes the rate over the latter. On the 2026-09-05
+  run that is 2,060 rather than 2,061 — 2.61 s either way, so no published
+  number moves, and the docs now quote the split.
+- **The re-judge's pairing artifact shipped without the `note` its source
+  run's carries.** `…rejudge-opus5.arms-vs-rag.json` gains one post hoc —
+  that the paired deltas span all 500 rows including the 25 the leak check
+  flags, that the leak-free means live in the summary instead, and that the
+  cascade arm is derived rather than answered — with no measured field
+  touched (`tests/test_beam_within_run_pairs.py` now regenerates that
+  artifact from its rows and asserts only the note differs). `--note` now
+  defaults to those caveats, so a future run cannot omit them by forgetting
+  a flag.
+
+### Added (2026-09-05 — a second judge family for LongMemEval, before the claim moves)
+- **The 2026-09-04 500-question run is the first whole-benchmark memory-arm
+  win this project has measured (hybrid +0.040 over the naive RAG control,
+  paired permutation p 0.015, 41 W / 21 L) — and one judge model scored all
+  of it.** The standing rule is that a claim reaching the README first runs
+  under two independent judge families, because reproducibility measures an
+  instrument's steadiness, not its agreement with any other instrument. BEAM
+  has had that tool since 2026-08 (`evals/beam_rejudge.py`); LongMemEval rows
+  had none. **`evals/lme_rejudge.py`** is it: recorded per-arm responses are
+  replayed through a headless `claude -p` judge using the harness's *own*
+  judge prompts (imported from `longmemeval_bench`, KU and generic variants
+  both, with the identical user message and verdict parse), so the judge
+  model is the only term that changes and any movement is pure judge effect.
+  Retrieval and answering are not re-run and the source artifact is never
+  touched: output is `<source>.rejudge-<tag>.jsonl` (the new
+  `{arm}_correct_<tag>` beside the preserved original verdict),
+  a `.summary.json` carrying per-arm and per-type accuracy under both judges,
+  item-level agreement, the gold-leak exclusion with its excluded ids and the
+  CLI call/error counts, and the *same* paired arms-vs-rag comparison the
+  original claim was made from. An existing output is refused rather than
+  overwritten (`--resume` continues it, `--force` discards it, and a resume
+  that would widen `--arms` past what the file already holds is refused too,
+  because those rows carry no verdict column for the added arm), and
+  `--stability-sample N` measures
+  the CLI judge's own flip rate — the control floor a judge-to-judge delta
+  has to clear.
+- **`evals/beam_within_run_pairs.py` takes any `--score-key` suffix**, not
+  just `score` and `correct`, so a re-judge's `correct_<tag>` column is
+  paired by the same producer that wrote the original artifact instead of a
+  second inline copy of the arithmetic. The derived `cascade` arm keeps its
+  routing rule under the new key (the commit gate still reads
+  `cortex_response` only; the verdict it serves now comes from the judge the
+  caller asked for). Default behaviour is unchanged and every committed
+  pairing artifact still regenerates byte-exactly.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

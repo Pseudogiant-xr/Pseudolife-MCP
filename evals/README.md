@@ -458,8 +458,151 @@ unleaked rows, **rag 0.6947, hybrid 0.7326, cortex 0.3158**.
 The paired column is a committed artifact
 (`…raglite-all-fresh.arms-vs-rag.json`) written by
 `evals/beam_within_run_pairs.py` — harness-agnostic since 2026-09-04
-(`--score-key correct|score`, `--type-key`, `--prefix`, `--pairs left:right`,
-and a derived `cascade` arm) — and pinned by a byte-exact regeneration test.
+(`--score-key`, `--type-key`, `--prefix`, `--pairs left:right`, and a
+derived `cascade` arm) — and pinned by a byte-exact regeneration test.
+
+#### Second judge family (2026-09-05)
+
+That hybrid delta is the first whole-benchmark memory-arm win this project
+has measured, and one instrument scored all of it. So before it went
+anywhere near the front door the entire run was re-judged by a second,
+independent judge family — `claude-opus-5`, through `evals/lme_rejudge.py`
+(the section below). Retrieval and answering were not re-run: the recorded
+per-arm responses were replayed through the harness's own judge prompts,
+so the judge model is the only term that changed and any movement is pure
+judge effect.
+
+| arm | Qwen3.8-27B | claude-opus-5 | transfer | item agreement |
+|---|---:|---:|---:|---:|
+| `rag` (control) | 0.690 | 0.694 | +0.004 | 0.976 |
+| `hybrid` | 0.730 | 0.736 | +0.006 | 0.982 |
+| `cortex` | 0.310 | 0.320 | +0.010 | 0.978 |
+| `rag1` | 0.316 | 0.320 | +0.004 | 0.980 |
+
+The paired column, recomputed by the *same* `beam_within_run_pairs.py`
+against each judge's own verdict key, so both sides come off identical
+arithmetic (all 500 rows, 10,000 permutations, seed 0):
+
+| arm vs `rag` | Qwen delta | p | W / L | Opus delta | p | W / L |
+|---|---:|---:|---:|---:|---:|---:|
+| `hybrid` | **+0.040** ± 0.031 | 0.0153 | 41 / 21 | **+0.042** ± 0.031 | 0.0126 | 42 / 21 |
+| `cascade` | +0.002 ± 0.022 | 1.0000 | 16 / 15 | +0.010 ± 0.021 | 0.4576 | 17 / 12 |
+| `cortex` | −0.380 ± 0.048 | 0.0001 | 16 / 206 | −0.374 ± 0.048 | 0.0001 | 17 / 204 |
+| `rag1` | −0.374 ± 0.045 | 0.0001 | 8 / 195 | −0.374 ± 0.046 | 0.0001 | 11 / 198 |
+
+**Where the win comes from.** That paired column is a sum over six
+question types, and they do not contribute equally. Net rows per type —
+questions the hybrid arm gets right and the control does not, minus the
+reverse — counted off each judge's own verdict column:
+
+| question type | n | Opus net | Opus Δ | Qwen net | Qwen Δ |
+|---|---:|---:|---:|---:|---:|
+| `temporal-reasoning` | 133 | **+12** | **+0.0902** | **+13** | **+0.0977** |
+| `single-session-user` | 70 | +3 | +0.0429 | +2 | +0.0286 |
+| `single-session-assistant` | 56 | +2 | +0.0357 | 0 | 0.0000 |
+| `knowledge-update` | 78 | +2 | +0.0256 | +3 | +0.0385 |
+| `multi-session` | 133 | +2 | +0.0150 | +3 | +0.0226 |
+| `single-session-preference` | 30 | 0 | 0.0000 | −1 | −0.0333 |
+| **all 500** | 500 | **+21** | **+0.0420** | **+20** | **+0.0400** |
+
+`temporal-reasoning` is **0.27** of the benchmark and carries **0.57** of
+the net win under Opus and **0.65** of it under Qwen — four times the next
+type's net rows under either judge. Both judges rank the six types the
+same way at the top and the bottom, so the concentration is a property of
+the questions, not of the instrument; `single-session-preference` is the
+only cell that is negative at all (−1 row under Qwen, 0 under Opus, over
+just 30 questions). Read the headline +0.040 / +0.042 as an average over a
+benchmark whose types the fact spine helps very unevenly, not as a uniform
+lift.
+
+The gold-answer leak check flags the same 25 rows under both judges. Over
+the 475 unleaked rows Opus reads **rag 0.6989, hybrid 0.7389, cortex
+0.3263, rag1 0.3347** — the same shape as the Qwen leak-free block above,
+and again not the headline figures.
+
+Instrument cost and floor: **2,061** CLI judge calls (2,060 judged calls +
+1 probe), **0** errors, 2.61 s per judged call, 5379.7 s wall.
+`--stability-sample 60` re-judged 60 random
+(row, arm) pairs a second time and the CLI judge agreed with itself on
+**0.9667** of them, a flip rate of ~0.033 — the control floor any
+judge-to-judge delta has to clear before it is a finding.
+
+**Read.** The win holds. Hybrid beats the raw-turn control by +0.040 under
+the local judge and +0.042 under Opus, both at p < 0.02, and both judges
+agree on which rows carry it (42 W / 21 L under Opus, 41 W / 21 L under
+Qwen). No arm's accuracy moves more than +0.010 between judges and item
+agreement runs 0.976–0.982, so judge transfer here is well inside the CLI
+judge's own flip rate — the same reading the 2026-08-22 BEAM re-judge
+gave (rag −0.002, cortex +0.007, hybrid −0.016 against a 0.073 floor).
+The budget-matched hybrid win therefore meets the two-judge-family rule
+and is promoted to `README.md` and `docs/guide/benchmarks.md`. The cascade
+arm is a wash under both judges and is **not** promoted. Artifacts:
+`…raglite-all-fresh.rejudge-opus5.summary.json` and
+`…rejudge-opus5.arms-vs-rag.json`, committed beside the source run's own.
+What it does **not** support is a uniform reading: the win is carried
+mostly by `temporal-reasoning` under both judges (the per-type table
+above), so it is closer to a claim about one question type than about the
+benchmark average.
+
+### Second-judge-family re-judge (`lme_rejudge.py`, added 2026-09-05)
+
+The hybrid win above was first judged by **one** instrument, the local
+Qwen3.8-27B server. A claim does not reach the README on that: determinism is not
+validity — the retired cascade headline replicated at std 0.0000 three
+times and still did not survive a change of judge. `evals/lme_rejudge.py`
+is the second family for LongMemEval rows — the counterpart to
+`beam_rejudge.py`, which does the same for BEAM's rubric-scored ones.
+
+Retrieval and answering are **not** re-run. The recorded per-arm responses
+are replayed through a headless `claude -p` judge (the same pooled CLI
+contract `beam_rejudge` uses; its `CliJudge` is imported, not copied) with
+the harness's **own** judge prompts imported from `longmemeval_bench` —
+`_JUDGE_SYSTEM` for knowledge-update rows, `_JUDGE_SYSTEM_GENERIC` for the
+other five types, the same user message and the same `startswith("yes")`
+parse. The judge model is the only term that changes, so any movement is
+pure judge effect.
+
+```bash
+PYTHONPATH=. python evals/lme_rejudge.py \
+    --in evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl \
+    --tag opus5 --arms rag,hybrid,cortex,rag1 --workers 4 \
+    --stability-sample 60
+```
+
+Three artifacts, none of which touch the source: `…rejudge-<tag>.jsonl`
+(the rows with `{arm}_correct_<tag>` added and the original
+`{arm}_correct` kept beside it, so every comparison pairs within-row),
+`…rejudge-<tag>.summary.json` (per-arm and per-type accuracy under both
+judges, item-level agreement per arm, the gold-leak exclusion with its
+excluded ids, and the instrument's own cost — `cli_calls_total` counts
+every call including the launch probe, `judged_calls` counts only the ones
+inside the timed window, and `seconds_per_call` divides the wall time by
+the latter, because the window opens after the probe), and
+`…rejudge-<tag>.arms-vs-rag.json` — the *same* paired comparison the
+original claim was made from, produced by `beam_within_run_pairs.py` with
+`--score-key correct_<tag>`, so the two numbers come off identical
+arithmetic; `--note` defaults to the standing pairing caveats so that
+artifact is never written bare. An existing output is refused rather than
+overwritten (`--resume` continues it, `--force` discards it), and a resume
+whose `--arms` differ from the file's — in either direction, checked on
+every row rather than the first — is refused too, because a column absent
+from some rows reads as a run of False verdicts rather than as a gap.
+
+**Known gap (follow-up).** Raw judge verdict text is not persisted and a
+wholesale per-arm failure increments no summary counter — the same shape
+as `beam_rejudge.py`, and unfixed here because closing it means re-running
+the judge over rows already judged.
+
+`--stability-sample N` judges N random (row, arm) pairs a second time. A
+CLI judge, unlike the pinned q8_0 server, is not bit-reproducible, and its
+own flip rate is the control floor: a judge-to-judge delta smaller than it
+is not a finding. On the 500-question run above the CLI judge agreed with
+itself on 0.9667 of 60 sampled pairs; the full run's three artifacts are
+committed beside their source
+(`…raglite-all-fresh.rejudge-opus5.jsonl`, `.summary.json`,
+`.arms-vs-rag.json`) and its numbers are in
+[Second judge family (2026-09-05)](#second-judge-family-2026-09-05)
+above.
 
 Model roles are split so extraction quality is the **only** variable:
 
