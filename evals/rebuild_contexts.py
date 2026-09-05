@@ -103,8 +103,13 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
 
     texts = [f"{f['entity']} {f['attribute']} {f['value']}".strip()
              for f in facts]
-    mat = emb.encode(texts)                            # (n, d), normalized
-    q = emb.encode_query(bank["question"])
+    import torch
+
+    # Mirror CortexStore.search's cosine contract, including normalization.
+    mat = emb.encode(texts).detach().to("cpu", torch.float32)
+    mat = mat / (mat.norm(dim=1, keepdim=True) + 1e-12)
+    q = emb.encode_query(bank["question"]).detach().to("cpu", torch.float32).reshape(-1)
+    q = q / (q.norm() + 1e-12)
     sims = (mat @ q).tolist()
     ranked = sorted((i for i, s in enumerate(sims) if s >= min_score),
                     key=lambda i: sims[i], reverse=True)[:top_k]
