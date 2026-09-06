@@ -389,7 +389,7 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 .reveal:nth-child(4){animation-delay:.15s} .reveal:nth-child(5){animation-delay:.2s}
 .reveal:nth-child(6){animation-delay:.25s}
 @keyframes reveal { from { opacity:0; transform:translateY(10px); } }
-@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.001ms !important; transition-duration:.001ms !important; } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; } }
 
 /* Icons (CSS-drawn, no assets) */
 .ico-theme,.ico-key,.ico-refresh { width:15px; height:15px; display:inline-block; background:currentColor;
