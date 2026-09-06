@@ -29,3 +29,16 @@ updates:
       # see the coupling note in ops/requirements.lock.txt.
       - dependency-name: "setuptools"
         versions: [">=82"]
+      # transformers is HELD below 4.58 by optimum-onnx's own metadata:
+      # optimum-onnx (the ONNX embedding backend the image ships as its
+      # default) declares `transformers<4.58`, and pip installs the daemon
+      # with the lockfile as a constraint file, so a lockfile pin on
+      # transformers 5.x cannot resolve at all. The 5.x-only CVE fixes
+      # are unreachable in the image (HF_HUB_OFFLINE=1, baked weights) —
+      # see the coupling note in ops/requirements.lock.txt. Dependabot
+      # proposed exactly this (#252, 2026-09-03, transformers 5.10.1)
+      # against optimum-onnx 0.1.0, still the latest release on
+      # 2026-09-06. Lift the rule only when bumping optimum-onnx to a
+      # release that supports transformers 5.x in the same change.
+      - dependency-name: "transformers"
+        versions: [">=5"]
