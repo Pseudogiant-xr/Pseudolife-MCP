@@ -1,0 +1,177 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 5,
+  "bench_env": {
+    "thinking": null,
+    "sampler": null,
+    "candidate_pool": {
+      "candidate_pool_multiplier": null,
+      "fusion": null
+    }
+  },
+  "arms": {
+    "rag": {
+      "accuracy": 1.0,
+      "context_tokens": 1207.6
+    },
+    "cortex": {
+      "accuracy": 0.6,
+      "context_tokens": 74.4
+    },
+    "hybrid": {
+      "accuracy": 1.0,
+      "context_tokens": 1291.0
+    },
+    "cascade": {
+      "accuracy": 1.0,
+      "context_tokens": 376.2
+    }
+  },
+  "superseded_total": 9,
+  "leak_check": {
+    "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+    "n_rows": 5,
+    "n_leaked": 0,
+    "n_untestable": 3,
+    "untestable_reasons": {
+      "trivial_gold": 3
+    },
+    "leaked": [],
+    "untestable": [
+      "45dc21b6",
+      "01493427",
+      "affe2881"
+    ],
+    "sites": {},
+    "min_answer_chars": 4,
+    "arms": {
+      "cortex": {
+        "n": 5,
+        "all": 0.6,
+        "n_leak_free": 5,
+        "leak_free": 0.6,
+        "n_testable": 2,
+        "leak_free_testable": 0.5
+      },
+      "hybrid": {
+        "n": 5,
+        "all": 1.0,
+        "n_leak_free": 5,
+        "leak_free": 1.0,
+        "n_testable": 2,
+        "leak_free_testable": 1.0
+      },
+      "rag": {
+        "n": 5,
+        "all": 1.0,
+        "n_leak_free": 5,
+        "leak_free": 1.0,
+        "n_testable": 2,
+        "leak_free_testable": 1.0
+      }
+    }
+  },
+  "answerability": {
+    "check": "memory-only answerability + pathway evidence (AWM arXiv 2608.25618, PAST-Bench arXiv 2608.04003)",
+    "n_rows": 5,
+    "arms": {
+      "cortex": {
+        "n": 5,
+        "n_testable": 2,
+        "untestable_reasons": {
+          "trivial_gold": 3
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 1,
+          "answerable_wrong": 0,
+          "unanswerable_correct": 0,
+          "unanswerable_wrong": 1
+        },
+        "answerable_share": 0.5,
+        "answerable_by": {
+          "span": 1,
+          "tokens": 0
+        },
+        "unanswerable_correct_ids": [],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 3,
+          "untestable": 2,
+          "supported": 1,
+          "unsupported": 0,
+          "spanning": 0,
+          "supported_share": 1.0,
+          "unsupported_ids": [],
+          "spanning_ids": []
+        }
+      },
+      "hybrid": {
+        "n": 5,
+        "n_testable": 2,
+        "untestable_reasons": {
+          "trivial_gold": 3
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 2,
+          "answerable_wrong": 0,
+          "unanswerable_correct": 0,
+          "unanswerable_wrong": 0
+        },
+        "answerable_share": 1.0,
+        "answerable_by": {
+          "span": 1,
+          "tokens": 1
+        },
+        "unanswerable_correct_ids": [],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 5,
+          "untestable": 3,
+          "supported": 2,
+          "unsupported": 0,
+          "spanning": 0,
+          "supported_share": 1.0,
+          "unsupported_ids": [],
+          "spanning_ids": []
+        }
+      },
+      "rag": {
+        "n": 5,
+        "n_testable": 2,
+        "untestable_reasons": {
+          "trivial_gold": 3
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 2,
+          "answerable_wrong": 0,
+          "unanswerable_correct": 0,
+          "unanswerable_wrong": 0
+        },
+        "answerable_share": 1.0,
+        "answerable_by": {
+          "span": 1,
+          "tokens": 1
+        },
+        "unanswerable_correct_ids": [],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 5,
+          "untestable": 3,
+          "supported": 2,
+          "unsupported": 0,
+          "spanning": 0,
+          "supported_share": 1.0,
+          "unsupported_ids": [],
+          "spanning_ids": []
+        }
+      }
+    }
+  }
+}

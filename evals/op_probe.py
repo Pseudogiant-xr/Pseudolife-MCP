@@ -86,6 +86,13 @@ BATTERY: list[tuple[str, dict[str, str | None]]] = [
     ("user: Added two shows tonight, which makes 25 titles on my to-watch "
      "list now.",
      {"25": None}),
+    # Count OF items from a source (2026-09-06): the v11 KU gate's one real
+    # loss routed such a count into a set member. Invented tokens, and
+    # deliberately NOT the tokens the v12 prompt example uses, so this
+    # decoy tests transfer rather than recall of the example.
+    ("user: Made the Ashcombe pie from Tarn Hollow's channel tonight, so "
+     "that's 19 of their recipes I've tried now.",
+     {"19": None}),
 ]
 
 # ── prompt variants ───────────────────────────────────────────────────────
@@ -416,6 +423,43 @@ def _recut(text: str) -> str:
 
 
 VARIANTS["v11-example-recut"] = _recut(VARIANTS["v10-stance-update"])
+
+# v12 (2026-09-06): v11 + a second inline count example. The v11 KU gate
+# lost 45dc21b6 because "3 of Emma's recipes" was routed into a set member
+# ("Emma's recipes (2)") instead of a plain count — the count rule already
+# says the number wins even when the note names the item, but the single
+# bird-count example did not carry that to counts OF items from a source.
+# The added example is the same single-claim shape, on invented tokens
+# vetted like v11's (Marrowgate / Quillon Larder / 9 — no gold is "9"), and
+# is worded generically ("of the <source>'s recipes I've tried"), not from
+# any corpus turn. Only other change: the stance example's note number
+# moves from [6] to [7] so the notes stay in order.
+_V12_SOURCE_COUNT = (
+    " The same holds when the count is of items from a source: the note "
+    "[6] cooked the Marrowgate stew tonight, that makes 9 of the Quillon "
+    "Larder's recipes I've tried now — yields only the single claim "
+    '{"entity":"user","attribute":"Quillon Larder recipes tried",'
+    '"value":"9","confidence":0.9,"source":6} inside the one claims '
+    'array, and NO "op":"add" claim for the stew.\n'
+)
+
+
+def _v12(text: str) -> str:
+    edits = (
+        ('array, and NO "op":"add" claim for Gallowmere Teal.\n',
+         'array, and NO "op":"add" claim for Gallowmere Teal.' + _V12_SOURCE_COUNT),
+        ("example, a later note [6] we'll probably move the deploy target ",
+         "example, a later note [7] we'll probably move the deploy target "),
+        ('"value":"eu-west-1","stance":"probably","confidence":0.6,"source":6}',
+         '"value":"eu-west-1","stance":"probably","confidence":0.6,"source":7}'),
+    )
+    for old, new in edits:
+        assert text.count(old) == 1, f"v12 edit target not unique: {old!r}"
+        text = text.replace(old, new)
+    return text
+
+
+VARIANTS["v12-count-source-example"] = _v12(VARIANTS["v11-example-recut"])
 
 
 def requires_op(name: str) -> bool:

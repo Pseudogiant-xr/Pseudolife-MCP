@@ -35,6 +35,9 @@ import op_probe  # noqa: E402
     # v11: v10 with its two corpus-lifted worked examples re-cut on invented
     # tokens (2026-09-06); rules byte-identical, examples clean of LongMemEval
     ("ku_op_prompt_v11_example_recut.txt", "v11-example-recut"),
+    # v12: v11 + a second inline count example for counts OF items from a
+    # source (the v11 KU gate's one real loss was that shape)
+    ("ku_op_prompt_v12_count_source_example.txt", "v12-count-source-example"),
 ])
 def test_prompt_file_matches_probe_construction(filename, variant):
     path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / filename

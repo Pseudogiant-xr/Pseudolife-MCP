@@ -95,6 +95,10 @@ def main() -> int:
     ap.add_argument("--dataset", default="oracle")
     ap.add_argument("--extractor", default="qwen-27b")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--extra-leave-out", default="",
+                    help="comma-separated extra question ids to drop in a "
+                         "second leave-out block (e.g. the row a previous "
+                         "iteration was diagnosed on)")
     a = ap.parse_args()
 
     pre = _load(a.pre, a.dataset, a.extractor)
@@ -115,6 +119,12 @@ def main() -> int:
     leave_out = {"dropped": [q for q in LIFTED_QIDS if q in pre],
                  "n": len(kept),
                  "comparisons": _compare(pre, post, kept, len(rag_flips))}
+    extra = tuple(x.strip() for x in a.extra_leave_out.split(",") if x.strip())
+    kept_extra = [q for q in kept if q not in extra]
+    leave_out_extra = ({"dropped": [q for q in (*LIFTED_QIDS, *extra) if q in pre],
+                        "n": len(kept_extra),
+                        "comparisons": _compare(pre, post, kept_extra, len(rag_flips))}
+                       if extra else None)
 
     frozen = {}
     for q in FROZEN_QIDS:
@@ -164,6 +174,7 @@ def main() -> int:
         "noise_floor_rag_control": floor,
         "comparisons": full,
         "leave_out": leave_out,
+        "leave_out_extra": leave_out_extra,
         "count_class": count_class,
         "frozen_total": frozen,
         "frozen_total_losses_on_six": frozen_losses,

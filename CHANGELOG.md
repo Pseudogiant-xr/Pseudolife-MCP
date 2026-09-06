@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-06 — v12: one more count example, and the re-gate passes)
+- **`evals/prompts/ku_op_prompt_v12_count_source_example.txt` is v11 plus one
+  sentence**: a second inline count example for counts OF items from a
+  source — "cooked the Marrowgate stew tonight, that makes 9 of the Quillon
+  Larder's recipes I've tried now" → the single scalar `9`, no member — the
+  shape the v11 gate's one real loss took; the stance example's note number
+  moves from [6] to [7] to keep the notes in order (`op_probe` variant
+  `v12-count-source-example`, construction-pinned). Tokens vetted as for
+  v11 (zero occurrences in both files, `9` is no gold) and the lift guard
+  passes with no allowlist entry. The wording is generic and invented, but
+  the shape was chosen after diagnosing a benchmark row, so that is
+  disclosed and the verdict also reports a leave-out that drops that row.
+  Dev-set step first: a synthetic decoy of the same shape on different
+  invented tokens (`op-probe-v12-recut-q8.json`) does not separate v10, v11
+  and v12 — all three score 7/7 adoption and 8/8 decoys in isolation — so
+  the failure lives in the batched multi-note context and the KU run stays
+  the load-bearing gate.
+- **Gate, shipped v10 → v12, same instrument and pre-registered bars as the
+  v11 gate** (`prompt-recut-v12-ku-paired-verdict.json`; the reference arm is
+  the 2026-09-06 v10 arm, shown byte-reproducible across a server restart by
+  a 5-row re-run, `longmemeval-ku-oracle-qwen-27b-recut-v10-detcheck.jsonl`,
+  5/5 rows identical on every judged field): rag control 0 flips; cortex
+  0.667 → 0.718 (7W/3L, p = 0.34); hybrid 0.897 → 0.897 (1W/1L); cascade
+  0.859 → 0.910 (4W/0L, p = 0.125); the paired ladder is verdict-identical
+  (`ladder-v12recut-paired-verdict.json`, 13.4 tokens per query both arms).
+  All seven frozen-total questions are cortex-correct under v12 (4 of 7
+  under v10), `45dc21b6` among them, and none lost cascade; digit-gold count
+  class cortex 26 → 31 and cascade 35 → 36; spelled-gold cortex 11 → 10 (the
+  one loss is `618f13b2`, an abstention where v10 answered). Leave-out
+  dropping the two lifted-example golds (n = 76) and additionally the v11
+  diagnosis row (n = 75): same direction on every arm. **Gate PASS on all
+  three checks.** The flip of `_SYSTEM_PROMPT` is a separate, stacked PR.
+- Sidecar rung (informational, same forwarder setup as the v11 entry): the
+  live `e4b-v3` extractor under v12 scores stale_leak 0.0 at
+  13.9 tokens per query with 26 claims
+  (`e4b-v3-v12recut-post.json`), against 1.0 / 39.7 / 16 for the shipped v10
+  prompt in three runs.
+
 ### Added (2026-09-06 — the lifted worked examples re-cut on invented tokens, gated, and not shipped)
 - **`evals/prompts/ku_op_prompt_v11_example_recut.txt` is the shipped v10
   prompt with its two corpus-lifted worked examples replaced by invented
