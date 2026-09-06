@@ -159,6 +159,11 @@ def test_gated_off_capabilities_stay_out_of_console():
         # off with the reranker" is now measured and false, not open.
         "memory.search.candidate_pool_multiplier",
         "memory.search.fusion",
+        # Assistant-stated claims (2026-09-05). Ships at today's behaviour
+        # (the shipped extraction prompt emits no speaker label, so the
+        # knob is never consulted) and has not been run yet — the three
+        # arms are a bench experiment, not an operator dial.
+        "memory.dream.assistant_claims",
     ):
         assert path not in _BY_PATH, f"gated-off knob surfaced: {path}"
 

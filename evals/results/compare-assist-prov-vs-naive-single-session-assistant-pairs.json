@@ -1,0 +1,78 @@
+{
+  "n": 56,
+  "dropped_a": 108,
+  "dropped_b": 108,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-prov.jsonl",
+    "arms": {
+      "rag": 0.9107,
+      "cortex": 0.5179,
+      "hybrid": 0.9643,
+      "cascade": 0.9286
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-naive.jsonl",
+    "arms": {
+      "rag": 0.9107,
+      "cortex": 0.5,
+      "hybrid": 0.9286,
+      "cascade": 0.9107
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "cortex": {
+        "delta": 0.0179,
+        "p": 1.0,
+        "wins": 4,
+        "losses": 3,
+        "win_qids": [
+          "18dcd5a5",
+          "352ab8bd",
+          "41275add",
+          "f523d9fe"
+        ],
+        "loss_qids": [
+          "5809eb10",
+          "7a8d0b71",
+          "89527b6b"
+        ]
+      },
+      "hybrid": {
+        "delta": 0.0357,
+        "p": 0.5053,
+        "wins": 2,
+        "losses": 0,
+        "win_qids": [
+          "2bf43736",
+          "778164c6"
+        ],
+        "loss_qids": []
+      },
+      "cascade": {
+        "delta": 0.0179,
+        "p": 1.0,
+        "wins": 1,
+        "losses": 0,
+        "win_qids": [
+          "41275add"
+        ],
+        "loss_qids": []
+      }
+    }
+  },
+  "types": [
+    "single-session-assistant"
+  ]
+}

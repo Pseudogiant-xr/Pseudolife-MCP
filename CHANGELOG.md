@@ -461,6 +461,199 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   haystack turns are byte-identical across both replays. The probe now
   writes a `haystack_digest` so a future run can show that instead of
   asserting it.
+### Added (2026-09-05 — assistant-stated facts, labelled and unable to overwrite the user)
+- **The fact spine scores near zero on questions whose answer the assistant
+  said, because the extractor never writes those facts down.** On the
+  six-type oracle run the `cortex` arm scores 0.054 on
+  `single-session-assistant` (56 questions) and 0.233 on
+  `single-session-preference` (30), against plain RAG's 0.911 / 0.533 —
+  and 50 of those 56 sessions consolidated with **zero claims**. Replayed
+  against the reproducible server, the extractor returns a well-formed
+  `{"claims": []}` for a session where the assistant recommends a
+  restaurant or describes a book: nothing filters assistant turns in code,
+  but the shipped prompt asks for "durable, current-state facts … skip
+  narrative, opinions" over worked examples that are all user-stated, so
+  the model reads assistant-stated content as not-a-fact. This change adds
+  the machinery to extract those facts *safely*; the shipped extraction
+  prompt is unchanged, so **no default behaviour moves**.
+- **A claim may now carry `"speaker": "user" | "assistant"`**, whitelisted
+  at the parse boundary exactly like `op` and `stance` (anything else
+  degrades to absent). The two candidate prompts that ask for it live in
+  `evals/prompts/assistant_facts_naive.txt` and
+  `…_provenance.txt`, both generated from the shipped `_SYSTEM_PROMPT`
+  verbatim by `evals/gen_assistant_facts_prompts.py`. The shipped prompt
+  never asks for the field, so every shipped extraction — and every
+  pre-existing artifact — is byte-identical.
+- **New provenance origin `assistant`**, the floor of the tier ladder
+  (`user` > `action` > `agent` > `assistant`). A `speaker: "assistant"`
+  claim may create a slot or fill an empty one, but against a current value
+  of any other origin it parks as a **contender** through the existing
+  contender machinery rather than superseding — deliberately *not* gated on
+  `memory.cortex.protect_provenance`, because the eval harness turns that
+  off and the guard would otherwise drop the value outright. The guard is
+  one-directional: an `assistant`-origin value is superseded by anything,
+  including a later assistant claim. `speaker: "user"` is a label about the
+  turn and never a tier promotion — support is still never taken from model
+  output.
+- **Assistant-origin facts rank after user-origin ones at equal
+  similarity** (×0.85 in `CortexStore.search`, the same constant and
+  rationale as the associative spine's `ASSISTANT_SCORE_MULT`), applied to
+  positive cosines only so a penalty can never read as a promotion.
+  `evals/rebuild_contexts.py` mirrors it, keeping the offline fact ranking
+  in lockstep; a bank with no assistant facts ranks byte-identically.
+- **`memory.dream.assistant_claims`** (default `contender`; also
+  `supersede` — treat the claim as an ordinary agent-tier dream claim, the
+  naive arm — and `drop`). An unrecognised value falls back to `contender`:
+  a config typo must not open the overwrite path. Because the shipped
+  prompt emits no speaker label, the knob is never consulted on any shipped
+  path, at any setting — pinned by a test that a speakerless claim writes
+  exactly as before under all three values.
+- **`PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender|supersede|drop`** applies
+  the knob to a bench run (`ladder_sweep.build_service`) and rides into the
+  summary as `bench_env.dream.assistant_claims`; an invalid value aborts
+  the run rather than silently serving the default, as for the pool knobs.
+- **Measured (2026-09-05).** Asking the extractor for assistant-stated
+  facts works, and the guard that stops those facts overwriting the user's
+  costs nothing we can measure. On the LongMemEval oracle slice
+  `single-session-assistant` + `single-session-preference` +
+  `knowledge-update` (164 questions, extractor `qwen-27b`), the fact-only
+  arm on `single-session-assistant` goes from **0.054** to **0.536** with
+  the provenance prompt at `contender` and **0.500** with the naive prompt
+  at `supersede` — paired **+0.482** and **+0.446**, both p < 0.0001, 27
+  and 25 questions won against **zero** lost. The knowledge-update family,
+  carried as the pollution check, is flat-to-up under both (cortex 0.667 →
+  0.731 provenance, → 0.718 naive; hybrid 0.897 → 0.897, → 0.910), so the
+  pollution a naive extraction was expected to cause is **not detectable
+  in accuracy at this n** — the guard's case is the safety property, not
+  an accuracy gain. Head to head the guarded arm leads on every
+  fact-reading arm directionally and on none of them significantly (slice
+  hybrid +0.024, 7 W / 3 L, p = 0.34). `single-session-preference` is the
+  one type both variants hurt slightly on the fact-only arm (cortex 0.233
+  → 0.133 under both; n = 30). The `rag` control moved by 0.0000 with 0
+  wins and 0 losses in all twelve paired comparisons, and the
+  shipped-prompt arm reproduced the 2026-09-04 rows exactly (56/56
+  identical claim counts, 56/56 byte-identical contexts, 0 verdict flips),
+  which is what makes these paired tests rather than a comparison of two
+  benches. Artifacts:
+  `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-{prov2,naive2}`,
+  `longmemeval-ssa-oracle-qwen-27b-assist-base` and the twelve
+  `compare-assist-{prov2,naive2}-*-pairs.json`, all under
+  `evals/results/`; the tables are in `evals/README.md`. These are numbers
+  from a **clean re-run**: the first measurement of the same two variants
+  used a worked example that named a benchmark gold answer, and its
+  artifacts and tables are kept as **superseded** — next bullet, and the
+  "Superseded — first run" section of `evals/README.md` — rather than
+  deleted. **Defaults are unchanged** — the shipped prompt emits no
+  `speaker`, so every mechanism above stays inert — and **adoption of
+  either prompt is gated on the extraction ladder**
+  (`evals/ladder_sweep.py`), which has not been run on them.
+- **Superseded (2026-09-05) — the same two variants, first
+  measurement, contaminated worked example.** The worked
+  example in both prompt variants named `Miss Bee Providore` in `Bandung`,
+  which is the gold answer of LongMemEval question `c4f10528` — a
+  `single-session-assistant` question inside the measured slice, and a
+  counted win for `cortex`/`hybrid`/`cascade` in both variants. Every
+  number in this bullet was measured with that string in the prompt. The
+  artifacts stay committed and the leave-one-out arithmetic is in
+  `evals/README.md` ("Contamination and the leave-one-out read"): the
+  recovery finding survives (SSA `cortex` +0.464 → **+0.455** for `prov`,
+  +0.446 → **+0.436** for `naive`), the naive arm's marginal SSA
+  `hybrid`/`cascade` gains go to **exactly 0.0000**, and the
+  guard-vs-naive comparisons are untouched (`c4f10528` is neither a win
+  nor a loss in any of them). The example was re-cut on invented
+  names and both variants were re-run under the tags `assist-prov2` /
+  `assist-naive2`; **those numbers are the published ones, in the
+  bullet above**. What follows is
+  the original text, kept so the superseded claim is legible where it was
+  made. Asking the extractor for assistant-stated
+  facts works, and the guard that stops those facts overwriting the user's
+  costs nothing we can measure. On the LongMemEval oracle slice
+  `single-session-assistant` + `single-session-preference` +
+  `knowledge-update` (164 questions, extractor `qwen-27b`), the fact-only
+  arm on `single-session-assistant` goes from **0.054** to **0.518** with
+  the provenance prompt at `contender` and **0.500** with the naive prompt
+  at `supersede` — paired **+0.464** and **+0.446**, both p < 0.0001, 26
+  and 25 questions won against **zero** lost. The knowledge-update family,
+  carried as the pollution check, is flat-to-up under both (cortex 0.667 →
+  0.744 provenance, → 0.705 naive; hybrid 0.897 → 0.923, → 0.885), so the
+  pollution a naive extraction was expected to cause is **not detectable
+  in accuracy at this n** — the guard's case is the safety property, not
+  an accuracy gain. Head to head the guarded arm leads on every
+  fact-reading arm directionally and on none of them significantly (slice
+  hybrid +0.037, 11 W / 5 L, p = 0.21). `single-session-preference` is the
+  one type both variants hurt slightly (cortex 0.233 → 0.100 provenance,
+  → 0.167 naive; n = 30). The `rag` control moved by 0.0000 with 0 wins
+  and 0 losses in all twelve paired comparisons, and the shipped-prompt
+  arm reproduced the 2026-09-04 rows exactly (56/56 identical claim
+  counts, 56/56 byte-identical contexts, 0 verdict flips), which is what
+  makes these paired tests rather than a comparison of two benches.
+  Artifacts: `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-{prov,naive}`,
+  `longmemeval-ssa-oracle-qwen-27b-assist-base` and the twelve
+  `compare-assist-*-pairs.json`, all under `evals/results/`; the tables
+  are in `evals/README.md`. **Defaults are unchanged** — the shipped
+  prompt emits no `speaker`, so every mechanism above stays inert — and
+  **adoption of either prompt is gated on the extraction ladder**
+  (`evals/ladder_sweep.py`), which has not been run on them.
+
+### Fixed (2026-09-05 — merge-review fold on the assistant-turn provenance work)
+- **The assistant guard did not cover set-valued slots.** A dream claim
+  labelled `speaker: "assistant"` with `op: "add"` routed to `set_add`,
+  and `CortexStore.add_member` never consulted the tier ladder: at the
+  default policy an assistant-stated claim silently one-way-converted a
+  **user-origin scalar** into a set and landed as a current member (no
+  contender, no tier check), and `set_remove` took no origin at all, so an
+  assistant claim could **retract a user's member**. The property the
+  guard is documented to have — an assistant-origin write may never change
+  a non-assistant current value *or member set* — is now true on the
+  member model too: `op: "add"` against a slot whose scalar or members
+  carry any non-assistant origin parks as a contender
+  (`member_add_blocked_assistant`, the same `_contend` path the scalar
+  guard uses); an add on an empty slot writes at the `assistant` origin; a
+  re-stated member that is already there still confirms (corroboration is
+  not a change); an assistant-origin `op: "remove"` of a member another
+  tier added is dropped and logged (`member_remove_refused`), while it may
+  still retract its own. `supersede` keeps the legacy behaviour and `drop`
+  writes nothing, both unchanged, and a **speakerless** claim — every
+  shipped extraction — converts and retracts exactly as before under all
+  three policies. Note the one honest limit, which the review corrected on
+  its way in: the member model has no contender path of its own, so this
+  parks through the scalar one, and `resolve` refuses to **promote** a
+  contender at a slot holding current members — such a contender can be
+  read and dismissed (`accept=False`, the set-slot retirement shipped in
+  the same release) but never adopted as a member; adopt the value with
+  `memory_set_add` instead. Pinned by
+  `test_a_set_slot_contender_is_dismissable_but_not_promotable`.
+  Related: the dream
+  rollback's `member_removed` reversal now reports
+  `partial:member_not_restored` instead of claiming a revert when the
+  re-add parks.
+- **The prompt variants' worked example named a benchmark gold answer.**
+  `evals/gen_assistant_facts_prompts.py` built both examples around "Miss
+  Bee Providore … Bandung", the gold of LongMemEval `c4f10528` — a
+  question in the very slice the variants were measured on. The example is
+  re-cut on invented names (a made-up cafe on an invented street in an
+  invented town), both prompt files are regenerated, and
+  `tests/test_assistant_provenance.py` now carries the guard that makes
+  the class un-repeatable: every capitalised word in a worked example must
+  be a registered `EXAMPLE_TOKENS` entry (or ordinary sentence English),
+  and every registered token is grepped against `longmemeval_oracle.json`
+  and `longmemeval_s_cleaned.json` and must occur zero times. The three
+  affected run artifacts are marked CONTAMINATED-PENDING-RERUN in
+  `evals/README.md` and above, with the leave-one-out arithmetic; none is
+  deleted. The bench's own `leak_check` reported `n_leaked: 0` on both
+  runs and could not have caught this — it checks served contexts, not the
+  extraction prompt.
+- **Smaller review items.** An unbacked "~1.5 s" extraction figure in
+  `evals/README.md` is dropped in favour of the pinned 2.05 s median two
+  paragraphs below it; `CortexStore.origin`'s docstring and the System
+  Atlas `cortex.py` card said "user > action > agent" and now name the
+  fourth tier (the atlas card also gained the set-slot coverage, and the
+  README capabilities table two rows); the Console rendered an `assistant`
+  origin badge in the **agent** CSS class, which showed a weaker tier in a
+  stronger tier's styling — it has its own dimmer class now; and
+  `memory.dream.assistant_claims` is documented in
+  `docs/guide/configuration.md` beside the other deliberately-gated knobs,
+  stating that it is inert with the shipped prompt and Console-hidden.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a

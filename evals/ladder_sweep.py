@@ -375,6 +375,7 @@ def build_service(tmp_dir: Path):
     if LITERAL_GATE is not None:
         svc.config.memory.dream.literal_gate = LITERAL_GATE
     apply_pool_env(svc.config.memory.search)
+    apply_dream_env(svc.config.memory.dream)
     apply_rerank_env(svc.config.memory)
     return svc
 
@@ -420,6 +421,45 @@ def apply_pool_env(search_cfg) -> None:
             sys.exit(f"PSEUDOLIFE_BENCH_FUSION={fusion!r}: want "
                      "'weighted_sum' or 'rrf'")
         search_cfg.fusion = fusion
+
+
+ASSISTANT_CLAIM_POLICIES = ("contender", "supersede", "drop")
+
+
+def dream_env_knobs() -> dict:
+    """Dream-path knob state, for stamping into artifacts.
+
+    Same contract as ``pool_env_knobs``: ``None`` means the shipped default
+    was in force. ``assistant_claims`` decides what a claim labelled
+    ``speaker: "assistant"`` becomes, so it is a term in any arm run against
+    ``evals/prompts/assistant_facts_provenance.txt`` — an artifact that
+    cannot say which policy produced it is not interpretable.
+    """
+    return {
+        "assistant_claims": (
+            os.environ.get("PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS", "").strip()
+            or None),
+    }
+
+
+def apply_dream_env(dream_cfg) -> None:
+    """Apply the dream-path env overrides to a bench config.
+
+    The assistant-turn arms (2026-09-05) are a prompt file plus this knob:
+
+        PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender|supersede|drop
+
+    Invalid values are a hard error, exactly as for the pool knobs — a
+    typo'd policy that quietly served the shipped default would mislabel
+    the whole arm.
+    """
+    policy = dream_env_knobs()["assistant_claims"]
+    if policy is not None:
+        if policy not in ASSISTANT_CLAIM_POLICIES:
+            sys.exit(f"PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS={policy!r}: want "
+                     + " or ".join(repr(p)
+                                   for p in ASSISTANT_CLAIM_POLICIES))
+        dream_cfg.assistant_claims = policy
 
 
 def rerank_env_knobs() -> dict:

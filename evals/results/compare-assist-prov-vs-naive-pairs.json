@@ -1,0 +1,115 @@
+{
+  "n": 164,
+  "dropped_a": 0,
+  "dropped_b": 0,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-prov.jsonl",
+    "arms": {
+      "rag": 0.8171,
+      "cortex": 0.5488,
+      "hybrid": 0.8659,
+      "cascade": 0.7988
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-naive.jsonl",
+    "arms": {
+      "rag": 0.8171,
+      "cortex": 0.5366,
+      "hybrid": 0.8293,
+      "cascade": 0.811
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "cortex": {
+        "delta": 0.0122,
+        "p": 0.8185,
+        "wins": 11,
+        "losses": 9,
+        "win_qids": [
+          "08e075c7",
+          "10e09553",
+          "18dcd5a5",
+          "352ab8bd",
+          "41275add",
+          "618f13b2",
+          "9bbe84a2",
+          "9ea5eabc",
+          "d7c942c3",
+          "f523d9fe",
+          "f685340e"
+        ],
+        "loss_qids": [
+          "07b6f563",
+          "1a1907b4",
+          "5809eb10",
+          "7401057b",
+          "7a8d0b71",
+          "89527b6b",
+          "a2f3aa27",
+          "b01defab",
+          "f685340e_abs"
+        ]
+      },
+      "hybrid": {
+        "delta": 0.0366,
+        "p": 0.2081,
+        "wins": 11,
+        "losses": 5,
+        "win_qids": [
+          "195a1a1b",
+          "2bf43736",
+          "41698283",
+          "69fee5aa",
+          "778164c6",
+          "95228167",
+          "9bbe84a2",
+          "a89d7624",
+          "afdc33df",
+          "d7c942c3",
+          "f685340e"
+        ],
+        "loss_qids": [
+          "07b6f563",
+          "09d032c9",
+          "89941a94",
+          "a2f3aa27",
+          "b0479f84"
+        ]
+      },
+      "cascade": {
+        "delta": -0.0122,
+        "p": 0.771,
+        "wins": 5,
+        "losses": 7,
+        "win_qids": [
+          "41275add",
+          "9bbe84a2",
+          "9ea5eabc",
+          "d7c942c3",
+          "e493bb7c"
+        ],
+        "loss_qids": [
+          "07b6f563",
+          "1a1907b4",
+          "7401057b",
+          "a2f3aa27",
+          "a89d7624",
+          "b01defab",
+          "f685340e_abs"
+        ]
+      }
+    }
+  }
+}
