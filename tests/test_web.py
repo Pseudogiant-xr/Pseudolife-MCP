@@ -643,6 +643,24 @@ def test_api_post_with_body_requires_json_content_type(svc):
     assert st == 415
 
 
+def test_facts_resolve_forwards_both_directions(svc):
+    """Wiring only (``FixtureService.cortex_resolve`` is a stub, so the
+    behaviour itself is pinned in tests/test_cortex_sets.py): the Console's
+    Discard button is the operator's path for dismissing a contender parked
+    against a set-valued slot, so the route must forward ``accept`` in both
+    directions rather than defaulting it away."""
+    app = _app(svc)
+    for accept in (True, False):
+        st, body = call(app, "POST", "/api/facts/resolve",
+                         headers=[(b"host", b"127.0.0.1"),
+                                  (b"content-type", b"application/json")],
+                         body=json.dumps({"entity": "user",
+                                          "attribute": "bikes owned",
+                                          "accept": accept}).encode())
+        assert st == 200
+        assert json.loads(body)["accepted"] is accept
+
+
 def test_facts_set_threads_freshness_class(svc):
     """The REST route is the documented fallback when an MCP client
     stringifies tool params, so it must be able to assert everything the tool

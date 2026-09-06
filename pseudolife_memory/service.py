@@ -2724,10 +2724,19 @@ class MemoryService(DreamOps):
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
         there is nothing parked to resolve, and ``{"resolved": False,
-        "reason": "slot_holds_set"}`` when the slot was converted to a set
-        (``memory_set_add``) after the contender was parked against the
-        scalar it used to hold — resolve it via ``memory_set_add`` /
-        ``memory_set_remove`` instead.
+        "reason": "slot_holds_set"}`` on ``accept=True`` when the slot was
+        converted to a set (``memory_set_add``) after the contender was
+        parked against the scalar it used to hold — a scalar contender
+        cannot replace a member set, so adopt the value via
+        ``memory_set_add`` / ``memory_set_remove`` instead. ``accept=False``
+        is always available: retiring touches no members, and it is the
+        operator's only way to dismiss such a contender (today via this
+        tool or ``POST /api/facts/resolve``; the Console's Cortex view does
+        not yet flag contested slots from the fact dump). On a set slot the
+        returned ``current`` is ``None`` (the slot holds members, not a
+        scalar) and ``record`` is the retired contender itself, where a
+        scalar-slot rejection returns the kept current; the response shape
+        is otherwise the same as the scalar case.
 
         ``support`` (internal): the tier stamped on an accepted contender —
         "user" for the MCP tool path; the consolidation quarantine passes
