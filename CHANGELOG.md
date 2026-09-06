@@ -1160,6 +1160,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it), refuses loudly if something else already holds the port, and exports
   `PSEUDOLIFE_BENCH_DG_URL` so both harnesses agree on the endpoint.
 
+### Fixed (2026-09-05 — the offline rebuild pins the live cosine contract)
+- **`evals/rebuild_contexts.py` ranked facts by a raw dot product and
+  trusted the embedder to have normalised.** It had: `EmbeddingPipeline`
+  returns unit-norm CPU float32 vectors, and the regression gate's stage-1
+  rebuild over all 78 pinned banks is byte-identical before and after this
+  change — nothing published moves. The rebuild now detaches, moves to CPU
+  float32 and re-normalises both sides itself, mirroring
+  `CortexStore.search`, so a future or non-normalising embedder cannot
+  silently turn the cosine floor into a magnitude ranking. A
+  magnitude-sensitive test pins it with and without BM25 fusion (the gate
+  runs dense-only). Contributed by @blacksheep25 (#268).
 ### Fixed (2026-09-05 — reduced motion no longer flickers the Console)
 - **Under `prefers-reduced-motion`, the Console's looping animations were
   shortened to `.001ms` but still ran forever**, so every `infinite` pulse
