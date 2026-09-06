@@ -13,8 +13,14 @@ copy of the bank read-only and writes an aggregate artifact.
 
 Signal taxonomy — the distinction the counters do NOT make for you:
 
-* ``retrieval_uses``           CONSUMPTION. Written only when a served
-                              entry is later dereferenced or reinforced.
+* ``retrieval_uses``           CONSUMPTION. Written when a served entry is
+                              later dereferenced or reinforced
+                              (``used_via`` ``get`` / ``reinforce``), or
+                              named by the agent in
+                              ``memory_outcome(used_ids=...)``
+                              (``outcome``, 2026-09-05). ``by_via``
+                              separates the asserted label from the two
+                              dereference ones.
 * ``entries.explicit_reinforcements``
                               CONSUMPTION. Moves only on
                               ``memory_reinforce`` (service.py reinforce).

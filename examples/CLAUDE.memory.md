@@ -36,8 +36,8 @@ RECALL — at the start of any task:
 RECALL AGAIN mid-session — once at the start is not enough. Search when:
 - the user refers to work you weren't part of ("last time…", "in another
   session…", "we decided…") — that is a memory question by definition;
-- you are about to propose a design → `memory_lesson_search` first, and heed
-  `polarity:-`; re-deriving a known dead-end is the common failure;
+- you are about to propose a design → `memory_lesson_search` first;
+  re-deriving a known dead-end is the common failure;
 - you are about to state a benchmark number, version, or "current" value →
   check for a prior record before asserting it;
 - you start a task in an area you haven't touched this session;
@@ -60,11 +60,10 @@ quarantined and the original preserved in `last_known_value` — that is
 your starting point for re-verification, never the current answer).
 When memory and the code disagree, say so
 out loud, trust the code, and correct the memory (`memory_fact_set` at the
-same slot) rather than silently picking one — a stale fact nobody corrects
-is one the next session will believe too. Recall results mark
-aged/contested facts with a ready-made `correct_with` call: run it the
-moment you notice the mismatch, filling in the verified value (re-assert
-the same value if it checks out), then log
+same slot) — a stale fact nobody corrects is one the next session will
+believe too. Recall results mark aged/contested facts with a ready-made
+`correct_with` call: run it the moment you notice the mismatch, filling in
+the verified value (re-assert the same value if it checks out), then log
 `memory_outcome(..., "correction")`. Correcting is part of discovering —
 a contradiction you only narrate is work left undone.
 A cortex fact carrying `contested: true` has competing values parked
@@ -112,15 +111,16 @@ CAPTURE — as durable things arise (one claim per call):
 - Never store secrets: no tokens, API keys, passwords, or credentials.
 
 REFLECT — at task end, or the moment an outcome lands:
-- `memory_outcome(task, outcome, about=, detail=)` whenever something WORKED
-  (`success`), was a dead-end (`failure`), or the user corrected you
-  (`correction`). These signals are the primary feeder for procedural LESSONS —
+- `memory_outcome(task, outcome, about=, detail=, used_ids=)` whenever
+  something WORKED (`success`), was a dead-end (`failure`), or the user
+  corrected you (`correction`). Pass `used_ids=[…]` — which search hits the
+  work turned on. These signals are the primary feeder for procedural LESSONS —
   the dream distils them into the do/avoid guidance surfaced at your next
   session start. Logging outcomes is how you stop repeating mistakes.
 
-Be judicious — one claim per call; skip fleeting chatter (the surprise gate
-drops near-duplicates; `stored=false` is not an error). The first memory call
-may lag while the embedder loads.
+Be judicious: skip fleeting chatter (the surprise gate drops
+near-duplicates; `stored=false` is not an error). The first memory call may
+lag while the embedder loads.
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
 (this briefing arrives via a hook, a separate channel) — tell the user to run

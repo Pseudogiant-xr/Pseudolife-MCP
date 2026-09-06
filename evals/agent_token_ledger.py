@@ -445,8 +445,13 @@ def measure_fact_get(mod, dm: Daemon, slots: list[tuple[str, str]],
        meaningful, but the dump row carries an ``entity_id`` the served
        record never has, and the served record can carry keys the dump
        does not (``correct_with``, ``stale``/currency flags recomputed at
-       lookup time). So the "before" is a few tens of chars wide of a real
-       call and the "after" is the projection applied to that same row.
+       lookup time). Since 2026-09-05 the dump row also carries
+       ``contested`` (and ``contender_value`` / ``contender_origin`` on a
+       contested slot), which the projection's allow-list drops, so a
+       rerun reads a slightly wider cut than the 2026-09-04 figure for no
+       change in what the tool serves. So the "before" is a few tens of
+       chars wide of a real call and the "after" is the projection applied
+       to that same row.
     2. Neither arm includes the tool ENVELOPE — ``{"record": ...,
        "contenders": [...]}`` plus, on an aged fact, ``correct_with`` and
        the ``correction_note`` — so both numbers are the record alone.

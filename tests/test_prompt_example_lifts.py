@@ -76,11 +76,13 @@ def _carriers() -> dict[str, str]:
 
 # ── extraction ───────────────────────────────────────────────────────────
 
-# A worked-example note: "[N] text", optionally prefixed by a corpus-style
-# "[date] user:" stamp, running to the next note, the Output block, the
-# em-dash / "yields" that introduces the expected claim, or end of text.
+# A worked-example note: "[N] text", optionally prefixed by a role marker
+# — a corpus-style "[date] user:" stamp or the bare "assistant:" the
+# provenance example (shipped 2026-09-05) opens its notes with — running
+# to the next note, the Output block, the em-dash / "yields" that
+# introduces the expected claim, or end of text.
 _NOTE = re.compile(
-    r"\[\d+\]\s*(?:\[[^\]]*\]\s*(?:user|assistant):\s*)?(.+?)"
+    r"\[\d+\]\s*(?:(?:\[[^\]]*\]\s*)?(?:user|assistant):\s*)?(.+?)"
     r"(?=\s*\[\d+\]|\s*Output|\s*—|\s*-\s+yields|\s*yields|$)")
 _VALUE = re.compile(r'"(?:value|description)"\s*:\s*"([^"]+)"')
 
@@ -137,13 +139,17 @@ def _example_values(text: str) -> set[str]:
 # prompt and, in the same commit, into the v1/v2 shim files; v3 and the
 # v5..v10 op-prompt artifacts were cut from it.
 #
-# Pending: `feat/shim-provenance-prompt` adds `sonnet_extractor_v4.md` (v2
-# plus the assistant-facts blocks), which inherits both examples. When that
-# branch lands, add "sonnet_extractor_v4.md" here — the glob will pick the
-# file up and both dataset tests will go red by equality until it is.
+# Three carriers landed after the audit and inherit both examples
+# unchanged: `assistant_facts_naive.txt` / `assistant_facts_provenance.txt`
+# (2026-09-05, the v10 base plus the assistant-facts blocks; the provenance
+# file IS the shipped prompt) and `sonnet_extractor_v4.md` (2026-09-06, v2
+# plus the same blocks, the deployed shim default). The glob picked each up
+# and both dataset tests went red by equality until they were listed here.
 _COUNT_RULE_CARRIERS = (
     "dream._SYSTEM_PROMPT",
+    "assistant_facts_naive.txt", "assistant_facts_provenance.txt",
     "sonnet_extractor_v1.md", "sonnet_extractor_v2.md", "sonnet_extractor_v3.md",
+    "sonnet_extractor_v4.md",
     "ku_op_prompt_v5.txt", "ku_op_prompt_v6.txt", "ku_op_prompt_v7_events.txt",
     "ku_op_prompt_v8_stance.txt", "ku_op_prompt_v9_stance_quote.txt",
     "ku_op_prompt_v10_stance_update.txt",
@@ -230,14 +236,20 @@ def test_the_stop_list_cannot_hide_a_lift():
     so it is where a name could be parked to silence a hit ("may", "bee").
     Every entry must look like a function word, and none may appear
     capitalised inside a worked-example note after its first word — that is
-    how the notes write names."""
+    how the notes write names. The one shape let through is an article
+    opening a Titlecase phrase ("The Quillon Larder", the shipped provenance
+    example): the phrase's own tokens stay in the scan, so nothing is
+    hidden by dropping its "the"."""
     for tok in _STOP:
         assert len(tok) <= 5 and tok.isalpha(), f"{tok!r} is not a function word"
     for name, text in _carriers().items():
         for note in _notes(text):
-            for word in note.split()[1:]:
-                bare = re.sub(r"[^A-Za-z]", "", word)
-                assert not (bare[:1].isupper() and bare.lower() in _STOP), (
+            words = [re.sub(r"[^A-Za-z]", "", w) for w in note.split()]
+            for i, bare in enumerate(words[1:], start=1):
+                if not (bare[:1].isupper() and bare.lower() in _STOP):
+                    continue
+                nxt = words[i + 1] if i + 1 < len(words) else ""
+                assert nxt[:1].isupper(), (
                     f"{bare!r} is capitalised mid-note in {name} yet listed in "
                     "_STOP — a name would be dropped from the scan")
 

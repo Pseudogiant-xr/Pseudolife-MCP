@@ -347,7 +347,19 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # minimal 1826, core 4304, full 7413. Caps are those plus ~775 of
     # headroom each — room for a real contract to land without a bump,
     # not room to drift.
-    param_budgets = {"minimal": 2600, "core": 5100, "full": 8200}
+    #
+    # core/full bumped 2026-09-05 for memory_outcome's `used_ids` (minimal
+    # tier, so it counts against all three): the 2026-08-25 headroom had
+    # been spent down to 53 chars on core and 4 on full, so no argument
+    # contract of any length could land. The caps below leave ~120 again,
+    # deliberately less than 775: still a wall, not a licence. Measured
+    # 2026-09-05 after the review fold (used_ids gained a cap and an
+    # error/miss split, documented in both places): minimal 2405, core
+    # 5159, full 8308 here, and minimal 4985 / core 9570 / full 15064
+    # against the description budgets above — the six used_ids result keys
+    # were listed by trimming memory_outcome's own docstring, not by
+    # moving a cap.
+    param_budgets = {"minimal": 2600, "core": 5250, "full": 8400}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, (
