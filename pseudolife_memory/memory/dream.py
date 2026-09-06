@@ -140,22 +140,28 @@ _SYSTEM_PROMPT = (
     '"op":"add" or "op":"remove" field to that claim instead of a plain '
     "supersede. op is ONLY for collection membership — a value that simply "
     "changed (a new job, a moved city) stays a plain claim with no op. "
-    "Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the road bike, "
+    "Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the penny-farthing, "
     'no longer biking to work. Output: {"claims":['
     '{"entity":"user","attribute":"restaurants tried","value":"Rosa\'s '
     'Diner","op":"add","confidence":0.8,"source":3},'
-    '{"entity":"user","attribute":"bikes owned","value":"road bike",'
+    '{"entity":"user","attribute":"bikes owned","value":"penny-farthing",'
     '"op":"remove","confidence":0.8,"source":4}]}\n'
     "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note "
     "states or updates how many of something the user has (a running "
     "count, a total, a follower number, a quantity), emit a plain claim "
     'whose value is the NEW number, with no "op" field — even when the '
     "note also names the item that changed the count. For example, the "
-    "note [5] saw a Northern Flicker today, that makes 32 species at "
-    "the park now — yields the single claim "
-    '{"entity":"user","attribute":"bird species seen at park",'
-    '"value":"32","confidence":0.9,"source":5} inside the one claims '
-    'array, and NO "op":"add" claim for Northern Flicker.\n'
+    "note [5] saw a Gallowmere Teal today, that makes 41 species at "
+    "Kelmarsh Reserve now — yields the single claim "
+    '{"entity":"user","attribute":"bird species seen at Kelmarsh Reserve",'
+    '"value":"41","confidence":0.9,"source":5} inside the one claims '
+    'array, and NO "op":"add" claim for Gallowmere Teal. The same holds '
+    "when the count is of items from a source: the note [6] cooked the "
+    "Marrowgate stew tonight, that makes 9 of the Quillon Larder's "
+    "recipes I've tried now — yields only the single claim "
+    '{"entity":"user","attribute":"Quillon Larder recipes tried",'
+    '"value":"9","confidence":0.9,"source":6} inside the one claims '
+    'array, and NO "op":"add" claim for the stew.\n'
     "HEDGES GO IN A STANCE FIELD: when the note itself hedges a fact "
     '("probably", "might", "unconfirmed", "not final", "per the '
     'runbook"), keep the value CLEAN and put the note\'s own hedge '
@@ -164,12 +170,12 @@ _SYSTEM_PROMPT = (
     "stated fact has no stance field. A hedged update is STILL an "
     "update: use the same entity and attribute as the fact it changes "
     "and emit only the CURRENT value, exactly as for a plain fact. For "
-    "example, a later note [6] we'll probably move the deploy target "
+    "example, a later note [7] we'll probably move the deploy target "
     "again, to eu-west-1 next quarter — updates the deploy target slot "
     "from the earlier example to the single claim "
     '{"entity":"deploy target","attribute":"environment",'
     '"value":"eu-west-1","stance":"probably","confidence":0.6,'
-    '"source":6} inside the one claims array.\n'
+    '"source":7} inside the one claims array.\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
 # The op block + count-exclusion rule shipped 2026-08-01 (hold reversed by
@@ -183,9 +189,21 @@ _SYSTEM_PROMPT = (
 # two deltas vs the KU-failed v8 block (bank-diff forensics traced that
 # failure to a diluted consolidation anchor): the "a hedged update is
 # STILL an update" sentence, and a worked example reusing the v0
-# example's own deploy-target slot as a later hedged update. This prompt
-# must stay byte-identical to the measured artifact
-# evals/prompts/ku_op_prompt_v10_stance_update.txt (pinned by
+# example's own deploy-target slot as a later hedged update.
+# v12 (2026-09-06, maintainer decision after PR #279's gates): the two
+# worked examples that had been paraphrased from LongMemEval turns
+# (a4686df6, 2026-08-01) are re-cut on invented tokens, and the count
+# rule gains a second inline example for counts OF items from a
+# source; every rule sentence is otherwise byte-identical to v10.
+# Gates vs a same-instrument v10 arm (reproducible Qwen3.8, one
+# window; prompt-recut-v12-ku-paired-verdict.json): rag control 0
+# flips, cortex 0.667 -> 0.718 (7W/3L, p 0.34), hybrid unchanged,
+# cascade 0.859 -> 0.910 (4W/0L, p 0.125), all seven frozen-total
+# questions cortex-correct; paired ladder verdict-identical
+# (ladder-v12recut-paired-verdict.json); live e4b-v3 sidecar ladder
+# stale_leak 0.0 where the v10 prompt read 1.0 in three runs. This
+# prompt must stay byte-identical to the measured artifact
+# evals/prompts/ku_op_prompt_v12_count_source_example.txt (pinned by
 # test_op_prompt_artifact.py). Edit the prompt only through a new
 # measured artifact + gate.
 

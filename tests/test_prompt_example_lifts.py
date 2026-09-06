@@ -1,8 +1,8 @@
 """No worked example in an extraction prompt may be lifted from the corpus
 the prompt is measured on.
 
-The 2026-09-05 audit found the count-exclusion example in the shipped
-``dream._SYSTEM_PROMPT`` — "[5] saw a Northern Flicker today, that makes 32
+The 2026-09-05 audit found the count-exclusion example in the then-shipped
+(v10) ``dream._SYSTEM_PROMPT`` — "[5] saw a Northern Flicker today, that makes 32
 species at the park now" -> value "32" — is a paraphrase of LongMemEval
 question ``affe2881``'s own answer turn, and "32" is that question's gold.
 The rule it illustrates was written to recover that exact question (it is
@@ -141,8 +141,10 @@ def _example_values(text: str) -> set[str]:
 # plus the assistant-facts blocks), which inherits both examples. When that
 # branch lands, add "sonnet_extractor_v4.md" here — the glob will pick the
 # file up and both dataset tests will go red by equality until it is.
+# ``dream._SYSTEM_PROMPT`` left these lists when v12 shipped (2026-09-06):
+# the live constant now carries invented tokens only and is held to an
+# EMPTY allowlist by the same equality assertions.
 _COUNT_RULE_CARRIERS = (
-    "dream._SYSTEM_PROMPT",
     "sonnet_extractor_v1.md", "sonnet_extractor_v2.md", "sonnet_extractor_v3.md",
     "ku_op_prompt_v5.txt", "ku_op_prompt_v6.txt", "ku_op_prompt_v7_events.txt",
     "ku_op_prompt_v8_stance.txt", "ku_op_prompt_v9_stance_quote.txt",
@@ -187,7 +189,8 @@ def test_the_scan_finds_examples_in_every_prompt_family():
     """Non-vacuity. A regex drift that stopped seeing notes or values would
     make both dataset tests pass on anything."""
     c = _carriers()
-    for name in _OP_BLOCK_CARRIERS + ("dream._EVENTS_SYSTEM_PROMPT",
+    for name in _OP_BLOCK_CARRIERS + ("dream._SYSTEM_PROMPT",
+                                      "dream._EVENTS_SYSTEM_PROMPT",
                                       "events_pass_v1.txt", "events_pass_v2.txt"):
         assert _notes(c[name]), f"no worked-example note found in {name}"
         assert _example_values(c[name]), f"no example value found in {name}"

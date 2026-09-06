@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-06 — the v12 prompt is the live extraction prompt)
+- **`_SYSTEM_PROMPT` moved v10 → v12**
+  (`evals/prompts/ku_op_prompt_v12_count_source_example.txt`,
+  construction-pinned): the two worked examples paraphrased from
+  LongMemEval turns are gone from the live prompt, replaced by invented
+  tokens, and the count rule carries a second inline example for counts
+  of items from a source; every rule sentence is otherwise byte-identical
+  to v10. Gates are in the two `Added (2026-09-06 …)` entries below —
+  paired KU-oracle vs a same-instrument v10 arm with the rag control at
+  0 flips (cortex 0.667 → 0.718, hybrid 0.897 → 0.897, cascade 0.859 →
+  0.910, all seven frozen-total questions cortex-correct), paired ladder
+  verdict-identical, and the live sidecar's ladder stale_leak at 0.0
+  where the v10 prompt read 1.0. The lift guard
+  (`tests/test_prompt_example_lifts.py`) no longer carries the live
+  constant in its allowlists: that debt is paid, not recorded. Takes
+  effect on the next deploy (`ops/update.ps1`; restart the shim if it
+  fronts the daemon). The Claude-shim prompt (`sonnet_extractor_v2.md`)
+  is a separate lineage and unchanged.
+
 ### Added (2026-09-06 — v12: one more count example, and the re-gate passes)
 - **`evals/prompts/ku_op_prompt_v12_count_source_example.txt` is v11 plus one
   sentence**: a second inline count example for counts OF items from a

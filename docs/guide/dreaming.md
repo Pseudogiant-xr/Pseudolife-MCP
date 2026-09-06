@@ -101,7 +101,7 @@ superseded:
   accumulating near-duplicate slots.
 - **The source's epistemic stance, kept.** A hedged or negated claim
   ("probably X", "no longer Y") lands with a `stance` marker on the fact
-  (schema v29; the v10 update-anchored prompt is the live one) instead of
+  (schema v29; the live v12 prompt carries the v10 update-anchored stance rule) instead of
   hardening into a flat assertion — see
   [memory-model — how current is this fact?](memory-model.md#how-current-is-this-fact).
 - **What a document prescribes.** When a note quotes or summarizes a spec,
