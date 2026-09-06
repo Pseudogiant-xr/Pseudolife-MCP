@@ -240,10 +240,11 @@ def bench_env_knobs() -> dict:
         "candidate_pool": pool_env_knobs(),
         # Dream-path knobs (memory.dream). Applied by the same
         # ladder_sweep.build_service; None means the shipped default.
-        # assistant_claims is only a term for arms whose extraction prompt
-        # asks for a speaker label (evals/prompts/assistant_facts_*.txt) —
-        # the shipped prompt never does, so it reads as the default and
-        # means nothing for every pre-2026-09-05 artifact.
+        # assistant_claims is a term for any arm whose extraction prompt
+        # asks for a speaker label — which the SHIPPED prompt has done
+        # since 2026-09-05, so it is a live term on a default run and not
+        # only on an `assistant_facts_*.txt` arm. It still means nothing
+        # for a pre-2026-09-05 artifact, where no claim carried the field.
         "dream": dream_env_knobs(),
         # Cross-encoder reranker (memory.reranker.enabled). Same
         # build_service/--phase extract constraint as candidate_pool above.

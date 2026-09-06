@@ -90,7 +90,7 @@ ignore the field.
 
 The tier-2 prompt (`_SYSTEM_PROMPT` in `pseudolife_memory/memory/dream.py`,
 shared by the bundled sidecar and any endpoint you point the daemon at)
-asks for three things and deliberately skips the rest — narrative,
+asks for four things and deliberately skips the rest — narrative,
 opinions, meta-chat about the conversation, and values a later note already
 superseded:
 
@@ -110,8 +110,28 @@ superseded:
   was actually done. Paste your deploy runbook, then mention a deploy that
   skipped a step, and you get two facts (the documented rule, and the
   incident), not one blurred into the other.
+- **What the ASSISTANT said, labelled as the assistant's** (since
+  2026-09-05). What the assistant asserted, described or recommended is
+  extractable on the same terms as what you said — keyed to the *thing
+  described*, never to "the assistant". A claim carries a `speaker` field
+  **where the note makes the speaker knowable**: the extractor reads it off
+  an explicit role marker (a leading `user:` / `assistant:`) when the note
+  carries one, infers `assistant` only where the content is unmistakably
+  the assistant's, and omits the field when unsure. Nothing in the daemon
+  writes a role prefix — the dream sends your notes as they were stored,
+  and the `[date] role: content` rendering is an eval-harness convention —
+  so on a bank whose notes carry no marker many claims are simply
+  unlabelled, which writes exactly as it did before 2026-09-05. An
+  assistant-stated fact is written at the floor `assistant` provenance
+  tier: it fills an empty slot, but parks as a contender against a value
+  of any other origin rather than overwriting it
+  (`memory.dream.assistant_claims`, default `contender`). Before this, a
+  session whose answer lived entirely in an assistant turn consolidated
+  with *zero* claims — see
+  [Benchmarks](benchmarks.md#longmemeval-v2--agent-trajectories-and-procedures)
+  and the "Assistant-stated facts" section of `evals/README.md`.
 
-That third one is deliberate, and it is the reason the prompt names its
+That document class is deliberate, and it is the reason the prompt names its
 content classes rather than merely forbidding noise: an extraction prompt
 that enumerates what to extract makes an obedient model **silently discard
 whatever it doesn't name** — no error, no partial result, just a class of
@@ -120,8 +140,12 @@ to find (see [Benchmarks](benchmarks.md#longmemeval-v2--agent-trajectories-and-p
 and it is worth remembering before narrowing this prompt further.
 
 The Sonnet override prompt (`evals/prompts/sonnet_extractor_v2.md`, used
-when you run the shim below) carries the same three, tuned for a larger
-model.
+when you run the shim below) carries the first three, tuned for a larger
+model. It does **not** carry the assistant-facts instruction: a shim
+launched with `--system-prompt-file` replaces the shipped prompt with that
+file, so on such an install assistant-stated facts are extracted only by
+the fallback sidecar. Adding the instruction there is a separate change
+needing its own ladder gate.
 
 **Literal-faithfulness gate.** After extraction, every claim's digit-bearing
 tokens (dates exempt — format variance makes digit matching unsafe there)

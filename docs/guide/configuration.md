@@ -308,14 +308,21 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   contender, and it ranks below user-origin facts at equal similarity),
   `supersede` treats it as an ordinary agent-tier dream claim, and `drop`
   discards it. An unrecognised value falls back to `contender` — a typo
-  must not open the overwrite path. **Inert with the shipped extraction
-  prompt**, which never asks for a `speaker` field: with no label on the
-  claim the knob is never consulted at any setting, so all three values
-  are today's behaviour on a shipped install. It is settable only for the
-  prompt-variant experiment in `evals/README.md` ("Assistant-stated
-  facts"), and it is deliberately **not** on the Console for the same
-  reason as the candidate-pool knobs: adoption of either variant is gated
-  on the extraction ladder, which has not been run on them.
+  must not open the overwrite path. **Live on the default path since
+  2026-09-05**, when the provenance extraction prompt shipped: an
+  extraction can now carry a `speaker` label, so the knob decides what
+  happens to assistant-stated claims on a stock install. (It was inert
+  before that, because the old prompt never asked for the field. The
+  label is asked for only where the note makes the speaker knowable, so
+  on a bank whose notes carry no `user:` / `assistant:` marker most
+  claims still arrive without one — as do claims from an older prompt or
+  an extractor shim launched with `--system-prompt-file` — and those
+  write exactly as they did before, whatever this is set to.) Kept off
+  the Console deliberately: `supersede`
+  is the setting that lets model-stated content overwrite a user-stated
+  fact, which is a provenance decision rather than an operator dial. The
+  measured comparison of the three values is in `evals/README.md`
+  ("Assistant-stated facts").
 - **Staleness served as annotation** (`memory.search.stale_policy =
   "annotate"`) — stale records (past 2×TTL for their freshness class)
   carry `effective_confidence`/`stale` flags and nothing more, today's

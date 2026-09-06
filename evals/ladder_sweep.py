@@ -462,6 +462,21 @@ def apply_dream_env(dream_cfg) -> None:
         dream_cfg.assistant_claims = policy
 
 
+def rung_bench_env(dream_cfg) -> dict:
+    """The knob state a RUNG artifact records — resolved, not "was it
+    overridden".
+
+    ``dream_env_knobs`` reports the env override (``None`` = none given),
+    which is what the LongMemEval summary stamps. A rung file needs the
+    policy that was actually in force: the 2026-09-05 `e4b-v3` post arm
+    reported 19 claims against 18 inserted, and its artifact could not say
+    whether the missing one parked as a contender, was dropped, or
+    superseded — the tally sums neither ``contested`` nor ``confirmed``, so
+    the policy is the only handle left. Read AFTER ``apply_dream_env``.
+    """
+    return {"dream": {"assistant_claims": str(dream_cfg.assistant_claims)}}
+
+
 def rerank_env_knobs() -> dict:
     """Cross-encoder reranker knob state, for stamping into artifacts.
 
@@ -633,6 +648,7 @@ def run_rung(name: str) -> dict:
     with tempfile.TemporaryDirectory(prefix=f"plbench_{name}_",
                                      ignore_cleanup_errors=True) as td:
         svc = build_service(Path(td))
+        result["bench_env"] = rung_bench_env(svc.config.memory.dream)
         ingest(svc)
         if rung["kind"] == "naive":
             result.update(measure_naive(svc))
