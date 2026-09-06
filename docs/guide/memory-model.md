@@ -372,11 +372,11 @@ it came from a live `memory_set_add` call or a dream claim.
 ## Provenance contenders — never silently overwrite a user fact
 
 Every cortex fact carries a provenance tier: **`user` > `action` >
-`agent`** (set via `origin=`, or defaulted from `source`). A write may only
-*supersede* a slot whose current value is backed by an equal-or-weaker
-tier. A **weaker-tier** write (e.g. an `agent` value conflicting with a
-`user`-stated fact), or one below the confidence margin, is **not
-applied** — it's parked as a *contender*:
+`agent` > `assistant`** (set via `origin=`, or defaulted from `source`). A
+write may only *supersede* a slot whose current value is backed by an
+equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
+conflicting with a `user`-stated fact), or one below the confidence margin,
+is **not applied** — it's parked as a *contender*:
 
 ```python
 memory_fact_set("db", "host", "10.0.0.5", origin="user")   # current
@@ -386,6 +386,44 @@ memory_fact_set("db", "host", "10.0.0.9", origin="agent")  # -> action="conteste
 memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user-confirmed)
 # or accept=False -> discard the contender, current unchanged.
 ```
+
+If the slot has since become a **set** (see [Conversion
+rules](#conversion-rules)), `accept=True` is refused with
+`reason: "slot_holds_set"` — a scalar contender cannot replace a member set,
+so adopt the value with `memory_set_add` instead — while `accept=False`
+always works and is how an operator dismisses such a contender.
+
+`assistant` is the floor tier: a fact the **assistant** stated in a turn.
+The shipped extraction prompt asks for a `speaker` label since 2026-09-05
+— where the note makes the speaker knowable; see
+[dreaming](dreaming.md#what-the-extractor-captures) — so this tier is
+**reachable on the default path**
+(`memory.dream.assistant_claims`, default `contender`). It may fill an empty
+slot, but against a current value of any other origin it always parks as a
+contender — that rule is not gated on `protect_provenance` below — and it
+ranks after user-origin facts at equal similarity. The same rule covers
+**scalar and set-valued slots**: an assistant claim cannot trigger the
+one-way scalar→set conversion, cannot join a member set that carries any
+non-assistant member (it parks as a contender), and cannot retract a
+member another tier added (the retraction is dropped, `action:
+"member_remove_refused"`). It may fill an empty slot, extend a set it
+alone built, and retract its own members. Nothing supersedes *it*
+in return: an assistant-origin value is replaced by any later write.
+Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
+for assistant-stated facts lifts the fact-only arm on
+`single-session-assistant` from 0.054 to 0.536 while the knowledge-update
+pollution check stays flat-to-up, and the guard costs nothing measurable
+against an unguarded variant of the same prompt — tables, paired tests and
+the adoption gate are in `evals/README.md` (the published run is the clean
+re-run `assist-prov2`; the first run's contaminated worked example and its
+retired numbers are retained in the same section). That prompt then passed
+the extraction ladder on the primary rung and **shipped on 2026-09-05**, so
+a dream on stock settings now writes assistant-origin facts: they fill
+empty slots and park as contenders against anything else. A claim carrying
+no `speaker` label — a note with no role marker to read it from, an older
+prompt, or an extractor shim launched with `--system-prompt-file` — still
+writes exactly as it did before, and on a bank of unmarked notes that is
+the common case.
 
 This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in

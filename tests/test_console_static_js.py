@@ -142,3 +142,36 @@ def test_devserver_fixture_bank_carries_markup_shaped_entity_name():
         "the XSS-probe entity has no edge — it would render off-screen and "
         "never come up in a normal dev-server eyeball check."
     )
+
+
+# ── views/cortex.js: contested-slot rendering and the resolve refusal ────
+#
+# Same no-harness situation as galaxy.js above. The 2026-09-05 fix made the
+# real fact dump carry ``contested``; the view's half of it — one contender
+# block per SLOT (a set slot arrives as one row per member) keyed the way
+# the store keys slots, and treating a 200 whose body says
+# ``resolved: false`` as the refusal it is instead of toasting "Contender
+# adopted" — has no other test.
+
+CORTEX_VIEW_JS = GALAXY_JS.parent / "views" / "cortex.js"
+
+
+def test_cortex_view_checks_resolved_before_toasting_success():
+    src = CORTEX_VIEW_JS.read_text(encoding="utf-8")
+    body = src[src.index("async function resolve("):]
+    body = body[:body.index("\n}\n")]
+    assert "res.resolved === false" in body
+    # The refusal branch returns before the success toast.
+    assert body.index("res.resolved === false") < body.index("Contender adopted")
+    assert "slot_holds_set" in body and "no_contender" in body
+
+
+def test_cortex_view_renders_one_contender_block_per_slot():
+    src = CORTEX_VIEW_JS.read_text(encoding="utf-8")
+    # The slot key mirrors cortex.py `_norm_key`: casefold + separator runs
+    # collapsed to one hyphen — so two member rows spelling the attribute
+    # differently still resolve to one slot.
+    assert "function slotKey(" in src
+    assert '.toLowerCase().replace(/[\\s._\\-\\/]+/g, "-")' in src
+    assert "shown.has(slotKey(f.attribute))" in src
+    assert "map((f) => slotKey(f.attribute))).size" in src

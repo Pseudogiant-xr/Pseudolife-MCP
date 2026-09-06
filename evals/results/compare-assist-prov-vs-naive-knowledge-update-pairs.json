@@ -1,0 +1,96 @@
+{
+  "n": 78,
+  "dropped_a": 86,
+  "dropped_b": 86,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-prov.jsonl",
+    "arms": {
+      "rag": 0.859,
+      "cortex": 0.7436,
+      "hybrid": 0.9231,
+      "cascade": 0.8718
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-naive.jsonl",
+    "arms": {
+      "rag": 0.859,
+      "cortex": 0.7051,
+      "hybrid": 0.8846,
+      "cascade": 0.8718
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "cortex": {
+        "delta": 0.0385,
+        "p": 0.548,
+        "wins": 7,
+        "losses": 4,
+        "win_qids": [
+          "08e075c7",
+          "10e09553",
+          "618f13b2",
+          "9bbe84a2",
+          "9ea5eabc",
+          "d7c942c3",
+          "f685340e"
+        ],
+        "loss_qids": [
+          "7401057b",
+          "a2f3aa27",
+          "b01defab",
+          "f685340e_abs"
+        ]
+      },
+      "hybrid": {
+        "delta": 0.0385,
+        "p": 0.4523,
+        "wins": 5,
+        "losses": 2,
+        "win_qids": [
+          "41698283",
+          "69fee5aa",
+          "9bbe84a2",
+          "d7c942c3",
+          "f685340e"
+        ],
+        "loss_qids": [
+          "89941a94",
+          "a2f3aa27"
+        ]
+      },
+      "cascade": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 4,
+        "losses": 4,
+        "win_qids": [
+          "9bbe84a2",
+          "9ea5eabc",
+          "d7c942c3",
+          "e493bb7c"
+        ],
+        "loss_qids": [
+          "7401057b",
+          "a2f3aa27",
+          "b01defab",
+          "f685340e_abs"
+        ]
+      }
+    }
+  },
+  "types": [
+    "knowledge-update"
+  ]
+}

@@ -1,0 +1,373 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 164,
+  "bench_env": {
+    "thinking": null,
+    "sampler": null,
+    "candidate_pool": {
+      "candidate_pool_multiplier": null,
+      "fusion": null
+    },
+    "dream": {
+      "assistant_claims": "supersede"
+    }
+  },
+  "arms": {
+    "rag": {
+      "accuracy": 0.817,
+      "context_tokens": 1071.7
+    },
+    "cortex": {
+      "accuracy": 0.537,
+      "context_tokens": 187.8
+    },
+    "hybrid": {
+      "accuracy": 0.835,
+      "context_tokens": 1268.0
+    },
+    "cascade": {
+      "accuracy": 0.799,
+      "context_tokens": 569.2
+    }
+  },
+  "superseded_total": 180,
+  "leak_check": {
+    "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+    "n_rows": 164,
+    "n_leaked": 0,
+    "n_untestable": 28,
+    "untestable_reasons": {
+      "trivial_gold": 28
+    },
+    "leaked": [],
+    "untestable": [
+      "d7c942c3",
+      "89941a93",
+      "184da446",
+      "4d6b87c8",
+      "0f05491a",
+      "b6019101",
+      "45dc21b6",
+      "618f13b2",
+      "72e3ee87",
+      "c4ea545c",
+      "01493427",
+      "6a27ffc2",
+      "1cea1afa",
+      "ed4ddc30",
+      "b01defab",
+      "7e974930",
+      "603deb26",
+      "5831f84d",
+      "affe2881",
+      "0ddfec37",
+      "69fee5aa",
+      "7401057b",
+      "c7dc5443",
+      "06db6396",
+      "10e09553",
+      "ba61f0b9",
+      "42ec0761",
+      "18dcd5a5"
+    ],
+    "sites": {},
+    "min_answer_chars": 4,
+    "arms": {
+      "cortex": {
+        "n": 164,
+        "all": 0.5366,
+        "n_leak_free": 164,
+        "leak_free": 0.5366,
+        "n_testable": 136,
+        "leak_free_testable": 0.5
+      },
+      "hybrid": {
+        "n": 164,
+        "all": 0.8354,
+        "n_leak_free": 164,
+        "leak_free": 0.8354,
+        "n_testable": 136,
+        "leak_free_testable": 0.8162
+      },
+      "rag": {
+        "n": 164,
+        "all": 0.8171,
+        "n_leak_free": 164,
+        "leak_free": 0.8171,
+        "n_testable": 136,
+        "leak_free_testable": 0.7868
+      }
+    }
+  },
+  "answerability": {
+    "check": "memory-only answerability + pathway evidence (AWM arXiv 2608.25618, PAST-Bench arXiv 2608.04003)",
+    "n_rows": 164,
+    "arms": {
+      "cortex": {
+        "n": 164,
+        "n_testable": 130,
+        "untestable_reasons": {
+          "trivial_gold": 28,
+          "abstention": 6
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 50,
+          "answerable_wrong": 6,
+          "unanswerable_correct": 14,
+          "unanswerable_wrong": 60
+        },
+        "answerable_share": 0.4308,
+        "answerable_by": {
+          "span": 47,
+          "tokens": 9
+        },
+        "unanswerable_correct_ids": [
+          "031748ae",
+          "2698e78f",
+          "f685340e",
+          "c6853660",
+          "89941a94",
+          "35a27287",
+          "6b7dfb22",
+          "1d4e3b97",
+          "07b6f563",
+          "2bf43736",
+          "6222b6eb",
+          "4baee567",
+          "16c90bf4",
+          "65240037"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 88,
+          "untestable": 24,
+          "supported": 49,
+          "unsupported": 14,
+          "spanning": 1,
+          "supported_share": 0.7656,
+          "unsupported_ids": [
+            "031748ae",
+            "2698e78f",
+            "f685340e",
+            "c6853660",
+            "89941a94",
+            "35a27287",
+            "6b7dfb22",
+            "1d4e3b97",
+            "07b6f563",
+            "2bf43736",
+            "6222b6eb",
+            "4baee567",
+            "16c90bf4",
+            "65240037"
+          ],
+          "spanning_ids": [
+            "a40e080f"
+          ]
+        }
+      },
+      "hybrid": {
+        "n": 164,
+        "n_testable": 130,
+        "untestable_reasons": {
+          "trivial_gold": 28,
+          "abstention": 6
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 84,
+          "answerable_wrong": 5,
+          "unanswerable_correct": 22,
+          "unanswerable_wrong": 19
+        },
+        "answerable_share": 0.6846,
+        "answerable_by": {
+          "span": 77,
+          "tokens": 12
+        },
+        "unanswerable_correct_ids": [
+          "031748ae",
+          "89941a94",
+          "8a2466db",
+          "06878be2",
+          "75832dbd",
+          "35a27287",
+          "32260d93",
+          "54026fce",
+          "06f04340",
+          "6b7dfb22",
+          "505af2f5",
+          "75f70248",
+          "a89d7624",
+          "1d4e3b97",
+          "0a34ad58",
+          "ceb54acb",
+          "58470ed2",
+          "1d4da289",
+          "41275add",
+          "4388e9dd",
+          "16c90bf4",
+          "65240037"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 137,
+          "untestable": 31,
+          "supported": 80,
+          "unsupported": 22,
+          "spanning": 4,
+          "supported_share": 0.7547,
+          "unsupported_ids": [
+            "031748ae",
+            "89941a94",
+            "8a2466db",
+            "06878be2",
+            "75832dbd",
+            "35a27287",
+            "32260d93",
+            "54026fce",
+            "06f04340",
+            "6b7dfb22",
+            "505af2f5",
+            "75f70248",
+            "a89d7624",
+            "1d4e3b97",
+            "0a34ad58",
+            "ceb54acb",
+            "58470ed2",
+            "1d4da289",
+            "41275add",
+            "4388e9dd",
+            "16c90bf4",
+            "65240037"
+          ],
+          "spanning_ids": [
+            "c6853660",
+            "8cf51dda",
+            "a40e080f",
+            "4baee567"
+          ]
+        }
+      },
+      "rag": {
+        "n": 164,
+        "n_testable": 130,
+        "untestable_reasons": {
+          "trivial_gold": 28,
+          "abstention": 6
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 78,
+          "answerable_wrong": 11,
+          "unanswerable_correct": 23,
+          "unanswerable_wrong": 18
+        },
+        "answerable_share": 0.6846,
+        "answerable_by": {
+          "span": 77,
+          "tokens": 12
+        },
+        "unanswerable_correct_ids": [
+          "031748ae",
+          "8a2466db",
+          "06878be2",
+          "35a27287",
+          "32260d93",
+          "195a1a1b",
+          "54026fce",
+          "06f04340",
+          "6b7dfb22",
+          "57f827a0",
+          "505af2f5",
+          "75f70248",
+          "a89d7624",
+          "b0479f84",
+          "1d4e3b97",
+          "07b6f563",
+          "0a34ad58",
+          "ceb54acb",
+          "58470ed2",
+          "1d4da289",
+          "4388e9dd",
+          "16c90bf4",
+          "65240037"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 134,
+          "untestable": 33,
+          "supported": 74,
+          "unsupported": 23,
+          "spanning": 4,
+          "supported_share": 0.7327,
+          "unsupported_ids": [
+            "031748ae",
+            "8a2466db",
+            "06878be2",
+            "35a27287",
+            "32260d93",
+            "195a1a1b",
+            "54026fce",
+            "06f04340",
+            "6b7dfb22",
+            "57f827a0",
+            "505af2f5",
+            "75f70248",
+            "a89d7624",
+            "b0479f84",
+            "1d4e3b97",
+            "07b6f563",
+            "0a34ad58",
+            "ceb54acb",
+            "58470ed2",
+            "1d4da289",
+            "4388e9dd",
+            "16c90bf4",
+            "65240037"
+          ],
+          "spanning_ids": [
+            "c6853660",
+            "8cf51dda",
+            "a40e080f",
+            "4baee567"
+          ]
+        }
+      }
+    }
+  },
+  "types": {
+    "knowledge-update": {
+      "n": 78,
+      "arms": {
+        "rag": 0.859,
+        "cortex": 0.718,
+        "hybrid": 0.91
+      },
+      "cascade": 0.859
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "arms": {
+        "rag": 0.911,
+        "cortex": 0.5,
+        "hybrid": 0.946
+      },
+      "cascade": 0.929
+    },
+    "single-session-preference": {
+      "n": 30,
+      "arms": {
+        "rag": 0.533,
+        "cortex": 0.133,
+        "hybrid": 0.433
+      },
+      "cascade": 0.4
+    }
+  }
+}
