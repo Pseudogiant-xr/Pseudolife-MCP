@@ -79,3 +79,66 @@ def test_tagged_rerun_writes_the_tagged_file_only(tmp_path, monkeypatch,
         encoding="utf-8")) == {"ok": 1}
     assert json.loads((tmp_path / "naive-rag.json").read_text(
         encoding="utf-8")) == {"canonical": True}
+
+
+# ── which commit produced the run (2026-09-05 merge review) ───────────────
+#
+# `ladder_pair_compare.py` used to answer "which commit produced this arm"
+# from the worktree's HEAD AT COMPARE TIME, which is the same string for
+# both arms of a re-gate and is neither arm's. It can only be answered by
+# the run itself, so the rung artifact records it.
+
+def test_run_rung_stamps_the_commit_that_produced_the_run(monkeypatch):
+    """Every rung file, including an unreachable one — a run that failed to
+    reach its endpoint is still evidence about a particular commit."""
+    monkeypatch.setattr(ladder, "git_rev", lambda: "f" * 40)
+    monkeypatch.setattr(ladder, "probe", lambda url: False)
+    out = ladder.run_rung("qwen-27b")
+    assert out["status"] == "unreachable"
+    assert out["git_rev"] == "f" * 40
+
+
+def test_git_rev_is_none_outside_a_checkout(monkeypatch):
+    """No git, no answer — and `None` rather than an empty string, because
+    the verdict distinguishes "unstamped" from "stamped with nothing"."""
+    def _boom(*a, **kw):
+        raise OSError("no git here")
+    monkeypatch.setattr(ladder.subprocess, "run", _boom)
+    assert ladder.git_rev() is None
+
+
+def test_git_rev_marks_a_dirty_worktree(monkeypatch):
+    """Eval runs here are routinely made from an uncommitted tree, so the
+    common case must be the one that is labelled."""
+    calls = []
+
+    class _Out:
+        returncode = 0
+
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "rev-parse" in cmd:
+            return _Out("a" * 40 + "\n")
+        return _Out(" M evals/ladder_sweep.py\n")
+
+    monkeypatch.setattr(ladder.subprocess, "run", fake_run)
+    assert ladder.git_rev() == "a" * 40 + "-dirty"
+    assert any("--untracked-files=no" in c for c in calls), (
+        "untracked scratch files do not change the code that ran and must "
+        "not mark a run dirty")
+
+
+def test_git_rev_leaves_a_clean_worktree_unsuffixed(monkeypatch):
+    class _Out:
+        returncode = 0
+
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+    monkeypatch.setattr(
+        ladder.subprocess, "run",
+        lambda cmd, **kw: _Out("a" * 40 + "\n" if "rev-parse" in cmd else ""))
+    assert ladder.git_rev() == "a" * 40

@@ -8427,6 +8427,300 @@ for _rung, _arm in (("qwen-27b", "pre"), ("qwen-27b", "post"),
             id=f"prov-regate-{_slug}-no-stamp-{_rung}-{_arm}", doc=_doc,
             needle=_needle, artifacts=(_PL % (_rung, _arm),),
             value=_has_bench_env, stated=0, places=0))
+
+
+# ── the shim prompt's own ladder gate (2026-09-05) ───────────────────────
+#
+# The daemon-side provenance prompt shipped earlier the same day, but an
+# install whose primary extractor is the Claude CLI shim never saw it:
+# `--system-prompt-file` REPLACES the shipped prefix. `sonnet_extractor_v4.md`
+# closes that, and this is the gate the default flip rests on. Two replicates
+# per arm, because the rung is a CLI-served model and is not
+# bit-reproducible — the replicates are what license the "inside the noise"
+# reading of the token move, so they are pinned like any other published
+# number.
+SP_PRE = RESULTS + "opus-5-shimprompt-pre.json"
+SP_POST = RESULTS + "opus-5-shimprompt-post.json"
+SP_PRE2 = RESULTS + "opus-5-shimprompt-pre-rep2.json"
+SP_POST2 = RESULTS + "opus-5-shimprompt-post-rep2.json"
+SP_THRESH = RESULTS + "ladder-shimprompt-paired-verdict-threshold.json"
+
+_SP_ROW_PRE = ("| pre | v2 | 1.0 | 0.0 | 15.2 | 16 / 16 | "
+               "`opus-5-shimprompt-pre.json` |")
+_SP_ROW_POST = ("| post | v4 | 1.0 | 0.0 | 16.1 | 16 / 16 | "
+                "`opus-5-shimprompt-post.json` |")
+_SP_ROW_PRE2 = ("| pre, rep 2 | v2 | 1.0 | 0.0 | 14.0 | 16 / 16 | "
+                "`opus-5-shimprompt-pre-rep2.json` |")
+_SP_ROW_POST2 = ("| post, rep 2 | v4 | 1.0 | 0.0 | 14.8 | 16 / 16 | "
+                 "`opus-5-shimprompt-post-rep2.json` |")
+_SP_GATE = '`no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`,'
+_SP_SPREAD = "*same prompt* spanning 14.0–15.2 (pre) and 14.8–16.1 (post)"
+_SP_CL_TALLY = "consolidation tally (26 pulled, 16 claims, 16 inserted, 0 superseded)."
+_SP_CL_NOISE = "noise**: the same prompt spans 14.0-15.2 (pre) and 14.8-16.1 (post)"
+
+
+def _sp_tally(key):
+    return lambda d: d["consolidation"][key]
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # the four ladder rows, each cell against its own run file
+    ("shimprompt-pre-gold", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-pre-stale", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-pre-tokens", EVALS, _SP_ROW_PRE, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shimprompt-pre-claims", EVALS, _SP_ROW_PRE, SP_PRE,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-post-gold", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-post-stale", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-post-tokens", EVALS, _SP_ROW_POST, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+    ("shimprompt-post-claims", EVALS, _SP_ROW_POST, SP_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-pre2-gold", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-pre2-stale", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-pre2-tokens", EVALS, _SP_ROW_PRE2, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-post2-gold", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shimprompt-post2-stale", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shimprompt-post2-tokens", EVALS, _SP_ROW_POST2, SP_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    # the verdict itself — the thing the default flip rests on
+    ("shimprompt-thresh-cleared", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("shimprompt-thresh-pre-clears", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "pre_clears"), 1, 0),
+    ("shimprompt-thresh-post-clears", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "post_clears"), 1, 0),
+    ("shimprompt-thresh-no-regression", EVALS, _SP_GATE, SP_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("shimprompt-budget", EVALS, _SP_ROW_PRE, SP_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # the replicate spread, which is what licenses "inside the noise"
+    ("shimprompt-spread-pre-lo", EVALS, _SP_SPREAD, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-spread-pre-hi", EVALS, _SP_SPREAD, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shimprompt-spread-post-lo", EVALS, _SP_SPREAD, SP_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shimprompt-spread-post-hi", EVALS, _SP_SPREAD, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+    # the CHANGELOG restates the tally and the spread
+    ("shimprompt-cl-pulled", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("pulled"), 26, 0),
+    ("shimprompt-cl-claims", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shimprompt-cl-inserted", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("inserted"), 16, 0),
+    ("shimprompt-cl-superseded", CHANGELOG, _SP_CL_TALLY, SP_POST,
+     _sp_tally("superseded"), 0, 0),
+    ("shimprompt-cl-noise-pre-lo", CHANGELOG, _SP_CL_NOISE, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shimprompt-cl-noise-post-hi", CHANGELOG, _SP_CL_NOISE, SP_POST,
+     lambda d: d["tokens_per_query"], 16.1, 1),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+# ── the same gate, re-run under speaker rule v2 (2026-09-05) ─────────────
+#
+# `sonnet_extractor_v4.md` is GENERATED from `_ASSISTANT_SPEAKER_RULE`, so
+# the same day's rule rewrite changed the file the shim is launched with and
+# the gate above stopped describing it. Only the POST arm was re-run (the v2
+# pre comparator carries none of the assistant blocks, so the rewrite cannot
+# reach it), which is why the verdict names a `post2` arm.
+#
+# One published statement deliberately does NOT reappear below: "an
+# identical consolidation tally every time". It is true of the four rule-v1
+# runs and false under rule v2, whose second replicate returned 17 claims —
+# and inserted all 17. What is pinned instead is that claim count and its
+# insert count, so the docs cannot quietly restate the stronger version.
+SP2_POST = RESULTS + "opus-5-shimprompt-post2.json"
+SP2_POST2 = RESULTS + "opus-5-shimprompt-post2-rep2.json"
+SP2_THRESH = RESULTS + "ladder-shimprompt-rule2-paired-verdict-threshold.json"
+
+_SP2_ROW_PRE = ("| pre | v2 | none | 1.0 | 0.0 | 15.2 | 16 / 16 | "
+                "`opus-5-shimprompt-pre.json` |")
+_SP2_ROW_PRE2 = ("| pre, rep 2 | v2 | none | 1.0 | 0.0 | 14.0 | 16 / 16 | "
+                 "`opus-5-shimprompt-pre-rep2.json` |")
+_SP2_ROW_POST = ("| post2 | v4 | v2 | 1.0 | 0.0 | 15.5 | 16 / 16 | "
+                 "`opus-5-shimprompt-post2.json` |")
+_SP2_ROW_POST2 = ("| post2, rep 2 | v4 | v2 | 1.0 | 0.0 | 14.8 | 17 / 17 | "
+                  "`opus-5-shimprompt-post2-rep2.json` |")
+_SP2_GATE = ('`gate: PASS`, `no_regression_gate: PASS`, '
+             '`rungs["opus-5"].cleared: true`')
+_SP2_TALLY = ("rule v2 the second replicate returned **17 claims and "
+              "inserted all 17**")
+_SP2_SPREAD = ("replicates the post2 arm spans 14.8–15.5 against the "
+               "pre arm's 14.0–15.2:")
+_SP2_DIFF = "`differences` block reports `tokens_per_query 15.2 → 15.5`"
+_SP2_BUDGET = "45% of the same 34.98 token budget"
+_SP2_CL_TOK = ("tokens/query 15.5 and 14.8 against the pre arm's 15.2 and "
+               "14.0 — still")
+_SP2_CL_TALLY = "second replicate returned 17 claims and inserted all"
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # the re-gate table, cell by cell against its own run file
+    ("shim2-pre-gold", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-pre-stale", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-pre-tokens", EVALS, _SP2_ROW_PRE, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-pre2-gold", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-pre2-stale", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-pre2-tokens", EVALS, _SP2_ROW_PRE2, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-post-gold", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-post-stale", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-post-tokens", EVALS, _SP2_ROW_POST, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-post-claims", EVALS, _SP2_ROW_POST, SP2_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shim2-post-inserted", EVALS, _SP2_ROW_POST, SP2_POST,
+     _sp_tally("inserted"), 16, 0),
+    ("shim2-post2-gold", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim2-post2-stale", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim2-post2-tokens", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-post2-claims", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-post2-inserted", EVALS, _SP2_ROW_POST2, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+    # the rule-v2 verdict — what the default flip now rests on
+    ("shim2-thresh-cleared", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("shim2-thresh-pre-clears", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "pre_clears"), 1, 0),
+    ("shim2-thresh-post-clears", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "post_clears"), 1, 0),
+    ("shim2-thresh-no-regression", EVALS, _SP2_GATE, SP2_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("shim2-budget", EVALS, _SP2_BUDGET, SP2_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # the tally sentence, which is the one claim that did NOT carry over
+    ("shim2-tally-claims", EVALS, _SP2_TALLY, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-tally-inserted", EVALS, _SP2_TALLY, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+    # the replicate spread that licenses "inside the noise", and the
+    # verdict's own reported move
+    ("shim2-spread-post-lo", EVALS, _SP2_SPREAD, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-spread-post-hi", EVALS, _SP2_SPREAD, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-spread-pre-lo", EVALS, _SP2_SPREAD, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-spread-pre-hi", EVALS, _SP2_SPREAD, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-diff-pre", EVALS, _SP2_DIFF, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-diff-post", EVALS, _SP2_DIFF, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    # the CHANGELOG restates the four token figures and the tally move
+    ("shim2-cl-tok-post", CHANGELOG, _SP2_CL_TOK, SP2_POST,
+     lambda d: d["tokens_per_query"], 15.5, 1),
+    ("shim2-cl-tok-post2", CHANGELOG, _SP2_CL_TOK, SP2_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("shim2-cl-tok-pre", CHANGELOG, _SP2_CL_TOK, SP_PRE,
+     lambda d: d["tokens_per_query"], 15.2, 1),
+    ("shim2-cl-tok-pre2", CHANGELOG, _SP2_CL_TOK, SP_PRE2,
+     lambda d: d["tokens_per_query"], 14.0, 1),
+    ("shim2-cl-tally-claims", CHANGELOG, _SP2_CL_TALLY, SP2_POST2,
+     _sp_tally("claims"), 17, 0),
+    ("shim2-cl-tally-inserted", CHANGELOG, _SP2_CL_TALLY, SP2_POST2,
+     _sp_tally("inserted"), 17, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+# ── the shim launchers must cite the gate that validated their default ────
+#
+# Review finding, 2026-09-05. `ops/install-shim-autostart.ps1` and its `.sh`
+# sibling flipped `--prompt-file` to `sonnet_extractor_v4.md` and justified
+# the flip in a header comment — naming the rule-v1 verdict and its token
+# range, both of which the same day's re-gate superseded. An `ops/` comment
+# is where an operator reads why a default is what it is, and nothing was
+# checking it, so it drifted the moment the re-gate landed.
+#
+# The `Claim` rows below pin the quoted range to the four runs of the
+# CURRENT gate; the test after them pins the artifact the comment names.
+SHIM_LAUNCH_PS1 = "ops/install-shim-autostart.ps1"
+SHIM_LAUNCH_SH = "ops/install-shim-autostart.sh"
+
+# The rule-v2 gate is four runs: an unchanged `pre` pair and the re-run
+# `post2` pair. The verdict itself names only one file per arm, so the
+# replicates have to be listed here for the range to mean anything.
+SHIM_GATE_RUNS = (SP_PRE, SP_PRE2, SP2_POST, SP2_POST2)
+_SHIM_TOKENS = "tokens 14.0-15.5 across both arms"
+
+
+def _tok_min(*runs):
+    return min(r["tokens_per_query"] for r in runs)
+
+
+def _tok_max(*runs):
+    return max(r["tokens_per_query"] for r in runs)
+
+
+for _doc, _slug in ((SHIM_LAUNCH_PS1, "ps1"), (SHIM_LAUNCH_SH, "sh")):
+    CLAIMS.append(Claim(
+        id=f"shim-launcher-{_slug}-tok-lo", doc=_doc, needle=_SHIM_TOKENS,
+        artifacts=SHIM_GATE_RUNS, value=_tok_min, stated=14.0, places=1))
+    CLAIMS.append(Claim(
+        id=f"shim-launcher-{_slug}-tok-hi", doc=_doc, needle=_SHIM_TOKENS,
+        artifacts=SHIM_GATE_RUNS, value=_tok_max, stated=15.5, places=1))
+
+
+def test_the_shim_launchers_cite_the_gate_that_validated_their_default():
+    """Every ladder verdict an `ops/` launcher names must be committed, and
+    the one it rests its default on must be the CURRENT gate.
+
+    The rule-v1 verdict stays in the tree — a superseded number keeps its
+    evidence — and the comment is allowed to name it, but only in its
+    retired role: as a bare filename beside the word "superseded", never as
+    the `evals/results/...` path the operator is pointed at.
+    """
+    import re
+
+    tracked = _tracked()
+    for rel in (SHIM_LAUNCH_PS1, SHIM_LAUNCH_SH):
+        text = _read_doc(rel)
+        named = set(re.findall(r"evals/results/[\w.-]+\.json", text))
+        assert named, f"{rel} names no verdict artifact at all"
+        missing = sorted(a for a in named if a not in tracked)
+        assert missing == [], (
+            f"{rel} cites uncommitted evidence: {missing} — a reader "
+            "following the comment finds nothing.")
+        assert SP2_THRESH in named, (
+            f"{rel} does not point at {SP2_THRESH}, the gate its default "
+            "rests on")
+        assert SP_THRESH not in named, (
+            f"{rel} still points at {SP_THRESH}, which the rule-v2 re-gate "
+            "superseded — the operator reading it would check the wrong run")
+        if SP_THRESH.split("/")[-1] in text:
+            assert "superseded" in text, (
+                f"{rel} names the rule-v1 verdict without saying it is "
+                "superseded — retire the number where a reader meets it")
 # docs/guide/benchmarks.md — the third honest limit.
 _BM_TYPE_1 = ("spread evenly across question types: `temporal-reasoning` "
               "carries **+12 of")

@@ -139,13 +139,31 @@ knowledge that never reaches the cortex. It cost a whole benchmark category
 to find (see [Benchmarks](benchmarks.md#longmemeval-v2--agent-trajectories-and-procedures)),
 and it is worth remembering before narrowing this prompt further.
 
-The Sonnet override prompt (`evals/prompts/sonnet_extractor_v2.md`, used
-when you run the shim below) carries the first three, tuned for a larger
-model. It does **not** carry the assistant-facts instruction: a shim
-launched with `--system-prompt-file` replaces the shipped prompt with that
-file, so on such an install assistant-stated facts are extracted only by
-the fallback sidecar. Adding the instruction there is a separate change
-needing its own ladder gate.
+The Sonnet override prompt (`evals/prompts/sonnet_extractor_v4.md`, used
+when you run the shim below) carries all four. A shim launched with
+`--system-prompt-file` **replaces** the shipped prompt with that file —
+keeping only the appended vocab/known-facts hints — so a prompt change made
+in `dream.py` alone never reaches an install whose primary extractor is the
+shim. v4 closes that gap: it is the v2 body plus the same assistant-facts
+blocks the shipped prompt carries, composed by `evals/gen_shim_prompt.py`
+from `dream.py`'s own constants so the two paths cannot drift in what they
+ask for. Gated on the ladder `opus-5` rung, v2 vs v4, two replicates per arm
+(`evals/results/ladder-shimprompt-paired-verdict-threshold.json`: `gate:
+PASS`, gold 1.0 and stale 0.0 on every run), and **re-gated** after the
+speaker rule was rewritten the same day — v4 is generated from that
+constant, so the file changed and the first gate stopped describing it. The
+re-run of the post arm is
+`evals/results/ladder-shimprompt-rule2-paired-verdict-threshold.json`
+(`gate: PASS`, `no_regression_gate: PASS`, gold 1.0 and stale 0.0 on both
+replicates). v2 stays in the tree as the
+gate's pre arm; `sonnet_extractor_v3.md` is an unrelated, never-adopted
+2026-08-02 lineage.
+
+Existing installs pick v4 up when the shim autostart is re-installed
+(`ops/install-shim-autostart.ps1`) or the shim is restarted with the new
+file. Rebuilding the daemon image alone does **not** reach the shim path.
+The Codex shim passes no prompt file at all, so it already runs the shipped
+prompt.
 
 **Literal-faithfulness gate.** After extraction, every claim's digit-bearing
 tokens (dates exempt — format variance makes digit matching unsafe there)

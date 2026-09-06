@@ -31,6 +31,7 @@ The contract:
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 
 import pytest
@@ -944,3 +945,114 @@ def test_every_registered_token_is_actually_used_by_a_prompt_file():
                      "assistant_facts_provenance.txt"))
     unused = [t for t in _gen_module().EXAMPLE_TOKENS if t not in text]
     assert unused == [], f"EXAMPLE_TOKENS entries no example uses: {unused}"
+
+
+# ── the same guard, over the WHOLE shipped prompt ────────────────────────
+#
+# Review finding, 2026-09-05 (the shim-prompt fold). The two tests above
+# scan `NAIVE_EXAMPLE` and `PROVENANCE_EXAMPLE` — the blocks the provenance
+# change ADDED — while the comment above them claims they "make the class
+# un-repeatable". They do not: `_BASE_SYSTEM_PROMPT` carries three worked
+# examples of its own, written before the invented-token rule existed, and
+# nothing was checking them. One of them names a LongMemEval answer (see
+# `KNOWN_CORPUS_COLLISIONS`), and it has been in the prompt every extractor
+# receives since 2026-08-01 — the sidecar, the shim, and every ladder rung
+# alike, not only the shim path.
+#
+# The prompt uses ALL-CAPS for emphasis throughout ("COUNTS, TOTALS, AND
+# QUANTITIES", "OMIT", "CURRENT"), so a caps-inclusive scan would need a
+# ~20-entry exemption list per prompt that would rot faster than it guards.
+# The scan is therefore over TITLECASE phrases — which is how names are
+# written both here and in the corpus — and that limit is stated rather
+# than implied away.
+
+# Titlecase word, optional possessive, optionally chained. Non-ASCII
+# initials included (the corpus carries accented names); ALL-CAPS runs
+# deliberately excluded, see above.
+_TITLECASE = re.compile(
+    r"[A-Z\u00C0-\u00DE][a-z\u00DF-\u00FF]+(?:['\u2019][A-Za-z]+)?"
+    r"(?:\s+[A-Z\u00C0-\u00DE][a-z\u00DF-\u00FF]+(?:['\u2019][A-Za-z]+)?)*")
+
+# Ordinary sentence-initial capitals in the shipped prompt. Every OTHER
+# titlecase phrase must be a registered token or a recorded pre-rule name.
+_SHIPPED_SENTENCE_CAPITALS = frozenset({
+    "Example", "Extract", "For", "Key", "Notes", "One", "Output", "Return",
+    "Reuse", "What", "When", "You",
+})
+
+
+def _shipped_titlecase() -> set:
+    from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
+    g = _gen_module()
+    text = _SYSTEM_PROMPT
+    for token in g.EXAMPLE_TOKENS:
+        text = text.replace(token, " ")
+    return {m.group(0) for m in _TITLECASE.finditer(text)
+            if m.group(0) not in _SHIPPED_SENTENCE_CAPITALS}
+
+
+def test_every_titlecase_name_in_the_shipped_prompt_is_accounted_for():
+    """Structural half, over the whole shipped prompt rather than the two
+    blocks the provenance change added."""
+    g = _gen_module()
+    found = _shipped_titlecase()
+    assert found, "no name found in the shipped prompt — the scan is vacuous"
+    unaccounted = sorted(found - set(g.PRE_RULE_PROPER_NOUNS))
+    assert unaccounted == [], (
+        f"unregistered proper noun(s) in the shipped prompt: {unaccounted} — "
+        "add them to EXAMPLE_TOKENS (which grep-checks them against the "
+        "LongMemEval datasets) or rewrite the example")
+
+
+def test_the_pre_rule_names_are_really_in_the_shipped_prompt():
+    """The exemption list must stay a statement about the prompt, not a
+    parking bay: every entry has to actually occur in it."""
+    from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
+    g = _gen_module()
+    absent = sorted(n for n in g.PRE_RULE_PROPER_NOUNS
+                    if n not in _SYSTEM_PROMPT)
+    assert absent == [], (
+        f"listed as a pre-rule prompt name but absent from it: {absent}")
+    extra = sorted(set(g.KNOWN_CORPUS_COLLISIONS) - set(g.PRE_RULE_PROPER_NOUNS))
+    assert extra == [], (
+        f"collision list names a phrase the prompt does not carry: {extra}")
+
+
+@pytest.mark.parametrize("dataset", ["longmemeval_oracle.json",
+                                     "longmemeval_s_cleaned.json"])
+def test_the_shipped_prompts_names_hit_only_known_collisions(dataset):
+    """Evidence half, over the whole shipped prompt.
+
+    EQUALITY, not a subset: a newly contaminated name fails, and so does a
+    listed collision that has stopped hitting. Both directions matter — an
+    allowlist nobody can retire is how a disclosure turns into decoration.
+    """
+    from pathlib import Path
+
+    path = (Path(__file__).resolve().parents[1] / "evals" / "data" / dataset)
+    if not path.exists():
+        pytest.skip(f"{dataset} not present (evals/data is gitignored)")
+
+    g = _gen_module()
+    names = sorted(_shipped_titlecase())
+    probes = [n.encode("utf-8") for n in names]
+    assert probes, "no name reaches the scan — vacuous"
+    overlap = max(len(p) for p in probes)
+    counts = {p: 0 for p in probes}
+    prev = b""
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(8 << 20)
+            if not chunk:
+                break
+            buf = prev + chunk
+            for p in probes:
+                counts[p] += buf.count(p)
+            prev = buf[-overlap:]
+    hits = sorted(p.decode() for p, n in counts.items() if n)
+    assert hits == sorted(g.KNOWN_CORPUS_COLLISIONS), (
+        f"shipped-prompt name(s) occur in {dataset}: {hits}; known and "
+        f"allowed: {sorted(g.KNOWN_CORPUS_COLLISIONS)}. A name not on that "
+        "list means the SHIPPED prompt is handing the model content the "
+        "bench measures. A listed one that no longer hits means the debt is "
+        "paid: delete its entry.")
