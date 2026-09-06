@@ -31,6 +31,10 @@ GALAXY_JS = (
     Path(__file__).resolve().parent.parent
     / "pseudolife_memory" / "web" / "static" / "js" / "galaxy.js"
 )
+STYLES_CSS = (
+    Path(__file__).resolve().parent.parent
+    / "pseudolife_memory" / "web" / "static" / "css" / "styles.css"
+)
 
 
 def _extract_call_arg(source: str, call_name: str) -> str:
@@ -144,6 +148,36 @@ def test_devserver_fixture_bank_carries_markup_shaped_entity_name():
     )
 
 
+def test_reduced_motion_does_not_repeat_shortened_animations_forever():
+    src = STYLES_CSS.read_text(encoding="utf-8")
+    reduced = src[src.index("@media (prefers-reduced-motion:reduce)"):]
+    rule = reduced[:reduced.index("}")]
+    assert "animation-iteration-count:1 !important" in rule, (
+        "shortening an infinite animation to .001ms creates rapid flicker; "
+        "reduced motion must also limit its iteration count")
+
+
+def test_reduced_motion_keeps_the_scrubber_replay_a_no_op():
+    """`prefers-reduced-motion` means no scrubber auto-play — both 2026-07-15
+    design docs say so (atlas-wiki-galaxy-design.md: "no play-animation";
+    atlas-stage3-scrubber-review.md: "no scrubber auto-play"). The play
+    handler must keep its early return; making the button do something under
+    reduced motion is a spec change, not a fix."""
+    src = GALAXY_JS.read_text(encoding="utf-8")
+    play = src.index('class: "scrub-play"')
+    handler = src[play : play + 400]
+    assert "if (reduce) return" in handler, (
+        "the scrubber replay must stay a no-op under reduced motion; hide or "
+        "disable the control instead if the enabled look is the complaint"
+    )
+
+
+def test_scrubber_play_button_title_tracks_its_aria_label():
+    """The tooltip and the accessible name must agree in both states."""
+    src = GALAXY_JS.read_text(encoding="utf-8")
+    for state in ("replay growth", "pause growth replay"):
+        assert f'playBtn.title = "{state}"' in src or f'title: "{state}"' in src, state
+        assert f'setAttribute("aria-label", "{state}")' in src or f'"aria-label": "{state}"' in src, state
 # ── views/cortex.js: contested-slot rendering and the resolve refusal ────
 #
 # Same no-harness situation as galaxy.js above. The 2026-09-05 fix made the

@@ -1171,6 +1171,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   silently turn the cosine floor into a magnitude ranking. A
   magnitude-sensitive test pins it with and without BM25 fusion (the gate
   runs dense-only). Contributed by @blacksheep25 (#268).
+### Fixed (2026-09-05 — reduced motion no longer flickers the Console)
+- **Under `prefers-reduced-motion`, the Console's looping animations were
+  shortened to `.001ms` but still ran forever**, so every `infinite` pulse
+  re-fired about a thousand times a second and read as a flicker instead of
+  standing still. The reduced-motion rule now also sets
+  `animation-iteration-count: 1`, so a shortened animation plays once and
+  stops (pinned in `tests/test_console_static_js.py`). The Graph scrubber's
+  play button also reports its state to assistive technology
+  (`aria-pressed`, with `aria-label` and `title` kept in step); the
+  design-mandated "no scrubber auto-play under reduced motion" no-op is
+  unchanged and now pinned. Contributed by @blacksheep25 (#269).
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported
