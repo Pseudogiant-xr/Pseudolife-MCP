@@ -1182,6 +1182,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`aria-pressed`, with `aria-label` and `title` kept in step); the
   design-mandated "no scrubber auto-play under reduced motion" no-op is
   unchanged and now pinned. Contributed by @blacksheep25 (#269).
+### Performance (2026-09-05 — a source edit no longer rebuilds the daemon's dependency and model layers)
+- **Every CSS, JS or Python edit re-ran the multi-GB dependency install and
+  model bake**, because `ops/Dockerfile.daemon` copied the application
+  source before installing it. The declared runtime and ONNX dependencies
+  are now installed from `pyproject.toml` under the CPU-only lock as
+  constraints *before* the source `COPY`, the two models are baked in one
+  step ahead of it, and the application is installed last with `--no-deps`
+  followed by `pip check`, so a missing or incompatible requirement fails
+  the build instead of the first tool call. Verified against the deployed
+  image: the same 116 distributions (only the deliberately floating `pypdf`
+  differs), torch still `2.13.0+cpu`, both models load offline, and a
+  `.py` + `.css` edit rebuilds with the torch, dependency and model layers
+  all `CACHED`.
+- **pip and Hugging Face downloads persist across builds** in locked
+  BuildKit cache mounts, including across a failed build, so an interrupted
+  model fetch resumes instead of restarting. Only the two supported model
+  directories are copied into the runtime image. Note the mounts live
+  inside the deploy-time build-cache budget (`ops/prune-build-cache.ps1`,
+  168 h / 20 GB, run by default at the end of every `ops/update.*`) — see
+  `docs/runbooks/incremental-builds.md`. Contributed by @blacksheep25
+  (#270).
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
   ~100-token fact context against a ~1,200-token raw-turn context and reported
