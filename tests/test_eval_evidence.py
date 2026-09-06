@@ -9076,3 +9076,83 @@ CLAIMS.append(Claim(
     artifacts=(RECUT10_ROWS, RECUT10_DETCHECK),
     value=_detcheck_identical, stated=5, places=0))
 
+# ── the composite that ships (2026-09-07): v12 base + assistant-facts blocks
+#    vs the shipped v10 composite — PASS; authorises the base flip ──────────
+RECUT_V12PROV = RESULTS + "prompt-recut-v12prov-ku-paired-verdict.json"
+RECUT12PROV_LADDER = RESULTS + "ladder-v12prov-paired-verdict.json"
+_V12PROV_ARMS = ("rag control 0 flips on 78/78 identical\n  contexts; cortex 0.692 → 0.744 "
+                 "(5W/1L, p = 0.22); hybrid 0.910 → 0.936\n  (3W/1L, p = 0.625); cascade "
+                 "0.872 → 0.872 (2W/2L, p = 1.0)")
+_V12PROV_README_ARMS = "cortex 0.692 → 0.744, hybrid 0.910 → 0.936, cascade 0.872 → 0.872; rag 0 flips"
+_V12PROV_SEVEN = "cortex-correct 3 → 6 and cascade-correct 5 → 7"
+
+
+def _frozen_cascade(side: str) -> Callable[[dict], float]:
+    return lambda d: sum(1 for f in d["frozen_total"].values() if f[f"cascade_{side}"])
+
+
+for _doc, _needle in ((CHANGELOG, _V12PROV_ARMS), (EVALS, _V12PROV_README_ARMS)):
+    for _arm, _pre, _post in (("cortex", 0.692, 0.744),
+                              ("hybrid", 0.910, 0.936),
+                              ("cascade", 0.872, 0.872)):
+        CLAIMS.append(Claim(
+            id=f"recut-v12prov-{_arm}-pre-{_doc.split('/')[0]}", doc=_doc,
+            needle=_needle, artifacts=(RECUT_V12PROV,),
+            value=_recut(_arm, "reference_accuracy"), stated=_pre, places=3))
+        CLAIMS.append(Claim(
+            id=f"recut-v12prov-{_arm}-post-{_doc.split('/')[0]}", doc=_doc,
+            needle=_needle, artifacts=(RECUT_V12PROV,),
+            value=_recut(_arm, "accuracy"), stated=_post, places=3))
+for _arm, _wins, _losses, _p, _places in (("cortex", 5, 1, 0.22, 2),
+                                          ("hybrid", 3, 1, 0.625, 3),
+                                          ("cascade", 2, 2, 1.0, 1)):
+    CLAIMS.append(Claim(
+        id=f"recut-v12prov-{_arm}-wins", doc=CHANGELOG, needle=_V12PROV_ARMS,
+        artifacts=(RECUT_V12PROV,), value=_recut(_arm, "wins"), stated=_wins, places=0))
+    CLAIMS.append(Claim(
+        id=f"recut-v12prov-{_arm}-losses", doc=CHANGELOG, needle=_V12PROV_ARMS,
+        artifacts=(RECUT_V12PROV,), value=_recut(_arm, "losses"), stated=_losses, places=0))
+    CLAIMS.append(Claim(
+        id=f"recut-v12prov-{_arm}-p", doc=CHANGELOG, needle=_V12PROV_ARMS,
+        artifacts=(RECUT_V12PROV,), value=_recut(_arm, "p_mcnemar_exact"),
+        stated=_p, places=_places))
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("recut-v12prov-rag-flips", _V12PROV_ARMS, RECUT_V12PROV,
+     lambda d: d["noise_floor_rag_control"]["rag_disagreement"], 0, 0),
+    ("recut-v12prov-gate-pass", "**Gate PASS on all three checks.** The paired ladder on the",
+     RECUT_V12PROV, lambda d: 1.0 if d["gate"] == "PASS" else 0.0, 1.0, 0),
+    ("recut-v12prov-frozen-losses", "with no loss on the six the rule was written for", RECUT_V12PROV,
+     lambda d: len(d["frozen_total_losses_on_six"]), 0, 0),
+    ("recut-v12prov-seven-cortex-pre", _V12PROV_SEVEN, RECUT_V12PROV, _frozen_cortex("pre"), 3, 0),
+    ("recut-v12prov-seven-cortex-post", _V12PROV_SEVEN, RECUT_V12PROV, _frozen_cortex("post"), 6, 0),
+    ("recut-v12prov-seven-cascade-pre", _V12PROV_SEVEN, RECUT_V12PROV, _frozen_cascade("pre"), 5, 0),
+    ("recut-v12prov-seven-cascade-post", _V12PROV_SEVEN, RECUT_V12PROV, _frozen_cascade("post"), 7, 0),
+    ("recut-v12prov-digit-cortex-pre", "digit-gold count class\n  cortex 28 → 30 and cascade 35 → 36", RECUT_V12PROV,
+     lambda d: d["count_class"]["digit_gold_n39"]["cortex"]["pre"], 28, 0),
+    ("recut-v12prov-digit-cortex-post", "digit-gold count class\n  cortex 28 → 30 and cascade 35 → 36", RECUT_V12PROV,
+     lambda d: d["count_class"]["digit_gold_n39"]["cortex"]["post"], 30, 0),
+    ("recut-v12prov-digit-cascade-pre", "digit-gold count class\n  cortex 28 → 30 and cascade 35 → 36", RECUT_V12PROV,
+     lambda d: d["count_class"]["digit_gold_n39"]["cascade"]["pre"], 35, 0),
+    ("recut-v12prov-digit-cascade-post", "digit-gold count class\n  cortex 28 → 30 and cascade 35 → 36", RECUT_V12PROV,
+     lambda d: d["count_class"]["digit_gold_n39"]["cascade"]["post"], 36, 0),
+    ("recut-v12prov-spelled-cortex-pre", "spelled-gold cortex 11 → 11", RECUT_V12PROV,
+     lambda d: d["count_class"]["spelled_gold_n12"]["cortex"]["pre"], 11, 0),
+    ("recut-v12prov-spelled-cortex-post", "spelled-gold cortex 11 → 11", RECUT_V12PROV,
+     lambda d: d["count_class"]["spelled_gold_n12"]["cortex"]["post"], 11, 0),
+    ("recut-v12prov-loo-n", "two lifted-example golds (n = 76): same direction", RECUT_V12PROV,
+     lambda d: d["leave_out"]["n"], 76, 0),
+    ("recut-v12prov-ladder-tokens-pre", "13.4 → 14.2 tokens per query", RECUT12PROV_LADDER,
+     lambda d: d["rungs"]["qwen-27b"]["metrics"]["tokens_per_query"]["pre"], 13.4, 1),
+    ("recut-v12prov-ladder-tokens-post", "13.4 → 14.2 tokens per query", RECUT12PROV_LADDER,
+     lambda d: d["rungs"]["qwen-27b"]["metrics"]["tokens_per_query"]["post"], 14.2, 1),
+    ("recut-v12prov-ladder-claims-pre", "16\n  claims both", RECUT12PROV_LADDER,
+     lambda d: d["rungs"]["qwen-27b"]["consolidation"]["claims"]["pre"], 16, 0),
+    ("recut-v12prov-ladder-claims-post", "16\n  claims both", RECUT12PROV_LADDER,
+     lambda d: d["rungs"]["qwen-27b"]["consolidation"]["claims"]["post"], 16, 0),
+    ("recut-v12prov-ladder-gate", "qwen-27b rung clears with no regression", RECUT12PROV_LADDER,
+     lambda d: 1.0 if d["gate"] == "PASS" and d["no_regression_gate"] == "PASS" else 0.0, 1.0, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+

@@ -1215,6 +1215,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   168 h / 20 GB, run by default at the end of every `ops/update.*`) — see
   `docs/runbooks/incremental-builds.md`. Contributed by @blacksheep25
   (#270).
+### Added (2026-09-07 — the composite that ships, gated as a whole)
+- **Gate, shipped composite → new composite, same instrument and bars as
+  the v12 gate** (`prompt-recut-v12prov-ku-paired-verdict.json`; pre = the
+  shipped prompt of 2026-09-05, `assistant_facts_provenance.txt` at that
+  revision = v10 base + assistant-facts blocks; post = the regenerated file
+  = v12 base + the same blocks; reproducible Qwen3.8 q8_0, KV 32k, one
+  window, arms run back to back): rag control 0 flips on 78/78 identical
+  contexts; cortex 0.692 → 0.744 (5W/1L, p = 0.22); hybrid 0.910 → 0.936
+  (3W/1L, p = 0.625); cascade 0.872 → 0.872 (2W/2L, p = 1.0). Of the seven
+  frozen-total questions, cortex-correct 3 → 6 and cascade-correct 5 → 7,
+  with no loss on the six the rule was written for; digit-gold count class
+  cortex 28 → 30 and cascade 35 → 36; spelled-gold cortex 11 → 11.
+  Leave-out dropping the two lifted-example golds (n = 76): same direction
+  on every arm. **Gate PASS on all three checks.** The paired ladder on the
+  qwen-27b rung clears with no regression
+  (`ladder-v12prov-paired-verdict.json`: gold 1.0 / stale 0.0 both arms, 16
+  claims both, 13.4 → 14.2 tokens per query); the floor rung is identical
+  between arms and, as always, below the ladder bar (its pre and post files
+  are committed for the record, not gated). This is the gate that
+  authorises the flip below: the v12-alone gates in #279 measured the base
+  without the blocks that ship with it. Not run for the composite: the
+  op-probe battery (it takes named variants, and the composite is not one)
+  and the sidecar rung — the shipped-vs-v12 sidecar reading is #279's.
+
 ### Changed (2026-09-07 — the v12 re-cut is the base of the live extraction prompt)
 - **`_BASE_SYSTEM_PROMPT` moved v10 → v12**
   (`evals/prompts/ku_op_prompt_v12_count_source_example.txt`,

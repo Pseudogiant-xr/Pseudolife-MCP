@@ -4123,6 +4123,7 @@ KU-oracle e2e runs to answer. Artifacts, in order:
 | op block + count-exclusion rule (`ku_op_prompt_v5.txt`) | `c2op-count-verdict.json` | cascade back to exactly the control (delta 0.0, p = 1.0); count-class recovered; sets still form |
 | the two lifted examples re-cut on invented tokens (`ku_op_prompt_v11_example_recut.txt`, 2026-09-06) | `prompt-recut-v11-ku-paired-verdict.json` | every arm up, none significant (cortex 0.667 → 0.705, hybrid 0.897 → 0.936, cascade 0.859 → 0.872; rag 0 flips); the pre-registered six-frozen-total check reads FAIL on 3 rows (one real extraction loss, `45dc21b6`) → **not shipped**, maintainer's call |
 | v11 + a second count example for counts of items from a source (`ku_op_prompt_v12_count_source_example.txt`, 2026-09-06) | `prompt-recut-v12-ku-paired-verdict.json` | cortex 0.667 → 0.718, hybrid 0.897 → 0.897, cascade 0.859 → 0.910; rag 0 flips; all seven frozen-total questions cortex-correct → **gate PASS**; ships via a separate flip PR |
+| the composite that ships — v12 base + the assistant-facts blocks — vs the shipped v10 composite (`assistant_facts_provenance.txt` regenerated, 2026-09-07) | `prompt-recut-v12prov-ku-paired-verdict.json` | cortex 0.692 → 0.744, hybrid 0.910 → 0.936, cascade 0.872 → 0.872; rag 0 flips; no loss on the six frozen-total questions → **gate PASS**; paired ladder (qwen-27b) clears, no regression |
 
 Supporting pieces: `op_probe.py` (prompt-format battery; count-update
 decoys added 2026-08-01), `analyze_frozen_totals.py` + `c2op-count-census.json`

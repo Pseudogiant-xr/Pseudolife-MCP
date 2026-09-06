@@ -226,8 +226,12 @@ _BASE_SYSTEM_PROMPT = (
 # sidecar ladder stale_leak 0.0 where v10 read 1.0 in three runs. The
 # SHIPPED prompt is this base plus the assistant-facts blocks below,
 # and that composite was gated as a whole against the v10 composite it
-# replaces (prompt-recut-v12prov-ku-paired-verdict.json,
-# ladder-v12prov-paired-verdict.json). This BASE must stay
+# replaces, same instrument, one window, 2026-09-07
+# (prompt-recut-v12prov-ku-paired-verdict.json): rag control 0 flips,
+# cortex 0.692 -> 0.744 (5W/1L, p 0.22), hybrid 0.910 -> 0.936 (3W/1L),
+# cascade 0.872 -> 0.872 (2W/2L), no loss on the six frozen-total
+# questions; paired ladder qwen-27b rung clears with no regression
+# (ladder-v12prov-paired-verdict.json). This BASE must stay
 # byte-identical to the measured artifact
 # evals/prompts/ku_op_prompt_v12_count_source_example.txt (pinned by
 # test_op_prompt_artifact.py). Edit it only through a new measured
