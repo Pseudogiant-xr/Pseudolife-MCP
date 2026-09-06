@@ -1098,6 +1098,67 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a fixture row carry every key the Cortex view reads, contested or
   not, scalar or member, with the same presence rule for the contender
   fields — the class of drift that hid this bug.
+### Fixed (2026-09-05 — ladder rungs no longer silently benchmark the production shim)
+- **Four `ladder_sweep.py` rungs hardcoded a base URL that a production shim
+  already owns, so a run could measure a model and system prompt it never
+  chose.** `sonnet-5` and `diffusiongemma` both pointed at `:8082` — the
+  deployed Claude shim (`ops/install-shim-autostart.ps1` defaults `-Port
+  8082`) — and `terra`/`luna` at `:8086`, the deployed Codex shim
+  (`ops/install.ps1`). With that shim up the rung serves whatever `--model`
+  and `--system-prompt-file` it was launched with, and the failure is quiet:
+  the incumbent answers `/models`, so the reachability probe passes and the
+  artifact looks clean. Verified live on 2026-09-05 — `:8082` returned `200`
+  and advertised the model id `extractor`, which is exactly the id these
+  rungs request. The exposure is `--out-tag` runs (the normal mode for these
+  rungs; an untagged rerun is stopped earlier by the canonical-clobber
+  guard), and `evals/bench_diffusiongemma.ps1`, whose `Start-Shim` accepts a
+  `200` on `:8082/health` as proof dg_shim is up when `claude_shim.py` serves
+  `/health` too. Each rung now resolves through an env override in the same
+  pattern as the existing `PSEUDOLIFE_BENCH_A3B_URL`/`_QWEN_URL` rungs:
+  `PSEUDOLIFE_BENCH_SONNET_URL`, `PSEUDOLIFE_BENCH_DG_URL`, and one shared
+  `PSEUDOLIFE_BENCH_CODEX_URL` for `terra`+`luna` (they share a shim launch
+  by design; `sonnet-5` and `diffusiongemma` get separate vars because they
+  are different shims that merely collide on a port). Defaults are unchanged,
+  so the fix alters no existing run. `opus-5`/`fable-5` already used
+  dedicated ports `:8083`/`:8084` and are untouched.
+- **Every LLM rung result now stamps `base_url` and `model`** (`run_rung`,
+  `run_abstain`, `run_supersede`, via a new `endpoint_stamp` helper).
+  Previously only the `unreachable` branch recorded `base_url`, so a
+  completed run against the wrong shim was indistinguishable afterwards from
+  one against the right one — the "neither controlled nor recorded" half of
+  the same defect. The four canonical results for the affected rungs
+  (`sonnet-5.json`, `diffusiongemma.json`, `terra.json`, `luna.json`) predate
+  the stamp and therefore cannot be audited for the collision; `evals/README.md`
+  now says so beside them.
+- **`python evals/ladder_sweep.py` with no arguments raised `NameError: name
+  'ap' is not defined`** instead of printing help — `main()` referenced a name
+  local to `build_parser()`. It now prints usage and exits 1.
+- **`--list` showed only the `LADDER_ORDER` rungs**, hiding three of the four
+  rungs that default to a production port (they sit outside that order). It
+  now lists every registered rung and its resolved endpoint, sweep order
+  first. `evals/README.md` gains the env vars in both rung tables plus a
+  warning naming the production ports, and drops two stale claims it carried
+  (`--list` does not probe; there are seven rungs outside `LADDER_ORDER`, not
+  five).
+- **`longmemeval_bench.py` had the same collision with no override at all**:
+  `EXTRACTORS["diffusiongemma"]` and `EXTRACTORS["sonnet-5"]` were pinned to
+  `:8082` — in the harness behind the published README accuracy numbers, two
+  lines below a comment saying ":8082 stays the production sonnet shim". Both
+  now read the SAME variables as the ladder rungs (`PSEUDOLIFE_BENCH_DG_URL`,
+  `PSEUDOLIFE_BENCH_SONNET_URL`), so one export redirects a run that crosses
+  both harnesses. `tests/test_bench_production_port_guard.py` pins the
+  invariant for both: the set of endpoints on a production port must equal
+  the declared set and every one must be redirectable, so a new entry added
+  on `:8082`/`:8086` without an override fails CI instead of silently
+  benchmarking production.
+- **`evals/bench_diffusiongemma.ps1` now checks *identity*, not liveness,
+  before trusting `:8082`.** Its `Start-Shim` accepted any `200` on
+  `/health` as "dg_shim is up" — and `claude_shim.py` serves `/health` — so
+  with the production shim running it never launched dg_shim and ran both
+  harnesses against Claude. It now requires `/v1/models` to list
+  `diffusiongemma` (dg_shim's only id; claude_shim's list never contains
+  it), refuses loudly if something else already holds the port, and exports
+  `PSEUDOLIFE_BENCH_DG_URL` so both harnesses agree on the endpoint.
 
 ### Added (2026-09-04 — accuracy and context cost as one trade-off, not two findings)
 - **Every memory-vs-RAG comparison this project has published scored a
