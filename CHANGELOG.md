@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-06 — Dependabot told not to propose transformers 5.x until optimum-onnx can take it)
+- **`.github/dependabot.yml`, ignore-only: `transformers >=5` will not be
+  proposed again.** The daemon image installs with `ops/requirements.lock.txt`
+  as a pip constraint file and ships `optimum-onnx` as its default embedding
+  backend, and `optimum-onnx` 0.1.0 (still the latest release) declares
+  `transformers<4.58` — so a lockfile pin on 5.x cannot resolve, which is why
+  the lock holds 4.57.6 and the 5.x-only CVE fixes are documented as
+  unreachable there. Dependabot proposed the bump anyway (#252, 5.10.1) and
+  CI could not catch it because the workflow does not build the image. Lift
+  the rule only when bumping `optimum-onnx` to a transformers-5 release in the
+  same change.
+
 ### Measured (2026-09-05 — the reranker does not rescue the wide pool)
 - **The cross-encoder reranker recovers the candidate-pool width penalty
   and converts none of it into a win.** The 2026-09-04 entry below measured
