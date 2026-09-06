@@ -414,6 +414,752 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   by `cortex_top_k` 24 against a 40-slot bank than by served width: 71 of the
   72 decoy values reached the cortex context across the 10 never-stated
   questions.
+### Fixed (2026-09-05 — the distractor probe can regenerate its own artifact again)
+- **The 2026-08-15 distractor-scale probe could not reproduce its own
+  published numbers, and nothing said so.** It named the band-state dump
+  directory it replays by string —
+  `evals/results/banks/s-qwen-27b-ablbands-flat` — and on a tree carrying
+  both replays of that dataset, the name resolves to the RETIRED 384-d
+  MiniLM dumps, while the committed artifact was measured on the 1024-d
+  v25 replay in a sibling directory whose suffix is machine-local. The
+  probe's refuse-overwrite guard hid it for three weeks: the run that
+  would have contradicted the artifact could never write one. Two sibling
+  scripts, `evals/bench_store_latency.py` and
+  `evals/retrieval_pool_probe.py`, carried the same literal.
+- **`evals/bank_dumps.py` resolves the dumps by CONTENT instead** —
+  backbone dimension (1024-d v25, not 384-d MiniLM), `flat` preset, and
+  nothing evicted during the replay. Zero or several matches is a refusal
+  with the full candidate listing rather than a guess, and an explicitly
+  named directory always wins, so a differently-shaped tree stays one flag
+  away from running. All three probes go through it and record `dump_dir`
+  and `embedding_dim` (directory name only — an absolute path would carry
+  a home directory into a tracked artifact). Pure functions, no filesystem
+  access at import. Lifted from the resolver written for
+  `evals/forgetting_sweep_probe.py` (branch `eval/forgetting-sweep`),
+  whose local copy it can replace without behaviour change.
+- **Regenerated under a new tag, and it reproduces exactly.**
+  `evals/results/distractor-scale-probe-2026-09-05.json` matches the
+  2026-08-15 artifact on **390 of 390** (question, scale) cells across
+  pool size, evidence-in-top-6, evidence-in-top-3, any-evidence-served and
+  first-evidence rank; every per-scale aggregate and all three gate
+  verdicts are identical, so the published 0.830 / 0.597 / +0.233 numbers
+  stand. Latency is excluded from the comparison as machine-dependent (it
+  moved: median BM25 at 15x, 620 ms then, 675 ms now). The negative
+  control is committed beside it rather than described: the same probe run
+  through the retired 384-d dumps (`-retired384`) reproduces **116 of 390**
+  cells, with evidence-in-top-6 at 1x reading 0.667 against the published
+  0.830 — the two directories are not interchangeable, and nothing about
+  the disagreement is subtle. The 2026-08-15 artifact was not touched.
+- **Sibling artifact provenance, checked rather than assumed.**
+  `store-latency-by-bank-size.json` (2026-07-25) was measured on the 384-d
+  MiniLM dumps — its own `corpus` field says so, and it predates the v25
+  swap — so it is a MiniLM-era write-cost measurement and does not
+  describe a 1024-d bank; that is now stated in `evals/README.md` beside
+  the numbers rather than the file being silently regenerated.
+  `retrieval-pool-probe-20260904.json` is unaffected: it reads only the
+  dumps' turn text and re-encodes with the current backbone, and the 400
+  haystack turns are byte-identical across both replays. The probe now
+  writes a `haystack_digest` so a future run can show that instead of
+  asserting it.
+### Fixed (2026-09-05 — the shim launchers cite the gate that validated their default, and the extraction prompt's example contamination is disclosed)
+- **The shim launchers pointed operators at the gate their default no
+  longer rests on.** `ops/install-shim-autostart.ps1` and its `.sh` sibling
+  explained the v4 default by naming
+  `evals/results/ladder-shimprompt-paired-verdict-threshold.json` and its
+  range "tokens 14.0-16.1" — the rule-v1 verdict, superseded hours later by
+  the rule-v2 re-gate, whose four runs span 14.0-15.5. Both comments now
+  name `ladder-shimprompt-rule2-paired-verdict-threshold.json` with the
+  right range and say plainly that the rule-v1 verdict is retired evidence.
+  The generated header of `evals/prompts/sonnet_extractor_v4.md` carried the
+  same stale citation and is regenerated. `tests/test_eval_evidence.py` now
+  treats those launcher comments as published claims: the quoted range is
+  pinned to the four run artifacts, and every `evals/results/…json` a
+  launcher names must be committed and must be the current gate. An `ops/`
+  comment is where an operator reads *why* a default is what it is, and
+  nothing was checking it.
+- **A paired verdict could not say which commit produced either arm.**
+  `evals/ladder_pair_compare.py` stamped `git rev-parse HEAD` of each
+  worktree **at compare time**. For a re-gate — both arms out of one
+  worktree at different commits — that is the same string for both arms and
+  is neither arm's: the rule-v2 shim verdict recorded `7083bc33` for a `pre`
+  arm actually produced at `0b02e5ea`. `evals/ladder_sweep.py` now stamps
+  `git_rev` into every rung artifact (including an `unreachable` one), and
+  the verdict reads each arm's sha off that arm's own artifacts, reporting
+  `sha_source` — `artifact`, `mixed`, `unstamped`, or `no_arm_files` — for
+  what it could establish. The compare-time HEAD is kept under
+  `worktree_head_at_compare`, which is what it always was. A plausible wrong
+  sha is worse than none: nothing downstream can tell it from a real one.
+  The rule-v2 verdict is regenerated on the new shape; **only its two sha
+  blocks and `generated_at` change** — every metric, tally, rung result and
+  gate verdict is byte-identical, because the verdict is a pure function of
+  the unchanged run artifacts. Both arms now read `sha: null`,
+  `sha_source: "unstamped"`, which is the true answer for runs made before
+  the stamp existed. The superseded rule-v1 verdict is left exactly as it
+  was.
+- **The re-gate's isolation claim was stronger than the facts.**
+  `evals/README.md` said "the live shim on :8082 was again never started,
+  stopped or reconfigured"; the maintainer restarted its scheduled task at
+  13:17, two minutes before that verdict was written. The claim is now
+  scoped to what the rung's isolation actually supports — the gate run
+  neither started, stopped nor reconfigured it, because the rung addresses
+  port 8083 and never :8082 at all.
+- **`--system-prompt-file` failing to apply was silent.**
+  `evals/claude_shim.py` swaps the prompt only when the incoming system
+  message starts with `dream._SYSTEM_PROMPT`; on a miss the override
+  vanished and the shipped text went to the model with nothing said. That is
+  the same class of silent substitution that made `sonnet_extractor_v4.md`
+  necessary, seen from the other side. It now logs one WARNING per distinct
+  missed prompt (deduped, because the relations and lessons prompts miss by
+  design and a per-call line would train an operator to ignore it). No
+  behaviour change: the prompt still passes through untouched.
+- **Disclosed: the SHIPPED extraction prompt names a LongMemEval answer.**
+  The guard added with `sonnet_extractor_v4.md` grepped only the four
+  registered invented tokens of the *new* assistant-facts blocks while its
+  docstring claimed the whole prompt. Scanning the whole prompt instead finds
+  that the "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS" example — in
+  `dream._BASE_SYSTEM_PROMPT` since 2026-08-01, and therefore in
+  `_SYSTEM_PROMPT`, in `assistant_facts_provenance.txt`, and (via the v2
+  body) in `sonnet_extractor_v2.md` and `v4` — reads *"[5] saw a Northern
+  Flicker today, that makes 32 species at the park now"* and yields the value
+  `32`. LongMemEval question `affe2881` (knowledge-update) asks how many bird
+  species the user has seen in their local park; its gold answer is `32`, and
+  all 13 occurrences of "Northern Flicker" in **each** dataset file sit
+  inside that question's own sessions.
+  - **This is not a shim-only debt.** The first cut of this disclosure said
+    "any run that used the shim as its extractor", which is wrong and
+    falsely reassuring: the example is in the prompt EVERY extractor
+    receives — the CPU sidecar, the Claude and Codex shims, and every ladder
+    rung alike — for every extraction run since 2026-08-01.
+  - **The paired shim gate is immune.** Both arms carry the identical text,
+    so the example cannot move a pre-vs-post difference; every gate number in
+    the entries above stands as measured. The same holds for any paired
+    comparison whose two arms share the prompt.
+  - **What is suspect is any ABSOLUTE accuracy on that one question**, in any
+    run since 2026-08-01.
+  - **Neither carrier is re-cut here.** `sonnet_extractor_v2.md` is the pre
+    arm of a committed gate, so editing it would retroactively change what
+    that gate compared; and re-cutting `dream.py`'s example is a change to
+    the shipped extraction prompt, which needs its own ladder gate. Recording
+    the debt and gating a prompt change are separate pieces of work.
+  - **Guarded in both places now.** `tests/test_shim_prompt.py` and
+    `tests/test_assistant_provenance.py` each scan every Titlecase phrase —
+    of the shim prompt body and of `dream._SYSTEM_PROMPT` respectively —
+    against both dataset files, sharing one dated `KNOWN_CORPUS_COLLISIONS`
+    allowlist in `evals/gen_assistant_facts_prompts.py`. The check is an
+    equality, not a subset, so the debt can neither grow nor rot into
+    decoration. ALL-CAPS, lowercase and digit-bearing names are out of scope
+    and said to be, rather than implied away.
+  - **Half the filed follow-up is already answered.**
+    `evals/distill_datagen_arm1.py` builds both its teacher and stored
+    prompts as `dream._SYSTEM_PROMPT + hints` (pinned by
+    `tests/test_claude_shim_contract.py`), so any distillation run **dated
+    after 2026-08-01** carried the example and any run before it did not —
+    dating each run is the remaining work. **Still filed, not attempted
+    here:** that dating, and an audit of which published absolute numbers
+    were measured on `affe2881` since 2026-08-01.
+
+### Changed (2026-09-05 — the CLI shim's extraction prompt asks for assistant-stated facts too)
+- **The assistant-facts instruction that shipped earlier today never reached
+  the maintainer's own extractor, because that install does not use the
+  shipped prompt.** When the primary extractor is the Claude CLI shim — the
+  default since the 2026-07-11 cutover, and what `ops/.env` selects with
+  `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1` —
+  `ops/install-shim-autostart.ps1` launches it with `--system-prompt-file`,
+  and that flag **replaces** the shipped `_SYSTEM_PROMPT` prefix, keeping
+  only the appended vocab/known-facts hints. So the daemon-side change was
+  live and inert at the same time: assistant-stated facts were extracted
+  only by the fallback sidecar. **`evals/prompts/sonnet_extractor_v4.md`**
+  is the fix — the v2 body plus the same three shipped blocks
+  (`_ASSISTANT_FACTS_INSTRUCTION`, `_ASSISTANT_SPEAKER_RULE`,
+  `_ASSISTANT_PROVENANCE_EXAMPLE`), composed by
+  `evals/gen_shim_prompt.py` from `dream.py`'s own constants rather than
+  retyped, so the shim path and the daemon path cannot drift in what they
+  ask for. It is **v4, not v3**: `sonnet_extractor_v3.md` is an unrelated,
+  never-adopted 2026-08-02 lineage, and v2 is the file the deployed config
+  actually names.
+  **Your install's primary extractor picks this up when the shim autostart
+  is re-installed (`ops/install-shim-autostart.ps1`) or the shim is
+  restarted with the new file; the daemon image change alone does not reach
+  the shim path.**
+- **`ops/install-shim-autostart.ps1`, its `.sh` sibling, and the
+  manual-start hints in `ops/install.{ps1,sh}` now default to v4** instead
+  of v2. `ops/install-codex-shim-autostart.ps1` passes no prompt file on
+  purpose, so it already ran the shipped prompt and is unchanged.
+- **Gated on the extraction ladder before the default moved** — the
+  `opus-5` rung (the Max-plan CLI shim on its dedicated port 8083, serving
+  the `claude-opus-5` the autostart defaults to; the live shim on :8082 was
+  never touched), v2 vs v4, two replicates per arm.
+  `evals/results/ladder-shimprompt-paired-verdict-threshold.json` reads
+  `gate: PASS` and `no_regression_gate: PASS`. Quality is pinned across all
+  four runs — gold_recoverable 1.0, stale_leak 0.0, and an identical
+  consolidation tally (26 pulled, 16 claims, 16 inserted, 0 superseded).
+  The verdict's reported `tokens_per_query 15.2 -> 16.1` is **inside the
+  noise**: the same prompt spans 14.0-15.2 (pre) and 14.8-16.1 (post)
+  across replicates, so the gap between arm means is smaller than either
+  arm's own spread and nothing is claimed for it. Both arms sit at ~45% of
+  the 34.98 token budget. Table in `evals/README.md`.
+  **Superseded 2026-09-05** by the re-gate below: the two `post` runs
+  measured v4 under speaker rule v1, which the same day's merge review
+  rewrote. The `pre` arm and the gate's verdict on it are unaffected.
+- **Re-gated after the same day's speaker-rule fix.**
+  `evals/prompts/sonnet_extractor_v4.md` is generated from
+  `_ASSISTANT_SPEAKER_RULE`, so the rule-v2 rewrite — read a marker where
+  the note carries one, infer only where the note is unmistakably the
+  assistant, omit the field under doubt — changed the file the shim is
+  launched with, and the gate above stopped describing it. The POST arm was
+  re-run twice on the same `opus-5` rung (same dedicated port 8083; the gate
+  run itself never addressed :8082 — but see the isolation correction in the
+  `Fixed` entry above) against the unchanged v2 pre arm.
+  `evals/results/ladder-shimprompt-rule2-paired-verdict-threshold.json`
+  (`post_arm: post2`) reads `gate: PASS` and `no_regression_gate: PASS`,
+  with gold_recoverable 1.0 and stale_leak 0.0 on both replicates and
+  tokens/query 15.5 and 14.8 against the pre arm's 15.2 and 14.0 — still
+  inside the arms' own spread. **The identical-tally claim does not carry
+  over**: the rule-v2 second replicate returned 17 claims and inserted all
+  17, so under the new rule only "nothing lost" (`claims == inserted`) is
+  claimed. The rule-v1 post artifacts and their verdict stay committed.
+- **`evals/ladder_pair_compare.py` gained `--post-suffix`**, which names a
+  post arm not called `post`. A re-gate keeps the pre arm and re-runs only
+  the post one, so its files carry a new suffix; without the flag the tool
+  reads the superseded `…-post.json` sitting beside them and compares the
+  wrong run. The default is unchanged and the verdict now records
+  `post_arm`.
+- **`tests/test_shim_prompt.py`** pins the composition through the shim's
+  own body-extraction rule, pins that regeneration is a no-op, pins that
+  importing the generator writes nothing, and extends the example-token
+  dataset grep to the shim prompt — the worked example is now a live
+  carrier on the path the maintainer's install actually extracts through,
+  so the LongMemEval contamination guard has to cover it. **That first cut
+  grepped only the four registered tokens of the new blocks**; it now scans
+  every capitalised phrase in the prompt body, which is what surfaced the
+  inherited v2 contamination disclosed in the `Fixed` entry above.
+
+### Added (2026-09-05 — assistant-stated facts, labelled and unable to overwrite the user)
+- **The fact spine scores near zero on questions whose answer the assistant
+  said, because the extractor never writes those facts down.** On the
+  six-type oracle run the `cortex` arm scores 0.054 on
+  `single-session-assistant` (56 questions) and 0.233 on
+  `single-session-preference` (30), against plain RAG's 0.911 / 0.533 —
+  and 50 of those 56 sessions consolidated with **zero claims**. Replayed
+  against the reproducible server, the extractor returns a well-formed
+  `{"claims": []}` for a session where the assistant recommends a
+  restaurant or describes a book: nothing filters assistant turns in code,
+  but the shipped prompt asks for "durable, current-state facts … skip
+  narrative, opinions" over worked examples that are all user-stated, so
+  the model reads assistant-stated content as not-a-fact. This change adds
+  the machinery to extract those facts *safely*; the shipped extraction
+  prompt is unchanged, so **no default behaviour moves**.
+  **Superseded 2026-09-05** by the `Changed` entry above: the provenance
+  prompt then shipped, and default behaviour does move.
+- **A claim may now carry `"speaker": "user" | "assistant"`**, whitelisted
+  at the parse boundary exactly like `op` and `stance` (anything else
+  degrades to absent). The two candidate prompts that ask for it live in
+  `evals/prompts/assistant_facts_naive.txt` and
+  `…_provenance.txt`, both generated from the shipped `_SYSTEM_PROMPT`
+  verbatim by `evals/gen_assistant_facts_prompts.py`. The shipped prompt
+  never asks for the field, so every shipped extraction — and every
+  pre-existing artifact — is byte-identical. **Superseded 2026-09-05**:
+  the provenance variant is now the shipped prompt and every extraction
+  carries the field; a claim WITHOUT it still writes exactly as before.
+- **New provenance origin `assistant`**, the floor of the tier ladder
+  (`user` > `action` > `agent` > `assistant`). A `speaker: "assistant"`
+  claim may create a slot or fill an empty one, but against a current value
+  of any other origin it parks as a **contender** through the existing
+  contender machinery rather than superseding — deliberately *not* gated on
+  `memory.cortex.protect_provenance`, because the eval harness turns that
+  off and the guard would otherwise drop the value outright. The guard is
+  one-directional: an `assistant`-origin value is superseded by anything,
+  including a later assistant claim. `speaker: "user"` is a label about the
+  turn and never a tier promotion — support is still never taken from model
+  output.
+- **Assistant-origin facts rank after user-origin ones at equal
+  similarity** (×0.85 in `CortexStore.search`, the same constant and
+  rationale as the associative spine's `ASSISTANT_SCORE_MULT`), applied to
+  positive cosines only so a penalty can never read as a promotion.
+  `evals/rebuild_contexts.py` mirrors it, keeping the offline fact ranking
+  in lockstep; a bank with no assistant facts ranks byte-identically.
+- **`memory.dream.assistant_claims`** (default `contender`; also
+  `supersede` — treat the claim as an ordinary agent-tier dream claim, the
+  naive arm — and `drop`). An unrecognised value falls back to `contender`:
+  a config typo must not open the overwrite path. Because the shipped
+  prompt emits no speaker label, the knob is never consulted on any shipped
+  path, at any setting — pinned by a test that a speakerless claim writes
+  exactly as before under all three values. **Superseded 2026-09-05**: the
+  shipped prompt asks for the label, so the knob is live on the normal
+  path; the speakerless-claim pin stays, now covering older prompts and
+  `--system-prompt-file` overrides.
+- **`PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender|supersede|drop`** applies
+  the knob to a bench run (`ladder_sweep.build_service`) and rides into the
+  summary as `bench_env.dream.assistant_claims`; an invalid value aborts
+  the run rather than silently serving the default, as for the pool knobs.
+- **Measured (2026-09-05).** Asking the extractor for assistant-stated
+  facts works, and the guard that stops those facts overwriting the user's
+  costs nothing we can measure. On the LongMemEval oracle slice
+  `single-session-assistant` + `single-session-preference` +
+  `knowledge-update` (164 questions, extractor `qwen-27b`), the fact-only
+  arm on `single-session-assistant` goes from **0.054** to **0.536** with
+  the provenance prompt at `contender` and **0.500** with the naive prompt
+  at `supersede` — paired **+0.482** and **+0.446**, both p < 0.0001, 27
+  and 25 questions won against **zero** lost. The knowledge-update family,
+  carried as the pollution check, is flat-to-up under both (cortex 0.667 →
+  0.731 provenance, → 0.718 naive; hybrid 0.897 → 0.897, → 0.910), so the
+  pollution a naive extraction was expected to cause is **not detectable
+  in accuracy at this n** — the guard's case is the safety property, not
+  an accuracy gain. Head to head the guarded arm leads on every
+  fact-reading arm directionally and on none of them significantly (slice
+  hybrid +0.024, 7 W / 3 L, p = 0.34). `single-session-preference` is the
+  one type both variants hurt slightly on the fact-only arm (cortex 0.233
+  → 0.133 under both; n = 30). The `rag` control moved by 0.0000 with 0
+  wins and 0 losses in all twelve paired comparisons, and the
+  shipped-prompt arm reproduced the 2026-09-04 rows exactly (56/56
+  identical claim counts, 56/56 byte-identical contexts, 0 verdict flips),
+  which is what makes these paired tests rather than a comparison of two
+  benches. Artifacts:
+  `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-{prov2,naive2}`,
+  `longmemeval-ssa-oracle-qwen-27b-assist-base` and the twelve
+  `compare-assist-{prov2,naive2}-*-pairs.json`, all under
+  `evals/results/`; the tables are in `evals/README.md`. These are numbers
+  from a **clean re-run**: the first measurement of the same two variants
+  used a worked example that named a benchmark gold answer, and its
+  artifacts and tables are kept as **superseded** — next bullet, and the
+  "Superseded — first run" section of `evals/README.md` — rather than
+  deleted. **Defaults are unchanged** — the shipped prompt emits no
+  `speaker`, so every mechanism above stays inert — and **adoption of
+  either prompt is gated on the extraction ladder**
+  (`evals/ladder_sweep.py`), which has not been run on them. **Ran 2026-09-05
+  and passed on the primary `qwen-27b` rung; the provenance prompt is the
+  shipped prompt from that date — see the `Changed` entry above. The
+  naive variant did not ship.**
+- **Superseded (2026-09-05) — the same two variants, first
+  measurement, contaminated worked example.** The worked
+  example in both prompt variants named `Miss Bee Providore` in `Bandung`,
+  which is the gold answer of LongMemEval question `c4f10528` — a
+  `single-session-assistant` question inside the measured slice, and a
+  counted win for `cortex`/`hybrid`/`cascade` in both variants. Every
+  number in this bullet was measured with that string in the prompt. The
+  artifacts stay committed and the leave-one-out arithmetic is in
+  `evals/README.md` ("Contamination and the leave-one-out read"): the
+  recovery finding survives (SSA `cortex` +0.464 → **+0.455** for `prov`,
+  +0.446 → **+0.436** for `naive`), the naive arm's marginal SSA
+  `hybrid`/`cascade` gains go to **exactly 0.0000**, and the
+  guard-vs-naive comparisons are untouched (`c4f10528` is neither a win
+  nor a loss in any of them). The example was re-cut on invented
+  names and both variants were re-run under the tags `assist-prov2` /
+  `assist-naive2`; **those numbers are the published ones, in the
+  bullet above**. What follows is
+  the original text, kept so the superseded claim is legible where it was
+  made. Asking the extractor for assistant-stated
+  facts works, and the guard that stops those facts overwriting the user's
+  costs nothing we can measure. On the LongMemEval oracle slice
+  `single-session-assistant` + `single-session-preference` +
+  `knowledge-update` (164 questions, extractor `qwen-27b`), the fact-only
+  arm on `single-session-assistant` goes from **0.054** to **0.518** with
+  the provenance prompt at `contender` and **0.500** with the naive prompt
+  at `supersede` — paired **+0.464** and **+0.446**, both p < 0.0001, 26
+  and 25 questions won against **zero** lost. The knowledge-update family,
+  carried as the pollution check, is flat-to-up under both (cortex 0.667 →
+  0.744 provenance, → 0.705 naive; hybrid 0.897 → 0.923, → 0.885), so the
+  pollution a naive extraction was expected to cause is **not detectable
+  in accuracy at this n** — the guard's case is the safety property, not
+  an accuracy gain. Head to head the guarded arm leads on every
+  fact-reading arm directionally and on none of them significantly (slice
+  hybrid +0.037, 11 W / 5 L, p = 0.21). `single-session-preference` is the
+  one type both variants hurt slightly (cortex 0.233 → 0.100 provenance,
+  → 0.167 naive; n = 30). The `rag` control moved by 0.0000 with 0 wins
+  and 0 losses in all twelve paired comparisons, and the shipped-prompt
+  arm reproduced the 2026-09-04 rows exactly (56/56 identical claim
+  counts, 56/56 byte-identical contexts, 0 verdict flips), which is what
+  makes these paired tests rather than a comparison of two benches.
+  Artifacts: `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-{prov,naive}`,
+  `longmemeval-ssa-oracle-qwen-27b-assist-base` and the twelve
+  `compare-assist-*-pairs.json`, all under `evals/results/`; the tables
+  are in `evals/README.md`. **Defaults are unchanged** — the shipped
+  prompt emits no `speaker`, so every mechanism above stays inert — and
+  **adoption of either prompt is gated on the extraction ladder**
+  (`evals/ladder_sweep.py`), which has not been run on them. **Ran 2026-09-05
+  and passed on the primary `qwen-27b` rung; the provenance prompt is the
+  shipped prompt from that date — see the `Changed` entry above. The
+  naive variant did not ship.**
+
+### Changed (2026-09-05 — the shipped extraction prompt asks for what the assistant said, too)
+- **The dream now writes down facts the assistant stated, and labels them
+  as the assistant's.** `evals/prompts/assistant_facts_provenance.txt` is
+  the shipped `_SYSTEM_PROMPT` as of this change, so **default behaviour
+  moves**: an extraction emits a `speaker` field where the note makes the
+  speaker knowable (the rule shipped that morning demanded it
+  unconditionally — see the `Fixed` entry below), assistant-stated
+  facts are extracted with `origin="assistant"`, and
+  `memory.dream.assistant_claims` (default `contender`) is consulted on
+  the normal path instead of never — such a claim fills an empty slot or
+  parks as a contender against a value of any other origin, and ranks
+  ×0.85 behind user-origin facts at equal similarity. The machinery
+  landed inert in the entry above; this is the entry that turns it on.
+- **One source of truth for the prompt.** `dream.py` keeps the
+  pre-2026-09-05 v10 text as `_BASE_SYSTEM_PROMPT` (still pinned
+  byte-identical to `evals/prompts/ku_op_prompt_v10_stance_update.txt`)
+  and appends the assistant-facts instruction, the speaker rule and the
+  worked example; `_SYSTEM_PROMPT` is that concatenation.
+  `evals/gen_assistant_facts_prompts.py` now writes the shipped constant
+  out verbatim as the provenance artifact and derives only the naive
+  comparison arm from the base, so the measured file and the live prompt
+  cannot drift — pinned byte-exact in both directions, with a
+  regeneration check. The example-token guard (no capitalised word in a
+  worked example that is not a registered invented token; no registered
+  token anywhere in either LongMemEval dataset) now covers
+  `_SYSTEM_PROMPT`, which is the live carrier of those names.
+- **Gated on the extraction ladder (2026-09-05)**, the screen a
+  dream-path prompt change must pass and which `evals/regression_gate.ps1`
+  deliberately does not cover. `naive-rag.json` sets the bar on this
+  corpus — gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is
+  **34.98** — and a rung clears by beating naive on staleness and gold
+  recovery inside that budget:
+
+  | rung | arm | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted |
+  |---|---|---|---|---|---|
+  | `qwen-27b` | pre (shipped prompt) | 1.0 | 0.0 | 13.4 | 16 / 16 |
+  | `qwen-27b` | post (provenance prompt, speaker rule v1) | 1.0 | 0.0 | 14.2 | 16 / 16 |
+  | `qwen-27b` | post (provenance prompt, speaker rule v2 — the shipped text) | 1.0 | 0.0 | 13.4 | 16 / 16 |
+  | `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 |
+  | `e4b-v3` | post (rule v1) | 1.0 | 0.1 | 14.8 | 19 / 18 |
+  | `e4b-v3` | pre, replicate 2 | 1.0 | **1.0** | **39.7** | 16 / 16 |
+  | `e4b-v3` | post (rule v1), replicate 2 | 1.0 | 0.1 | 14.8 | 19 / 18 |
+
+  On the primary `qwen-27b` rung **every arm clears the ladder**, the
+  consolidation tally is identical across all three (26 pulled, 16 claims,
+  16 inserted, 0 superseded), and the only movement anywhere is the
+  rule-v1 arm's 13.4 → 14.2 tokens/query — 41% of the budget. That is the
+  gate this ship rests on. The two rule-v1 `post` rows were superseded the
+  same day by the merge review, which retired that rule as resting on a
+  false premise (the `Fixed` entry below); they are kept here labelled
+  rather than deleted. The re-gate on the shipped rule-v2 text,
+  `evals/results/qwen-27b-assistprompt-post2.json`, lands
+  **metric-identical to the `pre` baseline** — 1.0 / 0.0 / 13.4 on the
+  same 16 / 16 tally — so rule v2 costs nothing at all against the shipped
+  prompt where rule v1 cost 0.8 tokens/query. Its own paired verdict,
+  `evals/results/ladder-assistprompt-post2-paired-verdict-threshold.json`,
+  reads `gate: PASS` and `no_regression_gate: PASS` with an empty
+  `differences`.
+- **The `e4b-v3` sidecar rung is bimodal, its baseline arm fails the
+  ladder's own bar, and its two arms are not established as independent.**
+  Read this as "no evidence of regression" and nothing further. The rung's
+  `stale_leak` has two modes *independently of this prompt*: on the shipped
+  prompt alone the committed `e4b-v3-stale-rep2.json` and `-rep3.json` sit
+  at 16 claims / stale 1.0 / 39.8 tokens while `e4b-v3.json`,
+  `-stale-rep1`, `-stale-rep4-fresh` and the three `-warmrep-p*` files sit
+  at 19–26 claims / stale 0.1–0.2 / 16.6–20.5 tokens. The four rows here
+  were **not** produced by `evals/ladder_replicate.py`: they are plain
+  `ladder_sweep --out-tag` passes against the live sidecar container — the
+  deployed fallback extractor, which is why it was neither restarted nor
+  its lifecycle recorded between passes. So the within-arm agreement is
+  not confirmation (a temperature-0 extractor repeating itself is the
+  expected result, and bounds nothing), and the pre arm's stale 1.0 / 39.7
+  tokens is precisely the warm-container fingerprint `ladder_replicate.py`
+  was written for (stale_leak 1.0 on passes 2–3 vs 0.1 fresh; evlora
+  2026-08-08). Container state is therefore a live alternative explanation
+  for the whole pre/post gap and **nothing is claimed for the prompt on
+  this rung**. Something did move — 14.8 tokens/query is a value this rung
+  has never produced before, against 16.6–20.5 in the good mode and
+  39.7–39.8 in the warm one — but in an unattributable direction.
+  **That the sidecar has a mode which fails the ladder at all is a
+  separate, pre-existing finding**, worth chasing on its own, under
+  `ladder_replicate.py` against a candidate container.
+- **`evals/ladder_pair_compare.py` gained `--mode threshold` and
+  `--rungs`.** Its only predicate was IDENTITY, written for the chip-5
+  gate where the change was predicted inert, so it reported `FAIL` on this
+  run purely because tokens moved 13.4 → 14.2. Threshold mode applies the
+  ladder rule to **both** arms and adds a no-going-backwards check
+  (`post.stale_leak <= pre.stale_leak`,
+  `post.gold_recoverable >= pre.gold_recoverable`); tokens are reported and
+  bounded only by the 0.6×naive rule. It writes two verdicts because they
+  answer different questions — `gate` (does every rung clear the ladder on
+  both arms: **FAIL**, on the `e4b-v3` *baseline* arm) and
+  `no_regression_gate` (did the post arm make anything worse: **PASS**).
+  The default mode and default rungs are unchanged and pinned. Both
+  verdict artifacts are committed, the identity-mode one exactly as it ran
+  so the reason the bar was changed stays legible.
+- **Deploy note.** The prompt lives in the daemon image, so this ships
+  with the next `ops/update.ps1` and not before. The live bank's existing
+  facts are untouched — nothing is rewritten or re-extracted — but the
+  first dream after deploy may start parking assistant-stated contenders
+  against slots that already have a value, which is the intended
+  behaviour and shows up in `memory_fact_get` / the Console's contender
+  view. One deployment-specific caveat: an install whose extractor is a
+  CLI shim launched with `--system-prompt-file` (the default for
+  `ops/install-shim-autostart.ps1`, which passes
+  `evals/prompts/sonnet_extractor_v2.md`, and the extractor `ops/.env`
+  points at) **replaces the shipped prompt prefix with that file**, so the
+  change reaches such an install only through the fallback sidecar. Giving
+  the Sonnet override prompt the same instruction is a separate change
+  needing its own gate and is deliberately not in this one. **Restart the
+  shim after the deploy**: it holds the `_SYSTEM_PROMPT` of the tree it was
+  launched from and swaps exactly that prefix, so a shim left running
+  across a deploy that changes the constant either splices its own file
+  onto the new tail or stops overriding altogether — both unmeasured
+  hybrids, both fixed by a restart.
+- **Superseded by this entry:** the "no default behaviour moves" and
+  "adoption of either prompt is gated on the extraction ladder, which has
+  not been run on them" statements in the two 2026-09-05 entries below.
+  The ladder ran; the provenance prompt shipped. The naive variant did
+  **not** ship and remains an eval-only comparison arm.
+- Artifacts: `evals/results/qwen-27b-assistprompt-{pre,post,post2}.json`,
+  `evals/results/e4b-v3-assistprompt-{pre,post}.json` and their
+  `-rep2` replicates, `evals/results/naive-rag.json`,
+  `evals/results/ladder-assistprompt-paired-verdict-threshold.json`, the
+  rule-v2 re-gate's
+  `evals/results/ladder-assistprompt-post2-paired-verdict-threshold.json`
+  and the identity-mode `…-paired-verdict.json`. Tables and the retired
+  first (contaminated) run are in `evals/README.md`, "Assistant-stated
+  facts".
+
+### Fixed (2026-09-05 — the speaker rule no longer assumes a role prefix)
+- **The shipped speaker rule rested on a premise that is false on a real
+  bank.** Rule v1 read "Each note begins with its role, so read the role
+  there; never guess it, and never omit the field" — but nothing in
+  `pseudolife_memory/` writes a role prefix:
+  `OpenAICompatExtractor.extract` numbers the raw entry text, and the
+  `[date] role: content` shape exists only in the eval harnesses
+  (`evals/gate_firing_probe.py`, `evals/band_ablation.py`, the LongMemEval
+  loaders). The rule therefore ordered a production extractor to read a
+  marker that is usually absent, and forbade the one safe answer. Rule v2
+  asks for the label off an explicit `user:` / `assistant:` marker when the
+  note carries one, allows an inference only where the content is
+  unmistakably the assistant's, and makes **omission** the answer under
+  doubt — an omitted `speaker` is an ordinary claim on the pre-2026-09-05
+  write path, whereas a wrong `assistant` label demotes a user-stated fact
+  to a contender. The shared instruction paragraph loses the same false
+  clause ("each rendered as `role: content`"), `docs/guide/dreaming.md` and
+  `evals/README.md` now describe the role prefix as an eval-harness
+  convention, and both prompt files are regenerated — the provenance
+  variant stays byte-identical to `_SYSTEM_PROMPT`, the naive variant still
+  carries no speaker field, and the example-token guard still passes.
+- **The ladder gate now names the text it gated, and the shipped text is
+  re-gated.** Every `post` row of the first 2026-09-05 ladder run was
+  measured with rule v1, so the tables in this file and in
+  `evals/README.md` label those rows superseded and keep them. The primary
+  rung then re-ran on the shipped rule-v2 text (`--rung qwen-27b --out-tag
+  assistprompt-post2 --system-prompt-file
+  evals/prompts/assistant_facts_provenance.txt`), landing
+  `evals/results/qwen-27b-assistprompt-post2.json`: gold 1.0, stale 0.0,
+  13.4 tokens/query, 26 pulled / 16 claims / 16 inserted / 0 superseded —
+  identical to the `pre` baseline on every compared field, where rule v1
+  read 14.2 tokens/query. So the rewrite that fixed the false premise cost
+  no accuracy and no tokens. The `pre` arm is unaffected and was not
+  re-run: it is the same shipped-prompt baseline either way, which is what
+  makes the pairing valid. The paired verdict is
+  `evals/results/ladder-assistprompt-post2-paired-verdict-threshold.json`
+  (`gate: PASS`, `no_regression_gate: PASS`, `failed_checks: []`, empty
+  `differences`, so the arm clears the stricter identity predicate too).
+  It needed a new `ladder_pair_compare.py --post-suffix` — defaulting to
+  `post`, so every existing invocation is unchanged — because the tool
+  could otherwise only read `<rung>-<tag>-post.json`, and verdicting a
+  re-run would have meant renaming the run it supersedes. `e4b-v3` was not
+  re-run and its rows still rest on the earlier verdict.
+- **The "two replicates" argument for the `e4b-v3` rung is withdrawn.**
+  Those passes ran against the live sidecar container rather than through
+  `evals/ladder_replicate.py`, so within-arm agreement on a temperature-0
+  extractor confirms nothing, the pre arm's stale 1.0 / 39.7 tokens matches
+  the documented warm-container fingerprint, and the arms are not
+  established as independent. The verdict stays "no evidence of
+  regression"; see the `Changed` entry above.
+- **Ladder rung artifacts stamp the dream policy they ran under.**
+  `ladder_sweep.run_rung` now writes `bench_env.dream.assistant_claims`
+  with the **resolved** policy (`dream_env_knobs` only reports whether an
+  override was given). The gap this closes is visible in the 2026-09-05
+  `e4b-v3` post arm: 19 claims against 18 inserted, with no way to tell
+  from the artifact whether the missing claim parked as a contender, was
+  dropped, or merely confirmed an existing value — the rung tally sums
+  neither `contested` nor `confirmed`. `qwen-27b-assistprompt-post2.json`
+  is the first ladder artifact to carry the stamp
+  (`bench_env.dream.assistant_claims: "contender"`); every earlier
+  `assistprompt` rung file — both `qwen-27b` rule-v1 arms and all four
+  `e4b-v3` files — predates it and has no `bench_env` key at all, so their
+  policy is readable only from the run date and the tree.
+- **Corrections to the committed identity-mode verdict's description.**
+  `ladder-assistprompt-paired-verdict.json` compared the **default** rung
+  pair `floor` + `qwen-27b`, not `qwen-27b` + `e4b-v3`, and its `floor`
+  rung reads `missing` because no floor arm files were produced at all. It
+  also predates the `mode` key `ladder_pair_compare.py` writes, so it
+  carries none; a re-run would emit `"mode": "identity"`.
+- **Disclosures added to `evals/README.md`** ("What these numbers do not
+  cover"): every LongMemEval accuracy in that section came from the
+  `qwen-27b` extractor and no `e4b-v3` run exists on that slice under
+  either variant; on an install whose primary extractor is the CLI shim
+  with `PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto` (the deployed default, read
+  from `ops/.env` and `ops/docker-compose.yml`) the sidecar serves only
+  when the shim is unreachable, so the flip is close to a no-op there until
+  the shim prompt follow-up lands; the `e4b-v3` fine-tune predates the v10
+  base it is served, drift this change widens by ~1,840 characters; and the
+  system prompt now runs 3,273 → 5,114 characters (~1,300 tokens) against
+  the sidecar's `--ctx-size 8192` — clean on the 26-entry ladder, unmeasured
+  at the largest dream batch.
+
+### Fixed (2026-09-05 — merge-review fold on the assistant-turn provenance work)
+- **The assistant guard did not cover set-valued slots.** A dream claim
+  labelled `speaker: "assistant"` with `op: "add"` routed to `set_add`,
+  and `CortexStore.add_member` never consulted the tier ladder: at the
+  default policy an assistant-stated claim silently one-way-converted a
+  **user-origin scalar** into a set and landed as a current member (no
+  contender, no tier check), and `set_remove` took no origin at all, so an
+  assistant claim could **retract a user's member**. The property the
+  guard is documented to have — an assistant-origin write may never change
+  a non-assistant current value *or member set* — is now true on the
+  member model too: `op: "add"` against a slot whose scalar or members
+  carry any non-assistant origin parks as a contender
+  (`member_add_blocked_assistant`, the same `_contend` path the scalar
+  guard uses); an add on an empty slot writes at the `assistant` origin; a
+  re-stated member that is already there still confirms (corroboration is
+  not a change); an assistant-origin `op: "remove"` of a member another
+  tier added is dropped and logged (`member_remove_refused`), while it may
+  still retract its own. `supersede` keeps the legacy behaviour and `drop`
+  writes nothing, both unchanged, and a **speakerless** claim — every
+  shipped extraction — converts and retracts exactly as before under all
+  three policies. Note the one honest limit, which the review corrected on
+  its way in: the member model has no contender path of its own, so this
+  parks through the scalar one, and `resolve` refuses to **promote** a
+  contender at a slot holding current members — such a contender can be
+  read and dismissed (`accept=False`, the set-slot retirement shipped in
+  the same release) but never adopted as a member; adopt the value with
+  `memory_set_add` instead. Pinned by
+  `test_a_set_slot_contender_is_dismissable_but_not_promotable`.
+  Related: the dream
+  rollback's `member_removed` reversal now reports
+  `partial:member_not_restored` instead of claiming a revert when the
+  re-add parks.
+- **The prompt variants' worked example named a benchmark gold answer.**
+  `evals/gen_assistant_facts_prompts.py` built both examples around "Miss
+  Bee Providore … Bandung", the gold of LongMemEval `c4f10528` — a
+  question in the very slice the variants were measured on. The example is
+  re-cut on invented names (a made-up cafe on an invented street in an
+  invented town), both prompt files are regenerated, and
+  `tests/test_assistant_provenance.py` now carries the guard that makes
+  the class un-repeatable: every capitalised word in a worked example must
+  be a registered `EXAMPLE_TOKENS` entry (or ordinary sentence English),
+  and every registered token is grepped against `longmemeval_oracle.json`
+  and `longmemeval_s_cleaned.json` and must occur zero times. The three
+  affected run artifacts are marked CONTAMINATED-PENDING-RERUN in
+  `evals/README.md` and above, with the leave-one-out arithmetic; none is
+  deleted. The bench's own `leak_check` reported `n_leaked: 0` on both
+  runs and could not have caught this — it checks served contexts, not the
+  extraction prompt.
+- **Smaller review items.** An unbacked "~1.5 s" extraction figure in
+  `evals/README.md` is dropped in favour of the pinned 2.05 s median two
+  paragraphs below it; `CortexStore.origin`'s docstring and the System
+  Atlas `cortex.py` card said "user > action > agent" and now name the
+  fourth tier (the atlas card also gained the set-slot coverage, and the
+  README capabilities table two rows); the Console rendered an `assistant`
+  origin badge in the **agent** CSS class, which showed a weaker tier in a
+  stronger tier's styling — it has its own dimmer class now; and
+  `memory.dream.assistant_claims` is documented in
+  `docs/guide/configuration.md` beside the other deliberately-gated knobs,
+  stating that it is inert with the shipped prompt and Console-hidden.
+### Fixed (2026-09-05 — the Console's Cortex view now sees real contested slots)
+- **Against a real bank the Cortex view never showed a contender, and the
+  Observatory's contested count always read 0.** The view gates its
+  Accept/Discard pair on `contested` in the `/api/facts` rows, which come from
+  `cortex_dump` — and only `cortex_search` ever set `contested` /
+  `contender_value` / `contender_origin`; the dump never did. The web fixtures
+  synthesise the flag, so the devserver demo and `tests/test_web.py` both
+  looked right while every real install had a review affordance that could
+  not fire. `cortex_dump` now serves the same three fields through one shared
+  helper (`_contender_fields`), bucketing the store's active contenders in a
+  single pass rather than one per-row scan. A set slot's member rows each
+  carry the slot's flag (the contender is parked against the slot, not a
+  member), so `/api/overview` → `counts.facts_contested` counts contested
+  *slots*, not rows, and the Cortex view counts and renders one contender
+  block per slot rather than one per member. Both count slots the way the
+  store keys them (casefold, separator runs collapsed), because a converted
+  scalar keeps its own display strings while a later add keeps the
+  caller's, so a raw-string comparison split one slot in two. The view also
+  stops toasting "Contender adopted" on a `200` whose body says
+  `resolved: false`: on a slot that now holds a set the store refuses
+  Accept (`slot_holds_set`; adopt the value with a set add instead) and, on
+  this branch, Discard as well — the pair renders there with an honest
+  refusal toast until the set-slot retire fix
+  (`fix/set-slot-contender-retire`) lands and makes Discard live. A
+  `no_contender` refusal (another client settled the slot first) refreshes
+  the view instead of leaving the dead block on screen. Pinned against the
+  real service, not `FixtureService`: a parked scalar contender, a
+  contender parked against a converted set slot, and the aggregate-guard
+  contender all render `contested: true` in the dump and through
+  `/api/facts`; the flag clears after a resolve in either direction; and
+  the overview counts two contested slots for one scalar contest plus one
+  two-member set contest, and one for a set slot whose member rows spell
+  the attribute differently. No schema change; `cortex_search`'s payload is
+  byte-identical. Known cost: the `/api/facts` row is also the "before" of
+  the `memory_fact_get` lean-projection measurement in
+  `evals/agent_token_ledger.py`, whose allow-list drops `contested`, so a
+  rerun reads a slightly wider cut — disclosed in that docstring, not
+  re-measured. The web fixtures, which masked the original gap, now carry
+  what they lacked: every fixture fact row has a `kind`, and a set-valued
+  slot with two `member` rows and one agent-origin contender parked against
+  it (the shape assistant-turn provenance produces) sits beside the scalar
+  contest, so the devserver demo shows the once-per-slot block and the
+  slot-counted Observatory chip. A contract test pins that a real dump row
+  and a fixture row carry every key the Cortex view reads, contested or
+  not, scalar or member, with the same presence rule for the contender
+  fields — the class of drift that hid this bug.
+### Fixed (2026-09-05 — ladder rungs no longer silently benchmark the production shim)
+- **Four `ladder_sweep.py` rungs hardcoded a base URL that a production shim
+  already owns, so a run could measure a model and system prompt it never
+  chose.** `sonnet-5` and `diffusiongemma` both pointed at `:8082` — the
+  deployed Claude shim (`ops/install-shim-autostart.ps1` defaults `-Port
+  8082`) — and `terra`/`luna` at `:8086`, the deployed Codex shim
+  (`ops/install.ps1`). With that shim up the rung serves whatever `--model`
+  and `--system-prompt-file` it was launched with, and the failure is quiet:
+  the incumbent answers `/models`, so the reachability probe passes and the
+  artifact looks clean. Verified live on 2026-09-05 — `:8082` returned `200`
+  and advertised the model id `extractor`, which is exactly the id these
+  rungs request. The exposure is `--out-tag` runs (the normal mode for these
+  rungs; an untagged rerun is stopped earlier by the canonical-clobber
+  guard), and `evals/bench_diffusiongemma.ps1`, whose `Start-Shim` accepts a
+  `200` on `:8082/health` as proof dg_shim is up when `claude_shim.py` serves
+  `/health` too. Each rung now resolves through an env override in the same
+  pattern as the existing `PSEUDOLIFE_BENCH_A3B_URL`/`_QWEN_URL` rungs:
+  `PSEUDOLIFE_BENCH_SONNET_URL`, `PSEUDOLIFE_BENCH_DG_URL`, and one shared
+  `PSEUDOLIFE_BENCH_CODEX_URL` for `terra`+`luna` (they share a shim launch
+  by design; `sonnet-5` and `diffusiongemma` get separate vars because they
+  are different shims that merely collide on a port). Defaults are unchanged,
+  so the fix alters no existing run. `opus-5`/`fable-5` already used
+  dedicated ports `:8083`/`:8084` and are untouched.
+- **Every LLM rung result now stamps `base_url` and `model`** (`run_rung`,
+  `run_abstain`, `run_supersede`, via a new `endpoint_stamp` helper).
+  Previously only the `unreachable` branch recorded `base_url`, so a
+  completed run against the wrong shim was indistinguishable afterwards from
+  one against the right one — the "neither controlled nor recorded" half of
+  the same defect. The four canonical results for the affected rungs
+  (`sonnet-5.json`, `diffusiongemma.json`, `terra.json`, `luna.json`) predate
+  the stamp and therefore cannot be audited for the collision; `evals/README.md`
+  now says so beside them.
+- **`python evals/ladder_sweep.py` with no arguments raised `NameError: name
+  'ap' is not defined`** instead of printing help — `main()` referenced a name
+  local to `build_parser()`. It now prints usage and exits 1.
+- **`--list` showed only the `LADDER_ORDER` rungs**, hiding three of the four
+  rungs that default to a production port (they sit outside that order). It
+  now lists every registered rung and its resolved endpoint, sweep order
+  first. `evals/README.md` gains the env vars in both rung tables plus a
+  warning naming the production ports, and drops two stale claims it carried
+  (`--list` does not probe; there are seven rungs outside `LADDER_ORDER`, not
+  five).
+- **`longmemeval_bench.py` had the same collision with no override at all**:
+  `EXTRACTORS["diffusiongemma"]` and `EXTRACTORS["sonnet-5"]` were pinned to
+  `:8082` — in the harness behind the published README accuracy numbers, two
+  lines below a comment saying ":8082 stays the production sonnet shim". Both
+  now read the SAME variables as the ladder rungs (`PSEUDOLIFE_BENCH_DG_URL`,
+  `PSEUDOLIFE_BENCH_SONNET_URL`), so one export redirects a run that crosses
+  both harnesses. `tests/test_bench_production_port_guard.py` pins the
+  invariant for both: the set of endpoints on a production port must equal
+  the declared set and every one must be redirectable, so a new entry added
+  on `:8082`/`:8086` without an override fails CI instead of silently
+  benchmarking production.
+- **`evals/bench_diffusiongemma.ps1` now checks *identity*, not liveness,
+  before trusting `:8082`.** Its `Start-Shim` accepted any `200` on
+  `/health` as "dg_shim is up" — and `claude_shim.py` serves `/health` — so
+  with the production shim running it never launched dg_shim and ran both
+  harnesses against Claude. It now requires `/v1/models` to list
+  `diffusiongemma` (dg_shim's only id; claude_shim's list never contains
+  it), refuses loudly if something else already holds the port, and exports
+  `PSEUDOLIFE_BENCH_DG_URL` so both harnesses agree on the endpoint.
+
 ### Fixed (2026-09-05 — the offline rebuild pins the live cosine contract)
 - **`evals/rebuild_contexts.py` ranked facts by a raw dot product and
   trusted the embedder to have normalised.** It had: `EmbeddingPipeline`
@@ -682,6 +1428,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `facts_current` / `facts_dump_truncated`) instead of leaving it a
   hand-checked sentence, and picks its five widest slots from the whole
   cortex rather than the first 2,000 rows of the fact dump.
+
+### Fixed (2026-09-05 — a contender parked against a set slot can now be dismissed)
+- **A contender parked against a set-valued cortex slot could not be settled
+  in either direction, so it stayed parked forever with no way to clear
+  it.** `CortexStore.resolve` refused any slot holding current members
+  for both `accept=True` and `accept=False`. The refusal is right for
+  promotion — a scalar contender cannot replace a member set, and registering
+  it as current would bypass `write_fact`'s scalar/set exclusivity guard — but
+  rejection never touches `_current` or `_members`, so it could never bypass
+  anything. The guard is now gated on `accept`: promotion still returns
+  `{"resolved": false, "reason": "slot_holds_set"}` (adopt the value with
+  `memory_set_add` / `memory_set_remove` instead), while
+  `memory_fact_resolve(..., accept=false)` retires the contender, leaves every
+  member untouched, and writes the same `resolved`/`rejected` audit row a
+  scalar rejection writes — logged against the contender itself, since a set
+  slot has no current scalar to log against. The response shape is unchanged;
+  `current` reads `null` at a set slot because the slot holds members. Rare
+  while only number-led set adds parked there; routine once assistant-origin
+  adds park against user-origin sets.
+
 ### Fixed (2026-09-04 — pre-merge review of the retrieval-replay branch)
 - **A machine hostname reached a public artifact.** `graph-ablation-20260904.json`
   published a homelab hostname carrying the maintainer name as a top-degree

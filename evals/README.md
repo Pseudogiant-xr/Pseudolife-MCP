@@ -36,9 +36,10 @@ extractor change.
 ## Rungs
 
 `LADDER_ORDER` (`ladder_sweep.py`) is the sweep, in rung order — 14 rungs.
-`--list` prints the same set with live reachability; the table here is the
-authoritative copy only until the code changes, so read the code if they
-disagree.
+`--list` prints every registered rung and its resolved endpoint (the sweep
+order first, then the rungs outside it); it is a static table and does not
+probe. The tables here are the authoritative copy only until the code
+changes, so read the code if they disagree.
 
 | rung             | extractor                                    | endpoint                     |
 |------------------|----------------------------------------------|------------------------------|
@@ -50,30 +51,66 @@ disagree.
 | `granite-h-tiny` | Granite 4.0-H-Tiny 7B-A1B (candidate)         | `http://127.0.0.1:8081/v1`   |
 | `lfm2-8b-a1b`    | LFM2-8B-A1B (candidate)                       | `http://127.0.0.1:8081/v1`   |
 | `ornith-9b`      | Ornith-1.0-9B (candidate)                     | `http://127.0.0.1:8081/v1`   |
-| `diffusiongemma` | DiffusionGemma 26B-A4B (candidate)            | `http://127.0.0.1:8082/v1` (via `evals/dg_shim.py` — no llama-server support for diffusion archs) |
+| `diffusiongemma` | DiffusionGemma 26B-A4B (candidate)            | `$PSEUDOLIFE_BENCH_DG_URL` (default `http://127.0.0.1:8082/v1`, via `evals/dg_shim.py` — no llama-server support for diffusion archs) ⚠️ |
 | `gemma4-26b-qat` | Gemma 4 26B-A4B QAT-Q4_0 (candidate)          | `http://127.0.0.1:8081/v1`   |
 | `gemma-e4b-qat`  | Gemma 4 E4B QAT UD-Q4_K_XL (sidecar-swap candidate) | `http://127.0.0.1:8081/v1` |
 | `e4b-ft`         | **E4B QLoRA extractor fine-tune Q4_K_M — the shipped default** | `http://127.0.0.1:8081/v1` |
 | `qwen-a3b`       | Qwen3.6-35B-A3B (homelab 5800X3D)             | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
 | `qwen-27b`       | Qwen3.8-27B (4090; migrated 2026-08-17, previously Qwen3.6-27B) | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
-Five further rungs are **registered but deliberately outside `LADDER_ORDER`**,
-so the default sweep is sovereign-only. They are runnable — `--rung sonnet-5`
-etc. — and are ceiling probes, not candidates:
+Seven further rungs are **registered but deliberately outside
+`LADDER_ORDER`**, so the sweep order stays sovereign-only. `e4b-v2`/`e4b-v3`
+are the evlora comparators (both on `:8081`); the five below are cloud
+ceiling probes, not candidates, and are runnable by name — `--rung sonnet-5`:
 
 | rung       | extractor                                        | endpoint                   |
 |------------|--------------------------------------------------|----------------------------|
-| `sonnet-5` | Claude Sonnet 5 (Max-plan CLI shim)               | `http://127.0.0.1:8082/v1` |
+| `sonnet-5` | Claude Sonnet 5 (Max-plan CLI shim)               | `$PSEUDOLIFE_BENCH_SONNET_URL` (default `http://127.0.0.1:8082/v1`) ⚠️ |
 | `opus-5`   | Claude Opus 5 (Max-plan CLI shim)                 | `http://127.0.0.1:8083/v1` |
 | `fable-5`  | Claude Fable 5 (Max-plan CLI shim)                | `http://127.0.0.1:8084/v1` |
-| `terra`    | GPT-5.6 Terra (ChatGPT-plan Codex CLI shim)       | `http://127.0.0.1:8086/v1` |
-| `luna`     | GPT-5.6 Luna (same shim, per-request override)    | `http://127.0.0.1:8086/v1` |
+| `terra`    | GPT-5.6 Terra (ChatGPT-plan Codex CLI shim)       | `$PSEUDOLIFE_BENCH_CODEX_URL` (default `http://127.0.0.1:8086/v1`) ⚠️ |
+| `luna`     | GPT-5.6 Luna (same shim, per-request override)    | `$PSEUDOLIFE_BENCH_CODEX_URL` (default `http://127.0.0.1:8086/v1`) ⚠️ |
 
 The Claude three are served by `evals/claude_shim.py` (shells out to the
 `claude` CLI) and the GPT two by `evals/codex_shim.py` (shells out to
 `codex exec`; `luna` names its model per request, so one shim launch
 serves both) — the only rungs that leave the machine. See "Everything
 runs locally" under the LongMemEval bench below for the same caveat.
+
+> ⚠️ **Four rungs default to a port a production shim already owns.**
+> `:8082` is the deployed Claude shim (`ops/install-shim-autostart.ps1`
+> defaults `-Port 8082`; the daemon routes dream extraction through it) and
+> `:8086` the deployed Codex shim (`ops/install.ps1` picks it for the codex
+> modes). If that shim is up, the rung benchmarks **whatever model and
+> `--system-prompt-file` the shim was launched with** — a configuration the
+> run does not choose, and one it could not previously record. The failure is
+> quiet, not loud: the incumbent answers `/models`, so the reachability probe
+> passes and the result file looks clean.
+>
+> The exposure is **`--out-tag` runs**, which is the normal mode for these
+> rungs (`results/sonnet-5-v1-ladder.json`,
+> `results/sonnet-5-sonnetv3-0802.json`). An *untagged* rerun is stopped
+> earlier by the canonical-clobber guard, and there is no all-rungs sweep
+> mode — every rung is named with `--rung`, so nothing reaches these ports by
+> accident. `evals/bench_diffusiongemma.ps1` used to walk into it unaided: its
+> `Start-Shim` treated a `200` on `:8082/health` as "dg_shim is up", and
+> `claude_shim.py` serves `/health` too. It now requires `/v1/models` to list
+> `diffusiongemma` before trusting the port, and refuses if anything else
+> already holds it.
+>
+> Set the rung's env var to a dedicated port before running (the way
+> `opus-5`/`fable-5` avoid the problem by construction), and check the
+> `base_url` + `model` that every run now stamps into its
+> `results/<rung>.json`. Separate vars for `sonnet-5` and `diffusiongemma`
+> are deliberate: they are different shims that merely collide on a port, so
+> redirecting one must not move the other. `terra`/`luna` share one var
+> because they share one shim launch.
+>
+> **The four canonical results for these rungs predate endpoint stamping**
+> (`sonnet-5.json`, `diffusiongemma.json`, `terra.json`, `luna.json` record
+> no `base_url`/`model`), so they cannot be audited for this after the fact.
+> Nothing suggests they are wrong — the Claude rungs were measured against a
+> Claude shim either way — but a rerun is what would settle it.
 
 `terra` and `luna` were first measured 2026-09-01 (single runs, ChatGPT
 free tier, 3 batched extraction calls each): both score
@@ -289,6 +326,13 @@ CLI, so **selecting one of those rungs sends the corpus turns to Anthropic**.
 They are never selected by default (they sit outside `LADDER_ORDER` and are
 not the default `--extractor`); you have to ask for them by name. The
 answerer and judge remain local in every configuration.
+
+The same production-port caveat as the ladder applies here: `--extractor
+sonnet-5` and `--extractor diffusiongemma` default to `:8082`, the deployed
+Claude shim's port, and read the same `PSEUDOLIFE_BENCH_SONNET_URL` /
+`PSEUDOLIFE_BENCH_DG_URL` overrides — one export redirects both harnesses.
+`tests/test_bench_production_port_guard.py` pins that every entry on a
+production port in either harness is redirectable.
 
 ## Dataset
 
@@ -603,6 +647,993 @@ committed beside their source
 `.arms-vs-rag.json`) and its numbers are in
 [Second judge family (2026-09-05)](#second-judge-family-2026-09-05)
 above.
+
+### Assistant-stated facts — `assistant_facts_*.txt` + `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS` (measured 2026-09-05, re-run clean 2026-09-05)
+
+The fact spine scored almost nothing on questions whose answer the
+*assistant* gave, because the shipped extraction prompt reads
+assistant-stated content as not-a-fact and writes nothing down at all. Two
+prompt variants that ask for those facts were measured against the shipped
+prompt. Both recover that question type — the fact-only arm goes from
+0.054 to 0.536 with the provenance prompt and 0.500 with the naive one —
+and the knowledge-update family that would have shown the extra claims
+polluting user-stated values does not go down. The safety guard that stops
+an assistant-stated value from overwriting a user-stated one costs nothing
+measurable. **The provenance variant then SHIPPED** (2026-09-05): the
+extraction ladder was run on it — passed on the primary `qwen-27b` rung,
+with the `e4b-v3` sidecar rung bimodal as it already was — and
+`assistant_facts_provenance.txt` is now the shipped `_SYSTEM_PROMPT` byte
+for byte. See "[The ladder gate and the adoption
+decision](#the-ladder-gate-and-the-adoption-decision)" below. The naive
+variant did **not** ship; it stays as the unguarded comparison arm.
+
+> **These are the clean numbers** (tags `assist-prov2` / `assist-naive2`).
+> The first measurement of both variants ran with a worked example that
+> named **Miss Bee Providore** in **Bandung** — the gold answer of
+> LongMemEval question `c4f10528`, a `single-session-assistant` question
+> *inside the measured slice*. The example was re-cut on invented names
+> and both variants were re-run over the same 164 questions on the same
+> instrument; every table below is from that clean re-run. The first run
+> is not deleted: its artifacts stay committed and its tables stay under
+> "[Superseded — first run (contaminated worked example)](#superseded--first-run-contaminated-worked-example)"
+> at the end of this section, beside the leave-one-out arithmetic that
+> qualified them. See "[First run vs clean run](#first-run-vs-clean-run)"
+> for what actually moved: nothing by more than four questions of 164, and
+> no headline changed direction.
+
+#### The diagnosis
+
+On the six-type oracle run
+(`longmemeval-all-oracle-qwen-27b-raglite-all-fresh.summary.json`) the
+`cortex` arm scores **0.054** on `single-session-assistant` (56 q) and
+**0.233** on `single-session-preference` (30 q), against `rag`'s
+**0.911** and **0.533**. The row-level cause is not retrieval: **50 of
+the 56** SSA sessions and **12 of the 30** SSP sessions consolidated with
+`claims == 0`. Replayed
+against the reproducible server, the extractor returns a well-formed
+`{"claims": []}` for sessions whose whole answer lives in an
+assistant turn (a restaurant recommendation, a description of a children's
+book). No code filters assistant turns — the shipped claims prompt asks for
+"durable, current-state facts … skip narrative, opinions" and every worked
+example is a user-stated fact, so the model reads assistant-stated content
+as not-a-fact.
+
+That "returns nothing, fast" signature is also visible inside the committed
+`assist-base` run, which re-extracts the same 56 sessions: its 50
+zero-claim rows have a **median `extract_seconds` of 2.05**, against
+**7.75** on the six rows that did produce claims. The model is not failing
+to parse a hard session; it is reading it and declining.
+
+#### The two variants and the knob
+
+Two prompt variants test whether asking changes that, and one engine knob
+decides what the extra claims are allowed to do:
+
+| file / knob | what it changes |
+|---|---|
+| `evals/prompts/assistant_facts_naive.txt` | the PRE-2026-09-05 prompt base (`dream._BASE_SYSTEM_PROMPT`) verbatim + one paragraph saying assistant-asserted content is extractable, keyed to the thing described (never "the assistant"), + one worked example built from an assistant recommendation. Same claim JSON as the old prompt; no speaker field. Eval-only — it did not ship. |
+| `evals/prompts/assistant_facts_provenance.txt` | the same paragraph, plus a rule that a claim carries `"speaker": "user"` or `"assistant"` **where the note makes the speaker knowable** — read off an explicit role marker when the note has one, inferred only for unmistakably assistant-produced content, omitted under doubt — and a worked example showing both values. The `[date] role: content` rendering is a convention of these eval harnesses; a production bank stores notes without a role prefix, which is why omission is the documented answer rather than a guess (speaker rule v2, 2026-09-05). **This IS the shipped `_SYSTEM_PROMPT` since 2026-09-05** — the file and the live constant are one string. |
+| `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender\|supersede\|drop` | what a `speaker: "assistant"` claim becomes — see below. Applied by `ladder_sweep.build_service`, stamped into the summary as `bench_env.dream.assistant_claims`. An unrecognised value aborts the run rather than silently serving the default. |
+
+The knob is `memory.dream.assistant_claims` (product default `contender`):
+
+- **`contender`** — the claim writes at the new `assistant` provenance
+  origin, below `agent` in the tier ladder. It may create a slot or fill an
+  empty one, but against a current value of any other origin it parks as a
+  contender through the existing contender machinery, and it ranks after
+  user-origin facts at equal similarity (×0.85, the associative spine's
+  `ASSISTANT_SCORE_MULT`). Assistant-origin values are superseded by
+  anything. The park is deliberately *not* gated on
+  `memory.cortex.protect_provenance`, which the bench turns off.
+- **`supersede`** — the label is not applied at all: the claim is an
+  ordinary agent-tier dream claim, so under the bench config it overwrites
+  whatever the slot held. This is the naive arm.
+- **`drop`** — discard the claim before any write.
+
+`bench_env` is stamped at **report** time, not extract time (as for the
+pool knobs), so keep `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS` exported for the
+`--report` invocation too — otherwise the summary records `null` for a run
+that was not run at the default.
+
+Both prompt files are generated by `evals/gen_assistant_facts_prompts.py`,
+which imports from `dream.py` rather than retyping anything, so the
+measured artifacts and the live prompt cannot drift. Since the provenance
+variant shipped (2026-09-05) the two sit on opposite sides of it:
+`assistant_facts_provenance.txt` **is** `_SYSTEM_PROMPT` byte for byte,
+and `assistant_facts_naive.txt` is the pre-ship base
+(`_BASE_SYSTEM_PROMPT`, still pinned to the measured v10 artifact) plus the
+same instruction paragraph and a speakerless example. Both properties are
+pinned byte-exact by `tests/test_assistant_provenance.py`, which also
+checks a regeneration would be a no-op — edit `dream.py` (shipped tail) or
+the generator (naive example) and re-run, never the `.txt` by hand.
+Importing the generator has no side effects; writing is behind
+`__main__`.
+
+#### The runs
+
+One slice, five runs, `--extractor qwen-27b --dataset oracle --types
+single-session-assistant,single-session-preference,knowledge-update`
+(56 + 30 + 78 = **164 questions**), answered and judged by Qwen3.8-27B on
+the reproducible q8_0 server. The two `*2` tags are the published runs;
+the two un-suffixed variant tags are the superseded first run:
+
+| tag | prompt file | `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS` | artifact prefix |
+|---|---|---|---|
+| `assist-base` | (none — the shipped prompt) | unset | `longmemeval-ssa-oracle-qwen-27b-assist-base` (SSA only; the determinism check) |
+| `assist-naive2` | `assistant_facts_naive.txt` | `supersede` | `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-naive2` |
+| `assist-prov2` | `assistant_facts_provenance.txt` | `contender` | `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-prov2` |
+| `assist-naive` | the same file before the example re-cut | `supersede` | `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-naive` (superseded) |
+| `assist-prov` | the same file before the example re-cut | `contender` | `longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-prov` (superseded) |
+
+The `rag` arm is the control: it is built from raw turns and never touches
+the extractor, so any movement there across the runs is measurement noise
+and bounds what the cortex/hybrid deltas can claim. It moves by **exactly
+0.0000, 0 wins and 0 losses, in all twelve paired comparisons of the clean
+run** — and in all twelve of the superseded one. The knowledge-update
+family rides along as the pollution check — it is the family the fact
+spine is tuned on, so a naive arm that buys SSA accuracy by overwriting
+user-stated values should show up there as a loss.
+
+The baseline column is the committed 2026-09-04 six-type run
+(`longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl`) restricted to
+these three types, not a fourth run. `assist-base` is what licenses that:
+re-running the shipped prompt over the 56 SSA sessions reproduces the
+09-04 rows exactly — **56 of 56 identical claim counts, 56 of 56
+byte-identical `cortex`, `rag` and `hybrid` contexts, and 0 verdict flips
+on any arm**. Same instrument, so the cross-run pairings below are paired
+tests and not a comparison of two different benches.
+
+#### Per-type accuracy
+
+`assist-base` is the 2026-09-04 baseline; `rag` is the control arm. These
+are the clean-run columns — `assist-prov2` (provenance prompt, claims park
+as contenders) and `assist-naive2` (naive prompt, claims supersede).
+
+| question type (n) | arm | `assist-base` | `assist-prov2` | `assist-naive2` |
+|---|---|---|---|---|
+| single-session-assistant (56) | cortex | 0.054 | **0.536** | 0.500 |
+| single-session-assistant (56) | hybrid | 0.911 | **0.982** | 0.946 |
+| single-session-assistant (56) | cascade | 0.893 | **0.964** | 0.929 |
+| single-session-assistant (56) | rag (control) | 0.911 | 0.911 | 0.911 |
+| single-session-preference (30) | cortex | 0.233 | 0.133 | 0.133 |
+| single-session-preference (30) | hybrid | 0.500 | **0.533** | 0.433 |
+| single-session-preference (30) | cascade | 0.467 | 0.400 | 0.400 |
+| single-session-preference (30) | rag (control) | 0.533 | 0.533 | 0.533 |
+| knowledge-update (78) | cortex | 0.667 | **0.731** | 0.718 |
+| knowledge-update (78) | hybrid | 0.897 | 0.897 | **0.910** |
+| knowledge-update (78) | cascade | 0.846 | **0.885** | 0.859 |
+| knowledge-update (78) | rag (control) | 0.859 | 0.859 | 0.859 |
+
+Over the whole 164-question slice, with mean context tokens per question
+for the two measured runs:
+
+| arm | `assist-base` | `assist-prov2` | `assist-naive2` | prov2 tokens | naive2 tokens |
+|---|---|---|---|---|---|
+| cortex | 0.378 | **0.555** | 0.537 | 216 | 188 |
+| hybrid | 0.829 | **0.860** | 0.835 | 1296 | 1268 |
+| cascade | 0.793 | **0.823** | 0.799 | 608 | 569 |
+| rag (control) | 0.817 | 0.817 | 0.817 | 1072 | 1072 |
+
+The extraction side moved the way the diagnosis predicts. Sessions
+consolidating with `claims == 0`, per type:
+
+| question type (n) | `assist-base` | `assist-prov2` | `assist-naive2` |
+|---|---|---|---|
+| single-session-assistant (56) | 50 | 19 | 23 |
+| single-session-preference (30) | 12 | 3 | 11 |
+| knowledge-update (78) | 1 | 0 | 1 |
+
+#### Paired tests
+
+`evals/compare_arms.py --a-file/--b-file [--types]`, 10,000 sign-flip
+draws, seed 0. Δ is A minus B; W / L are questions the A run got right and
+B wrong, and the reverse. `p < 0.0001` is the artifact's `p: 0.0` — no
+draw of 10,000 reached the observed delta.
+
+**`assist-prov2` vs `assist-base`**
+(`compare-assist-prov2-vs-base*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | **+0.177** | 0.0001 | 38 / 9 |
+| all 164 | hybrid | +0.030 | 0.23 | 8 / 3 |
+| all 164 | cascade | +0.030 | 0.33 | 11 / 6 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | **+0.482** | < 0.0001 | 27 / 0 |
+| single-session-assistant (56) | hybrid | +0.071 | 0.12 | 4 / 0 |
+| single-session-assistant (56) | cascade | +0.071 | 0.12 | 4 / 0 |
+| knowledge-update (78) | cortex | +0.064 | 0.31 | 10 / 5 |
+| knowledge-update (78) | hybrid | 0.000 | 1.00 | 2 / 2 |
+| knowledge-update (78) | cascade | +0.038 | 0.45 | 5 / 2 |
+| single-session-preference (30) | cortex | −0.100 | 0.37 | 1 / 4 |
+| single-session-preference (30) | hybrid | +0.033 | 1.00 | 2 / 1 |
+| single-session-preference (30) | cascade | −0.067 | 0.69 | 2 / 4 |
+
+**`assist-naive2` vs `assist-base`**
+(`compare-assist-naive2-vs-base*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | **+0.159** | < 0.0001 | 33 / 7 |
+| all 164 | hybrid | +0.006 | 1.00 | 4 / 3 |
+| all 164 | cascade | +0.006 | 1.00 | 7 / 6 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | **+0.446** | < 0.0001 | 25 / 0 |
+| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |
+| single-session-assistant (56) | cascade | +0.036 | 0.51 | 2 / 0 |
+| knowledge-update (78) | cortex | +0.051 | 0.39 | 8 / 4 |
+| knowledge-update (78) | hybrid | +0.013 | 1.00 | 2 / 1 |
+| knowledge-update (78) | cascade | +0.013 | 1.00 | 4 / 3 |
+| single-session-preference (30) | cortex | −0.100 | 0.24 | 0 / 3 |
+| single-session-preference (30) | hybrid | −0.067 | 0.51 | 0 / 2 |
+| single-session-preference (30) | cascade | −0.067 | 0.61 | 1 / 3 |
+
+**`assist-prov2` vs `assist-naive2`** — the guard's own cost
+(`compare-assist-prov2-vs-naive2*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | +0.018 | 0.68 | 13 / 10 |
+| all 164 | hybrid | +0.024 | 0.34 | 7 / 3 |
+| all 164 | cascade | +0.024 | 0.42 | 9 / 5 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | +0.036 | 0.72 | 5 / 3 |
+| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |
+| single-session-assistant (56) | cascade | +0.036 | 0.62 | 3 / 1 |
+| knowledge-update (78) | cortex | +0.013 | 1.00 | 7 / 6 |
+| knowledge-update (78) | hybrid | −0.013 | 1.00 | 2 / 3 |
+| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |
+| single-session-preference (30) | cortex | 0.000 | 1.00 | 1 / 1 |
+| single-session-preference (30) | hybrid | +0.100 | 0.24 | 3 / 0 |
+| single-session-preference (30) | cascade | 0.000 | 1.00 | 1 / 1 |
+
+#### First run vs clean run
+
+The re-run existed to get a leaked gold string out of the extraction
+prompt, so the honest thing to report is how much taking it out actually
+moved. Not much. Across the per-type headline cells and the whole-slice
+ones, the largest single move is **four questions of 164**
+(`assist-prov2`'s slice `cascade`, 0.799 → 0.823); every other move is one
+or two questions. No headline changed direction, and the `rag` control is
+0.817 in the first run and 0.817 in the clean one.
+
+| headline | first run | clean run | move |
+|---|---|---|---|
+| SSA cortex, provenance | 0.518 | 0.536 | +1 question |
+| SSA cortex, naive | 0.500 | 0.500 | unchanged |
+| SSA hybrid, provenance | 0.964 | 0.982 | +1 question |
+| SSA hybrid, naive | 0.929 | 0.946 | +1 question |
+| KU cortex, provenance | 0.744 | 0.731 | −1 question |
+| KU cortex, naive | 0.705 | 0.718 | +1 question |
+| KU hybrid, provenance | 0.923 | 0.897 | −2 questions |
+| KU hybrid, naive | 0.885 | 0.910 | +2 questions |
+| SSP cortex, provenance | 0.100 | 0.133 | +1 question |
+| SSP cortex, naive | 0.167 | 0.133 | −1 question |
+| slice cortex, provenance | 0.549 | 0.555 | +1 question |
+| slice cascade, provenance | 0.799 | 0.823 | +4 questions |
+
+The paired headline moved the same way. SSA `cortex` for the provenance
+arm goes +0.464 → **+0.482** (26 → 27 questions won, still zero lost);
+for the naive arm it is **+0.446** in both runs, the same 25 / 0. The
+zero-claim counts barely move either: provenance 20 → **19** on SSA and
+4 → **3** on SSP, naive unchanged at 23 and 11.
+
+**The leave-one-out read published with the first run was conservative,
+not optimistic.** Dropping `c4f10528` arithmetically took the provenance
+SSA `cortex` gain to +0.455 and the naive arm's SSA `hybrid` and
+`cascade` gains to exactly 0.0000. Removing the leak for real gives
+**+0.482** and **+0.036** instead — better than the leave-one-out
+estimate on both. The reason is visible on the question itself:
+**`c4f10528` is cortex-, hybrid- and cascade-correct in both clean arms**,
+extracted under a prompt whose worked example is built on invented names
+and never mentions the gold. The contamination did not manufacture that
+win; it made the win unprovable, which is a different thing, and the
+leave-one-out row over-corrected by discarding it.
+
+One qualification survives the re-cut, and it is the same shape as before:
+the example's *attribute* name `signature dish` is ordinary English rather
+than a registered token, and it still turns up in the `assist-naive2`
+rows — only on `c4f10528` itself, where the extractor minted
+`Miss Bee Providore — signature dish: Miss Bee's Nasi Goreng` from the
+session's own text. The value is the session's; the attribute schema is
+the prompt's. The example's four invented proper nouns
+(`The Quillon Larder`, `Fendrick Row`, `Marrowgate`, `pepper-brisket bun`)
+occur **0 times** in either clean run's rows, and
+`tests/test_assistant_provenance.py` greps every registered example token
+against both LongMemEval dataset files, so the leak class itself cannot
+recur.
+
+#### The read
+
+Stated plainly, because the result is not the one the change was designed
+to argue for:
+
+- **Both variants recover `single-session-assistant`**, from 0.054 to
+  **0.536** (`assist-prov2`) and **0.500** (`assist-naive2`) on the
+  fact-only arm — paired **+0.482** and **+0.446**, both p < 0.0001, 27
+  and 25 questions won against **zero** lost. Asking for assistant-stated
+  facts is what moved the number; the guard is not what moved it.
+- **The pollution the naive arm was expected to cause is not detectable in
+  accuracy at this n.** The knowledge-update canary is flat-to-up under
+  both variants (naive2 cortex +0.051, hybrid +0.013; prov2 cortex +0.064,
+  hybrid 0.000), and none of those deltas is significant. On this
+  evidence the case for the provenance guard is **not** an accuracy case.
+- **The guard's case is the safety property**: an assistant-stated value
+  can never overwrite a value of any other origin — it parks as a
+  contender — and that costs nothing measurable. Head to head, `prov2`
+  leads `naive2` on every fact-reading arm directionally but not
+  significantly (slice hybrid +0.024, 7 W / 3 L, p = 0.34; slice cortex
+  +0.018, 13 / 10). A delta this size is inside what this bench can
+  resolve, so read it as "no measured cost", not as "the guard is better".
+- **`single-session-preference` is the one type both variants hurt** on
+  the fact-only arm: cortex 0.233 → **0.133** under both, a paired −0.100
+  either way — three questions of thirty. Preferences are facts about the
+  *user*, and the added instruction pulls extraction toward the thing
+  being described instead. The hybrid arm splits (prov2 0.533 against
+  naive2 0.433), so once turns are in the context the guarded variant is
+  the one that does not lose ground. Nothing here is significant at
+  n = 30, but it is the only consistent negative and it should not be
+  rounded away.
+- **The `rag` control moved by 0.0000 with 0 wins and 0 losses in all
+  twelve comparisons**, so none of the above is a run-to-run measurement
+  artifact.
+
+#### The ladder gate and the adoption decision
+
+A LongMemEval slice that takes the fact-only
+arm on `single-session-assistant` from 0.054 to **0.536** says the prompt
+finds more facts; the **extraction ladder** (`evals/ladder_sweep.py`) says
+whether the facts it finds are the right ones — gold recoverability and
+stale leakage on the knowledge-update corpus. It is the gate a dream-path
+prompt change must pass, deliberately not covered by
+`evals/regression_gate.ps1`.
+
+It ran on 2026-09-05, two rungs, each with a pre arm (the then-shipped
+prompt) and a post arm (`assistant_facts_provenance.txt`), same harness,
+same corpus, same extractor endpoint. `naive-rag.json` sets the bar —
+gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is **34.98**:
+
+| rung | arm | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|
+| `qwen-27b` | pre | 1.0 | 0.0 | 13.4 | 16 / 16 | `qwen-27b-assistprompt-pre.json` |
+| `qwen-27b` | post (rule v1, superseded) | 1.0 | 0.0 | 14.2 | 16 / 16 | `qwen-27b-assistprompt-post.json` |
+| `qwen-27b` | post (rule v2, the shipped text) | 1.0 | 0.0 | 13.4 | 16 / 16 | `qwen-27b-assistprompt-post2.json` |
+| `e4b-v3` | pre | 1.0 | **1.0** | **39.7** | 16 / 16 | `e4b-v3-assistprompt-pre.json` |
+| `e4b-v3` | post (rule v1, superseded) | 1.0 | 0.1 | 14.8 | 19 / 18 | `e4b-v3-assistprompt-post.json` |
+| `e4b-v3` | pre, rep 2 | 1.0 | **1.0** | **39.7** | 16 / 16 | `e4b-v3-assistprompt-pre-rep2.json` |
+| `e4b-v3` | post (rule v1, superseded), rep 2 | 1.0 | 0.1 | 14.8 | 19 / 18 | `e4b-v3-assistprompt-post-rep2.json` |
+
+**`qwen-27b` clears the ladder on all three arms.** The consolidation tally
+is identical across every one of them (26 pulled, 16 claims, 16 inserted,
+0 superseded), and the only movement anywhere is the rule-v1 arm's 13.4 →
+14.2 tokens/query, 41% of the budget. On the text that actually ships —
+rule v2, the `post2` row — even that movement is gone. That is the gate
+the ship rests on, and `assistant_facts_provenance.txt` became the shipped
+`_SYSTEM_PROMPT` on the strength of it.
+
+**The rule-v1 post rows were superseded the same day by the merge review;
+the `post2` row is the re-gate on the text that ships.** Rule v1 told the
+model "Each note begins with its role, so read the role there; never guess
+it, and never omit the field" — false on a production bank, where
+`OpenAICompatExtractor.extract` numbers the raw entry text and writes no
+role prefix (the `[date] role: content` shape belongs to these harnesses).
+Rule v2 asks for the marker where a note has one, allows an inference only
+for unmistakably assistant-produced content, and makes omission the answer
+under doubt. The shipped `_SYSTEM_PROMPT` is rule v2, so the primary rung
+was re-run on it (2026-09-05) from the branch worktree as:
+
+```
+PYTHONPATH=. python evals/ladder_sweep.py --rung qwen-27b \
+    --out-tag assistprompt-post2 \
+    --system-prompt-file evals/prompts/assistant_facts_provenance.txt
+```
+
+landing as `evals/results/qwen-27b-assistprompt-post2.json`. It reads gold
+1.0, stale 0.0, **13.4 tokens/query** on the same 16 / 16 tally — rule v2
+is **token-identical to the shipped prompt** on this rung, where rule v1
+read 14.2. The `pre` arm was not re-run and did not need to be: it is the
+same shipped-prompt baseline either way, which is what makes the pairing
+valid. The rule-v1 rows stay in the table, labelled superseded, rather
+than being deleted or overwritten.
+
+That arm has its own paired verdict,
+`ladder-assistprompt-post2-paired-verdict-threshold.json`, from
+`ladder_pair_compare.py --mode threshold --rungs qwen-27b --tag
+assistprompt --post-suffix post2` (the `--post-suffix` option exists so a
+re-gate can be verdicted without renaming the run it supersedes). It reads
+`gate: PASS`, `no_regression_gate: PASS`, `cleared: true` and
+`failed_checks: []`, with `identical: true` and an empty `differences` —
+so this arm also passes the stricter identity predicate that the rule-v1
+run failed on tokens alone. `e4b-v3` was not re-run, so the earlier
+threshold verdict remains the only evidence for that rung.
+
+**Only the `post2` file carries a `bench_env` stamp.**
+`ladder_sweep.run_rung` began recording the resolved dream policy that
+same day, so `qwen-27b-assistprompt-post2.json` is the first ladder
+artifact to say which one it ran under:
+`bench_env.dream.assistant_claims: "contender"`. Every other row in the
+table above — both `qwen-27b` rule-v1 arms and all four `e4b-v3` files —
+predates the stamp and carries **no `bench_env` key at all**; their policy
+has to be read from the run date and the tree, not off the artifact.
+
+**`e4b-v3` is bimodal, its baseline arm fails the ladder's own bar, and its
+two arms are not established as independent** — read the rung as "no
+evidence of regression" and nothing further. The mode split predates this
+prompt: on the shipped prompt alone, `e4b-v3-stale-rep2.json` and
+`-rep3.json` sit at 16 claims / stale 1.0 / 39.8 tokens, while
+`e4b-v3.json`, `-stale-rep1`, `-stale-rep4-fresh` and the three
+`-warmrep-p*` files sit at 19–26 claims / stale 0.1–0.2 / 16.6–20.5
+tokens.
+
+The four `e4b-v3` rows were **not** produced by `evals/ladder_replicate.py`.
+They are plain `ladder_sweep --rung e4b-v3 --out-tag …` passes against the
+live sidecar container — the deployed fallback extractor on this install,
+which is why it was not restarted between passes and why its lifecycle
+across them went unrecorded. Three consequences:
+
+- **Within-arm agreement is not confirmation.** The extractor serves at
+  temperature 0 with the request prompt cache pinned off, so two passes of
+  one arm agreeing is the expected result, not evidence that the arm
+  survives an environment change. It bounds nothing.
+- **The pre arm landed in the warm-container mode.**
+  `ladder_replicate.py` exists for exactly this fingerprint and its
+  docstring names it: stale_leak 1.0 on passes 2–3 against 0.1 on every
+  fresh-container pass (evlora, 2026-08-08). Stale 1.0 with 39.7 tokens
+  *is* that signature, so container state is a live alternative
+  explanation for the whole pre/post gap, and the arms cannot be read as
+  independent samples of a prompt effect.
+- **Nothing is claimed for the prompt on this rung** — not the stale_leak
+  difference, not the token drop.
+
+Something did move, though: **14.8 tokens/query is a value this rung has
+never produced before.** Every other committed `e4b-v3` ladder file sits at
+16.6–20.5 (good mode) or 39.7–39.8 (warm mode). The direction of that move
+is unattributable between prompt and container state on this evidence.
+
+One detail of the post rows is worth naming because the artifact cannot
+settle it: **19 claims against 18 inserted**, where every previous
+good-mode run of this rung (`e4b-v3.json`, `-stale-rep1`,
+`-stale-rep4-fresh`) inserted all 19. So one claim reached the write path
+and became no row. The likely route is the one this prompt newly opens — a
+`speaker: "assistant"` label on a corpus with no role markers at all,
+parking the claim as a contender (or, for a retraction, being dropped) —
+but the rung artifact does not record it: `ladder_sweep`'s tally sums
+`pulled/claims/inserted/superseded/literal_*` and drops `dream_run`'s
+`contested` and `confirmed`, and the run kept no per-claim detail. A
+duplicate of an already-current value (`confirmed`) is the other candidate
+and cannot be excluded. Rung artifacts now stamp the resolved
+`memory.dream.assistant_claims` policy in `bench_env`, so a future run at
+least says which policy could have produced such a gap.
+
+The verdict is therefore "no evidence of regression", and that the sidecar
+has a mode failing the ladder at all remains a **separate, pre-existing
+finding**. Settling either question means re-running the rung under
+`ladder_replicate.py` (fresh container per pass) against a candidate
+container rather than the deployed one.
+
+Three verdict artifacts are committed. The first two cover the rule-v1
+run and disagree on purpose; the third is the rule-v2 re-gate described
+above:
+
+- `ladder-assistprompt-post2-paired-verdict-threshold.json` — the
+  `qwen-27b` re-gate on the shipped text, `gate: PASS` /
+  `no_regression_gate: PASS`, `differences: {}`. It covers that one rung
+  only.
+- `ladder-assistprompt-paired-verdict-threshold.json` —
+  `ladder_pair_compare.py --mode threshold`, the predicate for a change
+  expected to move the numbers. `gate: FAIL` (the `e4b-v3` **pre** arm,
+  `failed_checks: ["pre.stale_leak", "pre.tokens_per_query"]`),
+  `no_regression_gate: PASS`, `rungs["qwen-27b"].cleared: true`.
+- `ladder-assistprompt-paired-verdict.json` — the same run under the
+  **identity** predicate, kept exactly as it ran. It says `gate: FAIL`,
+  and that verdict is **not** a finding about this prompt: identity mode
+  was written for the chip-5 gate (PR #245), where the change was
+  predicted inert on an unlabelled corpus, so *any* difference is a bug.
+  Its sole `differences` entry on `qwen-27b` is
+  `tokens_per_query 13.4 → 14.2` — a move the ladder's own rule permits
+  five times over. Two things about the file itself, so it is not misread:
+  it compared the **default** rung pair, `floor` and `qwen-27b` (`--rungs`
+  did not exist when it ran), and its `floor` rung reads `missing` because
+  no `floor-assistprompt-{pre,post}.json` were ever produced — the floor
+  rung was never run, not excluded. It also predates the `mode` key that
+  `ladder_pair_compare.py` now writes, so it carries no `mode` field; a
+  re-run of the same command would emit `"mode": "identity"`. Applying it
+  to a prompt change was the wrong bar, and threshold mode exists because
+  of it.
+
+What the ship changes and does not: the `assistant` origin, the
+unconditional contender park, the ×0.85 demotion and
+`memory.dream.assistant_claims` are all live on the default path now. The
+live bank's existing facts are untouched. One deployment caveat: an
+install whose extractor is a CLI shim launched with `--system-prompt-file`
+(the default for `ops/install-shim-autostart.ps1`, which passes
+`evals/prompts/sonnet_extractor_v2.md`) **replaces the shipped prompt
+prefix with that file**, so the change reaches such an install only via
+the fallback sidecar. Giving the Sonnet override prompt the same
+instruction is a separate change needing its own gate.
+
+#### What these numbers do not cover
+
+- **Every LongMemEval accuracy in this section came from the `qwen-27b`
+  extractor.** Neither prompt variant has been run on that slice with the
+  `e4b-v3` sidecar; the sidecar's only evidence here is the ladder rung
+  above, a 26-note corpus rather than 164 questions. Nothing in the SSA
+  recovery finding transfers to a sidecar-served install by measurement.
+- **On the maintainer's install the flip is close to a no-op until the
+  shim follow-up lands.** Resolved from the deployed config —
+  `ops/.env` sets `PSEUDOLIFE_DREAM_BASE_URL` to the host CLI shim on
+  `:8082`, `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` to the in-stack sidecar,
+  and `PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto` (the same default
+  `ops/docker-compose.yml` supplies) — `auto` probes the primary per dream
+  and reaches the sidecar **only when the shim is unreachable**. The shim
+  replaces the shipped prompt prefix with `sonnet_extractor_v2.md`, so
+  until that override file carries the same instruction the new prompt
+  serves approximately nothing on this install.
+- **Restart the shim after `ops/update.ps1`.** A shim process holds the
+  `_SYSTEM_PROMPT` of the tree it was launched from and swaps exactly that
+  prefix (`evals/claude_shim.py`, `system.startswith(_SYSTEM_PROMPT)`).
+  After a deploy that changes the constant, a still-running shim either
+  splices its own file onto the *new* tail (when the new prompt still
+  starts with the old constant, as on 2026-09-05) or stops overriding at
+  all (when it does not, as after the rule-v2 rewrite). Both are unmeasured
+  hybrids; a restart resolves either.
+- **The `e4b-v3` fine-tune predates the prompt it is served.** Its training
+  data was generated before the v10 update-anchored base, so serving-time
+  prompt drift is pre-existing; this change widens it by the
+  assistant-facts tail — about 1,840 characters (~460 tokens) on top of a
+  3,273-character base.
+- **Sidecar context headroom is fine on this corpus and unmeasured at the
+  largest batch.** The shipped system prompt grew from 3,273 to 5,114
+  characters (~1,300 tokens) against the sidecar's `--ctx-size 8192`
+  (`ops/Dockerfile.extractor`, `ops/docker-compose.yml`); the 26-entry
+  ladder ran clean at that size. A full 100-entry dream batch of long notes
+  has not been measured against the smaller window.
+
+#### The CLI shim's own prompt — a second gate, on the deployed path
+
+The gate above measured the prompt the *daemon* sends. On the maintainer's
+install the daemon does not get the last word: `ops/.env` points
+`PSEUDOLIFE_DREAM_BASE_URL` at `host.docker.internal:8082/v1`, which is the
+Claude CLI shim, and `ops/install-shim-autostart.ps1` launches that shim
+with `--system-prompt-file`. That flag **replaces** the shipped
+`_SYSTEM_PROMPT` prefix (keeping only the appended vocab/known-facts
+hints), so an instruction added to `dream.py` reaches such an install only
+through the fallback sidecar. The assistant-facts blocks shipped on
+2026-09-05 landed in exactly that blind spot, which the section above flags
+as needing its own gate. This is that gate.
+
+`evals/prompts/sonnet_extractor_v4.md` is the v2 body plus the same three
+shipped blocks, composed by `evals/gen_shim_prompt.py` from `dream.py`'s
+own constants — the shim path and the daemon path cannot drift in what they
+ask for. It is **v4, not v3**: `sonnet_extractor_v3.md` is an unrelated,
+never-adopted 2026-08-02 lineage (coverage mandates), and v2 is the file the
+deployed config actually names.
+
+The run, 2026-09-05, on the `opus-5` rung — the Max-plan CLI shim on its
+**dedicated port 8083**, serving `claude-opus-5`, which is the model
+`ops/install-shim-autostart.ps1` defaults to. The rung exists precisely so
+"the production sonnet shim on :8082 is never repurposed mid-run"; the live
+shim was never started, stopped or reconfigured. The prompt variant is set
+on the **shim** (`--system-prompt-file` at launch), not via the ladder's own
+flag, because the shim is what replaces the prompt. `naive-rag.json` sets
+the bar — gold 0.7, stale 0.3, 58.3 tokens/query, so the token budget is
+**34.98**:
+
+| arm | prompt | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|
+| pre | v2 | 1.0 | 0.0 | 15.2 | 16 / 16 | `opus-5-shimprompt-pre.json` |
+| post | v4 | 1.0 | 0.0 | 16.1 | 16 / 16 | `opus-5-shimprompt-post.json` |
+| pre, rep 2 | v2 | 1.0 | 0.0 | 14.0 | 16 / 16 | `opus-5-shimprompt-pre-rep2.json` |
+| post, rep 2 | v4 | 1.0 | 0.0 | 14.8 | 16 / 16 | `opus-5-shimprompt-post-rep2.json` |
+
+**The two `post` rows are superseded.** They measured v4 while it carried
+speaker rule v1, which the same day's merge review rewrote; the re-gate under
+"[Re-gated under speaker rule v2](#re-gated-under-speaker-rule-v2-2026-09-05)"
+below replaces them. The `pre` rows still stand — the v2 comparator carries
+none of the assistant blocks, so the rule rewrite cannot reach it.
+
+**The gate passes on both predicates.**
+`ladder-shimprompt-paired-verdict-threshold.json` reads `gate: PASS`,
+`no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`,
+`failed_checks: []`. Quality is pinned across all four runs: gold 1.0,
+stale 0.0, and an identical consolidation tally every time (26 pulled, 16
+claims, 16 inserted, 0 superseded).
+
+**The token move is inside the noise, and the replicates are what say so.**
+The verdict's `differences` block reports `tokens_per_query 15.2 → 16.1`,
+which the ladder's own rule permits twice over. But the replicates show the
+*same prompt* spanning 14.0–15.2 (pre) and 14.8–16.1 (post): the arms'
+ranges overlap, and the 0.85 gap between arm means is smaller than either
+arm's own 1.2–1.3 spread. The shim rung is a CLI-served model and is not
+bit-reproducible, so a single run per arm could not have distinguished the
+two — nothing is claimed for the difference in either direction. Both arms
+sit at ~45% of the token budget.
+
+What this changes: `ops/install-shim-autostart.ps1`, its `.sh` sibling and
+the manual-start hints in `ops/install.{ps1,sh}` now default to v4. The
+Codex shim (`ops/install-codex-shim-autostart.ps1`) passes **no** prompt
+file on purpose, so it already runs the shipped `_SYSTEM_PROMPT` and needed
+no change. An existing install picks the new prompt up when the autostart is
+re-installed or the shim is restarted with the new file — rebuilding the
+daemon image alone does not reach the shim path.
+
+##### Re-gated under speaker rule v2 (2026-09-05)
+
+The four rows above measured v4 while it still carried **speaker rule v1**,
+which told the model that "each note begins with its role". The same day's
+merge review found that premise false on a real bank — only the eval
+harnesses write a `role:` prefix — and rewrote `_ASSISTANT_SPEAKER_RULE` to
+read a marker where the note carries one, infer only where the note is
+unmistakably the assistant speaking, and OMIT the field under doubt.
+`sonnet_extractor_v4.md` is generated from that constant, so the file the
+shim is launched with changed and the gate above stopped describing it.
+Only the POST arm was re-run: the `pre` comparator is v2, which carries none
+of the assistant blocks, so the rule rewrite cannot reach it. Same rung,
+same corpus, same dedicated port 8083; **the gate run neither started,
+stopped nor reconfigured the live shim on :8082**. That is the claim the
+rung's isolation supports, and it is narrower than the one first written
+here ("was again never started, stopped or reconfigured"), which was not
+true of the window: the maintainer restarted the shim's scheduled task at
+13:17, two minutes before this verdict was first written (`generated_at:
+2026-09-05T13:18:50`; the file now carries a later stamp — see the sha note
+above, which explains why it was regenerated). The rung is isolated
+because it never addresses :8082 at all — not because nothing else on the
+machine touched it.
+
+| arm | prompt | speaker rule | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|---|
+| pre | v2 | none | 1.0 | 0.0 | 15.2 | 16 / 16 | `opus-5-shimprompt-pre.json` |
+| pre, rep 2 | v2 | none | 1.0 | 0.0 | 14.0 | 16 / 16 | `opus-5-shimprompt-pre-rep2.json` |
+| post2 | v4 | v2 | 1.0 | 0.0 | 15.5 | 16 / 16 | `opus-5-shimprompt-post2.json` |
+| post2, rep 2 | v4 | v2 | 1.0 | 0.0 | 14.8 | 17 / 17 | `opus-5-shimprompt-post2-rep2.json` |
+
+**The gate still passes on both predicates**, on the rule-v2 verdict
+`ladder-shimprompt-rule2-paired-verdict-threshold.json` (`post_arm: post2`):
+`gate: PASS`, `no_regression_gate: PASS`, `rungs["opus-5"].cleared: true`
+and `failed_checks: []`. Gold stays 1.0 and stale 0.0 on both replicates, so
+the quality claim the default flip rests on survives the rule rewrite.
+
+**What does not carry over is the identical tally.** Under rule v1 all four
+runs consolidated 26 pulled / 16 claims / 16 inserted / 0 superseded. Under
+rule v2 the second replicate returned **17 claims and inserted all 17** —
+same corpus, one extra claim, nothing lost, since `claims == inserted` in
+every run under both rules. "An identical consolidation tally every time" is
+therefore a statement about the rule-v1 runs only, and is not restated here.
+A one-claim move across two replicates of a rung that is not
+bit-reproducible is not evidence in either direction; it is reported because
+the artifact shows it. `bench_env.dream.assistant_claims` reads `contender`
+on both new runs, so the write policy is not a hidden term in the move.
+
+**The token move stays inside the noise.** The rule-v2 verdict's
+`differences` block reports `tokens_per_query 15.2 → 15.5`. Across
+replicates the post2 arm spans 14.8–15.5 against the pre arm's 14.0–15.2:
+the ranges overlap, and the 0.55 gap between the arm means (14.6 pre, 15.15
+post2) is smaller than the pre arm's own 1.2 spread. All four runs sit under
+45% of the same 34.98 token budget. Nothing is claimed for the difference.
+
+The rule-v1 verdict and its two `post` artifacts stay committed — a
+superseded number keeps its evidence. `evals/ladder_pair_compare.py` gained
+`--post-suffix` for exactly this shape of re-run: a re-gate that keeps the
+pre arm writes `…-post2.json`, and without the flag the tool would read the
+superseded `…-post.json` sitting beside it.
+
+**The two verdicts have different `pre`/`post` sha blocks, on purpose.** The
+rule-v1 verdict records `sha: 0b02e5ea` for both arms and the rule-v2 one
+`sha: null, sha_source: "unstamped"`. Neither is a correction of a number:
+the field used to hold each worktree's HEAD **at compare time**, which for a
+re-gate out of one worktree is the same string for both arms and is neither
+arm's — the rule-v2 verdict claimed `7083bc33` for a `pre` arm produced at
+`0b02e5ea`. It now reads `git_rev` off each arm's own artifacts, which these
+runs predate, so the honest answer is `null` with the reason named. Rung
+files written by `ladder_sweep.py` from that change onward carry the stamp;
+every artifact already in the tree, these four included, does not. Only the
+sha blocks
+and `generated_at` differ from the verdict as first written; every metric,
+tally and gate result is unchanged, the verdict being a pure function of the
+run artifacts.
+
+
+##### The extraction prompt names a benchmark answer (disclosed 2026-09-05)
+
+`sonnet_extractor_v4.md` is the v2 body plus the shipped assistant-facts
+blocks. The guard that shipped with it grepped only the four registered
+invented tokens — the names the 2026-09-05 provenance example made up —
+while claiming to cover the whole prompt. It does now, and the wider scan
+found something the narrow one could not. The finding turned out to be
+bigger than the shim: it starts in `dream.py`, so it reaches every
+extractor, and this section was rewritten once already for saying otherwise.
+
+**The SHIPPED prompt names a LongMemEval answer.** The
+"COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS" example reads *"[5] saw a
+Northern Flicker today, that makes 32 species at the park now"* and yields the
+value `32`. LongMemEval question `affe2881` (knowledge-update) asks how many
+bird species the user has seen in their local park; its gold answer is `32`,
+and all 13 occurrences of "Northern Flicker" in **each** dataset file sit
+inside that question's own sessions.
+
+It is **not** a shim-only debt, though the first cut of this note said so. The
+example lives in `dream._BASE_SYSTEM_PROMPT` (shipped 2026-08-01), hence in
+`_SYSTEM_PROMPT`, in `assistant_facts_provenance.txt`, and — via the v2 body —
+in `sonnet_extractor_v2.md` and `v4`. Every extraction run since has had it, on
+every extractor: the CPU sidecar, both CLI shims, and every ladder rung.
+
+What this does and does not affect:
+
+- **The paired gates above are immune.** Both arms carry the identical text, so
+  the example cannot move a pre-vs-post difference. Every number in the two
+  tables above stands as measured, and the same holds for any paired
+  comparison whose arms share the prompt.
+- **Absolute accuracies are what is suspect**, on that one question, in any run
+  since 2026-08-01.
+- **Neither carrier is re-cut here.** `sonnet_extractor_v2.md` is the `pre` arm
+  of a committed gate; editing it would retroactively change what that gate
+  compared. And re-cutting `dream.py`'s example changes the shipped extraction
+  prompt, which needs its own ladder gate. Recording the debt and gating a
+  prompt change are separate pieces of work.
+
+**Half the follow-up is already answered.** `evals/distill_datagen_arm1.py`
+builds its teacher and stored prompts as `dream._SYSTEM_PROMPT + hints` (pinned
+by `tests/test_claude_shim_contract.py`), so a distillation run dated after
+2026-08-01 carried the example and one before it did not. **Still filed, not
+attempted here:** dating those runs, and auditing which published absolute
+numbers were measured on `affe2881` since 2026-08-01.
+
+The guards are `tests/test_shim_prompt.py` (the shim prompt body) and
+`tests/test_assistant_provenance.py` (`dream._SYSTEM_PROMPT`). Each scans every
+Titlecase phrase against both dataset files and shares one dated
+`KNOWN_CORPUS_COLLISIONS` allowlist in `evals/gen_assistant_facts_prompts.py`.
+The check is an equality: a newly contaminated name fails, and so does a listed
+one that has stopped hitting. ALL-CAPS, lowercase and digit-bearing names are
+out of scope — the prompts use ALL-CAPS for emphasis throughout, so a
+caps-inclusive scan would need an exemption list that rots faster than it
+guards — and that limit is stated rather than implied away. (The dataset half
+skips when `evals/data` is absent, which is gitignored; the structural half
+runs regardless.)
+
+#### Superseded — first run (contaminated worked example)
+
+Everything below is the **first** measurement of the two variants, kept
+where a reader will meet it rather than deleted. Its worked example was
+built around **Miss Bee Providore** in **Bandung** — the gold answer of
+LongMemEval question `c4f10528`, a `single-session-assistant` question
+*inside the very slice these runs measure*, and a counted win for
+`cortex`, `hybrid` and `cascade` in both variants. Every number in this
+subsection was measured with that string sitting in the extraction
+prompt, so **none of it is a published number any more**: the clean
+re-run above replaces it cell for cell. The run artifacts
+(`…assist-prov`, `…assist-naive`) and the twelve
+`compare-assist-{prov,naive}-*-pairs.json` stay committed, because a
+superseded number keeps its evidence. The leave-one-out arithmetic that
+qualified these tables is kept below as well — and see
+"[First run vs clean run](#first-run-vs-clean-run)" above for the finding
+that it was a conservative estimate rather than an optimistic one.
+
+##### Per-type accuracy (first run)
+
+`assist-base` here is the 2026-09-04 baseline; `rag` is the control arm.
+Both measured columns are CONTAMINATED-SUPERSEDED (see the lead
+above): `c4f10528`, one of the 56 SSA questions, is the gold the prompt
+example named.
+
+| question type (n) | arm | `assist-base` | `assist-prov` | `assist-naive` |
+|---|---|---|---|---|
+| single-session-assistant (56) | cortex | 0.054 | **0.518** | 0.500 |
+| single-session-assistant (56) | hybrid | 0.911 | **0.964** | 0.929 |
+| single-session-assistant (56) | cascade | 0.893 | **0.929** | 0.911 |
+| single-session-assistant (56) | rag (control) | 0.911 | 0.911 | 0.911 |
+| single-session-preference (30) | cortex | 0.233 | 0.100 | 0.167 |
+| single-session-preference (30) | hybrid | 0.500 | 0.533 | 0.500 |
+| single-session-preference (30) | cascade | 0.467 | 0.367 | 0.467 |
+| single-session-preference (30) | rag (control) | 0.533 | 0.533 | 0.533 |
+| knowledge-update (78) | cortex | 0.667 | **0.744** | 0.705 |
+| knowledge-update (78) | hybrid | 0.897 | **0.923** | 0.885 |
+| knowledge-update (78) | cascade | 0.846 | 0.872 | 0.872 |
+| knowledge-update (78) | rag (control) | 0.859 | 0.859 | 0.859 |
+
+Over the whole 164-question slice, with mean context tokens per question
+for the two measured runs:
+
+| arm | `assist-base` | `assist-prov` | `assist-naive` | prov tokens | naive tokens |
+|---|---|---|---|---|---|
+| cortex | 0.378 | **0.549** | 0.537 | 216 | 183 |
+| hybrid | 0.829 | **0.866** | 0.829 | 1297 | 1263 |
+| cascade | 0.793 | 0.799 | 0.811 | 581 | 599 |
+| rag (control) | 0.817 | 0.817 | 0.817 | 1072 | 1072 |
+
+The extraction side moved the way the diagnosis predicts. Sessions
+consolidating with `claims == 0`, per type:
+
+| question type (n) | `assist-base` | `assist-prov` | `assist-naive` |
+|---|---|---|---|
+| single-session-assistant (56) | 50 | 20 | 23 |
+| single-session-preference (30) | 12 | 4 | 11 |
+| knowledge-update (78) | 1 | 0 | 1 |
+
+##### Paired tests (first run)
+
+`evals/compare_arms.py --a-file/--b-file [--types]`, 10,000 sign-flip
+draws, seed 0. Δ is A minus B; W / L are questions the A run got right and
+B wrong, and the reverse. `p < 0.0001` is the artifact's `p: 0.0` — no
+draw of 10,000 reached the observed delta.
+
+**`assist-prov` vs `assist-base`** (`compare-assist-prov-vs-base*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | **+0.171** | < 0.0001 | 36 / 8 |
+| all 164 | hybrid | +0.037 | 0.14 | 9 / 3 |
+| all 164 | cascade | +0.006 | 1.00 | 8 / 7 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | **+0.464** | < 0.0001 | 26 / 0 |
+| single-session-assistant (56) | hybrid | +0.054 | 0.24 | 3 / 0 |
+| single-session-assistant (56) | cascade | +0.036 | 0.51 | 2 / 0 |
+| knowledge-update (78) | cortex | +0.077 | 0.18 | 10 / 4 |
+| knowledge-update (78) | hybrid | +0.026 | 0.69 | 4 / 2 |
+| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |
+| single-session-preference (30) | cortex | −0.133 | 0.12 | 0 / 4 |
+| single-session-preference (30) | hybrid | +0.033 | 1.00 | 2 / 1 |
+| single-session-preference (30) | cascade | −0.100 | 0.37 | 1 / 4 |
+
+**`assist-naive` vs `assist-base`** (`compare-assist-naive-vs-base*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | **+0.159** | 0.0002 | 35 / 9 |
+| all 164 | hybrid | 0.000 | 1.00 | 5 / 5 |
+| all 164 | cascade | +0.018 | 0.60 | 9 / 6 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | **+0.446** | < 0.0001 | 25 / 0 |
+| single-session-assistant (56) | hybrid | +0.018 | 1.00 | 1 / 0 |
+| single-session-assistant (56) | cascade | +0.018 | 1.00 | 1 / 0 |
+| knowledge-update (78) | cortex | +0.038 | 0.62 | 9 / 6 |
+| knowledge-update (78) | hybrid | −0.013 | 1.00 | 2 / 3 |
+| knowledge-update (78) | cascade | +0.026 | 0.72 | 5 / 3 |
+| single-session-preference (30) | cortex | −0.067 | 0.61 | 1 / 3 |
+| single-session-preference (30) | hybrid | 0.000 | 1.00 | 2 / 2 |
+| single-session-preference (30) | cascade | 0.000 | 1.00 | 3 / 3 |
+
+**`assist-prov` vs `assist-naive`** — the guard's own cost
+(`compare-assist-prov-vs-naive*-pairs.json`):
+
+| slice | arm | Δ | p | W / L |
+|---|---|---|---|---|
+| all 164 | cortex | +0.012 | 0.82 | 11 / 9 |
+| all 164 | hybrid | +0.037 | 0.21 | 11 / 5 |
+| all 164 | cascade | −0.012 | 0.77 | 5 / 7 |
+| all 164 | rag (control) | 0.000 | 1.00 | 0 / 0 |
+| single-session-assistant (56) | cortex | +0.018 | 1.00 | 4 / 3 |
+| single-session-assistant (56) | hybrid | +0.036 | 0.51 | 2 / 0 |
+| single-session-assistant (56) | cascade | +0.018 | 1.00 | 1 / 0 |
+| knowledge-update (78) | cortex | +0.038 | 0.55 | 7 / 4 |
+| knowledge-update (78) | hybrid | +0.038 | 0.45 | 5 / 2 |
+| knowledge-update (78) | cascade | 0.000 | 1.00 | 4 / 4 |
+| single-session-preference (30) | cortex | −0.067 | 0.51 | 0 / 2 |
+| single-session-preference (30) | hybrid | +0.033 | 1.00 | 4 / 3 |
+| single-session-preference (30) | cascade | −0.100 | 0.24 | 0 / 3 |
+
+##### Contamination and the leave-one-out read
+
+What leaked. `evals/gen_assistant_facts_prompts.py` built both worked
+examples around a made-up brunch recommendation that used a REAL name:
+"For brunch in Bandung I'd suggest Miss Bee Providore on Jalan Progo".
+`Miss Bee Providore` is the gold answer of `c4f10528`
+("…that restaurant in Cihampelas Walk that serves a great Nasi Goreng?"),
+one of the 56 `single-session-assistant` questions scored above. Any model
+reading the prompt saw the answer to one measured question before it saw
+the session.
+
+What it can and cannot explain. `c4f10528` is a **win** for `cortex`,
+`hybrid` and `cascade` in both variants against `assist-base`, so it is
+counted in every headline delta. Dropping that one question from the
+paired comparisons (recomputed from the `win_qids` / `loss_qids` in the
+committed `compare-assist-*-single-session-assistant-pairs.json`, over
+n = 55 instead of 56):
+
+| comparison | arm | Δ (56 q) | Δ without `c4f10528` (55 q) |
+|---|---|---|---|
+| `assist-prov` vs `assist-base` | cortex | +0.4643 | +0.4545 |
+| `assist-prov` vs `assist-base` | hybrid | +0.0536 | +0.0364 |
+| `assist-prov` vs `assist-base` | cascade | +0.0357 | +0.0182 |
+| `assist-naive` vs `assist-base` | cortex | +0.4464 | +0.4364 |
+| `assist-naive` vs `assist-base` | hybrid | +0.0179 | **0.0000** |
+| `assist-naive` vs `assist-base` | cascade | +0.0179 | **0.0000** |
+| either vs base | rag (control) | 0.000 | 0.000 |
+
+The same drop applied to the SSA accuracies themselves (56 q → 55 q):
+
+| arm | `assist-base` | `assist-prov` | `assist-naive` |
+|---|---|---|---|
+| cortex | 0.0536 → 0.0545 | 0.5179 → 0.5091 | 0.5000 → 0.4909 |
+| hybrid | 0.9107 → 0.9273 | 0.9643 → 0.9636 | 0.9286 → 0.9273 |
+| rag (control) | 0.9107 → 0.9273 | 0.9107 → 0.9273 | 0.9107 → 0.9273 |
+
+Note the last row: the `rag` control gets `c4f10528` **wrong in all three
+runs**, while `cortex` gets it right in both variants. A fact-only arm
+beating raw turns is the whole point of the recovery, so that pattern is
+not by itself evidence of the leak — but on this one question the model
+had the gold string in its extraction prompt, so this particular win
+cannot be attributed to the memory and is the reason the whole section
+was re-run.
+
+So the **recovery finding survives**: the fact-only arm still gains ~0.44
+to ~0.45 on `single-session-assistant`, on 24-25 questions won against
+zero lost, and one leaked question cannot carry that. What does **not**
+survive is the naive arm's already-marginal `hybrid` and `cascade` gains
+on this type, which go to exactly zero — they were that one question.
+`prov`'s hybrid gain drops from 3 questions to 2 and stays
+non-significant. None of the guard-vs-naive comparisons involve
+`c4f10528` at all (it is neither a win nor a loss in any of them), so the
+"the guard costs nothing measurable" read is untouched by the leak.
+
+What did NOT happen. The example's invented values (`Jalan Progo`,
+`smoked-beef bowl`) appear **0 times** in either run's rows, so no
+fabricated content was injected into any bank — this is entity-name
+priming, not content injection. The one qualification, found while
+checking: the example's attribute name `signature dish` does appear once
+in each run, both times on `c4f10528` itself, where the extractor minted
+`Miss Bee Providore — signature dish: Miss Bee's Nasi Goreng` from the
+session's own text. The value is the session's; the attribute schema is
+the prompt's. Note also that the bench's own gold-answer leak check
+(`leak_check`, SR-TTT) reported `n_leaked: 0` on both runs and could not
+have caught this: it checks whether a gold answer appears in a served
+*context*, not in the extraction *prompt*.
+
+The re-run, as it was run — it has since completed, and its numbers are
+the published ones above. Same slice, same instrument, the re-cut
+prompts, new tags so nothing canonical is overwritten (from the repo root, with the
+reproducible q8_0 server up via `Start-Qwen`):
+
+```bash
+export PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender
+PYTHONPATH=. python evals/longmemeval_bench.py \
+  --extractor qwen-27b --dataset oracle \
+  --types single-session-assistant,single-session-preference,knowledge-update \
+  --system-prompt-file evals/prompts/assistant_facts_provenance.txt \
+  --tag assist-prov2 --report
+
+export PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=supersede
+PYTHONPATH=. python evals/longmemeval_bench.py \
+  --extractor qwen-27b --dataset oracle \
+  --types single-session-assistant,single-session-preference,knowledge-update \
+  --system-prompt-file evals/prompts/assistant_facts_naive.txt \
+  --tag assist-naive2 --report
+```
+
+`assist-base` does not need re-running: it uses the shipped prompt, which
+never carried the example. The prompt file paths are unchanged — the
+generator rewrote them in place.
+
+##### The read (first run)
+
+Stated plainly, because the result is not the one the change was designed
+to argue for. **Every number below predates the contamination fix**, and
+the clean re-run above supersedes all of it:
+
+- **Both variants recover `single-session-assistant`**, from 0.054 to
+  0.518 (`assist-prov`) and 0.500 (`assist-naive`) on the fact-only arm —
+  +0.464 and +0.446 paired, 26 and 25 questions won against **zero** lost.
+  Asking for assistant-stated facts is what moved the number; the guard is
+  not what moved it.
+- **The pollution the naive arm was expected to cause is not detectable in
+  accuracy at this n.** The knowledge-update canary is flat-to-up under
+  both variants (naive cortex +0.038, hybrid −0.013; prov cortex +0.077,
+  hybrid +0.026), and none of those deltas is significant. On this
+  evidence the case for the provenance guard is **not** an accuracy case.
+- **The guard's case is the safety property**: an assistant-stated value
+  can never overwrite a value of any other origin — it parks as a
+  contender — and that costs nothing measurable. Head to head, `prov`
+  leads `naive` on every fact-reading arm directionally but not
+  significantly (slice hybrid +0.037, 11 W / 5 L, p = 0.21; slice cortex
+  +0.012, 11 / 9). A delta this size is inside what this bench can
+  resolve, so read it as "no measured cost", not as "the guard is better".
+- **`single-session-preference` is the one type both variants hurt**
+  slightly (prov cortex −0.133, naive −0.067; n = 30, so 2 to 4 questions).
+  Preferences are facts about the *user*, and the added instruction pulls
+  extraction toward the thing being described instead. Not significant,
+  but it is the only consistent negative and it should not be rounded away.
+- **The `rag` control moved by 0.0000 with 0 wins and 0 losses in all
+  twelve comparisons**, so none of the above is a run-to-run measurement
+  artifact.
 
 Model roles are split so extraction quality is the **only** variable:
 
@@ -1847,16 +2878,20 @@ python evals/retrieval_pool_probe.py --haystack 0   # synthetic corpus alone
 Corpus: the 10 knowledge-update pairs + 6 distractors from
 `ladder_sweep.py`, ingested initials → distractors → updates, buried in
 400 real conversational turns whose TEXT is read from the
-`band_ablation.py` band-state dumps (`results/banks/s-qwen-27b-ablbands-flat`)
-and re-encoded with the current backbone. That directory is gitignored, so
-a fresh worktree has to copy it from the main checkout; without it the
-probe runs synthetic-only and says so in the artifact.
+`band_ablation.py` band-state dumps under `results/banks/` — resolved by
+content through `bank_dumps.py`, never by directory name (see "Which
+replay a probe reads") — and re-encoded with the current backbone. Those
+directories are gitignored, so a fresh worktree has to copy or link one
+from the main checkout; without it the probe runs synthetic-only and says
+so in the artifact.
 
 Why not LongMemEval gold: no dump under `results/banks/` can score recall
 over `cms.retrieve()`. `dump_bank` persists cortex facts only (turns
 absent, `source_entries` stripped), and the band-state dumps carry no
 gold-turn labels — the `has_answer` markers live in the dataset, not the
-dump — and their own vectors are 384-d from the retired MiniLM backbone.
+dump. Only their turn text is borrowed here; the dumps' own vectors are
+never read, which is why the committed `20260904` numbers do not depend
+on which replay supplied the text.
 
 **Result — `results/retrieval-pool-probe-20260904.json` (null):**
 
@@ -2840,6 +3875,117 @@ python evals/needle_survival.py --dataset s --extractor qwen-27b
 That artifact (72 questions, 35,117 turns ingested, 144 needles) is pinned by
 `tests/test_eval_evidence.py`, which re-derives 37.5 / 31.1 / 58 from it and
 fails if the prose and the file diverge.
+
+---
+
+# Which replay a probe reads (`bank_dumps.py`)
+
+`band_ablation.py replay` writes one gzipped dump per question under
+`results/banks/<stem>-ablbands[-<preset>]`. Those directories are
+gitignored, hand-copied between checkouts and re-tagged there, so one tree
+can hold **several replays of the same dataset under names that differ
+only by a machine-local suffix**. Naming one by string literal therefore
+does not identify a corpus — and for three weeks it identified the wrong
+one.
+
+`distractor_scale_probe.py`, `bench_store_latency.py` and
+`retrieval_pool_probe.py` all hardcoded `s-qwen-27b-ablbands-flat`. On a
+tree carrying both replays that name resolves to the **retired 384-d
+MiniLM** dumps, while the published 2026-08-15 distractor artifact was
+measured on the **1024-d v25** replay sitting in a sibling directory.
+Nothing surfaced the mismatch because the probe refuses to overwrite its
+own artifact: the run that would have contradicted the file could never
+write one.
+
+`bank_dumps.resolve_dump_dir()` picks by **content**, not by name — three
+facts read from the dumps themselves:
+
+* backbone dimension (1024-d v25 `Qwen3-Embedding-0.6B`, not 384-d MiniLM);
+* band preset `flat` (not `continuum` / `flat257` / `scaled257`);
+* nothing evicted during the replay (`turns_stored` equals the resident
+  entry count).
+
+Zero or several matches is a **refusal with the full candidate listing**,
+never a guess; an explicitly named directory always wins. Probes that
+resolve through it record `dump_dir` and `embedding_dim` (directory *name*
+only — an absolute path would carry a home directory into a tracked
+artifact). `tests/test_bank_dumps.py` pins both ends: the resolver's
+choice and its refusals, and that none of the three probes names the
+retired directory again.
+
+## The distractor-scale probe is regenerable again (2026-09-05)
+
+```bash
+python evals/distractor_scale_probe.py \
+    --out evals/results/distractor-scale-probe-<today>.json \
+    --compare-to evals/results/distractor-scale-probe-2026-08-15.json
+```
+
+`--out` is required for a rerun because the canonical 2026-08-15 artifact
+is never overwritten in place. `--compare-to` writes
+`<out stem>.reproduction.json`: a cell-by-cell equality check of the
+**quality** fields — pool size, evidence-in-top-6, evidence-in-top-3,
+any-evidence-served, first-evidence rank — over all 78 questions × 5
+scales. Latency is excluded by construction; it is machine- and
+load-dependent, and it did move (median BM25 at 15x: 620 ms in the
+2026-08-15 run, 675 ms here, same code, same pools, different day).
+
+| run | dumps | reproduction vs 2026-08-15 |
+|---|---|---|
+| `distractor-scale-probe-2026-09-05.json` | 1024-d v25, resolved | **390 of 390 cells match** |
+| `distractor-scale-probe-2026-09-05-retired384.json` | 384-d MiniLM, the old hardcoded name | **116 of 390** — 274 cells differ |
+
+The second row is the negative control, and it is committed rather than
+described: the two directories are not interchangeable, and the
+difference is not subtle (evidence-in-top-6 at 1x reads 0.667 off the
+retired dumps against the published 0.830). Both reproduction checks are
+committed (`distractor-scale-probe-2026-09-05.reproduction.json`,
+`…-retired384.reproduction.json`) and pinned in
+`tests/test_eval_evidence.py`. Every aggregate and every gate verdict of
+the 2026-08-15 artifact is reproduced exactly by the resolved
+run, so the published 0.830 / 0.597 / +0.233 numbers stand unchanged; the
+2026-08-15 file remains canonical and was not touched.
+
+## What the two sibling probes were measured on
+
+Both hardcoded the same directory name, so both had to be checked rather
+than assumed.
+
+**`bench_store_latency.py` → `results/store-latency-by-bank-size.json`
+(2026-07-25) was measured on the 384-d MiniLM dumps** — its own `corpus`
+field records "real MiniLM embeddings", and it predates the v25 backbone
+swap, so at the time that was simply the current corpus. It is **not**
+regenerated here, and it should be read as a **MiniLM-era** measurement:
+the store path's cost scales with the embedding dimension, so those
+medians (and the before/after table in the CHANGELOG's 2026-07-25 entry)
+do not describe what a 1024-d bank costs to write. Reproduce them with
+`--dumps <the 384-d directory> --dim 384`; the default is now the
+resolved 1024-d replay, and a rerun records `dump_dir` and `dim`.
+
+**`retrieval_pool_probe.py` → `results/retrieval-pool-probe-20260904.json`
+is unaffected.** It reads only the dumps' turn TEXT and re-encodes it with
+the current backbone (the artifact records `embedder.dim = 1024`), so the
+dumps' own vectors — and hence the replay's dimension — never enter the
+result. The 400 haystack turns it takes are byte-identical across the two
+replays, so the numbers would not move either way. The committed
+`20260904` artifact predates the check, so the digest is published here
+instead: both directories give
+`f0784268b0e28bd4af77405f9af8c61b25907c24ec2b3761527a49257d603e57`
+(measured 2026-09-05), reproducible in a second —
+
+```bash
+python -c "import sys; sys.path.insert(0,'evals'); import bank_dumps as b; \
+    print(b.haystack_digest(b.BANKS_ROOT / '<dump dir>', 400))"
+```
+
+Every future run of the probe records that digest in its own artifact, so
+this is the last time it has to be argued rather than read.
+
+The strict resolution is deliberate for this probe too, even though it
+reads text only: relaxing the dimension makes both replays equally valid,
+which is a refusal, which would silently drop the probe to its synthetic
+corpus. A tree carrying only the retired replay names it with
+`--haystack-dir`.
 
 ---
 

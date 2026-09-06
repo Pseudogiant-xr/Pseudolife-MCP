@@ -2,7 +2,7 @@
 # Register the Claude extractor shim as a systemd --user service (Linux
 # parity for ops/install-shim-autostart.ps1 — issue #11).
 #
-#   ops/install-shim-autostart.sh                 # default port 8082, v2 prompt, opus
+#   ops/install-shim-autostart.sh                 # default port 8082, v4 prompt, opus
 #   ops/install-shim-autostart.sh --model claude-sonnet-5   # pick the served model
 #
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on
@@ -11,11 +11,22 @@
 # 2026-07-11-sonnet-sidecar-cutover-design.md). Requires a logged-in CLI.
 # --model default is claude-opus-5 per the 2026-08-02 same-harness comparison
 # (evals/results/dreamer-choice-verdict.json: cortex 0.885 vs 0.821, 5/0).
+# --prompt-file default is sonnet_extractor_v4.md since 2026-09-05: v2 plus the
+# assistant-facts blocks that shipped in dream.py that day. --system-prompt-file
+# REPLACES the shipped prompt prefix, so on this path the daemon-side change
+# alone never reached the model. Gated on the ladder opus-5 rung (v2 vs v4, two
+# replicates per arm): evals/results/ladder-shimprompt-rule2-paired-verdict-threshold.json
+# — gold 1.0, stale 0.0 on every run, tokens 14.0-15.5 across both arms.
+# That is the RE-GATE, and it is the one this default rests on: the speaker
+# rule was rewritten after the first gate ran and v4 is generated from it, so
+# the rule-v1 verdict (ladder-shimprompt-paired-verdict-threshold.json, tokens
+# 14.0-16.1) measured a text this script no longer launches. It stays in the
+# tree as superseded evidence.
 set -euo pipefail
 
 PORT=8082
 MODEL="claude-opus-5"
-PROMPT_FILE="evals/prompts/sonnet_extractor_v2.md"
+PROMPT_FILE="evals/prompts/sonnet_extractor_v4.md"
 PYTHON_EXE=""
 LOG_FILE="$HOME/.pseudolife-mcp/claude-shim.log"
 

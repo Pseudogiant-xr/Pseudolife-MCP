@@ -300,6 +300,29 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   a populated reference bank (its raw cosines are not rescaled and
   outrank every memory once the reranker fires). Neither combination has
   been measured.
+- **Assistant-stated claims parked, not adopted**
+  (`memory.dream.assistant_claims = "contender"`) — what a dream claim
+  labelled `speaker: "assistant"` becomes: `contender` writes it at the
+  floor `assistant` provenance tier (it may fill an empty slot, but
+  against a value or member set of any other origin it parks as a
+  contender, and it ranks below user-origin facts at equal similarity),
+  `supersede` treats it as an ordinary agent-tier dream claim, and `drop`
+  discards it. An unrecognised value falls back to `contender` — a typo
+  must not open the overwrite path. **Live on the default path since
+  2026-09-05**, when the provenance extraction prompt shipped: an
+  extraction can now carry a `speaker` label, so the knob decides what
+  happens to assistant-stated claims on a stock install. (It was inert
+  before that, because the old prompt never asked for the field. The
+  label is asked for only where the note makes the speaker knowable, so
+  on a bank whose notes carry no `user:` / `assistant:` marker most
+  claims still arrive without one — as do claims from an older prompt or
+  an extractor shim launched with `--system-prompt-file` — and those
+  write exactly as they did before, whatever this is set to.) Kept off
+  the Console deliberately: `supersede`
+  is the setting that lets model-stated content overwrite a user-stated
+  fact, which is a provenance decision rather than an operator dial. The
+  measured comparison of the three values is in `evals/README.md`
+  ("Assistant-stated facts").
 - **Staleness served as annotation** (`memory.search.stale_policy =
   "annotate"`) — stale records (past 2×TTL for their freshness class)
   carry `effective_confidence`/`stale` flags and nothing more, today's

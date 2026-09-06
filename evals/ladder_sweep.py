@@ -42,6 +42,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 import argparse
 import json
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -89,10 +90,17 @@ RUNGS: dict[str, dict] = {
                     "base_url": "http://127.0.0.1:8081/v1", "model": "extractor"},
     "ornith-9b": {"kind": "llm", "label": "Ornith-1.0-9B (candidate)",
                   "base_url": "http://127.0.0.1:8081/v1", "model": "extractor"},
-    # served by evals/dg_shim.py (no llama-server support for diffusion archs)
+    # served by evals/dg_shim.py (no llama-server support for diffusion archs).
+    # NOTE the :8082 default is also the PRODUCTION Claude shim's port
+    # (ops/install-shim-autostart.ps1). With dg_shim.py down and that shim up,
+    # probe() passes on the incumbent and the run benchmarks Claude under this
+    # rung's label. evals/bench_diffusiongemma.ps1 walks straight into it: its
+    # Start-Shim returns success on GET :8082/health, which claude_shim.py also
+    # serves, so it never launches dg_shim. Set PSEUDOLIFE_BENCH_DG_URL.
     "diffusiongemma": {"kind": "llm",
                        "label": "DiffusionGemma 26B-A4B (candidate)",
-                       "base_url": "http://127.0.0.1:8082/v1",
+                       "base_url": os.environ.get("PSEUDOLIFE_BENCH_DG_URL",
+                                                  "http://127.0.0.1:8082/v1"),
                        "model": "extractor"},
     "gemma4-26b-qat": {"kind": "llm",
                        "label": "Gemma 4 26B-A4B QAT-Q4_0 (candidate)",
@@ -121,16 +129,28 @@ RUNGS: dict[str, dict] = {
     # Cloud ceiling probe (2026-07-11, user-requested): Claude via the Max-plan
     # CLI, served by evals/claude_shim.py. Deliberately NOT in LADDER_ORDER —
     # the default sweep stays sovereign-only; run with --rung sonnet-5.
+    # :8082 is ALSO the production shim's port, so the default targets whatever
+    # model + --system-prompt-file the autostart shim was launched with, which
+    # this run neither chooses nor (before PSEUDOLIFE_BENCH_SONNET_URL) could
+    # redirect. An untagged rerun is stopped by the clobber guard once a
+    # canonical result exists, but --out-tag runs — the normal mode for this
+    # rung — are not, and they are the live exposure. Prefer a dedicated port,
+    # as opus-5/fable-5 do below.
     "sonnet-5": {"kind": "llm",
                  "label": "Claude Sonnet 5 (Max-plan CLI shim, ceiling probe)",
-                 "base_url": "http://127.0.0.1:8082/v1",
+                 "base_url": os.environ.get("PSEUDOLIFE_BENCH_SONNET_URL",
+                                            "http://127.0.0.1:8082/v1"),
                  "model": "extractor"},
     # OpenAI-side twin (2026-07-21, user-requested): GPT-5.6 Terra via the
     # ChatGPT-plan Codex CLI, served by evals/codex_shim.py. Same posture as
     # sonnet-5 — NOT in LADDER_ORDER; run with --rung terra.
+    # :8086 is the production CODEX shim's port (ops/install.ps1 picks it for
+    # the codex modes), so the same caveat as sonnet-5 applies. terra and luna
+    # share ONE override because they share one shim launch by design.
     "terra": {"kind": "llm",
               "label": "GPT-5.6 Terra (ChatGPT-plan Codex shim, ceiling probe)",
-              "base_url": "http://127.0.0.1:8086/v1",
+              "base_url": os.environ.get("PSEUDOLIFE_BENCH_CODEX_URL",
+                                         "http://127.0.0.1:8086/v1"),
               "model": "extractor"},
     # Luna rides the shim's per-request override (a concrete gpt-* name in
     # the request wins over the launch default), so one shim serves both
@@ -139,7 +159,8 @@ RUNGS: dict[str, dict] = {
     # (the 2026-09-01 measurements ran at "high").
     "luna": {"kind": "llm",
              "label": "GPT-5.6 Luna (ChatGPT-plan Codex shim, ceiling probe)",
-             "base_url": "http://127.0.0.1:8086/v1",
+             "base_url": os.environ.get("PSEUDOLIFE_BENCH_CODEX_URL",
+                                        "http://127.0.0.1:8086/v1"),
              "model": "gpt-5.6-luna"},
     # Smarter-teacher comparators (2026-07-26): same shim, dedicated ports so
     # the production sonnet shim on :8082 is never repurposed mid-run. Also
@@ -375,6 +396,7 @@ def build_service(tmp_dir: Path):
     if LITERAL_GATE is not None:
         svc.config.memory.dream.literal_gate = LITERAL_GATE
     apply_pool_env(svc.config.memory.search)
+    apply_dream_env(svc.config.memory.dream)
     apply_rerank_env(svc.config.memory)
     return svc
 
@@ -420,6 +442,99 @@ def apply_pool_env(search_cfg) -> None:
             sys.exit(f"PSEUDOLIFE_BENCH_FUSION={fusion!r}: want "
                      "'weighted_sum' or 'rrf'")
         search_cfg.fusion = fusion
+
+
+ASSISTANT_CLAIM_POLICIES = ("contender", "supersede", "drop")
+
+
+def dream_env_knobs() -> dict:
+    """Dream-path knob state, for stamping into artifacts.
+
+    Same contract as ``pool_env_knobs``: ``None`` means the shipped default
+    was in force. ``assistant_claims`` decides what a claim labelled
+    ``speaker: "assistant"`` becomes, so it is a term in any arm run against
+    ``evals/prompts/assistant_facts_provenance.txt`` — an artifact that
+    cannot say which policy produced it is not interpretable.
+    """
+    return {
+        "assistant_claims": (
+            os.environ.get("PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS", "").strip()
+            or None),
+    }
+
+
+def apply_dream_env(dream_cfg) -> None:
+    """Apply the dream-path env overrides to a bench config.
+
+    The assistant-turn arms (2026-09-05) are a prompt file plus this knob:
+
+        PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender|supersede|drop
+
+    Invalid values are a hard error, exactly as for the pool knobs — a
+    typo'd policy that quietly served the shipped default would mislabel
+    the whole arm.
+    """
+    policy = dream_env_knobs()["assistant_claims"]
+    if policy is not None:
+        if policy not in ASSISTANT_CLAIM_POLICIES:
+            sys.exit(f"PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS={policy!r}: want "
+                     + " or ".join(repr(p)
+                                   for p in ASSISTANT_CLAIM_POLICIES))
+        dream_cfg.assistant_claims = policy
+
+
+def rung_bench_env(dream_cfg) -> dict:
+    """The knob state a RUNG artifact records — resolved, not "was it
+    overridden".
+
+    ``dream_env_knobs`` reports the env override (``None`` = none given),
+    which is what the LongMemEval summary stamps. A rung file needs the
+    policy that was actually in force: the 2026-09-05 `e4b-v3` post arm
+    reported 19 claims against 18 inserted, and its artifact could not say
+    whether the missing one parked as a contender, was dropped, or
+    superseded — the tally sums neither ``contested`` nor ``confirmed``, so
+    the policy is the only handle left. Read AFTER ``apply_dream_env``.
+    """
+    return {"dream": {"assistant_claims": str(dream_cfg.assistant_claims)}}
+
+
+def git_rev() -> str | None:
+    """The commit this run was produced at, for stamping into the artifact.
+
+    ``ladder_pair_compare.py`` used to answer "which commit produced this
+    arm" from the worktree's HEAD at COMPARE time. For a re-gate — both arms
+    out of one worktree, at different commits — that is the same string for
+    both arms and is neither arm's; the 2026-09-05 rule-v2 shim verdict
+    recorded ``7083bc33`` for a ``pre`` arm produced at ``0b02e5ea``. Only
+    the run can answer it, so the run records it.
+
+    A DIRTY worktree gets a ``-dirty`` suffix, and that matters more than it
+    looks: eval runs here are routinely made from an uncommitted tree, and a
+    bare HEAD would then name a commit that does not describe the code that
+    ran — the same "plausible wrong sha" this function exists to stop,
+    moved one hop downstream. ``ladder_pair_compare.arm_provenance`` reads
+    the suffix and downgrades ``sha_source`` to ``artifact-dirty``.
+
+    ``None`` (not ``""``) when there is no checkout to ask: the verdict
+    distinguishes an artifact that could not say from one that said nothing.
+    """
+    here = str(Path(__file__).resolve().parent)
+
+    def _git(*args) -> str | None:
+        try:
+            out = subprocess.run(["git", "-C", here, *args],
+                                 capture_output=True, text=True)
+        except OSError:        # no git on PATH
+            return None
+        return out.stdout if out.returncode == 0 else None
+
+    head = (_git("rev-parse", "HEAD") or "").strip()
+    if not head:
+        return None
+    # Tracked-file changes only: untracked scratch files in the tree do not
+    # change the code that ran.
+    status = _git("status", "--porcelain", "--untracked-files=no")
+    return f"{head}-dirty" if (status or "").strip() else head
 
 
 def rerank_env_knobs() -> dict:
@@ -576,14 +691,29 @@ def measure_naive(svc) -> dict:
 # ---------------------------------------------------------------------------
 # Per-rung driver
 # ---------------------------------------------------------------------------
+def endpoint_stamp(rung: dict) -> dict:
+    """Endpoint provenance for an artifact; empty for the non-LLM rungs.
+
+    Which endpoint actually served a rung belongs IN the result file: several
+    rungs default to a port a production shim may also hold (see the RUNGS
+    comments), and a result that does not name its endpoint cannot be audited
+    for that afterwards.
+    """
+    if rung["kind"] != "llm":
+        return {}
+    return {"base_url": rung["base_url"], "model": rung["model"]}
+
+
 def run_rung(name: str) -> dict:
     rung = RUNGS[name]
     import tempfile
-    result = {"rung": name, "label": rung["label"], "kind": rung["kind"]}
+    # git_rev first, so even the `unreachable` early return carries it: a
+    # run that never reached its endpoint is still evidence about a commit.
+    result = {"rung": name, "label": rung["label"], "kind": rung["kind"],
+              "git_rev": git_rev(), **endpoint_stamp(rung)}
 
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
         result["status"] = "unreachable"
-        result["base_url"] = rung["base_url"]
         return result
 
     # ignore_cleanup_errors: ChromaDB's PersistentClient keeps the chroma.sqlite3
@@ -593,6 +723,7 @@ def run_rung(name: str) -> dict:
     with tempfile.TemporaryDirectory(prefix=f"plbench_{name}_",
                                      ignore_cleanup_errors=True) as td:
         svc = build_service(Path(td))
+        result["bench_env"] = rung_bench_env(svc.config.memory.dream)
         ingest(svc)
         if rung["kind"] == "naive":
             result.update(measure_naive(svc))
@@ -618,7 +749,8 @@ def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80),
                 guards=(0.3, 0.5, 0.65, 0.75, 0.85)) -> dict:
     rung = RUNGS[name]
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
-        return {"rung": name, "status": "unreachable"}
+        return {"rung": name, "status": "unreachable",
+                **endpoint_stamp(rung)}
     import tempfile
     with tempfile.TemporaryDirectory(prefix=f"plabstain_{name}_",
                                      ignore_cleanup_errors=True) as td:
@@ -653,7 +785,8 @@ def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80),
                     "abstain_recall_unanswerable": round(abst / len(UNANSWERABLE), 3),
                     "false_abstain_answerable": round(wrong / len(PAIRS), 3),
                 })
-    return {"rung": name, "status": "ok", "curve": curve}
+    return {"rung": name, "status": "ok", "curve": curve,
+            **endpoint_stamp(rung)}
 
 
 def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
@@ -661,7 +794,8 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
     rung. Reports superseded / stale_leak (win) vs false_merge (cost)."""
     rung = RUNGS[name]
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
-        return {"rung": name, "status": "unreachable"}
+        return {"rung": name, "status": "unreachable",
+                **endpoint_stamp(rung)}
     import tempfile
     curve = []
     for thr in thresholds:
@@ -688,7 +822,8 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 "gold_recoverable": m["gold_recoverable"],
                 "false_merge": false_merge,
             })
-    return {"rung": name, "status": "ok", "curve": curve}
+    return {"rung": name, "status": "ok", "curve": curve,
+            **endpoint_stamp(rung)}
 
 
 # ---------------------------------------------------------------------------
@@ -829,7 +964,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         pass
 
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     global WINDOW, SYSTEM_PROMPT_FILE, LITERAL_GATE
     WINDOW = args.window
     SYSTEM_PROMPT_FILE = args.system_prompt_file
@@ -842,10 +978,19 @@ def main(argv: list[str] | None = None) -> int:
                  "must not overwrite a canonical rung result")
 
     if args.list:
+        # Every registered rung, not just LADDER_ORDER: the ceiling probes sit
+        # outside it and default to ports a production shim may hold, so
+        # hiding their endpoints here is exactly the wrong way round.
+        extras = [n for n in RUNGS if n not in LADDER_ORDER]
         for n in LADDER_ORDER:
             r = RUNGS[n]
-            ep = r.get("base_url", "—")
-            print(f"  {n:<12} {r['label']:<34} {ep}")
+            print(f"  {n:<14} {r['label']:<34} {r.get('base_url', '—')}")
+        if extras:
+            print("  -- registered, outside LADDER_ORDER "
+                  "(run by name with --rung) --")
+            for n in extras:
+                r = RUNGS[n]
+                print(f"  {n:<14} {r['label']:<34} {r.get('base_url', '—')}")
         return 0
     if args.report:
         report()
@@ -874,7 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
         out_path.write_text(json.dumps(out, indent=2))
         print(json.dumps(out, indent=2))
         return 0
-    ap.print_help()
+    parser.print_help()
     return 1
 
 
