@@ -19,12 +19,14 @@ claimed the whole prompt, and the inherited v2 body carries worked examples
 of its own — one of which names a LongMemEval answer.
 
 The debt is recorded rather than hidden, in ``KNOWN_CORPUS_COLLISIONS``
-(``evals/gen_assistant_facts_prompts.py``). It is **not** a shim-only debt:
-the same example is in ``dream._SYSTEM_PROMPT``, so every extractor has had
-it, and ``tests/test_assistant_provenance.py`` runs the same two halves over
-the shipped prompt. v2 cannot be re-cut here (it is the pre arm of a
-committed gate) and re-cutting the shipped prompt is a prompt change needing
-its own ladder gate, so neither is attempted in the change that recorded it.
+(``evals/gen_shim_prompt.py``, beside the file that carries it). It was not
+a shim-only debt when recorded (2026-09-05): the same example was in
+``dream._SYSTEM_PROMPT``, so every extractor had it. The v12 base re-cut it
+there on 2026-09-07, so it is a shim-lineage debt now, and
+``tests/test_assistant_provenance.py`` runs the same two halves over the
+shipped prompt against that module's own (empty) list. v2 is not re-cut
+here (it is the pre arm of a committed gate); a re-cut shim prompt is a v5
+with its own ladder gate.
 """
 from __future__ import annotations
 

@@ -4330,8 +4330,9 @@ instrument-dependent.
 > 10,000 draws, seed 0) — with **commit precision 0.714** on a 14/78 commit
 > rate. It was graded by the Qwen3.6 answerer/judge, and its extraction
 > predates even the earliest committed op-prompt artifact (`v5`, committed
-> 2026-08-01) — the shipped pin has since moved to
-> `ku_op_prompt_v10_stance_update.txt`. The same cascade metric lost 0.090
+> 2026-08-01) — the shipped pin has since moved through
+> `ku_op_prompt_v10_stance_update.txt` to
+> `ku_op_prompt_v12_count_source_example.txt` (2026-09-07). The same cascade metric lost 0.090
 > on the oracle slice when the stack migrated. Until it is re-run, it
 > is an engineering-log result, not a front-door claim, and it was removed
 > from the README on 2026-08-25. Honest scoping at the time: the margin

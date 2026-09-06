@@ -65,8 +65,9 @@ EXAMPLE_TOKENS = (
 # must occur in the shipped prompt — but kept apart because the shim
 # prompt (`sonnet_extractor_v4.md`, v2 plus the shipped blocks) carries
 # the assistant-example tokens and NOT these: its v2 body still has the
-# pre-re-cut examples, see `gen_shim_prompt.py`. "The Quillon Larder" is
-# listed before "Quillon Larder" so the longer token is stripped first.
+# pre-re-cut examples, see `gen_shim_prompt.py`. "Quillon Larder" is a
+# substring of the registered "The Quillon Larder"; the shipped-prompt scan
+# strips tokens longest-first, so the order here does not matter.
 BASE_EXAMPLE_TOKENS = (
     "Gallowmere Teal",
     "Kelmarsh Reserve",

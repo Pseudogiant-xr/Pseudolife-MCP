@@ -962,10 +962,12 @@ def test_every_registered_token_is_actually_used_by_a_prompt_file():
 # change ADDED — while the comment above them claims they "make the class
 # un-repeatable". They do not: `_BASE_SYSTEM_PROMPT` carries three worked
 # examples of its own, written before the invented-token rule existed, and
-# nothing was checking them. One of them names a LongMemEval answer (see
-# `KNOWN_CORPUS_COLLISIONS`), and it has been in the prompt every extractor
-# receives since 2026-08-01 — the sidecar, the shim, and every ladder rung
-# alike, not only the shim path.
+# nothing was checking them. One of them named a LongMemEval answer
+# (recorded 2026-09-05 in `KNOWN_CORPUS_COLLISIONS`; re-cut by the v12 base
+# on 2026-09-07, so that dict is now empty and the scan below holds it
+# empty), and it had been in the prompt every extractor received since
+# 2026-08-01 — the sidecar, the shim, and every ladder rung alike, not only
+# the shim path.
 #
 # The prompt uses ALL-CAPS for emphasis throughout ("COUNTS, TOTALS, AND
 # QUANTITIES", "OMIT", "CURRENT"), so a caps-inclusive scan would need a
@@ -993,7 +995,11 @@ def _shipped_titlecase() -> set:
     from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
     g = _gen_module()
     text = _SYSTEM_PROMPT
-    for token in (*g.EXAMPLE_TOKENS, *g.BASE_EXAMPLE_TOKENS):
+    # Longest first, so "The Quillon Larder" goes before "Quillon Larder"
+    # whatever order the two registries declare them in — the other order
+    # would leave a bare "The" that the sentence-capital exemption now hides.
+    for token in sorted((*g.EXAMPLE_TOKENS, *g.BASE_EXAMPLE_TOKENS),
+                        key=len, reverse=True):
         text = text.replace(token, " ")
     return {m.group(0) for m in _TITLECASE.finditer(text)
             if m.group(0) not in _SHIPPED_SENTENCE_CAPITALS}
