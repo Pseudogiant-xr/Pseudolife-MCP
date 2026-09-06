@@ -59,7 +59,14 @@ not recall — in the budget-matched five-arm run of 2026-09-02 (rag 0.725 there
 one replicate, local judge) an arm served no memory at all scores 1.000 on
 the same questions, because refusing is the right answer there and an
 empty context always refuses. The fact spine loses where an answer has to
-be aggregated across sessions. Graded by a local, byte-reproducible judge (the cross-judge check
+be aggregated across sessions. The second claim to survive a judge swap is
+a win rather than a wash: re-run on 2026-09-04 with the hybrid arm
+**budget-matched** to the control at 6 turns, the same 500 questions give
+hybrid **0.730** against naive RAG's 0.690 under the local judge and
+**0.736** against 0.694 under `claude-opus-5` — paired **+0.040 / +0.042**,
+p 0.015 / 0.013 — bought with *more* context, ~1229 tokens against the
+control's ~1124, not less, and carried mostly by temporal-reasoning
+questions. Graded by a local, byte-reproducible judge (the cross-judge check
 names its second judge) — compare within rows, never against GPT-judged
 leaderboards.
 
@@ -342,7 +349,7 @@ is agent context every session, so it stays lean.
 | `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
-| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
+| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits the serving `retrieval_events` row with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
 | `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
@@ -700,8 +707,9 @@ the loop: **RECALL at the start** (`memory_search` / `memory_lesson_search` /
 (`memory_store` with an honest `origin`, `memory_fact_set` for canonical
 facts, `memory_world_set` for cited external facts, `source="status"` for
 verbose logs so they stay out of the dream), **REFLECT at the end**
-(`memory_outcome` — the dream distils these signals into the lessons
-surfaced at your next session start).
+(`memory_outcome`, with `used_ids` naming the hits you actually used — the
+dream distils these signals into the lessons surfaced at your next session
+start).
 
 One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
 `ops/install-hook.sh --client codex` (Linux/macOS) — installs the
@@ -885,8 +893,8 @@ bank.
 | Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
 | Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
-| Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
-| Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
+| Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender); an `assistant`-origin add cannot convert or join another tier's set, and cannot retract another tier's member |
+| Provenance contenders | Tier-rank guard `user > action > agent > assistant`; `memory_fact_resolve` |
 | Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
 | Write-time labels | `authority` (`directive` / `observation` / `quoted` — the speech act, orthogonal to the `origin` tier) and `distortion_tolerance` (`constraint` / `procedural` / `belief` / `preference` / `episodic`) on entries and facts, set at write time (explicit, or a deterministic heuristic under `auto`) and inherited through supersession unless restated. A `constraint` source is carried verbatim through the dream (with a post-dream guard) and pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` when the query names its entity; a `quoted` source is low-trust for the two-man rule (schema v35) |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |

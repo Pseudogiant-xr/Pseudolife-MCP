@@ -346,7 +346,16 @@ class ConsoleRoutes:
             total_entries = sum((b or {}).get("size", 0) for b in bands)
 
         ep_list = episodes.get("episodes", episodes.get("entries", [])) if isinstance(episodes, dict) else []
-        contested = sum(1 for f in facts if f.get("contested"))
+        # Contested SLOTS, not rows: a set slot dumps one row per member and
+        # each carries the slot's flag (a contender is parked against the
+        # slot), so counting rows would over-report by the member count.
+        # Keyed the way the store keys slots (casefold + separator runs
+        # collapsed): a converted scalar keeps its own display strings while
+        # a later add keeps the caller's, so one slot's rows can differ.
+        from pseudolife_memory.memory.cortex import _norm_key
+        contested = len({(_norm_key(str(f.get("entity", ""))),
+                          _norm_key(str(f.get("attribute", ""))))
+                         for f in facts if f.get("contested")})
         stale = sum(1 for w in world if w.get("stale"))
         from collections import Counter
         by_origin = dict(Counter((f.get("origin") or "agent") for f in facts))

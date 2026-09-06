@@ -1,0 +1,136 @@
+{
+  "n": 164,
+  "dropped_a": 0,
+  "dropped_b": 336,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-ssa-ssp-ku-oracle-qwen-27b-assist-naive.jsonl",
+    "arms": {
+      "rag": 0.8171,
+      "cortex": 0.5366,
+      "hybrid": 0.8293,
+      "cascade": 0.811
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl",
+    "arms": {
+      "rag": 0.8171,
+      "cortex": 0.378,
+      "hybrid": 0.8293,
+      "cascade": 0.7927
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "cortex": {
+        "delta": 0.1585,
+        "p": 0.0002,
+        "wins": 35,
+        "losses": 9,
+        "win_qids": [
+          "01493427",
+          "07741c44",
+          "07741c45",
+          "0e5e2d1a",
+          "16c90bf4",
+          "1a1907b4",
+          "1de5cff2",
+          "26bdc477",
+          "28bcfaac",
+          "488d3006",
+          "4baee567",
+          "4c36ccef",
+          "51b23612",
+          "5809eb10",
+          "6222b6eb",
+          "65240037",
+          "6ae235be",
+          "70b3e69b",
+          "71315a70",
+          "7a8d0b71",
+          "7e00a6cb",
+          "8464fc84",
+          "89527b6b",
+          "8b9d4367",
+          "a40e080f",
+          "b01defab",
+          "b759caee",
+          "ba61f0b9",
+          "c4f10528",
+          "c7cf7dfd",
+          "cf22b7bf",
+          "d596882b",
+          "e48988bc",
+          "f685340e_abs",
+          "fca762bc"
+        ],
+        "loss_qids": [
+          "06878be2",
+          "0a34ad58",
+          "10e09553",
+          "45dc21b6",
+          "618f13b2",
+          "b0479f84",
+          "d7c942c3",
+          "e493bb7c",
+          "f685340e"
+        ]
+      },
+      "hybrid": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 5,
+        "losses": 5,
+        "win_qids": [
+          "07741c45",
+          "09d032c9",
+          "b0479f84",
+          "c4f10528",
+          "eace081b"
+        ],
+        "loss_qids": [
+          "41698283",
+          "95228167",
+          "a89d7624",
+          "d7c942c3",
+          "f685340e"
+        ]
+      },
+      "cascade": {
+        "delta": 0.0183,
+        "p": 0.6044,
+        "wins": 9,
+        "losses": 6,
+        "win_qids": [
+          "07741c44",
+          "07741c45",
+          "195a1a1b",
+          "1a1907b4",
+          "a89d7624",
+          "b01defab",
+          "ba61f0b9",
+          "c4f10528",
+          "f685340e_abs"
+        ],
+        "loss_qids": [
+          "06878be2",
+          "0a34ad58",
+          "45dc21b6",
+          "b0479f84",
+          "d7c942c3",
+          "e493bb7c"
+        ]
+      }
+    }
+  }
+}

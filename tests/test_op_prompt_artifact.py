@@ -44,18 +44,34 @@ def test_prompt_file_matches_probe_construction(filename, variant):
     assert path.read_text(encoding="utf-8") == op_probe.VARIANTS[variant]
 
 
-def test_shipped_prompt_is_the_measured_v12_artifact():
-    """The v12 example re-cut ship (2026-09-06, after the v10 stance ship
-    of 2026-08-14): the live extraction prompt must be byte-identical to
-    the artifact its gates measured (op-probe + paired ladder + paired
-    same-window KU-oracle vs the v10 arm; verdicts
+def test_the_prompt_base_is_the_measured_v12_artifact():
+    """The v12 example re-cut ship (2026-09-07, after the v10 stance ship
+    of 2026-08-14): the base of the live extraction prompt must be
+    byte-identical to the artifact its gates measured (op-probe + paired
+    ladder + paired same-window KU-oracle vs the v10 arm; verdicts
     prompt-recut-v12-ku-paired-verdict.json and
     ladder-v12recut-paired-verdict.json). Any drift between what runs
     and what was measured re-opens the gap the verdict artifacts exist
-    to close."""
-    from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
+    to close.
+
+    Since 2026-09-05 the measured op-prompt text is the BASE of the
+    shipped prompt rather than all of it — the assistant-facts blocks
+    are appended after their own ladder gate — so the pin is on
+    `_BASE_SYSTEM_PROMPT`. The shipped constant has its own byte-exact
+    pin, against the measured artifact `assistant_facts_provenance.txt`,
+    in `tests/test_assistant_provenance.py`."""
+    from pseudolife_memory.memory.dream import _BASE_SYSTEM_PROMPT
     path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v12_count_source_example.txt"
-    assert _SYSTEM_PROMPT == path.read_text(encoding="utf-8")
+    assert _BASE_SYSTEM_PROMPT == path.read_text(encoding="utf-8")
+
+
+def test_the_shipped_prompt_still_opens_with_the_base():
+    """The append is an append: nothing in the base block may be edited or
+    reordered on its way into the shipped prompt."""
+    from pseudolife_memory.memory.dream import (_BASE_SYSTEM_PROMPT,
+                                                _SYSTEM_PROMPT)
+    assert _SYSTEM_PROMPT.startswith(_BASE_SYSTEM_PROMPT)
+    assert len(_SYSTEM_PROMPT) > len(_BASE_SYSTEM_PROMPT)
 
 
 def test_only_the_required_op_variant_scores_plain_facts_as_op_set():

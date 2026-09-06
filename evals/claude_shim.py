@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 import shutil
@@ -44,6 +45,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))      # repo root
 from pseudolife_memory.memory.dream import _SYSTEM_PROMPT  # noqa: E402
+
+_LOG = logging.getLogger("claude_shim")
 
 # The `claude` CLI from PATH; PSEUDOLIFE_SHIM_CLAUDE_CLI or --cli overrides
 # for installs whose binary isn't on PATH.
@@ -102,6 +105,9 @@ class ClaudeCli:
         # value wins. None = never pass the flag — the pre-knob behavior.
         self.reasoning_effort = reasoning_effort
         self.lock = threading.Lock()
+        # Prompt heads already reported as an override miss, so the warning
+        # below is one line per distinct prompt rather than one per call.
+        self._override_miss_seen: set[str] = set()
         self.calls = 0
         self._health_ok: bool | None = None
         self._health_detail = ""
@@ -123,6 +129,40 @@ class ClaudeCli:
             raise
         return proc.returncode, out, err
 
+    def _warn_override_missed(self, system: str) -> None:
+        """Say so when ``--system-prompt-file`` did not apply to a call.
+
+        A miss is NORMAL for every non-claims prompt on this endpoint: the
+        override targets claims extraction only, and the daemon also sends
+        events, relations, lessons, digest, outcome-inference and — when
+        ``judge_url`` is unset — the four review-queue judge prompts down
+        the same wire. It is not normal for the claims prompt, and from the
+        outside the two are indistinguishable: the override just vanishes
+        and the model gets the shipped text while the operator believes it
+        got the variant. That is the same class of silent substitution that
+        made ``sonnet_extractor_v4.md`` necessary, seen from the other side,
+        so it gets a line in the log.
+
+        Deduped per distinct prompt head: about ten prompts legitimately
+        miss, and a per-call warning on each would teach an operator to
+        ignore the one that matters. The EMPTY system prompt is filtered by
+        the caller — ``_health_refresh`` sends one on every /health cache
+        miss, and ``main()`` warms that cache before ``serve_forever``, so
+        warning on it would put the loudest, earliest and wrongest line at
+        the top of every shim's log.
+        """
+        head = system[:60]
+        if head in self._override_miss_seen:
+            return
+        self._override_miss_seen.add(head)
+        _LOG.warning(
+            "--system-prompt-file did not apply: this prompt does not start "
+            "with dream._SYSTEM_PROMPT, so the shipped text was sent "
+            "unchanged (prompt begins %r). Expected for every non-claims "
+            "prompt (events, relations, lessons, digest, outcome inference, "
+            "the review-queue judges); for claims extraction it means the "
+            "variant never reached the model.", head)
+
     def chat(self, system: str, user: str, model: str | None = None,
              effort: str | None = None) -> str:
         if self.system_override and system.startswith(_SYSTEM_PROMPT):
@@ -131,6 +171,11 @@ class ClaudeCli:
             # etc.). Other prompts (relations, lessons) pass through
             # untouched — the override targets claims extraction only.
             system = self.system_override + system[len(_SYSTEM_PROMPT):]
+        elif self.system_override and system:
+            # `and system`: the /health probe sends an EMPTY system prompt
+            # (see _health_refresh), which is not an override miss worth
+            # reporting — it is a call that deliberately carries no prompt.
+            self._warn_override_missed(system)
         cmd = [str(self.cli), "-p", "--model", model or self.model,
                "--output-format", "json",
                "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',

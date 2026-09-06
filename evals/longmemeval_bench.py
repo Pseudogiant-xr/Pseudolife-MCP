@@ -66,7 +66,8 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import hybrid_context  # noqa: E402
 from ladder_sweep import (approx_tokens, build_service,  # noqa: E402
-                          pool_env_knobs, probe)
+                          dream_env_knobs, pool_env_knobs, probe,
+                          rerank_env_knobs)
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 import answerability_probe  # noqa: E402
 import leak_check  # noqa: E402
@@ -95,12 +96,21 @@ EXTRACTORS = {
     "lfm2-8b-a1b": "http://127.0.0.1:8081/v1",
     "ornith-9b": "http://127.0.0.1:8081/v1",
     # DiffusionGemma has no llama-server support (PR #24423); serve it with
-    # evals/dg_shim.py, which wraps the patched llama-diffusion-cli.
-    "diffusiongemma": "http://127.0.0.1:8082/v1",
+    # evals/dg_shim.py, which wraps the patched llama-diffusion-cli. The :8082
+    # default is ALSO the production Claude shim's port, which answers /models
+    # and so passes probe(): with dg_shim down and that shim up, this arm
+    # benchmarks Claude under the DiffusionGemma label. Same var as the ladder
+    # rung, so one export redirects both harnesses.
+    "diffusiongemma": os.environ.get("PSEUDOLIFE_BENCH_DG_URL",
+                                     "http://127.0.0.1:8082/v1"),
     "gemma4-26b-qat": "http://127.0.0.1:8081/v1",
     # Claude Sonnet 5 ceiling probe (2026-07-11): served by evals/claude_shim.py
-    # wrapping the Max-plan claude CLI (same :8082 shim-swap slot as dg).
-    "sonnet-5": "http://127.0.0.1:8082/v1",
+    # wrapping the Max-plan claude CLI (same :8082 shim-swap slot as dg). That
+    # slot is the production shim's, so by default this arm measures whatever
+    # --model / --system-prompt-file the autostart shim was launched with;
+    # redirect to a dedicated launch the way opus-5/fable-5 are by construction.
+    "sonnet-5": os.environ.get("PSEUDOLIFE_BENCH_SONNET_URL",
+                               "http://127.0.0.1:8082/v1"),
     # Smarter-teacher comparators (2026-07-26): claude_shim.py --model
     # claude-opus-5 / claude-fable-5 on dedicated ports (:8082 stays the
     # production sonnet shim).
@@ -237,6 +247,17 @@ def bench_env_knobs() -> dict:
         # only on a --phase extract run — rebuild_contexts.py copies the
         # associative context verbatim and cannot honour them.
         "candidate_pool": pool_env_knobs(),
+        # Dream-path knobs (memory.dream). Applied by the same
+        # ladder_sweep.build_service; None means the shipped default.
+        # assistant_claims is a term for any arm whose extraction prompt
+        # asks for a speaker label — which the SHIPPED prompt has done
+        # since 2026-09-05, so it is a live term on a default run and not
+        # only on an `assistant_facts_*.txt` arm. It still means nothing
+        # for a pre-2026-09-05 artifact, where no claim carried the field.
+        "dream": dream_env_knobs(),
+        # Cross-encoder reranker (memory.reranker.enabled). Same
+        # build_service/--phase extract constraint as candidate_pool above.
+        "reranker": rerank_env_knobs(),
     }
 
 
@@ -767,6 +788,16 @@ def build_contexts(svc, question: str, variants: bool = False,
     # test. The hybrid/memory arm follows the CLI/config knobs. With
     # knobs at their defaults the two calls return identical entries and
     # every pre-Phase-1 artifact stays byte-identical.
+    #
+    # CARVE-OUT (2026-09-05 review): "pinned" covers the Phase-1 knobs
+    # this call names — contiguity and timeline — and nothing else. The
+    # PSEUDOLIFE_BENCH_* retrieval overrides (candidate pool, fusion,
+    # reranker) are applied to the SERVICE config, so they reach this
+    # call too and the rag arm becomes a treatment arm under them: the
+    # 2026-09-04/05 pool cells move rag by up to 0.115. Under any of
+    # those overrides the zero-delta control is the CORTEX arm, which
+    # never touches ``cms.retrieve`` — which is what the pool/reranker
+    # tables in evals/README.md are read against.
     #
     # ``variants=True`` (spec Amendment 2026-08-03): five hybrid variants
     # built from the SAME live service — vanilla (shares the pinned

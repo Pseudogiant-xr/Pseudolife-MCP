@@ -35,15 +35,53 @@ function Stop-Shim {
     Start-Sleep -Seconds 3
 }
 
+# dg_shim's port. 8082 is ALSO the production Claude shim's port
+# (ops/install-shim-autostart.ps1), and claude_shim.py serves /health too, so
+# "something answered on 8082" is not proof dg_shim is up. Both bench
+# harnesses read this var, so one setting redirects the whole run.
+$dgPort = 8082
+$env:PSEUDOLIFE_BENCH_DG_URL = "http://127.0.0.1:$dgPort/v1"
+
+# True only if the server on $dgPort is dg_shim: its /v1/models lists exactly
+# one id, "diffusiongemma"; claude_shim's list never contains it. Identity
+# only — dg_shim serves /v1/models before the model has loaded.
+function Test-DgShim {
+    try {
+        $m = Invoke-RestMethod -Uri "http://127.0.0.1:$dgPort/v1/models" -TimeoutSec 3
+        return [bool]($m.data | Where-Object { $_.id -eq "diffusiongemma" })
+    } catch { return $false }
+}
+
+# Identity AND readiness: dg_shim's /health is 503 until the GGUF is loaded,
+# so a bench that starts on identity alone races the load.
+function Test-DgShimReady {
+    if (-not (Test-DgShim)) { return $false }
+    try { Invoke-RestMethod -Uri "http://127.0.0.1:$dgPort/health" -TimeoutSec 3 | Out-Null; return $true }
+    catch { return $false }
+}
+
+function Wait-DgShim($seconds) {
+    for ($i = 0; $i -lt ($seconds / 5); $i++) {
+        if (Test-DgShimReady) { return $true }
+        Start-Sleep -Seconds 5
+    }
+    return $false
+}
+
 function Start-Shim {
-    if (Wait-Endpoint "http://127.0.0.1:8082/health" 5) { return $true }
+    # dg_shim already owns the port (possibly still loading): wait for it.
+    if (Test-DgShim) { return (Wait-DgShim 300) }
+    if (Wait-Endpoint "http://127.0.0.1:$dgPort/health" 1) {
+        Log "REFUSING: something that is not dg_shim already answers on :$dgPort (the production Claude shim?). Stop it, or set `$dgPort to a free port."
+        return $false
+    }
     Log "starting dg_shim (GPU, log: evals\results\dgbench-shim.log)"
     Start-Process -FilePath $py -WindowStyle Minimized `
         -RedirectStandardOutput (Join-Path $repo "evals\results\dgbench-shim.log") `
         -RedirectStandardError (Join-Path $repo "evals\results\dgbench-shim.err.log") `
-        -ArgumentList $shim, "--model", $dgGguf, "--ngl", "99", "--n-predict", "1024", "--port", "8082",
+        -ArgumentList $shim, "--model", $dgGguf, "--ngl", "99", "--n-predict", "1024", "--port", "$dgPort",
             "--n-cpu-moe", "12"  # keep 12 MoE layers' experts in RAM: headroom so long prompts don't spill
-    return (Wait-Endpoint "http://127.0.0.1:8082/health" 300)
+    return (Wait-DgShim 300)
 }
 
 # Start-Qwen / Stop-Qwen + the eval env protocol (cache-ram,
