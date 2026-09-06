@@ -1,14 +1,14 @@
 {
   "what": "chip-5 (PR #245 label pair) extraction-ladder paired arms: pre-#245 tree vs master, same harness, same corpus, same extractor endpoint; prediction = verdict-identical on an unlabelled corpus",
-  "generated_at": "2026-09-06T09:42:46",
+  "generated_at": "2026-09-06T10:38:20",
   "tag": "v12recut",
   "pre": {
     "worktree": "elastic-lichterman-f752f3",
-    "sha": "9a9a2f9c288fe8d7b92457bfa442f68311844515"
+    "sha": "62eafe9900618d356a5f26367f8671ebcec855e7"
   },
   "post": {
     "worktree": "elastic-lichterman-f752f3",
-    "sha": "9a9a2f9c288fe8d7b92457bfa442f68311844515"
+    "sha": "62eafe9900618d356a5f26367f8671ebcec855e7"
   },
   "compared": [
     "gold_recoverable",
@@ -77,8 +77,8 @@
           "post": 0.5
         },
         "search_latency_ms": {
-          "pre": 48.4,
-          "post": 55.0
+          "pre": 46.9,
+          "post": 46.2
         }
       },
       "differences": {},
@@ -133,12 +133,12 @@
       },
       "timing": {
         "extract_seconds": {
-          "pre": 35.7,
-          "post": 36.7
+          "pre": 36.0,
+          "post": 32.8
         },
         "search_latency_ms": {
-          "pre": 52.5,
-          "post": 54.2
+          "pre": 53.1,
+          "post": 55.8
         }
       },
       "differences": {},
