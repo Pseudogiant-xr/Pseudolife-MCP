@@ -1,0 +1,23 @@
+{
+  "check": "distractor-scale-probe reproduction",
+  "new_artifact": "distractor-scale-probe-2026-09-05.json",
+  "old_artifact": "distractor-scale-probe-2026-08-15.json",
+  "new_dump_dir": "s-qwen-27b-ablbands-flat--awesome-bhaskara",
+  "old_dump_dir": null,
+  "new_embedding_dim": 1024,
+  "fields": [
+    "n_pool_entries",
+    "evidence_in_top6",
+    "evidence_in_top3",
+    "any_evidence_served",
+    "rank_first_evidence"
+  ],
+  "latency_excluded": true,
+  "questions_only_in_new": [],
+  "questions_only_in_old": [],
+  "cells_compared": 390,
+  "cells_matching": 390,
+  "cells_mismatching": 0,
+  "cells_skipped": 0,
+  "mismatches": []
+}

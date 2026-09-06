@@ -1,0 +1,216 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 56,
+  "bench_env": {
+    "thinking": null,
+    "sampler": null,
+    "candidate_pool": {
+      "candidate_pool_multiplier": null,
+      "fusion": null
+    },
+    "dream": {
+      "assistant_claims": null
+    }
+  },
+  "arms": {
+    "rag": {
+      "accuracy": 0.911,
+      "context_tokens": 908.1
+    },
+    "cortex": {
+      "accuracy": 0.054,
+      "context_tokens": 13.5
+    },
+    "hybrid": {
+      "accuracy": 0.911,
+      "context_tokens": 929.2
+    },
+    "cascade": {
+      "accuracy": 0.893,
+      "context_tokens": 839.7
+    }
+  },
+  "superseded_total": 1,
+  "leak_check": {
+    "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+    "n_rows": 56,
+    "n_leaked": 0,
+    "n_untestable": 1,
+    "untestable_reasons": {
+      "trivial_gold": 1
+    },
+    "leaked": [],
+    "untestable": [
+      "18dcd5a5"
+    ],
+    "sites": {},
+    "min_answer_chars": 4,
+    "arms": {
+      "cortex": {
+        "n": 56,
+        "all": 0.0536,
+        "n_leak_free": 56,
+        "leak_free": 0.0536,
+        "n_testable": 55,
+        "leak_free_testable": 0.0545
+      },
+      "hybrid": {
+        "n": 56,
+        "all": 0.9107,
+        "n_leak_free": 56,
+        "leak_free": 0.9107,
+        "n_testable": 55,
+        "leak_free_testable": 0.9091
+      },
+      "rag": {
+        "n": 56,
+        "all": 0.9107,
+        "n_leak_free": 56,
+        "leak_free": 0.9107,
+        "n_testable": 55,
+        "leak_free_testable": 0.9091
+      }
+    }
+  },
+  "answerability": {
+    "check": "memory-only answerability + pathway evidence (AWM arXiv 2608.25618, PAST-Bench arXiv 2608.04003)",
+    "n_rows": 56,
+    "arms": {
+      "cortex": {
+        "n": 56,
+        "n_testable": 55,
+        "untestable_reasons": {
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 3,
+          "answerable_wrong": 0,
+          "unanswerable_correct": 0,
+          "unanswerable_wrong": 52
+        },
+        "answerable_share": 0.0545,
+        "answerable_by": {
+          "span": 3,
+          "tokens": 0
+        },
+        "unanswerable_correct_ids": [],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 3,
+          "untestable": 0,
+          "supported": 3,
+          "unsupported": 0,
+          "spanning": 0,
+          "supported_share": 1.0,
+          "unsupported_ids": [],
+          "spanning_ids": []
+        }
+      },
+      "hybrid": {
+        "n": 56,
+        "n_testable": 55,
+        "untestable_reasons": {
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 43,
+          "answerable_wrong": 4,
+          "unanswerable_correct": 7,
+          "unanswerable_wrong": 1
+        },
+        "answerable_share": 0.8545,
+        "answerable_by": {
+          "span": 38,
+          "tokens": 9
+        },
+        "unanswerable_correct_ids": [
+          "ceb54acb",
+          "58470ed2",
+          "1d4da289",
+          "41275add",
+          "4388e9dd",
+          "16c90bf4",
+          "65240037"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 51,
+          "untestable": 1,
+          "supported": 40,
+          "unsupported": 7,
+          "spanning": 3,
+          "supported_share": 0.8,
+          "unsupported_ids": [
+            "ceb54acb",
+            "58470ed2",
+            "1d4da289",
+            "41275add",
+            "4388e9dd",
+            "16c90bf4",
+            "65240037"
+          ],
+          "spanning_ids": [
+            "8cf51dda",
+            "a40e080f",
+            "4baee567"
+          ]
+        }
+      },
+      "rag": {
+        "n": 56,
+        "n_testable": 55,
+        "untestable_reasons": {
+          "trivial_gold": 1
+        },
+        "n_unjudged": 0,
+        "n_partial": 0,
+        "cells": {
+          "answerable_correct": 44,
+          "answerable_wrong": 3,
+          "unanswerable_correct": 6,
+          "unanswerable_wrong": 2
+        },
+        "answerable_share": 0.8545,
+        "answerable_by": {
+          "span": 38,
+          "tokens": 9
+        },
+        "unanswerable_correct_ids": [
+          "ceb54acb",
+          "58470ed2",
+          "1d4da289",
+          "4388e9dd",
+          "16c90bf4",
+          "65240037"
+        ],
+        "red_flag_leak_explained": 0,
+        "pathway": {
+          "n_correct": 51,
+          "untestable": 1,
+          "supported": 41,
+          "unsupported": 6,
+          "spanning": 3,
+          "supported_share": 0.82,
+          "unsupported_ids": [
+            "ceb54acb",
+            "58470ed2",
+            "1d4da289",
+            "4388e9dd",
+            "16c90bf4",
+            "65240037"
+          ],
+          "spanning_ids": [
+            "8cf51dda",
+            "a40e080f",
+            "4baee567"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -31,8 +31,11 @@ export function reVerifyBadge(f) {
 }
 
 export function originBadge(origin) {
+  // "assistant" is a real tier (the floor), not an unknown value: falling it
+  // back to the agent class rendered a weaker origin in a stronger tier's
+  // styling, which is the one thing a provenance badge must not do.
   const o = String(origin || "agent").toLowerCase();
-  const cls = ["user", "action", "agent"].includes(o) ? o : "agent";
+  const cls = ["user", "action", "agent", "assistant"].includes(o) ? o : "agent";
   return el("span", { class: `badge ${cls}`, title: `provenance tier: ${o}` }, o);
 }
 
