@@ -316,6 +316,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
 .badge.user { color:var(--c-world); border-color:color-mix(in srgb,var(--c-world) 40%,transparent); }
 .badge.action { color:var(--c-graph); border-color:color-mix(in srgb,var(--c-graph) 40%,transparent); }
 .badge.agent { color:var(--ink-2); }
+.badge.assistant { color:var(--ink-3); }  /* floor tier: dimmer than agent */
 .badge.pos { color:var(--c-world); border-color:color-mix(in srgb,var(--c-world) 40%,transparent); }
 .badge.neg { color:var(--c-danger); border-color:color-mix(in srgb,var(--c-danger) 40%,transparent); }
 .badge.contested { color:var(--c-warn); border-color:color-mix(in srgb,var(--c-warn) 45%,transparent); background:color-mix(in srgb,var(--c-warn) 12%,transparent); }
@@ -388,7 +389,7 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 .reveal:nth-child(4){animation-delay:.15s} .reveal:nth-child(5){animation-delay:.2s}
 .reveal:nth-child(6){animation-delay:.25s}
 @keyframes reveal { from { opacity:0; transform:translateY(10px); } }
-@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.001ms !important; transition-duration:.001ms !important; } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; } }
 
 /* Icons (CSS-drawn, no assets) */
 .ico-theme,.ico-key,.ico-refresh { width:15px; height:15px; display:inline-block; background:currentColor;

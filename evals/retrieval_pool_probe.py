@@ -38,12 +38,15 @@ Why not the LongMemEval banks
 ``evals/results/banks/`` is gitignored and absent from a fresh worktree,
 and none of its dumps can replay this path anyway: ``dump_bank`` persists
 CORTEX FACTS only (``source_entries`` stripped), which reconstructs
-``cortex_search`` but not ``cms.retrieve``. The one band-state dump
-(``band_ablation.py`` replay, ``banks/s-qwen-27b-ablbands-flat``) carries
-384-d embeddings from the retired MiniLM backbone and no gold-turn labels,
-so it cannot be scored for recall against today's embedder either. The
-synthetic corpus is the honest fallback, and it is small (10 gold queries
-over 26 turns) — read the numbers as direction, not magnitude.
+``cortex_search`` but not ``cms.retrieve``. The band-state dumps
+(``band_ablation.py`` replay) carry no gold-turn labels — those live in
+the LongMemEval dataset — so they cannot be scored for recall either.
+Only their turn TEXT is borrowed here, as a realistic haystack, and it is
+re-encoded with the current backbone; the dumps' own vectors are never
+read, which is why the choice of replay does not move these numbers (see
+``bank_dumps.haystack_digest``). The synthetic corpus is the honest
+fallback, and it is small (10 gold queries over 26 turns) — read the
+numbers as direction, not magnitude.
 
 No GPU, no Postgres, no judge, no network. Writes its artifact by default.
 
@@ -69,43 +72,22 @@ from pathlib import Path  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))      # repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
 
+from bank_dumps import (  # noqa: E402
+    BANKS_ROOT, digest_texts, haystack_texts, resolve_dump_dir,
+)
 from ladder_sweep import DISTRACTORS, PAIRS, value_present  # noqa: E402
 
 TOP_K = 6
 MULTIPLIERS = (1, 4)
 FUSIONS = ("weighted_sum", "rrf")
-# Real conversational turns to bury the gold in. These are the band-state
-# dumps band_ablation.py writes; only their TEXT is used (their 384-d
-# embeddings are from the retired MiniLM backbone and are re-encoded here
-# with the current one). Gitignored, so a worktree has to copy the
-# directory from the main checkout — absent, the probe runs synthetic-only
-# and says so in the artifact.
-HAYSTACK_DIR = Path("evals/results/banks/s-qwen-27b-ablbands-flat")
+# Real conversational turns to bury the gold in, from the band-state dumps
+# band_ablation.py writes. Resolved by content, never by name — the tree
+# can hold several replays under names differing by a machine-local
+# suffix. Only their TEXT is used (re-encoded with the current backbone),
+# so the resolved replay's own dimension is irrelevant here. Gitignored,
+# so a worktree has to copy or link the directory from the main checkout;
+# absent, the probe runs synthetic-only and says so in the artifact.
 HAYSTACK_N = 400
-
-
-def _haystack(root: Path, want: int) -> list[str]:
-    """Background turns from the band-state dumps, oldest-file-first and
-    de-duplicated, so the ladder's gold statements sit in a bank of
-    realistic size instead of a 26-entry toy."""
-    import gzip
-
-    if want <= 0 or not root.is_dir():
-        return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for path in sorted(root.glob("*.json.gz")):
-        with gzip.open(path, "rt", encoding="utf-8") as fh:
-            dump = json.load(fh)
-        for band in dump.get("bands", []):
-            for entry in band.get("entries", []):
-                text = (entry.get("text") or "").strip()
-                if text and text not in seen:
-                    seen.add(text)
-                    out.append(text)
-                    if len(out) >= want:
-                        return out
-    return out
 
 
 def _build_corpus(haystack: list[str]) -> list[str]:
@@ -186,26 +168,40 @@ def main() -> int:
     ap.add_argument("--haystack", type=int, default=HAYSTACK_N,
                     help="background turns to bury the gold in (0 = the "
                          "26-entry synthetic corpus alone)")
-    ap.add_argument("--haystack-dir", default=str(HAYSTACK_DIR),
-                    help="band-state dump directory, repo-relative")
+    ap.add_argument("--haystack-dir", default=None,
+                    help="band-state dump directory, repo-relative "
+                         "(default: resolved by content)")
     args = ap.parse_args()
 
     repo = Path(__file__).resolve().parents[1]
     out = Path(args.out) if args.out else (
         repo / "evals" / "results"
         / f"retrieval-pool-probe-{date.today():%Y%m%d}.json")
-    hay_dir = Path(args.haystack_dir)
-    if not hay_dir.is_absolute():
+    hay_dir = Path(args.haystack_dir) if args.haystack_dir else None
+    if hay_dir is not None and not hay_dir.is_absolute():
         hay_dir = repo / hay_dir
+    # required=False: this probe is designed to run without the dumps.
+    #
+    # The default resolution is the STRICT one (1024-d v25, flat, no
+    # eviction) even though this probe reads text only and would be happy
+    # with any flat replay. Deliberate: relaxing the dimension makes two
+    # directories on this tree equally valid, which is a refusal, which
+    # would silently drop the probe to its synthetic corpus. One
+    # identified corpus beats a tie broken by sort order. A tree that
+    # carries only the retired replay names it with --haystack-dir; the
+    # text is identical either way (bank_dumps.haystack_digest).
+    hay_dir = resolve_dump_dir(hay_dir, required=False)
 
     from pseudolife_memory.memory.embedding import EmbeddingPipeline
     from pseudolife_memory.utils.config import EmbeddingConfig
     embedder = EmbeddingPipeline(EmbeddingConfig(device="cpu"))
     dim = embedder.embedding_dim
 
-    haystack = _haystack(hay_dir, args.haystack)
+    haystack = haystack_texts(hay_dir, args.haystack) if hay_dir else []
     if args.haystack and not haystack:
-        print(f"no band-state dumps under {hay_dir} — synthetic corpus only",
+        where = hay_dir if hay_dir is not None else (
+            f"none resolved under {BANKS_ROOT}")
+        print(f"no band-state dumps: {where} — synthetic corpus only",
               file=sys.stderr)
     texts = _build_corpus(haystack)
     print(f"encoding {len(texts)} turns + {len(PAIRS)} queries…",
@@ -260,8 +256,10 @@ def main() -> int:
             "went against them and they ship OFF."),
         "corpus": {
             "source": "evals/ladder_sweep.py PAIRS + DISTRACTORS",
-            "haystack_source": (str(hay_dir.relative_to(repo))
-                                if haystack else None),
+            # Directory NAME, not a path: an absolute one would carry a
+            # home directory into a tracked artifact.
+            "haystack_source": hay_dir.name if haystack else None,
+            "haystack_digest": digest_texts(haystack),
             "haystack_turns": len(haystack),
             "entries": len(texts),
             "questions": len(PAIRS),
@@ -272,8 +270,10 @@ def main() -> int:
                 "(band_ablation.py replay) carry no gold-turn labels — the "
                 "has_answer markers live in the LongMemEval dataset, not in "
                 "the dump. Their TURN TEXT is reused here as a realistic "
-                "haystack, re-encoded with the current backbone; their own "
-                "384-d MiniLM vectors are not used."),
+                "haystack, re-encoded with the current backbone; the dumps' "
+                "own vectors are never read, so which replay supplied the "
+                "text cannot move these numbers — haystack_digest above "
+                "identifies the text itself."),
         },
         "embedder": {"dim": dim, "model": EmbeddingConfig().model_name},
         "top_k": TOP_K,

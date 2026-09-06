@@ -31,6 +31,10 @@ GALAXY_JS = (
     Path(__file__).resolve().parent.parent
     / "pseudolife_memory" / "web" / "static" / "js" / "galaxy.js"
 )
+STYLES_CSS = (
+    Path(__file__).resolve().parent.parent
+    / "pseudolife_memory" / "web" / "static" / "css" / "styles.css"
+)
 
 
 def _extract_call_arg(source: str, call_name: str) -> str:
@@ -142,3 +146,66 @@ def test_devserver_fixture_bank_carries_markup_shaped_entity_name():
         "the XSS-probe entity has no edge — it would render off-screen and "
         "never come up in a normal dev-server eyeball check."
     )
+
+
+def test_reduced_motion_does_not_repeat_shortened_animations_forever():
+    src = STYLES_CSS.read_text(encoding="utf-8")
+    reduced = src[src.index("@media (prefers-reduced-motion:reduce)"):]
+    rule = reduced[:reduced.index("}")]
+    assert "animation-iteration-count:1 !important" in rule, (
+        "shortening an infinite animation to .001ms creates rapid flicker; "
+        "reduced motion must also limit its iteration count")
+
+
+def test_reduced_motion_keeps_the_scrubber_replay_a_no_op():
+    """`prefers-reduced-motion` means no scrubber auto-play — both 2026-07-15
+    design docs say so (atlas-wiki-galaxy-design.md: "no play-animation";
+    atlas-stage3-scrubber-review.md: "no scrubber auto-play"). The play
+    handler must keep its early return; making the button do something under
+    reduced motion is a spec change, not a fix."""
+    src = GALAXY_JS.read_text(encoding="utf-8")
+    play = src.index('class: "scrub-play"')
+    handler = src[play : play + 400]
+    assert "if (reduce) return" in handler, (
+        "the scrubber replay must stay a no-op under reduced motion; hide or "
+        "disable the control instead if the enabled look is the complaint"
+    )
+
+
+def test_scrubber_play_button_title_tracks_its_aria_label():
+    """The tooltip and the accessible name must agree in both states."""
+    src = GALAXY_JS.read_text(encoding="utf-8")
+    for state in ("replay growth", "pause growth replay"):
+        assert f'playBtn.title = "{state}"' in src or f'title: "{state}"' in src, state
+        assert f'setAttribute("aria-label", "{state}")' in src or f'"aria-label": "{state}"' in src, state
+# ── views/cortex.js: contested-slot rendering and the resolve refusal ────
+#
+# Same no-harness situation as galaxy.js above. The 2026-09-05 fix made the
+# real fact dump carry ``contested``; the view's half of it — one contender
+# block per SLOT (a set slot arrives as one row per member) keyed the way
+# the store keys slots, and treating a 200 whose body says
+# ``resolved: false`` as the refusal it is instead of toasting "Contender
+# adopted" — has no other test.
+
+CORTEX_VIEW_JS = GALAXY_JS.parent / "views" / "cortex.js"
+
+
+def test_cortex_view_checks_resolved_before_toasting_success():
+    src = CORTEX_VIEW_JS.read_text(encoding="utf-8")
+    body = src[src.index("async function resolve("):]
+    body = body[:body.index("\n}\n")]
+    assert "res.resolved === false" in body
+    # The refusal branch returns before the success toast.
+    assert body.index("res.resolved === false") < body.index("Contender adopted")
+    assert "slot_holds_set" in body and "no_contender" in body
+
+
+def test_cortex_view_renders_one_contender_block_per_slot():
+    src = CORTEX_VIEW_JS.read_text(encoding="utf-8")
+    # The slot key mirrors cortex.py `_norm_key`: casefold + separator runs
+    # collapsed to one hyphen — so two member rows spelling the attribute
+    # differently still resolve to one slot.
+    assert "function slotKey(" in src
+    assert '.toLowerCase().replace(/[\\s._\\-\\/]+/g, "-")' in src
+    assert "shown.has(slotKey(f.attribute))" in src
+    assert "map((f) => slotKey(f.attribute))).size" in src

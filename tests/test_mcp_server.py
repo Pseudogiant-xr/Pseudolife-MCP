@@ -366,6 +366,45 @@ def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
         "slot holds a set; use memory_set_add / memory_set_remove")
 
 
+def test_memory_fact_resolve_dismisses_a_set_slot_contender_via_mcp(
+        tmp_path: Path, monkeypatch) -> None:
+    """A contender parked against a slot that later became a set can be
+    DISMISSED through the tool (accept=false) but not adopted (accept=true):
+    a scalar contender cannot replace a member set, while retiring it
+    touches no members. Before 2026-09-05 both calls returned
+    ``slot_holds_set`` and the contender could never leave the queue."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_fact_set", {"entity": "user", "attribute": "bikes owned",
+                                "value": "road bike", "origin": "user"})
+    parked = _invoke("memory_fact_set", {
+        "entity": "user", "attribute": "bikes owned",
+        "value": "gravel bike", "origin": "agent"})
+    assert parked["action"] == "contested"
+    _invoke("memory_set_add", {"entity": "user", "attribute": "bikes owned",
+                               "member": "hybrid bike"})
+
+    refused = _invoke("memory_fact_resolve", {
+        "entity": "user", "attribute": "bikes owned", "accept": True})
+    assert refused == {"resolved": False, "reason": "slot_holds_set",
+                       "entity": "user", "attribute": "bikes owned"}
+
+    dismissed = _invoke("memory_fact_resolve", {
+        "entity": "user", "attribute": "bikes owned", "accept": False})
+    assert dismissed["resolved"] is True and dismissed["accepted"] is False
+    assert dismissed["record"]["value"] == "gravel bike"
+
+    got = _invoke("memory_fact_get", {"entity": "user",
+                                      "attribute": "bikes owned"})
+    assert got["record"]["kind"] == "set"
+    assert sorted(m["value"] for m in got["record"]["members"]) == [
+        "hybrid bike", "road bike"]
+    assert not got.get("contenders")
+
+
 def test_memory_fact_get_on_a_fully_emptied_set_slot_reads_as_empty(
         tmp_path: Path, monkeypatch) -> None:
     """Task 5 review finding: cortex_lookup's set shape stays a truthy dict
@@ -1135,3 +1174,144 @@ def test_transport_security_policy_is_explicit_not_inherited():
     finally:
         mcp_server.mcp.streamable_http_app = orig_app
         mcp_server._TRANSPORT_SECURITY = prior
+
+
+# ---------------------------------------------------------------------------
+# memory_outcome(used_ids=...) — the relevance label an agent writes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value,ids,ignored", [
+    # The declared shape.
+    ([12, 34], [12, 34], 0),
+    # Claude Code stringifies list params (reconfirmed 2026-07-19 on the
+    # stdio shim): both the JSON and the bare-CSV renderings must land.
+    ("[12, 34]", [12, 34], 0),
+    ("12,34", [12, 34], 0),
+    ("12 34", [12, 34], 0),
+    (["12", "34"], [12, 34], 0),
+    (12, [12], 0),
+    ("12", [12], 0),
+    # Partial garbage: keep the ids, count what was dropped.
+    ("[12, oops]", [12], 1),
+    ([12, "oops", None], [12], 2),
+    # Order-preserving dedup — a doubled id is one label, not two.
+    ([12, 12, 34], [12, 34], 0),
+    # Nothing usable.
+    ("oops", [], 1),
+    ("", [], 0),
+    ([], [], 0),
+    # A value that is not a list of ids at all is one ignored token, the
+    # same as it would be inside a list.
+    ({"a": 1}, [], 1),
+    (None, [], 0),
+])
+def test_parse_used_ids_accepts_every_client_rendering(value, ids, ignored):
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+
+    # Nothing here is anywhere near USED_IDS_CAP, so truncated is always 0.
+    assert mcp_server._parse_used_ids(value) == (ids, ignored, 0)
+
+
+def test_memory_outcome_forwards_parsed_used_ids(tmp_path: Path,
+                                                 monkeypatch) -> None:
+    """The tool parses, the service labels: a stringified list still reaches
+    ``record_outcome`` as ids, and the dropped-token count is reported."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    seen: dict = {}
+
+    def _fake(task, outcome, **kw):
+        seen.update(kw, task=task, outcome=outcome)
+        return {"recorded": True, "signal_id": 1, "used_ids_recorded": 2}
+
+    monkeypatch.setattr(mod.service, "record_outcome", _fake)
+    out = _invoke("memory_outcome", {"task": "t", "outcome": "success",
+                                     "used_ids": "12, 34, oops"})
+    assert seen["used_ids"] == [12, 34]
+    assert out["used_ids_recorded"] == 2
+    assert out["used_ids_ignored"] == 1
+
+
+def test_memory_outcome_unusable_used_ids_still_records_the_outcome(
+        tmp_path: Path, monkeypatch) -> None:
+    """Refuse the label, never the signal: garbage in ``used_ids`` is
+    reported as a reason and the outcome is still logged."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    seen: dict = {}
+
+    def _fake(task, outcome, **kw):
+        seen.update(kw)
+        return {"recorded": True, "signal_id": 1}
+
+    monkeypatch.setattr(mod.service, "record_outcome", _fake)
+    out = _invoke("memory_outcome", {"task": "t", "outcome": "success",
+                                     "used_ids": "nope"})
+    assert seen["used_ids"] is None
+    assert out["recorded"] is True
+    assert out["used_ids_reason"] == "no usable entry ids"
+    assert out["used_ids_ignored"] == 1
+
+
+def test_parse_used_ids_caps_a_runaway_list() -> None:
+    """The field is typed by a model, so its LENGTH gets the same distrust
+    as its contents: 5,000 ids would be 5,000 storage round trips under the
+    service lock, and the whole junk list echoed back as unmatched. Ids past
+    the cap are dropped and the drop is reported, never silent."""
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+
+    cap = mcp_server.USED_IDS_CAP
+    ids, ignored, truncated = mcp_server._parse_used_ids(list(range(1, 5001)))
+    assert ids == list(range(1, cap + 1))
+    assert (ignored, truncated) == (0, 5000 - cap)
+
+    # Same for the stringified rendering a client actually sends.
+    csv = ",".join(str(i) for i in range(1, 5001))
+    ids, ignored, truncated = mcp_server._parse_used_ids(csv)
+    assert ids == list(range(1, cap + 1))
+    assert (ignored, truncated) == (0, 5000 - cap)
+
+    # A list at the cap is untouched and reports no truncation.
+    assert mcp_server._parse_used_ids(list(range(1, cap + 1))) == (
+        list(range(1, cap + 1)), 0, 0)
+
+
+def test_parse_used_ids_caps_after_dedup() -> None:
+    """The cap counts distinct ids, not tokens: a doubled list of cap ids is
+    cap labels and nothing dropped."""
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+
+    cap = mcp_server.USED_IDS_CAP
+    doubled = list(range(1, cap + 1)) * 2
+    assert mcp_server._parse_used_ids(doubled) == (
+        list(range(1, cap + 1)), 0, 0)
+
+
+def test_parse_used_ids_counts_an_unusable_top_level_value() -> None:
+    """``1.0`` and ``[1.0]`` are the same mistake and must report the same
+    way — the scalar branch used to drop it uncounted."""
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+
+    assert mcp_server._parse_used_ids(1.0) == ([], 1, 0)
+    assert mcp_server._parse_used_ids([1.0]) == ([], 1, 0)
+
+
+def test_memory_outcome_reports_the_truncated_tail(tmp_path: Path,
+                                                   monkeypatch) -> None:
+    """A capped list says so, and a list inside the cap says nothing."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    seen: dict = {}
+
+    def _fake(task, outcome, **kw):
+        seen.update(kw)
+        return {"recorded": True, "signal_id": 1}
+
+    monkeypatch.setattr(mod.service, "record_outcome", _fake)
+    out = _invoke("memory_outcome", {"task": "t", "outcome": "success",
+                                     "used_ids": list(range(1, 5001))})
+    assert len(seen["used_ids"]) == mod.USED_IDS_CAP
+    assert out["used_ids_truncated"] == 5000 - mod.USED_IDS_CAP
+    assert "used_ids_reason" not in out
+
+    out = _invoke("memory_outcome", {"task": "t", "outcome": "success",
+                                     "used_ids": [12, 34]})
+    assert "used_ids_truncated" not in out

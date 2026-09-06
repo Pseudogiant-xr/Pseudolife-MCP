@@ -643,6 +643,24 @@ def test_api_post_with_body_requires_json_content_type(svc):
     assert st == 415
 
 
+def test_facts_resolve_forwards_both_directions(svc):
+    """Wiring only (``FixtureService.cortex_resolve`` is a stub, so the
+    behaviour itself is pinned in tests/test_cortex_sets.py): the Console's
+    Discard button is the operator's path for dismissing a contender parked
+    against a set-valued slot, so the route must forward ``accept`` in both
+    directions rather than defaulting it away."""
+    app = _app(svc)
+    for accept in (True, False):
+        st, body = call(app, "POST", "/api/facts/resolve",
+                         headers=[(b"host", b"127.0.0.1"),
+                                  (b"content-type", b"application/json")],
+                         body=json.dumps({"entity": "user",
+                                          "attribute": "bikes owned",
+                                          "accept": accept}).encode())
+        assert st == 200
+        assert json.loads(body)["accepted"] is accept
+
+
 def test_facts_set_threads_freshness_class(svc):
     """The REST route is the documented fallback when an MCP client
     stringifies tool params, so it must be able to assert everything the tool
@@ -733,3 +751,25 @@ def test_curation_retired_route_passes_store_and_limit(svc):
     assert "entries" in out
 
 
+
+
+def test_fixture_set_slot_contender_counts_once_in_overview(svc):
+    """The devserver demo carries a set-valued slot with a parked contender
+    (2026-09-05) so the Cortex view's once-per-slot contender block is
+    eyeball-checkable without a real bank. Two member rows, one contender,
+    ONE contested slot in the overview — same slot-counting rule as the
+    real service (pinned there in tests/test_cortex_contenders.py)."""
+    rows = svc.cortex_dump()["entries"]
+    members = [r for r in rows if r.get("kind") == "member"]
+    assert len(members) >= 2
+    slots = {(r["entity"], r["attribute"]) for r in members}
+    assert len(slots) == 1
+    assert all(r["contested"] is True for r in members)
+    assert len({r["contender_value"] for r in members}) == 1
+    scalars = [r for r in rows if r["kind"] == "scalar"]
+    assert all("contender_value" not in r for r in scalars if not r["contested"])
+    contested_rows = [r for r in rows if r["contested"]]
+    contested_slots = {(r["entity"], r["attribute"]) for r in contested_rows}
+    assert len(contested_rows) == len(contested_slots) + len(members) - 1
+    ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
+    assert ov["counts"]["facts_contested"] == len(contested_slots)

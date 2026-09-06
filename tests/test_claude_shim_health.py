@@ -4,6 +4,7 @@ answers 503 so the daemon's fallback probe sees primary-down)."""
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import sys
 import time
@@ -17,6 +18,8 @@ spec = importlib.util.spec_from_file_location(
 shim = importlib.util.module_from_spec(spec)
 sys.modules["claude_shim"] = shim
 spec.loader.exec_module(shim)
+
+from pseudolife_memory.memory.dream import _SYSTEM_PROMPT  # noqa: E402
 
 
 def _cli(monkeypatch, chat_ok: bool):
@@ -263,3 +266,82 @@ def test_chat_completions_thread_reasoning_effort(monkeypatch):
     finally:
         srv.shutdown()
     assert seen["effort"] == "low"
+
+
+# ── --system-prompt-file misses are audible (2026-09-05 merge review) ─────
+#
+# The override applies only when the incoming system prompt starts with
+# `dream._SYSTEM_PROMPT`. On a miss it silently vanishes and the shipped
+# text goes to the model — which is exactly the shape of the bug that made
+# `sonnet_extractor_v4.md` necessary in the first place, seen from the other
+# side. A miss is NORMAL for the relations and lessons prompts (the override
+# targets claims extraction only), so the log line is deduped per distinct
+# prompt rather than fired per call.
+
+
+def _echo_cli(system_prompt):
+    """A ClaudeCli whose `_run` records the --system-prompt it was handed."""
+    seen = {}
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0,
+                         system_override="OVERRIDE BODY")
+
+    def fake_run(cmd, payload):
+        seen["system"] = (cmd[cmd.index("--system-prompt") + 1]
+                          if "--system-prompt" in cmd else None)
+        return 0, b'{"result": "ok"}', b""
+
+    cli._run = fake_run
+    return cli, seen, system_prompt
+
+
+def test_an_override_miss_is_logged_once_per_distinct_prompt(caplog):
+    cli, seen, prompt = _echo_cli("Extract the RELATIONS between entities.")
+    with caplog.at_level(logging.WARNING, logger="claude_shim"):
+        cli.chat(prompt, "notes")
+        cli.chat(prompt, "more notes")
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1, (
+        f"expected one deduped warning, got {[r.message for r in warnings]}")
+    assert "--system-prompt-file did not apply" in warnings[0].getMessage()
+    # No behaviour change: the prompt still goes through untouched.
+    assert seen["system"] == prompt
+
+
+def test_a_second_distinct_missed_prompt_warns_again(caplog):
+    cli, _, _ = _echo_cli("")
+    with caplog.at_level(logging.WARNING, logger="claude_shim"):
+        cli.chat("Extract the RELATIONS between entities.", "n")
+        cli.chat("Distil the LESSONS from these outcomes.", "n")
+    assert len([r for r in caplog.records
+                if r.levelno >= logging.WARNING]) == 2
+
+
+def test_an_applied_override_logs_nothing(caplog):
+    cli, seen, _ = _echo_cli("")
+    with caplog.at_level(logging.WARNING, logger="claude_shim"):
+        cli.chat(_SYSTEM_PROMPT + "\n\nvocab hint", "notes")
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+    assert seen["system"].startswith("OVERRIDE BODY")
+
+
+def test_no_override_configured_never_warns(caplog):
+    """The warning is about a configured override failing to land, not
+    about the ordinary no-override install."""
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0)
+    cli._run = lambda cmd, payload: (0, b'{"result": "ok"}', b"")
+    with caplog.at_level(logging.WARNING, logger="claude_shim"):
+        cli.chat("anything at all", "notes")
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+def test_the_health_probe_does_not_trip_the_override_warning(caplog):
+    """`_health_refresh` calls `chat("", ...)` on every /health cache miss,
+    and `main()` warms that cache before `serve_forever`. Warning on it put
+    the loudest, earliest and wrongest line at the top of every shim's log —
+    for a call that passes no system prompt at all."""
+    cli, seen, _ = _echo_cli("")
+    with caplog.at_level(logging.WARNING, logger="claude_shim"):
+        cli.chat("", "Reply with exactly: OK")
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == [], (
+        "the empty health-probe prompt must not report an override miss")
+    assert seen["system"] is None      # nothing was passed to the CLI

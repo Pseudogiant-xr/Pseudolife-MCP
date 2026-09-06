@@ -152,9 +152,20 @@ def test_gated_off_capabilities_stay_out_of_console():
         # third to a half more context tokens (table in evals/README.md,
         # "Judged verdict (2026-09-04)"). A measured loser is a stronger
         # reason to keep a live retrieval-ranking switch off the Console
-        # than an unmeasured one, not a weaker one.
+        # than an unmeasured one, not a weaker one. The follow-up cells
+        # (2026-09-05) closed the last escape hatch: with the
+        # cross-encoder ON the wide pool recovers but does not win
+        # (+0.026 on rag at p 0.694, 27% more context), so "it would pay
+        # off with the reranker" is now measured and false, not open.
         "memory.search.candidate_pool_multiplier",
         "memory.search.fusion",
+        # Assistant-stated claims (2026-09-05). Live on the default path
+        # since the provenance prompt shipped, so no longer inert — and
+        # still off the Console, now for a stronger reason: `supersede` is
+        # the setting that lets model-stated content overwrite a
+        # user-stated fact. That is a provenance decision, not an operator
+        # dial.
+        "memory.dream.assistant_claims",
     ):
         assert path not in _BY_PATH, f"gated-off knob surfaced: {path}"
 

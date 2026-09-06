@@ -333,15 +333,24 @@ export async function createGalaxy(host, data, opts = {}) {
         poke();
       };
       function stopPlay() {
-        if (playing) { clearInterval(playing); playing = null; playBtn.textContent = "▶"; }
+        if (playing) clearInterval(playing);
+        playing = null;
+        playBtn.textContent = "▶";
+        playBtn.title = "replay growth";
+        playBtn.setAttribute("aria-label", "replay growth");
+        playBtn.setAttribute("aria-pressed", "false");
       }
       slider.oninput = () => { stopPlay(); apply(+slider.value); };
-      const playBtn = el("button", { class: "scrub-play", title: "replay growth",
-        "aria-label": "replay growth", onclick: () => {
+      const playBtn = el("button", { type: "button", class: "scrub-play",
+        title: "replay growth", "aria-label": "replay growth",
+        "aria-pressed": "false", onclick: () => {
           if (reduce) return;                      // no auto-animation
           if (playing) { stopPlay(); return; }
           let v = 0;
           playBtn.textContent = "❚❚";
+          playBtn.title = "pause growth replay";
+          playBtn.setAttribute("aria-label", "pause growth replay");
+          playBtn.setAttribute("aria-pressed", "true");
           playing = setInterval(() => {
             v += 12;
             if (v >= 1000) { v = 1000; stopPlay(); }
