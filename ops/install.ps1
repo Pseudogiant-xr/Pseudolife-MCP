@@ -472,7 +472,7 @@ if ($claudeShimMode) {
     try {
         & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort -Model $Model
     } catch {
-        Write-Warning "Shim autostart registration failed (usually elevation): $_"
+        Write-Warning "Shim autostart registration or start failed (registration: usually elevation): $_"
         Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-shim-autostart.ps1):"
         Write-Host "    ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model"
         Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v4.md"

@@ -42,7 +42,12 @@ param(
     [int]$Port = 8082,
     [string]$Model = "claude-opus-5",
     [string]$PromptFile = "evals\prompts\sonnet_extractor_v4.md",
-    [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\claude-shim.log"
+    [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\claude-shim.log",
+    # How long to wait for the started shim to bind the port. The shim warms
+    # its health cache with one real `claude -p` call BEFORE it binds, so a
+    # cold start is normally 10-30 s and a slow CLI login check can take
+    # longer; 90 s covers both with margin (2026-09-06 restart: 11 s).
+    [int]$StartupTimeoutSec = 90
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,7 +59,44 @@ if (-not $PythonExe) {
 }
 $promptPath = Join-Path $repo $PromptFile
 if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }
+# Absolute up front: the task's cmd.exe would otherwise resolve a relative
+# -LogFile against its WorkingDirectory ($repo) while the verification below
+# resolves it against this shell's location.
+$LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
+
+# Every process whose command line names claude_shim.py AND this --port. The
+# task launches a three-layer tree (cmd.exe running the `>> log` redirect ->
+# the .venv python.exe launcher -> the base interpreter that owns the socket)
+# and no layer's death propagates to the others, so the whole set is what
+# "the running shim" means here. Keyed on the port too: an A/B shim serving
+# another port from the same script must survive an install.
+function Get-ShimProcess {
+    param([int]$ShimPort)
+    $pattern = "claude_shim\.py.*--port\s+$ShimPort(\s|$)"
+    @(Get-CimInstance Win32_Process -ErrorAction Stop |
+        Where-Object { $_.CommandLine -and ($_.CommandLine -match $pattern) })
+}
+function Get-PortListener {
+    param([int]$ShimPort)
+    Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+}
+# Lines the shim appended to its log after byte offset $Offset. Opened with
+# FileShare ReadWrite so the running shim's own handle is undisturbed.
+function Read-LogSince {
+    param([string]$Path, [long]$Offset)
+    if (-not (Test-Path -LiteralPath $Path)) { return @() }
+    $full = (Resolve-Path -LiteralPath $Path).ProviderPath   # .NET resolves relative to its own cwd
+    $fs = [IO.File]::Open($full, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                          [IO.FileShare]::ReadWrite)
+    try {
+        if ($Offset -gt $fs.Length) { $Offset = 0 }   # log was rotated/truncated
+        $fs.Seek($Offset, [IO.SeekOrigin]::Begin) | Out-Null
+        $reader = New-Object IO.StreamReader($fs)
+        @(($reader.ReadToEnd() -split "`r?`n") | Where-Object { $_ })
+    } finally { $fs.Dispose() }
+}
 
 $taskName = "Pseudolife Claude Shim"
 $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
@@ -114,8 +156,84 @@ if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) 
            "app (its next update then fails to launch until a reboot - " +
            "anthropics/claude-code#61635).")
 }
+
+# Stop the shim that is already serving this port BEFORE starting the task.
+# Re-registering over a live shim used to "succeed" while the old instance
+# kept the port (2026-09-06, v2 -> v4 prompt cutover): on Windows a second
+# http.server listener BINDS beside the first (allow_reuse_address is
+# SO_REUSEADDR, which shares a port in LISTEN), so the new interpreter never
+# hit an error to log, and its startup lines were then overwritten by the old
+# shim's next log write (two `cmd >> log` opens keep independent file
+# pointers). Both probed 2026-09-07. This runs only after registration
+# succeeded: stopping the live shim and then failing to register would leave
+# the box with no extractor at all.
+$stale = @(Get-ShimProcess -ShimPort $Port)
+if ($stale.Count -gt 0) {
+    $pids = ($stale | ForEach-Object { "$($_.ProcessId) $($_.Name)" }) -join ", "
+    Write-Host "Stopping the running claude_shim.py instance on port $Port ($pids) so the new task instance can take the port..."
+    foreach ($p in $stale) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline -and
+           (((Get-ShimProcess -ShimPort $Port).Count -gt 0) -or (Get-PortListener -ShimPort $Port))) {
+        Start-Sleep -Milliseconds 500
+    }
+    $left = @(Get-ShimProcess -ShimPort $Port)
+    if ($left.Count -gt 0) {
+        throw ("could not stop the running shim (pid " +
+               (($left | ForEach-Object ProcessId) -join ", ") + ") - stop it and re-run.")
+    }
+}
+$holder = Get-PortListener -ShimPort $Port
+if ($holder) {
+    $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($holder.OwningProcess)" -ErrorAction SilentlyContinue
+    if ($owner -and $owner.CommandLine -match 'claude_shim\.py') {
+        # Launched by hand with a spelling the kill set does not parse
+        # (--port=N, or the flag omitted for the default port).
+        throw ("port $Port is held by a claude_shim.py this installer could not match by --port " +
+               "(pid $($holder.OwningProcess)) - stop that process and re-run.")
+    }
+    throw ("port $Port is held by pid $($holder.OwningProcess) ($($owner.Name)), which is not " +
+           "a claude_shim.py instance - free the port (or pick another with -Port) and re-run. " +
+           "The task would not fail to bind beside it; it would just never receive the traffic.")
+}
+
+$logOffset = (Test-Path $LogFile) ? (Get-Item $LogFile).Length : 0
 Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-Write-Host "Registered + started '$taskName' ($Model, port $Port, log $LogFile)."
+Write-Host "Started '$taskName'; waiting up to ${StartupTimeoutSec}s for the shim to bind 127.0.0.1:$Port (health warm-up is one real CLI call)..."
+# Affirmative verification: a listener on the port OWNED BY a claude_shim.py
+# process. "The task ran" (LastTaskResult 0) only means the spawner exited.
+$listener = $null
+$deadline = (Get-Date).AddSeconds($StartupTimeoutSec)
+while (-not $listener -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds 2
+    $candidate = Get-PortListener -ShimPort $Port
+    if ($candidate) {
+        $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
+        if ($owner -and $owner.CommandLine -match 'claude_shim\.py') { $listener = $candidate }
+    }
+}
+$newLines = @(Read-LogSince -Path $LogFile -Offset $logOffset)
+if (-not $listener) {
+    $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+    $tail = if ($newLines.Count -gt 0) { $newLines -join "`n" } else {
+        "(none - nothing reached $LogFile; check the CLI login with: claude -p hi)" }
+    throw ("shim did not bind 127.0.0.1:$Port within ${StartupTimeoutSec}s " +
+           "(task LastTaskResult $($info.LastTaskResult)). New log lines:`n$tail")
+}
+# The "serving" line is printed right after the bind; allow the flush a moment.
+$settle = (Get-Date).AddSeconds(5)
+while (-not @($newLines -match 'serving .* on ').Count -and (Get-Date) -lt $settle) {
+    Start-Sleep -Milliseconds 500
+    $newLines = @(Read-LogSince -Path $LogFile -Offset $logOffset)
+}
+$startup = @($newLines | Where-Object {
+    $_ -match 'system prompt override from|serving .* on |health warm|Traceback|Error' })
+if ($startup.Count -eq 0) {
+    Write-Warning "the shim is listening (pid $($listener.OwningProcess)) but wrote no startup lines to $LogFile - the log redirect may be broken."
+} else {
+    foreach ($line in $startup) { Write-Host "  log: $line" }
+}
+Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), log $LogFile)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"

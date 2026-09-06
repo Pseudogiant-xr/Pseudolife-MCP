@@ -442,3 +442,26 @@ def test_chat_completions_thread_reasoning_effort(monkeypatch):
     finally:
         srv.shutdown()
     assert seen["effort"] == "low"
+
+
+# --- bind semantics -------------------------------------------------------
+
+def test_server_refuses_to_bind_beside_a_running_shim():
+    """Mirror of the claude_shim pin: ``allow_reuse_address`` (SO_REUSEADDR)
+    lets a second socket bind a port already in LISTEN on Windows, so a
+    duplicate shim used to start "successfully", serve nothing and log no
+    error (2026-09-06 re-install over the live Claude shim; probed
+    2026-09-07). A second bind must raise on every platform."""
+    first = shim.ShimHTTPServer(("127.0.0.1", 0), shim.BaseHTTPRequestHandler)
+    port = first.server_address[1]
+    try:
+        with pytest.raises(OSError):
+            shim.ShimHTTPServer(("127.0.0.1", port), shim.BaseHTTPRequestHandler)
+    finally:
+        first.server_close()
+
+
+def test_reuse_address_is_dropped_only_on_windows():
+    assert shim.ShimHTTPServer.allow_reuse_address is (os.name != "nt")
+    src = Path(shim.__file__).read_text(encoding="utf-8")
+    assert "ShimHTTPServer((args.host, args.port)" in src
