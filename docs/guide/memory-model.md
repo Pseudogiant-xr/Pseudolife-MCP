@@ -359,11 +359,16 @@ stated totals — `evals/results/c2op-gate-verdict.json`), and the count
 rule is what repaired it — the gated run landed the commit-gated cascade
 exactly at the op-less control while genuine sets still formed
 (`evals/results/c2op-count-verdict.json`, with sidecar-adoption and
-ladder-rung validation in the same artifact). The shipped prompt is
-byte-pinned to the measured artifact
-(`evals/prompts/ku_op_prompt_v10_stance_update.txt`, pinned by
-`test_op_prompt_artifact.py`); the op block was introduced at v5 and the
-pin has since moved through the v10 update-anchored stance revision.
+ladder-rung validation in the same artifact). The base of the shipped
+prompt is byte-pinned to the measured artifact
+(`evals/prompts/ku_op_prompt_v12_count_source_example.txt`, pinned by
+`test_op_prompt_artifact.py`; the shipped prompt itself — that base plus
+the assistant-facts blocks — is pinned to
+`evals/prompts/assistant_facts_provenance.txt` by
+`test_assistant_provenance.py`); the op block was introduced at v5 and the
+pin has since moved through the v10 update-anchored stance revision to
+the v12 example re-cut of 2026-09-07, which replaced the two worked
+examples that had been paraphrased from the benchmark corpus.
 The aggregate-conversion guard (see [Conversion rules](#conversion-rules)
 above) remains the apply-time backstop: an `op:"add"` that does land on a
 stated-total scalar parks as a contender rather than converting, whether

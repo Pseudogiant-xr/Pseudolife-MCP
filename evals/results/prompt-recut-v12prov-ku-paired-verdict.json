@@ -1,0 +1,230 @@
+{
+  "what": "extraction-prompt example re-cut, paired same-window KU-oracle e2e: pre = shipped prompt, post = candidate; same extractor endpoint, answerer and judge",
+  "generated_at": "2026-09-07T02:30:55",
+  "pre_tag": "recut-v10prov",
+  "post_tag": "recut-v12prov",
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 78,
+  "noise_floor_rag_control": {
+    "identical_rag_context": "78/78",
+    "rag_disagreement": 0,
+    "flipped_qids": []
+  },
+  "comparisons": {
+    "rag": {
+      "accuracy": 0.8718,
+      "reference_accuracy": 0.8718,
+      "delta": 0.0,
+      "wins": 0,
+      "losses": 0,
+      "net": 0,
+      "p_mcnemar_exact": 1.0,
+      "exceeds_noise_floor": false
+    },
+    "cortex": {
+      "accuracy": 0.7436,
+      "reference_accuracy": 0.6923,
+      "delta": 0.0513,
+      "wins": 5,
+      "losses": 1,
+      "net": 4,
+      "p_mcnemar_exact": 0.2188,
+      "exceeds_noise_floor": true
+    },
+    "hybrid": {
+      "accuracy": 0.9359,
+      "reference_accuracy": 0.9103,
+      "delta": 0.0256,
+      "wins": 3,
+      "losses": 1,
+      "net": 2,
+      "p_mcnemar_exact": 0.625,
+      "exceeds_noise_floor": true
+    },
+    "cascade": {
+      "accuracy": 0.8718,
+      "reference_accuracy": 0.8718,
+      "delta": 0.0,
+      "wins": 2,
+      "losses": 2,
+      "net": 0,
+      "p_mcnemar_exact": 1.0,
+      "exceeds_noise_floor": false
+    }
+  },
+  "leave_out": {
+    "dropped": [
+      "affe2881",
+      "89941a94"
+    ],
+    "n": 76,
+    "comparisons": {
+      "rag": {
+        "accuracy": 0.8816,
+        "reference_accuracy": 0.8816,
+        "delta": 0.0,
+        "wins": 0,
+        "losses": 0,
+        "net": 0,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": false
+      },
+      "cortex": {
+        "accuracy": 0.7368,
+        "reference_accuracy": 0.6842,
+        "delta": 0.0526,
+        "wins": 5,
+        "losses": 1,
+        "net": 4,
+        "p_mcnemar_exact": 0.2188,
+        "exceeds_noise_floor": true
+      },
+      "hybrid": {
+        "accuracy": 0.9342,
+        "reference_accuracy": 0.9079,
+        "delta": 0.0263,
+        "wins": 3,
+        "losses": 1,
+        "net": 2,
+        "p_mcnemar_exact": 0.625,
+        "exceeds_noise_floor": true
+      },
+      "cascade": {
+        "accuracy": 0.8684,
+        "reference_accuracy": 0.8684,
+        "delta": 0.0,
+        "wins": 2,
+        "losses": 2,
+        "net": 0,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": false
+      }
+    }
+  },
+  "leave_out_extra": null,
+  "count_class": {
+    "digit_gold_n39": {
+      "cortex": {
+        "pre": 28,
+        "post": 30
+      },
+      "hybrid": {
+        "pre": 37,
+        "post": 37
+      },
+      "cascade": {
+        "pre": 35,
+        "post": 36
+      }
+    },
+    "spelled_gold_n12": {
+      "cortex": {
+        "pre": 11,
+        "post": 11
+      },
+      "hybrid": {
+        "pre": 12,
+        "post": 12
+      },
+      "cascade": {
+        "pre": 11,
+        "post": 11
+      }
+    }
+  },
+  "frozen_total": {
+    "01493427": {
+      "lifted_example_source": false,
+      "gold": "25",
+      "cortex_pre": true,
+      "cascade_pre": true,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    },
+    "41698283": {
+      "lifted_example_source": false,
+      "gold": "a 70-200mm zoom lens",
+      "cortex_pre": false,
+      "cascade_pre": true,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": false,
+        "post": false
+      }
+    },
+    "45dc21b6": {
+      "lifted_example_source": false,
+      "gold": "3",
+      "cortex_pre": false,
+      "cascade_pre": false,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": false,
+        "post": true
+      }
+    },
+    "4d6b87c8": {
+      "lifted_example_source": false,
+      "gold": "25",
+      "cortex_pre": true,
+      "cascade_pre": true,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    },
+    "5831f84d": {
+      "lifted_example_source": false,
+      "gold": "15",
+      "cortex_pre": false,
+      "cascade_pre": true,
+      "cortex_post": false,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    },
+    "a2f3aa27": {
+      "lifted_example_source": false,
+      "gold": 1300,
+      "cortex_pre": false,
+      "cascade_pre": false,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": false,
+        "post": true
+      }
+    },
+    "affe2881": {
+      "lifted_example_source": true,
+      "gold": "32",
+      "cortex_pre": true,
+      "cascade_pre": true,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    }
+  },
+  "frozen_total_losses_on_six": [],
+  "significant_regressions": [],
+  "checks": {
+    "no_arm_significantly_below_pre": true,
+    "rag_control_net_zero": true,
+    "six_frozen_totals_no_loss": true
+  },
+  "gate": "PASS"
+}

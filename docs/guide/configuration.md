@@ -211,7 +211,7 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   parks unbacked scalar claims as visible contenders with a
   `span:unbacked` marker, resolvable via `memory_fact_resolve`. Ships off
   because flipping it on requires the live extraction prompt to emit
-  quotes (the v10 prompt does not).
+  quotes (the live v12 prompt does not).
 - **Lesson-synthesis dedup on**
   (`memory.lessons.synthesis_dedup_min_similarity = 0.88`) — a synthesized
   lesson that near-matches an existing *current* lesson at a different key

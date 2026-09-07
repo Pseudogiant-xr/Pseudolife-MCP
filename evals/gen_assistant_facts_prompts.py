@@ -8,11 +8,12 @@ opposite sides of the shipped prompt and neither retypes anything:
 * ``assistant_facts_provenance.txt`` **is** ``dream._SYSTEM_PROMPT``,
   byte for byte. It is the measured artifact and the live prompt at once,
   so they cannot drift.
-* ``assistant_facts_naive.txt`` is the pre-2026-09-05 base
-  (``dream._BASE_SYSTEM_PROMPT``) plus the same instruction paragraph and
-  a worked example that carries no ``speaker`` field — the unguarded
-  comparison arm, kept because the guard's case rests on measuring
-  against it.
+* ``assistant_facts_naive.txt`` is the pre-2026-09-05 base — the v10
+  artifact ``ku_op_prompt_v10_stance_update.txt``, read from its file
+  rather than from ``dream.py`` since the live base moved to v12 on
+  2026-09-07 — plus the same instruction paragraph and a worked example
+  that carries no ``speaker`` field: the unguarded comparison arm, kept
+  as measured because the guard's case rests on measuring against it.
 
 ``tests/test_assistant_provenance.py`` pins both properties and
 regenerates the files byte-exactly; edit the blocks (in ``dream.py`` for
@@ -36,7 +37,6 @@ from pathlib import Path
 from pseudolife_memory.memory.dream import (
     _ASSISTANT_FACTS_INSTRUCTION,
     _ASSISTANT_PROVENANCE_EXAMPLE,
-    _BASE_SYSTEM_PROMPT,
     _SYSTEM_PROMPT,
 )
 
@@ -58,43 +58,43 @@ EXAMPLE_TOKENS = (
     "pepper-brisket bun",
 )
 
-# Proper nouns in the SHIPPED prompt's older worked examples, which predate
-# the invented-token rule above. `EXAMPLE_TOKENS` governs what a NEW example
-# may name; these are what the existing ones already do.
+# The invented names the v12 BASE's own worked examples carry (the
+# 2026-09-06 re-cut of the two examples that had been paraphrased from
+# LongMemEval turns; PR #279). Same contract as `EXAMPLE_TOKENS` — every
+# entry is grep-checked at zero occurrences in both dataset files and
+# must occur in the shipped prompt — but kept apart because the shim
+# prompt (`sonnet_extractor_v4.md`, v2 plus the shipped blocks) carries
+# the assistant-example tokens and NOT these: its v2 body still has the
+# pre-re-cut examples, see `gen_shim_prompt.py`. "Quillon Larder" is a
+# substring of the registered "The Quillon Larder"; the shipped-prompt scan
+# strips tokens longest-first, so the order here does not matter.
+BASE_EXAMPLE_TOKENS = (
+    "Gallowmere Teal",
+    "Kelmarsh Reserve",
+    "Quillon Larder",
+)
+
+# Proper nouns in the SHIPPED prompt's worked examples that predate the
+# invented-token rule. `EXAMPLE_TOKENS` / `BASE_EXAMPLE_TOKENS` govern what
+# a NEW example may name; this is what the remaining old one does.
 #
-# `_BASE_SYSTEM_PROMPT` carries three worked examples of its own (a deploy
-# runbook, a collection-membership example, a count-exclusion example), and
-# none of them was ever checked against the corpus. `sonnet_extractor_v2.md`
-# — and therefore v4, which is v2 plus the shipped blocks — carries the same
-# two names, so the shim path and the daemon path share the debt.
+# Until 2026-09-07 this set also held "Northern Flicker", the
+# count-exclusion example that paraphrased LongMemEval `affe2881`'s answer
+# turn and stated its gold ("32"); the v12 base re-cut it on invented
+# tokens, so it left the shipped prompt. The shim lineage (v2, and v4 = v2
+# plus the shipped blocks) still carries it — that debt is recorded in
+# `gen_shim_prompt.py`, beside the file that owns it.
 PRE_RULE_PROPER_NOUNS = frozenset({
-    "Northern Flicker",   # COUNTS, TOTALS, AND QUANTITIES example
     "Rosa's Diner",       # COLLECTION MEMBERSHIP example
 })
 
 # The subset of `PRE_RULE_PROPER_NOUNS` that ACTUALLY occurs in the measured
-# corpus, i.e. real contamination. Recorded 2026-09-05 by the merge review of
-# the shim-prompt gate; the guards treat this as an EQUALITY, so the debt can
-# neither grow nor rot into decoration.
-#
-# This is not a technicality. The count-exclusion example (shipped
-# 2026-08-01) reads "[5] saw a Northern Flicker today, that makes 32 species
-# at the park now" and yields the value "32". LongMemEval question
-# `affe2881` (knowledge-update) asks how many bird species the user has seen
-# in their local park; its gold answer is "32", and all 13 occurrences of
-# "Northern Flicker" in EACH dataset file sit inside that question's own
-# sessions. Every extraction run since — on every extractor, not only the
-# shim — had that example in the prompt.
-#
-# Re-cutting the example is a change to the shipped extraction prompt and
-# needs its own ladder gate; it is deliberately not done in the change that
-# recorded this.
-KNOWN_CORPUS_COLLISIONS = {
-    "Northern Flicker": (
-        "LongMemEval affe2881 (knowledge-update, gold '32'); the "
-        "count-exclusion example states the same number. Recorded "
-        "2026-09-05."),
-}
+# corpus, i.e. real contamination. The guards treat this as an EQUALITY, so
+# the debt can neither grow nor rot into decoration. Empty since
+# 2026-09-07: the one entry ("Northern Flicker", recorded 2026-09-05) was
+# paid by the v12 re-cut, and a listed collision that no longer hits fails
+# the guard in that direction too.
+KNOWN_CORPUS_COLLISIONS: dict[str, str] = {}
 
 NAIVE_EXAMPLE = (
     "Example. Notes: [7] assistant: For brunch in Marrowgate I'd suggest "
@@ -110,7 +110,13 @@ NAIVE_EXAMPLE = (
 # a copy of it: this is `dream._ASSISTANT_PROVENANCE_EXAMPLE`.
 PROVENANCE_EXAMPLE = _ASSISTANT_PROVENANCE_EXAMPLE
 
-NAIVE_TEXT = _BASE_SYSTEM_PROMPT + "\n" + INSTRUCTION + NAIVE_EXAMPLE
+# The naive arm is anchored to the v10 ARTIFACT, not to `_BASE_SYSTEM_PROMPT`:
+# it is the comparison arm of the 2026-09-05 gate and must stay exactly what
+# that gate measured. When the live base moved to v12 (2026-09-07) the file
+# did not change — which is the point.
+V10_BASE = (OUT / "ku_op_prompt_v10_stance_update.txt").read_text(
+    encoding="utf-8")
+NAIVE_TEXT = V10_BASE + "\n" + INSTRUCTION + NAIVE_EXAMPLE
 # The provenance variant is the shipped prompt itself. It carries the SAME
 # instruction plus the speaker rule, and one worked example of the same
 # scenario in which every claim names its speaker — the naive example is

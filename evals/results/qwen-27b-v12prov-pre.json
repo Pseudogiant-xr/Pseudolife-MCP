@@ -1,0 +1,27 @@
+{
+  "rung": "qwen-27b",
+  "label": "Qwen3.8-27B (4090)",
+  "kind": "llm",
+  "git_rev": "f5a15a7eed49c16f343835f501870704619adab2",
+  "base_url": "http://127.0.0.1:1234/v1",
+  "model": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
+  "bench_env": {
+    "dream": {
+      "assistant_claims": "contender"
+    }
+  },
+  "extract_seconds": 31.5,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 16,
+    "inserted": 16,
+    "superseded": 0,
+    "literal_flagged": 0,
+    "literal_dropped": 0
+  },
+  "gold_recoverable": 1.0,
+  "stale_leak": 0.0,
+  "tokens_per_query": 13.4,
+  "search_latency_ms": 52.5,
+  "status": "ok"
+}

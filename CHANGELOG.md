@@ -1215,6 +1215,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   168 h / 20 GB, run by default at the end of every `ops/update.*`) — see
   `docs/runbooks/incremental-builds.md`. Contributed by @blacksheep25
   (#270).
+### Added (2026-09-07 — the composite that ships, gated as a whole)
+- **Gate, shipped composite → new composite, same instrument and bars as
+  the v12 gate** (`prompt-recut-v12prov-ku-paired-verdict.json`; pre = the
+  shipped prompt of 2026-09-05, `assistant_facts_provenance.txt` at that
+  revision = v10 base + assistant-facts blocks; post = the regenerated file
+  = v12 base + the same blocks; reproducible Qwen3.8 q8_0, KV 32k, one
+  window, arms run back to back): rag control 0 flips on 78/78 identical
+  contexts; cortex 0.692 → 0.744 (5W/1L, p = 0.22); hybrid 0.910 → 0.936
+  (3W/1L, p = 0.625); cascade 0.872 → 0.872 (2W/2L, p = 1.0). Of the seven
+  frozen-total questions, cortex-correct 3 → 6 and cascade-correct 5 → 7,
+  with no loss on the six the rule was written for; digit-gold count class
+  cortex 28 → 30 and cascade 35 → 36; spelled-gold cortex 11 → 11.
+  Leave-out dropping the two lifted-example golds (n = 76): same direction
+  on every arm. **Gate PASS on all three checks.** The paired ladder on the
+  qwen-27b rung clears with no regression
+  (`ladder-v12prov-paired-verdict.json`: gold 1.0 / stale 0.0 both arms, 16
+  claims both, 13.4 → 14.2 tokens per query); the floor rung is identical
+  between arms and, as always, below the ladder bar (its pre and post files
+  are committed for the record, not gated). This is the gate that
+  authorises the flip below: the v12-alone gates in #279 measured the base
+  without the blocks that ship with it. Not run for the composite: the
+  op-probe battery (it takes named variants, and the composite is not one)
+  and the sidecar rung — the shipped-vs-v12 sidecar reading is #279's.
+
+### Changed (2026-09-07 — the v12 re-cut is the base of the live extraction prompt)
+- **`_BASE_SYSTEM_PROMPT` moved v10 → v12**
+  (`evals/prompts/ku_op_prompt_v12_count_source_example.txt`,
+  construction-pinned): the two worked examples paraphrased from
+  LongMemEval turns are gone from the live prompt, replaced by invented
+  tokens, and the count rule carries a second inline example for counts
+  of items from a source; every rule sentence is otherwise byte-identical
+  to v10. The shipped prompt keeps the 2026-09-05 shape — that base plus
+  the assistant-facts blocks — so `assistant_facts_provenance.txt` (which
+  IS the shipped prompt, regenerated) moves with it, while
+  `assistant_facts_naive.txt` stays byte-identical: the generator now
+  anchors it to the v10 artifact by file, because it is the comparison
+  arm of a committed gate. v12-alone gates are in the two
+  `Added (2026-09-06 …)` entries below (paired KU-oracle vs a
+  same-instrument v10 arm with the rag control at 0 flips: cortex 0.667 →
+  0.718, hybrid 0.897 → 0.897, cascade 0.859 → 0.910, all seven
+  frozen-total questions cortex-correct; paired ladder
+  verdict-identical; the live sidecar's ladder stale_leak at 0.0 where
+  the v10 prompt read 1.0). The composite that actually ships was gated
+  as a whole against the composite it replaces — see the
+  `Added (2026-09-07 …)` entry above. The lift guard
+  (`tests/test_prompt_example_lifts.py`) no longer carries the live
+  constant or the provenance artifact in its allowlists: that debt is
+  paid, not recorded; the v2-lineage shim prompt's own debt
+  (`Northern Flicker`) moves to `evals/gen_shim_prompt.py`, beside the
+  file that carries it. Takes effect on the next deploy
+  (`ops/update.ps1`). The Claude-shim prompt (`sonnet_extractor_v4.md`,
+  v2 plus the shipped blocks) is a separate lineage and still carries
+  both pre-re-cut examples; a re-cut shim prompt is a v5 with its own
+  gate.
+
 ### Added (2026-09-06 — v12: one more count example, and the re-gate passes)
 - **`evals/prompts/ku_op_prompt_v12_count_source_example.txt` is v11 plus one
   sentence**: a second inline count example for counts OF items from a

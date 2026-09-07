@@ -51,6 +51,38 @@ SEPARATOR = "\n---\n"
 TAIL = (_ASSISTANT_FACTS_INSTRUCTION + _ASSISTANT_SPEAKER_RULE
         + _ASSISTANT_PROVENANCE_EXAMPLE)
 
+# Proper nouns the v2 BODY's worked examples carry, written before the
+# invented-token rule existed (`gen_assistant_facts_prompts.EXAMPLE_TOKENS`
+# governs what a NEW example may name). v4 inherits them verbatim. These
+# lived beside `EXAMPLE_TOKENS` until 2026-09-07 because the daemon prompt
+# carried the same two names; the v12 base re-cut them there, so the shim
+# lineage is now the only carrier and the lists moved next to the file
+# that owns them. v2 is the pre arm of a committed gate
+# (`ladder-shimprompt-rule2-paired-verdict-threshold.json`) and is not
+# re-cut retroactively; a re-cut shim prompt is a v5 with its own gate.
+PRE_RULE_PROPER_NOUNS = frozenset({
+    "Northern Flicker",   # COUNTS, TOTALS, AND QUANTITIES example
+    "Rosa's Diner",       # COLLECTION MEMBERSHIP example
+})
+
+# The subset of `PRE_RULE_PROPER_NOUNS` that ACTUALLY occurs in the measured
+# corpus, i.e. real contamination. Recorded 2026-09-05 by the merge review of
+# the shim-prompt gate; the guards treat this as an EQUALITY, so the debt can
+# neither grow nor rot into decoration.
+#
+# The count-exclusion example reads "[5] saw a Northern Flicker today, that
+# makes 32 species at the park now" and yields the value "32". LongMemEval
+# question `affe2881` (knowledge-update) asks how many bird species the user
+# has seen in their local park; its gold answer is "32", and all 13
+# occurrences of "Northern Flicker" in EACH dataset file sit inside that
+# question's own sessions.
+KNOWN_CORPUS_COLLISIONS = {
+    "Northern Flicker": (
+        "LongMemEval affe2881 (knowledge-update, gold '32'); the "
+        "count-exclusion example states the same number. Recorded "
+        "2026-09-05."),
+}
+
 HEADER = """\
 # Sonnet-tuned dream extraction prompt — v4 (2026-09-05)
 

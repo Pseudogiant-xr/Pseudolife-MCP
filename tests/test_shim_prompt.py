@@ -19,12 +19,14 @@ claimed the whole prompt, and the inherited v2 body carries worked examples
 of its own — one of which names a LongMemEval answer.
 
 The debt is recorded rather than hidden, in ``KNOWN_CORPUS_COLLISIONS``
-(``evals/gen_assistant_facts_prompts.py``). It is **not** a shim-only debt:
-the same example is in ``dream._SYSTEM_PROMPT``, so every extractor has had
-it, and ``tests/test_assistant_provenance.py`` runs the same two halves over
-the shipped prompt. v2 cannot be re-cut here (it is the pre arm of a
-committed gate) and re-cutting the shipped prompt is a prompt change needing
-its own ladder gate, so neither is attempted in the change that recorded it.
+(``evals/gen_shim_prompt.py``, beside the file that carries it). It was not
+a shim-only debt when recorded (2026-09-05): the same example was in
+``dream._SYSTEM_PROMPT``, so every extractor had it. The v12 base re-cut it
+there on 2026-09-07, so it is a shim-lineage debt now, and
+``tests/test_assistant_provenance.py`` runs the same two halves over the
+shipped prompt against that module's own (empty) list. v2 is not re-cut
+here (it is the pre arm of a committed gate); a re-cut shim prompt is a v5
+with its own ladder gate.
 """
 from __future__ import annotations
 
@@ -201,18 +203,20 @@ def _gen_module():
 # (`ladder-shimprompt-rule2-paired-verdict-threshold.json`), so editing it
 # would retroactively change what that gate compared.
 #
-# The lists themselves live beside `EXAMPLE_TOKENS` in
-# `evals/gen_assistant_facts_prompts.py`, NOT here, because the same two
-# names are in `dream._SYSTEM_PROMPT` — this is not a shim-only debt, and two
-# copies of an allowlist is how one of them goes stale.
-# `tests/test_assistant_provenance.py` runs the same two halves over the
-# shipped prompt.
+# The lists live in `evals/gen_shim_prompt.py`, beside the file that owns
+# them, NOT here — one allowlist per carrier, next to its generator, so a
+# test cannot drift away from what the prompt actually says. They sat in
+# `gen_assistant_facts_prompts.py` until 2026-09-07, while the daemon
+# prompt carried the same two names; the v12 base re-cut them there, so
+# `dream._SYSTEM_PROMPT`'s own lists (in that module) no longer describe
+# this file. `tests/test_assistant_provenance.py` runs the same two halves
+# over the shipped prompt against its own lists.
 def _pre_rule_names():
-    return frozenset(_gen_module().PRE_RULE_PROPER_NOUNS)
+    return frozenset(_gen().PRE_RULE_PROPER_NOUNS)
 
 
 def _known_collisions():
-    return dict(_gen_module().KNOWN_CORPUS_COLLISIONS)
+    return dict(_gen().KNOWN_CORPUS_COLLISIONS)
 
 
 def _proper_nouns(text: str) -> set[str]:

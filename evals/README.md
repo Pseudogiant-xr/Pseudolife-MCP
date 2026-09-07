@@ -711,7 +711,7 @@ decides what the extra claims are allowed to do:
 
 | file / knob | what it changes |
 |---|---|
-| `evals/prompts/assistant_facts_naive.txt` | the PRE-2026-09-05 prompt base (`dream._BASE_SYSTEM_PROMPT`) verbatim + one paragraph saying assistant-asserted content is extractable, keyed to the thing described (never "the assistant"), + one worked example built from an assistant recommendation. Same claim JSON as the old prompt; no speaker field. Eval-only — it did not ship. |
+| `evals/prompts/assistant_facts_naive.txt` | the PRE-2026-09-05 prompt base (the measured v10 artifact `ku_op_prompt_v10_stance_update.txt`, read from its file — the live `dream._BASE_SYSTEM_PROMPT` moved to v12 on 2026-09-07) verbatim + one paragraph saying assistant-asserted content is extractable, keyed to the thing described (never "the assistant"), + one worked example built from an assistant recommendation. Same claim JSON as the old prompt; no speaker field. Eval-only — it did not ship. |
 | `evals/prompts/assistant_facts_provenance.txt` | the same paragraph, plus a rule that a claim carries `"speaker": "user"` or `"assistant"` **where the note makes the speaker knowable** — read off an explicit role marker when the note has one, inferred only for unmistakably assistant-produced content, omitted under doubt — and a worked example showing both values. The `[date] role: content` rendering is a convention of these eval harnesses; a production bank stores notes without a role prefix, which is why omission is the documented answer rather than a guess (speaker rule v2, 2026-09-05). **This IS the shipped `_SYSTEM_PROMPT` since 2026-09-05** — the file and the live constant are one string. |
 | `PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS=contender\|supersede\|drop` | what a `speaker: "assistant"` claim becomes — see below. Applied by `ladder_sweep.build_service`, stamped into the summary as `bench_env.dream.assistant_claims`. An unrecognised value aborts the run rather than silently serving the default. |
 
@@ -740,8 +740,9 @@ which imports from `dream.py` rather than retyping anything, so the
 measured artifacts and the live prompt cannot drift. Since the provenance
 variant shipped (2026-09-05) the two sit on opposite sides of it:
 `assistant_facts_provenance.txt` **is** `_SYSTEM_PROMPT` byte for byte,
-and `assistant_facts_naive.txt` is the pre-ship base
-(`_BASE_SYSTEM_PROMPT`, still pinned to the measured v10 artifact) plus the
+and `assistant_facts_naive.txt` is the pre-ship base (the measured v10
+artifact, read from its file — the live `_BASE_SYSTEM_PROMPT` moved to the
+v12 artifact on 2026-09-07) plus the
 same instruction paragraph and a speakerless example. Both properties are
 pinned byte-exact by `tests/test_assistant_provenance.py`, which also
 checks a regeneration would be a no-op — edit `dream.py` (shipped tail) or
@@ -1333,7 +1334,18 @@ tally and gate result is unchanged, the verdict being a pure function of the
 run artifacts.
 
 
-##### The extraction prompt names a benchmark answer (disclosed 2026-09-05)
+##### The extraction prompt names a benchmark answer (disclosed 2026-09-05; the shipped prompt re-cut 2026-09-07)
+
+**Superseded for the daemon path on 2026-09-07.** The v12 base re-cut the
+example on invented tokens (`ku_op_prompt_v12_count_source_example.txt`;
+gates in the table above and `prompt-recut-v12prov-ku-paired-verdict.json`
+for the composite that ships), so `dream._BASE_SYSTEM_PROMPT`,
+`_SYSTEM_PROMPT` and `assistant_facts_provenance.txt` no longer carry it and
+`gen_assistant_facts_prompts.KNOWN_CORPUS_COLLISIONS` is empty. The v2 shim
+lineage (`sonnet_extractor_v2.md`, `v4`, and the eval-only
+`assistant_facts_naive.txt`) still does; that debt now lives in
+`evals/gen_shim_prompt.py`, beside the file that carries it. The text below
+is the disclosure as written on 2026-09-05.
 
 `sonnet_extractor_v4.md` is the v2 body plus the shipped assistant-facts
 blocks. The guard that shipped with it grepped only the four registered
@@ -1343,7 +1355,7 @@ found something the narrow one could not. The finding turned out to be
 bigger than the shim: it starts in `dream.py`, so it reaches every
 extractor, and this section was rewritten once already for saying otherwise.
 
-**The SHIPPED prompt names a LongMemEval answer.** The
+**The SHIPPED prompt named a LongMemEval answer (until 2026-09-07).** The
 "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS" example reads *"[5] saw a
 Northern Flicker today, that makes 32 species at the park now"* and yields the
 value `32`. LongMemEval question `affe2881` (knowledge-update) asks how many
@@ -1351,11 +1363,12 @@ bird species the user has seen in their local park; its gold answer is `32`,
 and all 13 occurrences of "Northern Flicker" in **each** dataset file sit
 inside that question's own sessions.
 
-It is **not** a shim-only debt, though the first cut of this note said so. The
-example lives in `dream._BASE_SYSTEM_PROMPT` (shipped 2026-08-01), hence in
+It was **not** a shim-only debt, though the first cut of this note said so. The
+example lived in `dream._BASE_SYSTEM_PROMPT` (shipped 2026-08-01), hence in
 `_SYSTEM_PROMPT`, in `assistant_facts_provenance.txt`, and — via the v2 body —
-in `sonnet_extractor_v2.md` and `v4`. Every extraction run since has had it, on
-every extractor: the CPU sidecar, both CLI shims, and every ladder rung.
+in `sonnet_extractor_v2.md` and `v4`. Every extraction run from then until the
+v12 re-cut had it, on every extractor: the CPU sidecar, both CLI shims, and
+every ladder rung. Since 2026-09-07 it is a shim-lineage debt only.
 
 What this does and does not affect:
 
@@ -1380,8 +1393,11 @@ numbers were measured on `affe2881` since 2026-08-01.
 
 The guards are `tests/test_shim_prompt.py` (the shim prompt body) and
 `tests/test_assistant_provenance.py` (`dream._SYSTEM_PROMPT`). Each scans every
-Titlecase phrase against both dataset files and shares one dated
-`KNOWN_CORPUS_COLLISIONS` allowlist in `evals/gen_assistant_facts_prompts.py`.
+Titlecase phrase against both dataset files against a dated
+`KNOWN_CORPUS_COLLISIONS` allowlist kept beside the carrier's generator —
+one list in `evals/gen_shim_prompt.py` for the v2 lineage, one (empty since
+2026-09-07) in `evals/gen_assistant_facts_prompts.py` for the shipped prompt;
+they were a single shared list until the daemon path paid its half.
 The check is an equality: a newly contaminated name fails, and so does a listed
 one that has stopped hitting. ALL-CAPS, lowercase and digit-bearing names are
 out of scope — the prompts use ALL-CAPS for emphasis throughout, so a
@@ -4107,6 +4123,7 @@ KU-oracle e2e runs to answer. Artifacts, in order:
 | op block + count-exclusion rule (`ku_op_prompt_v5.txt`) | `c2op-count-verdict.json` | cascade back to exactly the control (delta 0.0, p = 1.0); count-class recovered; sets still form |
 | the two lifted examples re-cut on invented tokens (`ku_op_prompt_v11_example_recut.txt`, 2026-09-06) | `prompt-recut-v11-ku-paired-verdict.json` | every arm up, none significant (cortex 0.667 → 0.705, hybrid 0.897 → 0.936, cascade 0.859 → 0.872; rag 0 flips); the pre-registered six-frozen-total check reads FAIL on 3 rows (one real extraction loss, `45dc21b6`) → **not shipped**, maintainer's call |
 | v11 + a second count example for counts of items from a source (`ku_op_prompt_v12_count_source_example.txt`, 2026-09-06) | `prompt-recut-v12-ku-paired-verdict.json` | cortex 0.667 → 0.718, hybrid 0.897 → 0.897, cascade 0.859 → 0.910; rag 0 flips; all seven frozen-total questions cortex-correct → **gate PASS**; ships via a separate flip PR |
+| the composite that ships — v12 base + the assistant-facts blocks — vs the shipped v10 composite (`assistant_facts_provenance.txt` regenerated, 2026-09-07) | `prompt-recut-v12prov-ku-paired-verdict.json` | cortex 0.692 → 0.744, hybrid 0.910 → 0.936, cascade 0.872 → 0.872; rag 0 flips; no loss on the six frozen-total questions → **gate PASS**; paired ladder (qwen-27b) clears, no regression |
 
 Supporting pieces: `op_probe.py` (prompt-format battery; count-update
 decoys added 2026-08-01), `analyze_frozen_totals.py` + `c2op-count-census.json`

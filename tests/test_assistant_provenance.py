@@ -445,14 +445,17 @@ def test_the_naive_variant_extends_the_pre_ship_base_verbatim():
     rests on, so it must not silently acquire the speaker rule."""
     from pathlib import Path
 
-    from pseudolife_memory.memory.dream import _BASE_SYSTEM_PROMPT
-    path = (Path(__file__).resolve().parents[1] / "evals" / "prompts"
-            / "assistant_facts_naive.txt")
-    text = path.read_text(encoding="utf-8")
-    assert text.startswith(_BASE_SYSTEM_PROMPT), (
+    prompts = Path(__file__).resolve().parents[1] / "evals" / "prompts"
+    # The v10 ARTIFACT, not `_BASE_SYSTEM_PROMPT`: the live base moved to
+    # v12 on 2026-09-07 and the naive arm must stay what its gate measured.
+    v10 = (prompts / "ku_op_prompt_v10_stance_update.txt").read_text(
+        encoding="utf-8")
+    text = (prompts / "assistant_facts_naive.txt").read_text(encoding="utf-8")
+    assert text.startswith(v10), (
         "assistant_facts_naive.txt no longer opens with the pre-2026-09-05 "
-        "base verbatim — regenerate it instead of hand-editing")
-    assert len(text) > len(_BASE_SYSTEM_PROMPT)
+        "base (the v10 artifact) verbatim — regenerate it instead of "
+        "hand-editing")
+    assert len(text) > len(v10)
 
 
 def test_regenerating_would_reproduce_both_files_exactly():
@@ -897,7 +900,9 @@ def test_no_worked_example_token_occurs_in_the_measured_dataset(dataset):
     if not path.exists():
         pytest.skip(f"{dataset} not present (evals/data is gitignored)")
 
-    tokens = [t.encode("utf-8") for t in _gen_module().EXAMPLE_TOKENS]
+    g = _gen_module()
+    tokens = [t.encode("utf-8")
+              for t in (*g.EXAMPLE_TOKENS, *g.BASE_EXAMPLE_TOKENS)]
     assert tokens, "EXAMPLE_TOKENS is empty — the guard would be vacuous"
     overlap = max(len(t) for t in tokens)
     counts = {t: 0 for t in tokens}
@@ -926,7 +931,8 @@ def test_the_shipped_prompt_is_covered_by_the_example_token_guard():
     rather than on a variant nobody runs."""
     from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
 
-    missing = [t for t in _gen_module().EXAMPLE_TOKENS
+    g = _gen_module()
+    missing = [t for t in (*g.EXAMPLE_TOKENS, *g.BASE_EXAMPLE_TOKENS)
                if t not in _SYSTEM_PROMPT]
     assert missing == [], (
         f"registered token(s) absent from the shipped prompt: {missing} — "
@@ -943,7 +949,9 @@ def test_every_registered_token_is_actually_used_by_a_prompt_file():
         (prompts / name).read_text(encoding="utf-8")
         for name in ("assistant_facts_naive.txt",
                      "assistant_facts_provenance.txt"))
-    unused = [t for t in _gen_module().EXAMPLE_TOKENS if t not in text]
+    g = _gen_module()
+    unused = [t for t in (*g.EXAMPLE_TOKENS, *g.BASE_EXAMPLE_TOKENS)
+              if t not in text]
     assert unused == [], f"EXAMPLE_TOKENS entries no example uses: {unused}"
 
 
@@ -954,10 +962,12 @@ def test_every_registered_token_is_actually_used_by_a_prompt_file():
 # change ADDED — while the comment above them claims they "make the class
 # un-repeatable". They do not: `_BASE_SYSTEM_PROMPT` carries three worked
 # examples of its own, written before the invented-token rule existed, and
-# nothing was checking them. One of them names a LongMemEval answer (see
-# `KNOWN_CORPUS_COLLISIONS`), and it has been in the prompt every extractor
-# receives since 2026-08-01 — the sidecar, the shim, and every ladder rung
-# alike, not only the shim path.
+# nothing was checking them. One of them named a LongMemEval answer
+# (recorded 2026-09-05 in `KNOWN_CORPUS_COLLISIONS`; re-cut by the v12 base
+# on 2026-09-07, so that dict is now empty and the scan below holds it
+# empty), and it had been in the prompt every extractor received since
+# 2026-08-01 — the sidecar, the shim, and every ladder rung alike, not only
+# the shim path.
 #
 # The prompt uses ALL-CAPS for emphasis throughout ("COUNTS, TOTALS, AND
 # QUANTITIES", "OMIT", "CURRENT"), so a caps-inclusive scan would need a
@@ -977,7 +987,7 @@ _TITLECASE = re.compile(
 # titlecase phrase must be a registered token or a recorded pre-rule name.
 _SHIPPED_SENTENCE_CAPITALS = frozenset({
     "Example", "Extract", "For", "Key", "Notes", "One", "Output", "Return",
-    "Reuse", "What", "When", "You",
+    "Reuse", "The", "What", "When", "You",
 })
 
 
@@ -985,7 +995,11 @@ def _shipped_titlecase() -> set:
     from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
     g = _gen_module()
     text = _SYSTEM_PROMPT
-    for token in g.EXAMPLE_TOKENS:
+    # Longest first, so "The Quillon Larder" goes before "Quillon Larder"
+    # whatever order the two registries declare them in — the other order
+    # would leave a bare "The" that the sentence-capital exemption now hides.
+    for token in sorted((*g.EXAMPLE_TOKENS, *g.BASE_EXAMPLE_TOKENS),
+                        key=len, reverse=True):
         text = text.replace(token, " ")
     return {m.group(0) for m in _TITLECASE.finditer(text)
             if m.group(0) not in _SHIPPED_SENTENCE_CAPITALS}
