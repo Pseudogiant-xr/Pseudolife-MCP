@@ -1147,8 +1147,9 @@ unconditional contender park, the ×0.85 demotion and
 `memory.dream.assistant_claims` are all live on the default path now. The
 live bank's existing facts are untouched. One deployment caveat: an
 install whose extractor is a CLI shim launched with `--system-prompt-file`
-(the default for `ops/install-shim-autostart.ps1`, which passes
-`evals/prompts/sonnet_extractor_v2.md`) **replaces the shipped prompt
+(the default for `ops/install-shim-autostart.ps1`, which passed
+`evals/prompts/sonnet_extractor_v2.md` when this was written — v4 from
+2026-09-05, v5 since 2026-09-07) **replaces the shipped prompt
 prefix with that file**, so the change reaches such an install only via
 the fallback sidecar. Giving the Sonnet override prompt the same
 instruction is a separate change needing its own gate.
@@ -1251,7 +1252,9 @@ two — nothing is claimed for the difference in either direction. Both arms
 sit at ~45% of the token budget.
 
 What this changes: `ops/install-shim-autostart.ps1`, its `.sh` sibling and
-the manual-start hints in `ops/install.{ps1,sh}` now default to v4. The
+the manual-start hints in `ops/install.{ps1,sh}` defaulted to v4 from this
+gate until 2026-09-07, when the default moved on to v5 ("Re-cut on invented
+names" below). The
 Codex shim (`ops/install-codex-shim-autostart.ps1`) passes **no** prompt
 file on purpose, so it already runs the shipped `_SYSTEM_PROMPT` and needed
 no change. An existing install picks the new prompt up when the autostart is
@@ -1334,17 +1337,78 @@ tally and gate result is unchanged, the verdict being a pure function of the
 run artifacts.
 
 
-##### The extraction prompt names a benchmark answer (disclosed 2026-09-05; the shipped prompt re-cut 2026-09-07)
+##### Re-cut on invented names (2026-09-07)
+
+v4 inherits the v2 body's two worked examples verbatim, and one of them
+names a LongMemEval answer (the disclosure below). The daemon's prompt paid
+that debt on 2026-09-07 with the v12 base; `sonnet_extractor_v5.md` pays it
+on the shim path the same way — `evals/gen_shim_prompt.V5_RECUTS` transposes
+the v12 re-cut onto the v2 wording (`road bike` → `penny-farthing`;
+`Northern Flicker` / `32` / `at the park` → `Gallowmere Teal` / `41` /
+`Kelmarsh Reserve`), and nothing else changes: same rules, same blocks,
+same JSON shape. The invented names are the ones already registered in
+`gen_assistant_facts_prompts.BASE_EXAMPLE_TOKENS`, so one registry and one
+zero-occurrence grep cover both paths. v2 and v4 are not edited — each is
+the pre arm of a committed gate.
+
+Same instrument as the two gates above: the `opus-5` rung on its dedicated
+port 8083, two replicates per arm, the prompt set on the shim at launch, the
+live `:8082` shim never addressed. `naive-rag.json` sets the same bar (token
+budget 34.98).
+
+| arm | prompt | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|
+| pre | v4 | 1.0 | 0.0 | 15.7 | 16 / 16 | `opus-5-shimv5-pre.json` |
+| pre, rep 2 | v4 | 1.0 | 0.0 | 14.1 | 16 / 16 | `opus-5-shimv5-pre-rep2.json` |
+| post | v5 | 1.0 | 0.0 | 14.3 | 16 / 16 | `opus-5-shimv5-post.json` |
+| post, rep 2 | v5 | 1.0 | 0.0 | 14.5 | 16 / 16 | `opus-5-shimv5-post-rep2.json` |
+
+**The gate passes on both predicates.**
+`ladder-shimv5-paired-verdict-threshold.json` reads `gate: PASS`,
+`no_regression_gate: PASS`, `rungs["opus-5"].cleared: true` and
+`failed_checks: []`. Gold 1.0, stale 0.0 and the same consolidation tally
+(26 pulled, 16 claims, 16 inserted, 0 superseded) on all four runs, so the
+re-cut cost nothing the ladder can see.
+
+**The token move is inside the noise.** The verdict's `differences` block
+reports `tokens_per_query 15.7 → 14.3`; across replicates the pre arm spans
+14.1–15.7 and the post arm 14.3–14.5, so the ranges overlap and the post
+arm sits inside the pre arm's own spread. Nothing is claimed for the
+difference. All four runs sit under 45% of the same 34.98 token budget.
+
+**What the ladder cannot see, said plainly.** The bank's own record is that
+this ladder saturates on prompt changes (v5, v8 and v9 of the op prompt all
+read 1.0 / 0.0 while the KU-oracle bench moved). It is the right instrument
+here only because the v4 → v5 diff is six token substitutions and no rule
+change — the shape of edit the KU-oracle gates for the v12 base (#279,
+#280) already measured on the daemon path. A shim prompt change that alters
+a rule needs the KU-oracle paired gate, not this table.
+
+The run artifacts carry `git_rev … 0e1338be-dirty`: the four runs were made
+from the working tree that became this change, before it was committed —
+the v4 file is byte-identical to master's and the v5 file is the one
+committed beside them. `bench_env.dream.assistant_claims` reads `contender`
+on every run.
+
+What this changes: `ops/install-shim-autostart.ps1`, its `.sh` sibling and
+the manual-start hints in `ops/install.{ps1,sh}` now default to v5. An
+existing install picks it up when the autostart is re-installed or the shim
+is restarted with the new file; the daemon image is not involved.
+
+##### The extraction prompt names a benchmark answer (disclosed 2026-09-05; the shipped prompt re-cut 2026-09-07; the shim default re-cut the same day)
 
 **Superseded for the daemon path on 2026-09-07.** The v12 base re-cut the
 example on invented tokens (`ku_op_prompt_v12_count_source_example.txt`;
 gates in the table above and `prompt-recut-v12prov-ku-paired-verdict.json`
 for the composite that ships), so `dream._BASE_SYSTEM_PROMPT`,
 `_SYSTEM_PROMPT` and `assistant_facts_provenance.txt` no longer carry it and
-`gen_assistant_facts_prompts.KNOWN_CORPUS_COLLISIONS` is empty. The v2 shim
-lineage (`sonnet_extractor_v2.md`, `v4`, and the eval-only
-`assistant_facts_naive.txt`) still does; that debt now lives in
-`evals/gen_shim_prompt.py`, beside the file that carries it. The text below
+`gen_assistant_facts_prompts.KNOWN_CORPUS_COLLISIONS` is empty. **Superseded
+for the shim path the same day**: the launchers now default to
+`sonnet_extractor_v5.md`, which re-cuts both examples ("Re-cut on invented
+names" above), so no deployed path carries it. `sonnet_extractor_v2.md`,
+`v4` and the eval-only `assistant_facts_naive.txt` still do — each is the
+committed arm of a gate and is not edited; that debt lives in
+`evals/gen_shim_prompt.py`, beside the files that carry it. The text below
 is the disclosure as written on 2026-09-05.
 
 `sonnet_extractor_v4.md` is the v2 body plus the shipped assistant-facts
@@ -1395,7 +1459,8 @@ The guards are `tests/test_shim_prompt.py` (the shim prompt body) and
 `tests/test_assistant_provenance.py` (`dream._SYSTEM_PROMPT`). Each scans every
 Titlecase phrase against both dataset files against a dated
 `KNOWN_CORPUS_COLLISIONS` allowlist kept beside the carrier's generator —
-one list in `evals/gen_shim_prompt.py` for the v2 lineage, one (empty since
+two in `evals/gen_shim_prompt.py` (one for the v2/v4 lineage, one — empty —
+for v5, the deployed default since 2026-09-07) and one (empty since
 2026-09-07) in `evals/gen_assistant_facts_prompts.py` for the shipped prompt;
 they were a single shared list until the daemon path paid its half.
 The check is an equality: a newly contaminated name fails, and so does a listed
