@@ -151,6 +151,10 @@ def _example_values(text: str) -> set[str]:
 # only and is held to an EMPTY allowlist by the same equality assertions.
 # ``assistant_facts_naive.txt`` stays: it is anchored to the v10 artifact
 # by construction, as the comparison arm of the 2026-09-05 gate.
+# ``sonnet_extractor_v5.md`` (2026-09-07, v4 with the same two examples
+# re-cut on the v12 base's invented names) is scanned by the glob and
+# deliberately NOT listed: it is held to the empty allowlist by the same
+# equality assertions, like the live constant.
 _COUNT_RULE_CARRIERS = (
     "assistant_facts_naive.txt",
     "sonnet_extractor_v1.md", "sonnet_extractor_v2.md", "sonnet_extractor_v3.md",
@@ -200,6 +204,7 @@ def test_the_scan_finds_examples_in_every_prompt_family():
     c = _carriers()
     for name in _OP_BLOCK_CARRIERS + ("dream._SYSTEM_PROMPT",
                                       "assistant_facts_provenance.txt",
+                                      "sonnet_extractor_v5.md",
                                       "dream._EVENTS_SYSTEM_PROMPT",
                                       "events_pass_v1.txt", "events_pass_v2.txt"):
         assert _notes(c[name]), f"no worked-example note found in {name}"

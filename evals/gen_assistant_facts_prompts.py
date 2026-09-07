@@ -63,9 +63,11 @@ EXAMPLE_TOKENS = (
 # LongMemEval turns; PR #279). Same contract as `EXAMPLE_TOKENS` — every
 # entry is grep-checked at zero occurrences in both dataset files and
 # must occur in the shipped prompt — but kept apart because the shim
-# prompt (`sonnet_extractor_v4.md`, v2 plus the shipped blocks) carries
-# the assistant-example tokens and NOT these: its v2 body still has the
-# pre-re-cut examples, see `gen_shim_prompt.py`. "Quillon Larder" is a
+# lineage carries them differently: `sonnet_extractor_v4.md` (v2 plus the
+# shipped blocks) has the assistant-example tokens and NONE of these, and
+# `sonnet_extractor_v5.md` (2026-09-07, the same re-cut transposed onto
+# the v2 body) has "Gallowmere Teal" and "Kelmarsh Reserve" but not
+# "Quillon Larder", see `gen_shim_prompt.V5_RECUTS`. "Quillon Larder" is a
 # substring of the registered "The Quillon Larder"; the shipped-prompt scan
 # strips tokens longest-first, so the order here does not matter.
 BASE_EXAMPLE_TOKENS = (

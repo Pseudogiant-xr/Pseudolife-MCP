@@ -8671,7 +8671,21 @@ SHIM_LAUNCH_SH = "ops/install-shim-autostart.sh"
 # `post2` pair. The verdict itself names only one file per arm, so the
 # replicates have to be listed here for the range to mean anything.
 SHIM_GATE_RUNS = (SP_PRE, SP_PRE2, SP2_POST, SP2_POST2)
-_SHIM_TOKENS = "tokens 14.0-15.5 across both arms"
+# Since 2026-09-07 the launchers default to v5 and the comment quotes the
+# v2 -> v4 range in its historical role, in a clause that names the arms.
+_SHIM_TOKENS = "(v2 vs v4, tokens 14.0-15.5 across both arms)"
+
+# The v5 gate (2026-09-07): v4 pre pair, v5 post pair, same rung. This is
+# the range the default now rests on.
+SP5_PRE = RESULTS + "opus-5-shimv5-pre.json"
+SP5_PRE2 = RESULTS + "opus-5-shimv5-pre-rep2.json"
+SP5_POST = RESULTS + "opus-5-shimv5-post.json"
+SP5_POST2 = RESULTS + "opus-5-shimv5-post-rep2.json"
+SP5_THRESH = RESULTS + "ladder-shimv5-paired-verdict-threshold.json"
+SHIM5_GATE_RUNS = (SP5_PRE, SP5_PRE2, SP5_POST, SP5_POST2)
+_SHIM5_TOKENS = "tokens 14.1-15.7"
+# The launcher comments also publish the quality line for the v5 gate.
+_SHIM5_QUALITY = "gold 1.0, stale 0.0 and 16/16 claims on every run"
 
 
 def _tok_min(*runs):
@@ -8689,6 +8703,40 @@ for _doc, _slug in ((SHIM_LAUNCH_PS1, "ps1"), (SHIM_LAUNCH_SH, "sh")):
     CLAIMS.append(Claim(
         id=f"shim-launcher-{_slug}-tok-hi", doc=_doc, needle=_SHIM_TOKENS,
         artifacts=SHIM_GATE_RUNS, value=_tok_max, stated=15.5, places=1))
+
+for _doc, _slug in ((SHIM_LAUNCH_PS1, "ps1"), (SHIM_LAUNCH_SH, "sh")):
+    CLAIMS.append(Claim(
+        id=f"shim5-launcher-{_slug}-tok-lo", doc=_doc, needle=_SHIM5_TOKENS,
+        artifacts=SHIM5_GATE_RUNS, value=_tok_min, stated=14.1, places=1))
+    CLAIMS.append(Claim(
+        id=f"shim5-launcher-{_slug}-tok-hi", doc=_doc, needle=_SHIM5_TOKENS,
+        artifacts=SHIM5_GATE_RUNS, value=_tok_max, stated=15.7, places=1))
+    # "on every run" = the worst run: min gold, max stale, min AND max claims
+    for _cid, _val, _stated in [
+        ("gold-lo", lambda *r: min(x["gold_recoverable"] for x in r), 1.0),
+        ("stale-hi", lambda *r: max(x["stale_leak"] for x in r), 0.0),
+        ("claims-lo", lambda *r: min(x["consolidation"]["claims"] for x in r), 16),
+        ("claims-hi", lambda *r: max(x["consolidation"]["claims"] for x in r), 16),
+        ("inserted-lo", lambda *r: min(x["consolidation"]["inserted"] for x in r), 16),
+        ("inserted-hi", lambda *r: max(x["consolidation"]["inserted"] for x in r), 16),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"shim5-launcher-{_slug}-{_cid}", doc=_doc, needle=_SHIM5_QUALITY,
+            artifacts=SHIM5_GATE_RUNS, value=_val, stated=_stated,
+            places=1 if isinstance(_stated, float) else 0))
+    # "on every run" = the worst run: min gold, max stale, min AND max claims
+    for _cid, _val, _stated in [
+        ("gold-lo", lambda *r: min(x["gold_recoverable"] for x in r), 1.0),
+        ("stale-hi", lambda *r: max(x["stale_leak"] for x in r), 0.0),
+        ("claims-lo", lambda *r: min(x["consolidation"]["claims"] for x in r), 16),
+        ("claims-hi", lambda *r: max(x["consolidation"]["claims"] for x in r), 16),
+        ("inserted-lo", lambda *r: min(x["consolidation"]["inserted"] for x in r), 16),
+        ("inserted-hi", lambda *r: max(x["consolidation"]["inserted"] for x in r), 16),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"shim5-launcher-{_slug}-{_cid}", doc=_doc, needle=_SHIM5_QUALITY,
+            artifacts=SHIM5_GATE_RUNS, value=_val, stated=_stated,
+            places=1 if isinstance(_stated, float) else 0))
 
 
 def test_the_shim_launchers_cite_the_gate_that_validated_their_default():
@@ -8711,9 +8759,12 @@ def test_the_shim_launchers_cite_the_gate_that_validated_their_default():
         assert missing == [], (
             f"{rel} cites uncommitted evidence: {missing} — a reader "
             "following the comment finds nothing.")
+        assert SP5_THRESH in named, (
+            f"{rel} does not point at {SP5_THRESH}, the gate its default "
+            "rests on (v4 vs v5, 2026-09-07)")
         assert SP2_THRESH in named, (
-            f"{rel} does not point at {SP2_THRESH}, the gate its default "
-            "rests on")
+            f"{rel} does not point at {SP2_THRESH}, the v2 -> v4 gate the "
+            "assistant-facts blocks rest on")
         assert SP_THRESH not in named, (
             f"{rel} still points at {SP_THRESH}, which the rule-v2 re-gate "
             "superseded — the operator reading it would check the wrong run")
@@ -8721,6 +8772,132 @@ def test_the_shim_launchers_cite_the_gate_that_validated_their_default():
             assert "superseded" in text, (
                 f"{rel} names the rule-v1 verdict without saying it is "
                 "superseded — retire the number where a reader meets it")
+
+
+# ── the shim prompt re-cut on invented names (2026-09-07) ─────────────────
+#
+# v5 = v4 with the v2 body's two pre-rule examples re-cut on the v12 base's
+# invented names. Same rung, same shape of gate, two replicates per arm; the
+# replicates license the "inside the noise" reading and are pinned like any
+# other published number. The README also publishes the identical tally,
+# which is TRUE of these four runs (unlike the rule-v2 re-gate), so it is
+# pinned per cell rather than left as prose.
+_SP5_ROW_PRE = ("| pre | v4 | 1.0 | 0.0 | 15.7 | 16 / 16 | "
+                "`opus-5-shimv5-pre.json` |")
+_SP5_ROW_PRE2 = ("| pre, rep 2 | v4 | 1.0 | 0.0 | 14.1 | 16 / 16 | "
+                 "`opus-5-shimv5-pre-rep2.json` |")
+_SP5_ROW_POST = ("| post | v5 | 1.0 | 0.0 | 14.3 | 16 / 16 | "
+                 "`opus-5-shimv5-post.json` |")
+_SP5_ROW_POST2 = ("| post, rep 2 | v5 | 1.0 | 0.0 | 14.5 | 16 / 16 | "
+                  "`opus-5-shimv5-post-rep2.json` |")
+_SP5_GATE = ('`ladder-shimv5-paired-verdict-threshold.json` reads `gate: PASS`,')
+_SP5_TALLY = "(26 pulled, 16 claims, 16 inserted, 0 superseded) on all four runs"
+_SP5_DIFF = "reports `tokens_per_query 15.7 → 14.3`; across replicates the pre arm spans"
+_SP5_SPREAD = "14.1–15.7 and the post arm 14.3–14.5, so the ranges overlap and the post"
+_SP5_BUDGET = "difference. All four runs sit under 45% of the same 34.98 token budget."
+_SP5_CL_TOK = "four runs; tokens/query 14.3 and 14.5 against the pre arm's 15.7 and"
+_SP5_CL_TALLY = "identical tally (26 pulled, 16 claims, 16 inserted, 0 superseded) on all"
+_SP5_CL_TOK2 = "14.1 — the post arm sits inside the pre arm's own spread, so nothing is"
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    # the table, cell by cell against its own run file
+    ("shim5-pre-gold", EVALS, _SP5_ROW_PRE, SP5_PRE,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim5-pre-stale", EVALS, _SP5_ROW_PRE, SP5_PRE,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim5-pre-tokens", EVALS, _SP5_ROW_PRE, SP5_PRE,
+     lambda d: d["tokens_per_query"], 15.7, 1),
+    ("shim5-pre-claims", EVALS, _SP5_ROW_PRE, SP5_PRE,
+     _sp_tally("claims"), 16, 0),
+    ("shim5-pre-inserted", EVALS, _SP5_ROW_PRE, SP5_PRE,
+     _sp_tally("inserted"), 16, 0),
+    ("shim5-pre2-gold", EVALS, _SP5_ROW_PRE2, SP5_PRE2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim5-pre2-stale", EVALS, _SP5_ROW_PRE2, SP5_PRE2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim5-pre2-tokens", EVALS, _SP5_ROW_PRE2, SP5_PRE2,
+     lambda d: d["tokens_per_query"], 14.1, 1),
+    ("shim5-pre2-claims", EVALS, _SP5_ROW_PRE2, SP5_PRE2,
+     _sp_tally("claims"), 16, 0),
+    ("shim5-pre2-inserted", EVALS, _SP5_ROW_PRE2, SP5_PRE2,
+     _sp_tally("inserted"), 16, 0),
+    ("shim5-post-gold", EVALS, _SP5_ROW_POST, SP5_POST,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim5-post-stale", EVALS, _SP5_ROW_POST, SP5_POST,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim5-post-tokens", EVALS, _SP5_ROW_POST, SP5_POST,
+     lambda d: d["tokens_per_query"], 14.3, 1),
+    ("shim5-post-claims", EVALS, _SP5_ROW_POST, SP5_POST,
+     _sp_tally("claims"), 16, 0),
+    ("shim5-post-inserted", EVALS, _SP5_ROW_POST, SP5_POST,
+     _sp_tally("inserted"), 16, 0),
+    ("shim5-post2-gold", EVALS, _SP5_ROW_POST2, SP5_POST2,
+     lambda d: d["gold_recoverable"], 1.0, 1),
+    ("shim5-post2-stale", EVALS, _SP5_ROW_POST2, SP5_POST2,
+     lambda d: d["stale_leak"], 0.0, 1),
+    ("shim5-post2-tokens", EVALS, _SP5_ROW_POST2, SP5_POST2,
+     lambda d: d["tokens_per_query"], 14.5, 1),
+    ("shim5-post2-claims", EVALS, _SP5_ROW_POST2, SP5_POST2,
+     _sp_tally("claims"), 16, 0),
+    ("shim5-post2-inserted", EVALS, _SP5_ROW_POST2, SP5_POST2,
+     _sp_tally("inserted"), 16, 0),
+    # the verdict — what the default now rests on
+    ("shim5-thresh-cleared", EVALS, _SP5_GATE, SP5_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("shim5-thresh-pre-clears", EVALS, _SP5_GATE, SP5_THRESH,
+     _thr_rung("opus-5", "pre_clears"), 1, 0),
+    ("shim5-thresh-post-clears", EVALS, _SP5_GATE, SP5_THRESH,
+     _thr_rung("opus-5", "post_clears"), 1, 0),
+    ("shim5-thresh-no-regression", EVALS, _SP5_GATE, SP5_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("shim5-budget", EVALS, _SP5_BUDGET, SP5_THRESH,
+     lambda d: d["naive"]["token_budget"], 34.98, 2),
+    # the identical tally, true of all four runs this time
+    *[(f"shim5-tally-{_k}-{_i}", EVALS, _SP5_TALLY, _run, _sp_tally(_k), _n, 0)
+      for _i, _run in enumerate(SHIM5_GATE_RUNS)
+      for _k, _n in (("pulled", 26), ("claims", 16), ("inserted", 16),
+                     ("superseded", 0))],
+    # the verdict's own reported move and the spread that reads it as noise
+    ("shim5-diff-pre", EVALS, _SP5_DIFF, SP5_PRE,
+     lambda d: d["tokens_per_query"], 15.7, 1),
+    ("shim5-diff-post", EVALS, _SP5_DIFF, SP5_POST,
+     lambda d: d["tokens_per_query"], 14.3, 1),
+    ("shim5-spread-pre-lo", EVALS, _SP5_SPREAD, SP5_PRE2,
+     lambda d: d["tokens_per_query"], 14.1, 1),
+    ("shim5-spread-pre-hi", EVALS, _SP5_SPREAD, SP5_PRE,
+     lambda d: d["tokens_per_query"], 15.7, 1),
+    ("shim5-spread-post-lo", EVALS, _SP5_SPREAD, SP5_POST,
+     lambda d: d["tokens_per_query"], 14.3, 1),
+    ("shim5-spread-post-hi", EVALS, _SP5_SPREAD, SP5_POST2,
+     lambda d: d["tokens_per_query"], 14.5, 1),
+    # the CHANGELOG restates the four token figures and the tally
+    ("shim5-cl-tok-post", CHANGELOG, _SP5_CL_TOK, SP5_POST,
+     lambda d: d["tokens_per_query"], 14.3, 1),
+    ("shim5-cl-tok-post2", CHANGELOG, _SP5_CL_TOK, SP5_POST2,
+     lambda d: d["tokens_per_query"], 14.5, 1),
+    ("shim5-cl-tok-pre", CHANGELOG, _SP5_CL_TOK, SP5_PRE,
+     lambda d: d["tokens_per_query"], 15.7, 1),
+    ("shim5-cl-tok-pre2", CHANGELOG, _SP5_CL_TOK2, SP5_PRE2,
+     lambda d: d["tokens_per_query"], 14.1, 1),
+    *[(f"shim5-cl-tally-{_k}-{_i}", CHANGELOG, _SP5_CL_TALLY, _run,
+       _sp_tally(_k), _n, 0)
+      for _i, _run in enumerate(SHIM5_GATE_RUNS)
+      for _k, _n in (("pulled", 26), ("claims", 16), ("inserted", 16),
+                     ("superseded", 0))],
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+def test_the_v5_gate_budget_clause_holds():
+    """"Under 45% of the budget" is a claim about the largest of the four
+    runs against the verdict's own budget, so it is checked as one."""
+    runs = [_load_artifact(r) for r in SHIM5_GATE_RUNS]
+    budget = _load_artifact(SP5_THRESH)["naive"]["token_budget"]
+    assert _tok_max(*runs) / budget < 0.45
+
+
 # docs/guide/benchmarks.md — the third honest limit.
 _BM_TYPE_1 = ("spread evenly across question types: `temporal-reasoning` "
               "carries **+12 of")

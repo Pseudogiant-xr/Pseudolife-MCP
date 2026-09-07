@@ -1,0 +1,27 @@
+{
+  "rung": "opus-5",
+  "label": "Claude Opus 5 (Max-plan CLI shim, ceiling probe)",
+  "kind": "llm",
+  "git_rev": "0e1338be20b7c28211f24a2c7e76dcc9ee535cde-dirty",
+  "base_url": "http://127.0.0.1:8083/v1",
+  "model": "extractor",
+  "bench_env": {
+    "dream": {
+      "assistant_claims": "contender"
+    }
+  },
+  "extract_seconds": 53.3,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 16,
+    "inserted": 16,
+    "superseded": 0,
+    "literal_flagged": 0,
+    "literal_dropped": 0
+  },
+  "gold_recoverable": 1.0,
+  "stale_leak": 0.0,
+  "tokens_per_query": 15.7,
+  "search_latency_ms": 95.9,
+  "status": "ok"
+}

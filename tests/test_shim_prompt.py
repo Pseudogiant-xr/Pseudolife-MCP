@@ -25,8 +25,9 @@ a shim-only debt when recorded (2026-09-05): the same example was in
 there on 2026-09-07, so it is a shim-lineage debt now, and
 ``tests/test_assistant_provenance.py`` runs the same two halves over the
 shipped prompt against that module's own (empty) list. v2 is not re-cut
-here (it is the pre arm of a committed gate); a re-cut shim prompt is a v5
-with its own ladder gate.
+(it is the pre arm of a committed gate) and neither is v4 (the pre arm of
+the v5 gate); ``sonnet_extractor_v5.md`` (2026-09-07) is the re-cut, held
+below to an EMPTY collision list, and the launchers default to it.
 """
 from __future__ import annotations
 
@@ -109,7 +110,8 @@ def test_importing_the_generator_does_not_write_anything():
     """``gen_assistant_facts_prompts`` used to write on import, so any suite
     importing it regenerated the committed artifacts underneath its own
     assertions (found 2026-09-05). This generator must not repeat it."""
-    names = ("sonnet_extractor_v2.md", "sonnet_extractor_v4.md")
+    names = ("sonnet_extractor_v2.md", "sonnet_extractor_v4.md",
+             "sonnet_extractor_v5.md")
     stamps = {n: (_PROMPTS / n).stat().st_mtime_ns for n in names}
     # reload, not import: import_module is cached, and a cached module would
     # pass this without ever re-running the body.
@@ -316,11 +318,171 @@ def test_the_inherited_contamination_allowlist_describes_the_v2_body():
         f"contamination allowlist names non-v2 phrase(s): {extra}")
 
 
+# ── v5: the re-cut shim prompt ───────────────────────────────────────────
+#
+# v5 is v4 with the v2 body's pre-rule examples re-cut on invented names,
+# derived by `gen_shim_prompt.V5_RECUTS`. These pins say what that
+# derivation may and may not do: exactly the registered pairs, nothing
+# else changes, the collision names are gone, every remaining name-shaped
+# phrase is a registered invented token or a kept pre-rule name, and the
+# corpus grep — run over the registered tokens too, not only the
+# leftovers — finds nothing. The v2 and v4 pins above are unchanged: v5
+# does not edit its ancestors.
+
+
+def _v5_registered_tokens() -> tuple[str, ...]:
+    g = _gen_module()
+    return (*g.EXAMPLE_TOKENS, *g.BASE_EXAMPLE_TOKENS)
+
+
+def _v5_proper_nouns(text: str) -> set[str]:
+    """Like `_proper_nouns`, but stripping BOTH registries (the blocks'
+    tokens and the base's), longest first so an article-led token does
+    not leave a bare "The" behind."""
+    text = _gen()._split_body(text)
+    for token in sorted(_v5_registered_tokens(), key=len, reverse=True):
+        text = text.replace(token, " ")
+    return {m.group(0) for m in _PHRASE.finditer(text)
+            if m.group(0) not in _SENTENCE_CAPITALS}
+
+
+def test_v5_is_v4_with_exactly_the_registered_recuts_applied():
+    """The load-bearing pin: the only difference between v4 and v5 is the
+    re-cut table, applied to every occurrence. Computed from the v4 FILE,
+    so a v5 that drifted from v4 by any other edit fails here even if the
+    generator would reproduce it."""
+    g = _gen()
+    assert g.V5_RECUTS, "V5_RECUTS is empty — v5 would be v4 under a new name"
+    v4 = g._split_body(_read(g.OUT_NAME))
+    expected = v4
+    for old, new in g.V5_RECUTS:
+        assert old in expected, f"re-cut target {old!r} is not in the v4 body"
+        expected = expected.replace(old, new)
+    assert g._split_body(_read(g.V5_NAME)) == expected
+    assert expected != v4, "the re-cut table changes nothing"
+
+
+def test_regenerating_would_reproduce_v5_exactly():
+    g = _gen()
+    assert _read(g.V5_NAME) == g.compose_v5(), (
+        f"{g.V5_NAME} differs from what the generator would write — re-run "
+        "`PYTHONPATH=. python evals/gen_shim_prompt.py`")
+
+
+def test_v5_still_sends_every_shipped_block_and_the_v2_rules():
+    """Same wire-level check as v4: the re-cut must not cost a block."""
+    from pseudolife_memory.memory.dream import (
+        _ASSISTANT_FACTS_INSTRUCTION,
+        _ASSISTANT_PROVENANCE_EXAMPLE,
+        _ASSISTANT_SPEAKER_RULE,
+    )
+
+    override = _read("sonnet_extractor_v5.md").split("\n---\n", 1)[-1].strip()
+    for block in (_ASSISTANT_FACTS_INSTRUCTION, _ASSISTANT_SPEAKER_RULE,
+                  _ASSISTANT_PROVENANCE_EXAMPLE):
+        assert block.strip() in override
+    assert "DOCUMENTS PRESCRIBE" in override, "the v2 body was lost"
+    assert "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS" in override
+    assert "COLLECTION MEMBERSHIP" in override
+
+
+def test_v5_carries_none_of_the_v2_collision_names():
+    """The reason v5 exists. The v2/v4 collision list is the set of names
+    that hit the corpus; every one of them must be gone from v5, and v5's
+    own list must be empty rather than merely shorter."""
+    g = _gen()
+    body = g._split_body(_read(g.V5_NAME))
+    still_there = sorted(n for n in g.KNOWN_CORPUS_COLLISIONS if n in body)
+    assert still_there == [], f"v5 still names {still_there}"
+    assert g.V5_KNOWN_CORPUS_COLLISIONS == {}
+
+
+def test_every_proper_noun_in_v5_is_a_registered_token_or_a_kept_name():
+    """Structural half for v5 — runs with or without the datasets. There
+    are two accounts a name-shaped phrase can be on, and no third: a
+    registered invented token (grep-checked) or `V5_PRE_RULE_PROPER_NOUNS`
+    (kept, and held equal to the body below)."""
+    g = _gen()
+    text = _read(g.V5_NAME)
+    body = g._split_body(text)
+    present = [t for t in _v5_registered_tokens() if t in body]
+    assert present, "no registered invented token reaches v5 — vacuous"
+    unaccounted = sorted(_v5_proper_nouns(text) - g.V5_PRE_RULE_PROPER_NOUNS)
+    assert unaccounted == [], (
+        f"unregistered proper noun(s) in v5: {unaccounted} — re-cut onto a "
+        "registered invented token or register a new one")
+
+
+def test_the_v5_kept_names_describe_the_v5_body():
+    """Equality, both ways: every kept name occurs in v5, and every
+    pre-rule name that survived the re-cut is on the kept list. A name
+    that the table removed must leave the list; one it kept must be on it."""
+    g = _gen()
+    body = g._split_body(_read(g.V5_NAME))
+    absent = sorted(n for n in g.V5_PRE_RULE_PROPER_NOUNS if n not in body)
+    assert absent == [], f"listed as kept but absent from v5: {absent}"
+    survived = frozenset(n for n in g.PRE_RULE_PROPER_NOUNS if n in body)
+    assert survived == g.V5_PRE_RULE_PROPER_NOUNS, (
+        f"pre-rule names in the v5 body {sorted(survived)} != kept list "
+        f"{sorted(g.V5_PRE_RULE_PROPER_NOUNS)}")
+
+
+@pytest.mark.parametrize("dataset", ["longmemeval_oracle.json",
+                                     "longmemeval_s_cleaned.json"])
+def test_no_v5_phrase_occurs_in_the_measured_dataset(dataset):
+    """Evidence half for v5, over the registered tokens AND the leftovers,
+    so this file's claim about v5 does not depend on another test having
+    grepped the registries. Streamed — the ``_s`` file is ~277 MB."""
+    path = _REPO / "evals" / "data" / dataset
+    if not path.exists():
+        pytest.skip(f"{dataset} not present (evals/data is gitignored)")
+
+    g = _gen()
+    text = _read(g.V5_NAME)
+    body = g._split_body(text)
+    phrases = sorted(set(_v5_proper_nouns(text))
+                     | {t for t in _v5_registered_tokens() if t in body})
+    assert phrases, "no phrase to probe — vacuous"
+    probes = [p.encode("utf-8") for p in phrases]
+    overlap = max(len(p) for p in probes)
+    counts = {p: 0 for p in probes}
+    prev = b""
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(8 << 20)
+            if not chunk:
+                break
+            buf = prev + chunk
+            for p in probes:
+                counts[p] += buf.count(p)
+            prev = buf[-overlap:]
+    hits = {p.decode(): n for p, n in counts.items() if n}
+    assert sorted(hits) == sorted(g.V5_KNOWN_CORPUS_COLLISIONS), (
+        f"v5 phrase(s) occur in {dataset}: {hits} — the re-cut names "
+        "benchmark content; re-cut again on invented names")
+
+
 # ── the header must cite the gate that validated this file ───────────────
 
 _GATE_RULE2 = ("evals/results/"
                "ladder-shimprompt-rule2-paired-verdict-threshold.json")
 _GATE_RULE1 = "evals/results/ladder-shimprompt-paired-verdict-threshold.json"
+_GATE_V5 = "evals/results/ladder-shimv5-paired-verdict-threshold.json"
+
+
+def test_the_v5_header_cites_the_gate_that_validated_it():
+    """Same rule for the re-cut: the header names the v4-vs-v5 verdict it
+    rests on, and that artifact is committed. v5 does not stack on the v4
+    verdicts — it is a different comparison — so it may not borrow them
+    as its own justification."""
+    g = _gen()
+    header = _read(g.V5_NAME).split(g.SEPARATOR, 1)[0]
+    assert _GATE_V5 in header, (
+        f"the v5 header does not cite {_GATE_V5}, the gate it rests on")
+    assert _GATE_RULE2 not in header and _GATE_RULE1 not in header, (
+        "the v5 header cites a v2-vs-v4 verdict as if it measured v5")
+    assert (_REPO / _GATE_V5).exists(), (
+        "the cited v5 gate artifact is not in the tree")
 
 
 def test_the_shim_prompt_header_cites_the_gate_that_validated_it():
