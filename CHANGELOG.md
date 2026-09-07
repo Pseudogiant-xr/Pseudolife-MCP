@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-07 — Cognee can be measured on our own instrument; unattended runs get a heartbeat ledger)
+- **`evals/cognee_adapter.py`** runs Cognee against BEAM on the same
+  instrument as `beam_adapter.py` — same chats, same `[session N, turn M]`
+  stamping, same answerer + judge, same rubric — using Cognee's
+  retrieval-only search modes (its completion modes answer with its own
+  LLM and are refused). `--context-chars` budget-matches by **whole
+  ranked results** (rank-prefix per type, interleaved across types) and
+  records the achieved chars per row; the resume unit is the whole chat
+  (a `.cognified` marker for fewer batches than requested is discarded, a
+  marker-less populated root is wiped). Runs in its own gitignored venv
+  (`.venv-cognee`), so the shared helpers are duplicated and
+  `tests/test_cognee_adapter.py` holds each AST-identical to its origin in
+  `beam_adapter.py` / `longmemeval_bench.py`. Written and smoke-run
+  2026-09-01, budget-fit and resume fixes 2026-09-02, landed now; **no
+  Cognee number is published** — the full run is a separate launch.
+- **`evals/run_ledger.ps1`**, the heartbeat ledger for unattended eval
+  runs: one line per beat with rows/delta, liveness and two VRAM columns
+  (the serving process via the *GPU Process Memory* counter, and
+  everything else), with `STALLED` / `NO-SMI` / `SERVER-GONE` /
+  `LOW-HEADROOM` / `RUN-EXITED` spelled out per line; a failed GPU query
+  is a note, never an exit. Section in `evals/README.md`.
+
 ### Changed (2026-09-07 — the shim's default extraction prompt no longer names a benchmark answer)
 - **`evals/prompts/sonnet_extractor_v5.md` is the new default for the
   Claude CLI shim** (`ops/install-shim-autostart.{ps1,sh}` and the
