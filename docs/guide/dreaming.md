@@ -304,7 +304,11 @@ steps:
      [anthropics/claude-code#61635](https://github.com/anthropics/claude-code/issues/61635);
      `-Model` picks the served default —
      `claude-opus-5` since the 2026-08-02 dreamer comparison; the one-shot
-     installer prompts for this choice on Claude-shim installs).
+     installer prompts for this choice on Claude-shim installs). Re-running
+     the installer replaces a shim already serving the port: it stops that
+     process tree first, then waits (`-StartupTimeoutSec`, default 90 s)
+     for the new task instance to bind and echoes its startup log lines —
+     and fails, rather than reporting success, if no listener appears.
    The shim also honors a concrete `claude-*` model named per request, so
    the Console's **Dreamer** card switches the dreamer live — one click
    between `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5` /

@@ -344,6 +344,23 @@ def _parse_args(argv=None):
     return ap.parse_args(argv)
 
 
+class ShimHTTPServer(ThreadingHTTPServer):
+    """``ThreadingHTTPServer`` that fails loudly when the port is taken.
+
+    ``HTTPServer.allow_reuse_address`` sets SO_REUSEADDR. On POSIX that only
+    lets a restart rebind through TIME_WAIT. On Windows it ALSO lets a second
+    socket bind a port that is already in LISTEN, and the first socket keeps
+    the traffic — so a duplicate shim launched over a live one started
+    "successfully", served nothing, and had no error to log (the 2026-09-06
+    re-install over the live :8082 shim; probed 2026-09-07 on Python 3.11.9:
+    with ``allow_reuse_address = False`` the second bind fails with
+    WinError 10048). Windows does not need SO_REUSEADDR to rebind after a
+    restart, so it is dropped there and kept everywhere else.
+    """
+
+    allow_reuse_address = os.name != "nt"
+
+
 def main():
     args = _parse_args()
 
@@ -362,7 +379,7 @@ def main():
     # an empty cache, and this guarantees no request ever hits it.
     ok, detail = cli.health()
     print(f"claude_shim: health warm -> {'ok' if ok else detail}", flush=True)
-    srv = ThreadingHTTPServer((args.host, args.port), make_handler(cli))
+    srv = ShimHTTPServer((args.host, args.port), make_handler(cli))
     print(f"claude_shim: serving {args.model} on "
           f"http://{args.host}:{args.port}/v1", flush=True)
     srv.serve_forever()

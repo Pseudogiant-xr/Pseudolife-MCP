@@ -345,3 +345,33 @@ def test_the_health_probe_does_not_trip_the_override_warning(caplog):
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == [], (
         "the empty health-probe prompt must not report an override miss")
     assert seen["system"] is None      # nothing was passed to the CLI
+
+
+# --- bind semantics -------------------------------------------------------
+
+def test_server_refuses_to_bind_beside_a_running_shim():
+    """A second shim launched over a live one must FAIL at bind, not start
+    "successfully" and serve nothing. ``HTTPServer.allow_reuse_address``
+    sets SO_REUSEADDR, and on Windows that lets a second socket bind a port
+    already in LISTEN while the first keeps the traffic — which is why the
+    2026-09-06 re-install over the live :8082 shim produced no traceback
+    (probed 2026-09-07, Python 3.11.9: a plain ThreadingHTTPServer bound
+    beside another; with allow_reuse_address=False the bind fails with
+    WinError 10048). On POSIX SO_REUSEADDR never permits a bind over a
+    LISTEN socket, so this is a real check on both platforms."""
+    first = shim.ShimHTTPServer(("127.0.0.1", 0), shim.BaseHTTPRequestHandler)
+    port = first.server_address[1]
+    try:
+        with pytest.raises(OSError):
+            shim.ShimHTTPServer(("127.0.0.1", port), shim.BaseHTTPRequestHandler)
+    finally:
+        first.server_close()
+
+
+def test_reuse_address_is_dropped_only_on_windows():
+    # POSIX keeps SO_REUSEADDR: a restart must rebind through TIME_WAIT.
+    # Windows does not need it for that, and with it a duplicate bind never
+    # fails. main() must construct this class, not the stock server.
+    assert shim.ShimHTTPServer.allow_reuse_address is (os.name != "nt")
+    src = Path(shim.__file__).read_text(encoding="utf-8")
+    assert "ShimHTTPServer((args.host, args.port)" in src

@@ -6,6 +6,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-07 — a duplicate shim now fails at bind on Windows instead of serving nothing)
+- **`evals/claude_shim.py` and `evals/codex_shim.py` serve through a
+  `ShimHTTPServer` whose `allow_reuse_address` is off on Windows.** The
+  stock `http.server.HTTPServer` sets `SO_REUSEADDR`, which on Windows lets
+  a second socket bind a port that is already in LISTEN while the first
+  socket keeps the traffic — so a shim launched over a live one started
+  "successfully", answered nothing, and had no error to log. This is the
+  shim-side half of the installer entry below (the same 2026-09-06
+  re-install; probed 2026-09-07 on Python 3.11.9: with the option off the
+  second bind fails with `WinError 10048`, and the flipped option alone
+  changes the outcome). POSIX keeps `SO_REUSEADDR`, which it needs to rebind
+  through TIME_WAIT after a restart; Windows does not need it for that.
+  Pinned in `tests/test_claude_shim_health.py` and
+  `tests/test_codex_shim_health.py` by a real double bind on an ephemeral
+  port (raises on every platform) plus the per-platform option value.
+
+### Fixed (2026-09-07 — the shim autostart installer no longer reports success over a shim it never replaced)
+- **`ops/install-shim-autostart.ps1` now stops the shim already serving
+  the port before it starts the task, and prints "Registered + started"
+  only once a `claude_shim.py` process is actually listening.** Re-running
+  it over a live shim (2026-09-06, the v2 → v4 prompt cutover) registered
+  the new task, `Start-ScheduledTask` returned `LastTaskResult 0`, and the
+  installer reported success — while the old v2 instance kept `:8082` and
+  the new interpreter left no trace in `~/.pseudolife-mcp/claude-shim.log`.
+  Two Windows facts made that silent, both probed 2026-09-07: a second
+  `http.server` listener **binds successfully** beside the first
+  (`allow_reuse_address` sets `SO_REUSEADDR`, which on Windows shares a
+  port already in LISTEN; the first socket keeps the traffic), so there was
+  never a bind error to log; and two independent `cmd >> log 2>&1`
+  appenders keep separate file pointers, so the old shim's next
+  health-probe line **overwrote** whatever the new one wrote (reproduced:
+  the second appender's line vanished from the file). The installer now
+  (a) — after registration succeeded, because stopping the live shim and
+  then failing to register would leave the box with no extractor at all —
+  finds every process whose command line names `claude_shim.py` and this
+  `--port` (the launch is a three-layer tree: `cmd.exe`, the `.venv`
+  launcher, the base interpreter; no layer's death propagates), stops
+  them, waits for the port to clear, and refuses if the port is held by
+  anything else; (b) after `Start-ScheduledTask`, polls up to
+  `-StartupTimeoutSec` (default 90 s — the health warm-up is one real CLI
+  call) for a listener **owned by** a `claude_shim.py` process, echoes the
+  log's new `system prompt override from …` / `serving … on …` lines, and
+  throws with the task's `LastTaskResult` and the new log lines when no
+  listener appears. The header's never-elevate-inside-Claude-Desktop
+  warning is unchanged; `install.ps1`'s catch hint now covers a start
+  failure, not only elevation. Guard:
+  `tests/test_client_install_ux.py::test_shim_autostart_installer_replaces_the_running_tree_and_verifies_the_bind`.
+  The shim-side half of the same class — the shims refusing a duplicate
+  bind — is the entry above. Deliberately not done here:
+  `ops/install-codex-shim-autostart.ps1` keeps its start-and-report shape
+  (no stop of a running Codex shim, no listener check), so a re-install
+  over a live Codex shim still prints success while the old instance keeps
+  `:8086` — the same failure this entry fixes for the Claude installer,
+  left for a follow-up that shares the helpers between the two scripts.
+
 ### Changed (2026-09-06 — Dependabot told not to propose transformers 5.x until optimum-onnx can take it)
 - **`.github/dependabot.yml`, ignore-only: `transformers >=5` will not be
   proposed again.** The daemon image installs with `ops/requirements.lock.txt`
