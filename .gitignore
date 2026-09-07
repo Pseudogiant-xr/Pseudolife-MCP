@@ -65,3 +65,7 @@ evals/results/*-gate*.summary.json
 
 # hookify local rules (machine-local enforcement, never published)
 .claude/*.local.md
+
+# the Cognee adapter's own venv (evals/cognee_adapter.py) — Cognee's
+# dependency tree stays out of the bench venv
+.venv-cognee/

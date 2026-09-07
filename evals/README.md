@@ -2670,6 +2670,89 @@ paper-faithful float, `score_intfaithful` = code-faithful).
 judged locally or by an Opus-class CLI judge. Cognee's 0.79 is also a
 20-question single-conversation protocol. Compare within a row.
 
+## Cognee on our instrument — the adapter (added 2026-09-07; no numbers yet)
+
+Cognee's published BEAM-100K 0.79 cannot be read against the rows above
+(GPT judge, per-type answer prompts, 20-question protocol), and the
+2026-08-22 judge-transfer re-judge already showed the gap is not a judge
+artifact. `evals/cognee_adapter.py` makes the comparison the
+instrument-matched way: the same chats, the same `[session N, turn M]`
+turn stamping, the same answerer + judge, the same rubric — with Cognee
+doing only the thing it is being measured for, retrieval.
+
+- **Retrieval modes only** (`chunks`, `chunks_lexical`, `summaries`,
+  `temporal`). Cognee's `*_COMPLETION` modes answer with its own LLM and
+  are refused: that would un-match the instrument.
+- **Budget-matched by whole results.** `--context-chars` fills the cap
+  with whole ranked results — rank-prefix per type, interleaved across
+  types so a wide first type cannot starve the second — and every row
+  records the *achieved* chars, not the requested cap. A mid-chunk
+  `ctx[:n]` cut would have landed entirely on the coarser-grained system
+  (2026-09-02 fairness review, before any comparison was run). `--top-k`
+  caps retrieval width; Cognee's own default is 15.
+- **The resume unit is the whole chat.** A `.cognified` marker records the
+  batch count; a marker for fewer batches than requested is discarded and
+  a marker-less populated root is wiped, so a cognify that died mid-flight
+  (the full run spans nights) cannot serve two thirds of a chat as a whole
+  one — the 2026-09-01 smoke left exactly such a bank behind.
+- **Its own venv** (`.venv-cognee`, gitignored), so Cognee's dependency
+  tree stays out of the bench venv. That means the adapter cannot import
+  `beam_adapter`; the shared helpers (answer prompt, judge, turn stamp,
+  chat loaders, the bench `_chat` with its thinking/sampler knobs) are
+  duplicated, and `tests/test_cognee_adapter.py` holds every one of them
+  **AST-identical** to its origin — an instrument change that is not
+  mirrored fails the suite instead of quietly un-matching the Cognee row.
+- Cognee is pointed at the bench Qwen server (`LLM_PROVIDER=custom`,
+  instructor `json_schema_mode`) with CPU fastembed embeddings; every
+  setting is `setdefault`, so an operator export wins. Per-chat banks
+  live under `evals/results/banks/cognee-<tier>-<tag>/` (gitignored).
+
+```bash
+.venv-cognee/Scripts/python evals/cognee_adapter.py --beam-root <BEAM> \
+    --tier 100K --out-tag <tag> [--smoke] [--top-k N --context-chars M]
+.venv-cognee/Scripts/python evals/cognee_adapter.py --beam-root <BEAM> \
+    --tier 100K --out-tag <tag> --report
+```
+
+Smoke-run end to end on 2026-09-01 (`--smoke`: 1 chat, 2 batches, 3
+questions — plumbing validation only, and its bank was produced before the
+whole-result budget fit, so nothing from it is kept). **No Cognee number
+is published here.** The full 100K run is roughly 18 h of cognify plus
+answer/judge and is a separate, explicitly launched job; its first
+decision is which committed arm it is budget-matched against (`rag16` /
+`rag48` by served chars), and whether Cognee's graph layer should be
+represented via `GraphCompletionRetriever.get_context` without its
+answerer.
+
+### Heartbeat ledger for unattended runs (`run_ledger.ps1`)
+
+`evals/run_ledger.ps1` writes one tab-separated line per beat (default
+every 15 min) for a run identified by pid, rows file and stdout log:
+rows written and the delta since the last beat, chats ingested, log size,
+whether the run is alive, and **two** VRAM columns — `llama_mb` (the
+serving process itself, via the Windows *GPU Process Memory* counter;
+`nvidia-smi --query-compute-apps` returns N/A per process under WDDM) and
+`other_mb` (everything else on the device). They catch different
+failures: a serving-process drop to zero while the run is alive means the
+server died under it and every later row is garbage; `other_mb` growth
+is what starves a run, and a device total hides it (the first version
+misread a browser window as run drift). Notes are spelled out per line —
+`quiet`, `STALLED` (two consecutive beats with no new rows *and* no log
+growth — a harness whose unit is a whole chat, like the Cognee adapter,
+can go 30+ min without a row while its log grows), `NO-SMI` (the GPU
+query failed; VRAM columns read `-1` and the ledger keeps beating rather
+than dying on the driver wedge it exists to catch), `SERVER-GONE`,
+`LOW-HEADROOM`, `RUN-EXITED` — so a 7am scan sees the word, not a diff of
+two columns. `-ProgressPattern` says what a chat-done log line looks like
+(default matches both `beam_adapter` and `cognee_adapter`). This is the
+durable half of the unattended-operation rule (affirmative launch check,
+15-minute heartbeat, auditable ledger).
+
+```powershell
+pwsh -NoProfile -File evals/run_ledger.ps1 -RunPid <pid> -RowsFile <run.jsonl> `
+    -LogFile <run.log> -LedgerFile <ledger.tsv>
+```
+
 ## Comparator arms — ReFind and no-memory (added 2026-09-01)
 
 Two opt-in arms, both adopted from the 2026-09-01 briefing-backlog triage.
