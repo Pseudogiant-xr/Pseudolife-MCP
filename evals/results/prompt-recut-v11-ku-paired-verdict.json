@@ -1,0 +1,233 @@
+{
+  "what": "extraction-prompt example re-cut, paired same-window KU-oracle e2e: pre = shipped prompt, post = candidate; same extractor endpoint, answerer and judge",
+  "generated_at": "2026-09-06T02:25:33",
+  "pre_tag": "recut-v10",
+  "post_tag": "recut-v11",
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 78,
+  "noise_floor_rag_control": {
+    "identical_rag_context": "78/78",
+    "rag_disagreement": 0,
+    "flipped_qids": []
+  },
+  "comparisons": {
+    "rag": {
+      "accuracy": 0.8718,
+      "reference_accuracy": 0.8718,
+      "delta": 0.0,
+      "wins": 0,
+      "losses": 0,
+      "net": 0,
+      "p_mcnemar_exact": 1.0,
+      "exceeds_noise_floor": false
+    },
+    "cortex": {
+      "accuracy": 0.7051,
+      "reference_accuracy": 0.6667,
+      "delta": 0.0385,
+      "wins": 7,
+      "losses": 4,
+      "net": 3,
+      "p_mcnemar_exact": 0.5488,
+      "exceeds_noise_floor": true
+    },
+    "hybrid": {
+      "accuracy": 0.9359,
+      "reference_accuracy": 0.8974,
+      "delta": 0.0385,
+      "wins": 3,
+      "losses": 0,
+      "net": 3,
+      "p_mcnemar_exact": 0.25,
+      "exceeds_noise_floor": true
+    },
+    "cascade": {
+      "accuracy": 0.8718,
+      "reference_accuracy": 0.859,
+      "delta": 0.0128,
+      "wins": 5,
+      "losses": 4,
+      "net": 1,
+      "p_mcnemar_exact": 1.0,
+      "exceeds_noise_floor": true
+    }
+  },
+  "leave_out": {
+    "dropped": [
+      "affe2881",
+      "89941a94"
+    ],
+    "n": 76,
+    "comparisons": {
+      "rag": {
+        "accuracy": 0.8816,
+        "reference_accuracy": 0.8816,
+        "delta": 0.0,
+        "wins": 0,
+        "losses": 0,
+        "net": 0,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": false
+      },
+      "cortex": {
+        "accuracy": 0.6974,
+        "reference_accuracy": 0.6579,
+        "delta": 0.0395,
+        "wins": 7,
+        "losses": 4,
+        "net": 3,
+        "p_mcnemar_exact": 0.5488,
+        "exceeds_noise_floor": true
+      },
+      "hybrid": {
+        "accuracy": 0.9342,
+        "reference_accuracy": 0.8947,
+        "delta": 0.0395,
+        "wins": 3,
+        "losses": 0,
+        "net": 3,
+        "p_mcnemar_exact": 0.25,
+        "exceeds_noise_floor": true
+      },
+      "cascade": {
+        "accuracy": 0.8684,
+        "reference_accuracy": 0.8553,
+        "delta": 0.0132,
+        "wins": 5,
+        "losses": 4,
+        "net": 1,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": true
+      }
+    }
+  },
+  "count_class": {
+    "digit_gold_n39": {
+      "cortex": {
+        "pre": 26,
+        "post": 29
+      },
+      "hybrid": {
+        "pre": 37,
+        "post": 38
+      },
+      "cascade": {
+        "pre": 35,
+        "post": 35
+      }
+    },
+    "spelled_gold_n12": {
+      "cortex": {
+        "pre": 11,
+        "post": 11
+      },
+      "hybrid": {
+        "pre": 12,
+        "post": 12
+      },
+      "cascade": {
+        "pre": 12,
+        "post": 12
+      }
+    }
+  },
+  "frozen_total": {
+    "01493427": {
+      "lifted_example_source": false,
+      "gold": "25",
+      "cortex_pre": false,
+      "cascade_pre": true,
+      "cortex_post": false,
+      "cascade_post": false,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    },
+    "41698283": {
+      "lifted_example_source": false,
+      "gold": "a 70-200mm zoom lens",
+      "cortex_pre": false,
+      "cascade_pre": true,
+      "cortex_post": false,
+      "cascade_post": false,
+      "answer_in_current_fact": {
+        "pre": false,
+        "post": false
+      }
+    },
+    "45dc21b6": {
+      "lifted_example_source": false,
+      "gold": "3",
+      "cortex_pre": true,
+      "cascade_pre": true,
+      "cortex_post": false,
+      "cascade_post": false,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": false
+      }
+    },
+    "4d6b87c8": {
+      "lifted_example_source": false,
+      "gold": "25",
+      "cortex_pre": true,
+      "cascade_pre": true,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    },
+    "5831f84d": {
+      "lifted_example_source": false,
+      "gold": "15",
+      "cortex_pre": false,
+      "cascade_pre": true,
+      "cortex_post": false,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    },
+    "a2f3aa27": {
+      "lifted_example_source": false,
+      "gold": 1300,
+      "cortex_pre": true,
+      "cascade_pre": true,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    },
+    "affe2881": {
+      "lifted_example_source": true,
+      "gold": "32",
+      "cortex_pre": true,
+      "cascade_pre": true,
+      "cortex_post": true,
+      "cascade_post": true,
+      "answer_in_current_fact": {
+        "pre": true,
+        "post": true
+      }
+    }
+  },
+  "frozen_total_losses_on_six": [
+    "01493427",
+    "41698283",
+    "45dc21b6"
+  ],
+  "significant_regressions": [],
+  "checks": {
+    "no_arm_significantly_below_pre": true,
+    "rag_control_net_zero": true,
+    "six_frozen_totals_no_loss": false
+  },
+  "gate": "FAIL"
+}

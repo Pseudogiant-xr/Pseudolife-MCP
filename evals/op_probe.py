@@ -86,6 +86,13 @@ BATTERY: list[tuple[str, dict[str, str | None]]] = [
     ("user: Added two shows tonight, which makes 25 titles on my to-watch "
      "list now.",
      {"25": None}),
+    # Count OF items from a source (2026-09-06): the v11 KU gate's one real
+    # loss routed such a count into a set member. Invented tokens, and
+    # deliberately NOT the tokens the v12 prompt example uses, so this
+    # decoy tests transfer rather than recall of the example.
+    ("user: Made the Ashcombe pie from Tarn Hollow's channel tonight, so "
+     "that's 19 of their recipes I've tried now.",
+     {"19": None}),
 ]
 
 # ── prompt variants ───────────────────────────────────────────────────────
@@ -381,6 +388,89 @@ VARIANTS: dict[str, str] = {
 }
 
 
+# v11 (2026-09-06): the shipped v10 text with its two corpus-lifted worked
+# examples re-cut on invented tokens. The RULES are byte-identical to v10;
+# only the example notes and the values they yield change. The 2026-09-05
+# audit (tests/test_prompt_example_lifts.py) found the count example
+# paraphrasing LongMemEval question affe2881's own answer turn — with that
+# question's gold, "32", as the example value — and the collection
+# example's "road bike" is the gold of 89941a94 / gpt4_e414231f. Every
+# replacement token was vetted at zero occurrences in BOTH dataset files
+# and against every gold answer (41 is not a gold; "the park" -> a named
+# invented reserve so the note shares no 4-gram with the corpus turn).
+_V11_RECUTS: tuple[tuple[str, str], ...] = (
+    ("[4] sold the road bike, no longer biking to work",
+     "[4] sold the penny-farthing, no longer biking to work"),
+    ('"attribute":"bikes owned","value":"road bike"',
+     '"attribute":"bikes owned","value":"penny-farthing"'),
+    ("[5] saw a Northern Flicker today, that makes 32 species at the park now",
+     "[5] saw a Gallowmere Teal today, that makes 41 species at Kelmarsh "
+     "Reserve now"),
+    ('"attribute":"bird species seen at park","value":"32"',
+     '"attribute":"bird species seen at Kelmarsh Reserve","value":"41"'),
+    ('NO "op":"add" claim for Northern Flicker',
+     'NO "op":"add" claim for Gallowmere Teal'),
+)
+
+
+def _recut(text: str) -> str:
+    """Apply the v11 example swaps; each target must occur exactly once so
+    a drifted base cannot silently produce a half-recut prompt."""
+    for old, new in _V11_RECUTS:
+        assert text.count(old) == 1, f"recut target not unique: {old!r}"
+        text = text.replace(old, new)
+    return text
+
+
+VARIANTS["v11-example-recut"] = _recut(VARIANTS["v10-stance-update"])
+
+# v12 (2026-09-06): v11 + a second inline count example. The v11 KU gate
+# lost 45dc21b6 because "3 of Emma's recipes" was routed into a set member
+# ("Emma's recipes (2)") instead of a plain count — the count rule already
+# says the number wins even when the note names the item, but the single
+# bird-count example did not carry that to counts OF items from a source.
+# The added example is the same single-claim shape, on invented tokens
+# vetted like v11's (Marrowgate / Quillon Larder / 9 — no gold is "9"), and
+# is worded generically ("of the <source>'s recipes I've tried"), not from
+# any corpus turn. Only other change: the stance example's note number
+# moves from [6] to [7] so the notes stay in order.
+_V12_SOURCE_COUNT = (
+    " The same holds when the count is of items from a source: the note "
+    "[6] cooked the Marrowgate stew tonight, that makes 9 of the Quillon "
+    "Larder's recipes I've tried now — yields only the single claim "
+    '{"entity":"user","attribute":"Quillon Larder recipes tried",'
+    '"value":"9","confidence":0.9,"source":6} inside the one claims '
+    'array, and NO "op":"add" claim for the stew.\n'
+)
+
+
+def _v12(text: str) -> str:
+    edits = (
+        ('array, and NO "op":"add" claim for Gallowmere Teal.\n',
+         'array, and NO "op":"add" claim for Gallowmere Teal.' + _V12_SOURCE_COUNT),
+        ("example, a later note [6] we'll probably move the deploy target ",
+         "example, a later note [7] we'll probably move the deploy target "),
+        ('"value":"eu-west-1","stance":"probably","confidence":0.6,"source":6}',
+         '"value":"eu-west-1","stance":"probably","confidence":0.6,"source":7}'),
+    )
+    for old, new in edits:
+        assert text.count(old) == 1, f"v12 edit target not unique: {old!r}"
+        text = text.replace(old, new)
+    return text
+
+
+VARIANTS["v12-count-source-example"] = _v12(VARIANTS["v11-example-recut"])
+
+
+def requires_op(name: str) -> bool:
+    """Only the v1 variant's schema requires ``op`` on every claim, so only
+    its plain-fact decoys are scored against ``{"set"}``. Was a ``v1``
+    name-prefix match, which also caught v10 and v11 and read their count
+    decoys as 0/7 (op-probe-qwen38-0817.json) while the claims were right
+    (plain, op-less)."""
+    return name == "v1-required-op"
+
+
 def score(claims: list[dict], expected: dict[str, str | None],
           required_op: bool) -> tuple[int, int, int, int]:
     """(adopt_hit, adopt_total, decoy_hit, decoy_total) for one note."""
@@ -422,7 +512,7 @@ def main() -> int:
                 per_note.append({"note": i, "error": str(e)[:200]})
                 continue
             claims = [c if isinstance(c, dict) else c.__dict__ for c in claims]
-            h = score(claims, expected, required_op=name.startswith("v1"))
+            h = score(claims, expected, required_op=requires_op(name))
             a_hit += h[0]; a_tot += h[1]; d_hit += h[2]; d_tot += h[3]
             per_note.append({"note": i, "claims": claims})
         out["variants"][name] = {

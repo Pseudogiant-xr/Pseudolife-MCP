@@ -32,6 +32,12 @@ import op_probe  # noqa: E402
     # v10: v5 + the update-anchored stance rule — the sgku bank-diff
     # forensics traced v8's KU failure to a diluted consolidation anchor
     ("ku_op_prompt_v10_stance_update.txt", "v10-stance-update"),
+    # v11: v10 with its two corpus-lifted worked examples re-cut on invented
+    # tokens (2026-09-06); rules byte-identical, examples clean of LongMemEval
+    ("ku_op_prompt_v11_example_recut.txt", "v11-example-recut"),
+    # v12: v11 + a second inline count example for counts OF items from a
+    # source (the v11 KU gate's one real loss was that shape)
+    ("ku_op_prompt_v12_count_source_example.txt", "v12-count-source-example"),
 ])
 def test_prompt_file_matches_probe_construction(filename, variant):
     path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / filename
@@ -64,3 +70,16 @@ def test_the_shipped_prompt_still_opens_with_the_v10_base():
                                                 _SYSTEM_PROMPT)
     assert _SYSTEM_PROMPT.startswith(_BASE_SYSTEM_PROMPT)
     assert len(_SYSTEM_PROMPT) > len(_BASE_SYSTEM_PROMPT)
+
+
+def test_only_the_required_op_variant_scores_plain_facts_as_op_set():
+    """The probe's decoy scorer treats "op":"set" as the only acceptable
+    plain-fact shape for the v1 variant, whose schema REQUIRES op on every
+    claim. Every other variant leaves plain facts op-less, so their decoys
+    must be scored against {None, "set"} — a name-prefix match that also
+    caught v10 and v11 read their count decoys as 0/7 for a month
+    (op-probe-qwen38-0817.json) while the claims themselves were right."""
+    assert op_probe.requires_op("v1-required-op")
+    for name in op_probe.VARIANTS:
+        if name != "v1-required-op":
+            assert not op_probe.requires_op(name), name
