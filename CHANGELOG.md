@@ -83,6 +83,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rule-mode daemon distilled a situation-keyed `WHEN … THEN …` lesson per
   episode. The smoke rewards are not a number: three tasks, two trials, a
   bank that carried over between smokes.
+- **The between-trial dream would have timed out a quarter of the way
+  through the first full trial.** Under `--distill trial` one
+  `memory_dream(action="run")` drains every pending signal of the trial in a
+  single synchronous tool call — 97 rule-mode signals at the shim's measured
+  7-12 s each, 12-20 minutes — against the MCP client's default 300 s read
+  timeout, so the adapter would have raised mid-arm while the daemon kept
+  dreaming. `evals/taubench_adapter.py` now builds the client with a
+  two-hour read timeout (`DREAM_READ_TIMEOUT_S`, of the httpx flavour the
+  installed `mcp` uses), and `check_dream_result` treats the daemon's
+  single-flight `{"skipped": "dream_in_progress"}` — which carries no
+  `error` key — as the failed dream it is for the next trial, stopping the
+  run instead of reporting an unconsolidated store as a learning arm.
 
 ### Fixed (2026-09-08 — `used_ids` credited only the last search that served an id, so the earlier ones read as negatives)
 - **An agent naming a memory it used credited only the most recent search

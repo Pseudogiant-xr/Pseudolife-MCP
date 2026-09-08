@@ -913,6 +913,33 @@ def maint_session_uid() -> str:
     return f"maint-{uuid.uuid4().hex}"
 
 
+# Read timeout for the between-trial dream, in seconds. ``memory_dream
+# run`` is one synchronous tool call that drains EVERY pending signal of
+# the trial: under rule mode that is one extractor call per signal, and
+# the emulating shim answered a single-signal dream in 7-12 s in the
+# 2026-09-08 smoke (lotj4), so a 97-task trial is 12-20 minutes in one
+# call, plus one retry per MUST INCLUDE miss. The MCP client's default read
+# timeout is 300 s: the adapter would raise a quarter of the way in and die
+# mid-arm while the daemon kept dreaming. Two hours covers a full trial at
+# 5x the measured per-signal cost.
+DREAM_READ_TIMEOUT_S = 7200.0
+
+
+def _mcp_timeout(create_client, connect_s: float, read_s: float):
+    """A ``Timeout`` of the httpx flavour the installed ``mcp`` client
+    builds its ``AsyncClient`` from — ``httpx2`` since the client moved to
+    it, ``httpx`` before; a ``Timeout`` from the other package is rejected by
+    the client, so it is taken from the helper's own namespace first."""
+    g = getattr(create_client, "__globals__", {})
+    mod = g.get("httpx2") or g.get("httpx")
+    if mod is None:
+        try:
+            import httpx2 as mod  # type: ignore[no-redef]
+        except ImportError:
+            import httpx as mod  # type: ignore[no-redef]
+    return mod.Timeout(connect_s, read=read_s)
+
+
 async def dream_run(url: str, session_uid: str) -> dict:
     """Drive one consolidation pass on the bench daemon between trials.
 
@@ -925,8 +952,9 @@ async def dream_run(url: str, session_uid: str) -> dict:
     from mcp.client.session import ClientSession
     from mcp.client.streamable_http import (create_mcp_http_client,
                                             streamable_http_client)
+    timeout = _mcp_timeout(create_mcp_http_client, 30.0, DREAM_READ_TIMEOUT_S)
     async with create_mcp_http_client(
-            headers={"X-PL-Session": session_uid}) as http:
+            headers={"X-PL-Session": session_uid}, timeout=timeout) as http:
         async with streamable_http_client(url.rstrip("/") + "/mcp",
                                           http_client=http) as (r, w):
             async with ClientSession(r, w) as session:
@@ -954,6 +982,17 @@ def check_dream_result(result) -> str | None:
         return f"memory_dream returned {type(result).__name__}, not a result"
     if result.get("error"):
         return f"memory_dream reported an error: {result['error']}"
+    # The daemon's single-flight guard answers ``{"skipped":
+    # "dream_in_progress"}`` — no error key — when another cycle holds it.
+    # Nothing was consolidated, so it is a failed dream for this purpose.
+    for text in result.get("content") or []:
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("skipped"):
+            return (f"memory_dream skipped the pass ({payload['skipped']}): "
+                    "nothing was consolidated")
     return None
 
 

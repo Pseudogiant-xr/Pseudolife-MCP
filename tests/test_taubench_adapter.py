@@ -994,3 +994,101 @@ def test_report_prints_the_withholding_reason(tb, tmp_path, monkeypatch,
     tb.report("instruction", "y", None, n_trials=4, B=50, seed=0,
               rules="entries")
     assert "RATIOS WITHHELD" in capsys.readouterr().out
+
+
+def _fake_mcp(monkeypatch, seen: dict, reply: str):
+    """Stand in for the ``mcp`` client package ``dream_run`` imports lazily,
+    recording the HTTP client it was built with and answering one tool call
+    with ``reply``."""
+    import types
+
+    class _Ctx:
+        def __init__(self, value):
+            self.value = value
+
+        async def __aenter__(self):
+            return self.value
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Res:
+        content = [types.SimpleNamespace(text=reply)]
+        isError = False
+
+    class _Session:
+        def __init__(self, r, w):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def call_tool(self, name, args):
+            seen["tool"] = (name, args)
+            return _Res()
+
+    def _create(headers=None, timeout=None, auth=None):
+        seen["headers"] = headers
+        seen["timeout"] = timeout
+        return _Ctx(object())
+
+    def _stream(url, http_client=None):
+        seen["url"] = url
+        return _Ctx((None, None))
+
+    mods = {
+        "mcp": types.ModuleType("mcp"),
+        "mcp.client": types.ModuleType("mcp.client"),
+        "mcp.client.session": types.ModuleType("mcp.client.session"),
+        "mcp.client.streamable_http": types.ModuleType(
+            "mcp.client.streamable_http"),
+    }
+    mods["mcp.client.session"].ClientSession = _Session
+    mods["mcp.client.streamable_http"].create_mcp_http_client = _create
+    mods["mcp.client.streamable_http"].streamable_http_client = _stream
+    for name, mod in mods.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+
+def test_between_trial_dream_client_waits_for_a_full_batch(tb, monkeypatch):
+    """Under ``--distill trial`` one dream drains every pending signal of the
+    trial: 97 rule-mode signals, one extractor call each at the shim's
+    measured 7-12 s per single-signal dream (2026-09-08 smoke lotj4), so
+    12-20 minutes inside ONE synchronous tool call. The MCP client's default
+    read timeout is 300 s — the adapter would raise ``ReadTimeout`` a quarter
+    of the way in and die mid-arm while the daemon kept dreaming. The client
+    must be built with a read timeout that covers the whole batch."""
+    import asyncio
+
+    seen: dict = {}
+    _fake_mcp(monkeypatch, seen, '{"lessons": {"signals": 97}}')
+    out = asyncio.run(tb.dream_run("http://127.0.0.1:8795", "maint-abc"))
+    assert seen["tool"] == ("memory_dream", {"action": "run"})
+    assert seen["headers"] == {"X-PL-Session": "maint-abc"}
+    assert seen["url"] == "http://127.0.0.1:8795/mcp"
+    assert out["content"] == ['{"lessons": {"signals": 97}}']
+    timeout = seen["timeout"]
+    assert timeout is not None, "the MCP default (read=300 s) was used"
+    assert tb.DREAM_READ_TIMEOUT_S >= 3600
+    assert getattr(timeout, "read", 0) >= tb.DREAM_READ_TIMEOUT_S, (
+        f"read timeout {getattr(timeout, 'read', None)} does not cover a "
+        "97-signal rule-mode dream")
+
+
+def test_check_dream_result_flags_a_skipped_dream(tb):
+    """The daemon's single-flight guard answers ``{"skipped":
+    "dream_in_progress"}`` when another cycle holds it — no ``error`` key,
+    so the check let it through and trial t+1 would run against an
+    unconsolidated store while being reported as the arm that learned. A
+    skipped dream between trials is a failed dream between trials."""
+    reason = tb.check_dream_result(
+        {"content": ['{"skipped": "dream_in_progress", "pulled": 0}']})
+    assert reason and "skipped" in reason, reason
+    assert tb.check_dream_result(
+        {"content": ['{"pulled": 0, "lessons": {"signals": 3}}']}) is None
