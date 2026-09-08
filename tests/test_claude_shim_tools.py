@@ -385,7 +385,7 @@ def test_an_imitated_history_marker_is_recovered_as_a_tool_call():
 # end), the retry closed one short again, the raw JSON went back to the
 # customer as prose, and the customer played along until max_steps.
 _INNER = json.dumps({"record_id": "rec_0001", "action": "keep",
-                     "reason": "not_as_described", "confirmed": True})
+                     "reason": "mismatch", "confirmed": True})
 _WRAPPED_SHORT = json.dumps({"tool_call": {
     "name": "call_wrapped_tool",
     "arguments": {"inner_tool": "file_record_42", "arguments": _INNER}}})[:-1]
