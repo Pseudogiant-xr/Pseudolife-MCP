@@ -1252,6 +1252,31 @@ def test_memory_outcome_unusable_used_ids_still_records_the_outcome(
     assert out["used_ids_ignored"] == 1
 
 
+@pytest.mark.parametrize("empty", [[], ""])
+def test_memory_outcome_empty_used_ids_is_reported_as_empty_not_garbage(
+        tmp_path: Path, monkeypatch, empty) -> None:
+    """``used_ids=[]`` is equivalent to omitting it — the label is
+    positive-only, so "used none" writes nothing (decision 2026-09-08; a
+    real negative would need an event-level mark, i.e. a schema change).
+    But an intentionally empty list is not garbage, and the reason must
+    not say the ids were unusable."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    seen: dict = {}
+
+    def _fake(task, outcome, **kw):
+        seen.update(kw)
+        return {"recorded": True, "signal_id": 1}
+
+    monkeypatch.setattr(mod.service, "record_outcome", _fake)
+    out = _invoke("memory_outcome", {"task": "t", "outcome": "success",
+                                     "used_ids": empty})
+    assert seen["used_ids"] is None
+    assert out["recorded"] is True
+    assert out["used_ids_reason"] == (
+        "empty: no label written (used_ids is positive-only)")
+    assert "used_ids_ignored" not in out
+
+
 def test_parse_used_ids_caps_a_runaway_list() -> None:
     """The field is typed by a model, so its LENGTH gets the same distrust
     as its contents: 5,000 ids would be 5,000 storage round trips under the

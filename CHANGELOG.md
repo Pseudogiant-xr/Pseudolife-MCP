@@ -6,6 +6,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-08 — `used_ids` credited only the last search that served an id, so the earlier ones read as negatives)
+- **An agent naming a memory it used credited only the most recent search
+  that had served it; every earlier search in the session that served the
+  same memory stayed unlabelled, and the replay either dropped those events
+  or — when they carried any other label — scored the memory as a miss in
+  them.** `memory_outcome(used_ids=)` (2026-09-05) reused the
+  dereference rule — `memory_get`/`memory_reinforce` credit the most recent
+  serving event, which is right for a fetch that follows one query — but an
+  outcome follows a session and names ids, not queries.
+  `evals/retrieval_replay.py` keys labels per event, drops an event with no
+  label and scores an unlabelled served id in a labelled event as a miss,
+  and `evals/retrieval_telemetry_review.py` counts an unlabelled event
+  against the Phase-1 target, so the rule lost a positive the agent asserted
+  and could turn it into a negative it never did. Measured on the live log
+  the same day (`evals/results/retrieval-uses-multiserve-20260908.json`,
+  read-only, 2,648 events / 74 sessions): none of the 13 labels on record
+  had a second serving event in its window, but 720 of 2,487 (session,
+  entry) pairs — 29% — are served by more than one event in their session,
+  628 of them within the hour, so under a many-searches-then-one-outcome
+  cadence the bias is structural. An `outcome` label now credits **every**
+  event in the session window that served the id (new
+  `PostgresStorage.credit_retrieval_uses`); `get`/`reinforce` are unchanged.
+  Both harnesses read the table as before. The widening needs an identity:
+  with no session id (44% of logged events that day) "same session" would
+  mean every other NULL-session event in the window — other sessions,
+  possibly other agents — so a session-less outcome keeps the most-recent
+  rule (reviewer finding, same day).
+- **"No search served this id" was also the answer when a search had —
+  under a different session id.** The tier-3 active-session pointer vs the
+  `X-PL-Session` header, or a pointer TTL lapse, can put the search and the
+  outcome under different identities, and 44% of logged events carry no
+  session id at all. The result now splits the miss:
+  `used_ids_served_elsewhere` (an event in the window served it under
+  another session id — the label needs the same identity) beside
+  `used_ids_unmatched` (nothing in the window served it). The probe is
+  bounded to the window on purpose: index-backed at 0.05 ms against a 3.9 ms
+  sequential scan unbounded (same artifact), which grows with the 365-day
+  retention.
+- **One statement, one transaction** for the whole list — fifty ids used to
+  be fifty storage round trips under the service lock, each re-resolving
+  the writer. The per-id three-way report survives (credited / unmatched /
+  served-elsewhere); a failure of the single statement is reported as
+  `used_ids_errors` for every id and makes no unmatched claim, since it is a
+  fact about the database and not about what the searches served.
+- **`memory.retrieval_log.use_window_seconds` (default 3600, unchanged) is
+  now documented as an invariant** on the `used_ids` parameter, the config
+  comment and the memory-model guide: an outcome credits only searches made
+  under the same session identity inside the window, so a harness keeps one
+  session per episode and logs the outcome before the window lapses.
+- **`used_ids=[]` stays equivalent to omitting the parameter.** The label is
+  positive-only; a real "used none" signal would need an event-level
+  negative (a column or a sentinel row — a schema change) and a replay that
+  scores unlabelled events as all-negative, both decided with real
+  τ-bench-style data in hand rather than now. An intentionally empty list
+  reports `used_ids_reason: "empty: no label written (used_ids is
+  positive-only)"` instead of calling the ids unusable. No schema bump.
+
 ### Added (2026-09-07 — Cognee can be measured on our own instrument; unattended runs get a heartbeat ledger)
 - **`evals/cognee_adapter.py`** runs Cognee against BEAM on the same
   instrument as `beam_adapter.py` — same chats, same `[session N, turn M]`
@@ -194,8 +251,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   — `retrieval-telemetry-review-20260904.json` measured 0.074% of events
   carrying any downstream signal. `memory_outcome` now takes an optional
   **`used_ids`**: the entry ids the caller actually reasoned from. Each id
-  credits the most recent search in the session window that served it,
-  writing the ordinary `retrieval_uses` row under `used_via="outcome"` — the
+  credits the most recent search in the session window that served it
+  (widened to every serving search in the window on 2026-09-08 — see that
+  entry), writing the ordinary `retrieval_uses` row under `used_via="outcome"` — the
   table `retrieval_replay.py` and `retrieval_telemetry_review.py` already
   read, so both pick the new via up with no harness change. The convention
   already requires an outcome at task end; this makes the call carry the one

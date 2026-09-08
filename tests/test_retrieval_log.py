@@ -1,9 +1,10 @@
 """Retrieval event log (schema v31) — storage round-trips + service wiring.
 
 Storage half: add_retrieval_event / record_retrieval_use /
-prune_retrieval_events / retrieval_events_window against a live PG.
-Service half: search() writes an event, get_entry()/reinforce() write
-implicit use labels, the config kill-switch silences both.
+credit_retrieval_uses / prune_retrieval_events / retrieval_events_window
+against a live PG. Service half: search() writes an event,
+get_entry()/reinforce() write implicit use labels, record_outcome(used_ids=)
+writes the asserted ones, the config kill-switch silences all of it.
 
 Skips cleanly without a PG server (mirrors test_lessons_storage.py).
 """
@@ -83,6 +84,83 @@ def test_use_is_idempotent_per_via(storage):
     # A different via is a distinct label.
     assert storage.record_retrieval_use(7, "s-1", "reinforce", 3600,
                                         now=1030.0) == 1
+
+
+def test_credit_retrieval_uses_credits_every_serving_event_in_window(storage):
+    """The batched outcome label (2026-09-08): an id the agent says it used
+    credits EVERY same-session event in the window that served it, not just
+    the most recent one — the agent does not know which query surfaced the
+    id, so the signal is session-scoped by construction. Measured on the
+    live log the same day: 29% of (session, entry) pairs are served by more
+    than one event in their session, so most-recent-wins would have read
+    the earlier events as served-not-used in the replay. Per id the answer
+    is three-way: the event ids credited, "served elsewhere" (an event in
+    the window served it under ANOTHER session id only), or absent (nothing
+    in the window served it)."""
+    # Window is [now - 3600, now] = [500, 4100]: the first event falls
+    # outside it, the other three inside.
+    too_old = storage.add_retrieval_event("q0", _served(7), session_id="s-1",
+                                          now=100.0)
+    first = storage.add_retrieval_event("q1", _served(7, 9), session_id="s-1",
+                                        now=4000.0)
+    second = storage.add_retrieval_event("q2", _served(7), session_id="s-1",
+                                         now=4050.0)
+    other = storage.add_retrieval_event("q3", _served(8), session_id="s-2",
+                                        now=4060.0)
+
+    res = storage.credit_retrieval_uses([7, 8, 9, 424242], "s-1", "outcome",
+                                        window_s=3600, now=4100.0)
+    assert res[7]["events"] == [first, second]
+    assert res[7]["elsewhere"] is False
+    assert res[9]["events"] == [first]
+    # Served in the window, but only under another session id.
+    assert res[8]["events"] == [] and res[8]["elsewhere"] is True
+    # Nothing in the window served it (the id is absent, not a miss row).
+    assert 424242 not in res
+
+    events = {e["id"]: e for e in storage.retrieval_events_window()}
+    labelled = lambda eid: sorted(  # noqa: E731
+        (u["entry_id"], u["used_via"]) for u in events[eid]["uses"])
+    assert labelled(first) == [(7, "outcome"), (9, "outcome")]
+    assert labelled(second) == [(7, "outcome")]
+    assert labelled(too_old) == []
+    assert labelled(other) == []
+
+    # Idempotent per (event, entry, via): a repeat writes no rows and still
+    # reports the same credited events.
+    again = storage.credit_retrieval_uses([7], "s-1", "outcome",
+                                          window_s=3600, now=4200.0)
+    assert again[7]["events"] == [first, second]
+    assert again[7]["written"] == 0
+    assert res[7]["written"] == 2
+
+
+def test_credit_retrieval_uses_without_a_session_keeps_most_recent_wins(storage):
+    """The all-events rule is justified by the session identity: with none
+    (``session_id=None``, 44% of logged events on 2026-09-08), "same
+    session" means every other NULL-session event in the window — other
+    sessions, possibly other agents — so crediting all of them would assert
+    a use of searches the agent never saw. A None-session outcome therefore
+    keeps the dereference rule: the most recent NULL-session serving event
+    only (the reviewer's finding, 2026-09-08)."""
+    older = storage.add_retrieval_event("q1", _served(7), session_id=None,
+                                        now=4000.0)
+    newest = storage.add_retrieval_event("q2", _served(7), session_id=None,
+                                         now=4050.0)
+    named = storage.add_retrieval_event("q3", _served(7), session_id="s-1",
+                                        now=4060.0)
+
+    res = storage.credit_retrieval_uses([7], None, "outcome",
+                                        window_s=3600, now=4100.0)
+    assert res[7]["events"] == [newest]
+    assert res[7]["written"] == 1
+    # The identified session's event is "elsewhere" from a None outcome.
+    assert res[7]["elsewhere"] is True
+
+    events = {e["id"]: e for e in storage.retrieval_events_window()}
+    assert events[older]["uses"] == []
+    assert events[named]["uses"] == []
+    assert [u["entry_id"] for u in events[newest]["uses"]] == [7]
 
 
 def test_prune_cascades_uses(storage, pg_conn):
@@ -415,29 +493,28 @@ def test_record_outcome_separates_a_label_write_failure_from_a_miss(
     svc.store(text, source="test")
     entry_id = svc.search(text)["entries"][0]["id"]
 
-    real = svc._storage.credit_retrieval_use
+    def _boom(*args, **kwargs):
+        raise RuntimeError("connection reset by peer")
 
-    def _flaky(eid, *args, **kwargs):
-        if int(eid) == 424242:
-            raise RuntimeError("connection reset by peer")
-        return real(eid, *args, **kwargs)
-
-    monkeypatch.setattr(svc._storage, "credit_retrieval_use", _flaky)
+    # One statement labels the whole list (2026-09-08), so a failure is a
+    # failure of every id at once — and still not a miss for any of them.
+    monkeypatch.setattr(svc._storage, "credit_retrieval_uses", _boom)
     before = svc._retrieval_log_errors
 
     out = svc.record_outcome("t", "success",
                              used_ids=[entry_id, 424242, 987654])
     assert out["recorded"] is True
-    assert out["used_ids_recorded"] == 1
-    assert out["used_ids_errors"] == 1
-    # The failed id is NOT reported as one nothing served.
-    assert out["used_ids_unmatched"] == [987654]
+    assert out["used_ids_recorded"] == 0
+    assert out["used_ids_errors"] == 3
+    # No id is reported as one nothing served: the write raised, which says
+    # nothing about what the searches served.
+    assert "used_ids_unmatched" not in out
+    assert "used_ids_served_elsewhere" not in out
     # The existing error accounting is unchanged.
     assert svc._retrieval_log_errors == before + 1
 
     uses = svc._storage.retrieval_events_window()[-1]["uses"]
-    assert [u["entry_id"] for u in uses if u["used_via"] == "outcome"] \
-        == [entry_id]
+    assert [u for u in uses if u["used_via"] == "outcome"] == []
 
 
 def test_record_outcome_omits_used_ids_errors_when_nothing_failed(
@@ -453,3 +530,93 @@ def test_record_outcome_omits_used_ids_errors_when_nothing_failed(
     out = svc.record_outcome("t", "success", used_ids=[entry_id])
     assert out["used_ids_recorded"] == 1
     assert "used_ids_errors" not in out
+
+
+def test_record_outcome_credits_every_search_that_served_the_id(
+        pg_conn, pg_url, tmp_path):
+    """Two searches in one session both serve the entry; the outcome names
+    it once; BOTH events carry the label. Under the original most-recent-
+    wins rule the first event stayed unlabelled, and the replay
+    (``retrieval_replay.build_cases`` keys labels per event) either dropped
+    it entirely or — if it carried any other label — scored the id as an
+    implicit negative the agent never asserted."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    # The all-events rule needs a session identity (see the storage test
+    # for the session-less fallback); a bare test service has none.
+    svc.set_active_session("s-1")
+    entry_id = svc.search(text)["entries"][0]["id"]
+    assert svc.search("quick brown fox")["entries"][0]["id"] == entry_id
+
+    out = svc.record_outcome("t", "success", used_ids=[entry_id])
+    assert out["used_ids_recorded"] == 1
+    assert "used_ids_unmatched" not in out
+
+    events = svc._storage.retrieval_events_window()[-2:]
+    assert [e["session_id"] for e in events] == ["s-1", "s-1"]
+    for ev in events:
+        assert entry_id in [s["entry_id"] for s in ev["served"]]
+        assert (entry_id, "outcome") in {(u["entry_id"], u["used_via"])
+                                         for u in ev["uses"]}
+
+
+def test_record_outcome_reports_served_elsewhere_separately(
+        pg_conn, pg_url, tmp_path):
+    """An id served in the window under a DIFFERENT session id is not
+    "never served": the tier-3 pointer vs the X-PL-Session header, or a
+    pointer TTL lapse, can put the search and the outcome under different
+    identities. Telling the agent nothing served the id would be a claim
+    about its retrieval; the honest answer is that the label needs the same
+    session. Reported under ``used_ids_served_elsewhere``, apart from
+    ``used_ids_unmatched``."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.set_active_session("s-A")
+    entry_id = svc.search(text)["entries"][0]["id"]
+    svc.set_active_session("s-B")
+
+    out = svc.record_outcome("t", "success", used_ids=[entry_id, 987654])
+    assert out["used_ids_recorded"] == 0
+    assert out["used_ids_served_elsewhere"] == [entry_id]
+    assert out["used_ids_unmatched"] == [987654]
+    assert svc._storage.retrieval_events_window()[-1]["uses"] == []
+
+
+def test_record_outcome_labels_the_whole_list_in_one_storage_call(
+        pg_conn, pg_url, tmp_path, monkeypatch):
+    """Fifty ids used to be fifty storage round trips under the service
+    lock, each re-resolving the writer. The list is one statement now, and
+    the session identity is resolved once per outcome."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    entry_id = svc.search(text)["entries"][0]["id"]
+
+    calls = {"storage": 0, "writer": 0}
+    real_credit = svc._storage.credit_retrieval_uses
+    real_writer = svc._resolve_writer
+
+    def _credit(*args, **kwargs):
+        calls["storage"] += 1
+        return real_credit(*args, **kwargs)
+
+    def _writer():
+        calls["writer"] += 1
+        return real_writer()
+
+    monkeypatch.setattr(svc._storage, "credit_retrieval_uses", _credit)
+    monkeypatch.setattr(svc, "_resolve_writer", _writer)
+
+    out = svc.record_outcome("t", "success",
+                             used_ids=[entry_id, 424242, 987654])
+    assert out["used_ids_recorded"] == 1
+    assert out["used_ids_unmatched"] == [424242, 987654]
+    assert calls == {"storage": 1, "writer": 1}

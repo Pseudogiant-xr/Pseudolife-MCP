@@ -666,11 +666,15 @@ class PostgresStorage:
     def record_retrieval_use(self, entry_id: int, session_id: str | None,
                              used_via: str, window_s: float,
                              now: float | None = None) -> int:
-        """Implicit relevance label: the most recent event in this session's
-        window that served ``entry_id`` gains a use row. Session match is
-        strict (``IS NOT DISTINCT FROM`` — a None session only labels
-        None-session events, never another session's). Idempotent per
-        (event, entry, via). Returns rows written (0 or 1)."""
+        """Implicit relevance label for a dereference (``get`` /
+        ``reinforce``): the most recent event in this session's window that
+        served ``entry_id`` gains a use row. Session match is strict
+        (``IS NOT DISTINCT FROM`` — a None session only labels None-session
+        events, never another session's). Idempotent per (event, entry,
+        via). Returns rows written (0 or 1). The asserted label
+        (``memory_outcome(used_ids=...)``) goes through
+        :meth:`credit_retrieval_uses` instead, which credits every serving
+        event in the window."""
         return self.credit_retrieval_use(
             entry_id, session_id, used_via, window_s, now=now)[1]
 
@@ -681,9 +685,8 @@ class PostgresStorage:
         None, rows written)``.
 
         The two halves differ: a repeat label writes no row but the entry
-        WAS served, so a caller reporting "this id matched no event" back to
-        an agent (``memory_outcome(used_ids=...)``) must read the event id,
-        not the rowcount."""
+        WAS served, so a caller reporting "this id matched no event" must
+        read the event id, not the rowcount."""
         t = time.time() if now is None else float(now)
         with self._txn():
             row = self.conn.execute(
@@ -703,6 +706,98 @@ class PostgresStorage:
                 (int(row[0]), int(entry_id), used_via, t),
             )
         return int(row[0]), cur.rowcount
+
+    def credit_retrieval_uses(self, entry_ids: list[int],
+                              session_id: str | None, used_via: str,
+                              window_s: float,
+                              now: float | None = None) -> dict[int, dict]:
+        """The asserted label (``memory_outcome(used_ids=...)``), batched:
+        EVERY event in the window that served an id under this session gains
+        a use row — not only the most recent one, which is what
+        :meth:`credit_retrieval_use` does for a dereference.
+
+        Why all of them (2026-09-08): the agent names the ids it used, not
+        the query that surfaced each one, so the signal is session-scoped by
+        construction. Under most-recent-wins an entry served by two searches
+        left the earlier event unlabelled: the replay
+        (``evals/retrieval_replay.py``, labels keyed per event) dropped that
+        event entirely, or — if it carried any other label — scored the id
+        as an implicit negative the agent never asserted. Measured on the
+        live log that day (``evals/results/retrieval-uses-multiserve-
+        20260908.json``): 29% of (session, entry) pairs are served by more
+        than one event in their session, 87% of those inside the default
+        window.
+
+        The rule is conditional on an identity: with ``session_id=None``
+        (44% of logged events that day) "same session" would mean every
+        other NULL-session event in the window — other sessions, possibly
+        other agents — so a None-session call keeps the dereference rule and
+        credits only the most recent NULL-session serving event per id.
+
+        One statement, one transaction, for the whole list (fifty ids used to
+        be fifty round trips under the service lock). Session match stays
+        strict (``IS NOT DISTINCT FROM``); the insert is idempotent per
+        (event, entry, via).
+
+        Returns ``{entry_id: {"events": [credited event ids, ascending],
+        "written": rows inserted, "elsewhere": bool}}`` for every id that
+        SOME event in the window served. ``elsewhere`` is True when an event
+        in the window served the id under a DIFFERENT session id — the
+        tier-3 pointer vs the ``X-PL-Session`` header, or a pointer TTL
+        lapse, can put the search and the outcome under different
+        identities, and a caller must not report that id as never served.
+        An id nothing in the window served is absent. The probe is bounded
+        to the window on purpose: it rides ``retrieval_events_created_idx``
+        (0.05 ms on the 2026-09-08 bank against 3.9 ms for the unbounded
+        scan, which grows with retention; same artifact)."""
+        ids = sorted({int(x) for x in entry_ids})
+        if not ids:
+            return {}
+        t = time.time() if now is None else float(now)
+        # ``eligible`` = same-session hits that get a row: all of them under
+        # an identity, only the most recent per id (rn = 1) without one.
+        all_events = session_id is not None
+        with self._txn():
+            rows = self.conn.execute(
+                """
+                WITH ids AS (SELECT unnest(%s::bigint[]) AS entry_id),
+                hit AS (
+                  SELECT i.entry_id, e.id AS event_id,
+                         (e.session_id IS NOT DISTINCT FROM %s) AS same_session,
+                         row_number() OVER (
+                           PARTITION BY i.entry_id,
+                                        (e.session_id IS NOT DISTINCT FROM %s)
+                           ORDER BY e.created_at DESC, e.id DESC) AS rn
+                  FROM ids i
+                  JOIN retrieval_events e
+                    ON e.created_at >= %s
+                   AND e.served @> jsonb_build_array(
+                         jsonb_build_object('entry_id', i.entry_id))
+                ),
+                ins AS (
+                  INSERT INTO retrieval_uses
+                    (event_id, entry_id, used_via, created_at)
+                  SELECT event_id, entry_id, %s, %s FROM hit
+                  WHERE same_session AND (%s OR rn = 1)
+                  ON CONFLICT DO NOTHING
+                  RETURNING event_id, entry_id
+                )
+                SELECT h.entry_id,
+                       COALESCE(array_agg(h.event_id ORDER BY h.event_id)
+                                FILTER (WHERE h.same_session
+                                        AND (%s OR h.rn = 1)), '{}'),
+                       (SELECT count(*) FROM ins
+                        WHERE ins.entry_id = h.entry_id),
+                       bool_or(NOT h.same_session)
+                FROM hit h GROUP BY h.entry_id
+                """,
+                (ids, session_id, session_id, t - float(window_s),
+                 used_via, t, all_events, all_events),
+            ).fetchall()
+        return {int(r[0]): {"events": [int(x) for x in r[1]],
+                            "written": int(r[2]),
+                            "elsewhere": bool(r[3])}
+                for r in rows}
 
     def attach_served_facts(self, event_id: int,
                             served_facts: list[dict]) -> int:

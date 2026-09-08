@@ -1195,9 +1195,10 @@ def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
 # a model-typed field, and an outcome names the handful of hits the work
 # actually turned on — 5–20 ids is the intended size (measured 2026-09-05
 # against the served guidance, which asks for the ids that mattered). Each
-# id past the cap would be one more storage round trip under the service
-# lock and one more entry echoed back as unmatched, so the tail is dropped
-# and the drop is reported.
+# id past the cap would be one more entry the label statement joins and one
+# more echoed back as unmatched (the whole list is one storage statement
+# since 2026-09-08 — the cost is the report, not round trips), so the tail
+# is dropped and the drop is reported.
 USED_IDS_CAP = 50
 
 
@@ -1290,16 +1291,17 @@ def memory_outcome(
     used_ids: Annotated[list[int] | str | None, Field(
         description="Ids of the search hits you actually used, e.g. "
                     "[1421, 903] — the relevance label only you can "
-                    "write. At most 50.")] = None,
+                    "write. At most 50. Credits this session's searches "
+                    "from the last hour; log before that lapses.")] = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
-    corrected. Dream synthesises signals into lessons surfaced next
-    session; logging stops repeated mistakes.
+    corrected. The dream distils signals into next session's lessons.
 
     Returns ``{recorded, signal_id, task, outcome}``; needs Postgres.
     ``used_ids`` adds ``used_ids_recorded`` (credited),
-    ``used_ids_unmatched`` (none served it), ``used_ids_ignored`` (not
-    an id), ``used_ids_truncated`` (past the 50 cap),
+    ``used_ids_unmatched`` (nothing served it),
+    ``used_ids_served_elsewhere`` (another session did),
+    ``used_ids_ignored`` (not ids), ``used_ids_truncated`` (over 50),
     ``used_ids_errors`` (write failed), ``used_ids_reason`` (why none
     landed).
     """
@@ -1313,8 +1315,15 @@ def memory_outcome(
         out["used_ids_truncated"] = truncated
     if used_ids is not None and not ids:
         # Refuse the label, never the signal: a malformed used_ids must not
-        # cost the outcome the whole convention exists to capture.
-        out["used_ids_reason"] = "no usable entry ids"
+        # cost the outcome the whole convention exists to capture. An
+        # intentionally empty list is not malformed: the label is
+        # positive-only (decision 2026-09-08 — "used none" would need an
+        # event-level negative, i.e. a schema change), so [] equals
+        # omitting the parameter, and the reason says so instead of
+        # calling the ids unusable.
+        out["used_ids_reason"] = (
+            "no usable entry ids" if ignored
+            else "empty: no label written (used_ids is positive-only)")
     return out
 
 

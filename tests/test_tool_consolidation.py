@@ -358,7 +358,8 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # 5159, full 8308 here, and minimal 4985 / core 9570 / full 15064
     # against the description budgets above — the six used_ids result keys
     # were listed by trimming memory_outcome's own docstring, not by
-    # moving a cap.
+    # moving a cap. 2026-09-08: a seventh key (used_ids_served_elsewhere)
+    # and the window invariant on the param were paid for the same way.
     param_budgets = {"minimal": 2600, "core": 5250, "full": 8400}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
