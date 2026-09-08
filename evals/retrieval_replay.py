@@ -23,6 +23,14 @@ Label sources (``--label-source``)
     ``memory_outcome(used_ids=...)``, added 2026-09-05). This is the label
     set Phase 1 would train on. On the 2026-09-04 bank there is exactly ONE
     such event, so this mode is a plumbing check, not a measurement.
+    Labels are keyed per EVENT here, so an unlabelled event is dropped and
+    an unlabelled served id in a labelled event is an implicit negative.
+    That is why (2026-09-08) an ``outcome`` label credits EVERY event in
+    the session window that served the id, where a ``get``/``reinforce``
+    credits only the most recent one: the agent names ids, not queries,
+    and under most-recent-wins the earlier serving events were either
+    dropped here or, when they carried some other label, scored the id as
+    an implicit negative.
 ``logged-top1`` / ``logged-top3``
     The entry ids the daemon itself served at rank 0 (or ranks 0-2) for
     that query, used as pseudo-labels. This is NOT a relevance measurement

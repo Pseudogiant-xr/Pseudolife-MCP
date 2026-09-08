@@ -535,17 +535,36 @@ both stores, and the Console's undo route is `POST /api/lessons/restore`.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
 
 `used_ids` is a second, unrelated payload riding the same call: the ids of
-the `memory_search` hits the work actually turned on. Each one credits the
-serving `retrieval_events` row with a `retrieval_uses` label
-(`used_via="outcome"`) — the relevance signal a learned reranker trains on,
-which otherwise only `memory_get` / `memory_reinforce` produce. Nothing is
-written to the signal itself, and nothing links a signal to the labels it
-caused: the labels stand on their own, and which outcome named which ids is
-deliberately not recorded. The result reports `used_ids_recorded`,
-`used_ids_unmatched` (ids no search in the window served) and
+the `memory_search` hits the work actually turned on. Each one credits
+**every** `retrieval_events` row in the session window that served it with a
+`retrieval_uses` label (`used_via="outcome"`) — the relevance signal a
+learned reranker trains on, which otherwise only `memory_get` /
+`memory_reinforce` produce (those credit only the most recent serving
+search: a dereference follows one query, an outcome follows a session, and
+the agent names ids, not queries — under most-recent-wins an entry served by
+two searches left the earlier one unlabelled, which the replay dropped or,
+when that event carried another label, scored as a miss). With no session
+identity at all the most-recent rule stays: "same session" would otherwise
+mean every other session-less search in the window.
+Nothing is written to the signal itself, and nothing links a signal to the
+labels it caused: the labels stand on their own, and which outcome named
+which ids is deliberately not recorded.
+
+Two invariants a harness must keep, because the label silently credits
+nothing otherwise: the outcome must be logged under the **same session
+identity** as the searches (one session per episode), and **within
+`memory.retrieval_log.use_window_seconds`** of them (default 1 h — an
+end-of-episode outcome cannot credit a search older than that). The result
+reports `used_ids_recorded` (ids credited to at least one search),
+`used_ids_unmatched` (nothing in the window served it),
+`used_ids_served_elsewhere` (a search in the window served it, but under
+another session id — not "never served", so the two are kept apart) and
 `used_ids_errors` (labels the storage layer refused, which is not the same
 answer as a miss); at most 50 ids are taken per call, any beyond that
-reported as `used_ids_truncated`.
+reported as `used_ids_truncated`. The label is **positive-only**: `used_ids=[]`
+is the same as omitting it (the result says so under `used_ids_reason`), and
+an outcome without `used_ids` says nothing about what was used — an
+unlabelled session is not a zero-use session.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,

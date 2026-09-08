@@ -9333,3 +9333,60 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
+# ── used_ids credits every serving search (2026-09-08) ───────────────────
+# The read-only live-log measurement that sized the change: how often one
+# (session, entry) pair is served by more than one event, i.e. how often
+# most-recent-wins left an earlier serving event unlabelled. The 29% is the
+# whole justification for the semantic change, so it is the one number in
+# that entry a reader most needs to re-derive. Same artifact carries the
+# window-bounded vs unbounded probe cost that justifies bounding the
+# served-elsewhere probe.
+MULTISERVE = RESULTS + "retrieval-uses-multiserve-20260908.json"
+_MS = "session_entry_multiplicity"
+for _cid, _doc, _needle, _val, _stated, _places in [
+    ("multiserve-events", CHANGELOG,
+     "read-only, 2,648 events / 74 sessions): none of the 13 labels on record",
+     lambda d: d["totals"]["events"], 2648, 0),
+    ("multiserve-sessions", CHANGELOG,
+     "read-only, 2,648 events / 74 sessions): none of the 13 labels on record",
+     lambda d: d["totals"]["sessions"], 74, 0),
+    ("multiserve-labels-total", CHANGELOG,
+     "read-only, 2,648 events / 74 sessions): none of the 13 labels on record",
+     lambda d: d["labels_on_record"]["labels_total"], 13, 0),
+    ("multiserve-labels-none-multi", CHANGELOG,
+     "read-only, 2,648 events / 74 sessions): none of the 13 labels on record",
+     lambda d: d["labels_on_record"][
+         "labels_with_another_serving_event_in_window"], 0, 0),
+    ("multiserve-pairs-multi", CHANGELOG, "but 720 of 2,487 (session,",
+     lambda d: d[_MS]["pairs_served_more_than_once"], 720, 0),
+    ("multiserve-pairs-total", CHANGELOG, "but 720 of 2,487 (session,",
+     lambda d: d[_MS]["pairs_total"], 2487, 0),
+    ("multiserve-pairs-pct", CHANGELOG,
+     "entry) pairs — 29% — are served by more than one event in their session,",
+     lambda d: d[_MS]["pairs_served_more_than_once_pct"], 29, 0),
+    ("multiserve-pairs-in-window", CHANGELOG, "628 of them within the hour",
+     lambda d: d[_MS]["pairs_served_more_than_once_within_window"], 628, 0),
+    ("multiserve-null-session-pct", CHANGELOG,
+     "with no session id (44% of logged events that day)",
+     lambda d: 100.0 * d["totals"]["null_session_events"]
+     / d["totals"]["events"], 44, 0),
+    ("multiserve-probe-bounded-ms", CHANGELOG,
+     "index-backed at 0.05 ms against a 3.9 ms",
+     lambda d: d["session_less_probe"]["bounded_to_window_ms"], 0.05, 2),
+    ("multiserve-probe-unbounded-ms", CHANGELOG,
+     "index-backed at 0.05 ms against a 3.9 ms",
+     lambda d: d["session_less_probe"]["unbounded_ms"], 3.9, 1),
+    ("multiserve-evals-pairs-multi", EVALS,
+     "720 of 2,487 (session, entry) pairs — 29% — were served by more than one",
+     lambda d: d[_MS]["pairs_served_more_than_once"], 720, 0),
+    ("multiserve-evals-pairs-total", EVALS,
+     "720 of 2,487 (session, entry) pairs — 29% — were served by more than one",
+     lambda d: d[_MS]["pairs_total"], 2487, 0),
+    ("multiserve-evals-pairs-pct", EVALS,
+     "720 of 2,487 (session, entry) pairs — 29% — were served by more than one",
+     lambda d: d[_MS]["pairs_served_more_than_once_pct"], 29, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(MULTISERVE,),
+        value=_val, stated=_stated, places=_places))
+

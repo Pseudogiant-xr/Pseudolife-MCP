@@ -3237,18 +3237,27 @@ class MemoryService(DreamOps):
         ``"episode_warning"`` is added to the result.
 
         ``used_ids``: entry ids the caller actually reasoned from. Each one
-        credits the most recent search in this session that served it with
-        a ``retrieval_uses`` row under ``used_via="outcome"`` — the same
-        table ``memory_get`` / ``memory_reinforce`` write to, so the replay
-        and telemetry harnesses read it unchanged. Nothing is written on
-        ``outcome_signals`` itself, and nothing links the signal row to the
-        use rows it caused: the labels stand on their own, and which
+        credits EVERY search in this session's window
+        (``memory.retrieval_log.use_window_seconds``) that served it with a
+        ``retrieval_uses`` row under ``used_via="outcome"`` — the same table
+        ``memory_get`` / ``memory_reinforce`` write to (those credit only
+        the most recent serving search: a dereference follows one query, an
+        outcome follows a session), so the replay and telemetry harnesses
+        read it unchanged. The window and the session identity are the
+        label's invariant: an outcome logged under a different session id,
+        or after the window has lapsed, credits nothing. Nothing is written
+        on ``outcome_signals`` itself, and nothing links the signal row to
+        the use rows it caused: the labels stand on their own, and which
         outcome named which ids is deliberately not recorded (the event's
         ``episode_id`` comes from the writer at search time, the signal's
         from the ``episode=`` handle — they are not a join). That is what
         costs no schema bump and no prose in ``detail``. Reported back as
-        ``used_ids_recorded`` (ids credited to an event) and
-        ``used_ids_unmatched`` (ids no event in the window served)."""
+        ``used_ids_recorded`` (ids credited to at least one event),
+        ``used_ids_unmatched`` (ids nothing in the window served) and
+        ``used_ids_served_elsewhere`` (ids served in the window only under
+        another session id). The label is positive-only: an empty list is
+        the same as omitting it, and an outcome without ``used_ids`` says
+        nothing about what was used."""
         # Refuse — never coerce — an unknown outcome: silently mapping e.g.
         # "failed" to "success" would invert a dead-end into a do-this lesson.
         if outcome not in ("success", "failure", "correction"):
@@ -3275,23 +3284,30 @@ class MemoryService(DreamOps):
             return out
 
     def _label_used_entries(self, used_ids: list[int]) -> dict[str, Any]:
-        """Credit each id in ``used_ids`` to the search that served it.
+        """Credit each id in ``used_ids`` to every in-window search in this
+        session that served it — one storage statement for the whole list
+        (:meth:`PostgresStorage.credit_retrieval_uses`), the writer
+        resolved once.
 
-        Returns the reporting keys for :meth:`record_outcome`. An id the
-        window never served is reported rather than dropped: a silent zero
-        reads the same as a landed label, and the whole point of the
-        parameter is that the caller can tell. A label the database refused
-        is a THIRD answer and is counted separately (``used_ids_errors``):
-        folding it into ``used_ids_unmatched`` would tell the agent no
-        search ever served the id, which is a claim about its retrieval
-        rather than about the write that failed.
+        Returns the reporting keys for :meth:`record_outcome`. Per id the
+        answer is one of four, and the agent is told which: credited;
+        ``used_ids_unmatched`` (nothing in the window served it) — reported
+        rather than dropped, because a silent zero reads the same as a
+        landed label; ``used_ids_served_elsewhere`` (an event in the window
+        served it, but under another session id — the label needs the same
+        identity, and "never served" would be a false claim about the
+        retrieval); or ``used_ids_errors`` when the statement raised, which
+        is a fact about the database and not about what the searches
+        served, so no unmatched/elsewhere claim is made for any id then —
+        the whole list is one statement, so the whole list errors.
 
         Caller holds ``self._lock`` (see
         ``tests/test_service_lock_discipline.py``)."""
-        if not self.config.memory.retrieval_log.enabled:
+        cfg = self.config.memory.retrieval_log
+        if not cfg.enabled:
             return {"used_ids_recorded": 0,
                     "used_ids_reason": "retrieval log disabled"}
-        credited, unmatched, errors = 0, [], 0
+        ids: list[int] = []
         seen: set[int] = set()
         for raw in used_ids:
             try:
@@ -3305,18 +3321,31 @@ class MemoryService(DreamOps):
             if entry_id in seen:
                 continue
             seen.add(entry_id)
-            labelled = self._record_retrieval_use(entry_id, "outcome")
-            if labelled is _USE_LABEL_FAILED:
-                errors += 1
-            elif labelled is None:
-                unmatched.append(entry_id)
-            else:
+            ids.append(entry_id)
+        if not ids:
+            return {"used_ids_recorded": 0}
+        try:
+            _, session_id = self._resolve_writer()
+            hits = self._storage.credit_retrieval_uses(
+                ids, session_id, "outcome", float(cfg.use_window_seconds))
+        except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
+            logger.warning("retrieval-use labels failed", exc_info=True)
+            return {"used_ids_recorded": 0, "used_ids_errors": len(ids)}
+        credited, unmatched, elsewhere = 0, [], []
+        for entry_id in ids:
+            hit = hits.get(entry_id)
+            if hit is not None and hit["events"]:
                 credited += 1
+            elif hit is not None and hit["elsewhere"]:
+                elsewhere.append(entry_id)
+            else:
+                unmatched.append(entry_id)
         out: dict[str, Any] = {"used_ids_recorded": credited}
         if unmatched:
             out["used_ids_unmatched"] = unmatched
-        if errors:
-            out["used_ids_errors"] = errors
+        if elsewhere:
+            out["used_ids_served_elsewhere"] = elsewhere
         return out
 
     def lesson_write(self, task: str, aspect: str, lesson: str, *,
@@ -4109,17 +4138,19 @@ class MemoryService(DreamOps):
 
     def _record_retrieval_use(self, entry_id: int,
                               used_via: str) -> int | _UseLabelFailed | None:
-        """Implicit relevance label (schema v31): the most recent search in
-        this session that served ``entry_id`` gains a ``retrieval_uses``
-        row. Never raises: a label failure must not break the fetch it
-        rides on.
+        """Implicit relevance label (schema v31) for a dereference: the most
+        recent search in this session that served ``entry_id`` gains a
+        ``retrieval_uses`` row. Never raises: a label failure must not break
+        the fetch it rides on. (The asserted ``used_ids`` label is batched
+        through :meth:`_label_used_entries` and credits every serving
+        search, not this path.)
 
-        Three distinct answers, because the ``used_ids`` reporting tells an
-        agent which one it got (the get/reinforce callers ignore the return
-        entirely): the event id credited; None when nothing in the window
-        served this entry, or logging is off; and :data:`_USE_LABEL_FAILED`
-        when the write raised — that one is a fact about the database, not
-        about what the search served."""
+        Three distinct answers, kept so a caller can tell them apart even
+        though the get/reinforce callers ignore the return: the event id
+        credited; None when nothing in the window served this entry, or
+        logging is off; and :data:`_USE_LABEL_FAILED` when the write raised
+        — that one is a fact about the database, not about what the search
+        served."""
         cfg = self.config.memory.retrieval_log
         if self._storage is None or not cfg.enabled:
             return None

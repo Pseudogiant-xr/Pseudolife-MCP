@@ -20,7 +20,11 @@ Signal taxonomy — the distinction the counters do NOT make for you:
                               ``memory_outcome(used_ids=...)``
                               (``outcome``, 2026-09-05). ``by_via``
                               separates the asserted label from the two
-                              dereference ones.
+                              dereference ones. An ``outcome`` label lands
+                              on EVERY in-window event that served the id
+                              (2026-09-08), so one named id can label
+                              several events; ``get``/``reinforce`` label
+                              only the most recent serving event.
 * ``entries.explicit_reinforcements``
                               CONSUMPTION. Moves only on
                               ``memory_reinforce`` (service.py reinforce).

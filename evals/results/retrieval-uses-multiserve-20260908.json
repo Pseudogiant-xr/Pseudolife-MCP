@@ -1,0 +1,101 @@
+{
+  "generated_for": "memory_outcome(used_ids=) label semantics, 2026-09-08 (CHANGELOG 'Fixed (2026-09-08)')",
+  "source_db": "pseudolife_memory (live bank; session set default_transaction_read_only=on; aggregates and ids only)",
+  "measured_at": "2026-09-08",
+  "window_seconds": 3600,
+  "read_only": true,
+  "totals": {
+    "events": 2648,
+    "sessions": 74,
+    "null_session_events": 1158,
+    "first_event_ts": 1787200258.081675,
+    "last_event_ts": 1788837207.3216934
+  },
+  "uses_by_via": [
+    {
+      "used_via": "get",
+      "n": 3
+    },
+    {
+      "used_via": "outcome",
+      "n": 10
+    }
+  ],
+  "labels_on_record": {
+    "labels_total": 13,
+    "labels_with_another_serving_event_in_window": 0,
+    "labels_whose_other_event_is_itself_labelled": 0
+  },
+  "session_entry_multiplicity": {
+    "rows": [
+      {
+        "n_events_capped": 1,
+        "session_entry_pairs": 1767,
+        "pairs_within_window": 1767
+      },
+      {
+        "n_events_capped": 2,
+        "session_entry_pairs": 304,
+        "pairs_within_window": 246
+      },
+      {
+        "n_events_capped": 3,
+        "session_entry_pairs": 122,
+        "pairs_within_window": 104
+      },
+      {
+        "n_events_capped": 4,
+        "session_entry_pairs": 79,
+        "pairs_within_window": 70
+      },
+      {
+        "n_events_capped": 5,
+        "session_entry_pairs": 215,
+        "pairs_within_window": 208
+      }
+    ],
+    "pairs_total": 2487,
+    "pairs_served_more_than_once": 720,
+    "pairs_served_more_than_once_pct": 29.0,
+    "pairs_served_more_than_once_within_window": 628,
+    "note": "NULL-session events excluded from the per-session pairing (no identity to group on)"
+  },
+  "per_session": {
+    "sessions": 74,
+    "avg_events": 20.1,
+    "avg_multiplicity": 1.644,
+    "avg_share_of_served_slots_that_repeat": 0.128
+  },
+  "session_less_probe": {
+    "entry_id_probed": 1480,
+    "bounded_to_window_ms": 0.046,
+    "unbounded_ms": 3.949,
+    "bounded_plan": [
+      "Aggregate  (cost=8.32..8.33 rows=1 width=8) (actual rows=1.00 loops=1)",
+      "  Buffers: shared hit=5",
+      "  ->  Index Scan using retrieval_events_created_idx on retrieval_events e  (cost=0.29..8.31 rows=1 width=0) (actual rows=2.00 loops=1)",
+      "        Index Cond: (created_at >= ((EXTRACT(epoch FROM now()) - '3600'::numeric))::double precision)",
+      "        Filter: (served @> jsonb_build_array(jsonb_build_object('entry_id', '1480'::bigint)))",
+      "        Rows Removed by Filter: 4",
+      "        Index Searches: 1",
+      "        Buffers: shared hit=5",
+      "Planning:",
+      "  Buffers: shared hit=157",
+      "Planning Time: 0.465 ms",
+      "Execution Time: 0.046 ms"
+    ],
+    "unbounded_plan": [
+      "Aggregate  (cost=488.44..488.45 rows=1 width=8) (actual rows=1.00 loops=1)",
+      "  Buffers: shared hit=484",
+      "  ->  Seq Scan on retrieval_events e  (cost=0.00..488.44 rows=1 width=0) (actual rows=2.00 loops=1)",
+      "        Filter: (served @> jsonb_build_array(jsonb_build_object('entry_id', '1480'::bigint)))",
+      "        Rows Removed by Filter: 2646",
+      "        Buffers: shared hit=484",
+      "Planning:",
+      "  Buffers: shared hit=128",
+      "Planning Time: 0.334 ms",
+      "Execution Time: 3.949 ms"
+    ]
+  },
+  "privacy": "aggregates and ids only; no query or entry text"
+}

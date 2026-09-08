@@ -716,6 +716,16 @@ class RetrievalLogConfig:
     # A get/reinforce this many seconds after a search still counts as a
     # use of it. Bounds the implicit-label lookback so a stale id fetched
     # much later doesn't credit an ancient query.
+    #
+    # The same window bounds the asserted label, memory_outcome(used_ids=),
+    # and is an INVARIANT for any harness that relies on it (2026-09-08):
+    # an outcome credits only searches made under the same session
+    # identity within this window, so keep one session per episode and log
+    # the outcome before the window lapses — an end-of-episode outcome
+    # cannot credit a search older than this. get/reinforce credit the
+    # most recent serving search; an outcome credits every serving search
+    # in the window (it names ids, not queries). Default kept at 1 h
+    # deliberately; the tool's param description states the invariant.
     use_window_seconds: int = 3600
 
 

@@ -4388,16 +4388,26 @@ labels the whole served set rather than the one id someone happened to
 dereference.
 
 **Shipped 2026-09-05.** `memory_outcome(..., used_ids=[...])` credits each
-id to the most recent event in the session window that served it, writing
+id to the event in the session window that served it — originally the most
+recent one only; since 2026-09-08 **every** serving event in the window
+under an identified session (the agent names ids, not queries; with no
+session id the most-recent rule stays, because "same session" would then
+mean every other NULL-session event) — writing
 the ordinary `retrieval_uses` row under `used_via="outcome"` — so
 `retrieval_replay.py`'s `uses` label source and this script's `by_via`
 breakdown pick it up with no harness change, and the two dereference vias
 stay distinguishable from the asserted one. No schema bump, and no join:
 nothing links a signal row to the use rows it caused — the labels stand on
 their own, and which outcome named which ids is deliberately not recorded.
-The result reports `used_ids_recorded`, `used_ids_unmatched` and
-`used_ids_errors`, because an id no event served must not read the same as
-a landed label, and neither must a label the storage layer refused.
+The result reports `used_ids_recorded`, `used_ids_unmatched`,
+`used_ids_served_elsewhere` (an event in the window served it, under another
+session id) and `used_ids_errors`, because an id no event served must not
+read the same as a landed label, and neither must a label the storage layer
+refused. The 2026-09-08 widening is sized by
+`results/retrieval-uses-multiserve-20260908.json` (read-only, live log):
+720 of 2,487 (session, entry) pairs — 29% — were served by more than one
+event in their session, so most-recent-wins left about one named id in
+three with an unlabelled earlier serving event.
 Whether agents actually pass it is the open question — the served session-start block
 (`MEMORY_LOOP_BLOCK`) now asks for it in the REFLECT beat, and the next
 telemetry review measures the answer against the 1 label above.
