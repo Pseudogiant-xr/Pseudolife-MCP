@@ -1624,6 +1624,25 @@ is the same as omitting it (the result says so under `used_ids_reason`), and
 an outcome without `used_ids` says nothing about what was used — an
 unlabelled session is not a zero-use session.
 
+**Rule mode (2026-09-08).** The shipped synthesis clusters signals into one
+abstract lesson per `(task-type, aspect)` slot and paraphrases freely. A
+protocol that distils one situation-specific rule per episode with its
+decision-critical values intact (the "Learning on the Job" setting,
+`docs/specs/2026-09-08-learning-on-the-job.md`) opts a signal in by giving
+`memory_outcome` an `about` that starts with `rule:` — or sets
+`memory.lessons.rule_mode: true` to treat every signal that way. Rule
+signals are synthesised one call per signal under a separate prompt: the
+lesson is one `WHEN <situation> THEN <exact action>` (or `WHEN … do NOT …`
+for a failure with no known solution) sentence, `aspect` is `rule`, the
+slot key is the situation, and rules are exempt from the cross-key dedup
+gate, so look-alike situations with different actions coexist. The
+`detail` may carry a fixed block the prompt reads — `SITUATION:`,
+`VERDICT:`, `ACTIONS TAKEN:`, `CORRECT SOLUTION:`, `ACTION DIFF:`,
+`MUST INCLUDE: a; b` — and a rule that drops a `MUST INCLUDE` value is
+retried once before being accepted. Default off; an extractor without the
+rule path synthesises such signals under the shipped prompt instead and
+the dream report says so (`rules_fallback`).
+
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,
 > signals accumulate (pruned by retention) and no lessons are synthesised,

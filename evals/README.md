@@ -2670,6 +2670,73 @@ paper-faithful float, `score_intfaithful` = code-faithful).
 judged locally or by an Opus-class CLI judge. Cognee's 0.79 is also a
 20-question single-conversation protocol. Compare within a row.
 
+## "Learning on the Job" on our instrument — the τ-bench adapter (added 2026-09-08; no numbers yet)
+
+Tablan et al. (arXiv 2607.22157) distil every τ-bench banking episode into a
+retrievable rule and report single-trial success 1.6× a static-RAG control
+from the outcome verdict alone and 2.6× from corrections (22 of 84
+never-solved tasks converted), replicated on Sonnet 5. Their numbers cannot
+be read against ours: a gpt-5.2 customer, a hosted memory service and a
+frontier agent are a different instrument. `taubench_adapter.py` runs their
+protocol — tau2-bench 1.0.1 at the pinned commit, 97 banking tasks, 4
+trials, trial-major, deterministic evaluator — with Pseudolife as the
+memory backend, on a local customer, so the only thing read is the paired
+ratio over our own baseline. The design record, the mapping onto the
+lessons tier and the preregistered parity bar are in
+`docs/specs/2026-09-08-learning-on-the-job.md`.
+
+- **Two runtimes, one protocol.** The tau2 side is a Python 3.12 plugin
+  (`evals/taubench_pseudolife/`, its own `.venv-taubench`, never imports the
+  engine) registering a `pl_memory` agent through a four-hunk patch that
+  mirrors the paper's; memory tools ride as ordinary environment tools and
+  mid-episode writes are deferred, exactly as the paper's harness does. The
+  repo-venv adapter builds the `tau2 run` commands, drives the dreams,
+  scores and reports.
+- **Feedback arm and rule route are separate arms.** `--condition
+  experience|instruction` picks verdict-only vs verified-sequence + action
+  diff (`PL_SUPERVISION`); `--rules entries|lessons` picks where rules live
+  (constraint entries written by the reflection and credited by
+  `used_ids`, or `memory_outcome` signals the dream distils under rule
+  mode). Both routes run under both arms; the results file carries the
+  route in its name so the resume set never conflates them.
+- **Cadence is an arm too.** `--distill episode` lets the plugin dream after
+  every episode (the paper's cadence); `--distill trial` runs tau2 once per
+  trial and dreams between trials — the paper's own data shows learning
+  only from a task's second trial, so this is the cheaper cadence the spec
+  expects to tie.
+- **The use-window invariant is checked, not assumed.** One `X-PL-Session`
+  per episode, the outcome logged before the episode ends and inside
+  `use_window_seconds` of the first search; the plugin records `window_ok`
+  per episode (the outcome is still sent — refuse the label, never the
+  signal) and `--report` withholds every ratio if any episode violated it —
+  a silent zero label is the failure PR #285 documented.
+- **Instruments.** Customer = local Qwen under `Start-Qwen`'s reproducible
+  config (never `-Fast`); agent = Claude Sonnet 5 at medium effort through
+  `claude_shim.py --emulate-tools` on an eval-only port
+  (`PSEUDOLIFE_BENCH_TAUBENCH_AGENT_URL`; the port guard refuses :8082/:8086);
+  bench daemon on its own database and port. The adapter starts none of
+  them and exits with the command to run.
+- **No benchmark text in any prompt.** The plugin's prompt constants and the
+  engine's rule prompt are checked by `tests/test_prompt_example_lifts.py`
+  for banking vocabulary and for 4-gram overlap with the task set and the
+  698 policy documents when the pinned checkout is present.
+
+```bash
+# smoke — 3 tasks x 2 trials, plumbing only; runs on the maintainer's word
+python evals/taubench_adapter.py --condition instruction --rules entries \
+    --out-tag lotj --smoke --task-ids-file local/data/tau2/tasks.txt
+# report a finished learning run against the baseline rows; the task list
+# is the denominator's authority (a task missing from the rows is a failure)
+python evals/taubench_adapter.py --condition instruction --rules entries \
+    --out-tag lotj --report --task-ids-file local/data/tau2/tasks.txt \
+    --baseline-rows evals/results/taubench-baseline-lotj.jsonl
+```
+
+**No τ-bench number is published here.** The smoke and the full grid are
+separate launches; the parity bar — instruction ≥ 2.6× and experience ≥
+1.6× our static-RAG pass^1, paired bootstrap intervals excluding 1.0× — and
+what each way of missing it would mean are preregistered in the spec.
+
 ## Cognee on our instrument — the adapter (added 2026-09-07; no numbers yet)
 
 Cognee's published BEAM-100K 0.79 cannot be read against the rows above

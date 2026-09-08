@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
 import ladder_sweep as ladder            # noqa: E402
 import longmemeval_bench as lme          # noqa: E402
+import taubench_adapter as taubench      # noqa: E402
 
 PRODUCTION_PORTS = {
     ":8082": "deployed Claude shim (ops/install-shim-autostart.ps1)",
@@ -51,7 +52,17 @@ LME_EXPECTED = {
     "sonnet-5": "PSEUDOLIFE_BENCH_SONNET_URL",
     "diffusiongemma": "PSEUDOLIFE_BENCH_DG_URL",
 }
-ALL_VARS = sorted(set(LADDER_EXPECTED.values()) | set(LME_EXPECTED.values()))
+# The tau2-bench adapter has NO entry on a production port and must never
+# gain one: its agent endpoint is the emulating Claude shim launched on the
+# eval port :8092, redirectable via PSEUDOLIFE_BENCH_TAUBENCH_AGENT_URL, and
+# its user endpoint is the bench Qwen server. The empty expected set is the
+# assertion — a default that drifts onto :8082/:8086 fails
+# test_production_port_entries_are_exactly_the_declared_set below.
+TAUBENCH_EXPECTED: dict[str, str] = {}
+TAUBENCH_VARS = ("PSEUDOLIFE_BENCH_TAUBENCH_AGENT_URL",
+                 "PSEUDOLIFE_BENCH_QWEN_URL")
+ALL_VARS = sorted(set(LADDER_EXPECTED.values()) | set(LME_EXPECTED.values())
+                  | set(TAUBENCH_VARS))
 
 SENTINEL = "http://127.0.0.1:9099/v1"
 
@@ -91,11 +102,17 @@ def _lme_endpoints(mod):
     return dict(mod.EXTRACTORS)
 
 
+def _taubench_endpoints(mod):
+    return {"agent": mod.AGENT_URL, "user": mod.USER_URL}
+
+
 HARNESSES = [
     pytest.param(ladder, _ladder_endpoints, LADDER_EXPECTED,
                  id="ladder_sweep.RUNGS"),
     pytest.param(lme, _lme_endpoints, LME_EXPECTED,
                  id="longmemeval_bench.EXTRACTORS"),
+    pytest.param(taubench, _taubench_endpoints, TAUBENCH_EXPECTED,
+                 id="taubench_adapter.endpoints"),
 ]
 
 
@@ -154,3 +171,32 @@ def test_both_harnesses_share_variable_names():
     single export must redirect both or the run is half-fixed."""
     for name, var in LME_EXPECTED.items():
         assert LADDER_EXPECTED[name] == var
+
+
+def test_taubench_agent_endpoint_is_redirectable_and_off_production():
+    """The taubench entry declares no production-port endpoint, so the
+    parametrized redirect test is vacuous for it — this covers the override
+    directly, and pins the default onto the eval port rather than a shim
+    port a live launch already owns."""
+    with _reloaded(taubench) as mod:
+        assert ":8092" in mod.AGENT_URL
+        assert not _on_production_port(mod.AGENT_URL)
+    with _reloaded(taubench,
+                   PSEUDOLIFE_BENCH_TAUBENCH_AGENT_URL=SENTINEL) as mod:
+        assert mod.AGENT_URL == SENTINEL
+
+
+def test_taubench_command_builder_refuses_a_production_port():
+    """Belt and braces: even an explicit --agent-url onto a live shim is
+    refused at command-build time unless the operator says so."""
+    with _reloaded(taubench) as mod:
+        for port in PRODUCTION_PORTS:
+            with pytest.raises(SystemExit, match="production"):
+                mod.build_tau2_command(
+                    condition="baseline", save_to="x", task_ids=["t1"],
+                    num_trials=1, seed=0,
+                    agent_url=f"http://127.0.0.1{port}/v1",
+                    user_url="http://127.0.0.1:1234/v1",
+                    daemon_url="http://127.0.0.1:8795",
+                    data_dir="local/data/tau2", run_tag="x",
+                    telemetry_log="local/data/tau2/x.jsonl")

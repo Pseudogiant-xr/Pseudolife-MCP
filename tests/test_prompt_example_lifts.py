@@ -335,3 +335,90 @@ def test_no_example_note_is_lifted_from_the_corpus(dataset):
         + "\nA new entry means an example was written from the corpus — "
           "re-cut it on invented content. A missing entry means the debt is "
           "paid: delete it.")
+
+
+# ── τ-bench carriers (2026-09-08) ────────────────────────────────────────
+# The "Learning on the Job" adapter authors prompts of its own (the tau2
+# plugin's prompt constants and the engine's rule-synthesis prompt). None
+# of them may carry benchmark text: the banking task set and policy
+# corpus are the thing being measured, and a prompt written from them
+# would be the lift this file exists to catch. Two predicates: a
+# vocabulary check that always runs, and a 4-gram shingle check against
+# the pinned tau2 checkout when it is present (reference/ is gitignored).
+
+_PL_SRC = _REPO / "evals" / "taubench_pseudolife" / "src" / "pl_taubench"
+# Every plugin module that composes text the model can see — prompts.py by
+# contract, reflection.py because it renders the action diff and verdict.
+_PL_PROMPT_MODULES = ("prompts.py", "reflection.py")
+_TAU2_BANKING = (_REPO / "reference" / "tau2-bench" / "data" / "tau2" / "domains"
+                 / "banking_knowledge")
+_BENCH_WORDS = ("bank", "banking", "card", "customer", "kb_search", "tau")
+KNOWN_TAUBENCH_LIFTS: set[tuple[str, str]] = set()
+
+
+def _taubench_carriers() -> dict[str, str]:
+    """Every string constant in the plugin's prompt module (AST-extracted —
+    the plugin targets Python 3.12 and is never imported here) plus the
+    engine's rule prompt."""
+    import ast
+
+    from pseudolife_memory.memory import dream
+
+    out = {"dream._RULE_LESSON_SYSTEM_PROMPT": dream._RULE_LESSON_SYSTEM_PROMPT}
+    for module in _PL_PROMPT_MODULES:
+        stem = module.removesuffix(".py")
+        tree = ast.parse((_PL_SRC / module).read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            try:
+                val = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                continue
+            for t in node.targets:
+                if not isinstance(t, ast.Name):
+                    continue
+                if isinstance(val, str):
+                    out[f"{stem}.{t.id}"] = val
+                elif isinstance(val, dict):
+                    for k, v in val.items():
+                        if isinstance(v, str):
+                            out[f"{stem}.{t.id}[{k}]"] = v
+    return out
+
+
+def test_taubench_prompts_exist_and_carry_no_benchmark_vocabulary():
+    carriers = _taubench_carriers()
+    assert len(carriers) >= 6, sorted(carriers)
+    bad = {}
+    for name, text in carriers.items():
+        low = text.lower()
+        words = [w for w in _BENCH_WORDS if re.search(rf"\b{re.escape(w)}\b", low)]
+        if "τ" in text:
+            words.append("τ")
+        if words:
+            bad[name] = words
+    assert not bad, f"benchmark vocabulary in adapter prompts: {bad}"
+
+
+def test_no_taubench_prompt_shingle_appears_in_the_banking_corpus():
+    if not _TAU2_BANKING.exists():
+        pytest.skip("pinned tau2-bench checkout not present (reference/ is gitignored)")
+    parts = [(_TAU2_BANKING / "tasks.json").read_text(encoding="utf-8")]
+    parts += [p.read_text(encoding="utf-8")
+              for p in sorted((_TAU2_BANKING / "documents").glob("*.json"))]
+    buf = " " + " ".join(_norm(" ".join(parts))) + " "
+
+    owners: dict[str, set[str]] = {}
+    for name, text in _taubench_carriers().items():
+        for s in _shingles(text):
+            owners.setdefault(s, set()).add(name)
+    assert owners, "no shingle produced from any τ-bench carrier"
+    hit = {s for s in owners if f" {s} " in buf}
+    found = sorted({(o, s) for s in hit for o in owners[s]})
+    assert found == sorted(KNOWN_TAUBENCH_LIFTS), (
+        "adapter prompt 4-grams found in the banking task set / policy corpus:\n  "
+        + "\n  ".join(f"{o}  <- {s!r}" for o, s in found)
+        + "\nA new entry means a prompt was written from the benchmark — re-cut "
+          "it in generic wording. A missing entry means the debt is paid: "
+          "delete it.")

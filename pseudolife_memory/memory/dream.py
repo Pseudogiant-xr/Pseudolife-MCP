@@ -899,6 +899,77 @@ _LESSON_SYSTEM_PROMPT = (
 )
 
 
+# Rule mode (2026-09-08): the opposite contract to the clustering prompt above,
+# for a store that keeps ONE situation-specific rule per episode with its
+# decision-critical values intact (the "Learning on the Job" protocol, arXiv
+# 2607.22157). One signal in, exactly one rule out; the slot key is the
+# situation, not a task type, so rules coexist instead of superseding each
+# other. Generic on purpose: no benchmark or domain wording lives here.
+_RULE_LESSON_SYSTEM_PROMPT = (
+    "You turn ONE outcome signal from an agent's episode into ONE "
+    "situation-specific RULE. Reply with JSON only: "
+    '{"lessons":[{"task":..,"aspect":"rule","lesson":..,"about":..,'
+    '"polarity":"+"|"-","outcome":"success"|"failure"|"correction",'
+    '"confidence":0..1}]} containing exactly one lesson.\n'
+    "- task = a short name for the SITUATION: the request and the observable "
+    "behaviour that distinguishes it from look-alike situations, taken from "
+    "the signal's detail. Specific to this situation, never a generic task "
+    "type.\n"
+    "- lesson = one sentence. A success: \"WHEN <situation> THEN <the exact "
+    "action(s) that produced the outcome>\". A correction (the detail carries "
+    "a CORRECT SOLUTION): \"WHEN <situation> THEN <the exact correct "
+    "action(s), copied verbatim from the correct solution>\"; if an ACTION "
+    "DIFF is given, add one clause naming the decisive divergence. A failure "
+    "with no correct solution: \"WHEN <situation> do NOT <the exact action(s) "
+    "taken> — verified wrong against the outcome\"; never invent the right "
+    "answer.\n"
+    "- Copy decision-critical values (names of things, options, amounts, "
+    "reasons, arguments) VERBATIM from the signal; do not paraphrase, soften, "
+    "or add conditions, alternatives or exceptions the signal does not "
+    "contain. Identifiers of people become placeholders. If the detail lists "
+    "MUST INCLUDE values, every one of them appears verbatim in the lesson.\n"
+    '- polarity = "+" for a THEN rule, "-" for a do-NOT rule. outcome = the '
+    "signal's class. about = the tool or action the rule concerns. "
+    "confidence = 0..1.\n"
+    "Do not cluster and do not skip: this signal yields exactly one rule."
+)
+
+_RULE_PREFIX = "rule:"
+
+
+def is_rule_signal(signal: dict, rule_mode: bool) -> bool:
+    """A signal synthesised under the rule contract: globally when
+    ``memory.lessons.rule_mode`` is on, or per signal when its ``about``
+    starts with ``rule:`` (the routing prefix is stripped from the stored
+    lesson's ``about``)."""
+    if rule_mode:
+        return True
+    return str(signal.get("about") or "").strip().lower().startswith(_RULE_PREFIX)
+
+
+def _strip_rule_prefix(about: str | None) -> str | None:
+    text = str(about or "").strip()
+    if text.lower().startswith(_RULE_PREFIX):
+        text = text[len(_RULE_PREFIX):].strip()
+    return text or None
+
+
+def _must_include(detail: str | None) -> list[str]:
+    """Values a rule must carry verbatim: the ``MUST INCLUDE: a; b`` line the
+    outcome's ``detail`` may carry (the harness lists decision-critical
+    values it verified)."""
+    for line in str(detail or "").splitlines():
+        if line.strip().upper().startswith("MUST INCLUDE:"):
+            body = line.split(":", 1)[1]
+            return [v.strip() for v in body.split(";") if v.strip()]
+    return []
+
+
+def _missing_values(lesson: str, must: list[str]) -> list[str]:
+    low = lesson.lower()
+    return [v for v in must if v.lower() not in low]
+
+
 _OUTCOME_INFER_SYSTEM_PROMPT = (
     "You review the stored record of one work session and infer what "
     "OUTCOMES it reached. Reply with JSON only: {\"outcomes\": [{\"task\": "
@@ -1285,15 +1356,14 @@ class OpenAICompatExtractor:
             raise ExtractorError(f"events pass failed: {exc}") from exc
         return events_from_parsed(parsed, len(texts))
 
-    def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:
-        """Synthesise procedural lessons from outcome signals via the same
-        endpoint. Returns ``[]`` on any failure (single-writer: the dream then
-        writes no lessons this cycle and the signals stay pending)."""
+    def _lessons_completion(self, system: str, user: str) -> list:
+        """One JSON chat completion under ``system``; returns the reply's raw
+        ``lessons`` list. Raises :class:`ExtractorError` on any transport or
+        parse failure so the caller leaves the signals pending and retries,
+        rather than consuming them on a failed call."""
         import json
         import urllib.request
 
-        if not signals:
-            return []
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
@@ -1301,8 +1371,8 @@ class OpenAICompatExtractor:
             body = json.dumps({**self.extra_body,
                 "model": self.model,
                 "messages": [
-                    {"role": "system", "content": _LESSON_SYSTEM_PROMPT},
-                    {"role": "user", "content": _format_signals(signals)},
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
                 ],
                 "response_format": {"type": "json_object"},
                 "max_tokens": self.max_tokens,
@@ -1322,18 +1392,24 @@ class OpenAICompatExtractor:
             parsed = json.loads(content)
             raw = parsed.get("lessons", []) if isinstance(parsed, dict) else []
         except Exception as exc:  # noqa: BLE001
-            # Raise (vs return []) so synthesize_lessons leaves the signals
-            # pending and retries, rather than consuming them on a failed call.
             raise ExtractorError(f"extract_lessons failed: {exc}") from exc
+        return raw if isinstance(raw, list) else []
+
+    @staticmethod
+    def _lesson_claims(raw: list, *,
+                       force_aspect: str | None = None) -> list[LessonClaim]:
+        """Coerce the model's lesson dicts into :class:`LessonClaim`s —
+        enum violations are repaired to the safe default, never raised."""
         out: list[LessonClaim] = []
-        for c in raw if isinstance(raw, list) else []:
+        for c in raw:
             if not isinstance(c, dict):
                 continue
             task = str(c.get("task", "")).strip()
             lesson = str(c.get("lesson", "")).strip()
             if not (task and lesson):
                 continue
-            aspect = str(c.get("aspect", "") or "lesson").strip() or "lesson"
+            aspect = force_aspect or (
+                str(c.get("aspect", "") or "lesson").strip() or "lesson")
             about = str(c.get("about", "") or "").strip() or None
             polarity = "-" if str(c.get("polarity", "+")).strip() == "-" else "+"
             outcome = str(c.get("outcome", "success")).strip()
@@ -1346,6 +1422,71 @@ class OpenAICompatExtractor:
             out.append(LessonClaim(
                 task=task, aspect=aspect, lesson=lesson, about=about,
                 polarity=polarity, outcome=outcome, confidence=conf))
+        return out
+
+    def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:
+        """Synthesise procedural lessons from outcome signals via the same
+        endpoint: one batched call under the clustering prompt. Raises on
+        failure (single-writer: the dream then writes no lessons this cycle
+        and the signals stay pending)."""
+        if not signals:
+            return []
+        return self._lesson_claims(self._lessons_completion(
+            _LESSON_SYSTEM_PROMPT, _format_signals(signals)))
+
+    def extract_rules(self, signals: list[dict]) -> list[LessonClaim]:
+        """Rule mode (2026-09-08): ONE call per signal under
+        :data:`_RULE_LESSON_SYSTEM_PROMPT`, exactly one rule kept per signal,
+        ``aspect`` forced to ``rule`` and the ``rule:`` routing prefix
+        stripped from ``about``. When the signal's detail lists ``MUST
+        INCLUDE`` values and the rule drops one, the call is retried once
+        naming the missing values (the paper bounces such rules up to twice);
+        the second answer is accepted as-is — a slightly lossy rule beats a
+        stranded signal.
+
+        Failure is per signal, not per batch: a trial-boundary batch is
+        ~100 calls, and a transient failure on the last one must not
+        discard the rules already extracted. The signals whose call failed
+        are listed in ``last_rule_failed_ids`` (reset per call) so the
+        caller leaves exactly those pending; ``last_rule_failures`` counts
+        them. Only a batch with NO successful call raises."""
+        out: list[LessonClaim] = []
+        self.last_rule_failed_ids: list = []
+        self.last_rule_failures = 0
+        first_error: Exception | None = None
+        for s in signals:
+            user = _format_signals([s])
+            must = _must_include(s.get("detail"))
+            try:
+                claims = self._lesson_claims(
+                    self._lessons_completion(_RULE_LESSON_SYSTEM_PROMPT, user),
+                    force_aspect="rule")
+                if must and claims:
+                    missing = _missing_values(claims[0]["lesson"], must)
+                    if missing:
+                        nudge = (user + "\n\nYour previous rule omitted these "
+                                 "values, which must appear verbatim: "
+                                 + "; ".join(missing)
+                                 + ". Reply again with the complete rule.")
+                        retried = self._lesson_claims(self._lessons_completion(
+                            _RULE_LESSON_SYSTEM_PROMPT, nudge),
+                            force_aspect="rule")
+                        claims = retried or claims
+            except ExtractorError as exc:
+                self.last_rule_failed_ids.append(s.get("id"))
+                self.last_rule_failures += 1
+                first_error = first_error or exc
+                logger.warning("extract_rules: signal %s failed (%s); "
+                               "left pending", s.get("id"), exc)
+                continue
+            for c in claims[:1]:
+                c["about"] = (_strip_rule_prefix(c.get("about"))
+                              or _strip_rule_prefix(s.get("about")))
+                out.append(c)
+        if signals and self.last_rule_failures == len(signals):
+            raise ExtractorError(
+                f"extract_rules failed for every signal: {first_error}"
+            ) from first_error
         return out
 
     def extract_relations(self, texts: list[str],

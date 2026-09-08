@@ -366,8 +366,34 @@ class DreamOps:
         fn = getattr(extractor, "extract_lessons", None)
         if fn is None:
             return {"signals": len(signals), "lessons": 0, "skipped": "no-extractor"}
+        # Rule mode (2026-09-08): signals under the rule contract go to
+        # extract_rules (one situation-specific rule per signal, verbatim
+        # values); the rest keep the clustering path. An extractor without
+        # extract_rules folds them back onto the clustering path rather than
+        # stranding them pending, and the report says so.
+        from pseudolife_memory.memory.dream import is_rule_signal
+        rule_mode = bool(getattr(cfg, "rule_mode", False))
+        rule_sigs = [s for s in signals if is_rule_signal(s, rule_mode)]
+        plain = [s for s in signals if not is_rule_signal(s, rule_mode)]
+        rules_fn = getattr(extractor, "extract_rules", None)
+        rules_fallback = 0
+        if rule_sigs and rules_fn is None:
+            logger.warning("extractor has no extract_rules; %d rule signal(s) "
+                           "synthesised under the clustering prompt",
+                           len(rule_sigs))
+            rules_fallback = len(rule_sigs)
+            plain, rule_sigs = list(signals), []
+        rule_failed_ids: set = set()
         try:
-            claims = fn(signals)
+            claims = list(fn(plain)) if plain else []
+            if rule_sigs:
+                claims += list(rules_fn(rule_sigs))
+                # Per-signal failure tolerance (extract_rules): the signals
+                # whose call failed stay pending for the next sweep instead
+                # of being consumed with the batch.
+                rule_failed_ids = {
+                    i for i in (getattr(extractor, "last_rule_failed_ids", None)
+                                or ()) if i is not None}
         except Exception as exc:  # noqa: BLE001 — never let synthesis break the dream
             logger.warning("lesson synthesis failed (%s); leaving signals pending", exc)
             return {"signals": len(signals), "lessons": 0, "error": str(exc)}
@@ -383,7 +409,12 @@ class DreamOps:
                           or 0.0)
         for c in claims:
             try:
-                if dedup_thr and self._synthesized_lesson_duplicate(
+                # Rules are keyed per situation and must not be folded on
+                # wording similarity: two look-alike situations with
+                # different actions are both information. Restatements of
+                # the SAME situation supersede at their own slot instead.
+                is_rule = c.get("aspect") == "rule"
+                if dedup_thr and not is_rule and self._synthesized_lesson_duplicate(
                         c["task"], c.get("aspect", "lesson"), c["lesson"],
                         c.get("polarity", "+"), dedup_thr):
                     deduped += 1
@@ -408,7 +439,8 @@ class DreamOps:
             # signals pending would re-synthesize the same near-duplicates
             # every sweep, forever bouncing off the gate.
             with self._lock:
-                self._storage.consume_signals([s["id"] for s in signals])
+                self._storage.consume_signals(
+                    [s["id"] for s in signals if s["id"] not in rule_failed_ids])
         else:
             # Nothing landed (empty extraction or every write failed): leave
             # the signals pending so the next sweep retries — they are the
@@ -416,7 +448,15 @@ class DreamOps:
             # the retry window.
             logger.info("lesson synthesis wrote nothing; leaving %d signals "
                         "pending", len(signals))
-        return {"signals": len(signals), "lessons": written, "deduped": deduped}
+        out = {"signals": len(signals), "lessons": written, "deduped": deduped}
+        if rule_sigs:
+            # Rule SIGNALS seen (writes are counted in ``lessons``).
+            out["rule_signals"] = len(rule_sigs)
+        if rule_failed_ids:
+            out["rules_failed"] = len(rule_failed_ids)
+        if rules_fallback:
+            out["rules_fallback"] = rules_fallback
+        return out
 
     def prune_dream_runs(self) -> int:
         """Retention for the v27 dream-run journal: keep the newest

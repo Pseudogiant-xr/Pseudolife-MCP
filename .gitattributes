@@ -3,3 +3,7 @@ pseudolife_memory/web/static/vendor/*.js -text
 
 # Shell scripts must check out LF everywhere — bash rejects CRLF.
 *.sh text eol=lf
+
+# Unified diffs applied to LF upstream checkouts (evals/taubench_pseudolife/
+# patches/) must check out LF too, or `patch -p1` rejects every hunk.
+*.patch text eol=lf

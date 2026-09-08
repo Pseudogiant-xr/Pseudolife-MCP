@@ -12,6 +12,30 @@ Cloud rung stays OUT of LADDER_ORDER — the default sweep remains
 sovereign-only; invoke explicitly with ``--rung sonnet-5`` /
 ``--extractor sonnet-5``.
 
+``--emulate-tools`` (opt-in, default off) adds OpenAI function calling on top
+of that pure completion, for harnesses that cannot work without it. When on:
+the request's ``tools`` are rendered into the system prompt with a generic
+preamble asking for a bare ``{"tool_call": {"name": ..., "arguments": {...}}}``
+object and nothing else; ``assistant``-with-``tool_calls`` and ``tool``-role
+messages are folded into the stdin transcript as ``[assistant called tool N
+with ARGS]`` / ``[tool N returned: CONTENT]``; and a reply that parses as that
+object comes back as ``choices[0].message.tool_calls`` (``content`` null,
+``finish_reason`` ``"tool_calls"``, ``arguments`` a JSON **string**, which is
+what litellm feeds to ``json.loads``). Prose around the object is tolerated —
+models narrate, and a call introduced with "Sure, let me check." is still a
+call. A reply that only looks like an attempt is retried once asking for valid
+JSON, then served as text — never as an unparsable ``arguments``.
+``tool_choice: "none"`` suppresses the rendering; anything else is auto. With
+the flag OFF the wire format is unchanged: tools are ignored and no
+``tool_calls`` key is ever emitted.
+
+The mode exists for the tau2-bench adapter (``evals/taubench_adapter.py``) and
+belongs on an EVAL-ONLY port. It refuses to launch on either deployed shim
+port (``PRODUCTION_SHIM_PORTS``): :8082 is the dream primary
+(``ops/install-shim-autostart.ps1``) and :8086 the Codex shim
+(``ops/install.ps1``), and both sets of callers expect the plain-completion
+wire format.
+
 Notes:
   * Calls are serialized with a lock (the bench is sequential anyway, and one
     in-flight Max call at a time is deliberate).
@@ -25,7 +49,7 @@ Endpoints: POST /v1/chat/completions, GET /health, GET /v1/models.
 
 Usage:
     python evals/claude_shim.py [--port 8082] [--model claude-sonnet-5]
-        [--cli PATH] [--call-timeout 300]
+        [--cli PATH] [--call-timeout 300] [--emulate-tools]
 """
 from __future__ import annotations
 
@@ -34,6 +58,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -80,6 +105,223 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             proc.kill()
 
 
+# ── tool-call emulation (--emulate-tools; inert without the flag) ─────────
+#
+# Deliberately generic: the preamble names no domain, no benchmark and no
+# tool, so the same text serves any harness. One call per turn is what the
+# tau2 loop executes anyway (it runs calls sequentially), and asking for one
+# keeps the reply a single small object that either parses or does not.
+
+_TOOL_PREAMBLE = """\
+You can call tools. Call AT MOST ONE tool per reply.
+
+To call a tool, reply with ONLY this JSON object and nothing else — no prose
+before or after it, no markdown fences, no explanation:
+
+{"tool_call": {"name": "<tool name>", "arguments": {<arguments object>}}}
+
+The arguments object must match that tool's parameter schema. The tool's
+result is given back to you on the next turn, after which you can call
+another tool or answer. If you do not need a tool, reply to the user in
+plain text and do not mention this format.
+
+Available tools:"""
+
+# The deployed shims' ports: :8082 is the Claude shim the daemon routes dream
+# extraction through (ops/install-shim-autostart.ps1) and :8086 the Codex shim
+# (ops/install.ps1) — both pinned by tests/test_bench_production_port_guard.py.
+# The emulating build serves a different wire format, and on Windows a second
+# bind can even "succeed" while the incumbent keeps the traffic, so the
+# emulation flag refuses them rather than trusting the bind to fail.
+PRODUCTION_SHIM_PORTS = (8082, 8086)
+
+
+def production_port_refusal(port: int) -> str | None:
+    """Why ``--emulate-tools`` may not run on this port, or None."""
+    if port in PRODUCTION_SHIM_PORTS:
+        return (f"--emulate-tools is eval-only; :{port} is a deployed shim "
+                "port whose callers expect the plain-completion wire format. "
+                "Pick another port (the tau2 adapter's default is :8092).")
+    return None
+
+
+_RETRY_INSTRUCTION = (
+    "Your previous reply looked like a tool call but was not valid JSON. "
+    'Reply with ONLY the JSON object {"tool_call": {"name": ..., '
+    '"arguments": {...}}} and nothing else, or with a plain-text answer '
+    "containing no JSON at all.")
+
+
+def _strip_fence(text: str) -> str:
+    m = _FENCE_RE.match(text or "")
+    return m.group(1).strip() if m else (text or "").strip()
+
+
+def _as_text(content) -> str:
+    """OpenAI content is a string or a list of typed parts."""
+    if isinstance(content, list):
+        return "\n".join(p.get("text", "") for p in content
+                         if isinstance(p, dict) and p.get("text"))
+    return "" if content is None else str(content)
+
+
+def _args_text(arguments) -> str:
+    """The wire form of a call's arguments: already a JSON string on the way
+    in, an object when the model produced one."""
+    if isinstance(arguments, str):
+        return arguments
+    if arguments is None:
+        return "{}"
+    return json.dumps(arguments, ensure_ascii=False)
+
+
+def tools_are_enabled(tool_choice) -> bool:
+    """``tool_choice`` may be a string or a dict. Only "none" disables the
+    rendering; a forced-function dict is treated as auto (the preamble
+    already asks for at most one call, and the model sees only that tool's
+    siblings — forcing is not worth a second prompt shape)."""
+    if isinstance(tool_choice, str):
+        return tool_choice.strip().lower() != "none"
+    if isinstance(tool_choice, dict):
+        return str(tool_choice.get("type", "")).lower() != "none"
+    return True
+
+
+def render_tools(tools) -> str:
+    """The system-prompt block describing the request's tools. Empty string
+    when there is nothing to render, so the caller can skip the append."""
+    blocks = []
+    for spec in tools or []:
+        fn = spec.get("function") if isinstance(spec, dict) else None
+        if not isinstance(fn, dict):
+            fn = spec if isinstance(spec, dict) else {}
+        name = fn.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        params = fn.get("parameters")
+        if not isinstance(params, dict):
+            params = {"type": "object", "properties": {}}
+        blocks.append(
+            f"- name: {name}\n"
+            f"  description: {fn.get('description', '') or ''}\n"
+            f"  parameters (JSON Schema): "
+            f"{json.dumps(params, ensure_ascii=False)}")
+    return f"{_TOOL_PREAMBLE}\n" + "\n\n".join(blocks) if blocks else ""
+
+
+def fold_messages(msgs) -> tuple[str, str]:
+    """Split a tool-carrying message list into (system prompt, transcript).
+
+    The CLI takes one system prompt and one stdin blob, so the tool turns are
+    folded into the blob in a fixed textual form. Roles are labelled because
+    an agent transcript is multi-turn — without labels the model cannot tell
+    its own past replies from the user's."""
+    system_parts: list[str] = []
+    turns: list[str] = []
+    names: dict[str, str] = {}          # tool_call_id -> tool name
+    for m in msgs or []:
+        if not isinstance(m, dict):
+            continue
+        role, content = m.get("role"), m.get("content")
+        if role == "system":
+            if content:
+                system_parts.append(_as_text(content))
+            continue
+        if role == "tool":
+            name = (names.get(m.get("tool_call_id"))
+                    or m.get("name") or "tool")
+            turns.append(f"[tool {name} returned: {_as_text(content)}]")
+            continue
+        calls = m.get("tool_calls") if role == "assistant" else None
+        if content:
+            label = "Assistant" if role == "assistant" else "User"
+            turns.append(f"{label}: {_as_text(content)}")
+        for call in calls or []:
+            fn = call.get("function") if isinstance(call, dict) else None
+            fn = fn if isinstance(fn, dict) else {}
+            name = fn.get("name") or "tool"
+            if isinstance(call, dict) and call.get("id"):
+                names[call["id"]] = name
+            turns.append(f"[assistant called tool {name} with "
+                         f"{_args_text(fn.get('arguments'))}]")
+    return "\n\n".join(system_parts), "\n\n".join(turns)
+
+
+def _tool_call_span(reply: str) -> str | None:
+    """The first ``{`` to the last ``}`` of a reply, if that span mentions
+    ``tool_call``.
+
+    Models narrate — "Sure, let me check." in front of the object, or a
+    sign-off after the fence — and a call that arrives with prose around it
+    is still a call. Requiring the reply to START with ``{`` turned every one
+    of those into a chat turn, silently costing the episode the call it was
+    making. Keyed on ``tool_call`` so an answer that merely quotes some JSON
+    stays an answer.
+    """
+    text = reply or ""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    span = text[start:end + 1]
+    return span if "tool_call" in span else None
+
+
+def looks_like_tool_call(reply: str) -> bool:
+    """A reply that was TRYING to be a tool call — worth one retry."""
+    text = _strip_fence(reply)
+    if text.startswith("{") and "tool_call" in text:
+        return True
+    return _tool_call_span(reply) is not None
+
+
+def parse_tool_reply(reply: str):
+    """Turn a tool-call reply into OpenAI ``tool_calls`` entries, or None.
+
+    ``arguments`` comes back as a JSON **string**: litellm calls
+    ``json.loads`` on it and an episode dies on a parse failure, so anything
+    that is not an object becomes ``{}`` rather than reaching the harness."""
+    text = _strip_fence(reply)
+    if not text.startswith("{"):
+        # A call the model introduced with prose, fenced or not.
+        text = _tool_call_span(reply)
+        if text is None:
+            return None
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    raw = obj.get("tool_call")
+    raw = [raw] if raw is not None else obj.get("tool_calls")
+    if not isinstance(raw, list):
+        return None
+    calls = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        fn = item.get("function")
+        fn = fn if isinstance(fn, dict) else item
+        name = fn.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        calls.append({
+            "id": f"call_{secrets.token_hex(4)}",
+            "type": "function",
+            "function": {"name": name,
+                         "arguments": json.dumps(args, ensure_ascii=False)},
+        })
+    return calls or None
+
+
 def resolve_model(requested: str | None, default: str) -> str:
     """Per-request model override (2026-08-02): a request naming a concrete
     Claude model wins over the launch default, so the daemon's Console
@@ -96,11 +338,15 @@ class ClaudeCli:
 
     def __init__(self, cli: Path, model: str, call_timeout: float,
                  system_override: str | None = None,
-                 reasoning_effort: str | None = None):
+                 reasoning_effort: str | None = None,
+                 emulate_tools: bool = False):
         self.cli = cli
         self.model = model
         self.call_timeout = call_timeout
         self.system_override = system_override
+        # --emulate-tools: read by the handler, which owns the prompt
+        # rendering and reply parsing. Off = the pre-emulation wire format.
+        self.emulate_tools = emulate_tools
         # Launch-default reasoning effort (claude --effort); a per-request
         # value wins. None = never pass the flag — the pre-knob behavior.
         self.reasoning_effort = reasoning_effort
@@ -285,12 +531,24 @@ def make_handler(cli: ClaudeCli):
                 n = int(self.headers.get("content-length", 0))
                 req = json.loads(self.rfile.read(n))
                 msgs = req.get("messages", [])
-                system = "\n\n".join(m.get("content", "") for m in msgs
-                                     if m.get("role") == "system"
-                                     and m.get("content"))
-                user = "\n\n".join(m.get("content", "") for m in msgs
-                                   if m.get("role") != "system"
-                                   and m.get("content"))
+                emulate = bool(getattr(cli, "emulate_tools", False))
+                tools = req.get("tools")
+                tools = tools if isinstance(tools, list) else []
+                if emulate:
+                    system, user = fold_messages(msgs)
+                    rendered = (render_tools(tools)
+                                if tools_are_enabled(req.get("tool_choice"))
+                                else "")
+                    if rendered:
+                        system = f"{system}\n\n{rendered}" if system \
+                            else rendered
+                else:
+                    system = "\n\n".join(m.get("content", "") for m in msgs
+                                         if m.get("role") == "system"
+                                         and m.get("content"))
+                    user = "\n\n".join(m.get("content", "") for m in msgs
+                                       if m.get("role") != "system"
+                                       and m.get("content"))
                 model = resolve_model(req.get("model"), cli.model)
                 # Per-request effort (the daemon's effort knob rides the
                 # request body); non-string/blank means unset.
@@ -299,14 +557,35 @@ def make_handler(cli: ClaudeCli):
                           if isinstance(effort, str) and effort.strip()
                           else None)
                 reply = cli.chat(system, user, model=model, effort=effort)
+                calls = parse_tool_reply(reply) if emulate else None
+                retried = False
+                if emulate and calls is None and looks_like_tool_call(reply):
+                    # Near-JSON: one more attempt, then serve the ORIGINAL
+                    # reply as text. Never raise, and never hand the harness
+                    # an `arguments` string it cannot json.loads.
+                    retried = True
+                    calls = parse_tool_reply(
+                        cli.chat(system, f"{user}\n\n{_RETRY_INSTRUCTION}",
+                                 model=model, effort=effort))
+                _LOG.info("chat.completions: emulate=%s n_tools=%d "
+                          "tool_call=%s retried=%s",
+                          "on" if emulate else "off", len(tools),
+                          "yes" if calls else "no", "yes" if retried else "no")
+                if calls:
+                    message = {"role": "assistant", "content": None,
+                               "tool_calls": calls}
+                    finish = "tool_calls"
+                else:
+                    message = {"role": "assistant", "content": reply}
+                    finish = "stop"
                 self._json(200, {
                     "id": f"claude-shim-{int(time.time() * 1000)}",
                     "object": "chat.completion",
                     "model": model,
                     "choices": [{
                         "index": 0,
-                        "message": {"role": "assistant", "content": reply},
-                        "finish_reason": "stop",
+                        "message": message,
+                        "finish_reason": finish,
                     }],
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0,
                               "total_tokens": 0},
@@ -336,6 +615,11 @@ def _parse_args(argv=None):
                          "(low/medium/high/xhigh/max); a request's "
                          "reasoning_effort wins per call. Unset = the CLI's "
                          "own per-model default")
+    ap.add_argument("--emulate-tools", action="store_true",
+                    help="emulate OpenAI function calling in the prompt for "
+                         "harnesses that require it (the tau2-bench adapter). "
+                         "Off by default and EVAL-ONLY: refused on the "
+                         "deployed shim ports :8082 and :8086")
     ap.add_argument("--system-prompt-file", type=Path, default=None,
                     help="replace the production _SYSTEM_PROMPT prefix with "
                          "this file's body (text after the first '---' line, "
@@ -372,9 +656,21 @@ def main():
         override = raw.split("\n---\n", 1)[-1].strip()
         print(f"claude_shim: system prompt override from "
               f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
+    if args.emulate_tools:
+        # The per-request line is INFO; without a handler the emulation path
+        # would run silently. Configured ONLY under the flag so an ordinary
+        # launch keeps exactly the output it had.
+        logging.basicConfig(level=logging.INFO,
+                            format="%(asctime)s %(levelname)s %(message)s")
+        refusal = production_port_refusal(args.port)
+        if refusal:
+            sys.exit(refusal)
+        print("claude_shim: tool-call emulation ON (OpenAI function calling "
+              "rendered into the prompt)", flush=True)
     cli = ClaudeCli(args.cli, args.model, args.call_timeout,
                     system_override=override,
-                    reasoning_effort=args.reasoning_effort)
+                    reasoning_effort=args.reasoning_effort,
+                    emulate_tools=args.emulate_tools)
     # Warm the health cache before serving: the only blocking health path is
     # an empty cache, and this guarantees no request ever hits it.
     ok, detail = cli.health()
