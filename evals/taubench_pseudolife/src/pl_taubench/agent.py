@@ -34,6 +34,10 @@ DEFAULT_URL = "http://127.0.0.1:8765"
 VALID_ROUTES = ("entries", "lessons")
 VALID_SUPERVISION = ("experience", "instruction")
 VALID_DREAM = ("off", "episode", "trial")
+# "nudge": the first turn carries a reminder and the model searches itself;
+# "inject": the harness searches on the first turn and folds the results in
+# (the paper's second mode); "off": the tools exist, nothing prompts their use.
+VALID_RETRIEVAL = ("nudge", "inject", "off")
 
 
 class PLMemoryAgent(LLMAgent):
@@ -56,12 +60,14 @@ class PLMemoryAgent(LLMAgent):
         task=None,
         reflection_llm: Optional[str] = None,
         reflection_llm_args: Optional[dict] = None,
+        retrieval_mode: str = "nudge",
     ) -> None:
         super().__init__(
             tools=tools, domain_policy=domain_policy, llm=llm, llm_args=llm_args
         )
         self.episode = episode
         self.client = client
+        self.retrieval_mode = retrieval_mode
         self.route = route
         self.supervision = supervision
         self.read_only = read_only
@@ -93,12 +99,26 @@ class PLMemoryAgent(LLMAgent):
         """
         if self._nudged or not isinstance(message, UserMessage):
             return message
+        if self.retrieval_mode == "off":
+            return message
         content = (message.content or "").strip()
         if not content:
             return message
         self._nudged = True
+        extra = prompts.NUDGE
+        if self.retrieval_mode == "inject":
+            # The harness searches on the model's behalf, through the same
+            # dispatch the tools use, so served ids and the window clock are
+            # recorded for used_ids exactly as for an agent-driven search.
+            from .memory_env import _dispatch
+
+            memories, _ = _dispatch("memory_search",
+                                    {"query": content, "top_k": 8})
+            lessons, _ = _dispatch("memory_lesson_search",
+                                   {"query": content, "top_k": 5})
+            extra = prompts.build_inject_block(memories, lessons) + "\n\n" + prompts.NUDGE
         return message.model_copy(
-            update={"content": f"{message.content}\n\n{prompts.NUDGE}"}
+            update={"content": f"{message.content}\n\n{extra}"}
         )
 
     # ── task end ─────────────────────────────────────────────────────────────
@@ -147,6 +167,7 @@ def create_pl_agent(tools, domain_policy, **kwargs) -> PLMemoryAgent:
     route = _choice("PL_ROUTE", VALID_ROUTES, "entries")
     supervision = _choice("PL_SUPERVISION", VALID_SUPERVISION, "experience")
     dream = _choice("PL_DREAM", VALID_DREAM, "off")
+    retrieval_mode = _choice("PL_RETRIEVAL_MODE", VALID_RETRIEVAL, "nudge")
     read_only = _flag("PL_READ_ONLY")
     run_tag = (os.environ.get("PL_RUN_TAG") or "").strip()
     url = (os.environ.get("PL_MCP_URL") or DEFAULT_URL).strip().rstrip("/")
@@ -174,11 +195,16 @@ def create_pl_agent(tools, domain_policy, **kwargs) -> PLMemoryAgent:
 
     print(
         f"[pl_memory] route={route} supervision={supervision} dream={dream} "
+        f"retrieval={retrieval_mode} "
         f"read_only={read_only} run={run_tag or '-'} task={task_id} "
         f"episode={episode.session_uid} url={url}",
         flush=True,
     )
 
+    # The memory instruction rides in the policy as well as the one-time
+    # nudge (prompts.POLICY_ADDENDUM): the nudge alone produced zero searches
+    # in the 2026-09-08 smoke.
+    domain_policy = f"{domain_policy.rstrip()}\n\n{prompts.POLICY_ADDENDUM}"
     return PLMemoryAgent(
         tools=tools,
         domain_policy=domain_policy,
@@ -194,6 +220,7 @@ def create_pl_agent(tools, domain_policy, **kwargs) -> PLMemoryAgent:
         task=task,
         reflection_llm=reflection_llm,
         reflection_llm_args=reflection_llm_args,
+        retrieval_mode=retrieval_mode,
     )
 
 

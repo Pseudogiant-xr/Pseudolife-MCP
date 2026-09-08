@@ -219,3 +219,17 @@ Smoke (3 tasks × 2 trials, one condition, both routes) only on the maintainer's
 full grid only after the smoke shows zero agent errors and every episode `window_ok`. Cost
 note: the CLI-backed shim serialises calls, so a full condition is tens of hours on the
 Sonnet instrument.
+
+### Smoke record (2026-09-08)
+
+Four smokes ran (entries under nudge, twice; lessons under inject, twice — the second on a
+daemon carrying rule mode): 24 episodes, zero agent errors, zero customer errors, every
+episode `window_ok`. Findings that changed the adapter before any number: the local
+customer's thinking mode returns empty turns (pinned off); tau2's data dir must be the
+checkout's and absolute; the released task list is one line; the model imitated the
+shim's history marker (forbidden and recovered); and retrieval compliance under `nudge` was
+one search in twelve episodes, so **the headline runs use `--retrieval inject`** — the
+paper's second mode — under which every episode served three to five memories, every
+served id was credited, and the rule-mode daemon wrote one situation-keyed rule per
+episode. A `nudge` arm stays available to measure compliance itself. The smoke's rewards
+(two passes in 24 episodes on a bank that carried over between smokes) are not a number.

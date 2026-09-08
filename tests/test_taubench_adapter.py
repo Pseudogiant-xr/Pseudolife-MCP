@@ -330,7 +330,11 @@ def test_build_tau2_command_baseline_uses_llm_agent_and_no_plugin_env(tb):
     assert not [k for k in env if k.startswith("PL_")], (
         "the baseline condition must carry no plugin env at all — a stray "
         "PL_* var is how a 'no memory' arm quietly gets memory")
-    assert env["TAU2_DATA_DIR"] == "local/data/tau2"
+    # tau2 runs with the checkout as its cwd, so a relative data dir does
+    # not resolve there (the 2026-09-08 smoke: "Data directory does not
+    # exist"); the env carries the ABSOLUTE path.
+    assert env["TAU2_DATA_DIR"] == str(Path("local/data/tau2").resolve())
+    assert Path(env["TAU2_DATA_DIR"]).is_absolute()
 
 
 def test_build_tau2_command_learning_conditions_set_the_plugin_env(tb):
@@ -375,6 +379,27 @@ def test_read_only_reaches_the_plugin_as_a_BOOLEAN_flag(tb):
     assert re.search(r'"--read-only",\s*action="store_true"', src)
 
 
+def test_retrieval_mode_reaches_the_plugin_and_names_the_run(tb):
+    """``--retrieval nudge|inject`` (default nudge) rides to the plugin as
+    PL_RETRIEVAL_MODE; inject is part of the run name so its rows never
+    share a resume set with a nudge run of the same tag."""
+    _, env = tb.build_tau2_command(condition="experience", rules="entries",
+                                   **_COMMON)
+    assert env["PL_RETRIEVAL_MODE"] == "nudge"
+    _, env = tb.build_tau2_command(condition="experience", rules="entries",
+                                   retrieval="inject", **_COMMON)
+    assert env["PL_RETRIEVAL_MODE"] == "inject"
+    _, env = tb.build_tau2_command(condition="baseline", **_COMMON)
+    assert "PL_RETRIEVAL_MODE" not in env
+    assert tb.run_name("experience", "t", "entries") == \
+        "taubench-experience-entries-t"
+    assert tb.run_name("experience", "t", "entries", retrieval="inject") == \
+        "taubench-experience-entries-inject-t"
+    with pytest.raises(ValueError):
+        tb.build_tau2_command(condition="experience", rules="entries",
+                              retrieval="teleport", **_COMMON)
+
+
 def test_build_tau2_command_keeps_route_and_arm_orthogonal(tb):
     """Feedback arm and rule route are separate arms of the design: every
     learning condition names its route explicitly, the baseline refuses
@@ -407,6 +432,11 @@ def test_build_tau2_command_carries_the_protocol_flags(tb):
     assert agent_args["reasoning_effort"] == "medium"
     user_args = json.loads(_argv_val(argv, "--user-llm-args"))
     assert user_args["api_base"] == "http://127.0.0.1:1234/v1"
+    # The customer's thinking mode is pinned OFF the way the bench's own
+    # client does it — the 2026-09-08 smoke's first episode retried three
+    # times on an empty customer turn without this.
+    assert user_args["extra_body"]["chat_template_kwargs"] == \
+        {"enable_thinking": False}
     assert _argv_val(argv, "--agent-llm").startswith("openai/")
     assert _argv_val(argv, "--user-llm").startswith("openai/")
 
@@ -420,6 +450,24 @@ def test_task_ids_are_expanded_from_the_file(tb, tmp_path):
     argv, _ = tb.build_tau2_command(
         condition="baseline", **{**_COMMON, "task_ids": tb.load_task_ids(p)})
     assert argv[argv.index("--task-ids") + 1:] == ["t1", "t2"]
+    # The paper's released data/task_ids.txt is ONE line of 97 ids separated
+    # by spaces; a line-only reader would hand tau2 a single bogus id.
+    p.write_text("t1 t2  t3\nt4 # trailing note\n", encoding="utf-8")
+    assert tb.load_task_ids(p) == ["t1", "t2", "t3", "t4"]
+
+
+def test_data_dir_must_carry_the_domain(tb, tmp_path):
+    """tau2 resolves BOTH its domain data and its simulations output under
+    TAU2_DATA_DIR (reference/tau2-bench/src/tau2/utils/utils.py), so a data
+    dir that lacks the banking domain makes every run fail after the
+    servers are up. The default is the pinned checkout's data dir and the
+    guard names the missing path."""
+    assert tb.DEFAULT_DATA_DIR.replace("\\", "/").endswith("tau2-bench/data")
+    with pytest.raises(SystemExit) as exc:
+        tb.check_data_dir(tmp_path)
+    assert "banking_knowledge" in str(exc.value)
+    (tmp_path / "tau2" / "domains" / "banking_knowledge").mkdir(parents=True)
+    assert tb.check_data_dir(tmp_path) == tmp_path
 
 
 @pytest.mark.parametrize("endpoint", ["agent_url", "user_url"])
@@ -836,6 +884,9 @@ def test_a_failed_dream_between_trials_stops_the_run(tb, tmp_path, monkeypatch,
     measures an arm that learned nothing while reporting it as the arm that
     did."""
     data_dir = tmp_path / "data"
+    # run() refuses a data dir without the domain (tau2 reads domains and
+    # writes simulations under one root); give this one the shape.
+    (data_dir / "tau2" / "domains" / tb.DOMAIN).mkdir(parents=True)
     monkeypatch.setattr(tb, "RESULTS_DIR", tmp_path / "results")
     monkeypatch.setattr(tb, "probe", lambda url, timeout=4.0: True)
     monkeypatch.setattr(tb, "probe_daemon", lambda url: True)

@@ -146,6 +146,13 @@ CONDITIONS = ("baseline", "experience", "instruction")
 # there and refused on the baseline, which carries no memory at all.
 RULES = ("entries", "lessons")
 DISTILL = ("episode", "trial", "off")
+# How recalled memory reaches the agent (PL_RETRIEVAL_MODE): "nudge" = the
+# first turn carries a reminder and the model searches itself (the paper's
+# reported configuration); "inject" = the harness searches on the first turn
+# and folds the results in (the paper's second mode — two nudge smokes on
+# 2026-09-08 produced one search in seven episodes under tool-call
+# emulation); "off" = tools present, nothing prompts their use.
+RETRIEVAL = ("nudge", "inject", "off")
 
 DOMAIN = "banking_knowledge"
 RETRIEVAL_CONFIG = "bm25"
@@ -167,9 +174,12 @@ USER_URL = os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL",
                           "http://127.0.0.1:1234/v1")
 
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8795"
-DEFAULT_DATA_DIR = "local/data/tau2"
 DEFAULT_TAU2_VENV = ".venv-taubench"
 DEFAULT_TAU2_ROOT = "reference/tau2-bench"
+# tau2 reads its DOMAINS and writes its simulations under one TAU2_DATA_DIR,
+# so the default is the pinned checkout's data dir (gitignored under
+# reference/); check_data_dir() refuses a root without the banking domain.
+DEFAULT_DATA_DIR = f"{DEFAULT_TAU2_ROOT}/data"
 DEFAULT_MODEL = "bench"
 DEFAULT_MAX_STEPS = 60
 DEFAULT_NUM_TRIALS = 4
@@ -527,7 +537,9 @@ def tau2_exe(tau2_venv) -> str:
 
 
 def load_task_ids(path) -> list[str]:
-    """One task id per line; blanks and ``#`` comments ignored.
+    """Task ids separated by any whitespace — one per line, or the paper's
+    released ``data/task_ids.txt`` shape (one line, 97 ids, spaces);
+    ``#`` comments ignored.
 
     tau2 has no --task-ids-file flag, only a variadic --task-ids, so the
     file is expanded onto the command line here rather than being passed
@@ -535,10 +547,25 @@ def load_task_ids(path) -> list[str]:
     """
     out = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
-        line = line.split("#", 1)[0].strip()
-        if line:
-            out.append(line)
+        line = line.split("#", 1)[0]
+        out.extend(line.split())
     return out
+
+
+def check_data_dir(data_dir) -> Path:
+    """tau2 resolves BOTH its domain data and its simulations output under
+    ``TAU2_DATA_DIR`` (``src/tau2/utils/utils.py``), so a data dir without
+    the banking domain fails every run only after the servers are up.
+    Exits naming the missing path."""
+    root = Path(data_dir).resolve()
+    domain = root / "tau2" / "domains" / DOMAIN
+    if not domain.is_dir():
+        raise SystemExit(
+            f"TAU2_DATA_DIR {root} carries no {DOMAIN} domain at {domain} — "
+            "point --data-dir at the pinned checkout's data dir "
+            f"({DEFAULT_DATA_DIR}); tau2 reads its domains and writes its "
+            "simulations under the same root")
+    return root
 
 
 def _reject_production_ports(urls: dict[str, str], allow: bool) -> None:
@@ -562,6 +589,7 @@ def build_tau2_command(*, condition: str, save_to: str, task_ids: list[str],
                        data_dir: str, run_tag: str, telemetry_log: str,
                        rules: str | None = None, distill: str = "episode",
                        read_only: bool = False, trial_offset: int = 0,
+                       retrieval: str = "nudge",
                        model: str = DEFAULT_MODEL,
                        max_steps: int = DEFAULT_MAX_STEPS,
                        tau2_venv=DEFAULT_TAU2_VENV,
@@ -585,13 +613,22 @@ def build_tau2_command(*, condition: str, save_to: str, task_ids: list[str],
     if condition != "baseline" and rules not in RULES:
         raise ValueError(f"a learning condition needs --rules in {RULES}; "
                          f"got {rules!r}")
+    if retrieval not in RETRIEVAL:
+        raise ValueError(f"retrieval={retrieval!r} not in {RETRIEVAL}")
     _reject_production_ports({"agent": agent_url, "user": user_url},
                              allow_production_ports)
 
     agent_args = {"api_base": agent_url, "api_key": "sk-local-bench",
                   "temperature": 0, "reasoning_effort": "medium"}
+    # The customer runs on the bench Qwen server, whose chat template thinks
+    # by default and then returns an EMPTY content field — tau2 rejects the
+    # turn ("UserMessage must have either content or tool_calls", the
+    # 2026-09-08 smoke) and retries three times. The bench's own client pins
+    # thinking off on every call (longmemeval_bench._chat); litellm forwards
+    # the same request field through ``extra_body``.
     user_args = {"api_base": user_url, "api_key": "sk-local-bench",
-                 "temperature": 0}
+                 "temperature": 0,
+                 "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
     argv = [
         tau2_exe(tau2_venv), "run",
         "--domain", DOMAIN,
@@ -611,7 +648,9 @@ def build_tau2_command(*, condition: str, save_to: str, task_ids: list[str],
         argv += ["--seed", str(seed)]
     argv += ["--task-ids", *task_ids]
 
-    env = {"TAU2_DATA_DIR": str(data_dir)}
+    # Absolute on purpose: tau2 is run with its checkout as cwd, where a
+    # relative data dir does not exist (it reads its domains from here).
+    env = {"TAU2_DATA_DIR": str(Path(data_dir).resolve())}
     if condition != "baseline":
         env.update({
             "PL_MCP_URL": daemon_url,
@@ -619,6 +658,7 @@ def build_tau2_command(*, condition: str, save_to: str, task_ids: list[str],
             # The feedback arm: the plugin's reflection delivers the verified
             # sequence + diff only under "instruction".
             "PL_SUPERVISION": condition,
+            "PL_RETRIEVAL_MODE": retrieval,
             "PL_DREAM": distill,
             "PL_RUN_TAG": run_tag,
             "PL_TAUBENCH_LOG": str(telemetry_log),
@@ -673,21 +713,25 @@ def telemetry_path(data_dir, name: str, trial_offset: int) -> Path:
     return Path(data_dir) / f"{name}-t{trial_offset}.telemetry.jsonl"
 
 
-def run_name(condition: str, tag: str, rules: str | None = None) -> str:
-    """The run's identity: condition, route (learning conditions only) and
-    tag. Route is part of the name because both routes run under the same
-    condition and tag — sharing one file would let the resume set skip the
-    second route's episodes as already done."""
+def run_name(condition: str, tag: str, rules: str | None = None,
+             retrieval: str | None = None) -> str:
+    """The run's identity: condition, route (learning conditions only), a
+    non-default retrieval mode, and tag. Route and mode are part of the name
+    because they run under the same condition and tag — sharing one file
+    would let the resume set skip the second arm's episodes as already
+    done."""
     if condition == "baseline":
         return f"taubench-{condition}-{tag}"
     if rules not in RULES:
         raise ValueError(f"a learning condition's run name needs a route "
                          f"in {RULES}; got {rules!r}")
-    return f"taubench-{condition}-{rules}-{tag}"
+    mode = "" if retrieval in (None, "nudge") else f"-{retrieval}"
+    return f"taubench-{condition}-{rules}{mode}-{tag}"
 
 
-def out_file(condition: str, tag: str, rules: str | None = None) -> Path:
-    return RESULTS_DIR / f"{run_name(condition, tag, rules)}.jsonl"
+def out_file(condition: str, tag: str, rules: str | None = None,
+             retrieval: str | None = None) -> Path:
+    return RESULTS_DIR / f"{run_name(condition, tag, rules, retrieval)}.jsonl"
 
 
 def smoke_tag(tag: str) -> str:
@@ -1060,14 +1104,14 @@ def _json_safe(value):
 def report(condition: str, tag: str, baseline_rows_path=None,
            n_trials: int = DEFAULT_NUM_TRIALS, B: int = 10_000,
            seed: int = 0, rules: str | None = None,
-           task_ids_file=None) -> dict:
+           task_ids_file=None, retrieval: str | None = None) -> dict:
     """Write the summary artifact for one condition.
 
     Pass the run's ``--task-ids-file`` here too: it is what makes a task that
     wrote no rows count as failures instead of quietly leaving the
     denominator, and the summary records how many that was.
     """
-    path = out_file(condition, tag, rules)
+    path = out_file(condition, tag, rules, retrieval)
     rows = load_rows(path)
     if not rows:
         raise SystemExit(f"no rows to report at {path}")
@@ -1097,13 +1141,17 @@ def run(*, condition: str, tag: str, task_ids: list[str], num_trials: int,
         rules: str | None, distill: str, read_only: bool,
         agent_url: str, user_url: str, daemon_url: str, data_dir: str,
         tau2_venv: str, tau2_root: str, max_steps: int, model: str,
-        seed: int, allow_production_ports: bool) -> None:
+        seed: int, allow_production_ports: bool,
+        retrieval: str = "nudge") -> None:
     """Drive tau2 per the trial plan and append one row per episode.
 
     Starts nothing: the Qwen server, the emulating shim and the bench
     daemon are operator preconditions (see the module docstring), and a
     missing one exits with the command to run rather than launching it.
     """
+    # Resolved once here: tau2 and the plugin both run with the checkout as
+    # cwd, so every path handed to them (data dir, telemetry log) is absolute.
+    data_dir = str(check_data_dir(data_dir))
     if not probe(user_url):
         sys.exit(f"no user-simulator server at {user_url} — start it first "
                  "(evals/qwen_server.ps1 Start-Qwen)")
@@ -1115,8 +1163,8 @@ def run(*, condition: str, tag: str, task_ids: list[str], num_trials: int,
                  "db: ok) — start it against a FRESH bench database "
                  "(pseudolife-mcp serve) before running a learning arm")
 
-    name = run_name(condition, tag, rules)
-    out_path = out_file(condition, tag, rules)
+    name = run_name(condition, tag, rules, retrieval)
+    out_path = out_file(condition, tag, rules, retrieval)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     done = done_set(load_rows(out_path))
     print(f"tau2 {DOMAIN} / {condition}: {len(task_ids)} tasks x "
@@ -1133,6 +1181,7 @@ def run(*, condition: str, tag: str, task_ids: list[str], num_trials: int,
             agent_url=agent_url, user_url=user_url, daemon_url=daemon_url,
             data_dir=data_dir, run_tag=tag, telemetry_log=str(telemetry_log),
             rules=rules, distill=distill, read_only=read_only,
+            retrieval=retrieval,
             trial_offset=step["trial_offset"],
             model=model, max_steps=max_steps, tau2_venv=tau2_venv,
             allow_production_ports=allow_production_ports)
@@ -1186,6 +1235,12 @@ def main(argv: list[str] | None = None) -> int:
                          "reflection writes constraint entries credited by "
                          "used_ids; 'lessons' = memory_outcome only, the "
                          "dream distils")
+    ap.add_argument("--retrieval", choices=RETRIEVAL, default="nudge",
+                    help="how recalled memory reaches the agent: 'nudge' = "
+                         "the first turn asks the model to search (paper's "
+                         "reported mode); 'inject' = the harness searches on "
+                         "the first turn and folds the results in (paper's "
+                         "second mode); 'off' = tools only")
     ap.add_argument("--distill", choices=DISTILL, default="episode",
                     help="'episode': the plugin consolidates per episode; "
                          "'trial': this adapter runs tau2 once per trial and "
@@ -1242,6 +1297,7 @@ def main(argv: list[str] | None = None) -> int:
         report(args.condition, tag, args.baseline_rows,
                n_trials=args.num_trials, B=args.bootstrap_B,
                seed=args.bootstrap_seed, rules=args.rules,
+               retrieval=args.retrieval,
                task_ids_file=args.task_ids_file)
         return 0
 
@@ -1261,6 +1317,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run(condition=args.condition, tag=tag, task_ids=task_ids,
         num_trials=num_trials, rules=args.rules, distill=args.distill,
+        retrieval=args.retrieval,
         read_only=args.read_only, agent_url=args.agent_url,
         user_url=args.user_url, daemon_url=args.daemon_url,
         data_dir=args.data_dir, tau2_venv=args.tau2_venv,
