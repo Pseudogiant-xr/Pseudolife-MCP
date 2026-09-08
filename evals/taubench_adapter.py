@@ -52,8 +52,9 @@ Metrics (all in the pure half of this module, all unit-tested):
     two identical conditions come out at exactly (0, 0).
 
 The pre-registered parity bar (``PARITY_BARS``) reads instruction/baseline
-pass^1 >= 2.6 and experience/baseline >= 1.6, with the interval excluding
-1.0.
+pass^1 >= 1.6 — the paper's Sonnet 5 replication, the instrument run here
+— with the interval excluding 1.0; experience carries no bar (see the
+constant's comment for the 2026-09-09 amendment from the Mistral 2.6x).
 
 Note on the paper's committed baseline numbers (Mistral): the per-trial
 curve is [6, 7, 5, 7] (25 successes over 388 episodes, so pass^1 = 25/388 =
@@ -137,7 +138,16 @@ REWARD_THRESHOLD = 0.999
 PERCENTILES = (2.5, 97.5)
 
 # Pre-registered parity bar on pass^1 relative to baseline (paper, Table 3).
-PARITY_BARS = {"instruction": 2.6, "experience": 1.6}
+# Amended 2026-09-09, before any learning-arm episode existed: the 2.6x /
+# 1.6x first written here are the paper's Mistral Large ratios at a 0.064
+# baseline. This adapter's agent is Sonnet 5 at medium effort — the paper's
+# replication model — and its committed grids (paper_grids.tsv, scored with
+# the estimators below) give baseline 0.247, instruction 0.397: 1.60x
+# [1.31, 2.05], delta +0.149, 28 of 57 floor tasks. At our baseline (0.24 at
+# its first 21 episodes) 2.6x would mean 0.65 absolute — a ceiling. No bar
+# on experience: the paper ran no Sonnet experience arm, so its ratio is
+# reported, never "met".
+PARITY_BARS = {"instruction": 1.6, "experience": None}
 
 CONDITIONS = ("baseline", "experience", "instruction")
 # Feedback arm (condition) and rule route are ORTHOGONAL arms of the design

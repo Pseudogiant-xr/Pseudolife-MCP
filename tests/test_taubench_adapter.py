@@ -279,9 +279,15 @@ def test_bootstrap_resampling_keeps_task_identity_for_floor_stats(tb):
 
 
 def test_ratio_vs_baseline_applies_the_parity_bar(tb):
-    """The pre-registered bar: instruction/baseline pass^1 >= 2.6 and
-    experience/baseline >= 1.6, with the interval excluding 1.0."""
-    assert tb.PARITY_BARS == {"instruction": 2.6, "experience": 1.6}
+    """The pre-registered bar, amended 2026-09-09 before any learning-arm
+    episode existed: instruction/baseline pass^1 >= 1.6 — the paper's
+    Sonnet 5 replication (0.397 / 0.247 on its committed grids), the
+    instrument this adapter runs — with the interval excluding 1.0. The 2.6x
+    headline is Mistral Large at a 0.064 baseline and is a ceiling here
+    (2.6 x 0.25 = 0.65 absolute). Experience carries no bar: the paper ran
+    no Sonnet experience arm, so its 1.6x (Mistral) has no matched-instrument
+    reading — the delta is reported, not gated."""
+    assert tb.PARITY_BARS == {"instruction": 1.6, "experience": None}
     base = _grid({f"t{i}": "1000" for i in range(10)})          # pass^1 = 0.25
     # every task all four trials -> pass^1 = 1.0, ratio 4.0
     strong = _grid({f"t{i}": "1111" for i in range(10)})
@@ -289,13 +295,20 @@ def test_ratio_vs_baseline_applies_the_parity_bar(tb):
                                baseline="baseline", k=1, B=200, seed=0)
     got = out["instruction"]
     assert got["point"] == pytest.approx(4.0)
-    assert got["bar"] == 2.6
+    assert got["bar"] == 1.6
     assert got["meets_bar"] is True
     assert got["excludes_one"] is True
     weak = _grid({f"t{i}": ("1100" if i < 5 else "1000") for i in range(10)})
     out2 = tb.ratio_vs_baseline({"baseline": base, "instruction": weak},
                                 baseline="baseline", k=1, B=200, seed=0)
+    assert out2["instruction"]["point"] == pytest.approx(1.5)   # 0.375 / 0.25
     assert out2["instruction"]["meets_bar"] is False
+    # No bar on experience: never "met", the ratio still reported.
+    out3 = tb.ratio_vs_baseline({"baseline": base, "experience": strong},
+                                baseline="baseline", k=1, B=200, seed=0)
+    assert out3["experience"]["bar"] is None
+    assert out3["experience"]["meets_bar"] is False
+    assert out3["experience"]["point"] == pytest.approx(4.0)
 
 
 # ── the 3-vote judge helper ──────────────────────────────────────────────
@@ -744,7 +757,7 @@ def test_report_publishes_ratios_when_the_use_window_held(tb):
     assert summary["vs_baseline"]["floor"] == 9
     assert summary["vs_baseline"]["conversion"] == 9
     assert summary["vs_baseline"]["ratio"]["point"] == pytest.approx(40.0)
-    assert summary["vs_baseline"]["ratio"]["bar"] == 2.6
+    assert summary["vs_baseline"]["ratio"]["bar"] == 1.6
     assert summary["vs_baseline"]["ratio"]["meets_bar"] is True
     assert summary["vs_baseline"]["delta"]["point"] == pytest.approx(0.975)
     assert summary["per_trial"] == [10, 10, 10, 10]

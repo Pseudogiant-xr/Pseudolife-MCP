@@ -187,18 +187,33 @@ Eval tooling:
   dialogue text appears in any prompt, and the prompt-lift guard checks the adapter's prompt
   carriers against the banking task set.
 
-## Parity bar (preregistered)
+## Parity bar (preregistered; amended 2026-09-09 before any learning-arm episode ran)
 
 On the full 97-task set, 4 trials, against our own static-RAG baseline on the same
 instrument (same customer model, same agent, same corpus):
 
-- **instruction ≥ 2.6× baseline pass^1** and **experience ≥ 1.6× baseline pass^1**, with the
-  paired cluster-bootstrap interval of the ratio excluding 1.0.
-- Secondary: conversion on our floor stratum reported beside the paper's 22 of 84; hold rate
-  reported; pass^4 reported but not gated (the paper's own pass^4 stays flat).
+- **instruction ≥ 1.6× baseline pass^1**, with the paired cluster-bootstrap interval of the
+  ratio excluding 1.0. The paired delta is reported beside the paper's Sonnet contrast
+  (+0.149 [0.088, 0.211]).
+- **experience: no bar.** The paper ran no Sonnet experience arm, so its 1.6× (Mistral) has
+  no matched-instrument reading; the paired ratio and delta are reported, not gated.
+- Secondary: conversion on our floor stratum reported beside the paper's Sonnet 28 of 57
+  (Mistral: 22 of 84); hold rate reported; pass^4 reported but not gated (the paper's own
+  pass^4 stays flat).
 
-Absolute numbers are expected below the paper's: the customer is a local model, not gpt-5.2.
-Only the paired ratios are read against the bar.
+Why the bar moved from the 2.6× / 1.6× first written here: those are the paper's *Mistral
+Large* headline ratios at a 0.064 baseline. The agent this adapter runs is Sonnet 5 at medium
+effort — the paper's replication model — and its committed grids
+(`analysis/fixtures/paper_grids.tsv`, scored with this adapter's estimators) give the Sonnet
+baseline pass^1 0.247 (per trial 22/24/26/24, 57-task floor) and the Sonnet instruction arm
+0.397 (26/38/42/48): **1.60× [1.31, 2.05]**, delta +0.149, 28 of 57 floor tasks converted.
+Our baseline was tracking 0.24 at its first 21 episodes when this was written, so a 2.6×
+bar would demand 0.65 absolute — a ceiling, not a parity test. The Sonnet replication is the
+matched comparator; the amendment was made with the baseline running and no learning-arm
+row in existence.
+
+Absolute numbers may still differ from the paper's: the customer is a local model, not
+gpt-5.2. Only the paired ratios and deltas are read against the bar.
 
 ## What a miss would tell us
 

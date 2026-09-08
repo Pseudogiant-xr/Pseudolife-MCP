@@ -2743,9 +2743,12 @@ python evals/taubench_adapter.py --condition instruction --rules entries \
 ```
 
 **No τ-bench number is published here.** The smoke and the full grid are
-separate launches; the parity bar — instruction ≥ 2.6× and experience ≥
-1.6× our static-RAG pass^1, paired bootstrap intervals excluding 1.0× — and
-what each way of missing it would mean are preregistered in the spec.
+separate launches; the parity bar — instruction ≥ 1.6× our static-RAG
+pass^1 with the paired bootstrap interval excluding 1.0×, the paper's
+Sonnet 5 replication figure (its 2.6× headline is Mistral Large at a 0.064
+baseline; experience has no Sonnet arm in the paper and carries no bar) —
+and what each way of missing it would mean are preregistered in the spec,
+amended 2026-09-09 before any learning-arm episode ran.
 
 ## Cognee on our instrument — the adapter (added 2026-09-07; no numbers yet)
 
