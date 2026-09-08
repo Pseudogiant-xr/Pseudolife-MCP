@@ -95,6 +95,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reported, not gated), amended in the spec before any learning-arm episode
   existed; the summary still reports the delta and floor conversion beside
   the paper's Sonnet numbers.
+- **A tool call the model closed one brace short cost the full baseline
+  five of its first 37 episodes.** On a wrapper tool whose own `arguments`
+  field is a JSON-encoded string, Sonnet wrote the escaped inner object
+  correctly and then closed one brace short; the shim's retry did the same;
+  the raw JSON was served back as assistant text and the customer simulator
+  played along, so the episode ran to the 60-step cap at two CLI calls per
+  turn and scored a spurious fail. `claude_shim` now balances the braces a
+  near-JSON reply is short of — counting only braces outside string
+  literals, never removing anything, and only after a plain parse failed —
+  so the call is served without a retry. The five contaminated cells were
+  re-run on the fixed shim under tau2's `--auto-resume`; the 32 clean ones
+  stand.
 - **The between-trial dream would have timed out a quarter of the way
   through the first full trial.** Under `--distill trial` one
   `memory_dream(action="run")` drains every pending signal of the trial in a

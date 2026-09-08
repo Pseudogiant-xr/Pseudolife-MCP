@@ -376,3 +376,49 @@ def test_an_imitated_history_marker_is_recovered_as_a_tool_call():
     assert msg["content"] is None
     assert msg["tool_calls"][0]["function"]["name"] == "get_reservation"
     assert out["choices"][0]["finish_reason"] == "tool_calls"
+
+
+# A wrapper tool whose own ``arguments`` field is a JSON-encoded STRING —
+# the shape under which the 2026-09-09 full baseline lost five of its first
+# 37 episodes: the model wrote the escaped inner object correctly and then
+# closed one brace short (713 chars, "Expecting ',' delimiter" at the very
+# end), the retry closed one short again, the raw JSON went back to the
+# customer as prose, and the customer played along until max_steps.
+_INNER = json.dumps({"record_id": "rec_0001", "action": "keep",
+                     "reason": "not_as_described", "confirmed": True})
+_WRAPPED_SHORT = json.dumps({"tool_call": {
+    "name": "call_wrapped_tool",
+    "arguments": {"inner_tool": "file_record_42", "arguments": _INNER}}})[:-1]
+
+
+def test_a_tool_call_closed_one_brace_short_is_repaired():
+    assert not _WRAPPED_SHORT.endswith("}}}")
+    assert shim.looks_like_tool_call(_WRAPPED_SHORT)
+    calls = shim.parse_tool_reply(_WRAPPED_SHORT)
+    assert calls and calls[0]["function"]["name"] == "call_wrapped_tool"
+    args = json.loads(calls[0]["function"]["arguments"])
+    assert args["inner_tool"] == "file_record_42"
+    # The inner string survives verbatim — braces inside strings are not
+    # what the repair counts.
+    assert json.loads(args["arguments"]) == json.loads(_INNER)
+
+
+def test_brace_repair_counts_only_structural_braces():
+    """Braces inside JSON strings (the inner object, an escaped quote, a
+    literal brace in prose) must not be balanced against."""
+    assert shim._balance_braces('{"a": "x}y"') == '{"a": "x}y"}'
+    assert shim._balance_braces('{"a": "\\"{{"') == '{"a": "\\"{{"}'
+    assert shim._balance_braces('{"a": {"b": 1}') == '{"a": {"b": 1}}'
+    # Already balanced or over-closed: unchanged.
+    assert shim._balance_braces('{"a": 1}') == '{"a": 1}'
+    assert shim._balance_braces('{"a": 1}}') == '{"a": 1}}'
+
+
+def test_a_short_close_is_served_as_the_call_without_a_retry():
+    """The repair means no second CLI call: one reply, one tool call."""
+    cli, calls_made = _cli([_WRAPPED_SHORT])
+    out = _post(cli, _request())
+    msg = out["choices"][0]["message"]
+    assert msg["content"] is None
+    assert msg["tool_calls"][0]["function"]["name"] == "call_wrapped_tool"
+    assert len(calls_made) == 1

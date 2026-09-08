@@ -299,6 +299,41 @@ def looks_like_tool_call(reply: str) -> bool:
     return _tool_call_span(reply) is not None
 
 
+def _balance_braces(text: str) -> str:
+    """Append the closing braces a JSON object is short of, counting only
+    braces outside string literals.
+
+    The 2026-09-09 full baseline lost five of its first 37 episodes to one
+    reply shape: a wrapper tool whose own ``arguments`` field is a
+    JSON-encoded string. The model wrote the escaped inner object correctly
+    and then closed one brace short (713 chars, "Expecting ',' delimiter"
+    at the very end); the retry closed one short again; the raw JSON went
+    back to the customer as prose and the customer played along to
+    max_steps. Balanced or over-closed text is returned unchanged — this
+    never removes anything, and a reply that is wrong in any other way
+    still fails ``json.loads`` afterwards.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+    return text + "}" * depth if depth > 0 else text
+
+
 def parse_tool_reply(reply: str):
     """Turn a tool-call reply into OpenAI ``tool_calls`` entries, or None.
 
@@ -315,7 +350,10 @@ def parse_tool_reply(reply: str):
     try:
         obj = json.loads(text)
     except ValueError:
-        return None
+        try:
+            obj = json.loads(_balance_braces(text))
+        except ValueError:
+            return None
     if not isinstance(obj, dict):
         return None
     raw = obj.get("tool_call")
