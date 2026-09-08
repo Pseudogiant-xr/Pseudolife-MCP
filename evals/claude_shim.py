@@ -125,6 +125,11 @@ result is given back to you on the next turn, after which you can call
 another tool or answer. If you do not need a tool, reply to the user in
 plain text and do not mention this format.
 
+Earlier turns of this conversation are shown to you with markers such as
+[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].
+Those markers are history rendered for you — never write them yourself. A
+call is only ever the JSON object above.
+
 Available tools:"""
 
 # The deployed shims' ports: :8082 is the Claude shim the daemon routes dream
@@ -266,10 +271,30 @@ def _tool_call_span(reply: str) -> str | None:
     return span if "tool_call" in span else None
 
 
+# A reply that IS one of the history markers the transcript is folded with:
+# the 2026-09-08 tau2 smoke saw the model imitate "[assistant called tool
+# KB_search with {...}]" as its whole answer, twice, and the customer
+# simulator then reacted to the marker text. Recovered as the call it names.
+_MARKER_CALL_RE = re.compile(
+    r"^\s*\[assistant called tool\s+([A-Za-z0-9_.-]+)\s+with\s+(\{.*\})\s*\]\s*$",
+    re.DOTALL)
+
+
+def _marker_call(reply: str) -> str | None:
+    """The JSON tool-call text equivalent to an imitated history marker."""
+    m = _MARKER_CALL_RE.match(_strip_fence(reply))
+    if not m:
+        return None
+    return json.dumps({"tool_call": {"name": m.group(1),
+                                     "arguments": m.group(2)}})
+
+
 def looks_like_tool_call(reply: str) -> bool:
     """A reply that was TRYING to be a tool call — worth one retry."""
     text = _strip_fence(reply)
     if text.startswith("{") and "tool_call" in text:
+        return True
+    if _marker_call(reply) is not None:
         return True
     return _tool_call_span(reply) is not None
 
@@ -280,7 +305,8 @@ def parse_tool_reply(reply: str):
     ``arguments`` comes back as a JSON **string**: litellm calls
     ``json.loads`` on it and an episode dies on a parse failure, so anything
     that is not an object becomes ``{}`` rather than reaching the harness."""
-    text = _strip_fence(reply)
+    marker = _marker_call(reply)
+    text = marker if marker is not None else _strip_fence(reply)
     if not text.startswith("{"):
         # A call the model introduced with prose, fenced or not.
         text = _tool_call_span(reply)

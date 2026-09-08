@@ -859,16 +859,28 @@ def test_patch_targets_exist_and_it_applies_to_a_temp_copy(tmp_path):
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(TAU2_ROOT / rel, dst)
 
+    # The reference checkout is pristine on a fresh clone and PATCHED once
+    # the operator has run apply_patch (as it is during a smoke). Either
+    # state proves the patch matches the tree: it applies forward, or it
+    # reverses cleanly. What must never pass is a patch that fits neither.
     patch_exe = _find_patch_exe()
     if patch_exe is not None:
-        cmd = [patch_exe, "-p1", "--dry-run", "-i", str(PATCH_PATH)]
+        forward = [patch_exe, "-p1", "--dry-run", "-f", "-i", str(PATCH_PATH)]
+        reverse = [patch_exe, "-p1", "--dry-run", "-f", "-R", "-i", str(PATCH_PATH)]
     else:
         git = shutil.which("git")
         if git is None:
             pytest.skip("neither GNU patch nor git available")
-        cmd = [git, "apply", "--check", "-p1", str(PATCH_PATH)]
-    proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True)
-    assert proc.returncode == 0, " ".join(cmd) + "\n" + proc.stdout + proc.stderr
+        forward = [git, "apply", "--check", "-p1", str(PATCH_PATH)]
+        reverse = [git, "apply", "--check", "-R", "-p1", str(PATCH_PATH)]
+    outcomes = {}
+    for label, cmd in (("forward", forward), ("reverse", reverse)):
+        proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True)
+        outcomes[label] = (proc.returncode, " ".join(cmd) + "\n"
+                           + proc.stdout + proc.stderr)
+    assert any(rc == 0 for rc, _ in outcomes.values()), (
+        "the patch neither applies to nor reverses from the checkout:\n"
+        + "\n".join(out for _, out in outcomes.values()))
 
 
 def test_apply_scripts_exist_for_both_shells():
@@ -904,3 +916,47 @@ def test_agent_module_exposes_the_factory():
 
     assert callable(create_pl_agent)
     assert hasattr(PLMemoryAgent, "on_simulation_end")
+
+
+def test_inject_mode_folds_recalled_memory_into_the_first_turn():
+    """Retrieval mode ``inject`` (the paper's second mode): the harness runs
+    the two memory searches itself on the first customer turn and folds the
+    results into the agent's copy of that turn, so retrieval no longer
+    depends on the model choosing to call the tool — the first two smokes
+    (2026-09-08) saw one search in seven episodes under ``nudge``. The block
+    is built by a pure function in prompts.py; the searches run through the
+    same dispatch as the tools, so served ids and the window clock are
+    recorded for ``used_ids`` exactly as for an agent-driven search."""
+    prompts_text = (PACKAGE_DIR / "prompts.py").read_text(encoding="utf-8")
+    ns: dict = {}
+    exec(compile(prompts_text, "prompts.py", "exec"), ns)  # noqa: S102
+    block = ns["build_inject_block"]("- [taubench] WHEN x THEN y", "- (+) do z")
+    assert "WHEN x THEN y" in block and "do z" in block
+    assert "memory_search" in block          # the model may search again
+    empty = ns["build_inject_block"]("", "")
+    assert "nothing" in empty.lower() or "no " in empty.lower()
+    agent_src = (PACKAGE_DIR / "agent.py").read_text(encoding="utf-8")
+    assert "PL_RETRIEVAL_MODE" in agent_src
+    assert "build_inject_block" in agent_src
+    assert '"inject"' in agent_src and '"nudge"' in agent_src
+
+
+def test_the_policy_carries_a_memory_addendum_not_only_the_nudge():
+    """The 2026-09-08 smoke: three episodes, six rules written, zero memory
+    searches — the one-time nudge lost to the pull of the environment's
+    own search tool. The paper injects a memory addendum into the policy
+    itself as well; so does the plugin, from ``prompts.POLICY_ADDENDUM``,
+    appended to ``domain_policy`` in ``create_pl_agent`` (pinned on the
+    source because agent.py imports the harness)."""
+    prompts_text = (PACKAGE_DIR / "prompts.py").read_text(encoding="utf-8")
+    assert "POLICY_ADDENDUM" in prompts_text
+    ns: dict = {}
+    exec(compile(prompts_text, "prompts.py", "exec"), ns)  # noqa: S102
+    addendum = ns["POLICY_ADDENDUM"]
+    assert "memory_search" in addendum and "memory_lesson_search" in addendum
+    agent_src = (PACKAGE_DIR / "agent.py").read_text(encoding="utf-8")
+    tree = ast.parse(agent_src)
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "create_pl_agent")
+    body = ast.get_source_segment(agent_src, fn)
+    assert "POLICY_ADDENDUM" in body and "domain_policy" in body

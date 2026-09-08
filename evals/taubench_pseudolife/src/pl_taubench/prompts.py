@@ -24,6 +24,57 @@ NUDGE = (
     "search again for the new situation before you act on it."
 )
 
+# ── policy addendum ──────────────────────────────────────────────────────────
+# Appended to the operating policy the assistant is given, in addition to the
+# one-time nudge. The first smoke (2026-09-08) ran three episodes with the nudge
+# alone and the assistant never searched its memory once: a trailing reminder
+# on one turn loses to the pull of the environment's own lookup tool. The paper
+# injects the same instruction into the policy itself; so does this.
+POLICY_ADDENDUM = (
+    "## Your own experience\n\n"
+    "You have a memory of earlier work. Before completing a request — after "
+    "you have gathered what it needs and before you act or answer — call "
+    "`memory_search` for what happened in situations like this one and "
+    "`memory_lesson_search` for the do/avoid guidance you already earned, and "
+    "follow what your own record says over a guess. Search again when the "
+    "request changes shape. Do not mention this memory to the person you are "
+    "helping.\n"
+)
+
+# ── retrieval mode "inject" ──────────────────────────────────────────────────
+# The harness runs the two memory searches itself on the first turn and folds
+# the results into the assistant's copy of that turn (the paper's second
+# retrieval mode). Two smokes under "nudge" (2026-09-08) produced one memory
+# search in seven episodes: under tool-call emulation the model answers as
+# soon as the environment's own lookup returns. Injection makes retrieval a
+# property of the harness, not of the model's compliance; the searches still
+# run under the episode's session, so served ids and the window clock are
+# recorded exactly as for an agent-driven search.
+INJECT_HEADER = (
+    "Recalled from your own experience of earlier work, retrieved for this "
+    "request (it may be incomplete or out of date — verify it against your "
+    "operating policy and prefer the policy on any conflict):"
+)
+INJECT_LESSONS_HEADER = "Guidance you already earned from how earlier work turned out:"
+INJECT_EMPTY = "(nothing relevant is remembered yet)"
+INJECT_FOOTER = (
+    "You can call `memory_search` again at any point for a more specific "
+    "question. Do not mention this recalled material to the person you are "
+    "helping."
+)
+
+
+def build_inject_block(memories_text: str, lessons_text: str) -> str:
+    """The folded recall block for the first turn (pure; tested)."""
+    memories = (memories_text or "").strip() or INJECT_EMPTY
+    lessons = (lessons_text or "").strip() or INJECT_EMPTY
+    return (
+        f"{INJECT_HEADER}\n{memories}\n\n"
+        f"{INJECT_LESSONS_HEADER}\n{lessons}\n\n"
+        f"{INJECT_FOOTER}"
+    )
+
+
 # ── mid-conversation write attempts ──────────────────────────────────────────
 # Writes are never taken mid-conversation: at that point the outcome is unknown,
 # so anything saved is a guess that later reads would treat as experience.

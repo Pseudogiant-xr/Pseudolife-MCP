@@ -62,6 +62,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--smoke` and the full grid are separate launches, and the parity bar
   (2.6× / 1.6× over our own static-RAG baseline, paired intervals excluding
   1.0×) is preregistered in the spec.
+- **The first smokes (2026-09-08, four runs of 3 tasks × 2 trials, 24
+  episodes, zero agent or customer errors) changed five things.** The local
+  customer's thinking mode returned empty turns that tau2 rejected three
+  times per episode: the user-LLM args now pin `enable_thinking: false` the
+  way the bench's own client does. tau2 resolves its domains and its
+  simulations under one `TAU2_DATA_DIR` and runs with the checkout as its
+  working directory: the adapter now passes the checkout's data dir as an
+  absolute path and refuses a root without the banking domain. The paper's
+  released task list is one whitespace-separated line: the loader splits on
+  whitespace. Under emulation the model twice answered with the shim's own
+  history marker as plain text: the preamble now forbids it and a
+  marker-shaped reply is recovered as the call it names. And retrieval
+  compliance under `nudge` was one memory search in twelve episodes even
+  with a memory addendum in the policy, so `--retrieval inject` (the paper's
+  second mode: the harness searches on the first turn and folds the results
+  into the agent's copy of it, through the same dispatch, so served ids and
+  the window clock are recorded) is now an arm; under it every episode
+  served three to five memories and every served id was credited, and the
+  rule-mode daemon distilled a situation-keyed `WHEN … THEN …` lesson per
+  episode. The smoke rewards are not a number: three tasks, two trials, a
+  bank that carried over between smokes.
 
 ### Fixed (2026-09-08 — `used_ids` credited only the last search that served an id, so the earlier ones read as negatives)
 - **An agent naming a memory it used credited only the most recent search

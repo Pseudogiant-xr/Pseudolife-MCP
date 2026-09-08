@@ -345,3 +345,34 @@ def test_the_log_line_reports_the_off_state_and_the_retry(caplog):
     line = [r.getMessage() for r in caplog.records
             if r.levelno == logging.INFO][0]
     assert "emulate=off" in line and "n_tools=2" in line
+
+
+# ── the folded-history markers must not be imitated (2026-09-08 smoke) ──────
+
+def test_preamble_tells_the_model_the_history_markers_are_not_its_format():
+    """In the first tau2 smoke the model twice answered with the shim's own
+    transcript marker — ``[assistant called tool KB_search with {...}]`` —
+    as plain text instead of a JSON call, and the customer then reacted to
+    that garbage. The preamble names the markers and says never to write
+    them."""
+    text = shim.render_tools(TOOLS)
+    assert "[assistant called tool" in text
+    assert "[tool" in text and "returned:" in text
+    assert "never" in text.lower()
+
+
+def test_an_imitated_history_marker_is_recovered_as_a_tool_call():
+    """Belt and braces for the same failure: a reply that IS a marker still
+    becomes the call it names, not a chat turn."""
+    reply = '[assistant called tool get_reservation with {"reservation_id": "R1"}]'
+    calls = shim.parse_tool_reply(reply)
+    assert calls and calls[0]["function"]["name"] == "get_reservation"
+    assert json.loads(calls[0]["function"]["arguments"]) == {"reservation_id": "R1"}
+    assert shim.looks_like_tool_call(reply)
+
+    cli, _ = _cli([reply])
+    out = _post(cli, _request())
+    msg = out["choices"][0]["message"]
+    assert msg["content"] is None
+    assert msg["tool_calls"][0]["function"]["name"] == "get_reservation"
+    assert out["choices"][0]["finish_reason"] == "tool_calls"

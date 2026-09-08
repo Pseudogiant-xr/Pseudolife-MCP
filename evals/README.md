@@ -2699,6 +2699,16 @@ lessons tier and the preregistered parity bar are in
   `used_ids`, or `memory_outcome` signals the dream distils under rule
   mode). Both routes run under both arms; the results file carries the
   route in its name so the resume set never conflates them.
+- **Retrieval mode is an arm.** `--retrieval nudge` (the paper's reported
+  configuration: the first turn asks the model to search) produced one
+  memory search in twelve smoke episodes under tool-call emulation, even
+  with a memory addendum in the policy; `--retrieval inject` (the paper's
+  second mode: the harness runs both searches on the first turn and folds
+  the results into the agent's copy of it, through the same dispatch, so
+  served ids and the window clock are recorded exactly as for an
+  agent-driven search) served and credited memory in every episode. Inject
+  is part of the run name so its rows never share a resume set with a
+  nudge run.
 - **Cadence is an arm too.** `--distill episode` lets the plugin dream after
   every episode (the paper's cadence); `--distill trial` runs tau2 once per
   trial and dreams between trials — the paper's own data shows learning
