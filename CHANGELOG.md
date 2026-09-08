@@ -60,8 +60,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the reproducible config; agent = Sonnet 5 at medium effort through the
   emulating shim on an eval-only port. **No τ-bench number is published**;
   `--smoke` and the full grid are separate launches, and the parity bar
-  (2.6× / 1.6× over our own static-RAG baseline, paired intervals excluding
-  1.0×) is preregistered in the spec.
+  (first written as 2.6× / 1.6× over our own static-RAG baseline, paired
+  intervals excluding 1.0× — amended below to the Sonnet replication's 1.6×)
+  is preregistered in the spec.
 - **The first smokes (2026-09-08, four runs of 3 tasks × 2 trials, 24
   episodes, zero agent or customer errors) changed five things.** The local
   customer's thinking mode returned empty turns that tau2 rejected three
@@ -83,6 +84,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rule-mode daemon distilled a situation-keyed `WHEN … THEN …` lesson per
   episode. The smoke rewards are not a number: three tasks, two trials, a
   bank that carried over between smokes.
+- **The τ-bench parity bar was the paper's Mistral ratio, and on the Sonnet
+  instrument it is a ceiling.** The 2.6× (instruction) and 1.6× (experience)
+  figures are Mistral Large at a 0.064 baseline; the adapter runs Sonnet 5 at
+  medium effort — the paper's replication model — whose committed grids score
+  baseline 0.247 and instruction 0.397, i.e. 1.60× [1.31, 2.05], delta +0.149,
+  28 of 57 floor tasks converted. With our own baseline tracking 0.24, 2.6×
+  would demand 0.65 absolute. `PARITY_BARS` is now `instruction: 1.6` and
+  `experience: None` (the paper ran no Sonnet experience arm, so it is
+  reported, not gated), amended in the spec before any learning-arm episode
+  existed; the summary still reports the delta and floor conversion beside
+  the paper's Sonnet numbers.
 - **The between-trial dream would have timed out a quarter of the way
   through the first full trial.** Under `--distill trial` one
   `memory_dream(action="run")` drains every pending signal of the trial in a
