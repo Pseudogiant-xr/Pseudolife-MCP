@@ -1033,10 +1033,27 @@ def _fake_mcp(monkeypatch, seen: dict, reply: str):
             seen["tool"] = (name, args)
             return _Res()
 
-    def _create(headers=None, timeout=None, auth=None):
-        seen["headers"] = headers
-        seen["timeout"] = timeout
-        return _Ctx(object())
+    class _Timeout:
+        """Stand-in for the httpx Timeout of whichever package the fake
+        client "imports" — recorded so the test can tell the primary
+        lookup (the helper's own namespace) from the import fallback."""
+        def __init__(self, default, read=None):
+            self.default = default
+            self.read = read
+
+    # Built with exec so ``_create.__globals__`` is a namespace that carries
+    # an ``httpx2`` binding, the way the real helper module does; a nested
+    # function here would carry THIS module's globals, which import
+    # neither httpx flavour, and the adapter's primary lookup would never
+    # run under test.
+    ns = {"seen": seen, "_Ctx": _Ctx,
+          "httpx2": types.SimpleNamespace(Timeout=_Timeout)}
+    exec("def _create(headers=None, timeout=None, auth=None):\n"
+         "    seen['headers'] = headers\n"
+         "    seen['timeout'] = timeout\n"
+         "    return _Ctx(object())\n", ns)
+    _create = ns["_create"]
+    seen["timeout_cls"] = _Timeout
 
     def _stream(url, http_client=None):
         seen["url"] = url
@@ -1075,6 +1092,11 @@ def test_between_trial_dream_client_waits_for_a_full_batch(tb, monkeypatch):
     assert out["content"] == ['{"lessons": {"signals": 97}}']
     timeout = seen["timeout"]
     assert timeout is not None, "the MCP default (read=300 s) was used"
+    assert isinstance(timeout, seen["timeout_cls"]), (
+        "the Timeout must come from the httpx module the mcp helper itself "
+        "imports, not from whichever httpx this process can import — the "
+        "other package's Timeout is rejected by the client")
+    assert timeout.default == 30.0
     assert tb.DREAM_READ_TIMEOUT_S >= 3600
     assert getattr(timeout, "read", 0) >= tb.DREAM_READ_TIMEOUT_S, (
         f"read timeout {getattr(timeout, 'read', None)} does not cover a "
