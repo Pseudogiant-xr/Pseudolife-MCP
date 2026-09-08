@@ -69,3 +69,9 @@ evals/results/*-gate*.summary.json
 # the Cognee adapter's own venv (evals/cognee_adapter.py) — Cognee's
 # dependency tree stays out of the bench venv
 .venv-cognee/
+
+# Learning-on-the-Job (tau-bench) adapter: pinned upstream checkouts and its
+# own Python 3.12 venv (evals/taubench_adapter.py, evals/taubench_pseudolife/)
+/reference/
+/.venv-taubench/
+/local/

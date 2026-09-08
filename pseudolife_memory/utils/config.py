@@ -688,6 +688,18 @@ class LessonsConfig:
     # Opposite-polarity near-matches are NEVER gated (an "avoid" inversion
     # of a "do" lesson is new information). 0 disables.
     synthesis_dedup_min_similarity: float = 0.88
+    # Rule mode (2026-09-08, the "Learning on the Job" delta, arXiv
+    # 2607.22157): synthesise ONE situation-specific rule per signal — keyed
+    # (situation, "rule"), decision-critical values copied verbatim, no
+    # clustering, no trivia skip, and exempt from the cross-key dedup gate
+    # above (two look-alike situations with different actions must both
+    # survive). Per-signal opt-in is an ``about`` starting with ``rule:``;
+    # this flag makes EVERY signal a rule. A ``MUST INCLUDE: a; b`` line in
+    # the signal's detail is checked with a plain case-insensitive substring
+    # test (no example-marker exclusion) and the call retried once. Default
+    # off: the shipped clustering prompt and slot semantics are unchanged
+    # for existing banks.
+    rule_mode: bool = False
 
 
 @dataclass

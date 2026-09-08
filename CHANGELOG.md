@@ -6,6 +6,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-08 — the lessons tier can distil one verbatim rule per episode, and a τ-bench adapter runs the "Learning on the Job" protocol on it)
+- **The dream's lesson synthesis clusters and paraphrases; a protocol that
+  needs one situation-specific rule per episode with its values intact had
+  no way to get one.** Tablan et al. (arXiv 2607.22157) distil every τ-bench
+  banking episode into a retrievable rule and lift single-trial success 1.6×
+  from the verdict alone and 2.6× from corrections. Mapped against the
+  lessons tier (`docs/specs/2026-09-08-learning-on-the-job.md`): capture is
+  identical, cadence is reproducible by an orchestrator-triggered
+  `memory_dream(action="run")` — the paper's own data shows learning only
+  from a task's second trial, ~97 episodes after the rule was written, so a
+  trial-boundary batch reproduces the loop and no synchronous
+  distill-on-outcome path is needed — but the synthesis prompt and the
+  one-value-per-`(task, aspect)` slot would fold 97 situations into each
+  other. **Rule mode**: `memory.lessons.rule_mode` (default off) or an
+  `about` starting with `rule:` routes a signal to
+  `OpenAICompatExtractor.extract_rules` — one call per signal under a
+  separate prompt, exactly one `WHEN … THEN …` / `WHEN … do NOT …` rule,
+  `aspect` forced to `rule`, the slot keyed by the situation, decision-critical
+  values copied verbatim (a `MUST INCLUDE:` line in `detail` is checked and
+  the call retried once), and no cross-key dedup for rules. The shipped
+  prompt, its single batched call and the default slot semantics are
+  unchanged and pinned; an extractor without the rule path synthesises rule
+  signals under the shipped prompt and the report says so.
+  `evals/lesson_synthesis_bench.py --rules` scores value survival on two
+  generic fixtures. Not added, on purpose: retrieval credit for lesson ids
+  (`retrieval_uses.entry_id` shares the entries' id space — a `kind` column
+  is a schema change), a pending-signal term in the sweep's `would_fire`,
+  the twin-situation merge, a daemon read-only mode.
+- **`evals/claude_shim.py --emulate-tools`**: the shim serves `claude -p` as
+  a pure completion, and tau2-bench's agent loop reads OpenAI-format tool
+  calls with no text fallback, so Sonnet could not act as a tool-using agent
+  through it. In emulate mode the request's tools are rendered into the
+  system prompt with a strict JSON reply schema, tool history is folded into
+  the transcript, and a parsed reply becomes `tool_calls` whose `arguments`
+  is always a valid JSON string; a near-JSON reply is retried once, never
+  raised. Off by default and byte-identical when off; refuses to start on the
+  production port (`:8082`).
+- **`evals/taubench_adapter.py` + `evals/taubench_pseudolife/`** run the
+  paper's τ-bench banking protocol with Pseudolife as the memory backend:
+  a `pl_memory` agent for the pinned tau2-bench 1.0.1 (four-hunk patch under
+  `evals/taubench_pseudolife/patches/`, its own Python 3.12 venv, never
+  imports the engine), memory tools as environment tools with mid-episode
+  writes deferred, a post-evaluation reflection turn, one `X-PL-Session` per
+  episode with the outcome's distance from the first search recorded against
+  `use_window_seconds` (`window_ok` in telemetry — the outcome is still sent,
+  and the report refuses to publish ratios on any violation), two rule routes
+  (`entries`: the reflection writes each rule as a `constraint` entry credited
+  by `used_ids`; `lessons`: `memory_outcome` with the `rule:` prefix and a
+  dream per episode or per trial), the three feedback arms, read-only
+  transfer, and the paper's estimators (per-trial curve, pass^k, hold rate,
+  floor conversion, paired cluster bootstrap). Customer = local Qwen under
+  the reproducible config; agent = Sonnet 5 at medium effort through the
+  emulating shim on an eval-only port. **No τ-bench number is published**;
+  `--smoke` and the full grid are separate launches, and the parity bar
+  (2.6× / 1.6× over our own static-RAG baseline, paired intervals excluding
+  1.0×) is preregistered in the spec.
+
 ### Fixed (2026-09-08 — `used_ids` credited only the last search that served an id, so the earlier ones read as negatives)
 - **An agent naming a memory it used credited only the most recent search
   that had served it; every earlier search in the session that served the

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pseudolife-taubench"
+version = "0.1.0"
+description = "Pseudolife memory plugin for the taubench harness"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { text = "Apache-2.0" }
+
+# The harness itself is deliberately NOT a dependency: it is already installed
+# (editable) in the venv this plugin is installed into, and declaring it would
+# let an installer resolve a different copy than the one being patched.
+dependencies = [
+    "mcp>=2.1,<3",
+    "httpx",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pl_taubench*"]
