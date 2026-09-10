@@ -1771,6 +1771,7 @@ class MemoryService(DreamOps):
                 new_text, store_emb, source="correction",
                 session_key=self._resolve_writer()[1],
                 authority=auth, distortion_tolerance=dt,
+                bypass_surprise_gate=True,
             )
             return {
                 "superseded_count": len(superseded),
@@ -5436,6 +5437,7 @@ class MemoryService(DreamOps):
                 tags=tags,
                 session_key=self._resolve_writer()[1],
                 authority=auth, distortion_tolerance=dt,
+                bypass_surprise_gate=True,
             )
             return {
                 "superseded_count": len(superseded),

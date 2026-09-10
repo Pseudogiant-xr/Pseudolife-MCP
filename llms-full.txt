@@ -30,8 +30,9 @@ the intelligence; this server is its memory on disk.
 What you get:
 
 - **Associative memory with honest forgetting** — a flat similarity store
-  ranked by hybrid dense-plus-lexical retrieval, with contradiction
-  detection and supersession. (The measured verdict: a preregistered
+  ranked by hybrid dense-plus-lexical retrieval, with conflict detection
+  that admits potential updates while preserving earlier source notes;
+  whole-note replacement is explicit. (The measured verdict: a preregistered
   ablation campaign found the previous 8-band continuum tied a flat store
   on every gate, so the simpler structure ships; the continuum remains
   one config line away.)
@@ -303,7 +304,7 @@ one answers*, not who's wrong:
 |---|---|---|---|---|
 | Survives sessions and compactions | yes | yes | yes | yes |
 | "What is X *now*?" has one current answer | if you curate it | no — replays what happened | no — every stored version competes at recall | yes — slot-keyed cortex |
-| A correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | supersedes, with full version history kept |
+| A canonical-fact correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | cortex supersedes, with full version history kept |
 | Facts know their age and go stale | no | no | no | dated, freshness-decayed, quarantined when stale |
 | Distils do/avoid lessons from its own outcomes | no | no | no | yes |
 | Benchmark numbers ship with their raw run artifacts | — | typically no | typically no | every published number, test-enforced |
@@ -316,7 +317,8 @@ cases where one of them is the better pick:
 
 It layers several complementary stores: the **associative store** (a flat
 embedding store ranked by cosine similarity fused with a BM25 lexical pool
-(on by default), with contradiction detection and supersession; an 8-tier
+(on by default), with conflict-aware admission and explicit source-note
+replacement; an 8-tier
 banded layout is available as an opt-in preset); the **cortex** (slot-keyed canonical facts — one *current*
 value per `entity.attribute`, or a member set for set-valued slots — with
 provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
@@ -916,7 +918,7 @@ bank.
 |---|---|
 | Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
 | Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
-| Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
+| Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection admits potential updates, including a deterministic slot-identity path regardless of embedding similarity, while retaining earlier source notes; whole-note supersession requires an explicit replacement operation |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender); an `assistant`-origin add cannot convert or join another tier's set, and cannot retract another tier's member |
 | Provenance contenders | Tier-rank guard `user > action > agent > assistant`; `memory_fact_resolve` |
@@ -1224,26 +1226,29 @@ whether a correction reached further than the cap.
 Both signals are **best-effort**, on purpose: they are derived at read
 time from evidence that still exists, so losing the evidence loses the
 flag. `memory_traces.entry_id` is `ON DELETE CASCADE`, a true-drop
-capacity eviction hard-deletes the entry row, and a superseded entry is
-the top eviction candidate (contradiction decay multiplies its surprise by
-0.3) — so a flag can appear and later vanish with no re-verification
-having happened, and `memory_delete`, the strongest retraction of all,
+capacity eviction hard-deletes the entry row, including superseded history
+when selected for eviction — so a flag can appear and later vanish with
+no re-verification having happened, and `memory_delete`, the strongest retraction of all,
 raises no flag at any point. Both are gated on `memory.traces.enabled`;
 turning it off silences both without changing anything else about how
 facts are served.
 
-Since 2026-07-25 **raw band entries follow the same slot rule.** When a
-stored memory and an earlier one assert different values — or opposite
-polarities — at the same normalised `(entity, attribute)` slot, the earlier
-entry is marked superseded. This is deterministic and does not consult
-embeddings, which matters because a value swap is a *minimal* edit: a real
-correction is often more embedding-similar than a harmless near-duplicate,
-so similarity alone is close to a coin flip for this judgment. It runs
-ahead of the similarity-gated heuristics (negation asymmetry, affirmative
-replacement, state transition), which still handle everything without
-slots. Slot extraction is deliberately precision-gated — about 0.6% of
-conversational turns yield one — so this path mostly serves deliberate,
-fact-shaped writes, and its reach grows with extraction quality.
+**Source notes retain their evidence when a potential conflict is stored.**
+The contradiction detector runs before the surprise gate: a different
+value or polarity at the same normalised `(entity, attribute)` slot, or a
+match from its similarity-gated heuristics, lets a potential update pass
+even when it is too similar to existing text to meet a positive surprise
+threshold. A conflict about one detail does not establish that the whole
+earlier note is invalid. Ordinary `memory_store` therefore does not decay
+that note or stamp a supersession mark on it.
+
+Old and new source notes can both compete in retrieval. Use
+`memory_supersede` or `memory_consolidate` when deliberately replacing a
+whole note or cluster; the cortex still supersedes canonical slot values
+under its existing rules. Existing source-note supersession marks and
+history are preserved, with no automatic repair or backfill. Their
+retrieval treatment is described under
+[superseded entries](retrieval.md#superseded-entries).
 
 ### Who said it, and how exactly must it survive? (schema v35)
 
@@ -1921,10 +1926,14 @@ false-abstain).
 
 ## Superseded entries
 
-An entry the contradiction pipeline marked superseded is **still
-retrieved**, with its score multiplied by `0.55`. Current values therefore
-outrank their own history without the history disappearing, which is what
-lets an answer read "you used to have X, then you changed it to Y".
+An explicitly superseded entry, or one carrying a mark from an earlier
+version, is **still retrieved**, with its score multiplied by `0.55`.
+This favors current entries while keeping history accessible for answers
+such as "you used to have X, then you changed it to Y". Ordinary
+`memory_store` preserves earlier source notes when a potential conflict
+is detected; that detection alone does not mark or downrank them as
+superseded. Whole-note replacement remains available through
+`memory_supersede` and `memory_consolidate`.
 
 ```yaml
 memory:
@@ -3238,7 +3247,8 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   (`1 − max cos` to existing entries). Claude stores deliberately, so the
   gate stays permissive (store everything; novelty still drives
   eviction scoring at capacity). Raise it above zero to dedup
-  near-duplicate stores.
+  near-duplicate stores. Detected potential conflicts bypass this gate so
+  low-novelty updates can land; this does not retire an earlier source note.
 - **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
   build) — the filter exists to drop auto-captured chat noise ("I don't
   have anything saved about that"); every MCP store is a deliberate tool
@@ -3300,9 +3310,11 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   the knob has left the Console config surface; it still applies to
   multi-band presets via `config.yaml`.
 - **Superseded entries stay visible** (`memory.hide_superseded = false`,
-  since v0.7.3) — an entry the contradiction pipeline marked superseded
-  is still retrievable, downranked ×0.55 so current facts outrank their
-  own history. That is what lets the agent say "you used to have X, then
+  since v0.7.3) — an explicitly superseded entry, or one carrying a mark
+  from an earlier version, is still retrievable, downranked ×0.55 to favor
+  current entries over their history. Ordinary stores do not apply this
+  mark merely because the detector finds a potential conflict. Keeping
+  history lets the agent say "you used to have X, then
   you said Y". Set it to `true` to restore the pre-v0.7.3 hard filter;
   that filter is why a category query once missed the only entry naming
   the category, and it costs knowledge-update recall, so treat it as a
@@ -4881,11 +4893,15 @@ overwritten" and "there is one current answer" are different products.
 
 ### Supersession with version history
 
-A correction **supersedes**: the new value becomes current, the old one is
-retained as a dated version with its writer and its **HLC** stamp, and
+A canonical-fact correction **supersedes**: the new value becomes current,
+the old one is retained as a dated version with its writer and its **HLC** stamp, and
 `memory_history(entity, attribute)` prints the timeline. Nothing is
 silently overwritten and nothing is silently duplicated —
 [memory model](memory-model.md#canonical-facts--the-cortex-schema-v8).
+
+Source notes have a separate policy: storing a potential conflict retains
+both notes for retrieval. Replacing a whole source note requires an
+explicit `memory_supersede` or `memory_consolidate` operation.
 
 The word is worth being precise about, because three different behaviours
 get marketed with the same vocabulary:

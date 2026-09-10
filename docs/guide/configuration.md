@@ -52,7 +52,8 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   (`1 − max cos` to existing entries). Claude stores deliberately, so the
   gate stays permissive (store everything; novelty still drives
   eviction scoring at capacity). Raise it above zero to dedup
-  near-duplicate stores.
+  near-duplicate stores. Detected potential conflicts bypass this gate so
+  low-novelty updates can land; this does not retire an earlier source note.
 - **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
   build) — the filter exists to drop auto-captured chat noise ("I don't
   have anything saved about that"); every MCP store is a deliberate tool
@@ -114,9 +115,11 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   the knob has left the Console config surface; it still applies to
   multi-band presets via `config.yaml`.
 - **Superseded entries stay visible** (`memory.hide_superseded = false`,
-  since v0.7.3) — an entry the contradiction pipeline marked superseded
-  is still retrievable, downranked ×0.55 so current facts outrank their
-  own history. That is what lets the agent say "you used to have X, then
+  since v0.7.3) — an explicitly superseded entry, or one carrying a mark
+  from an earlier version, is still retrievable, downranked ×0.55 to favor
+  current entries over their history. Ordinary stores do not apply this
+  mark merely because the detector finds a potential conflict. Keeping
+  history lets the agent say "you used to have X, then
   you said Y". Set it to `true` to restore the pre-v0.7.3 hard filter;
   that filter is why a category query once missed the only entry naming
   the category, and it costs knowledge-update recall, so treat it as a

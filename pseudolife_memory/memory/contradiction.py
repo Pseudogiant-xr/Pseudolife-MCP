@@ -1,11 +1,11 @@
-"""Contradiction detection and belief revision for the memory system.
+"""Potential-conflict detection and a legacy supersession helper.
 
-When new information contradicts existing memories, this module detects the
-conflict and actively decays the contradicted memory's weight rather than
-letting both coexist. This mimics belief revision — new evidence weakens
-old conflicting beliefs.
+Ordinary CMS storage uses detected conflicts to admit possible updates
+through the surprise gate. Detection does not establish that a whole source
+note is obsolete, so it does not authorize retiring or weakening that note.
 
-Four detection paths are combined:
+Slot identity is checked first when structured slots are supplied, followed
+by these four detection paths:
 
   1. **Negation asymmetry** — one text has an explicit negation/correction
      cue (not / never / actually / wrong …) and the other doesn't. Triggered
@@ -36,10 +36,10 @@ Four detection paths are combined:
      anchor. Bounded by ``nli_candidate_cap`` entries per call so latency
      stays predictable.
 
-When a contradiction is detected we both decay the old entry's
-``surprise_score`` (reducing its eviction resistance) and stamp
-``superseded_at`` on it so that :meth:`ContinuumMemorySystem.retrieve`
-can hide it from the LLM.
+The retained ``decay_contradicted_entries`` helper can reduce an entry's
+``surprise_score`` and stamp supersession when called directly. CMS storage
+does not call it. Whole-note retirement belongs to explicit supersede or
+consolidate operations; canonical fact supersession belongs to the cortex.
 """
 
 from __future__ import annotations

@@ -155,10 +155,14 @@ false-abstain).
 
 ## Superseded entries
 
-An entry the contradiction pipeline marked superseded is **still
-retrieved**, with its score multiplied by `0.55`. Current values therefore
-outrank their own history without the history disappearing, which is what
-lets an answer read "you used to have X, then you changed it to Y".
+An explicitly superseded entry, or one carrying a mark from an earlier
+version, is **still retrieved**, with its score multiplied by `0.55`.
+This favors current entries while keeping history accessible for answers
+such as "you used to have X, then you changed it to Y". Ordinary
+`memory_store` preserves earlier source notes when a potential conflict
+is detected; that detection alone does not mark or downrank them as
+superseded. Whole-note replacement remains available through
+`memory_supersede` and `memory_consolidate`.
 
 ```yaml
 memory:
