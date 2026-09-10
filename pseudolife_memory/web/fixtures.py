@@ -753,12 +753,16 @@ class FixtureService:
             {"cohesion": 0.84, "seed_score": 0.9, "size": 3, "members": [
                 _stream_dict(_STREAM[1], 1), _stream_dict(_STREAM[2], 2), _stream_dict(_STREAM[3], 3)]}]}
 
-    def consolidate(self, replaces, new_text, source=None, tags=None):
-        return {"superseded_count": len(replaces), "superseded_texts": replaces[:20],
+    def consolidate(self, replaces=None, new_text="", source=None, tags=None, *, entry_ids=None):
+        texts = replaces or []
+        return {"superseded_count": len(entry_ids) if entry_ids is not None else len(texts),
+                "superseded_texts": texts[:20], "superseded_ids": entry_ids or [],
                 "new_memory_stored": True, "new_memory_surprise": 0.42}
 
-    def supersede(self, old_text, new_text):
-        return {"superseded_count": 1, "superseded_texts": [old_text], "new_memory_stored": True}
+    def supersede(self, old_text=None, new_text="", *, entry_id=None):
+        return {"superseded_count": 1, "superseded_texts": [old_text] if old_text else [],
+                "superseded_ids": [entry_id] if entry_id is not None else [],
+                "new_memory_stored": True}
 
     def delete(self, text=None, substring=None, source=None, episode=None, tag=None):
         return {"deleted_count": 3, "deleted_texts": ["(fixture) deleted entry"]}

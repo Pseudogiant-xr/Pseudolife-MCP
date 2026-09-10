@@ -527,7 +527,8 @@
     "Then negation / replacement / state-transition / NLI paths",
     "Runs BEFORE the surprise gate so detected potential updates can land despite low novelty",
     "Detection admits new source notes without decaying or superseding earlier notes",
-    "Explicit supersede/consolidate operations replace source notes; cortex slot supersession is separate"
+    "Explicit supersede/consolidate use selected IDs or unique exact text; reject invalid selections before mutation",
+    "Cortex slot supersession is separate from source-note correction"
    ]
   },
   {

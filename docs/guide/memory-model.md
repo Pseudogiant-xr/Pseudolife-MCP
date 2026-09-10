@@ -171,6 +171,25 @@ history are preserved, with no automatic repair or backfill. Their
 retrieval treatment is described under
 [superseded entries](retrieval.md#superseded-entries).
 
+For an explicit correction, carry the selected entry's `id` from search or
+recent results into `memory_supersede(entry_id=..., new_text=...)`. Use
+`entry_ids=[...]` for `memory_consolidate`. IDs identify entries in the same
+bank and survive ordinary PostgreSQL hydration; they are not portable across
+bank replacement or arbitrary imports. The Console sends selected IDs too.
+
+Use exactly one selector mode. Legacy `old_text` and `replaces` calls still
+work when each full text identifies one entry, including consideration of
+retired duplicates. There is no paraphrase fallback or replace-all behavior.
+Missing, ambiguous, already-superseded or unavailable targets return
+`new_memory_stored: false` with `reason`, `error` and `target_errors`; none of
+the selected entries change on target-validation failure. Search again and
+resubmit IDs. Success results include `superseded_ids`. File-mode entries
+have no durable row ID and therefore require unique exact text.
+
+Whole-selection validation does not provide transactional rollback for later
+encoding or storage failures. Operational failure recovery remains a separate
+limitation of explicit corrections.
+
 ### Who said it, and how exactly must it survive? (schema v35)
 
 Two labels ride on every entry and every fact, set at write time and

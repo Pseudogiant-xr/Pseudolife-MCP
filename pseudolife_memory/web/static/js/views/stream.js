@@ -155,7 +155,11 @@ function openEntryActions(e) {
 async function doSupersede(e, newText) {
   if (!newText) { toast("Replacement text is required", "bad"); return; }
   try {
-    await api.post("/api/supersede", { old_text: e.text, new_text: newText });
+    const selector = e.id != null ? { entry_id: e.id } : { old_text: e.text };
+    const r = await api.post("/api/supersede", { ...selector, new_text: newText });
+    if (!r.new_memory_stored) {
+      throw new Error(r.error || "Replacement was not stored; reload the memory and try again.");
+    }
     closeModal(); toast("Superseded", "ok"); viewCtx?.refresh?.();
   } catch (err) { toast("Supersede failed: " + err.message, "bad"); }
 }

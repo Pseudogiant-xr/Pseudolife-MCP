@@ -202,11 +202,10 @@ class TestSupersede:
         assert wrong["superseded"] is True
         assert wrong["superseded_by_text"] == "Sky is blue"
 
-    def test_supersede_via_embedding_fallback(
+    def test_supersede_refuses_paraphrased_target(
         self, pristine_service: MemoryService,
     ) -> None:
-        """Paraphrased ``old_text`` should still flag the original via top-1
-        embedding match."""
+        """Similarity cannot authorize changing a particular source entry."""
         pristine_service.store(
             "The user prefers Python over Rust for systems work",
             source="general",
@@ -215,8 +214,12 @@ class TestSupersede:
             "User likes Python more than Rust",
             "User uses Python but is open to Rust experiments",
         )
-        assert result["superseded_count"] >= 1
-        assert result["new_memory_stored"] is True
+        assert result["superseded_count"] == 0
+        assert result["new_memory_stored"] is False
+        assert result["reason"] == "target_not_found"
+        recent = pristine_service.recent(n=10)["entries"]
+        assert len(recent) == 1
+        assert recent[0]["superseded"] is False
 
     def test_supersede_empty_input_is_noop(
         self, pristine_service: MemoryService,

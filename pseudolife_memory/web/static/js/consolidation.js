@@ -60,8 +60,18 @@ function preview(c, ctx) {
 async function doConsolidate(members, newText, ctx) {
   if (!newText) { toast("Merged text can't be empty", "bad"); return; }
   try {
+    const withIds = members.filter((m) => m.id != null);
+    if (withIds.length && withIds.length !== members.length) {
+      throw new Error("Some selected memories changed; reload the candidates.");
+    }
+    const selector = withIds.length
+      ? { entry_ids: members.map((m) => m.id) }
+      : { replaces: members.map((m) => m.text) };
     const r = await api.post("/api/consolidate",
-      { replaces: members.map((m) => m.text), new_text: newText });
+      { ...selector, new_text: newText });
+    if (!r.new_memory_stored) {
+      throw new Error(r.error || "Merged memory was not stored; reload the candidates and try again.");
+    }
     closeModal();
     toast(`Consolidated ${r.superseded_count ?? members.length} → 1`, "ok");
     ctx?.refresh?.();

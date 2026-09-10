@@ -73,7 +73,7 @@ from mcp.types import ToolAnnotations  # noqa: E402
 # lands in ``inputSchema.properties[arg].description``. Defaults stay plain
 # signature defaults — Field carries description ONLY, so coercion and
 # optionality are untouched.
-from pydantic import Field  # noqa: E402
+from pydantic import Field, StrictInt  # noqa: E402
 
 from pseudolife_memory.service import MemoryService  # noqa: E402
 
@@ -729,18 +729,22 @@ def memory_recent(
 
 @_tool()
 def memory_supersede(
-    old_text: Annotated[str, Field(
-        description="The memory now obsolete. Matched exact-text first, "
-                    "then by nearest embedding — a close paraphrase "
-                    "works.")],
+    old_text: Annotated[str | None, Field(
+        description="Unique exact stored text; omit with entry_id.")] = None,
     new_text: Annotated[str, Field(
-        description="The replacement claim; stored fresh.")],
+        description="The replacement claim; stored fresh.")] = "",
+    *,
+    entry_id: Annotated[StrictInt | None, Field(
+        description="Positive search/recent ID in this bank; preferred selector.")] = None,
 ) -> dict[str, Any]:
     """Mark a stored memory obsolete and record its replacement. The old
     entry is kept but flagged superseded, so retrieval ranks the correction
     higher and shows both together.
 
-    Returns: ``{superseded_count, superseded_texts, new_memory_stored,
+    Use exactly one selector. Missing, retired, or ambiguous targets cause
+    no mutation; search again and resubmit an ID. No similarity fallback.
+
+    Returns: ``{superseded_count, superseded_texts, superseded_ids, new_memory_stored,
     derived_flagged}`` — the last being the canonical facts the dream built
     on the memories just corrected. They are FLAGGED, never rewritten;
     check each and re-assert the ones that moved. Each row carries
@@ -750,7 +754,7 @@ def memory_supersede(
     ``derived_flagged_total`` say when a correction reached further than
     the cap.
     """
-    return service.supersede(old_text=old_text, new_text=new_text)
+    return service.supersede(old_text=old_text, new_text=new_text, entry_id=entry_id)
 
 
 @_tool(tier="core")
@@ -1752,25 +1756,29 @@ def memory_consolidation_candidates(
 
 @_tool()
 def memory_consolidate(
-    replaces: Annotated[list[str], Field(
-        description="The memories being folded in; each is matched by "
-                    "exact text or close paraphrase.")],
+    replaces: Annotated[list[str] | None, Field(
+        description="Unique exact stored texts; omit with entry_ids.")] = None,
     new_text: Annotated[str, Field(
-        description="The canonical note that replaces them.")],
+        description="The canonical note that replaces them.")] = "",
     source: Annotated[str | None, Field(
         description="Source tag for the new note.")] = None,
     tags: Annotated[list[str] | None, Field(
         description="Labels for the new note.")] = None,
+    *,
+    entry_ids: Annotated[list[StrictInt] | None, Field(
+        description="Positive IDs in this bank; prefer over replaces.")] = None,
 ) -> dict[str, Any]:
     """Replace a cluster of near-duplicate memories with one canonical note.
-    Every entry matching ``replaces`` is marked superseded by ``new_text``,
-    which is stored fresh — the bank gets shorter without losing the audit
-    trail.
+    Use exactly one selector mode; there is no similarity fallback.
+    All targets must resolve before any changes. Missing, retired or
+    ambiguous targets cause no mutation; search again and resubmit IDs.
+    Selected entries remain as history after replacement.
 
-    Returns: ``{superseded_count, superseded_texts, new_memory_stored}``.
+    Returns: ``{superseded_count, superseded_texts, superseded_ids, new_memory_stored}``.
     """
     return service.consolidate(
         replaces=replaces, new_text=new_text, source=source, tags=tags,
+        entry_ids=entry_ids,
     )
 
 

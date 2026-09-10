@@ -658,6 +658,7 @@ class ContinuumMemorySystem:
         rerank: bool | None = None,
         bm25: bool | None = None,
         timeline: bool | None = None,
+        hide_superseded: bool | None = None,
         _trace: dict | None = None,
     ) -> RetrievalResult:
         """Retrieve from CMS bands and merge results.
@@ -674,6 +675,8 @@ class ContinuumMemorySystem:
         Args:
             query_embedding: The encoded query.
             top_k: Maximum neural results. Falls back to ``config.top_k``.
+            hide_superseded: Override the configured history visibility for
+                this retrieval only. Applied before candidate caps and dedup.
             bands: When provided, restrict the neural pool to bands with
                 these names — e.g. ``["working", "instant"]`` for "just the
                 fast tiers" or ``["forever"]`` for identity recall only.
@@ -779,7 +782,8 @@ class ContinuumMemorySystem:
         # event — so it is opt-in, for debugging and audit.
         # ``getattr`` (not an attribute read) because library callers
         # and eval harnesses pass config objects predating the field.
-        hide_superseded = bool(getattr(self.config, "hide_superseded", False))
+        if hide_superseded is None:
+            hide_superseded = bool(getattr(self.config, "hide_superseded", False))
 
         def _keep(entry: MemoryEntry) -> bool:
             if not hide_superseded:

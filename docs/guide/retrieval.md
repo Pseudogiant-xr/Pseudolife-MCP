@@ -14,8 +14,7 @@ never carry — entries, fact/world/lesson claim text, and slot/entity-name
 embeddings are all encoded bare, and every stored-to-stored comparison
 (dedup, curation, alias candidates, the surprise gate) stays bare on BOTH
 ends. Two distinct threshold effects follow, and they should not be
-conflated. The `min_score` 0.2/0.25 recall floors (and `supersede()`'s
-embedding-fallback paraphrase probe) now gate a prefixed-query-to-document
+conflated. The `min_score` 0.2/0.25 recall floors gate a prefixed-query-to-document
 cosine rather than a doc-to-doc one — their *semantics* shifted, not just
 their scale, and they read somewhat more conservative at the shipped
 defaults. By contrast, `alias_candidate_min_cosine`,
@@ -25,6 +24,11 @@ All are left unrecalibrated pending live data. See
 [Configuration](configuration.md#built-in-defaults-tuned-for-claudes-use-case)
 for the config fields and the [schema version history](configuration.md#schema-version-history)
 for the v25 cutover itself.
+
+Explicit corrections do not use a similarity threshold: `memory_supersede`
+and `memory_consolidate` select entry IDs, or unique exact text for legacy
+calls. The earlier embedding fallback has been removed so a failed lookup
+cannot redirect a correction to a different note.
 
 ## Cross-encoder reranking
 

@@ -31,6 +31,7 @@ Design notes
 
 from __future__ import annotations
 
+from collections import Counter
 import heapq
 import logging
 import os
@@ -1697,46 +1698,138 @@ class MemoryService(DreamOps):
     # Tool: supersede
     # ------------------------------------------------------------------
 
-    def supersede(self, old_text: str, new_text: str) -> dict[str, Any]:
-        """Explicit correction: mark entries matching ``old_text`` as
-        superseded by ``new_text``, then store ``new_text`` itself.
+    @staticmethod
+    def _correction_noop(reason: str, error: str,
+                         target_errors: list[dict] | None = None) -> dict[str, Any]:
+        return {
+            "superseded_count": 0,
+            "superseded_texts": [],
+            "superseded_ids": [],
+            "new_memory_stored": False,
+            "derived_flagged": [],
+            "derived_flagged_total": 0,
+            "derived_flagged_truncated": False,
+            "reason": reason,
+            "error": error,
+            "target_errors": target_errors or [],
+        }
 
-        Matching is by exact-text first, falling back to top-1 embedding
-        retrieval — so a near-paraphrase of the wrong fact still gets
-        caught even if the user phrasing drifted.
+    def _resolve_correction_targets_locked(
+        self, *, texts: list[str] | None, entry_ids: list[int] | None,
+    ) -> tuple[list[MemoryEntry], dict[str, Any] | None]:
+        """Resolve the entire selection without writes or retrieval effects.
+
+        PostgreSQL row IDs survive hydration and band relocation. File mode
+        has no durable IDs; its legacy exact-text selector must be unique,
+        including historical entries. Caller holds the service lock.
+        """
+        if (texts is None) == (entry_ids is None):
+            return [], self._correction_noop(
+                "invalid_selector", "Supply exactly one of entry IDs or exact texts.")
+        by_id = entry_ids is not None
+        selectors = entry_ids if by_id else texts
+        if not isinstance(selectors, list):
+            return [], self._correction_noop(
+                "invalid_selector", "Correction targets must be a list.")
+        if not selectors:
+            return [], self._correction_noop("empty_input", "No correction targets supplied.")
+        if by_id:
+            if any(type(value) is not int or value <= 0 for value in selectors):
+                return [], self._correction_noop(
+                    "invalid_selector", "Entry IDs must be positive integers, not coerced values.")
+            if self._storage is None:
+                return [], self._correction_noop(
+                    "id_unavailable", "File mode has no durable entry IDs; use unique exact text.")
+        elif any(not isinstance(value, str) for value in selectors):
+            return [], self._correction_noop(
+                "invalid_selector", "Exact-text targets must be strings.")
+        elif any(not value.strip() for value in selectors):
+            return [], self._correction_noop("empty_input", "Exact-text targets must be non-empty.")
+
+        assert self._cms is not None
+        residents = [e for band in self._cms.bands for e in band.entries]
+        selected: list[MemoryEntry] = []
+        errors: list[dict] = []
+        for value in dict.fromkeys(selectors):
+            matches = [e for e in residents
+                       if (e.db_id if by_id else e.text) == value]
+            selector = {"entry_id" if by_id else "text": value}
+            if not matches:
+                errors.append({**selector, "reason": "target_not_found"})
+            elif len(matches) != 1:
+                errors.append({
+                    **selector, "reason": "ambiguous_target",
+                    "candidates": [{
+                        "id": e.db_id, "source": e.source,
+                        "episode_id": e.episode_id,
+                        "superseded": e.superseded_at is not None,
+                    } for e in matches],
+                })
+            elif matches[0].superseded_at is not None:
+                errors.append({**selector, "reason": "target_superseded",
+                               "superseded_by_text": matches[0].superseded_by_text})
+            else:
+                selected.append(matches[0])
+        if errors:
+            return [], self._correction_noop(
+                errors[0]["reason"],
+                "No entries changed. Resolve the reported targets and resubmit exact IDs or unique texts.",
+                errors,
+            )
+
+        if self._storage is not None:
+            # Failed inserts can leave a resident object holding a phantom
+            # db_id until dream recovery reflushes it. Never correct that
+            # object or infer its replacement from text during recovery.
+            ids = [e.db_id for e in selected]
+            if any(entry_id is None for entry_id in ids):
+                return [], self._correction_noop(
+                    "target_unavailable", "A selected entry has no persisted row ID; retry after recovery.")
+            if any(sum(e.db_id == entry_id for e in residents) != 1
+                   for entry_id in ids):
+                return [], self._correction_noop(
+                    "ambiguous_target", "A selected row ID has multiple resident entries; retry after recovery.")
+            try:
+                existing = self._storage.existing_entry_ids(ids)
+            except Exception:  # Read failure must not turn into a correction.
+                return [], self._correction_noop(
+                    "target_unavailable", "Could not verify selected rows; retry when storage is available.")
+            missing = [{"entry_id": entry_id, "reason": "target_unavailable"}
+                       for entry_id in ids if entry_id not in existing]
+            if missing:
+                return [], self._correction_noop(
+                    "target_unavailable", "Selected rows are no longer persisted; reselect after recovery.",
+                    missing,
+                )
+        return selected, None
+
+    def supersede(
+        self, old_text: str | None = None, new_text: str = "", *,
+        entry_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Correct one entry selected by durable ID or unique exact text.
+
+        Resolve identity before any mutation; missing, ambiguous, or retired
+        targets are no-ops. Replacement storage is not a rollback transaction.
         """
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cms is not None
-            old_text = (old_text or "").strip()
-            new_text = (new_text or "").strip()
-            if not old_text or not new_text:
-                return {"superseded_count": 0, "reason": "empty_input"}
+            if not isinstance(new_text, str) or not new_text.strip():
+                return self._correction_noop("empty_input", "Replacement text must be non-empty.")
+            new_text = new_text.strip()
+            superseded_entries, error = self._resolve_correction_targets_locked(
+                texts=[old_text] if old_text is not None else None,
+                entry_ids=[entry_id] if entry_id is not None else None,
+            )
+            if error is not None:
+                return error
 
             now = time.time()
-            superseded: list[str] = []
-            superseded_entries: list[MemoryEntry] = []
-
-            # Exact-text pass.
-            for band in self._cms.bands:
-                for entry in band.entries:
-                    if entry.text == old_text and entry.superseded_at is None:
-                        entry.superseded_at = now
-                        entry.superseded_by_text = new_text
-                        superseded.append(entry.text)
-                        superseded_entries.append(entry)
-
-            # If no exact match, fall back to top-1 retrieval on old_text.
-            if not superseded:
-                emb = self._embedder.encode_query(old_text)
-                result = self._cms.retrieve(emb, top_k=1, query_text=old_text)
-                if result.entries:
-                    target = result.entries[0]
-                    if target.superseded_at is None:
-                        target.superseded_at = now
-                        target.superseded_by_text = new_text
-                        superseded.append(target.text)
-                        superseded_entries.append(target)
+            superseded = [e.text for e in superseded_entries]
+            for entry in superseded_entries:
+                entry.superseded_at = now
+                entry.superseded_by_text = new_text
 
             # Write-through the supersession marks.
             if self._storage is not None:
@@ -1776,6 +1869,7 @@ class MemoryService(DreamOps):
             return {
                 "superseded_count": len(superseded),
                 "superseded_texts": superseded,
+                "superseded_ids": [e.db_id for e in superseded_entries if e.db_id is not None],
                 "derived_flagged": derived,
                 "derived_flagged_total": len(derived_total),
                 "derived_flagged_truncated": len(derived) < len(derived_total),
@@ -5236,7 +5330,10 @@ class MemoryService(DreamOps):
 
         The clustering algorithm is exposed in
         :mod:`pseudolife_memory.memory.consolidation`. This method is
-        glue: filter + score → cluster → serialise.
+        glue: filter + score → cluster → serialise. Only resident entries
+        that can be addressed by the correction API are offered. Query
+        retrieval stays bounded, so filtering non-addressable hits can
+        produce fewer than ``top_k`` candidates.
 
         Args:
             query: Topic to consolidate around. None when episode-scoping.
@@ -5265,6 +5362,20 @@ class MemoryService(DreamOps):
 
             # Build the candidate pool — either via retrieval (query) or
             # by direct band scan (episode).
+            residents = [e for band in self._cms.bands for e in band.entries]
+            resident_objects = {id(e) for e in residents}
+            by_id = self._storage is not None
+            identity_counts = Counter(e.db_id if by_id else e.text for e in residents)
+
+            def actionable(entry: MemoryEntry) -> bool:
+                # Reference documents can appear in query results but are
+                # not correction targets. In file mode text must be unique
+                # across ALL residents, including retired/out-of-scope twins.
+                if id(entry) not in resident_objects or entry.superseded_at is not None:
+                    return False
+                key = entry.db_id if by_id else entry.text
+                return (not by_id or key is not None) and identity_counts[key] == 1
+
             candidates: list[tuple[MemoryEntry, float]] = []
             if query:
                 embedding = self._embedder.encode_query(query)
@@ -5275,11 +5386,15 @@ class MemoryService(DreamOps):
                     episodes=[episode] if episode else None,
                     tags=tags,
                     query_text=query,
+                    # Proposed targets must still be actionable. Apply this
+                    # before retrieval caps and text dedup, not to the result.
+                    hide_superseded=True,
                     # Wider net than the default — clustering wants more
                     # to work with.
                     min_score=0.0,
                 )
-                candidates = list(zip(result.entries, result.scores))
+                candidates = [(e, score) for e, score in zip(result.entries, result.scores)
+                              if actionable(e)]
             elif episode:
                 # Pull every entry tagged with this episode, ordered by
                 # recency. Score is 1.0 across the board so the seed
@@ -5288,6 +5403,8 @@ class MemoryService(DreamOps):
                 seen_texts: set[str] = set()
                 for band in self._cms.bands:
                     for e in band.entries:
+                        if not actionable(e):
+                            continue
                         if e.episode_id != episode:
                             continue
                         if e.text in seen_texts:
@@ -5298,8 +5415,6 @@ class MemoryService(DreamOps):
                             continue
                         candidates.append((e, 1.0))
                         seen_texts.add(e.text)
-                # Cap to ``top_k`` to keep clustering bounded.
-                candidates = candidates[:top_k]
             else:
                 # Neither query nor episode — there's nothing principled
                 # to cluster, so return empty. Callers should pass at
@@ -5310,6 +5425,14 @@ class MemoryService(DreamOps):
                     "count": 0,
                     "clusters": [],
                 }
+
+            if self._storage is not None and candidates:
+                # Filter unavailable rows individually: one phantom ID must
+                # not hide the remaining valid cluster. Check before the
+                # episode cap; query retrieval has already bounded its pool.
+                present = self._storage.existing_entry_ids([e.db_id for e, _ in candidates])
+                candidates = [(e, score) for e, score in candidates if e.db_id in present]
+            candidates = candidates[:top_k]
 
             clusters: list[Cluster] = cluster_candidates(
                 candidates,
@@ -5334,80 +5457,60 @@ class MemoryService(DreamOps):
 
     def consolidate(
         self,
-        replaces: list[str],
-        new_text: str,
+        replaces: list[str] | None = None,
+        new_text: str = "",
         source: str | None = None,
         tags: list[str] | None = None,
+        *,
+        entry_ids: list[int] | None = None,
     ) -> dict[str, Any]:
-        """Atomic supersede-and-store: replace a cluster with one note.
+        """Replace an exactly selected cluster with one note.
 
-        The cluster of stale entries (``replaces`` — list of exact texts
-        or near-paraphrases) gets marked superseded by ``new_text``;
+        The cluster (``entry_ids`` or unique exact texts in ``replaces``)
+        gets marked superseded by ``new_text``;
         the new note is stored as a fresh memory carrying ``source``
         (defaults to ``"consolidation"``) and ``tags``. Reuses the
         existing supersession machinery so deeper-band promotion +
         retrieval ordering already work correctly with consolidated
         entries.
 
-        Defensive: empty ``replaces`` returns a no-op rather than just
+        Defensive: an empty selection returns a no-op rather than just
         storing ``new_text`` — the caller should use ``memory_store``
         for that. Keeps the "consolidate" semantics unambiguous.
 
         Args:
-            replaces: Exact or near-paraphrase texts to retire. Exact
-                match first; embedding-fallback per text.
+            replaces: Unique exact texts to retire, when IDs are unavailable.
+            entry_ids: Durable PostgreSQL row IDs; never transient sequence numbers.
             new_text: The consolidated summary to store.
             source: Defaults to ``"consolidation"`` for audit clarity.
             tags: Optional tag list — useful for marking the new entry
                 as ``["consolidated"]`` so it's discoverable.
 
         Returns:
-            ``{"superseded_count": N, "superseded_texts": [...],
+            ``{"superseded_count": N, "superseded_texts": [...], "superseded_ids": [...],
             "new_memory_stored": bool, "new_memory_surprise": float}``.
+
+        Every target is validated before any mutation. Replacement storage
+        and old-row updates are not one rollback transaction.
         """
         with self._lock:
             self._ensure_init()
             assert self._cms is not None and self._embedder is not None
 
-            replaces = [t for t in (replaces or []) if (t or "").strip()]
-            new_text = (new_text or "").strip()
-            if not replaces or not new_text:
-                return {
-                    "superseded_count": 0,
-                    "superseded_texts": [],
-                    "new_memory_stored": False,
-                    "error": "replaces and new_text must both be non-empty",
-                }
+            if not isinstance(new_text, str) or not new_text.strip():
+                return self._correction_noop("empty_input", "Replacement text must be non-empty.")
+            new_text = new_text.strip()
+            superseded_entries, error = self._resolve_correction_targets_locked(
+                texts=replaces, entry_ids=entry_ids,
+            )
+            if error is not None:
+                return error
 
             now = time.time()
-            superseded: list[str] = []
-            superseded_entries: list[MemoryEntry] = []
-            for old_text in replaces:
-                marked_this_round = False
-                # Exact-text pass for this specific replacement.
-                for band in self._cms.bands:
-                    for entry in band.entries:
-                        if (
-                            entry.text == old_text
-                            and entry.superseded_at is None
-                        ):
-                            entry.superseded_at = now
-                            entry.superseded_by_text = new_text
-                            superseded.append(entry.text)
-                            superseded_entries.append(entry)
-                            marked_this_round = True
-                if marked_this_round:
-                    continue
-                # Embedding fallback for paraphrases.
-                emb = self._embedder.encode_query(old_text)
-                result = self._cms.retrieve(emb, top_k=1, query_text=old_text)
-                if result.entries:
-                    target = result.entries[0]
-                    if target.superseded_at is None:
-                        target.superseded_at = now
-                        target.superseded_by_text = new_text
-                        superseded.append(target.text)
-                        superseded_entries.append(target)
+            superseded = [e.text for e in superseded_entries]
+            for entry in superseded_entries:
+                entry.superseded_at = now
+                entry.superseded_by_text = new_text
 
             # Write-through the supersession marks, exactly as ``supersede``
             # does. Postgres is the source of truth across a restart and
@@ -5442,6 +5545,7 @@ class MemoryService(DreamOps):
             return {
                 "superseded_count": len(superseded),
                 "superseded_texts": superseded,
+                "superseded_ids": [e.db_id for e in superseded_entries if e.db_id is not None],
                 "new_memory_stored": stored,
                 "new_memory_surprise": round(float(surprise), 4),
             }

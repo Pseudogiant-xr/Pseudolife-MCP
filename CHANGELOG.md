@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-11 — exact correction targets)
+- Explicit supersede and consolidation calls accept entry IDs from retrieval,
+  and the Console carries those selected IDs through to the correction.
+  A correction no longer retires a similarly worded note or every duplicate
+  across sources and episodes. Legacy text selectors require one exact match;
+  missing, retired, ambiguous or unavailable targets reject the whole selection
+  before any changes. File mode retains unique exact-text selection.
+- Consolidation candidates exclude retired entries before candidate limits
+  and clustering, so suggested IDs do not include already-replaced targets.
+- Correction results include the superseded IDs and actionable target errors.
+  The Console keeps the edit open when the service rejects a correction,
+  preserving replacement text instead of reporting a false success.
+
 ### Fixed (2026-09-10 — preserve source evidence)
 - Automatic contradiction candidates can admit a possible update through
   the surprise gate, but no longer retire or weaken whole source entries.

@@ -811,18 +811,25 @@ memory_consolidation_candidates(query="MCP transport choice", top_k=20)
 # → {clusters: [{cohesion: 0.84, size: 3, members: [<entry>, ...]}, ...]}
 
 memory_consolidate(
-  replaces=["MCP uses stdio transport", "stdio was chosen for MCP", "decided on stdio for MCP"],
+  entry_ids=[101, 102, 103],  # selected member IDs from the candidates above
   new_text="MCP transport is stdio — chosen over TCP to avoid port conflicts.",
   tags=["consolidated"],
 )
 # → {superseded_count: 3, new_memory_stored: true, ...}
 ```
 
+Pass the selected member IDs rather than copying their text. All targets
+must resolve before any changes; a missing, retired or ambiguous target
+returns a no-op with diagnostics so the caller can reload the candidates.
+Legacy `replaces=[...]` requires unique exact text and does not fall back to
+similarity. File-mode entries have no row IDs and use that exact-text form.
+
 The clustering is deterministic greedy: highest-relevance entry seeds
 the cluster, any unclustered candidate whose cosine with the seed
 clears `min_cohesion` (default 0.6) joins, cohesion is the mean
 intra-cluster cosine, clusters are sorted by `cohesion × size`. Cost
 is O(N²) within the candidate pool, bounded to `top_k` candidates.
+Retired entries are excluded before candidate limits and clustering.
 
 `memory_consolidate` reuses the supersession machinery so the
 predecessors stay in the bank but rank below the canonical note —
