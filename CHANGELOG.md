@@ -19,6 +19,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The Console keeps the edit open when the service rejects a correction,
   preserving replacement text instead of reporting a false success.
 
+### Fixed (2026-09-11 — durable lesson acknowledgement)
+- Lesson synthesis commits staged lessons, graph updates and acknowledgements
+  together in PostgreSQL. A failed write leaves the batch retryable without
+  exposing tentative lessons; overlapping extractions recheck their selected
+  signals before applying changes. A lost commit response is reconciled from
+  durable state before further service use or saving.
+- Empty or failed extraction routes retain their signals, including individual
+  empty rule responses. Successful routes can proceed independently; a custom
+  rule extractor with incomplete output coverage leaves that route pending.
+  Signal retention and file-mode synthesis behavior are unchanged.
+
 ### Fixed (2026-09-10 — preserve source evidence)
 - Automatic contradiction candidates can admit a possible update through
   the surprise gate, but no longer retire or weaken whole source entries.

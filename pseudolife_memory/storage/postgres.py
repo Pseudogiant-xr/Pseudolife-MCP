@@ -145,6 +145,7 @@ class PostgresStorage:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
+        self._lesson_transaction_connection = None
         self._conn = self._connect()
         ensure_schema(self._conn)
         register_vector(self._conn)
@@ -180,6 +181,10 @@ class PostgresStorage:
         the dead connection still raises; the *next* one reconnects.
         Schema is NOT re-ensured (it exists); the vector adapter is
         per-connection and must be re-registered."""
+        # A lesson batch must not silently reconnect halfway through its
+        # transaction: later helpers would then commit outside that batch.
+        if self._lesson_transaction_connection is not None:
+            return self._lesson_transaction_connection
         c = self._conn
         if c.closed or c.broken:
             logger.warning("postgres connection lost (closed=%s broken=%s); "
@@ -624,6 +629,52 @@ class PostgresStorage:
                 (t, list(ids)),
             )
         return cur.rowcount
+
+    def lesson_batch_status(self, signals: list[dict], handled_ids: list[int],
+                            *, lock: bool = False) -> str:
+        """Revalidate extracted inputs, or reconcile an uncertain lesson commit.
+
+        Under the single-daemon writer contract, a batch commits all handled
+        acknowledgements together. Changed/missing/partly acknowledged inputs
+        cannot establish either outcome and must not authorize a replay.
+        """
+        cols = ("id",) + _SIGNAL_COLS
+        rows = self.conn.execute(
+            f"SELECT {', '.join(cols)}, consumed_at FROM outcome_signals "
+            "WHERE id = ANY(%s) ORDER BY id" + (" FOR UPDATE" if lock else ""),
+            ([s["id"] for s in signals],),
+        ).fetchall()
+        expected = {s["id"]: s for s in signals}
+        if len(rows) != len(expected):
+            return "changed"
+        if any(dict(zip(cols, row[:-1])) != expected[row[0]] for row in rows):
+            return "changed"
+        if all(row[-1] is None for row in rows):
+            return "pending"
+        handled = set(handled_ids)
+        if handled and all((row[-1] is not None) == (row[0] in handled)
+                           for row in rows):
+            return "consumed"
+        return "changed"
+
+    @contextmanager
+    def lesson_synthesis_transaction(self, signals: list[dict]):
+        """Lock/recheck the selected input rows and pin one connection until
+        lesson, graph and acknowledgement writes commit or roll back.
+
+        Extraction happens before this short transaction. A concurrent drain
+        or signal retargeting invalidates that extraction before any write.
+        The caller holds the service lock and publishes staged RAM only after
+        this context exits successfully.
+        """
+        if self._lesson_transaction_connection is not None:
+            raise RuntimeError("lesson synthesis transaction is already active")
+        self._lesson_transaction_connection = self.conn
+        try:
+            with self._txn():
+                yield self.lesson_batch_status(signals, [], lock=True) == "pending"
+        finally:
+            self._lesson_transaction_connection = None
 
     def prune_signals(self, older_than_ts: float) -> int:
         """Delete signals (consumed or not) older than the cutoff, so the log

@@ -344,9 +344,9 @@ class DreamOps:
     def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """Drain pending outcome signals and synthesise lessons via ``extractor``.
 
-        Single-writer: an extractor with no ``extract_lessons`` (the no-op / a
-        plain regex floor) writes nothing and leaves the signals pending. Old
-        signals are pruned by retention so the log can't grow unbounded.
+        Extraction runs outside the lock. Selected inputs are revalidated before
+        staged lessons, graph changes and handled acknowledgements commit in one
+        transaction. Empty/failed routes stay pending until retry or retention.
         """
         import time as _t
         cfg = self.config.memory.lessons
@@ -384,78 +384,116 @@ class DreamOps:
             rules_fallback = len(rule_sigs)
             plain, rule_sigs = list(signals), []
         rule_failed_ids: set = set()
+        rule_empty_ids: set = set()
+        errors: list[str] = []
+        plain_claims, rule_claims = [], []
         try:
-            claims = list(fn(plain)) if plain else []
-            if rule_sigs:
-                claims += list(rules_fn(rule_sigs))
-                # Per-signal failure tolerance (extract_rules): the signals
-                # whose call failed stay pending for the next sweep instead
-                # of being consumed with the batch.
-                rule_failed_ids = {
-                    i for i in (getattr(extractor, "last_rule_failed_ids", None)
-                                or ()) if i is not None}
+            # Give the extractor copies: its annotations must not change the
+            # input snapshot used for durable row revalidation.
+            plain_claims = list(fn([dict(s) for s in plain])) if plain else []
         except Exception as exc:  # noqa: BLE001 — never let synthesis break the dream
-            logger.warning("lesson synthesis failed (%s); leaving signals pending", exc)
-            return {"signals": len(signals), "lessons": 0, "error": str(exc)}
+            errors.append(f"plain extraction: {exc}")
+        if rule_sigs:
+            try:
+                rule_claims = list(rules_fn([dict(s) for s in rule_sigs]))
+                rule_ids = {s["id"] for s in rule_sigs}
+                rule_failed_ids = rule_ids.intersection(
+                    getattr(extractor, "last_rule_failed_ids", None) or ())
+                rule_empty_ids = rule_ids.intersection(
+                    getattr(extractor, "last_rule_empty_ids", None) or ())
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"rule extraction: {exc}")
+                rule_failed_ids = {s["id"] for s in rule_sigs}
+        handled_ids = [s["id"] for s in plain] if plain_claims else []
+        rule_handled = [s["id"] for s in rule_sigs
+                        if s["id"] not in rule_failed_ids | rule_empty_ids]
+        # Rule extractors promise one result per handled signal. If a custom
+        # extractor omits outputs without identifying empty/failed inputs, the
+        # unmatched results cannot safely acknowledge any of that route.
+        if len(rule_claims) == len(rule_handled):
+            handled_ids.extend(rule_handled)
+        else:
+            errors.append("rule extraction did not identify every unhandled signal")
+            rule_claims = []
+        claims = plain_claims + rule_claims
         # Bitemporal event time: the synthesised lesson became *true* when its
         # underlying outcomes were observed, not when the dream wrote it. Claims
         # don't map 1:1 to signals, so use the earliest contributing signal's
         # created_at as the batch valid_time (None → store defaults to tx_time).
         created = [s["created_at"] for s in signals if s.get("created_at")]
         batch_valid_time = min(created) if created else None
-        written = 0
-        deduped = 0
-        dedup_thr = float(getattr(cfg, "synthesis_dedup_min_similarity", 0.0)
-                          or 0.0)
-        for c in claims:
-            try:
-                # Rules are keyed per situation and must not be folded on
-                # wording similarity: two look-alike situations with
-                # different actions are both information. Restatements of
-                # the SAME situation supersede at their own slot instead.
-                is_rule = c.get("aspect") == "rule"
-                if dedup_thr and not is_rule and self._synthesized_lesson_duplicate(
-                        c["task"], c.get("aspect", "lesson"), c["lesson"],
-                        c.get("polarity", "+"), dedup_thr):
-                    deduped += 1
-                    logger.info("lesson synthesis dedup: %r near-duplicates "
-                                "an existing lesson; skipped", c.get("task"))
-                    continue
-                self.lesson_write(
-                    c["task"], c.get("aspect", "lesson"), c["lesson"],
-                    about=c.get("about"), outcome=c.get("outcome", "success"),
-                    polarity=c.get("polarity", "+"),
-                    confidence=(0.4 if all_inferred
-                                else float(c.get("confidence", 0.6))),
-                    origin=c.get("origin", "agent"),
-                    provenance=(set(c.get("provenance") or [])
-                                | ({"inferred"} if all_inferred else set())),
-                    valid_time=batch_valid_time)
-                written += 1
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("lesson write skipped (%s): %s", exc, c)
-        if written or deduped:
-            # A fully-deduped batch is HANDLED, not failed — leaving its
-            # signals pending would re-synthesize the same near-duplicates
-            # every sweep, forever bouncing off the gate.
-            with self._lock:
-                self._storage.consume_signals(
-                    [s["id"] for s in signals if s["id"] not in rule_failed_ids])
-        else:
-            # Nothing landed (empty extraction or every write failed): leave
-            # the signals pending so the next sweep retries — they are the
-            # only feeder for procedural memory. Retention pruning bounds
-            # the retry window.
-            logger.info("lesson synthesis wrote nothing; leaving %d signals "
-                        "pending", len(signals))
-        out = {"signals": len(signals), "lessons": written, "deduped": deduped}
+        out = {"signals": len(signals), "lessons": 0, "deduped": 0}
         if rule_sigs:
-            # Rule SIGNALS seen (writes are counted in ``lessons``).
             out["rule_signals"] = len(rule_sigs)
         if rule_failed_ids:
             out["rules_failed"] = len(rule_failed_ids)
+        if rule_empty_ids:
+            out["rules_empty"] = len(rule_empty_ids)
         if rules_fallback:
             out["rules_fallback"] = rules_fallback
+        if errors:
+            out["error"] = "; ".join(errors)
+        if not claims:
+            return out
+        dedup_thr = float(getattr(cfg, "synthesis_dedup_min_similarity", 0.0)
+                          or 0.0)
+        from copy import deepcopy
+        from pseudolife_memory.storage.sync import sync_lesson_slots
+        with self._lock:
+            self._ensure_init()
+            written = deduped = 0
+            writes_finished = False
+            try:
+                with self._storage.lesson_synthesis_transaction(signals) as current:
+                    if not current:
+                        out["skipped"] = "signals-changed"
+                        return out
+                    staged = deepcopy(self._lessons)
+                    # A prior failed explicit write may be dirty in RAM. It
+                    # can justify dedup only if its lesson AND graph state
+                    # become durable in this same acknowledged transaction.
+                    for rec in staged.records:
+                        if rec.key in staged.dirty_slots and rec.status == "current":
+                            self._link_lesson_graph(rec.entity, rec.about, rec.polarity)
+                    for c in claims:
+                        is_rule = c.get("aspect") == "rule"
+                        if dedup_thr and not is_rule and self._lesson_duplicate_locked(
+                                staged, c["task"], c.get("aspect", "lesson"),
+                                c["lesson"], c.get("polarity", "+"), dedup_thr):
+                            deduped += 1
+                            continue
+                        self._write_lesson_locked(
+                            staged, c["task"], c.get("aspect", "lesson"), c["lesson"],
+                            about=c.get("about"), outcome=c.get("outcome", "success"),
+                            polarity=c.get("polarity", "+"),
+                            confidence=(0.4 if all_inferred
+                                        else float(c.get("confidence", 0.6))),
+                            origin=c.get("origin", "agent"),
+                            provenance=(set(c.get("provenance") or [])
+                                        | ({"inferred"} if all_inferred else set())),
+                            valid_time=batch_valid_time)
+                        written += 1
+                    sync_lesson_slots(staged, self._storage)
+                    consumed = self._storage.consume_signals(handled_ids)
+                    if consumed != len(handled_ids):
+                        raise RuntimeError("lesson acknowledgement count changed")
+                    writes_finished = True
+                self._lessons = staged
+                out.update(lessons=written, deduped=deduped)
+            except Exception as exc:  # noqa: BLE001
+                self._persist_errors += 1
+                out["error"] = str(exc)
+                if writes_finished:
+                    # COMMIT may have reached the server despite an exception
+                    # reaching us. Never autosave old RAM over that outcome.
+                    self._lesson_synthesis_recovery = (signals, handled_ids)
+                    try:
+                        if self._recover_lesson_synthesis() == "consumed":
+                            out.update(lessons=written, deduped=deduped)
+                    except Exception as recovery_exc:  # noqa: BLE001
+                        out["error"] += f"; {recovery_exc}"
+                        out["reconciliation_required"] = True
+                logger.warning("lesson batch failed (%s); retry or durable reconciliation required", exc)
         return out
 
     def prune_dream_runs(self) -> int:

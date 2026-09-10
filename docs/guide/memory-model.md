@@ -537,6 +537,27 @@ disables). Opposite-polarity near-matches always write — a dead-end and a
 success about the same thing are both worth keeping — and explicit
 `lesson_write` calls are never gated.
 
+In PostgreSQL, synthesis stages lesson changes in memory and commits the
+lessons, their graph updates, and the handled signals' acknowledgements in one
+transaction. A write failure rolls back the whole selected write group. A
+fully deduplicated group is acknowledged only with its supporting lesson state
+durable. Extraction happens outside the service lock; changed or already
+consumed inputs invalidate the extracted batch before it writes anything.
+
+An empty or failed extraction route leaves its signals pending for a later
+sweep, subject to the existing retention limit. This is a persistence guarantee,
+not evidence that every extracted lesson is correct or complete. A lost commit
+response triggers a durable-state check before retrying or saving; if that
+check is unavailable, normal service operations and saves fail until
+reconciliation succeeds. This exceptional availability restriction is global,
+not limited to lesson writes. If selected signal rows have been removed or
+retargeted during an extended outage, their state may no longer prove the
+commit outcome: the service remains blocked for operator recovery instead of
+claiming a successful retry. Restarting rehydrates the durable bank; this
+protocol does not repair historical losses or recover prior unsaved changes.
+It assumes the existing single-daemon writer. File-mode synthesis still
+returns `skipped: no-storage`.
+
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
 `avoids` (negative / dead-end) edge to the tool/source it concerns — so
@@ -606,6 +627,14 @@ gate, so look-alike situations with different actions coexist. The
 retried once before being accepted. Default off; an extractor without the
 rule path synthesises such signals under the shipped prompt instead and
 the dream report says so (`rules_fallback`).
+
+Failed rule calls and valid-but-empty rule responses stay pending individually
+(`rules_failed` and `rules_empty` in the synthesis report). Plain and rule
+extraction failures do not prevent a successful route from committing. A custom
+rule extractor must return one rule per handled input and identify failed or
+empty input IDs through `last_rule_failed_ids` / `last_rule_empty_ids`; if its
+counts do not establish coverage, that route is left pending without writing
+its unmatched outputs.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,

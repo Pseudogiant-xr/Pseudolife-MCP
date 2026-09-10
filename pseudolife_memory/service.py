@@ -637,6 +637,7 @@ class MemoryService(DreamOps):
         self._cortex: CortexStore | None = None
         self._world = None  # WorldCortexStore | None (world-knowledge cortex, v9)
         self._lessons = None  # LessonStore | None (procedural / outcome memory, v10)
+        self._lesson_synthesis_recovery = None  # uncertain commit: (inputs, handled IDs)
         from pseudolife_memory.memory.hlc import HybridLogicalClock
         self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
@@ -966,6 +967,7 @@ class MemoryService(DreamOps):
         return self._storage
 
     def _ensure_init(self) -> None:
+        self._recover_lesson_synthesis()
         if self._cms is not None:
             return
         logger.info("MemoryService: initialising embedder + CMS (first call).")
@@ -2128,6 +2130,7 @@ class MemoryService(DreamOps):
             raise PersistenceError(f"world cortex save failed: {exc}") from exc
 
     def _save_lessons(self) -> None:
+        self._recover_lesson_synthesis()
         if getattr(self, "_lessons", None) is None or self._storage is None:
             return
         try:
@@ -2146,6 +2149,7 @@ class MemoryService(DreamOps):
         lazily-updated access counts and snapshot the cortex.
         File mode: legacy full-bank torch.save (v0.1 behavior).
         """
+        self._recover_lesson_synthesis()
         assert self._cms is not None
         # Per-part durations, warned on a slow save: every persist runs
         # under the service lock, so a slow part IS a daemon pause — and
@@ -3459,18 +3463,53 @@ class MemoryService(DreamOps):
         """
         with self._lock:
             self._ensure_init()
-            assert self._embedder is not None and self._lessons is not None
-            emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
-            writer_id, session_id = self._resolve_writer()
-            action, rec = self._lessons.write_fact(
-                task, aspect, lesson, emb, about=about, outcome=outcome,
+            action, rec = self._write_lesson_locked(
+                self._lessons, task, aspect, lesson, about=about, outcome=outcome,
                 polarity=polarity, confidence=confidence, origin=origin,
                 provenance=provenance, support=support, now=now,
-                valid_time=valid_time,
-                hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
-            self._link_lesson_graph(task, rec.about, rec.polarity)
+                valid_time=valid_time)
             self._save_lessons()
             return {"action": action, **_lesson_record_to_dict(rec)}
+
+    def _write_lesson_locked(self, lessons, task: str, aspect: str,
+                             lesson: str, **kwargs):
+        """Shared write semantics for the live store or a synthesis stage.
+        Caller holds the service lock and owns persistence/publication."""
+        assert self._embedder is not None and lessons is not None
+        emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
+        writer_id, session_id = self._resolve_writer()
+        action, rec = lessons.write_fact(
+            task, aspect, lesson, emb, **kwargs,
+            hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
+        self._link_lesson_graph(task, rec.about, rec.polarity)
+        return action, rec
+
+    def _recover_lesson_synthesis(self) -> str | None:
+        """Resolve an uncertain commit before reads or snapshots use lesson RAM.
+
+        Caller holds the service lock. If the transaction rolled back, the
+        original store (including prior dirty slots) is still authoritative.
+        A committed batch is rehydrated; failed/ambiguous reconciliation stays
+        latched so a later autosave cannot overwrite durable state with old RAM.
+        """
+        recovery = getattr(self, "_lesson_synthesis_recovery", None)
+        if recovery is None:
+            return
+        from pseudolife_memory.memory.lessons import LessonStore
+        from pseudolife_memory.storage.sync import hydrate_lessons
+        signals, handled_ids = recovery
+        try:
+            status = self._storage.lesson_batch_status(signals, handled_ids)
+            if status == "consumed":
+                restored = LessonStore()
+                hydrate_lessons(restored, self._storage)
+                self._lessons = restored
+            elif status != "pending":
+                raise RuntimeError("selected lesson signals changed during commit recovery")
+        except Exception as exc:
+            raise PersistenceError(f"lesson commit reconciliation required: {exc}") from exc
+        self._lesson_synthesis_recovery = None
+        return status
 
     def _link_lesson_graph(self, task: str, about: str | None, polarity: str) -> None:
         """Upsert the task-type entity + object entity + prefers/avoids edge so a
@@ -3872,18 +3911,23 @@ class MemoryService(DreamOps):
         own search metric). Same-key hits pass through: supersession is the
         store's job. Opposite-polarity hits pass through: an "avoid"
         inversion of a "do" lesson is new information, never a duplicate."""
-        from pseudolife_memory.memory.cortex import _norm_key
         with self._lock:
             self._ensure_init()
-            if self._lessons is None or self._embedder is None:
-                return False
-            key = (_norm_key(task), _norm_key(aspect))
-            emb = self._embedder.encode_single(
-                f"{task} {aspect} {lesson}".strip())
-            for rec, _score in self._lessons.search(emb, top_k=3,
-                                                    min_score=threshold):
-                if rec.key != key and rec.polarity == polarity:
-                    return True
+            return self._lesson_duplicate_locked(
+                self._lessons, task, aspect, lesson, polarity, threshold)
+
+    def _lesson_duplicate_locked(self, lessons, task: str, aspect: str,
+                                 lesson: str, polarity: str,
+                                 threshold: float) -> bool:
+        """The synthesis dedup predicate over live or staged lesson records."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        if lessons is None or self._embedder is None:
+            return False
+        key = (_norm_key(task), _norm_key(aspect))
+        emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
+        for rec, _score in lessons.search(emb, top_k=3, min_score=threshold):
+            if rec.key != key and rec.polarity == polarity:
+                return True
         return False
 
     def cortex_dump(self) -> dict[str, Any]:
