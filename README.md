@@ -195,6 +195,8 @@ ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
 # Codex hook source: --codex-hooks manual / -CodexHooks manual
 # Use plugin instead of manual if an enabled plugin owns the hooks; default skip.
+# With hooks skipped, unattended installs need --instructions append / -Instructions append
+# to add the standing memory block; interactive installs offer it.
 # Both:  add --client both  / -Client both
 # Gemini: add --client gemini — or several: --client claude,codex,gemini
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic

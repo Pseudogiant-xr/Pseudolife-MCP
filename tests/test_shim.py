@@ -153,6 +153,88 @@ def test_doctor_checks_registered_runtime_handshake_without_bank_writes(shared_d
     assert result["interpreter"] == sys.executable
 
 
+@pytest.mark.parametrize("initial_failure", ["refused", "stalled"])
+def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path, initial_failure):
+    """An optional briefing fetch must not prevent downstream initialize.
+
+    A fixture HTTP server refuses or stalls the first handshake, then accepts the next
+    one. The same stdio process must remain usable for subsequent tool lists.
+    """
+    import asyncio
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    class Handler(BaseHTTPRequestHandler):
+        initializations = 0
+
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            method = request["method"]
+            if method == "initialize":
+                Handler.initializations += 1
+                if Handler.initializations == 1:
+                    if initial_failure == "stalled":
+                        time.sleep(12)
+                    self.send_response(401)
+                    self.end_headers()
+                    return
+                result = {"protocolVersion": request["params"]["protocolVersion"],
+                          "capabilities": {"tools": {}},
+                          "serverInfo": {"name": "fixture", "version": "1"}}
+            elif method == "tools/list":
+                result = {"tools": [{"name": "fixture_tool", "inputSchema": {"type": "object"}}]}
+            else:
+                self.send_response(202)
+                self.end_headers()
+                return
+            body = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self.send_response(405)
+            self.end_headers()
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=http.serve_forever, daemon=True)
+    worker.start()
+
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(command=sys.executable, args=["-c",
+            "import asyncio, sys; from pseudolife_memory.shim import _proxy; "
+            "asyncio.run(_proxy(sys.argv[1], 'fixture-secret', 'fixture-session'))",
+            f"http://127.0.0.1:{http.server_port}"])
+        with (tmp_path / "shim-stderr.txt").open("w", encoding="utf-8") as errlog:
+            async with stdio_client(params, errlog=errlog) as (read, write):
+                async with ClientSession(read, write) as client:
+                    # Leave margin around the shim's optional-fetch deadline,
+                    # but remain well below the upstream transport's 300s read.
+                    initialized = await asyncio.wait_for(client.initialize(), timeout=9)
+                    assert not initialized.instructions
+                    assert [t.name for t in (await client.list_tools()).tools] == ["fixture_tool"]
+        errors = (tmp_path / "shim-stderr.txt").read_text(encoding="utf-8")
+        assert "instructions unavailable" in errors
+        assert "fixture-secret" not in errors
+        assert "Traceback" not in errors
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), timeout=20))
+        assert Handler.initializations == 2
+    finally:
+        http.shutdown()
+        http.server_close()
+        worker.join(timeout=2)
+
+
 def test_shim_survives_idle_gap(shared_daemon):
     """Two calls separated by an idle gap must both succeed.
 

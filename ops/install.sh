@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # >>> usage >>>
-# Codex hooks: --codex-hooks manual|plugin|skip (default skip; choose one owner).
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: provider selection -> preflight ->
 # extractor choice -> compose up -> client hooks -> standing instructions ->
@@ -21,6 +20,7 @@
 #   both = claude,codex      all = claude,codex,gemini
 #
 # Other flags:
+#   --codex-hooks manual|plugin|skip  hook owner (default: skip)
 #   --instructions append|skip|auto  standing memory block (default: auto -
 #                                    prompts only where no briefing hook exists)
 #   --claude-md append|skip          compatibility alias for --instructions
@@ -559,8 +559,8 @@ done
 # ── 10. standing memory instructions (consent; never edited without it) ────
 # Default is `auto`: skip wherever a session-start briefing already delivers
 # the block (claude hook/plugin, codex hook), and offer an interactive append
-# where none exists (gemini, generic). `auto` never writes a standing file in
-# a non-interactive run; --instructions append behaves exactly as before.
+# where none exists (including codex with hooks skipped). `auto` never writes
+# a standing file in a non-interactive run; --instructions append is explicit.
 instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 INSTR_CLAUDE=""
 INSTR_CODEX=""
@@ -611,10 +611,21 @@ for selected_client in $CLIENTS; do
     choice="$instruction_choice"
     if [ "$choice" = auto ]; then
         case "$selected_client" in
-            claude|codex)
+            claude)
                 # A session-start briefing hook already delivers the block —
                 # a standing-file copy would double-inject.
                 choice=skip ;;
+            codex)
+                if [ "$HOOK_CODEX" = hook ] || [ "$HOOK_CODEX" = plugin ]; then
+                    choice=skip
+                elif [ -t 0 ]; then
+                    printf 'No Codex briefing hook selected - append the standing memory block to %s? [Y/n] ' "$instruction_path"
+                    read -r yn
+                    case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
+                else
+                    choice=skip
+                    step "Codex has no selected briefing hook. Use --instructions append for the standing block, or select --codex-hooks manual|plugin."
+                fi ;;
             gemini)
                 if [ -t 0 ]; then
                     printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"

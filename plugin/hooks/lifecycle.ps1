@@ -5,7 +5,9 @@ $ErrorActionPreference = 'Stop'
 
 function Write-Context([string]$text) {
     @{ hookSpecificOutput = @{ hookEventName = $Event; additionalContext = $text } } |
-        ConvertTo-Json -Depth 4 -Compress
+        # Redirected stdout can inherit an OEM console code page. Escaping
+        # Unicode keeps the JSON bytes valid regardless of that encoding.
+        ConvertTo-Json -Depth 4 -Compress -EscapeHandling EscapeNonAscii
 }
 
 if ($Event -eq 'UserPromptSubmit') {
@@ -22,7 +24,19 @@ try {
     $sid = [string]$payload.session_id
     if ($Event -eq 'SessionStart') {
         $query = if ($sid) { '?session_id=' + [Uri]::EscapeDataString($sid) + '&source=' + [Uri]::EscapeDataString([string]$payload.source) } else { '' }
-        $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/session-start$query" -Headers $headers -TimeoutSec 5
+        # Match session-start.sh's maintenance-stall retry: at most 5+1+5
+        # seconds of request/delay budget, within the 15-second hook budget.
+        # Registration is idempotent per session_id. Do not retry auth errors.
+        for ($attempt = 0; $attempt -lt 2; $attempt++) {
+            try {
+                $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/session-start$query" -Headers $headers -TimeoutSec 5
+                break
+            } catch {
+                $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+                if (($attempt -eq 1) -or ($status -ne 0 -and $status -notin 408, 429, 500, 502, 503, 504)) { throw }
+                Start-Sleep -Seconds 1
+            }
+        }
         $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
         Write-Context $text
     } elseif ($sid) {

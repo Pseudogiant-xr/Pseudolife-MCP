@@ -360,7 +360,6 @@ def test_installers_support_codex_hook_on_windows() -> None:
     """Current runtimes support Windows; the installer must say so."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
-    assert "$IsWindows" in ps
     assert "Current Codex runtimes enable hooks by default, including Windows" in ps
     assert "$IsWindows" not in sh
 

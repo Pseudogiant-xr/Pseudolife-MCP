@@ -50,12 +50,17 @@ def run_doctor() -> None:
         health = probe_health(_daemon_url(), timeout=min(args.timeout, 2))
         report["daemon_status"] = health.get("status") if health else "unreachable"
         if not health or health.get("status") != "ok":
-            raise RuntimeError("Start the intended daemon, then retry; doctor never starts one.")
-        report.update(asyncio.run(asyncio.wait_for(_handshake(), timeout=args.timeout)))
-        report["ok"] = bool(report["instructions_present"] and report["tool_count"]
-                            and not report["tools_missing_annotations"])
-        if not report["ok"]:
-            report["recovery"] = "Compare daemon and shim versions; update the component missing instructions or annotations, then reconnect."
+            report["error"] = "DaemonUnavailable"
+            report["recovery"] = "Start the intended daemon, then retry; doctor never starts one."
+        else:
+            report.update(asyncio.run(asyncio.wait_for(_handshake(), timeout=args.timeout)))
+            report["ok"] = bool(report["instructions_present"] and report["tool_count"]
+                                and not report["tools_missing_annotations"])
+            if not report["ok"]:
+                report["recovery"] = "Check shim stderr and daemon MCP access, then compare daemon and shim versions; update the component missing instructions or annotations and reconnect."
+    except TimeoutError:
+        report["error"] = "TimeoutError"
+        report["recovery"] = "Check daemon health and MCP access; if startup is slow, retry doctor with a larger --timeout budget."
     except (Exception, SystemExit) as exc:
         # Do not serialize transport exceptions: they can contain auth headers
         # or URL credentials. The exception type plus recovery is sufficient.

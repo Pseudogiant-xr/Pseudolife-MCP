@@ -231,6 +231,9 @@ _DESTRUCTIVE_TOOLS = {
     "memory_fact_resolve", "memory_consolidate", "memory_graph_unrelate",
     "memory_graph_review", "memory_dream", "memory_world_set",
     "memory_graph_relate", "memory_alias", "memory_relation_define",
+    # Reingest upserts existing chunks; configured auto-promotion can replace
+    # a cortex value even though the top-level store operation is additive.
+    "memory_store", "document_ingest",
 }
 
 

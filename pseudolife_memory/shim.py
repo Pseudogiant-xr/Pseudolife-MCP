@@ -375,6 +375,7 @@ def _toolset_changed(result) -> bool:
 
 
 async def _proxy(url: str, token: str | None, session_uid: str) -> None:
+    import asyncio
     import contextlib
 
     from mcp.client.session import ClientSession
@@ -456,8 +457,21 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     # Instructions belong to the running daemon, not this installed shim's
     # source version. Fetch before the downstream initialize handshake; keep
     # per-call connections so idle reconnect behavior remains unchanged.
-    async with _upstream() as (_, initialization):
-        instructions = initialization.instructions
+    async def _fetch_instructions():
+        async with _upstream() as (_, initialization):
+            return initialization.instructions
+
+    instructions = None
+    try:
+        # Reserve time within Codex's default 10s startup budget for the
+        # downstream handshake; the upstream HTTP read default is 300s.
+        instructions = await asyncio.wait_for(_fetch_instructions(), timeout=5)
+    except Exception as exc:
+        # This optional enhancement must not turn a transient MCP refusal
+        # into a dead stdio process. Fresh per-call connections can recover.
+        # Exception text may contain credentials; report only its type.
+        print(f"pseudolife-mcp: instructions unavailable ({type(exc).__name__}); "
+              "check daemon MCP access and reconnect for startup guidance.", file=sys.stderr)
     server = Server(
         "pseudolife-memory",
         instructions=instructions,

@@ -201,6 +201,8 @@ ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
 # Codex hook source: --codex-hooks manual / -CodexHooks manual
 # Use plugin instead of manual if an enabled plugin owns the hooks; default skip.
+# With hooks skipped, unattended installs need --instructions append / -Instructions append
+# to add the standing memory block; interactive installs offer it.
 # Both:  add --client both  / -Client both
 # Gemini: add --client gemini — or several: --client claude,codex,gemini
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
@@ -4048,10 +4050,20 @@ For the full Docker installer, explicitly choose `-CodexHooks manual`
 events. The default `skip` leaves existing hooks alone on reruns; it never
 guesses plugin ownership. This choice does not enable or trust a plugin, and
 switching to `plugin` does not delete old manual hooks: review duplicate sources
-in `/hooks` before enabling both. The Windows installer and plugin supply
+in `/hooks` before enabling both. With hooks skipped, an interactive install
+offers the standing block on every supported OS. For an unattended install,
+pass `--instructions append` (`-Instructions append` in PowerShell) to add it;
+the default `auto` prints guidance and leaves the standing file alone. Selecting
+`manual` or `plugin` skips that automatic offer; explicit `append` still adds
+the fallback while hook definitions await trust.
+
+The Windows installer and plugin supply
 `commandWindows` overrides; Claude
 keeps its Bash plugin commands. Plugin SessionEnd on Windows uses a bounded
 request inside Codex's three-second maximum, with idle reaping as fallback.
+SessionStart retries one transient failure within its 15-second budget. The
+native command escapes non-ASCII context so redirected JSON stays valid under
+Windows OEM code pages as well as UTF-8.
 
 **A file write is not an active hook.** Start Codex, open `/hooks`, review
 and trust the exact definitions, then start a new task and inspect its hook
@@ -4071,6 +4083,12 @@ has loaded, trusted, and invoked them. Keep the standing memory block in
    source path, installed package/SDK versions, health, instructions and tool
    annotations. It neither starts a daemon nor calls a bank tool. A healthy
    endpoint alone does not establish a working stdio handshake.
+   An unreachable daemon report tells you to start it; a handshake timeout
+   suggests checking MCP access and increasing `doctor --timeout` if needed.
+   If the shim cannot fetch startup instructions within five seconds, it logs
+   a sanitized stderr message and still initializes. Tool requests retain their own fresh upstream
+   connections, but persistent authentication failures still need correction;
+   reconnect after recovery to receive the startup guidance.
 3. Run that interpreter with `-m pip check` and `-m pip show pseudolife-mcp mcp`.
    For a stale published installation, use that interpreter's
    `-m pip install --upgrade "pseudolife-mcp[lite]"`; for a source checkout,
@@ -4111,6 +4129,8 @@ filters can narrow it further.
 All tools carry approval hints. Searches are read operations over claims;
 access telemetry can still update. Explicit retention reinforcement and tools
 mixing status with mutation (toolset, dream, graph review) are marked writes.
+Destructive hints also cover replacing document chunks during reingestion and
+replacing canonical facts through `memory_store` when auto-promotion is enabled.
 Hints inform a client's `default_tools_approval_mode = "writes"`; they are not
 authorization and do not override per-tool approval settings or managed policy.
 An allow-once prompt does not guarantee durable approval. Inspect any existing

@@ -524,7 +524,7 @@ foreach ($selectedClient in $clients) {
 # -- 10. standing memory instructions (consent; never edited without it) ----------
 # Default is `auto`: skip wherever a session-start briefing already delivers
 # the block (claude hook/plugin, codex hook), and offer an interactive append
-# where none exists (gemini, generic, codex on Windows). `auto` never writes
+# where none exists (including codex with hooks skipped). `auto` never writes
 # a standing file in a non-interactive run; -Instructions append behaves
 # exactly as before. -ClaudeMd remains a compatibility alias.
 $instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
@@ -573,11 +573,14 @@ foreach ($selectedClient in $clients) {
                 $choice = "skip"
             }
             "codex" {
-                if ($IsWindows -and $interactive) {
-                    $yn = Read-Host "Append a standing memory block to $instructionPath as a fallback while hooks await trust? [Y/n]"
+                if ($hookState["codex"] -in "hook", "plugin") {
+                    $choice = "skip"
+                } elseif ($interactive) {
+                    $yn = Read-Host "No Codex briefing hook selected - append the standing memory block to $instructionPath? [Y/n]"
                     $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
                 } else {
                     $choice = "skip"
+                    Step "Codex has no selected briefing hook. Use -Instructions append for the standing block, or select -CodexHooks manual|plugin."
                 }
             }
             "gemini" {
