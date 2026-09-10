@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 38
+SCHEMA_META_VERSION = 39
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -368,6 +368,19 @@ CREATE TABLE IF NOT EXISTS memory_traces (
 );
 CREATE INDEX IF NOT EXISTS memory_traces_entry_idx ON memory_traces (entry_id);
 
+-- v39 durable source-supersession events. The source entry is deliberately
+-- NOT a foreign key: this row exists so a correction warning survives the
+-- capacity eviction or explicit deletion that removes entries + live traces.
+-- facts.id is equally unsuitable because cortex snapshots regenerate it.
+CREATE TABLE IF NOT EXISTS memory_trace_invalidations (
+  entity_norm     TEXT             NOT NULL,
+  attribute_norm  TEXT             NOT NULL,
+  source_entry_id BIGINT           NOT NULL,
+  invalidated_at  DOUBLE PRECISION NOT NULL,
+  cause           TEXT             NOT NULL,
+  PRIMARY KEY (entity_norm, attribute_norm, source_entry_id)
+);
+
 -- v16 additive: per-entity project/topic attribution. Denormalized cache of
 -- entity_id -> source(s). 'derived' rows are recomputed from
 -- facts.entity_id ⋈ memory_traces ⋈ entries; 'manual' rows are user overrides
@@ -407,7 +420,8 @@ BENCH_RESET_TABLES = (
     "meta", "episodes", "entries", "entities", "entity_aliases", "relations",
     "edges", "edge_proposals", "entity_proposals", "entity_kinds",
     "dismissed_pairs", "facts", "world_facts", "lessons", "outcome_signals",
-    "communities", "entity_communities", "memory_traces", "entity_sources",
+    "communities", "entity_communities", "memory_traces",
+    "memory_trace_invalidations", "entity_sources",
     # Declared by the additive-migration tail of ensure_schema, not SCHEMA_SQL.
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
     "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",
@@ -419,6 +433,25 @@ BENCH_RESET_TABLES = (
 # on what THIS BUILD's schema.py demands, independent of whatever model a
 # caller happens to have configured.
 _EXPECTED_EMBEDDING_DIM = 1024
+
+
+def _backfill_trace_invalidations(executor) -> int:
+    """Reconstruct surviving pre-v39 source supersessions idempotently."""
+    result = executor.execute(
+        """
+        INSERT INTO memory_trace_invalidations
+          (entity_norm, attribute_norm, source_entry_id,
+           invalidated_at, cause)
+        SELECT t.entity_norm, t.attribute_norm, t.entry_id,
+               e.superseded_at, 'source_superseded'
+        FROM memory_traces t
+        JOIN entries e ON e.id = t.entry_id
+        WHERE e.superseded_at IS NOT NULL
+        ON CONFLICT (entity_norm, attribute_norm, source_entry_id)
+        DO NOTHING
+        """
+    )
+    return max(result.rowcount, 0)
 
 
 def _refuse_on_embedding_dim_mismatch(cur) -> None:
@@ -505,7 +538,19 @@ def ensure_schema(conn) -> dict:
             "SET LOCAL lock_timeout = '5s'; "
             "SET LOCAL statement_timeout = '30s';")
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        # A newly-created v39 invalidation table means this is either a fresh
+        # bank or an upgrade. Remember that boundary before SCHEMA_SQL creates
+        # it so the one-time compatibility backfill does not run on every
+        # startup and manufacture events that a current-schema bank omitted.
+        cur.execute(
+            "SELECT to_regclass('public.memory_trace_invalidations')"
+        )
+        had_trace_invalidations = cur.fetchone()[0] is not None
         cur.execute(SCHEMA_SQL)
+        if not had_trace_invalidations:
+            # Only surviving provenance can be reconstructed. Trace rows that
+            # already cascaded with an evicted entry are unrecoverable.
+            _backfill_trace_invalidations(cur)
         # v13 additive: reinforcement counter on entries (tracks how many times
         # the dream has re-linked an episode via memory_traces).
         cur.execute(

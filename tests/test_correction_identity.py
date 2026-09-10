@@ -42,6 +42,7 @@ class Storage:
     def __init__(self):
         self.rows = {}
         self.updates = []
+        self.supersessions = []
 
     def insert_entry(self, row):
         entry_id = max(self.rows, default=0) + 1
@@ -51,6 +52,20 @@ class Storage:
     def update_entry(self, entry_id, **fields):
         self.updates.append((entry_id, fields))
         self.rows[entry_id].update(fields)
+
+    def supersede_entries(self, entry_ids, *, superseded_at,
+                          superseded_by_text):
+        ids = sorted(set(entry_ids))
+        self.supersessions.append((ids, {
+            "superseded_at": superseded_at,
+            "superseded_by_text": superseded_by_text,
+        }))
+        for entry_id in ids:
+            self.rows[entry_id].update({
+                "superseded_at": superseded_at,
+                "superseded_by_text": superseded_by_text,
+            })
+        return len(ids)
 
     def existing_entry_ids(self, ids):
         return set(ids) & self.rows.keys()
@@ -142,6 +157,7 @@ def _assert_refused(svc, before, result, reason):
     assert svc._embedder.calls == []
     if isinstance(svc._storage, Storage):
         assert svc._storage.updates == []
+        assert svc._storage.supersessions == []
 
 
 @pytest.mark.parametrize("operation", ["supersede", "consolidate"])
@@ -169,9 +185,10 @@ def test_id_selects_only_one_duplicate_across_source_episode_and_band(svc, opera
     replacement = next(e for e in _entries(svc) if e.text == NEW_TEXT)
     assert replacement.authority == "quoted"
     assert replacement.distortion_tolerance is None
-    assert svc._storage.updates == [(old.db_id, {
+    assert svc._storage.supersessions == [([old.db_id], {
         "superseded_at": old.superseded_at, "superseded_by_text": NEW_TEXT,
     })]
+    assert svc._storage.updates == []
 
 
 @pytest.mark.parametrize("operation", ["supersede", "consolidate"])
@@ -240,7 +257,9 @@ def test_consolidate_repeated_selector_changes_target_once(svc, mode):
     assert result["superseded_ids"] == [old.db_id]
     assert result["superseded_count"] == 1
     assert sibling.superseded_at is None
-    assert len(svc._storage.updates) == 1
+    assert len(svc._storage.supersessions) == 1
+    assert svc._storage.supersessions[0][0] == [old.db_id]
+    assert svc._storage.updates == []
 
 
 @pytest.mark.parametrize("operation", ["supersede", "consolidate"])
@@ -297,6 +316,23 @@ def test_row_validation_failure_does_not_mutate_or_embed(svc, monkeypatch):
     monkeypatch.setattr(svc._storage, "existing_entry_ids", fail_read)
     result = _call(svc, "supersede", ids=[old.db_id])
     _assert_refused(svc, before, result, "target_unavailable")
+
+
+@pytest.mark.parametrize("operation", ["supersede", "consolidate"])
+def test_atomic_retirement_failure_leaves_resident_entries_unchanged(
+        svc, monkeypatch, operation):
+    old = _seed(svc)
+    before = _state(svc)
+
+    def fail_retirement(*args, **kwargs):
+        raise RuntimeError("synthetic atomic retirement failure")
+
+    monkeypatch.setattr(svc._storage, "supersede_entries", fail_retirement)
+    with pytest.raises(RuntimeError, match="synthetic atomic retirement failure"):
+        _call(svc, operation, ids=[old.db_id])
+
+    assert _state(svc) == before
+    assert svc._embedder.calls == []
 
 
 def test_supersede_reports_derivations_only_from_selected_ids(svc, monkeypatch):

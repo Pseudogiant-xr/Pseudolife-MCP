@@ -305,10 +305,10 @@ true` plus `re_verify_reason` — see below.
 
 **Re-verify: a flag, not a cascade.** The `re_verify` marker above appears
 on `memory_search`'s cortex block, `memory_fact_get`, and `memory_recall`
-(the default `verbose=False` projection carries it too). It is
-best-effort, computed at read time from evidence that still exists:
-`memory_traces.entry_id` is `ON DELETE CASCADE`, so a capacity eviction of
-the source entry loses the trail before it ever flags anything. Full
+(the default `verbose=False` projection carries it too). PostgreSQL preserves
+source correction events independently of evictable traces, so later removal
+of a corrected source does not clear the warning. Re-confirming the fact does;
+ordinary deletion of an uncorrected source creates no warning. Full
 contract: [memory model](memory-model.md#how-current-is-this-fact).
 
 **Output caps (issue #186).** A plain 3-hop query on a hub entity can

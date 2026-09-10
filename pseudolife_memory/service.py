@@ -1836,29 +1836,16 @@ class MemoryService(DreamOps):
 
             now = time.time()
             superseded = [e.text for e in superseded_entries]
-            for entry in superseded_entries:
-                entry.superseded_at = now
-                entry.superseded_by_text = new_text
-
-            # Write-through the supersession marks.
-            if self._storage is not None:
-                for e in superseded_entries:
-                    if e.db_id is not None:
-                        self._storage.update_entry(
-                            e.db_id,
-                            superseded_at=e.superseded_at,
-                            superseded_by_text=e.superseded_by_text,
-                        )
+            self._retire_entries_locked(
+                superseded_entries, superseded_at=now,
+                superseded_by_text=new_text)
 
             # Retract traversal: what the dream derived from the memories
             # just corrected. Reported, never cascaded — the caller decides
             # whether a derivation still holds. The same facts also carry
-            # ``re_verify`` on later reads, but that is a BEST-EFFORT read of
-            # still-present evidence and stops the moment the superseded
-            # entry is evicted (see ``_annotate_evidence_supersession``).
-            # This list, named once at the moment of correction, is the
-            # durable half of the affordance — which is why it is capped
-            # rather than truncated silently.
+            # ``re_verify`` on later reads from a durable slot invalidation
+            # event that survives source-entry eviction. This immediate list
+            # is capped rather than truncated silently.
             derived_total = self._derived_from_entries_locked(
                 [e.db_id for e in superseded_entries])
             derived = derived_total[:DERIVED_FLAGGED_CAP]
@@ -1885,6 +1872,31 @@ class MemoryService(DreamOps):
                 "new_memory_stored": stored,
                 "new_memory_surprise": round(float(surprise), 4),
             }
+
+    def _retire_entries_locked(self, entries, *, superseded_at: float,
+                               superseded_by_text: str) -> None:
+        """Persist semantic retirement before exposing it in resident RAM.
+
+        PostgreSQL validates and retires the full target set atomically while
+        capturing durable trace invalidations. File mode keeps its existing
+        resident/file behavior. Caller holds ``self._lock``.
+        """
+        if self._storage is not None:
+            entry_ids = [entry.db_id for entry in entries]
+            if any(entry_id is None for entry_id in entry_ids):
+                raise RuntimeError(
+                    "cannot retire an entry without a persisted row ID")
+            persisted = self._storage.supersede_entries(
+                [int(entry_id) for entry_id in entry_ids],
+                superseded_at=superseded_at,
+                superseded_by_text=superseded_by_text,
+            )
+            if persisted != len(entry_ids):
+                raise RuntimeError(
+                    "atomic entry retirement returned an unexpected count")
+        for entry in entries:
+            entry.superseded_at = superseded_at
+            entry.superseded_by_text = superseded_by_text
 
     # ------------------------------------------------------------------
     # Tool: delete — hygiene
@@ -2725,147 +2737,64 @@ class MemoryService(DreamOps):
     # through derived facts is a review judgment, which is the same
     # two-man rule the consolidation quarantine already encodes.
 
-    def _superseded_evidence(self, ids: set[int]) -> dict[int, float]:
-        """``{entry_id: superseded_at}`` for the superseded ones among these
-        source entries, scoped to the ids actually being served.
+    def _annotate_trace_invalidations(self, targets) -> None:
+        """Annotate ``(row, normalized_slot, seen_time)`` triples in one read.
 
-        ``entries.superseded_at`` is the single authority. An earlier draft
-        also scanned the live band entries, because :meth:`consolidate`
-        stamped its marks in RAM and never wrote them through. PR #239
-        closed that: all three entry-level supersession sites —
-        :meth:`supersede`, ``cms.store``'s contradiction decay, and
-        :meth:`consolidate` — now write through inside the same locked call
-        that sets the mark, so normal operation opens no window in which
-        RAM and the column disagree. The scan was therefore paying an
-        O(bank) pass on every annotated read to cover a state no live path
-        produces, and it went. The consequence is recorded, not hidden:
-        anything that leaves a mark in RAM only is a known miss for this
-        flag — a future site that forgets the write-through, all three
-        existing loops' ``if e.db_id is not None`` guard if an entry could
-        ever reach them unpersisted, and a write-through that raises after
-        the marks are set (loud, but the RAM marks are not rolled back).
-        Pinned by ``test_a_mark_that_never_reached_postgres_does_not_flag``.
-
-        No cached index — the same no-stored-state rule as
-        :meth:`_cortex_change_index`. Caller holds the lock."""
-        if not ids or self._storage is None:
-            return {}
-        return self._storage.superseded_evidence(ids)
-
-    def _annotate_evidence_supersession(self, rows: list[dict]) -> list[dict]:
-        """Read-time flag: a served fact standing on evidence that was
-        corrected AFTER the fact was last confirmed gets ``re_verify`` +
-        ``re_verify_reason`` — the SAME shape lessons already carry for
-        "subject facts changed since"
-        (:meth:`_annotate_lesson_staleness`), not a parallel one.
-
-        The ``last_confirmed`` comparison is what makes the flag mean
-        something and what makes it CLEARABLE. The cross-index is keyed on
-        the slot, so ``source_entries`` lists every entry that ever formed
-        it across the slot's whole supersession history, and trace rows are
-        never deleted. A bare "any source superseded" test would therefore
-        latch on forever — including on slots whose current value was
-        asserted long after the retracted contributor, which on a mature
-        bank is a large fraction of the cortex. Worse, it would latch while
-        routing into ``correct_with``, whose served note tells the reader to
-        write a correction NOW: an unclearable flag there is a standing
-        instruction to rewrite a quarter of the cortex, every session.
-        Keying on ``last_confirmed`` means the documented remedy —
-        re-assert the slot, which confirms it and moves the clock — is
-        exactly what silences it.
-
-        The keys are ABSENT on unaffected facts, keeping their payloads
-        byte-identical (the ``stance`` precedent in
-        ``_cortex_record_to_dict``).
-
-        BEST-EFFORT, and deliberately so. The flag is derived at read time
-        from evidence that still exists, so LOSING the evidence loses the
-        flag: ``memory_traces.entry_id`` is ``ON DELETE CASCADE``, a
-        true-drop capacity eviction hard-deletes the entry row (every
-        eviction under the default flat preset), and a superseded entry is
-        the top eviction candidate because contradiction decay multiplies
-        its surprise by 0.3. So a flag can appear and later vanish with no
-        re-verification having happened, and ``memory_delete`` — the
-        strongest retraction of all — raises no flag at any point. Making
-        the caution outlive its evidence needs durable per-slot state, i.e.
-        a schema change, which is out of scope here; both behaviours are
-        pinned by tests so the limit is a recorded contract rather than a
-        surprise. Caller holds the lock."""
-        if not self.config.memory.traces.enabled:
-            return rows
-        cited = {i for r in rows for i in (r.get("source_entries") or [])}
-        if not cited:
-            return rows                 # nothing to traverse — skip the scan
-        dead = self._superseded_evidence(cited)
-        if not dead:
-            return rows
-        for row in rows:
-            # Fall back to asserted_at only when the record carries no
-            # confirmation stamp at all (legacy rows); never to 0.0, which
-            # would re-open the latch this comparison exists to close.
-            seen = row.get("last_confirmed") or row.get("asserted_at")
+        Durable slot events are independent of entries and trace rows, so a
+        semantic correction warning survives later source eviction or deletion.
+        A newer confirmation clears the warning. Caller holds ``self._lock``.
+        """
+        if (not targets or self._storage is None
+                or not self.config.memory.traces.enabled):
+            return
+        slots = sorted({slot for _row, slot, _seen in targets})
+        invalidations = self._storage.trace_invalidations_for_slots(slots)
+        for row, slot, seen in targets:
             if not seen:
                 continue
-            hit = [i for i in (row.get("source_entries") or [])
-                   if (ts := dead.get(i)) is not None and ts > seen]
-            if not hit:
+            source_ids = {
+                int(event["source_entry_id"])
+                for event in invalidations.get(slot, ())
+                if (event.get("cause") == "source_superseded"
+                    and float(event["invalidated_at"]) > float(seen))
+            }
+            if not source_ids:
                 continue
+            count = len(source_ids)
             row["re_verify"] = True
             row["re_verify_reason"] = (
-                f"derived from {len(hit)} source "
-                f"{'memory' if len(hit) == 1 else 'memories'} "
+                f"derived from {count} source "
+                f"{'memory' if count == 1 else 'memories'} "
                 "corrected since this fact was last confirmed")
+
+    def _annotate_evidence_supersession(self, rows: list[dict]) -> list[dict]:
+        """Annotate served fact rows from durable normalized-slot events."""
+        if not self.config.memory.traces.enabled:
+            return rows
+        from pseudolife_memory.memory.cortex import _norm_key
+        targets = []
+        for row in rows:
+            entity, attribute = row.get("entity"), row.get("attribute")
+            if entity is None or attribute is None:
+                continue
+            seen = row.get("last_confirmed") or row.get("asserted_at")
+            targets.append((
+                row, (_norm_key(entity), _norm_key(attribute)), seen))
+        self._annotate_trace_invalidations(targets)
         return rows
 
     def _annotate_set_slot_evidence(self, out: dict, entity: str,
                                     attribute: str, members: list) -> None:
-        """Carry the flag onto a set-valued slot's payload.
-
-        A set slot is served as ONE grouped dict with no scalar record
-        behind it, so this lookup payload carried neither the
-        ``source_entries`` the scalar path fetches nor a confirmation stamp
-        (``cortex_search``'s grouped entry has carried ``last_confirmed``
-        since the Task-6 review; it lacked only the traces). Either way no
-        set slot could carry ``re_verify``, while ``slots_for_entries``
-        (kind-agnostic) named set slots in ``derived_flagged`` and
-        ``memory_fact_get`` promised the flag without qualification.
-
-        The cross-index is keyed on the SLOT, not the member, so one
-        ``traces_for_slot`` answers for the whole set. The slot's
-        confirmation stamp is the newest member's, which makes the flag
-        clearable the way the scalar path's ``last_confirmed`` does — but
-        bluntly: ADDING a member also stamps the slot, so an unrelated add
-        silences the caution for members nobody re-checked. Accepted rather
-        than keyed to confirmations only, because a set slot is a single
-        served answer and a per-member flag on a grouped payload has
-        nowhere to render. ``_annotate_recalled_facts``, where members ARE
-        served individually, matches per member instead. Only the flag keys
-        are merged out, so the set payload does not otherwise change shape.
-        Gated on ``traces.enabled`` before the query, not after: unlike the
-        scalar path — which SERVES its traces as ``source_entries`` and so
-        fetches them either way — this lookup is purely feeding the
-        annotation and discards the result, so with the cross-index off the
-        query is pure waste. ``test_flag_off_when_the_cross_index_is_disabled``
-        states the rule it would break: "the read surface must not pay for
-        one". Caller holds the lock."""
+        """Carry a slot-wide warning onto a grouped set payload."""
         if not self.config.memory.traces.enabled:
             return
         from pseudolife_memory.memory.cortex import _norm_key
-        probe = {
-            "source_entries": self._storage.traces_for_slot(
-                _norm_key(entity), _norm_key(attribute)),
-            # ``or m.asserted_at`` is the same legacy fallback the scalar
-            # path applies, taken per member so one unstamped member cannot
-            # drag the slot's clock back to nothing.
-            "last_confirmed": max(
-                (s for m in members
-                 if (s := m.last_confirmed or m.asserted_at)),
-                default=None),
-        }
-        self._annotate_evidence_supersession([probe])
-        if probe.get("re_verify"):
-            out["re_verify"] = True
-            out["re_verify_reason"] = probe["re_verify_reason"]
+        seen = max(
+            (stamp for member in members
+             if (stamp := member.last_confirmed or member.asserted_at)),
+            default=None)
+        self._annotate_trace_invalidations([(
+            out, (_norm_key(entity), _norm_key(attribute)), seen)])
 
     def _derived_from_entries_locked(self, entry_ids) -> list[dict]:
         """Slots these source entries helped form, in display vocabulary.
@@ -3145,7 +3074,8 @@ class MemoryService(DreamOps):
                         "score": round(float(score), 4) if score is not None else 0.0,
                         "contested": False,
                         "last_confirmed": max(
-                            (m.last_confirmed for m in all_members), default=None),
+                            (m.last_confirmed or m.asserted_at
+                             for m in all_members), default=None),
                         "asserted_at": anchor,
                         "age": _relative_time(anchor) if anchor else None,
                     })
@@ -5683,23 +5613,9 @@ class MemoryService(DreamOps):
 
             now = time.time()
             superseded = [e.text for e in superseded_entries]
-            for entry in superseded_entries:
-                entry.superseded_at = now
-                entry.superseded_by_text = new_text
-
-            # Write-through the supersession marks, exactly as ``supersede``
-            # does. Postgres is the source of truth across a restart and
-            # ``_persist_all`` syncs only ``access_count`` for entries — a
-            # mark left in RAM is lost at the next ``hydrate_cms`` and the
-            # consolidated-away entry comes back looking current.
-            if self._storage is not None:
-                for e in superseded_entries:
-                    if e.db_id is not None:
-                        self._storage.update_entry(
-                            e.db_id,
-                            superseded_at=e.superseded_at,
-                            superseded_by_text=e.superseded_by_text,
-                        )
+            self._retire_entries_locked(
+                superseded_entries, superseded_at=now,
+                superseded_by_text=new_text)
 
             # Always store the consolidated entry — source defaults to
             # ``"consolidation"`` for audit / filtering. v35: the note
@@ -7064,8 +6980,8 @@ class MemoryService(DreamOps):
         composes: that method also backs the Console's Atlas and the whole-
         graph view, where the facts are a label on a node rather than an
         answer being acted on, and where the node set is capped in the
-        hundreds. Scoping the work to recall keeps it to one batched trace
-        query plus one evidence query per call, whatever the graph's size.
+        hundreds. Scoping the work to recall keeps it to one batched
+        invalidation query per call, whatever the graph's size.
 
         Facts are matched back to their slot on ``(entity, attribute,
         VALUE)``. The entity side is the record's entity RESOLVED through
@@ -7101,13 +7017,9 @@ class MemoryService(DreamOps):
         slot's members each match on their own value, so a member is
         cleared by ITS own re-confirmation rather than the slot's newest.
 
-        Only the flag keys are written onto the served fact; the
-        ``source_entries`` the traversal needs stay on a probe, since a
-        recalled fact is a label and would double in size carrying them.
-
         Cost: one graph load for the alias table (the same load
-        ``graph_neighborhood`` makes per hop), one batched trace query and
-        one evidence query per call — and one pass over
+        ``graph_neighborhood`` makes per hop), one batched invalidation query
+        per call, and one pass over
         ``current_records()`` with two normalizations per record, which is
         the same sweep ``graph_neighborhood`` has already made to assemble
         these facts. ``recall`` holds no lock of its own, so this takes
@@ -7160,14 +7072,5 @@ class MemoryService(DreamOps):
                         targets.append((fact, hit[0], hit[1]))
             if not targets:
                 return
-            traces = self._storage.traces_for_slots(
-                sorted({slot for _f, slot, _s in targets}))
-            probes = [{"source_entries": traces.get(slot, []),
-                       "last_confirmed": stamp}
-                      for _f, slot, stamp in targets]
-            self._annotate_evidence_supersession(probes)
-            for probe, (fact, _slot, _stamp) in zip(probes, targets):
-                if probe.get("re_verify"):
-                    fact["re_verify"] = True
-                    fact["re_verify_reason"] = probe["re_verify_reason"]
+            self._annotate_trace_invalidations(targets)
 

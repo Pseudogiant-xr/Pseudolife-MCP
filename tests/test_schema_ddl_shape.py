@@ -43,6 +43,10 @@ _REQUIRED_COLUMNS = [
     # v13 — provenance-as-link: the trace index is SLOT-keyed.
     ("memory_traces",
      {"entity_norm", "attribute_norm", "entry_id", "created_at"}),
+    # v39 — survives deletion of its evictable source entry.
+    ("memory_trace_invalidations",
+     {"entity_norm", "attribute_norm", "source_entry_id",
+      "invalidated_at", "cause"}),
     # v13 reinforcements / v33 explicit_reinforcements (the split counter).
     ("entries", {"reinforcements", "explicit_reinforcements"}),
     # v16 — per-entity source attribution.
@@ -193,6 +197,25 @@ def test_memory_traces_is_slot_keyed_not_fact_keyed(pg_conn):
     fact-keyed trace index goes stale silently. Lock the slot anchor so a
     regression to the old one fails."""
     assert "fact_id" not in _columns(pg_conn, "memory_traces")
+
+
+def test_trace_invalidations_are_slot_keyed_and_fk_free(pg_conn):
+    """v39 events outlive both evictable source and regenerated fact rows."""
+    pk = pg_conn.execute(
+        "SELECT a.attname FROM pg_index i "
+        "JOIN pg_attribute a ON a.attrelid=i.indrelid "
+        "AND a.attnum=ANY(i.indkey) "
+        "WHERE i.indrelid='memory_trace_invalidations'::regclass "
+        "AND i.indisprimary ORDER BY array_position(i.indkey, a.attnum)"
+    ).fetchall()
+    assert [r[0] for r in pk] == [
+        "entity_norm", "attribute_norm", "source_entry_id"]
+    fks = pg_conn.execute(
+        "SELECT conname FROM pg_constraint c "
+        "JOIN pg_class t ON c.conrelid=t.oid "
+        "WHERE t.relname='memory_trace_invalidations' AND c.contype='f'"
+    ).fetchall()
+    assert fks == []
 
 
 def test_entity_kinds_primary_key_is_entity_norm(pg_conn):

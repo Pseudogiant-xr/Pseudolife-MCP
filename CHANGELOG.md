@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-11 — durable correction warnings)
+- Facts retain their `re_verify` warning when a corrected source memory is
+  later evicted or deleted. PostgreSQL schema v39 records source supersession
+  independently of evictable traces, in the same transaction as source-entry
+  retirement.
+  Re-confirming a fact still clears its warning; deleting an uncorrected source
+  does not create one.
+- Existing trace relationships retain correction events while tracing is
+  disabled, with warning serving still controlled by `memory.traces.enabled`.
+  Logical exports preserve the events. Upgrades and older imports reconstruct
+  only surviving superseded source/trace pairs; already-deleted history cannot
+  be recovered.
+
 ### Fixed (2026-09-11 — durable dream acknowledgement)
 - Dream batches acknowledge their exact entries instead of moving a timestamp
   boundary past other entries. New memories remain eligible after equal or
@@ -2942,7 +2955,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     would be a standing instruction to rewrite a quarter of the cortex every
     session. The active, targeted affordance is `derived_flagged`, which
     fires only on an explicit correction.
-  - **`re_verify` is BEST-EFFORT, and the docs now say so.** It is derived
+  - **Historical contract, superseded by schema v39:** correction warnings
+    now survive source deletion; ordinary deletion alone is not a semantic
+    correction. Automatic contradiction-based source retirement was also
+    removed on 2026-09-11. The original behavior below describes this release.
+    **`re_verify` is BEST-EFFORT, and the docs now say so.** It is derived
     at read time from evidence that still exists, so losing the evidence
     loses the flag: `memory_traces.entry_id` is `ON DELETE CASCADE`, a
     true-drop capacity eviction hard-deletes the entry row (every eviction

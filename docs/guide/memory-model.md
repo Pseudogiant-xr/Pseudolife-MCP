@@ -125,14 +125,9 @@ since. It surfaces on `memory_fact_get`, `memory_search`'s cortex block,
 and `memory_recall`; on a set-valued slot the comparison is against the
 newest member's confirmation stamp, since a set is served as one grouped
 answer. It is a flag, never a cascade, and deliberately not routed into a
-`correct_with` call: keyed on `last_confirmed`, a slot re-asserted long
-after its retracted contributor still fires it, which on a mature bank is
-common — on the live bank on 2026-09-02 roughly a quarter of current facts
-stood on a source memory contradicted since they were last confirmed.
-Routing that into the same call `correct_with` tells the reader
-to run *now* would turn a common, weak signal into a standing instruction
-to rewrite a quarter of the cortex every session. Re-asserting or
-re-confirming the slot moves `last_confirmed` forward and clears the flag.
+`correct_with` call: correcting a source note does not establish that every
+fact derived from that note is wrong. Re-asserting or re-confirming the slot
+moves `last_confirmed` forward and clears the flag.
 
 The **active** affordance for retracted evidence lives on the correction
 itself: `memory_supersede`'s result carries `derived_flagged` — the
@@ -144,15 +139,22 @@ nothing to go re-check), the list is capped at 50 entries with live slots
 first, and `derived_flagged_truncated` / `derived_flagged_total` say
 whether a correction reached further than the cap.
 
-Both signals are **best-effort**, on purpose: they are derived at read
-time from evidence that still exists, so losing the evidence loses the
-flag. `memory_traces.entry_id` is `ON DELETE CASCADE`, a true-drop
-capacity eviction hard-deletes the entry row, including superseded history
-when selected for eviction — so a flag can appear and later vanish with
-no re-verification having happened, and `memory_delete`, the strongest retraction of all,
-raises no flag at any point. Both are gated on `memory.traces.enabled`;
-turning it off silences both without changing anything else about how
-facts are served.
+PostgreSQL schema v39 preserves the correction event separately from the
+evictable source and its trace. A corrected source can later disappear from
+`source_entries` while its fact's `re_verify` warning remains, until the fact
+is confirmed again. The event holds a normalized slot, opaque source entry ID
+and correction time, without source text or a foreign key to the entry or fact
+row. Cortex snapshots and fact compaction therefore retain it. Ordinary
+eviction or deletion of an uncorrected source does not establish a correction
+and creates no warning.
+
+Both served signals are gated on `memory.traces.enabled`. Turning tracing off
+silences them and stops new trace formation; corrections still preserve events
+for trace relationships that already exist, so turning it back on does not
+erase known provenance. Upgrades and older logical imports can reconstruct
+events only from surviving superseded sources and traces. History already
+lost to deletion cannot be recovered. These warnings remain passive: they
+request scrutiny without changing or deleting a fact.
 
 **Source notes retain their evidence when a potential conflict is stored.**
 The contradiction detector runs before the surprise gate: a different

@@ -434,16 +434,10 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
         f.get("last_confirmed") or f.get("asserted_at"))
     # ``re_verify`` deliberately does NOT gate here. It is a passive
     # caution, exactly as it is on lessons (`_annotate_lesson_staleness`),
-    # and it fires on ~25% of a mature bank's facts — measured 2026-09-02
-    # on the live bank: 1264/5153 current facts stand on a source memory
-    # contradicted since they were last confirmed, because `cms.store`'s
-    # contradiction decay marks entries superseded automatically and
-    # liberally. Routing that into a call the served CORRECTION_NOTE tells
-    # the reader to run NOW would turn a common, weak signal into a
-    # standing instruction to rewrite a quarter of the cortex every
-    # session. The ACTIVE affordance for retracted evidence is
-    # `memory_supersede`'s `derived_flagged`, which fires only on an
-    # explicit correction and names exactly the facts affected.
+    # because source retirement says only that a derived fact needs review,
+    # not what its verified current value is. The active affordance at
+    # correction time is `memory_supersede`'s `derived_flagged`, which names
+    # exactly the facts affected by that explicit correction.
     if not (f.get("contested") or f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "
@@ -895,11 +889,11 @@ def memory_fact_get(
     ``candidates`` lists nearby slots — ranked leads, not answers.
     ``re_verify`` = a memory this fact was derived from has since been
     corrected; the value still stands but check it before acting. Set slots
-    carry it too, at the slot. Its absence is not a guarantee: the flag is
-    read from evidence that still exists, so it stops once the corrected
-    memory is evicted or deleted. ``verbose=True`` adds the record's
-    provenance, support and temporal stamp; ``memory_history`` shows the
-    slot's version chain.
+    carry it too, at the slot. PostgreSQL keeps this warning after the
+    corrected source memory is evicted or deleted; file mode has no durable
+    retraction warning. ``verbose=True`` adds the record's provenance,
+    support and temporal stamp; ``memory_history`` shows the slot's version
+    chain.
     """
     rec = service.cortex_lookup(entity, attribute)
     out = {

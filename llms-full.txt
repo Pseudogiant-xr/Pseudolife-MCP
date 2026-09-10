@@ -946,7 +946,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v38 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v39 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1217,14 +1217,9 @@ since. It surfaces on `memory_fact_get`, `memory_search`'s cortex block,
 and `memory_recall`; on a set-valued slot the comparison is against the
 newest member's confirmation stamp, since a set is served as one grouped
 answer. It is a flag, never a cascade, and deliberately not routed into a
-`correct_with` call: keyed on `last_confirmed`, a slot re-asserted long
-after its retracted contributor still fires it, which on a mature bank is
-common — on the live bank on 2026-09-02 roughly a quarter of current facts
-stood on a source memory contradicted since they were last confirmed.
-Routing that into the same call `correct_with` tells the reader
-to run *now* would turn a common, weak signal into a standing instruction
-to rewrite a quarter of the cortex every session. Re-asserting or
-re-confirming the slot moves `last_confirmed` forward and clears the flag.
+`correct_with` call: correcting a source note does not establish that every
+fact derived from that note is wrong. Re-asserting or re-confirming the slot
+moves `last_confirmed` forward and clears the flag.
 
 The **active** affordance for retracted evidence lives on the correction
 itself: `memory_supersede`'s result carries `derived_flagged` — the
@@ -1236,15 +1231,22 @@ nothing to go re-check), the list is capped at 50 entries with live slots
 first, and `derived_flagged_truncated` / `derived_flagged_total` say
 whether a correction reached further than the cap.
 
-Both signals are **best-effort**, on purpose: they are derived at read
-time from evidence that still exists, so losing the evidence loses the
-flag. `memory_traces.entry_id` is `ON DELETE CASCADE`, a true-drop
-capacity eviction hard-deletes the entry row, including superseded history
-when selected for eviction — so a flag can appear and later vanish with
-no re-verification having happened, and `memory_delete`, the strongest retraction of all,
-raises no flag at any point. Both are gated on `memory.traces.enabled`;
-turning it off silences both without changing anything else about how
-facts are served.
+PostgreSQL schema v39 preserves the correction event separately from the
+evictable source and its trace. A corrected source can later disappear from
+`source_entries` while its fact's `re_verify` warning remains, until the fact
+is confirmed again. The event holds a normalized slot, opaque source entry ID
+and correction time, without source text or a foreign key to the entry or fact
+row. Cortex snapshots and fact compaction therefore retain it. Ordinary
+eviction or deletion of an uncorrected source does not establish a correction
+and creates no warning.
+
+Both served signals are gated on `memory.traces.enabled`. Turning tracing off
+silences them and stops new trace formation; corrections still preserve events
+for trace relationships that already exist, so turning it back on does not
+erase known provenance. Upgrades and older logical imports can reconstruct
+events only from surviving superseded sources and traces. History already
+lost to deletion cannot be recovered. These warnings remain passive: they
+request scrutiny without changing or deleting a fact.
 
 **Source notes retain their evidence when a potential conflict is stored.**
 The contradiction detector runs before the surprise gate: a different
@@ -2137,10 +2139,10 @@ true` plus `re_verify_reason` — see below.
 
 **Re-verify: a flag, not a cascade.** The `re_verify` marker above appears
 on `memory_search`'s cortex block, `memory_fact_get`, and `memory_recall`
-(the default `verbose=False` projection carries it too). It is
-best-effort, computed at read time from evidence that still exists:
-`memory_traces.entry_id` is `ON DELETE CASCADE`, so a capacity eviction of
-the source entry loses the trail before it ever flags anything. Full
+(the default `verbose=False` projection carries it too). PostgreSQL preserves
+source correction events independently of evictable traces, so later removal
+of a corrected source does not clear the warning. Re-confirming the fact does;
+ordinary deletion of an uncorrected source creates no warning. Full
 contract: [memory model](memory-model.md#how-current-is-this-fact).
 
 **Output caps (issue #186).** A plain 3-hop query on a hub entity can
@@ -3303,7 +3305,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v38). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v39). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -3467,6 +3469,9 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `memory_supersede` (see [Memory model](memory-model.md#how-current-is-this-fact)).
   Set `false` to silence both — the read surfaces stop paying for the
   cross-index query but otherwise serve exactly as before.
+  Since schema v39, correction events for existing traces survive source
+  deletion and are preserved even while tracing is off; new trace formation
+  remains disabled. Re-enabling tracing can therefore surface those warnings.
   `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
   MTT-retention weight this same cross-index feeds; `0.0` is today's
   eviction behavior unchanged.
@@ -3979,7 +3984,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v38**; migrations are additive
+The current Postgres meta version is **v39**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -4023,6 +4028,7 @@ The milestones:
 | v36 | Review-queue autonomy (2026-09-02). `edge_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` / `judge_relation` / `decided_by` / `decided_at` — the link judge's opinion on a pending link proposal (the retype verdict's corrected relation in `judge_relation`) and who settled the row; `entity_proposals.judge2_verdict` / `judge2_confidence` / `judge2_model` / `judged2_at` — the merge judge's SECOND opinion beside the v30 first one (two-vote agreement is the apply gate for rows the single-vote 0.8 reject gate leaves pending); and `curation_judgments` (`store`, sorted slot keys, verdict, keep, fold, confidence, note, model, judged_at) — the store-curation judge's memo, because the lesson/world duplicate listings are recomputed per pass and would otherwise be re-sent every sweep. `NULL` judge columns = not yet judged, exactly the pre-v36 behaviour, so the migration is a no-op on existing banks. Gates measured by `evals/queue_judge_ladder.py` against `evals/results/queue-judge-panel-20260902.json`. Additive/idempotent |
 | v37 | Retire-not-delete (2026-09-03). `store_decisions` (`id`, `store`, `entity_norm`, `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB, `decided_at`) — the FK-free audit of lesson/world forgets and restores. A `memory_forget(scope="lesson"\|"world")` now retires the slot's rows (`status='retired'`, rows kept; `memory.compaction` treats them like any non-live record) instead of deleting them, and the audit row carries the verbatim record so `lesson_restore` / `world_restore` (`memory_graph_review(action="restore_slot")`, `POST /api/lessons/restore`, `POST /api/world/restore`) still work after compaction has purged the retired row. Also (no DDL): merge and junk rejects write text-keyed tombstones to `dismissed_pairs` (canonical pair / `junk:<canonical>` self-pair) so a verdict outlives the CASCADE-deleted proposal row. No column changes; the table starts empty on an existing bank, so the migration is a no-op there. Additive/idempotent |
 | v38 | Durable dream acknowledgement. `entries.dream_state` records `pending`, `acknowledged`, or `legacy-covered`; pre-existing rows retain `NULL` for one-time classification against the legacy cursor and configured source eligibility. New writes default to `pending`, regardless of their timestamps. Exact-entry commit tokens use a bank-local secret in `meta`; logical export excludes that secret. The numeric cursor remains display metadata. This preserves the previous migration boundary; it does not repair historical skipped entries. Additive/idempotent |
+| v39 | `memory_trace_invalidations` preserves source-supersession events by normalized slot and source entry ID, without entry or fact foreign keys. Explicit correction records entry retirement and existing trace invalidations together. Events survive source deletion, cortex snapshots and compaction; confirmation still clears the served warning. Table creation and older logical imports reconstruct only surviving superseded source/trace pairs. Additive/idempotent |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

@@ -119,8 +119,7 @@ _BUILTIN_RELATIONS = (
 
 # Mutable entry fields update_entry accepts — everything else is identity.
 _ENTRY_UPDATABLE = {
-    "band", "surprise", "access_count", "superseded_at",
-    "superseded_by_text", "last_logical_turn", "episode_id",
+    "band", "surprise", "access_count", "last_logical_turn", "episode_id",
     "episode_title", "tags", "slots",
 }
 
@@ -286,6 +285,76 @@ class PostgresStorage:
             self.conn.execute(
                 f"UPDATE entries SET {', '.join(sets)} WHERE id = %s", values,
             )
+
+    def supersede_entries(
+        self, entry_ids, *, superseded_at: float,
+        superseded_by_text: str,
+    ) -> int:
+        """Atomically retire source entries and capture their traced slots.
+
+        Every target must exist and still be live. The source rows are locked
+        in stable ID order so a concurrent :meth:`add_trace` either lands
+        before this operation's trace scan or observes the committed
+        supersession and creates the event itself.
+        """
+        try:
+            raw_ids = [] if entry_ids is None else list(entry_ids)
+        except TypeError as exc:
+            raise ValueError(
+                "supersede_entries: entry_ids must be positive integers"
+            ) from exc
+        if any(type(value) is not int or value <= 0 for value in raw_ids):
+            raise ValueError("supersede_entries: entry_ids must be positive integers")
+        ids = sorted(set(raw_ids))
+        try:
+            superseded_at = float(superseded_at)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "supersede_entries: superseded_at must be finite"
+            ) from exc
+        if not math.isfinite(superseded_at):
+            raise ValueError("supersede_entries: superseded_at must be finite")
+        if not ids:
+            return 0
+
+        conn = self.conn
+        with conn.transaction() as tx:
+            rows = conn.execute(
+                "SELECT id, superseded_at FROM entries "
+                "WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+                (ids,),
+            ).fetchall()
+            found = {int(row[0]) for row in rows}
+            missing = [i for i in ids if i not in found]
+            retired = [int(row[0]) for row in rows if row[1] is not None]
+            if missing or retired:
+                detail = []
+                if missing:
+                    detail.append(f"missing={missing}")
+                if retired:
+                    detail.append(f"already_retired={retired}")
+                raise ValueError("supersede_entries: " + ", ".join(detail))
+            conn.execute(
+                "UPDATE entries SET superseded_at = %s, "
+                "superseded_by_text = %s WHERE id = ANY(%s)",
+                (superseded_at, superseded_by_text, ids),
+            )
+            conn.execute(
+                "INSERT INTO memory_trace_invalidations "
+                "(entity_norm, attribute_norm, source_entry_id, "
+                " invalidated_at, cause) "
+                "SELECT entity_norm, attribute_norm, entry_id, %s, "
+                "       'source_superseded' FROM memory_traces "
+                "WHERE entry_id = ANY(%s) "
+                "ON CONFLICT (entity_norm, attribute_norm, source_entry_id) "
+                "DO NOTHING",
+                (superseded_at, ids),
+            )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
+        return len(ids)
 
     def delete_entry_ids(self, ids: list[int]) -> int:
         if not ids:
@@ -1753,14 +1822,34 @@ class PostgresStorage:
         """Link a cortex slot to a source episode. Idempotent on the PK; returns
         True iff a NEW row was inserted (so the caller bumps reinforcements only on
         genuine new formation, never on a re-assert)."""
-        with self._txn():
-            row = self.conn.execute(
+        conn = self.conn
+        with conn.transaction() as tx:
+            source = conn.execute(
+                "SELECT superseded_at FROM entries "
+                "WHERE id = %s FOR UPDATE",
+                (entry_id,),
+            ).fetchone()
+            row = conn.execute(
                 "INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
                 "VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (entity_norm, attribute_norm, entry_id) DO NOTHING "
                 "RETURNING entry_id",
                 (entity_norm, attribute_norm, entry_id, now),
             ).fetchone()
+            if source is not None and source[0] is not None:
+                conn.execute(
+                    "INSERT INTO memory_trace_invalidations "
+                    "(entity_norm, attribute_norm, source_entry_id, "
+                    " invalidated_at, cause) "
+                    "VALUES (%s, %s, %s, %s, 'source_superseded') "
+                    "ON CONFLICT (entity_norm, attribute_norm, "
+                    "             source_entry_id) DO NOTHING",
+                    (entity_norm, attribute_norm, entry_id, source[0]),
+                )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
         return row is not None
 
     # ── dream-run audit + pre-image journal (schema v27) ─────────────────
@@ -2420,6 +2509,31 @@ class PostgresStorage:
                 "ORDER BY t.entity_norm, t.attribute_norm, t.entry_id",
                 ([k[0] for k in keys], [k[1] for k in keys])).fetchall():
             out.setdefault((e, a), []).append(int(eid))
+        return out
+
+    def trace_invalidations_for_slots(
+        self, slot_keys,
+    ) -> dict[tuple[str, str], list[dict]]:
+        """Durable source-supersession events for normalized cortex slots."""
+        keys = list(dict.fromkeys((str(e), str(a)) for e, a in (slot_keys or [])))
+        if not keys:
+            return {}
+        out: dict[tuple[str, str], list[dict]] = {}
+        rows = self.conn.execute(
+            "SELECT i.entity_norm, i.attribute_norm, i.source_entry_id, "
+            "       i.invalidated_at, i.cause "
+            "FROM memory_trace_invalidations i "
+            "JOIN unnest(%s::text[], %s::text[]) AS k(e, a) "
+            "  ON i.entity_norm = k.e AND i.attribute_norm = k.a "
+            "ORDER BY i.entity_norm, i.attribute_norm, i.source_entry_id",
+            ([k[0] for k in keys], [k[1] for k in keys]),
+        ).fetchall()
+        for entity, attribute, source_id, invalidated_at, cause in rows:
+            out.setdefault((entity, attribute), []).append({
+                "source_entry_id": int(source_id),
+                "invalidated_at": float(invalidated_at),
+                "cause": cause,
+            })
         return out
 
     def superseded_evidence(self, entry_ids) -> dict[int, float]:
