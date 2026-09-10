@@ -65,6 +65,7 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 from anyio import to_thread  # noqa: E402
 from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
+from mcp.types import ToolAnnotations  # noqa: E402
 # ``Annotated[T, Field(description=...)]`` on a tool signature is how a
 # per-argument contract reaches the client: FastMCP builds each tool's
 # inputSchema from a pydantic model derived from the signature
@@ -215,12 +216,42 @@ def _async_offload(fn):
     return _run
 
 
+# Hints describe user-visible bank operations. Retrieval may update access
+# telemetry, but does not create/edit claims. memory_get explicitly reinforces
+# retention, so it is a write. Mixed-action tools (dream, review, toolset) are
+# writes even when a particular invocation only requests status.
+_READ_ONLY_TOOLS = {
+    "memory_search", "memory_recent", "memory_stats", "memory_fact_get",
+    "memory_history", "memory_world_search", "memory_lesson_search",
+    "memory_episode_summary", "memory_consolidation_candidates",
+    "memory_graph", "memory_recall", "document_search",
+}
+_DESTRUCTIVE_TOOLS = {
+    "memory_supersede", "memory_forget", "memory_fact_set", "memory_set_remove",
+    "memory_fact_resolve", "memory_consolidate", "memory_graph_unrelate",
+    "memory_graph_review", "memory_dream", "memory_world_set",
+    "memory_graph_relate", "memory_alias", "memory_relation_define",
+    # Reingest upserts existing chunks; configured auto-promotion can replace
+    # a cortex value even though the top-level store operation is additive.
+    "memory_store", "document_ingest",
+}
+
+
+def _annotations(name: str) -> ToolAnnotations:
+    return ToolAnnotations(
+        read_only_hint=name in _READ_ONLY_TOOLS,
+        destructive_hint=name in _DESTRUCTIVE_TOOLS,
+        idempotent_hint=False,
+        open_world_hint=name in {"memory_dream"},
+    )
+
+
 def _tool(*, tier: str = "full"):
     """Record the tool's tier and register it (always — tiers gate
     visibility in tools/list, not existence)."""
     def deco(fn):
         _TOOL_TIERS[fn.__name__] = tier
-        mcp.tool()(_async_offload(fn))
+        mcp.tool(annotations=_annotations(fn.__name__))(_async_offload(fn))
         return fn  # module attr stays the plain sync fn (tests / Console)
     return deco
 
@@ -803,7 +834,7 @@ async def memory_toolset(
 # (send_tool_list_changed), so it skips the _async_offload thread hop — its
 # body is dict ops only and cannot block the event loop.
 _TOOL_TIERS["memory_toolset"] = "minimal"
-mcp.tool()(memory_toolset)
+mcp.tool(annotations=_annotations("memory_toolset"))(memory_toolset)
 
 
 # core memory_fact_get returns source_entries ids —

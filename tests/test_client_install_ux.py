@@ -139,24 +139,16 @@ def test_codex_http_auth_uses_supported_token_configuration() -> None:
     assert 'bearer_token_env_var = "PSEUDOLIFE_MCP_TOKEN"' in readme
 
 
-def test_hook_installers_wire_user_prompt_submit_for_claude() -> None:
-    """Non-plugin Claude installs get the every-turn mid-session discipline
-    line too (UserPromptSubmit), including the recall-before-review clause —
-    the one-shot session-start briefing loses salience over a long session
-    (2026-08-25 finding). Claude client only: Codex per-prompt hook support
-    is unverified, and every new Codex hook needs a manual trust review
-    (2026-08-28), so the installer must not silently write one there."""
+def test_hook_installers_wire_user_prompt_submit_for_both_clients() -> None:
+    """Both clients get the per-turn reminder; Codex runs it after trust."""
     ps = _read("ops/install-hook.ps1")
     sh = _read("ops/install-hook.sh")
     for text in (ps, sh):
         assert "UserPromptSubmit" in text
         assert "reviewing code, docs, or a PR" in text
-    # Pin the client gating itself — a refactor that hoists the wiring out of
-    # the guard would silently write an untrusted per-prompt hook into every
-    # Codex install. (Line identity + idempotency needle are pinned by
-    # test_plugin_packaging.py::test_discipline_line_synced_across_plugin_and_installers.)
-    assert 'if [ "$CLIENT" = claude ]' in sh
-    assert 'if ($Client -eq "claude")' in ps
+    # Line identity is pinned by test_plugin_packaging.py.
+    assert 'UPS_COMMAND="echo' in sh
+    assert 'if ($Client -in "claude", "codex")' in ps
 
 
 def test_installers_offer_dreamer_model_choice() -> None:
@@ -364,26 +356,19 @@ def test_installers_pass_writer_id_on_registration_with_a_flagless_fallback() ->
         assert "codex mcp add pseudolife-memory -- pseudolife-mcp" in text
 
 
-def test_installers_skip_codex_hook_on_windows() -> None:
-    """Codex hooks are not available on Windows, so install.ps1 must gate the
-    Codex hook install on the OS and say what replaces it (the standing
-    AGENTS.md block). The .sh installer never runs on Windows and carries no
-    such gate."""
+def test_installers_support_codex_hook_on_windows() -> None:
+    """Current runtimes support Windows; the installer must say so."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
-    assert "$IsWindows" in ps
-    assert "the standing AGENTS.md block is the briefing there" in ps
+    assert "Current Codex runtimes enable hooks by default, including Windows" in ps
     assert "$IsWindows" not in sh
 
 
-def test_hook_installer_explains_experimental_codex_opt_in() -> None:
-    """Codex hooks are off by default: writing hooks.json is not enough, the
-    user must also opt in via [features] codex_hooks = true in config.toml
-    (and then trust the hook — test_codex_hook_install_explains_required_
-    trust_review pins that part)."""
+def test_hook_installer_explains_codex_runtime_and_policy() -> None:
+    """Document intentional disablement and retain the separate trust step."""
     for rel in ("ops/install-hook.sh", "ops/install-hook.ps1", "README.md"):
         text = _read(rel)
-        assert "codex_hooks = true" in text, rel
+        assert "hooks = false" in text, rel
         assert "[features]" in text, rel
 
 
@@ -438,7 +423,7 @@ def test_providers_guide_matches_installer_matrix() -> None:
         assert label in guide, f"providers guide missing: {label}"
     for writer in ("claude-code", "codex", "gemini", "mcp-client"):
         assert writer in guide, f"providers guide missing writer id: {writer}"
-    assert "codex_hooks = true" in guide
+    assert "commandWindows" in guide
     assert "@AGENTS.md" in guide
 
 
@@ -525,13 +510,11 @@ def test_capability_matrix_is_synced_across_installers() -> None:
 
 
 def test_capability_matrix_states_codex_hook_limits() -> None:
-    """The matrix must be honest about Codex hooks: experimental opt-in via
-    config.toml, and unavailable on Windows (there the standing AGENTS.md
-    block IS the briefing — which is why append is recommended)."""
+    """The matrix separates supported runtime behavior from hook trust."""
     joined = "\n".join(_heredoc_payload(
         _marker_block(_read("ops/install.sh"), "capability-matrix")))
-    assert "codex_hooks = true" in joined
-    assert "NOT available on Windows" in joined
+    assert "enable hooks by default, including Windows" in joined
+    assert "Review and trust" in joined
 
 
 def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:

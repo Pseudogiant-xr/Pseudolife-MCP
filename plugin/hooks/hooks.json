@@ -7,6 +7,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event UserPromptSubmit",
             "timeout": 5
           }
         ]
@@ -18,6 +19,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SessionStart",
             "timeout": 15
           }
         ]
@@ -29,6 +31,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SessionEnd",
             "timeout": 10
           }
         ]

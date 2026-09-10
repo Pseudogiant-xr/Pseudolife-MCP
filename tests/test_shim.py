@@ -110,6 +110,131 @@ def test_shim_autostarts_daemon_and_proxies(tmp_path):
         _reap_daemon(port)
 
 
+def test_shim_forwards_initialize_instructions_and_tool_annotations(shared_daemon):
+    """Compare actual wire handshakes; a healthy /health cannot prove this."""
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        from mcp.client.streamable_http import streamable_http_client
+
+        url = f"http://127.0.0.1:{shared_daemon['port']}/mcp"
+        async with streamable_http_client(url) as (r, w):
+            async with ClientSession(r, w) as direct:
+                upstream = await direct.initialize()
+                direct_tools = (await direct.list_tools()).tools
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"],
+            env=_shim_env(shared_daemon["port"], shared_daemon["data_dir"]),
+        )
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as client:
+                downstream = await client.initialize()
+                assert upstream.instructions and "memory_search" in upstream.instructions
+                assert downstream.instructions == upstream.instructions
+                proxied = {t.name: t.annotations for t in (await client.list_tools()).tools}
+                assert proxied == {t.name: t.annotations for t in direct_tools}
+                assert all(a is not None for a in proxied.values())
+
+    import asyncio
+    asyncio.run(asyncio.wait_for(drive(), timeout=60))
+
+
+def test_doctor_checks_registered_runtime_handshake_without_bank_writes(shared_daemon):
+    proc = subprocess.run(
+        [sys.executable, "-m", "pseudolife_memory.cli", "doctor"],
+        env=_shim_env(shared_daemon["port"], shared_daemon["data_dir"]),
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)
+    assert result["ok"] is True
+    assert result["instructions_present"] is True
+    assert result["tools_missing_annotations"] == []
+    assert result["interpreter"] == sys.executable
+
+
+@pytest.mark.parametrize("initial_failure", ["refused", "stalled"])
+def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path, initial_failure):
+    """An optional briefing fetch must not prevent downstream initialize.
+
+    A fixture HTTP server refuses or stalls the first handshake, then accepts the next
+    one. The same stdio process must remain usable for subsequent tool lists.
+    """
+    import asyncio
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    class Handler(BaseHTTPRequestHandler):
+        initializations = 0
+
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            method = request["method"]
+            if method == "initialize":
+                Handler.initializations += 1
+                if Handler.initializations == 1:
+                    if initial_failure == "stalled":
+                        time.sleep(12)
+                    self.send_response(401)
+                    self.end_headers()
+                    return
+                result = {"protocolVersion": request["params"]["protocolVersion"],
+                          "capabilities": {"tools": {}},
+                          "serverInfo": {"name": "fixture", "version": "1"}}
+            elif method == "tools/list":
+                result = {"tools": [{"name": "fixture_tool", "inputSchema": {"type": "object"}}]}
+            else:
+                self.send_response(202)
+                self.end_headers()
+                return
+            body = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self.send_response(405)
+            self.end_headers()
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=http.serve_forever, daemon=True)
+    worker.start()
+
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(command=sys.executable, args=["-c",
+            "import asyncio, sys; from pseudolife_memory.shim import _proxy; "
+            "asyncio.run(_proxy(sys.argv[1], 'fixture-secret', 'fixture-session'))",
+            f"http://127.0.0.1:{http.server_port}"])
+        with (tmp_path / "shim-stderr.txt").open("w", encoding="utf-8") as errlog:
+            async with stdio_client(params, errlog=errlog) as (read, write):
+                async with ClientSession(read, write) as client:
+                    # Leave margin around the shim's optional-fetch deadline,
+                    # but remain well below the upstream transport's 300s read.
+                    initialized = await asyncio.wait_for(client.initialize(), timeout=9)
+                    assert not initialized.instructions
+                    assert [t.name for t in (await client.list_tools()).tools] == ["fixture_tool"]
+        errors = (tmp_path / "shim-stderr.txt").read_text(encoding="utf-8")
+        assert "instructions unavailable" in errors
+        assert "fixture-secret" not in errors
+        assert "Traceback" not in errors
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), timeout=20))
+        assert Handler.initializations == 2
+    finally:
+        http.shutdown()
+        http.server_close()
+        worker.join(timeout=2)
+
+
 def test_shim_survives_idle_gap(shared_daemon):
     """Two calls separated by an idle gap must both succeed.
 

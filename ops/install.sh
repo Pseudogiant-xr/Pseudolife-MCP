@@ -14,12 +14,13 @@
 #
 # Providers (--client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
-#   codex     OpenAI Codex   - MCP + SessionStart briefing (opt-in, not Windows)
+#   codex     OpenAI Codex   - MCP + hooks selected with --codex-hooks
 #   gemini    Gemini CLI     - MCP + standing instructions (no hook system)
 #   generic   any MCP agent  - prints paste-ready config + standing block
 #   both = claude,codex      all = claude,codex,gemini
 #
 # Other flags:
+#   --codex-hooks manual|plugin|skip  hook owner (default: skip)
 #   --instructions append|skip|auto  standing memory block (default: auto -
 #                                    prompts only where no briefing hook exists)
 #   --claude-md append|skip          compatibility alias for --instructions
@@ -44,6 +45,7 @@ set -euo pipefail
 EXTRACTOR=""
 MODEL=""
 CLIENT=""
+CODEX_HOOKS=skip
 CLAUDE_MD=""
 INSTRUCTIONS=""
 AGENTS_FILE=""
@@ -63,6 +65,7 @@ while [ $# -gt 0 ]; do
         --extractor) EXTRACTOR="$2"; shift 2 ;;
         --model) MODEL="$2"; shift 2 ;;
         --client) CLIENT="$2"; shift 2 ;;
+        --codex-hooks) CODEX_HOOKS="$2"; shift 2 ;;
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
         --instructions) INSTRUCTIONS="$2"; shift 2 ;;
         --agents-file) AGENTS_FILE="$2"; shift 2 ;;
@@ -87,6 +90,9 @@ case "$INSTRUCTIONS" in ""|append|skip|auto) ;; *)
 esac
 case "$TRANSPORT" in shim|http) ;; *)
     echo "invalid --transport '$TRANSPORT' (shim|http)" >&2; exit 2 ;;
+esac
+case "$CODEX_HOOKS" in manual|plugin|skip) ;; *)
+    echo "invalid --codex-hooks '$CODEX_HOOKS' (manual|plugin|skip)" >&2; exit 2 ;;
 esac
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -166,7 +172,7 @@ show_matrix() {
   Agent         MCP          Briefing        Per-turn  Standing file
   ------------  -----------  --------------  --------  ---------------------
   Claude Code   shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
-  OpenAI Codex  shim / HTTP  hook (see *)    no        ~/.codex/AGENTS.md
+  OpenAI Codex  shim / HTTP  hook (see *)    yes       ~/.codex/AGENTS.md
   Gemini CLI    shim / HTTP  none            no        ~/.gemini/GEMINI.md
   Other agent   stdio/HTTP   none            no        AGENTS.md (your path)
 
@@ -174,12 +180,10 @@ show_matrix() {
   MCP server `instructions` field - the memory loop delivered by the
   protocol itself.
 
-  * Codex hooks are EXPERIMENTAL and off by default: set
-        [features]
-        codex_hooks = true
-    in ~/.codex/config.toml, then review and trust the hook in /hooks.
-    Codex hooks are NOT available on Windows - there the standing AGENTS.md
-    block is the briefing, which is why appending it is recommended.
+  * Current Codex runtimes enable hooks by default, including Windows.
+    Review and trust new or changed hooks in /hooks before they run.
+    Support depends on the runtime and policy, not the selected model.
+    Use a standing AGENTS.md block if hooks are disabled or unavailable.
 PL_MATRIX
 }
 # <<< capability-matrix <<<
@@ -239,7 +243,7 @@ if [ -z "$CLIENT" ]; then
         echo "Which coding agents should this install wire up?"
         echo ""
         echo "  1) Claude Code    full parity: MCP + SessionStart briefing + per-turn discipline"
-        echo "  2) OpenAI Codex   MCP + SessionStart briefing (opt-in, trust review, not on Windows)"
+        echo "  2) OpenAI Codex   MCP + session and per-turn hooks (trust review)"
         echo "  3) Gemini CLI     MCP + standing instructions (Gemini CLI has no hook system)"
         echo "  4) Other MCP agent  Cursor / Windsurf / Zed / Copilot CLI / anything else:"
         echo "                      prints ready-to-paste config, offers the standing block"
@@ -519,8 +523,8 @@ fi
 
 # ── 9. session lifecycle hooks (hook-capable providers only) ───────────────
 # claude: unless the plugin already owns the hooks. codex: hooks exist but
-# are experimental and opt-in — install-hook prints the trust-review and
-# [features] codex_hooks guidance. gemini/generic: no hook system.
+# need trust review — install-hook prints the runtime and policy guidance.
+# gemini/generic: no hook system.
 if grep -q "pseudolife-memory@pseudolife-mcp" \
         "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
     CLAUDE_PLUGIN_INSTALLED=1
@@ -542,6 +546,11 @@ for selected_client in $CLIENTS; do
         HOOK_CLAUDE=plugin
         continue
     fi
+    if [ "$selected_client" = codex ] && [ "$CODEX_HOOKS" != manual ]; then
+        HOOK_CODEX="$CODEX_HOOKS"
+        step "Codex hook source: $CODEX_HOOKS. No manual hooks written; use --codex-hooks manual for installer hooks or --codex-hooks plugin for an enabled plugin."
+        continue
+    fi
     step "Installing $selected_client session hook..."
     "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
     if [ "$selected_client" = claude ]; then HOOK_CLAUDE=hook; else HOOK_CODEX=hook; fi
@@ -550,8 +559,8 @@ done
 # ── 10. standing memory instructions (consent; never edited without it) ────
 # Default is `auto`: skip wherever a session-start briefing already delivers
 # the block (claude hook/plugin, codex hook), and offer an interactive append
-# where none exists (gemini, generic). `auto` never writes a standing file in
-# a non-interactive run; --instructions append behaves exactly as before.
+# where none exists (including codex with hooks skipped). `auto` never writes
+# a standing file in a non-interactive run; --instructions append is explicit.
 instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 INSTR_CLAUDE=""
 INSTR_CODEX=""
@@ -602,10 +611,21 @@ for selected_client in $CLIENTS; do
     choice="$instruction_choice"
     if [ "$choice" = auto ]; then
         case "$selected_client" in
-            claude|codex)
+            claude)
                 # A session-start briefing hook already delivers the block —
                 # a standing-file copy would double-inject.
                 choice=skip ;;
+            codex)
+                if [ "$HOOK_CODEX" = hook ] || [ "$HOOK_CODEX" = plugin ]; then
+                    choice=skip
+                elif [ -t 0 ]; then
+                    printf 'No Codex briefing hook selected - append the standing memory block to %s? [Y/n] ' "$instruction_path"
+                    read -r yn
+                    case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
+                else
+                    choice=skip
+                    step "Codex has no selected briefing hook. Use --instructions append for the standing block, or select --codex-hooks manual|plugin."
+                fi ;;
             gemini)
                 if [ -t 0 ]; then
                     printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"
@@ -903,11 +923,15 @@ for selected_client in $CLIENTS; do
             echo "    [x] MCP transport        $(describe_mcp "$MCP_CODEX")"
             echo "    [x] Server instructions  automatic (MCP instructions field)"
             if [ "$HOOK_CODEX" = hook ]; then
-                echo "    [x] Session briefing     hook written - enable codex_hooks = true, then trust it in /hooks"
+                echo "    [x] Session briefing     hook written - review and trust it in /hooks"
+                echo "    [x] Per-turn discipline  hook written - review and trust it in /hooks"
+            elif [ "$HOOK_CODEX" = plugin ]; then
+                echo "    [-] Session/per-turn     delegated to plugin - verify enabled and trusted in /hooks"
             else
-                echo "    [!] Session briefing     not installed - re-run: ops/install-hook.sh --client codex"
+                echo "    [-] Session/per-turn     skipped - use --codex-hooks manual or plugin"
             fi
-            echo "    [!] Per-turn discipline  unavailable - Codex has no per-prompt hook"
+            echo "    Verify runtime: codex mcp get pseudolife-memory; run doctor from that command's environment."
+            echo "    In its existing config.toml table set startup_timeout_sec = 240, tool_timeout_sec = 180, required = true."
             describe_instr "$INSTR_CODEX" | sed 's/^/    /' ;;
         gemini)
             echo "  Gemini CLI"

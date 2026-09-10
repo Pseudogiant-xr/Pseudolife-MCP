@@ -29,17 +29,13 @@ fi
 SETTINGS_PATH="${1:-$default_settings}"
 COMMAND="${2:-pseudolife-mcp briefing --hook-json}"
 
-# Every-turn memory-discipline line (UserPromptSubmit), Claude client only:
-# Codex per-prompt hook support is unverified, and every new Codex hook
-# needs a manual trust review — don't silently write one there. Static echo
+# Every-turn memory-discipline line (UserPromptSubmit), both clients.
+# Codex requires review and trust before newly installed hooks run. Static echo
 # (no daemon call): the one-shot session-start briefing loses salience over
 # a long session; this keeps the loop — including recall-before-review —
 # mechanical. Keep the line free of quote characters (it nests in JSON+sh).
 DISCIPLINE_LINE="Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
-UPS_COMMAND=""
-if [ "$CLIENT" = claude ]; then
-  UPS_COMMAND="echo '$DISCIPLINE_LINE'"
-fi
+UPS_COMMAND="echo '$DISCIPLINE_LINE'"
 
 # Prefer python3 but accept python (verified runnable — Windows ships a
 # python3 Store stub that "exists" yet exits with an install nag).
@@ -130,11 +126,9 @@ if [ "$CLIENT" = codex ]; then
   echo ""
   echo "IMPORTANT: Codex will skip this new or changed hook until you review and trust its exact definition."
   echo "  Start Codex, open /hooks, review the definition from $SETTINGS_PATH, and approve it."
-  echo "NOTE: Codex hooks are experimental and OFF by default - enable the engine"
-  echo "  first in ~/.codex/config.toml (and note hooks are not available on"
-  echo "  Windows - use the standing AGENTS.md block there instead):"
-  echo "    [features]"
-  echo "    codex_hooks = true"
+  echo "Current Codex runtimes enable hooks by default, including Windows."
+  echo "  Check /hooks for trust or managed-policy blocks; older runtimes may need updating."
+  echo "  If [features] hooks = false is intentional, use the standing AGENTS.md block."
 fi
 
 # The hooks wire the session lifecycle, but the memory LOOP only fires if a

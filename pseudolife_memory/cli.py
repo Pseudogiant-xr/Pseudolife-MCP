@@ -25,6 +25,7 @@ modes:
   embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
   briefing       print the session-start briefing (for a SessionStart hook;
                  --hook-json emits Claude Code/Codex hook JSON)
+  doctor         check this runtime, daemon health and MCP handshake (no writes)
   backup         back up the bank: pg_dump + state archive with rotation
                  (pip tiers; the Docker tier keeps ops/backup.ps1)
   export         write a portable logical export of the bank (ZIP of JSONL
@@ -55,6 +56,9 @@ def main() -> None:
     elif mode == "briefing":
         from pseudolife_memory.briefing_cli import run_briefing
         run_briefing()
+    elif mode == "doctor":
+        from pseudolife_memory.doctor_cli import run_doctor
+        run_doctor()
     elif mode == "backup":
         from pseudolife_memory.backup_cli import run_backup
         run_backup()

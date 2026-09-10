@@ -31,6 +31,19 @@ Restart Claude Code (or `/reload-plugins`). If the daemon is running you'll
 see the memory briefing at the top of each session; if not, the session tells
 you how to start it.
 
+## Codex compatibility
+
+When loaded by a current Codex runtime, the plugin's lifecycle hooks use the
+same events. On Windows, `commandWindows` runs native PowerShell 7 helpers;
+Claude keeps the Bash commands. Open `/hooks` and review and trust the exact
+definitions before expecting them to run. A plugin installation or a passing
+script fixture does not prove a particular app has invoked its hooks.
+
+Use either the plugin hooks or `ops/install-hook.*`, so the same event does
+not run twice. Keep a single MCP transport registration, and follow the
+[Codex setup and verification guide](../docs/guide/providers.md#codex-specifics)
+for startup budgets, standing instructions and runtime diagnostics.
+
 ## Why no bundled MCP server?
 
 Earlier versions shipped an HTTP server entry in the plugin. Claude Code

@@ -86,7 +86,7 @@ artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
 
-Two commands. No Docker, no database to set up, no container runtime:
+Install and register the lite tier. No Docker, no database to set up, no container runtime:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
@@ -97,8 +97,27 @@ Codex instead of Claude Code — same shape:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory -- pseudolife-mcp
+codex mcp add pseudolife-memory --env PSEUDOLIFE_WRITER_ID=codex -- pseudolife-mcp
 ```
+
+For Codex, finish setup before starting a fresh task. In the existing
+`[mcp_servers.pseudolife-memory]` table in `~/.codex/config.toml`, add
+`startup_timeout_sec = 240`, `tool_timeout_sec = 180`, and `required = true`.
+The shim can wait up to 180 seconds for a cold daemon; Codex's default
+startup budget is 10 seconds. `required` makes missing memory visible at
+startup and waits for its initial catalog. These are starting budgets,
+not a promise that a first model download fits; prewarm with
+`pseudolife-mcp serve` in a terminal if needed.
+
+The MCP handshake delivers compact recall/capture/reflection instructions.
+For the complete standing guidance, copy the
+[bundled memory block](examples/CLAUDE.memory.md) into your project
+`AGENTS.md` or `~/.codex/AGENTS.md`. For session briefings and per-turn
+reminders, follow [Codex hooks and verification](docs/guide/providers.md#codex-specifics).
+Use one MCP registration and one hook source; an installed plugin may
+already provide either. After the daemon is running, execute
+`pseudolife-mcp doctor` from the **same environment as the registered command**.
+It checks the handshake and annotations without calling bank tools.
 
 Then in either coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
@@ -174,6 +193,10 @@ cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
+# Codex hook source: --codex-hooks manual / -CodexHooks manual
+# Use plugin instead of manual if an enabled plugin owns the hooks; default skip.
+# With hooks skipped, unattended installs need --instructions append / -Instructions append
+# to add the standing memory block; interactive installs offer it.
 # Both:  add --client both  / -Client both
 # Gemini: add --client gemini — or several: --client claude,codex,gemini
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
@@ -715,25 +738,21 @@ One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
 `ops/install-hook.sh --client codex` (Linux/macOS) — installs the
 **SessionStart briefing hook** for the selected client (what your memory is
 unsure about + lessons from past work + verified world facts + where we left
-off, injected at every session start) and, for the Claude client, a
+off, injected at every session start) and a
 **UserPromptSubmit discipline hook**: a static one-line memory reminder on
 every turn — recall before reviewing code, docs, or PRs, then compare memory
 against the files; status questions are memory questions; log outcomes.
-(Codex is excluded from the per-turn hook: its per-prompt hook support is
-unverified, and every new Codex hook needs a manual trust review.) The
+Both Claude Code and current Codex runtimes support these events. The
 installer backs up `~/.claude/settings.json`
 or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
 the briefing budget flags, and how session episodes open/close/resume
 without any hooks: [Episodes & sessions](docs/guide/episodes.md).
 
-**Codex hooks are experimental and off by default** (and not available on
-Windows — use the standing AGENTS.md block there). Writing `hooks.json` is
-not enough on its own; first enable the hook engine in `~/.codex/config.toml`:
-
-```toml
-[features]
-codex_hooks = true
-```
+**Current Codex runtimes enable hooks by default, including Windows.**
+Availability depends on the application/runtime and policy, not the model.
+If `[features] hooks = false` is intentional, keep it and use the standing
+`AGENTS.md` block. Windows plugin hooks use native PowerShell 7 commands.
+See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** Codex also skips every new or changed hook until you
 review and trust its exact definition. After installing the Codex hook, start

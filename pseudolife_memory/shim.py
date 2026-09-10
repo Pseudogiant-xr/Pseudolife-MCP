@@ -375,6 +375,7 @@ def _toolset_changed(result) -> bool:
 
 
 async def _proxy(url: str, token: str | None, session_uid: str) -> None:
+    import asyncio
     import contextlib
 
     from mcp.client.session import ClientSession
@@ -407,8 +408,8 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
                 url + "/mcp", http_client=http,
             ) as (read, write):
                 async with ClientSession(read, write) as remote:
-                    await remote.initialize()
-                    yield remote
+                    initialization = await remote.initialize()
+                    yield remote, initialization
 
     # v2 low-level handlers are constructor params taking (ctx, params) and
     # returning result types verbatim. The proxy registers NO tool schemas of
@@ -419,11 +420,11 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     async def _list_tools(ctx, params):
         # Forward pagination params verbatim — swallowing a client cursor
         # would replay page 1 forever if the daemon ever paginates.
-        async with _upstream() as remote:
+        async with _upstream() as (remote, _):
             return await remote.list_tools(params=params)
 
     async def _call_tool(ctx, params):
-        async with _upstream() as remote:
+        async with _upstream() as (remote, _):
             # Seed the output-schema cache: v2's call_tool otherwise fetches
             # the full 35-tool manifest (list_tools) on every call to
             # revalidate structured output — and this session is fresh per
@@ -453,8 +454,27 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     # derivation advertise tools.listChanged — without it, modern clients
     # are told the list never changes and the bus has no outlet.
     bus = InMemorySubscriptionBus()
+    # Instructions belong to the running daemon, not this installed shim's
+    # source version. Fetch before the downstream initialize handshake; keep
+    # per-call connections so idle reconnect behavior remains unchanged.
+    async def _fetch_instructions():
+        async with _upstream() as (_, initialization):
+            return initialization.instructions
+
+    instructions = None
+    try:
+        # Reserve time within Codex's default 10s startup budget for the
+        # downstream handshake; the upstream HTTP read default is 300s.
+        instructions = await asyncio.wait_for(_fetch_instructions(), timeout=5)
+    except Exception as exc:
+        # This optional enhancement must not turn a transient MCP refusal
+        # into a dead stdio process. Fresh per-call connections can recover.
+        # Exception text may contain credentials; report only its type.
+        print(f"pseudolife-mcp: instructions unavailable ({type(exc).__name__}); "
+              "check daemon MCP access and reconnect for startup guidance.", file=sys.stderr)
     server = Server(
         "pseudolife-memory",
+        instructions=instructions,
         on_list_tools=_list_tools,
         on_call_tool=_call_tool,
         on_subscriptions_listen=ListenHandler(bus),

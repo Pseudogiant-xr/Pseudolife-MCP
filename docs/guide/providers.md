@@ -2,8 +2,8 @@
 
 The daemon speaks MCP, so any MCP-capable coding agent can use the same
 bank. What differs per agent is how much of the **memory loop enforcement**
-its platform can carry: Claude Code has a full hook system, Codex has an
-experimental one, Gemini CLI has none, and generic MCP clients only get
+its platform can carry: Claude Code and current Codex runtimes have
+lifecycle hooks, while generic MCP clients only get
 what the protocol itself delivers. This page is the honest map — what each
 provider gets, what its platform cannot support, and what to do about the
 gaps. The installer (`ops/install.sh` / `ops\install.ps1`) wires all of
@@ -15,18 +15,18 @@ run.
 | Agent | MCP transport | Session briefing | Per-turn discipline | Standing file |
 |---|---|---|---|---|
 | Claude Code | stdio shim / HTTP | SessionStart hook or plugin | UserPromptSubmit hook | `~/.claude/CLAUDE.md` |
-| OpenAI Codex | stdio shim / HTTP | SessionStart hook (opt-in\*, not on Windows) | — | `~/.codex/AGENTS.md` |
+| OpenAI Codex | stdio shim / HTTP | SessionStart hook (trust required\*) | UserPromptSubmit hook | `~/.codex/AGENTS.md` |
 | Gemini CLI | stdio shim / HTTP | — | — | `~/.gemini/GEMINI.md` |
 | Other MCP agent | stdio / HTTP (pasted config) | — | — | `AGENTS.md` (your path) |
 
-\* Codex hooks are experimental and off by default — see
+\* Hook availability depends on the runtime and policy — see
 [Codex specifics](#codex-specifics) below.
 
 Every agent also gets, with no files touched: the **memory tools**, and the
 MCP server **`instructions` field** — a compact statement of the memory
-loop that any conforming client shows its model at connect time. That field
+loop supplied at connect time; the client controls how it uses that field. It
 is deliberately client-neutral and capped at 512 characters (guard-tested),
-so it works identically everywhere.
+and the stdio shim forwards the running daemon's value unchanged.
 
 ## The hook-equivalent ladder
 
@@ -46,10 +46,10 @@ each platform supports:
 4. **SessionStart briefing hook** — the daemon-served briefing (memory-loop
    block + what your memory is unsure about + lessons + where you left
    off) injected at session start. Claude Code (hook or plugin), Codex
-   (opt-in, not on Windows).
+   (review and trust the hook definitions first).
 5. **Per-turn discipline line** — a one-line reminder injected on every
    prompt (recall before review, status questions are memory questions,
-   log outcomes). Claude Code only.
+   log outcomes). Claude Code and current Codex runtimes.
 
 ## One more axis: who dreams
 
@@ -83,22 +83,107 @@ Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 ## Codex specifics
 
 MCP wiring is first-class (`codex mcp add`, shim or `--url` HTTP;
-`PSEUDOLIFE_WRITER_ID=codex`). The session briefing needs Codex's hook
-engine, which is **experimental and off by default**:
+`PSEUDOLIFE_WRITER_ID=codex`). Current Codex runtimes support SessionStart
+and UserPromptSubmit on Windows as well as Unix. Hooks are enabled by
+default; the canonical feature key is `hooks` (`codex_hooks` is a deprecated
+alias). A managed policy or `[features] hooks = false` can disable them.
+This is runtime support, not a model capability or a promise about ordinary
+ChatGPT conversations. See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
-```toml
-# ~/.codex/config.toml
-[features]
-codex_hooks = true
-```
+Run `ops/install-hook.ps1 -Client codex` on Windows (PowerShell 7), or
+`ops/install-hook.sh --client codex` on Unix. Both write SessionStart and
+UserPromptSubmit to `~/.codex/hooks.json`, preserving unrelated hooks.
+For the full Docker installer, explicitly choose `-CodexHooks manual`
+(`--codex-hooks manual` on Unix), or `plugin` if an enabled plugin owns those
+events. The default `skip` leaves existing hooks alone on reruns; it never
+guesses plugin ownership. This choice does not enable or trust a plugin, and
+switching to `plugin` does not delete old manual hooks: review duplicate sources
+in `/hooks` before enabling both. With hooks skipped, an interactive install
+offers the standing block on every supported OS. For an unattended install,
+pass `--instructions append` (`-Instructions append` in PowerShell) to add it;
+the default `auto` prints guidance and leaves the standing file alone. Selecting
+`manual` or `plugin` skips that automatic offer; explicit `append` still adds
+the fallback while hook definitions await trust.
 
-Then `ops/install-hook.sh --client codex` writes the SessionStart hook into
-`~/.codex/hooks.json`, and Codex still skips it until you review and trust
-its exact definition (start Codex, open `/hooks`, approve). Two further
-limits: Codex hooks are **not available on Windows** — there the standing
-`~/.codex/AGENTS.md` block is the briefing, and the installer offers to
-append it — and Codex has no per-prompt hook, so the per-turn discipline
-line has no Codex equivalent anywhere.
+The Windows installer and plugin supply
+`commandWindows` overrides; Claude
+keeps its Bash plugin commands. Plugin SessionEnd on Windows uses a bounded
+request inside Codex's three-second maximum, with idle reaping as fallback.
+SessionStart retries one transient failure within its 15-second budget. The
+native command escapes non-ASCII context so redirected JSON stays valid under
+Windows OEM code pages as well as UTF-8.
+
+**A file write is not an active hook.** Start Codex, open `/hooks`, review
+and trust the exact definitions, then start a new task and inspect its hook
+results. New or changed definitions require review again. Do not install
+manual hooks alongside an enabled plugin providing the same events: matching
+sources all run. The native Windows commands are exercised in isolated
+fixtures; this does not establish that a particular desktop app installation
+has loaded, trusted, and invoked them. Keep the standing memory block in
+`AGENTS.md` when hooks are unavailable or awaiting trust.
+
+### Verify the registered runtime
+
+1. Inspect `codex mcp list` and `codex mcp get pseudolife-memory` (or the
+   plugin's MCP configuration). Keep one registration. Identify the exact
+   executable; a repo venv can differ from a global executable or plugin cache.
+2. In that environment run `pseudolife-mcp doctor`. It reports interpreter,
+   source path, installed package/SDK versions, health, instructions and tool
+   annotations. It neither starts a daemon nor calls a bank tool. A healthy
+   endpoint alone does not establish a working stdio handshake.
+   An unreachable daemon report tells you to start it; a handshake timeout
+   suggests checking MCP access and increasing `doctor --timeout` if needed.
+   If the shim cannot fetch startup instructions within five seconds, it logs
+   a sanitized stderr message and still initializes. Tool requests retain their own fresh upstream
+   connections, but persistent authentication failures still need correction;
+   reconnect after recovery to receive the startup guidance.
+3. Run that interpreter with `-m pip check` and `-m pip show pseudolife-mcp mcp`.
+   For a stale published installation, use that interpreter's
+   `-m pip install --upgrade "pseudolife-mcp[lite]"`; for a source checkout,
+   reinstall the intended checkout with `-m pip install -e .` to refresh
+   dependencies and editable metadata. Docker shim-only hosts omit `[lite]`.
+   Re-running the Docker installer preserves existing registrations; it does
+   not repair a different interpreter already registered with Codex.
+4. Reconnect and ask for a real memory search and lesson search. Confirm the
+   tools are callable in the new task; `doctor` only proves protocol inventory.
+   Store a truthful decision and verify it from another task when testing writes.
+
+For a cold lite daemon, add `startup_timeout_sec = 240`,
+`tool_timeout_sec = 180`, and `required = true` to the existing MCP server
+table. This allows the shim's 180-second startup wait plus handshake margin;
+the tool budget allows first-call model loading. Prewarm the daemon if the
+initial model download takes longer. `required` waits for memory's initial
+catalog and makes startup failure explicit. Codex otherwise has a 10-second
+startup timeout and may assemble an optional catalog earlier. See
+[official MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+### Discovery and approvals
+
+Prefer the needed catalog at connection time. An unconfigured daemon defaults
+to `full`; deployments can override that with a principal-specific tier map.
+For clients that retain their initial catalog, the operator can explicitly
+choose `codex:full` in `PSEUDOLIFE_MCP_TIER_MAP` for the intended identity and
+then reconnect. Do not change the shared default or another principal simply
+to discover one tool. A bearer principal takes precedence over writer identity;
+check which identity the registration actually uses.
+
+A September 2026 Codex check expanded core to full: the server listed 35 tools
+and sent `list_changed`, but the running turn retained its initial 22 callable
+tools. That verifies a current-turn limit only. After expansion, check a fresh
+task/reconnection's actual callable catalog; do not infer success from the
+server inventory or notification. Client `enabled_tools`/`disabled_tools`
+filters can narrow it further.
+
+All tools carry approval hints. Searches are read operations over claims;
+access telemetry can still update. Explicit retention reinforcement and tools
+mixing status with mutation (toolset, dream, graph review) are marked writes.
+Destructive hints also cover replacing document chunks during reingestion and
+replacing canonical facts through `memory_store` when auto-promotion is enabled.
+Hints inform a client's `default_tools_approval_mode = "writes"`; they are not
+authorization and do not override per-tool approval settings or managed policy.
+An allow-once prompt does not guarantee durable approval. Inspect any existing
+`tools.<tool>.approval_mode` override if prompts differ from the server default;
+the installer and doctor do not change approval policy.
 
 Codex can also filter tools **client-side, per project**: a project-scoped
 `.codex/config.toml` (loaded for trusted projects only) may register the
@@ -119,8 +204,8 @@ This complements the daemon's server-side
 [toolset tiers](configuration.md#toolset-tiers): tiers key the roster to
 the caller's identity for every session, while `enabled_tools` narrows it
 further for a single project without touching the daemon. One operational
-note (verified live 2026-08-31): Codex does not hot-reload newly added MCP
-servers — restart the session after registering one.
+note: reconnect after registering a server and verify a real tool call in
+the new task rather than relying on a config write.
 
 ## Gemini CLI
 
