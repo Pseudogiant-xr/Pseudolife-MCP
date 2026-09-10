@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-11 — regression gate input requirements)
+- The regression gate rejects a missing bank directory as an infrastructure failure
+  before clearing prior results or starting its GPU server. It no longer falls
+  back to copied contexts that could pass without testing fact ranking.
+  Its documented scope now distinguishes offline cortex reconstruction from
+  entry retrieval, service search and MCP rendering.
+
 ### Fixed (2026-09-11 — durable correction warnings)
 - Facts retain their `re_verify` warning when a corrected source memory is
   later evicted or deleted. PostgreSQL schema v39 records source supersession
@@ -29,6 +36,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are classified once against the legacy cursor and source policy; this keeps
   the prior boundary and does not repair historical omissions. File checkpoints
   move to format v7 with durable entry identities and acknowledgement state.
+
+### Security (2026-09-11 — require existing ONNX artifacts)
+- A configured ONNX backend with no matching artifact could enter
+  SentenceTransformers and Optimum's automatic export path. That path saves a
+  model's tokenizer or processor and made Transformers
+  GHSA-xrqw-3rrv-vx5w conditionally reachable for a malicious local or cached
+  model even with Hugging Face offline mode enabled. ONNX loading now verifies
+  the configured artifact for each supported Transformer module and passes
+  its owning local model directory to the backend. Missing files or unknown
+  module layouts fall back to torch before ONNX construction; filenames must
+  use lowercase `.onnx` to match case-sensitive loader discovery. Validated
+  ONNX artifact paths and `modules.json` metadata for local models cannot link
+  outside their root; standard Hub snapshot leaf links are allowed only after
+  local-only cache resolution and only into the same repository's `blobs`
+  directory.
+- With the pinned Optimum stack, native Windows can mis-detect an existing
+  nested ONNX file and enable export despite `export=False`. Native Windows now
+  falls back to torch before ONNX construction; the contained Linux and daemon
+  image route remains enabled.
+- The daemon image explicitly downloads MiniLM's `onnx/model.onnx`, then loads
+  it from the owning local snapshot with export disabled. A missing artifact or
+  incompatible same-revision metadata now fails the build instead of creating
+  an ONNX model implicitly. Dependency versions are unchanged because
+  `optimum-onnx` 0.1.0 still requires Transformers below 4.58.
 
 ### Fixed (2026-09-11 — exact correction targets)
 - Explicit supersede and consolidation calls accept entry IDs from retrieval,
