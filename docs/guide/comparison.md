@@ -68,11 +68,15 @@ overwritten" and "there is one current answer" are different products.
 
 ### Supersession with version history
 
-A correction **supersedes**: the new value becomes current, the old one is
-retained as a dated version with its writer and its **HLC** stamp, and
+A canonical-fact correction **supersedes**: the new value becomes current,
+the old one is retained as a dated version with its writer and its **HLC** stamp, and
 `memory_history(entity, attribute)` prints the timeline. Nothing is
 silently overwritten and nothing is silently duplicated —
 [memory model](memory-model.md#canonical-facts--the-cortex-schema-v8).
+
+Source notes have a separate policy: storing a potential conflict retains
+both notes for retrieval. Replacing a whole source note requires an
+explicit `memory_supersede` or `memory_consolidate` operation.
 
 The word is worth being precise about, because three different behaviours
 get marketed with the same vocabulary:

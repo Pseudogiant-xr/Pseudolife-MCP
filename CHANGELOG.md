@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-10 — preserve source evidence)
+- Automatic contradiction candidates can admit a possible update through
+  the surprise gate, but no longer retire or weaken whole source entries.
+  A conflicting claim does not establish that every claim in a note is
+  obsolete. Explicit supersede/consolidate operations and cortex fact
+  supersession remain available; existing replacement history is preserved.
+- Explicit supersede/consolidate operations bypass surprise filtering for
+  their replacement note, so a near-identical correction is still stored
+  after its target is retired. Ordinary stores retain their admission rules.
+
 ### Fixed (2026-09-10 — scoped entry retrieval)
 - Dense retrieval applies source, episode, tag, logical-turn and optional
   superseded-entry eligibility before each band's candidate cap. Eligible

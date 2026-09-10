@@ -147,26 +147,29 @@ whether a correction reached further than the cap.
 Both signals are **best-effort**, on purpose: they are derived at read
 time from evidence that still exists, so losing the evidence loses the
 flag. `memory_traces.entry_id` is `ON DELETE CASCADE`, a true-drop
-capacity eviction hard-deletes the entry row, and a superseded entry is
-the top eviction candidate (contradiction decay multiplies its surprise by
-0.3) — so a flag can appear and later vanish with no re-verification
-having happened, and `memory_delete`, the strongest retraction of all,
+capacity eviction hard-deletes the entry row, including superseded history
+when selected for eviction — so a flag can appear and later vanish with
+no re-verification having happened, and `memory_delete`, the strongest retraction of all,
 raises no flag at any point. Both are gated on `memory.traces.enabled`;
 turning it off silences both without changing anything else about how
 facts are served.
 
-Since 2026-07-25 **raw band entries follow the same slot rule.** When a
-stored memory and an earlier one assert different values — or opposite
-polarities — at the same normalised `(entity, attribute)` slot, the earlier
-entry is marked superseded. This is deterministic and does not consult
-embeddings, which matters because a value swap is a *minimal* edit: a real
-correction is often more embedding-similar than a harmless near-duplicate,
-so similarity alone is close to a coin flip for this judgment. It runs
-ahead of the similarity-gated heuristics (negation asymmetry, affirmative
-replacement, state transition), which still handle everything without
-slots. Slot extraction is deliberately precision-gated — about 0.6% of
-conversational turns yield one — so this path mostly serves deliberate,
-fact-shaped writes, and its reach grows with extraction quality.
+**Source notes retain their evidence when a potential conflict is stored.**
+The contradiction detector runs before the surprise gate: a different
+value or polarity at the same normalised `(entity, attribute)` slot, or a
+match from its similarity-gated heuristics, lets a potential update pass
+even when it is too similar to existing text to meet a positive surprise
+threshold. A conflict about one detail does not establish that the whole
+earlier note is invalid. Ordinary `memory_store` therefore does not decay
+that note or stamp a supersession mark on it.
+
+Old and new source notes can both compete in retrieval. Use
+`memory_supersede` or `memory_consolidate` when deliberately replacing a
+whole note or cluster; the cortex still supersedes canonical slot values
+under its existing rules. Existing source-note supersession marks and
+history are preserved, with no automatic repair or backfill. Their
+retrieval treatment is described under
+[superseded entries](retrieval.md#superseded-entries).
 
 ### Who said it, and how exactly must it survive? (schema v35)
 

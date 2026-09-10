@@ -24,8 +24,9 @@ the intelligence; this server is its memory on disk.
 What you get:
 
 - **Associative memory with honest forgetting** — a flat similarity store
-  ranked by hybrid dense-plus-lexical retrieval, with contradiction
-  detection and supersession. (The measured verdict: a preregistered
+  ranked by hybrid dense-plus-lexical retrieval, with conflict detection
+  that admits potential updates while preserving earlier source notes;
+  whole-note replacement is explicit. (The measured verdict: a preregistered
   ablation campaign found the previous 8-band continuum tied a flat store
   on every gate, so the simpler structure ships; the continuum remains
   one config line away.)
@@ -297,7 +298,7 @@ one answers*, not who's wrong:
 |---|---|---|---|---|
 | Survives sessions and compactions | yes | yes | yes | yes |
 | "What is X *now*?" has one current answer | if you curate it | no — replays what happened | no — every stored version competes at recall | yes — slot-keyed cortex |
-| A correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | supersedes, with full version history kept |
+| A canonical-fact correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | cortex supersedes, with full version history kept |
 | Facts know their age and go stale | no | no | no | dated, freshness-decayed, quarantined when stale |
 | Distils do/avoid lessons from its own outcomes | no | no | no | yes |
 | Benchmark numbers ship with their raw run artifacts | — | typically no | typically no | every published number, test-enforced |
@@ -310,7 +311,8 @@ cases where one of them is the better pick:
 
 It layers several complementary stores: the **associative store** (a flat
 embedding store ranked by cosine similarity fused with a BM25 lexical pool
-(on by default), with contradiction detection and supersession; an 8-tier
+(on by default), with conflict-aware admission and explicit source-note
+replacement; an 8-tier
 banded layout is available as an opt-in preset); the **cortex** (slot-keyed canonical facts — one *current*
 value per `entity.attribute`, or a member set for set-valued slots — with
 provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
@@ -910,7 +912,7 @@ bank.
 |---|---|
 | Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
 | Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
-| Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
+| Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection admits potential updates, including a deterministic slot-identity path regardless of embedding similarity, while retaining earlier source notes; whole-note supersession requires an explicit replacement operation |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender); an `assistant`-origin add cannot convert or join another tier's set, and cannot retract another tier's member |
 | Provenance contenders | Tier-rank guard `user > action > agent > assistant`; `memory_fact_resolve` |

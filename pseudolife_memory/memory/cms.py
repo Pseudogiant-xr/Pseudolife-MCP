@@ -44,7 +44,7 @@ from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.memory.miras.band import MIRASBand, build_band
 from pseudolife_memory.memory.miras.retention import now_seconds
 from pseudolife_memory.memory.meta_filter import is_meta_statement
-from pseudolife_memory.memory.contradiction import detect_contradictions, decay_contradicted_entries
+from pseudolife_memory.memory.contradiction import detect_contradictions
 from pseudolife_memory.memory.slots import extract_slots
 from pseudolife_memory.memory.bm25 import BM25Index, normalize_scores
 from pseudolife_memory.memory.episodes import EpisodeManager, normalize_tags
@@ -357,6 +357,8 @@ class ContinuumMemorySystem:
         attribution_episode_id: str | None = None,
         authority: str | None = None,
         distortion_tolerance: str | None = None,
+        *,
+        bypass_surprise_gate: bool = False,
     ) -> tuple[bool, float]:
         """Store a new memory through the CMS pipeline.
 
@@ -364,13 +366,15 @@ class ContinuumMemorySystem:
 
         1. Filter self-referential meta-statements.
         2. Compute surprise across all bands (for telemetry + gating).
-        3. Run contradiction detection against every band. Any entry
-           flagged here is both decayed and marked ``superseded_at`` so
-           retrieval hides it from the LLM.
-        4. If a contradiction was found, **bypass the surprise gate**:
-           the correction must land even when it is semantically
-           near-identical to the fact it replaces. Otherwise apply the
-           normal gate.
+        3. Run contradiction detection against every band. A possible
+           conflict admits the new note without retiring or decaying
+           existing source evidence: a conflict may concern only one
+           of the original note's claims.
+        4. If a possible conflict was found, **bypass the surprise gate**:
+           an update must land even when semantically near-identical
+           to prior evidence. Explicit correction operations may also
+           bypass this gate via ``bypass_surprise_gate``. Otherwise apply
+           the normal gate.
         5. Store in the first (fastest) band and periodically promote.
 
         ``attribution_episode_id`` (identity tier 2, spec 2026-07-18):
@@ -389,6 +393,12 @@ class ContinuumMemorySystem:
         the heuristic and the inheritance rules); stamped on the entry
         before the write-through so the row carries them.
 
+        ``bypass_surprise_gate`` is an internal admission override for
+        explicit supersede/consolidate operations, whose targets may
+        already be marked before their replacement reaches this method.
+        It does not bypass the meta filter or authorize changing any
+        existing entry. Source tags never grant this override.
+
         Returns:
             Tuple of ``(was_stored, surprise_score)``.
         """
@@ -405,12 +415,13 @@ class ContinuumMemorySystem:
                 self._surprise_history[b.name] = history[-self._max_history:]
 
         # ── Contradiction detection (runs BEFORE the surprise gate) ───────────
-        # Corrections are often semantically near-identical to the fact
-        # they replace ("dog is Rex" → "dog is Max"), so their surprise is
-        # LOW. If we gated first, the write would be silently dropped and
-        # the old fact would live on forever. Instead: detect first, and
-        # if anything is flagged, force the write through regardless of
-        # surprise.
+        # Updates are often semantically near-identical to prior evidence
+        # ("dog is Rex" → "dog is Max"), so their surprise is LOW. Detect
+        # first so a potential update lands despite the duplicate gate.
+        # Detection is admission evidence only: a whole note can contain
+        # useful claims beyond the conflicting span, even with one
+        # extracted slot. Retirement belongs to explicit operations;
+        # canonical slot supersession remains in the cortex.
         device = "cuda" if torch.cuda.is_available() else "cpu"
         # Extracted once, here, rather than after the write: the slot-identity
         # path needs them, and they are reused for the entry stamp below —
@@ -422,7 +433,6 @@ class ContinuumMemorySystem:
             (s.entity, s.attribute, s.value, s.polarity) for s in extracted_slots
         ]
         contradiction_found = False
-        all_contradicted: list[MemoryEntry] = []
         for band in self.bands:
             contradicted = detect_contradictions(
                 text, embedding, band.entries,
@@ -432,34 +442,11 @@ class ContinuumMemorySystem:
                 new_slots=new_slots,
             )
             if contradicted:
-                all_contradicted.extend(contradicted)
-                # Decay factor is band-policy-specific; pull it from the band's
-                # retention policy rather than hardcoding 0.3.
-                # ``superseding_text=text`` records the new memory's text on
-                # each superseded entry (schema v5, v0.7.6) so the context
-                # builder can show the correction inline even when the new
-                # memory's own embedding misses retrieval.
-                decay_contradicted_entries(
-                    contradicted,
-                    decay_factor=band.retention.decay_factor_on_contradiction,
-                    superseding_text=text,
-                )
                 contradiction_found = True
 
-        if not contradiction_found and overall_surprise < self.config.surprise_threshold:
+        if (not bypass_surprise_gate and not contradiction_found
+                and overall_surprise < self.config.surprise_threshold):
             return False, overall_surprise
-
-        # Write-through: persist supersession marks set by the
-        # contradiction decay above (entries already have rows).
-        if self.storage is not None:
-            for c in all_contradicted:
-                if c.db_id is not None:
-                    self.storage.update_entry(
-                        c.db_id,
-                        superseded_at=c.superseded_at,
-                        superseded_by_text=c.superseded_by_text,
-                        surprise=float(c.surprise_score),
-                    )
 
         # ── Land the write in the first band ──────────────────────────────────
         self.bands[0].store(text, embedding, source=source, surprise=overall_surprise)

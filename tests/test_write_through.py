@@ -212,3 +212,59 @@ def test_supersede_supersession_survives_restart(pg_conn, pg_url, tmp_path):
     entry = _rehydrated(tmp_path, pg_url, "Sky is green")
     assert entry["superseded"] is True
     assert entry["superseded_by_text"] == "Sky is blue"
+
+
+@pytest.mark.parametrize('operation', ['supersede', 'consolidate'])
+def test_explicit_replacement_bypasses_surprise_and_survives_restart(
+    operation, pg_conn, pg_url, tmp_path, monkeypatch,
+):
+    """Retiring a selected note must not leave its replacement unrecorded."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / 'live', database_url=pg_url)
+    old_text = 'The deployment target is staging.'
+    new_text = 'The deployment target is production.'
+    assert svc.store(old_text, source='test')['stored'] is True
+    svc.config.memory.surprise_threshold = 0.5
+    for band in svc._cms.bands:
+        monkeypatch.setattr(band, 'compute_surprise', lambda _: 0.0)
+    assert svc.config.memory.surprise_threshold > 0.0
+
+    if operation == 'supersede':
+        result = svc.supersede(old_text, new_text)
+    else:
+        result = svc.consolidate([old_text], new_text)
+
+    assert result['superseded_count'] == 1
+    assert result['new_memory_stored'] is True
+    assert _rehydrated(tmp_path, pg_url, old_text)['superseded'] is True
+    replacement = _rehydrated(tmp_path, pg_url, new_text)
+    assert replacement['superseded'] is False
+
+
+def test_possible_partial_correction_preserves_source_in_postgres(storage):
+    """A candidate conflict must not retire the rest of a persisted note."""
+    from pseudolife_memory.storage.sync import hydrate_cms
+
+    cfg = MemoryConfig()
+    cfg.surprise_threshold = -1.0
+    cms = ContinuumMemorySystem(cfg, storage=storage)
+    old_text = 'I have a cat named Mira. Its veterinary records are in the blue folder.'
+    update = 'I no longer have a cat named Mira.'
+    vector = _emb(100)
+    assert cms.store(old_text, vector, source='notes')[0]
+    old = _mem_view(cms)[old_text]
+    original_surprise = old.surprise_score
+    assert cms.store(update, vector, source='status')[0]
+
+    current = _pg_view(storage)[old_text]
+    assert current['superseded_at'] is None
+    assert current['superseded_by_text'] is None
+    assert current['surprise'] == pytest.approx(original_surprise)
+
+    restarted = ContinuumMemorySystem(cfg, storage=storage)
+    hydrate_cms(restarted, storage)
+    restored = _mem_view(restarted)
+    assert set(restored) == {old_text, update}
+    assert restored[old_text].superseded_at is None
+    assert restored[old_text].surprise_score == pytest.approx(original_surprise)
