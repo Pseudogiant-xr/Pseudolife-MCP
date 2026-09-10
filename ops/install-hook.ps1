@@ -62,6 +62,10 @@ if (-not $hasBriefing) {
     $briefingGroup = [pscustomobject]@{
         hooks = @([pscustomobject]@{ type = 'command'; command = $Command })
     }
+    if ($Client -eq "codex") {
+        $briefingGroup.hooks[0] | Add-Member commandWindows $Command
+        $briefingGroup.hooks[0] | Add-Member timeout 15
+    }
     $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + $briefingGroup
     Write-Host "Installed SessionStart briefing hook -> $SettingsPath"
     Write-Host "  command: $Command"
@@ -69,13 +73,12 @@ if (-not $hasBriefing) {
     Write-Host "Briefing hook already present in $SettingsPath - skipping."
 }
 
-# Every-turn memory-discipline line (UserPromptSubmit), Claude client only:
-# Codex per-prompt hook support is unverified, and every new Codex hook
-# needs a manual trust review — don't silently write one there. Static echo
+# Every-turn memory-discipline line (UserPromptSubmit), both clients.
+# Codex requires review and trust before newly installed hooks run. Static echo
 # (no daemon call): the one-shot session-start briefing loses salience over
 # a long session; this keeps the loop — including recall-before-review —
 # mechanical. Keep the line free of quote characters (it nests in JSON+sh).
-if ($Client -eq "claude") {
+if ($Client -in "claude", "codex") {
     $disciplineLine = "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
     if (-not ($obj.hooks.PSObject.Properties.Name -contains 'UserPromptSubmit')) {
         $obj.hooks | Add-Member -NotePropertyName UserPromptSubmit -NotePropertyValue @()
@@ -90,6 +93,10 @@ if ($Client -eq "claude") {
     if (-not $hasDiscipline) {
         $upsGroup = [pscustomobject]@{
             hooks = @([pscustomobject]@{ type = 'command'; command = "echo '$disciplineLine'" })
+        }
+        if ($Client -eq "codex") {
+            $upsGroup.hooks[0] | Add-Member commandWindows "Write-Output '$disciplineLine'"
+            $upsGroup.hooks[0] | Add-Member timeout 5
         }
         $obj.hooks.UserPromptSubmit = @($obj.hooks.UserPromptSubmit) + $upsGroup
         Write-Host "Installed UserPromptSubmit discipline hook -> $SettingsPath"
@@ -133,11 +140,9 @@ if ($Client -eq "codex") {
     Write-Host ""
     Write-Warning "Codex will skip this new or changed hook until you review and trust its exact definition."
     Write-Host "  Start Codex, open /hooks, review the definition from $SettingsPath, and approve it."
-    Write-Host "NOTE: Codex hooks are experimental and OFF by default - enable the engine"
-    Write-Host "  first in ~/.codex/config.toml (and note hooks are not available on"
-    Write-Host "  Windows - use the standing AGENTS.md block there instead):"
-    Write-Host "    [features]"
-    Write-Host "    codex_hooks = true"
+    Write-Host "Current Codex runtimes enable hooks by default, including Windows."
+    Write-Host "  Check /hooks for trust or managed-policy blocks; older runtimes may need updating."
+    Write-Host "  If [features] hooks = false is intentional, use the standing AGENTS.md block."
 }
 
 # The hooks wire the session lifecycle, but the memory LOOP only fires if a

@@ -378,6 +378,24 @@ def test_builtin_relation_protected(svc):
     assert out["error"] == "builtin_relation"
 
 
+def test_replacing_graph_meaning_requires_destructive_mcp_hints(svc):
+    """These writes can replace existing meaning, even without deleting rows."""
+    import asyncio
+    from pseudolife_memory.mcp_server import mcp
+
+    svc.graph_alias("fixture-first-target", "fixture-movable-alias")
+    svc.graph_alias("fixture-second-target", "fixture-movable-alias")
+    assert svc._storage.find_entity("fixture-movable-alias")["canonical"] == "fixture-second-target"
+    svc.relation_define("fixture-custom-relation", "original meaning", transitive=True)
+    svc.relation_define("fixture-custom-relation", "replacement meaning", transitive=False)
+    relation = next(r for r in svc._graph.load_relations() if r["name"] == "fixture-custom-relation")
+    assert relation["description"] == "replacement meaning"
+    assert relation["transitive"] is False
+    manifest = {t.name: t.annotations for t in asyncio.run(mcp.list_tools())}
+    for name in ("memory_alias", "memory_relation_define"):
+        assert manifest[name].destructive_hint is True
+
+
 def test_alias_resolves_in_relate(svc):
     svc.graph_alias("agent-box", "the-box")
     out = svc.graph_relate("sensor-hub", "runs-on", "the-box")

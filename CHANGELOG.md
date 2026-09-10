@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-10 — Codex memory onboarding)
+- The stdio shim now forwards the running daemon's MCP instructions, and all
+  tools expose conservative read/write, destructive and external-access hints.
+  Mixed status/mutation tools remain writes; client approval policy still applies.
+- Codex hook installation includes Windows and per-turn reminders. The plugin
+  supplies native PowerShell lifecycle commands with bounded SessionEnd I/O;
+  Claude's existing Bash commands remain supported. New definitions still need
+  Codex hook trust review.
+- `pseudolife-mcp doctor` verifies the invoking runtime, daemon health and actual
+  stdio handshake without spawning a daemon or calling bank tools. Onboarding
+  now covers cold-start budgets, standing guidance, duplicate registrations,
+  stale editable metadata, discovery limits and explicit hook verification.
+
 ### Added (2026-09-08 — the lessons tier can distil one verbatim rule per episode, and a τ-bench adapter runs the "Learning on the Job" protocol on it)
 - **The dream's lesson synthesis clusters and paraphrases; a protocol that
   needs one situation-specific rule per episode with its values intact had

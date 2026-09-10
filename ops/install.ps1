@@ -16,7 +16,7 @@
 #
 # Providers (-Client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
-#   codex     OpenAI Codex   - MCP + SessionStart briefing (opt-in, not Windows)
+#   codex     OpenAI Codex   - MCP + hooks selected with -CodexHooks
 #   gemini    Gemini CLI     - MCP + standing instructions (no hook system)
 #   generic   any MCP agent  - prints paste-ready config + standing block
 #   both = claude,codex      all = claude,codex,gemini
@@ -40,6 +40,9 @@ param(
     # the both/all aliases) — validated by Get-ProviderList, not ValidateSet,
     # which cannot express a list.
     [string]$Client = "",
+    # Explicit ownership avoids duplicating hooks from an installed Codex plugin.
+    [ValidateSet("manual", "plugin", "skip")]
+    [string]$CodexHooks = "skip",
     [ValidateSet("", "append", "skip")]
     [string]$ClaudeMd = "",
     [ValidateSet("", "append", "skip", "auto")]
@@ -132,7 +135,7 @@ function Show-Matrix {
   Agent         MCP          Briefing        Per-turn  Standing file
   ------------  -----------  --------------  --------  ---------------------
   Claude Code   shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
-  OpenAI Codex  shim / HTTP  hook (see *)    no        ~/.codex/AGENTS.md
+  OpenAI Codex  shim / HTTP  hook (see *)    yes       ~/.codex/AGENTS.md
   Gemini CLI    shim / HTTP  none            no        ~/.gemini/GEMINI.md
   Other agent   stdio/HTTP   none            no        AGENTS.md (your path)
 
@@ -140,12 +143,10 @@ function Show-Matrix {
   MCP server `instructions` field - the memory loop delivered by the
   protocol itself.
 
-  * Codex hooks are EXPERIMENTAL and off by default: set
-        [features]
-        codex_hooks = true
-    in ~/.codex/config.toml, then review and trust the hook in /hooks.
-    Codex hooks are NOT available on Windows - there the standing AGENTS.md
-    block is the briefing, which is why appending it is recommended.
+  * Current Codex runtimes enable hooks by default, including Windows.
+    Review and trust new or changed hooks in /hooks before they run.
+    Support depends on the runtime and policy, not the selected model.
+    Use a standing AGENTS.md block if hooks are disabled or unavailable.
 '@
 }
 # <<< capability-matrix <<<
@@ -203,7 +204,7 @@ if (-not $Client) {
         Write-Host "Which coding agents should this install wire up?"
         Write-Host ""
         Write-Host "  1) Claude Code    full parity: MCP + SessionStart briefing + per-turn discipline"
-        Write-Host "  2) OpenAI Codex   MCP + SessionStart briefing (opt-in, trust review, not on Windows)"
+        Write-Host "  2) OpenAI Codex   MCP + session and per-turn hooks (trust review)"
         Write-Host "  3) Gemini CLI     MCP + standing instructions (Gemini CLI has no hook system)"
         Write-Host "  4) Other MCP agent  Cursor / Windsurf / Zed / Copilot CLI / anything else:"
         Write-Host "                      prints ready-to-paste config, offers the standing block"
@@ -490,9 +491,8 @@ if ($claudeShimMode) {
 }
 
 # -- 9. session lifecycle hooks (hook-capable providers only) ---------------------
-# claude: unless the plugin already owns the hooks. codex: hooks exist but are
-# experimental, opt-in, and NOT available on Windows — there the standing
-# AGENTS.md block is the briefing (stage 10 offers it). gemini/generic: no
+# claude: unless the plugin already owns the hooks. codex: current runtimes
+# support both hooks on Windows too; definitions still require trust. gemini/generic: no
 # hook system.
 $installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
 $claudePluginInstalled = (Test-Path $installedPlugins) -and
@@ -511,11 +511,9 @@ foreach ($selectedClient in $clients) {
         $hookState["claude"] = "plugin"
         continue
     }
-    if (($selectedClient -eq "codex") -and $IsWindows) {
-        Step "Skipping the Codex session hook: Codex hooks are not available on"
-        Write-Host "    Windows - the standing AGENTS.md block is the briefing there"
-        Write-Host "    (stage 10 offers to append it)."
-        $hookState["codex"] = "windows"
+    if (($selectedClient -eq "codex") -and ($CodexHooks -ne "manual")) {
+        $hookState["codex"] = $CodexHooks
+        Step "Codex hook source: $CodexHooks. No manual hooks written; use -CodexHooks manual for installer hooks or -CodexHooks plugin for an enabled plugin."
         continue
     }
     Step "Installing $selectedClient session hook..."
@@ -576,7 +574,7 @@ foreach ($selectedClient in $clients) {
             }
             "codex" {
                 if ($IsWindows -and $interactive) {
-                    $yn = Read-Host "Codex hooks are unavailable on Windows - append the standing memory block to $instructionPath? [Y/n]"
+                    $yn = Read-Host "Append a standing memory block to $instructionPath as a fallback while hooks await trust? [Y/n]"
                     $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
                 } else {
                     $choice = "skip"
@@ -904,13 +902,15 @@ foreach ($selectedClient in $clients) {
             Write-Host "    $(Get-McpMarker $mcpState['codex']) MCP transport        $(Describe-Mcp $mcpState['codex'])"
             Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
             if ($hookState["codex"] -eq "hook") {
-                Write-Host "    [x] Session briefing     hook written - enable codex_hooks = true, then trust it in /hooks"
-            } elseif ($hookState["codex"] -eq "windows") {
-                Write-Host "    [!] Session briefing     unavailable on Windows - the standing AGENTS.md block is the briefing"
+                Write-Host "    [x] Session briefing     hook written - review and trust it in /hooks"
+                Write-Host "    [x] Per-turn discipline  hook written - review and trust it in /hooks"
+            } elseif ($hookState["codex"] -eq "plugin") {
+                Write-Host "    [-] Session/per-turn     delegated to plugin - verify enabled and trusted in /hooks"
             } else {
-                Write-Host "    [!] Session briefing     not installed - re-run: ops\install-hook.ps1 -Client codex"
+                Write-Host "    [-] Session/per-turn     skipped - use -CodexHooks manual or plugin"
             }
-            Write-Host "    [!] Per-turn discipline  unavailable - Codex has no per-prompt hook"
+            Write-Host "    Verify runtime: codex mcp get pseudolife-memory; run doctor from that command's environment."
+            Write-Host "    In its existing config.toml table set startup_timeout_sec = 240, tool_timeout_sec = 180, required = true."
             Write-Host "    $(Describe-Instr $instrState['codex'])"
         }
         "gemini" {

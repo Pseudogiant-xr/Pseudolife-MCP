@@ -407,8 +407,8 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
                 url + "/mcp", http_client=http,
             ) as (read, write):
                 async with ClientSession(read, write) as remote:
-                    await remote.initialize()
-                    yield remote
+                    initialization = await remote.initialize()
+                    yield remote, initialization
 
     # v2 low-level handlers are constructor params taking (ctx, params) and
     # returning result types verbatim. The proxy registers NO tool schemas of
@@ -419,11 +419,11 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     async def _list_tools(ctx, params):
         # Forward pagination params verbatim — swallowing a client cursor
         # would replay page 1 forever if the daemon ever paginates.
-        async with _upstream() as remote:
+        async with _upstream() as (remote, _):
             return await remote.list_tools(params=params)
 
     async def _call_tool(ctx, params):
-        async with _upstream() as remote:
+        async with _upstream() as (remote, _):
             # Seed the output-schema cache: v2's call_tool otherwise fetches
             # the full 35-tool manifest (list_tools) on every call to
             # revalidate structured output — and this session is fresh per
@@ -453,8 +453,14 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     # derivation advertise tools.listChanged — without it, modern clients
     # are told the list never changes and the bus has no outlet.
     bus = InMemorySubscriptionBus()
+    # Instructions belong to the running daemon, not this installed shim's
+    # source version. Fetch before the downstream initialize handshake; keep
+    # per-call connections so idle reconnect behavior remains unchanged.
+    async with _upstream() as (_, initialization):
+        instructions = initialization.instructions
     server = Server(
         "pseudolife-memory",
+        instructions=instructions,
         on_list_tools=_list_tools,
         on_call_tool=_call_tool,
         on_subscriptions_listen=ListenHandler(bus),
