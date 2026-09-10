@@ -12,11 +12,37 @@ cortex facts: pull unconsolidated memories → extract
 slot](memory-model.md#set-valued-slots) — solicited by the shipped prompt
 since 2026-08-01, paired with a counts-are-never-members rule; see the
 [memory model](memory-model.md#dream-extraction) for the measurement
-story) → `memory_fact_set` → advance a monotonic
-cursor so each memory is processed once. Because it keys on the **cursor**,
-not on "sessions", returning to an old session later just appends more
-tail — nothing is reprocessed, and there is no "session finished" event to
-detect.
+story) → `memory_fact_set` → acknowledge the exact input entries.
+Acknowledgement survives restart and does not depend on timestamp order:
+a new entry remains pending even when it shares an older entry's timestamp
+or arrives with a backdated timestamp. Returning to an old session adds
+new pending entries; there is no "session finished" event to detect.
+
+Claim application remains **at least once**. If claim writes succeed but
+acknowledgement fails, a retry can apply those claims again. The numeric
+**cursor** is monotonic display metadata, not the boundary that selects
+pending entries. Relations and lesson synthesis run after the input batch
+is acknowledged and are separate from this acknowledgement contract.
+
+For manual extraction, retain the opaque `commit_token` returned by
+`memory_dream(action="pull")`. After writing the extracted facts, call
+`memory_dream(action="commit", commit_token=<that token>)`. It acknowledges
+only that pull's entries. Repeating a successful commit is idempotent;
+a missing entry or a token from another bank is rejected. A numeric
+`cursor` cannot safely identify a batch and is no longer accepted for a
+commit. Pull again to obtain a token. An empty pull has no token to commit.
+
+PostgreSQL schema v38 classifies old entries once using the previous cursor
+and the configured source eligibility. Entries excluded by that policy stay
+pending so a later policy change can include them. File mode persists entry
+identities and acknowledgement in the same format-v7 checkpoint. This
+migration preserves the old boundary; it does not recover entries already
+skipped before migration. Logical imports create a new bank token identity;
+old source-bank tokens cannot commit against the imported bank.
+If a file import fails validation before writing any imported content,
+repairing those source files allows a retry, including after the daemon
+has accepted new entries. Once any import writes begin, retries require
+the original source files so two different imports cannot be mixed.
 
 Extraction is pluggable; pick the tier that fits — the stack ships with
 tier 2 preconfigured (the extractor sidecar), and **no self-hosted model is
@@ -24,7 +50,7 @@ required** if you'd rather not run one:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — none** | no extractor configured — the dream still runs, prunes and advances its cursor, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
+| **0 — none** | no extractor configured — the dream still runs, prunes and acknowledges input batches, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep calls an OpenAI-compatible endpoint — the bundled sidecar out of the box, or any endpoint you point it at | nothing (sidecar) / one base-URL + key + model | high; free if local |
 
@@ -41,7 +67,7 @@ instead of by hand, point a scheduled agent/cron job at the same prompt.
 
 **Tier 0 — no extractor.** With no endpoint configured the cortex has no
 automatic writer: `memory_dream(action="run")` still drains the backlog,
-prunes outcome signals and advances the cursor, but extracts no facts, and
+prunes outcome signals and acknowledges its input batch, but extracts no facts, and
 the daemon logs a startup warning. Populate the cortex with deliberate
 `memory_fact_set` calls, or configure tier 1 or 2.
 
@@ -62,12 +88,12 @@ The daemon runs a background sweep every
 `memory.dream.sweep_interval_seconds`; each tick it checks the same
 backlog+quiescence trigger and, if it fires, runs a dream with the
 configured extractor. Under the single-writer cortex a *successful* pass
-that finds no canonical facts writes nothing and advances the cursor; a
-**failed** call (timeout, network, malformed output) instead **holds the
-cursor**, so those memories are retried next sweep rather than skipped —
-up to three times. A batch that keeps failing is re-run entry by entry,
-the individual offenders are quarantined, and the cursor advances past
-them, so one unparseable memory cannot stall consolidation indefinitely.
+that finds no canonical facts writes no facts and acknowledges the input
+batch. A **failed** call (timeout, network, malformed output) instead leaves
+those entries **pending**, so the next sweep retries them — up to three
+times. A batch that keeps failing is re-run entry by entry; individual
+offenders are quarantined and acknowledged under the existing retry policy,
+so one unparseable memory cannot stall consolidation indefinitely.
 There is no regex fallback either way. The extractor timeout defaults to
 **240s** in code; the Docker stack ships **480s**
 (`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` in the compose file) because the
@@ -505,14 +531,16 @@ leave no row.
 - `memory_dream(action="runs")` lists recent passes: id, cursor movement,
   tallies (including the literal-gate counters), and lifecycle status
   (`running | committed | failed | rolled_back`). A `failed` run means a
-  claim write blew up mid-pass — partial writes are journaled and the
-  cursor was held.
+  claim write or acknowledgement failed — partial claim writes are
+  journaled. A lost acknowledgement response may require a retry to discover
+  whether the database committed it.
 - `memory_dream(action="rollback")` reverts the **latest committed** pass by
   replaying its journal in reverse through the normal write paths — a
   superseded value is superseded back (history preserved, nothing deleted),
   a dream-inserted slot is retired, member adds/removes are mirrored.
   Rollback covers fact writes only (not relations/lessons/graph), keeps the
-  source traces, and never rewinds the dream cursor. It refuses when a newer
+  source traces, and does not reset input acknowledgement or the display
+  cursor. It refuses when a newer
   run is `failed`/`running` (unjournaled uncertainty) and on double
   rollback. Both actions are full-tier tools — expand with
   `memory_toolset(action="expand")` from a core-tier session.
@@ -595,7 +623,7 @@ is therefore treated as zero-distortion by the dream:
   This is a **flag, not a hard fail**: the paper fails a compaction whose
   input is still there to retry, but here the raw entry is never
   discarded (it stays in the associative store and is served by
-  `memory_search`), and holding the cursor would hostage every other
+  `memory_search`), and withholding acknowledgement would hold every other
   claim in the batch to one rule the extractor could not slot. The
   typical miss is an extractor that emitted no scalar claim for the
   entry at all — inventing a slot is not the dream's business.

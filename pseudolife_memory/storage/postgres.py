@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import secrets
 import time
 from contextlib import contextmanager
 from typing import Any, Sequence
@@ -32,6 +34,9 @@ _ENTRY_COLS = (
     "episode_id", "episode_title", "tags", "slots",
     # v35: the write-time label pair — nullable, NULL = unlabelled.
     "authority", "distortion_tolerance",
+    # v38: NULL is accepted only when an importer explicitly marks an
+    # old-format row; an omitted value is a new pending write.
+    "dream_state",
 )
 _ENTRY_JSONB = {"tags", "slots"}
 
@@ -251,6 +256,8 @@ class PostgresStorage:
         values = []
         for c in _ENTRY_COLS:
             v = e.get(c)
+            if c == "dream_state" and c not in e:
+                v = "pending"
             if c == "embedding":
                 v = _embedding_in(v)
             elif c in _ENTRY_JSONB:
@@ -298,6 +305,173 @@ class PostgresStorage:
             d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
+
+    def initialize_dream_tracking(
+        self, *, eligible_sources=None, exclude_sources=None,
+    ) -> dict:
+        """Create the bank secret and classify pre-v38 entry rows once.
+
+        ``NULL`` is the only old-format marker. Explicit ``pending`` rows are
+        never interpreted through the legacy timestamp, which is what keeps
+        daemon writes made between interrupted import attempts visible.
+        """
+        allowed = set(eligible_sources) if eligible_sources else None
+        excluded = set(exclude_sources or [])
+        conn = self.conn  # one captured connection for the whole transaction
+        updated_states: dict[int, str] = {}
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, ts, source FROM entries "
+                "WHERE dream_state IS NULL ORDER BY id FOR UPDATE"
+            )
+            unclassified = cur.fetchall()
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor'"
+            )
+            cursor_row = cur.fetchone()
+            dream_cursor = float(cursor_row[0] if cursor_row else 0.0)
+            if unclassified and not math.isfinite(dream_cursor):
+                raise ValueError(
+                    "invalid_legacy_dream_cursor: unclassified entries require "
+                    "a finite cortex_dream_cursor"
+                )
+
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'dream_ack_secret_v1'"
+            )
+            secret_row = cur.fetchone()
+            if secret_row is None:
+                secret = secrets.token_hex(32)
+                cur.execute(
+                    "INSERT INTO meta (key, value) VALUES "
+                    "('dream_ack_secret_v1', %s::jsonb)",
+                    (json.dumps(secret),),
+                )
+            else:
+                secret = secret_row[0]
+                try:
+                    valid_secret = (
+                        isinstance(secret, str)
+                        and len(secret) == 64
+                        and len(bytes.fromhex(secret)) == 32
+                    )
+                except ValueError:
+                    valid_secret = False
+                if not valid_secret:
+                    raise ValueError(
+                        "invalid_dream_ack_secret: dream_ack_secret_v1 must "
+                        "be a 64-character hexadecimal string"
+                    )
+
+            for entry_id, ts, source in unclassified:
+                eligible = (
+                    source in allowed if allowed is not None
+                    else source not in excluded
+                )
+                state = (
+                    "legacy-covered"
+                    if eligible and float(ts) <= dream_cursor
+                    else "pending"
+                )
+                cur.execute(
+                    "UPDATE entries SET dream_state = %s "
+                    "WHERE id = %s AND dream_state IS NULL",
+                    (state, entry_id),
+                )
+                updated_states[int(entry_id)] = state
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during dream initialization"
+            )
+        return {
+            "secret": secret,
+            "dream_cursor": dream_cursor,
+            "updated_states": updated_states,
+        }
+
+    def acknowledge_dream_entries(
+        self, entry_ids: list[int], display_timestamp: float,
+    ) -> dict:
+        """Atomically acknowledge the exact PostgreSQL entry identities.
+
+        Already-acknowledged IDs are accepted so a retry after response loss
+        is idempotent. Missing, unclassified, and legacy-covered IDs reject
+        the complete batch before any row or display metadata is changed.
+        """
+        ids = list(entry_ids)
+        if (not ids
+                or any(type(value) is not int or value <= 0 for value in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError(
+                "dream_ack_invalid_states: entry ids must be distinct "
+                "positive integers"
+            )
+        display_timestamp = float(display_timestamp)
+        if not math.isfinite(display_timestamp):
+            raise ValueError(
+                "dream_ack_invalid_states: display timestamp must be finite"
+            )
+
+        conn = self.conn  # never re-resolve/reconnect inside this transaction
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, dream_state FROM entries "
+                "WHERE id = ANY(%s) FOR UPDATE",
+                (ids,),
+            )
+            states = {int(row[0]): row[1] for row in cur.fetchall()}
+            missing = [entry_id for entry_id in ids if entry_id not in states]
+            if missing:
+                raise ValueError(
+                    "dream_ack_missing_entries: "
+                    + ",".join(str(value) for value in missing)
+                )
+            invalid = [
+                entry_id for entry_id in ids
+                if states[entry_id] not in {"pending", "acknowledged"}
+            ]
+            if invalid:
+                raise ValueError(
+                    "dream_ack_invalid_states: "
+                    + ",".join(
+                        f"{entry_id}={states[entry_id]!r}" for entry_id in invalid
+                    )
+                )
+
+            cur.execute(
+                "UPDATE entries SET dream_state = 'acknowledged' "
+                "WHERE id = ANY(%s) AND dream_state = 'pending' RETURNING id",
+                (ids,),
+            )
+            newly_acknowledged = len(cur.fetchall())
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor'"
+            )
+            cursor_row = cur.fetchone()
+            current_cursor = float(cursor_row[0] if cursor_row else 0.0)
+            if not math.isfinite(current_cursor):
+                raise ValueError(
+                    "dream_ack_invalid_states: stored display cursor must "
+                    "be finite"
+                )
+            dream_cursor = max(current_cursor, display_timestamp)
+            cur.execute(
+                "INSERT INTO meta (key, value) VALUES "
+                "('cortex_dream_cursor', %s::jsonb) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (json.dumps(dream_cursor),),
+            )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during dream acknowledgement"
+            )
+        return {
+            "acknowledged_ids": ids,
+            "newly_acknowledged": newly_acknowledged,
+            "dream_cursor": dream_cursor,
+        }
 
     # ── episodes ────────────────────────────────────────────────────────
 
@@ -1120,6 +1294,42 @@ class PostgresStorage:
                 """,
                 (key, Jsonb(value)),
             )
+
+    def advance_dream_cursor(self, value: float) -> float:
+        """Persist display-only dream metadata without moving it backward.
+
+        A response-lost acknowledgement deliberately leaves RAM conservative.
+        Later generic cortex snapshots must not overwrite the committed display
+        value with that stale copy.
+        """
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("invalid_legacy_dream_cursor: cursor must be finite")
+        conn = self.conn
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor' "
+                "FOR UPDATE"
+            )
+            row = cur.fetchone()
+            current = float(row[0] if row else 0.0)
+            if not math.isfinite(current):
+                raise ValueError(
+                    "invalid_legacy_dream_cursor: stored cursor must be finite"
+                )
+            persisted = max(current, value)
+            cur.execute(
+                "INSERT INTO meta (key, value) VALUES "
+                "('cortex_dream_cursor', %s::jsonb) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (json.dumps(persisted),),
+            )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost while advancing dream display metadata"
+            )
+        return persisted
 
     def meta_get(self, key: str, default: Any = None) -> Any:
         row = self.conn.execute(

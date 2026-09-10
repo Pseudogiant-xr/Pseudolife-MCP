@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 import time
+import uuid
 from dataclasses import dataclass, field
 
 import torch
@@ -91,6 +92,11 @@ class MemoryEntry:
     # relocation; NULL everywhere is exactly the pre-v35 behaviour.
     authority: str | None = None
     distortion_tolerance: str | None = None
+    # Durable dream acknowledgement. New entries start pending; ``None`` is
+    # reserved for an old saved row that has not been classified yet.
+    dream_state: str | None = "pending"
+    # File-mode identity for exact acknowledgement. PostgreSQL uses ``db_id``.
+    dream_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     # Storage row id (schema v8, transient — NOT persisted in .pt saves).
     # None in file mode or before the write-through insert returns.
     db_id: int | None = None

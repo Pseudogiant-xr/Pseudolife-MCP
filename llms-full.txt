@@ -156,7 +156,7 @@ Windows needs an ASCII-only data path
 | External volumes, health-checked services, deploy/rollback tooling | no | yes |
 
 **The gap, stated plainly.** Lite ships no **extractor**, so the **dream**
-pass still runs, prunes, and advances its **cursor**, but writes no
+pass still runs, prunes, and acknowledges its input batch, but writes no
 canonical facts: on this path `memory_fact_set` is the only **cortex**
 writer. Everything else above works. Nothing about this is silent —
 `curl http://127.0.0.1:8765/health` reports `"extractor": "none"`, and the
@@ -389,7 +389,7 @@ is agent context every session, so it stays lean.
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
-| `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
+| `memory_dream(action, limit?, commit_token?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
 | `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
 | `memory_session_title(title, episode?)` | Name THIS session's auto-opened episode (default titles are generic); `episode` is your session handle from the briefing — concurrent sessions share one HTTP connection, so pass it to land the rename on your own episode |
 | `memory_episode_start(title, hint?, episode?)` / `memory_episode_end(episode?)` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id; `episode` is your session handle so the nest/pop lands in your own tree when several sessions run concurrently |
@@ -824,12 +824,14 @@ episodes, and full-table views all live there. Going deeper:
 
 A **dream** distils the recent associative stream into canonical cortex
 facts while you're not looking: pull unconsolidated memories → extract
-`(entity, attribute, value)` → advance a cursor so nothing is reprocessed.
+`(entity, attribute, value)` → acknowledge those exact entries durably.
+New entries remain pending regardless of their timestamps; failed acknowledgement
+can replay claim application. Manual commits use the token returned by `pull`.
 Extraction is pluggable:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — none** | no extractor configured — the dream still runs, prunes, and advances its cursor, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
+| **0 — none** | no extractor configured — the dream still runs, prunes, and acknowledges input batches, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep → the bundled CPU sidecar, or any OpenAI-compatible endpoint | nothing (sidecar) | high; free if local |
 
@@ -944,7 +946,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v37 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v38 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -2227,11 +2229,37 @@ cortex facts: pull unconsolidated memories → extract
 slot](memory-model.md#set-valued-slots) — solicited by the shipped prompt
 since 2026-08-01, paired with a counts-are-never-members rule; see the
 [memory model](memory-model.md#dream-extraction) for the measurement
-story) → `memory_fact_set` → advance a monotonic
-cursor so each memory is processed once. Because it keys on the **cursor**,
-not on "sessions", returning to an old session later just appends more
-tail — nothing is reprocessed, and there is no "session finished" event to
-detect.
+story) → `memory_fact_set` → acknowledge the exact input entries.
+Acknowledgement survives restart and does not depend on timestamp order:
+a new entry remains pending even when it shares an older entry's timestamp
+or arrives with a backdated timestamp. Returning to an old session adds
+new pending entries; there is no "session finished" event to detect.
+
+Claim application remains **at least once**. If claim writes succeed but
+acknowledgement fails, a retry can apply those claims again. The numeric
+**cursor** is monotonic display metadata, not the boundary that selects
+pending entries. Relations and lesson synthesis run after the input batch
+is acknowledged and are separate from this acknowledgement contract.
+
+For manual extraction, retain the opaque `commit_token` returned by
+`memory_dream(action="pull")`. After writing the extracted facts, call
+`memory_dream(action="commit", commit_token=<that token>)`. It acknowledges
+only that pull's entries. Repeating a successful commit is idempotent;
+a missing entry or a token from another bank is rejected. A numeric
+`cursor` cannot safely identify a batch and is no longer accepted for a
+commit. Pull again to obtain a token. An empty pull has no token to commit.
+
+PostgreSQL schema v38 classifies old entries once using the previous cursor
+and the configured source eligibility. Entries excluded by that policy stay
+pending so a later policy change can include them. File mode persists entry
+identities and acknowledgement in the same format-v7 checkpoint. This
+migration preserves the old boundary; it does not recover entries already
+skipped before migration. Logical imports create a new bank token identity;
+old source-bank tokens cannot commit against the imported bank.
+If a file import fails validation before writing any imported content,
+repairing those source files allows a retry, including after the daemon
+has accepted new entries. Once any import writes begin, retries require
+the original source files so two different imports cannot be mixed.
 
 Extraction is pluggable; pick the tier that fits — the stack ships with
 tier 2 preconfigured (the extractor sidecar), and **no self-hosted model is
@@ -2239,7 +2267,7 @@ required** if you'd rather not run one:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — none** | no extractor configured — the dream still runs, prunes and advances its cursor, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
+| **0 — none** | no extractor configured — the dream still runs, prunes and acknowledges input batches, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep calls an OpenAI-compatible endpoint — the bundled sidecar out of the box, or any endpoint you point it at | nothing (sidecar) / one base-URL + key + model | high; free if local |
 
@@ -2256,7 +2284,7 @@ instead of by hand, point a scheduled agent/cron job at the same prompt.
 
 **Tier 0 — no extractor.** With no endpoint configured the cortex has no
 automatic writer: `memory_dream(action="run")` still drains the backlog,
-prunes outcome signals and advances the cursor, but extracts no facts, and
+prunes outcome signals and acknowledges its input batch, but extracts no facts, and
 the daemon logs a startup warning. Populate the cortex with deliberate
 `memory_fact_set` calls, or configure tier 1 or 2.
 
@@ -2277,12 +2305,12 @@ The daemon runs a background sweep every
 `memory.dream.sweep_interval_seconds`; each tick it checks the same
 backlog+quiescence trigger and, if it fires, runs a dream with the
 configured extractor. Under the single-writer cortex a *successful* pass
-that finds no canonical facts writes nothing and advances the cursor; a
-**failed** call (timeout, network, malformed output) instead **holds the
-cursor**, so those memories are retried next sweep rather than skipped —
-up to three times. A batch that keeps failing is re-run entry by entry,
-the individual offenders are quarantined, and the cursor advances past
-them, so one unparseable memory cannot stall consolidation indefinitely.
+that finds no canonical facts writes no facts and acknowledges the input
+batch. A **failed** call (timeout, network, malformed output) instead leaves
+those entries **pending**, so the next sweep retries them — up to three
+times. A batch that keeps failing is re-run entry by entry; individual
+offenders are quarantined and acknowledged under the existing retry policy,
+so one unparseable memory cannot stall consolidation indefinitely.
 There is no regex fallback either way. The extractor timeout defaults to
 **240s** in code; the Docker stack ships **480s**
 (`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` in the compose file) because the
@@ -2720,14 +2748,16 @@ leave no row.
 - `memory_dream(action="runs")` lists recent passes: id, cursor movement,
   tallies (including the literal-gate counters), and lifecycle status
   (`running | committed | failed | rolled_back`). A `failed` run means a
-  claim write blew up mid-pass — partial writes are journaled and the
-  cursor was held.
+  claim write or acknowledgement failed — partial claim writes are
+  journaled. A lost acknowledgement response may require a retry to discover
+  whether the database committed it.
 - `memory_dream(action="rollback")` reverts the **latest committed** pass by
   replaying its journal in reverse through the normal write paths — a
   superseded value is superseded back (history preserved, nothing deleted),
   a dream-inserted slot is retired, member adds/removes are mirrored.
   Rollback covers fact writes only (not relations/lessons/graph), keeps the
-  source traces, and never rewinds the dream cursor. It refuses when a newer
+  source traces, and does not reset input acknowledgement or the display
+  cursor. It refuses when a newer
   run is `failed`/`running` (unjournaled uncertainty) and on double
   rollback. Both actions are full-tier tools — expand with
   `memory_toolset(action="expand")` from a core-tier session.
@@ -2810,7 +2840,7 @@ is therefore treated as zero-distortion by the dream:
   This is a **flag, not a hard fail**: the paper fails a compaction whose
   input is still there to retry, but here the raw entry is never
   discarded (it stays in the associative store and is served by
-  `memory_search`), and holding the cursor would hostage every other
+  `memory_search`), and withholding acknowledgement would hold every other
   claim in the batch to one rule the extractor could not slot. The
   typical miss is an extractor that emitted no scalar claim for the
   entry at all — inventing a slot is not the dream's business.
@@ -3273,7 +3303,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v37). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v38). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -3949,7 +3979,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v37**; migrations are additive
+The current Postgres meta version is **v38**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -3992,6 +4022,7 @@ The milestones:
 | v35 | `entries.authority` / `entries.distortion_tolerance` and `facts.authority` / `facts.distortion_tolerance` — the write-time label pair (authority collapse, arXiv 2608.01679; the compaction cliff, arXiv 2608.22752). `authority` is the SPEECH ACT of the text (`directive` \| `observation` \| `quoted`), deliberately a separate axis from the `origin` tier (who wrote — which drives supersession arithmetic and which entries never persisted anyway); `distortion_tolerance` is the fidelity class (`constraint` \| `procedural` \| `belief` \| `preference` \| `episodic`). Set at write time — explicit `memory_store` / `memory_fact_set` parameters, or a deterministic heuristic under the `auto` default that asserts only `constraint` (rule-sized deontic/imperative text) and `quoted`/`directive` — and inherited through `memory_supersede` / `memory_consolidate` / fact supersession unless the new write restates one. Consumers: the dream carries a `constraint` source's text verbatim onto a derived fact and a post-dream guard reports any constraint entry left without a verbatim carrier (`constraint_verbatim` / `constraint_misses`); a `quoted` source is low-trust for the two-man rule; `constraint` facts are pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` (`memory.cortex.pin_constraints`). `NULL` = observation / unlabelled, exactly the pre-v35 reading, so the migration is a no-op on an existing bank — no backfill, by design. Additive/idempotent |
 | v36 | Review-queue autonomy (2026-09-02). `edge_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` / `judge_relation` / `decided_by` / `decided_at` — the link judge's opinion on a pending link proposal (the retype verdict's corrected relation in `judge_relation`) and who settled the row; `entity_proposals.judge2_verdict` / `judge2_confidence` / `judge2_model` / `judged2_at` — the merge judge's SECOND opinion beside the v30 first one (two-vote agreement is the apply gate for rows the single-vote 0.8 reject gate leaves pending); and `curation_judgments` (`store`, sorted slot keys, verdict, keep, fold, confidence, note, model, judged_at) — the store-curation judge's memo, because the lesson/world duplicate listings are recomputed per pass and would otherwise be re-sent every sweep. `NULL` judge columns = not yet judged, exactly the pre-v36 behaviour, so the migration is a no-op on existing banks. Gates measured by `evals/queue_judge_ladder.py` against `evals/results/queue-judge-panel-20260902.json`. Additive/idempotent |
 | v37 | Retire-not-delete (2026-09-03). `store_decisions` (`id`, `store`, `entity_norm`, `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB, `decided_at`) — the FK-free audit of lesson/world forgets and restores. A `memory_forget(scope="lesson"\|"world")` now retires the slot's rows (`status='retired'`, rows kept; `memory.compaction` treats them like any non-live record) instead of deleting them, and the audit row carries the verbatim record so `lesson_restore` / `world_restore` (`memory_graph_review(action="restore_slot")`, `POST /api/lessons/restore`, `POST /api/world/restore`) still work after compaction has purged the retired row. Also (no DDL): merge and junk rejects write text-keyed tombstones to `dismissed_pairs` (canonical pair / `junk:<canonical>` self-pair) so a verdict outlives the CASCADE-deleted proposal row. No column changes; the table starts empty on an existing bank, so the migration is a no-op there. Additive/idempotent |
+| v38 | Durable dream acknowledgement. `entries.dream_state` records `pending`, `acknowledged`, or `legacy-covered`; pre-existing rows retain `NULL` for one-time classification against the legacy cursor and configured source eligibility. New writes default to `pending`, regardless of their timestamps. Exact-entry commit tokens use a bank-local secret in `meta`; logical export excludes that secret. The numeric cursor remains display metadata. This preserves the previous migration boundary; it does not repair historical skipped entries. Additive/idempotent |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

@@ -1462,9 +1462,10 @@ def memory_dream(
         description="pull/run: how many memories to process (pull defaults "
                     "to 40). runs: how many passes to list (defaults to "
                     "10).")] = None,
+    commit_token: Annotated[str | None, Field(
+        description="commit: token returned by pull.")] = None,
     cursor: Annotated[float | None, Field(
-        description="commit: the newest pulled timestamp. Required for "
-                    "that action.")] = None,
+        description="Deprecated; use commit_token.")] = None,
     apply: Annotated[bool, Field(
         description="deep: True writes the consolidation (graph tables are "
                     "snapshotted first); the default is a dry run.")] = False,
@@ -1498,9 +1499,15 @@ def memory_dream(
     if action == "pull":
         return service.dream_pull(limit=limit or 40)
     if action == "commit":
-        if cursor is None:
-            return {"error": "cursor_required"}
-        return service.dream_commit(cursor)
+        if commit_token is not None:
+            return service.dream_commit(commit_token)
+        if cursor is not None:
+            return {
+                "error": "legacy_cursor_unsupported",
+                "detail": "Timestamp commits are unsafe. Pull again and pass "
+                          "the returned commit_token.",
+            }
+        return {"error": "commit_token_required"}
     if action == "run":
         return service.dream_run_auto(limit=limit)
     if action == "deep":

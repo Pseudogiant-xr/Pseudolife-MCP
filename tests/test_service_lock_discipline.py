@@ -65,6 +65,8 @@ SERVICE_PY = SERVICE_FILES[0]
 CALLER_HOLDS_LOCK = {
     "_assert_public_search_path",
     "_ensure_init",
+    # Reached only from _ensure_init; the fixpoint below verifies its lock.
+    "_initialize_dream_tracking",
     "_ensure_postgres_storage",
     "_ensure_subject_entity",
     "_persist_all",

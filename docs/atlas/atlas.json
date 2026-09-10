@@ -2,8 +2,8 @@
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.15.0",
-  "schema": 37,
-  "verified": "2026-09-03"
+  "schema": 38,
+  "verified": "2026-09-11"
  },
  "groups": {
   "clients": {
@@ -255,7 +255,8 @@
    "p": "pseudolife_memory/transfer_cli.py",
    "d": [
     "ZIP of JSONL (one per table) + manifest — decoupled from Postgres major version and deployment tier, unlike pg_dump's physical backup",
-    "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim"
+    "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim",
+    "Carries entry dream state but excludes the acknowledgement secret; an imported bank creates its own token identity"
    ]
   },
   {
@@ -442,7 +443,7 @@
     "store(): flat band by default (2026-08-15); promotion walk only under multi-band presets",
     "retrieve(): neural + slot-index + BM25 + reference + rerank pools",
     "retrieve_with_trace() powers memory_search(explain=True) diagnostics",
-    "Write-through to Postgres; .pt fallback schema v6 with migration"
+    "Write-through to Postgres; .pt fallback schema v7 persists entry IDs, dream state, bank secret and display cursor together"
    ]
   },
   {
@@ -853,7 +854,8 @@
    "d": [
     "One psycopg conn: autocommit reads + explicit _txn() writes",
     "_txn COMMITTED check — no phantom RETURNING ids on a dead conn",
-    "Heal-on-next-use reconnect; ping() on a dedicated conn for /health"
+    "Heal-on-next-use reconnect; ping() on a dedicated conn for /health",
+    "Dream acknowledgement captures one connection and transaction for exact entry IDs plus display cursor; pre-v38 rows are classified once"
    ]
   },
   {
@@ -862,12 +864,12 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 37",
+   "s": "DDL · SCHEMA_META_VERSION 38",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
     "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads · curation_judgments · store_decisions",
-    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction)",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 entries.dream_state (per-entry acknowledgement; NULL marks old rows for one-time source-aware legacy classification; new rows default pending)",
     "One-current-row-per-slot partial unique indexes"
    ]
   },
@@ -882,7 +884,8 @@
    "d": [
     "hydrate_* on startup; dirty-slot incremental sync per write",
     "snapshot_* full rewrite for explicit save / flush / restore",
-    "Auto-links cortex subjects to graph entities"
+    "Auto-links cortex subjects to graph entities",
+    "Hydrates per-entry dream state; ordinary snapshots preserve committed acknowledgement against stale in-memory state"
    ]
   },
   {
@@ -896,7 +899,8 @@
    "d": [
     "Empty bank or a recorded resume; weights_only=True (CWE-502 guard)",
     "Progress in the legacy_migration meta row — partial imports resume",
-    "Renames sources *.pre-v8.bak — never deletes"
+    "Renames sources *.pre-v8.bak — never deletes",
+    "Translates old file entries using the source cursor and target source policy; preserves explicit per-entry state across resumed imports"
    ]
   },
   {

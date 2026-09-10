@@ -917,7 +917,8 @@ def test_batch_retry_does_not_ratchet_confidence(svc):
                             "origin": "agent"}])
     svc.dream_run(stub)                     # writes relay.port@0.55 + trace
     first = svc.cortex_lookup("relay", "port")["confidence"]
-    svc._cortex.dream_cursor = 0.0          # noqa: SLF001 — force a re-dream
+    next(e for b in svc._cms.bands for e in b.entries  # noqa: SLF001
+         if "relay speaks" in e.text).dream_state = "pending"
     again = svc.dream_run(stub)             # re-extracts the same source entry
     assert again["pulled"] >= 1             # the re-dream really happened
     second = svc.cortex_lookup("relay", "port")["confidence"]

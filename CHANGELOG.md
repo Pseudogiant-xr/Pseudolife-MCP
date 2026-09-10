@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-11 — durable dream acknowledgement)
+- Dream batches acknowledge their exact entries instead of moving a timestamp
+  boundary past other entries. New memories remain eligible after equal or
+  backdated timestamps, source-policy changes and restarts. Manual commits use
+  the token returned by the pull; numeric cursor writes are rejected with
+  instructions to pull again.
+- PostgreSQL schema v38 adds per-entry acknowledgement state. Existing entries
+  are classified once against the legacy cursor and source policy; this keeps
+  the prior boundary and does not repair historical omissions. File checkpoints
+  move to format v7 with durable entry identities and acknowledgement state.
+
 ### Fixed (2026-09-11 — exact correction targets)
 - Explicit supersede and consolidation calls accept entry IDs from retrieval,
   and the Console carries those selected IDs through to the correction.

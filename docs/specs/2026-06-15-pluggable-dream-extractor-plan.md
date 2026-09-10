@@ -1,5 +1,10 @@
 # Pluggable Dream Extractor — Implementation Plan (Phases 1–2)
 
+> Historical API note (2026-09-11): numeric dream cursor commits in this plan
+> have been replaced by exact-batch `commit_token` acknowledgement. Use the
+> [current dreaming guide](../guide/dreaming.md) for manual calls and retry semantics.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the dream pass (MIRAS → cortex consolidation) runnable headless with zero config (Tier 0 regex floor) and high-quality via the agent itself (Tier 1 `/dream`), without assuming any self-hosted LLM.

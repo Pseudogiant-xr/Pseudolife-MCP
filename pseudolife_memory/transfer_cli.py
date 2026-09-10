@@ -86,7 +86,12 @@ EXCLUDED_TABLES = (
 # and any extension lineage marker (the `*_schema_version` convention —
 # see docs/guide/configuration.md#extension-schemas), and the
 # active-session pointer is transient session state.
-_META_SKIP_KEYS = {"schema_version", "active_session_pointer"}
+_META_SKIP_KEYS = {
+    "schema_version", "active_session_pointer",
+    # Bank-local acknowledgement authority. Logical transfer creates or
+    # retains the target generation; only physical restore preserves it.
+    "dream_ack_secret_v1",
+}
 
 
 def _skip_meta_key(key) -> bool:
@@ -282,7 +287,13 @@ def perform_import(dsn: str, zip_path: Path | str, force: bool = False) -> dict:
                             counts[table] = _import_meta(conn, lines)
                         else:
                             counts[table] = _import_table(
-                                conn, table, lines)
+                                conn, table, lines,
+                                legacy_entry_states=(
+                                    table == "entries"
+                                    and int(manifest.get("schema_version") or 0)
+                                    < 38
+                                ),
+                            )
                 _advance_sequences(conn)
     return {"counts": counts}
 
@@ -372,7 +383,9 @@ def _encode(value, udt: str):
     return value
 
 
-def _import_table(conn, table: str, lines) -> int:
+def _import_table(
+    conn, table: str, lines, *, legacy_entry_states: bool = False,
+) -> int:
     types = _column_types(conn, table)
     # Builtin relations are (re-)seeded by every daemon start; an export
     # naturally carries them, so collisions on name are expected identity,
@@ -413,6 +426,12 @@ def _import_table(conn, table: str, lines) -> int:
             if not line:
                 continue
             rec = json.loads(line)
+            if table == "entries" and legacy_entry_states:
+                # Do not let the target column default classify old rows as
+                # new writes. Service initialization applies the imported
+                # finite display cursor plus the target's current source
+                # policy once the complete transaction has landed.
+                rec["dream_state"] = None
             unknown = set(rec) - set(types)
             if unknown:
                 raise TransferError(

@@ -319,7 +319,7 @@ def _drain_dream_backlog(svc):
         pulled = svc.dream_pull(limit=100)
         if not pulled["entries"]:
             return
-        svc.dream_commit(max(e["timestamp"] for e in pulled["entries"]))
+        svc.dream_commit(pulled["commit_token"])
     pytest.fail("dream backlog did not drain in 50 pulls")
 
 
@@ -397,7 +397,7 @@ def test_dream_run_idle_cycle_runs_digest_stage(closed_episode):
         pulled = svc.dream_pull(limit=100)
         if not pulled["entries"]:
             break
-        svc.dream_commit(max(e["timestamp"] for e in pulled["entries"]))
+        svc.dream_commit(pulled["commit_token"])
     else:
         pytest.fail("dream backlog did not drain in 50 pulls")
     res = svc.dream_run(_IdleExtractor(["The digest."]))

@@ -276,9 +276,10 @@ def test_retype_runs_even_with_no_dream_backlog(svc):
     # quarantine — exactly backwards, since the quarantine accumulates when
     # dreams are INFREQUENT. Same precedent as lesson synthesis on this path:
     # no new memories, but pending work may still exist.
-    import time as _t
     _quarantine_pair(svc, "nobacklog-a", "nobacklog-b")
-    svc.dream_commit(_t.time() + 60)       # cursor past everything: no backlog
+    pulled = svc.dream_pull(limit=10**6)
+    if pulled.get("commit_token"):
+        svc.dream_commit(pulled["commit_token"])
 
     class _Stub:
         def extract(self, texts, vocab, known_facts=None):

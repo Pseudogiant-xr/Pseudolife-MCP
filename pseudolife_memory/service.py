@@ -658,6 +658,9 @@ class MemoryService(DreamOps):
         # Count of durable-save failures (cortex/world/lessons). Exposed via the
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
+        # Dream initialization failures are isolated from normal memory
+        # serving. Exact acknowledgement stays disabled until restart/fix.
+        self._dream_tracking_error: str | None = None
         # Set by _ensure_init when storage construction refuses to start
         # (schema v25's embedding-dim mismatch guard, schema.py's
         # RuntimeError) -- exposed via /health so the daemon doesn't report
@@ -1046,6 +1049,8 @@ class MemoryService(DreamOps):
             try:
                 summary = _migrate.migrate_legacy(
                     self.data_dir, self._storage, self._embedder,
+                    eligible_sources=self.config.memory.dream.eligible_sources,
+                    exclude_sources=self.config.memory.dream.exclude_sources,
                 )
                 if summary.get("migrated"):
                     logger.warning("legacy .pt bank migrated: %s", summary)
@@ -1108,6 +1113,8 @@ class MemoryService(DreamOps):
                 self._cortex.load(self._cortex_path())
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Cortex load skipped: %s", exc)
+
+        self._initialize_dream_tracking()
 
         self._refuse_on_stale_hydrated_dims()
 
@@ -2097,6 +2104,130 @@ class MemoryService(DreamOps):
     # ------------------------------------------------------------------
     # Cortex — sibling slot-keyed canonical-fact store (schema v7)
     # ------------------------------------------------------------------
+
+    def _initialize_dream_tracking(self) -> None:
+        """Initialize exact dream state without blocking ordinary serving."""
+        assert self._cms is not None and self._cortex is not None
+        cfg = self.config.memory.dream
+        try:
+            if self._storage is not None:
+                result = self._storage.initialize_dream_tracking(
+                    eligible_sources=cfg.eligible_sources,
+                    exclude_sources=cfg.exclude_sources,
+                )
+                self._cms.dream_ack_secret = result["secret"]
+                self._cms.dream_display_cursor = float(result["dream_cursor"])
+                updated = result.get("updated_states") or {}
+                for band in self._cms.bands:
+                    for entry in band.entries:
+                        if entry.db_id in updated:
+                            entry.dream_state = updated[entry.db_id]
+            else:
+                import math
+                import secrets
+                from pseudolife_memory.dream_token import public_generation
+
+                entries = [
+                    entry
+                    for band in self._cms.bands
+                    for entry in band.entries
+                ]
+                invalid_states = [
+                    entry.dream_id for entry in entries
+                    if entry.dream_state not in (
+                        None, "pending", "acknowledged", "legacy-covered")
+                ]
+                identities = [entry.dream_id for entry in entries]
+                invalid_ids = [identity for identity in identities if not (
+                    isinstance(identity, str)
+                    and len(identity) == 32
+                    and all(c in "0123456789abcdef" for c in identity)
+                )]
+                if invalid_states:
+                    raise ValueError(
+                        f"invalid_dream_ack_state: invalid states {invalid_states}")
+                if invalid_ids or len(set(identities)) != len(identities):
+                    raise ValueError(
+                        "invalid_dream_ack_state: invalid or duplicate file IDs")
+
+                loaded_schema = self._cms._loaded_schema_version  # noqa: SLF001
+                if loaded_schema == 7 and self._cms.dream_ack_secret is None:
+                    raise ValueError(
+                        "invalid_dream_ack_state: v7 checkpoint has no secret")
+                if self._cms.dream_ack_secret is not None:
+                    try:
+                        public_generation(self._cms.dream_ack_secret)
+                    except ValueError as exc:
+                        raise ValueError(
+                            "invalid_dream_ack_state: invalid checkpoint secret"
+                        ) from exc
+
+                missing = [entry for entry in entries
+                           if entry.dream_state is None]
+                legacy_cursor = float(self._cortex.dream_cursor or 0.0)
+                has_checkpoint = self._cms.dream_ack_secret is not None
+                if has_checkpoint:
+                    try:
+                        display_cursor = float(self._cms.dream_display_cursor)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            "invalid_dream_ack_state: invalid display cursor"
+                        ) from exc
+                    if not math.isfinite(display_cursor):
+                        raise ValueError(
+                            "invalid_dream_ack_state: non-finite display cursor")
+                    classification_cursor = display_cursor
+                else:
+                    classification_cursor = legacy_cursor
+                    display_cursor = (
+                        legacy_cursor if math.isfinite(legacy_cursor) else 0.0)
+                if missing and not math.isfinite(classification_cursor):
+                    raise ValueError(
+                        "invalid_legacy_dream_cursor: non-finite file cursor")
+
+                secret = self._cms.dream_ack_secret or secrets.token_hex(32)
+                excluded = set(cfg.exclude_sources or [])
+                allowed = set(cfg.eligible_sources) \
+                    if cfg.eligible_sources else None
+                overrides: dict[str, str] = {}
+                for entry in missing:
+                    eligible = (
+                        entry.source in allowed if allowed is not None
+                        else entry.source not in excluded
+                    )
+                    overrides[entry.dream_id] = (
+                        "legacy-covered"
+                        if eligible and entry.timestamp <= classification_cursor
+                        else "pending"
+                    )
+
+                if self._cms.dream_ack_secret is None or overrides:
+                    self._cms.save(
+                        self.config.memory.save_dir,
+                        dream_state_overrides=overrides,
+                        dream_ack_secret=secret,
+                        dream_display_cursor=display_cursor,
+                    )
+                for band in self._cms.bands:
+                    for entry in band.entries:
+                        if entry.dream_id in overrides:
+                            entry.dream_state = overrides[entry.dream_id]
+                self._cms.dream_ack_secret = secret
+                self._cms.dream_display_cursor = display_cursor
+
+            # The exact states are authoritative; the old scalar remains a
+            # display/compatibility value and mirrors the co-located cursor.
+            self._cortex.dream_cursor = self._cms.dream_display_cursor
+            self._dream_tracking_error = None
+        except Exception as exc:  # noqa: BLE001 - dream-only degradation
+            message = str(exc)
+            if message.startswith(("invalid_legacy_dream_cursor:",
+                                   "invalid_dream_ack_state:")):
+                self._dream_tracking_error = message
+            else:
+                self._dream_tracking_error = (
+                    f"dream_ack_initialization_failed: {message}")
+            logger.error("dream acknowledgement initialization failed: %s", exc)
 
     def _cortex_path(self) -> str:
         return str(self.data_dir / "cortex_state.pt")

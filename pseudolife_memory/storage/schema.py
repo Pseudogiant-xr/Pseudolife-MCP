@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 37
+SCHEMA_META_VERSION = 38
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -61,7 +61,10 @@ CREATE TABLE IF NOT EXISTS entries (
   -- unlabelled, exactly the pre-v35 reading, so the migration is a
   -- no-op on an existing bank. Carried through supersede/consolidate.
   authority TEXT,
-  distortion_tolerance TEXT
+  distortion_tolerance TEXT,
+  -- v38: durable dream acknowledgement. NULL is reserved for rows written
+  -- before this column existed and is classified once at service startup.
+  dream_state TEXT DEFAULT 'pending'
 );
 CREATE INDEX IF NOT EXISTS entries_band_idx ON entries (band);
 CREATE INDEX IF NOT EXISTS entries_ts_idx ON entries (ts);
@@ -790,6 +793,27 @@ def ensure_schema(conn) -> dict:
             "ALTER TABLE entries ADD COLUMN IF NOT EXISTS "
             "explicit_reinforcements INTEGER NOT NULL DEFAULT 0"
         )
+        # v38 additive: per-entry dream acknowledgement. The two statements
+        # are deliberately separate. Existing rows must retain NULL as their
+        # one-time migration marker, while inserts after this migration get
+        # pending even when they omit the column.
+        cur.execute(
+            "ALTER TABLE entries ADD COLUMN IF NOT EXISTS dream_state TEXT"
+        )
+        cur.execute(
+            "ALTER TABLE entries ALTER COLUMN dream_state SET DEFAULT 'pending'"
+        )
+        cur.execute(
+            "SELECT 1 FROM pg_constraint "
+            "WHERE conname = 'entries_dream_state_check' "
+            "AND conrelid = 'public.entries'::regclass"
+        )
+        if cur.fetchone() is None:
+            cur.execute(
+                "ALTER TABLE entries ADD CONSTRAINT entries_dream_state_check "
+                "CHECK (dream_state IS NULL OR dream_state IN "
+                "('pending', 'acknowledged', 'legacy-covered'))"
+            )
         # v34 additive: the fact half of the training tuple. The v31 event
         # log recorded only the served ENTRIES; the cortex-first block's
         # facts — served ABOVE those entries in every search response —

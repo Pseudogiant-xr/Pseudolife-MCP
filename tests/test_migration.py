@@ -68,6 +68,18 @@ def _build_legacy_bank(data_dir, suffix: str = "", config=None):
     target.superseded_at = 123.0
     target.superseded_by_text = "legacy fact beta" + suffix
     cms.save(data_dir / "memory_state")
+    # Exercise an old-format import, independent of today's CMS writer.
+    # Schema 7 adds a service-initialized acknowledgement checkpoint.
+    cms_path = data_dir / "memory_state" / "cms_state.pt"
+    payload = torch.load(cms_path, map_location="cpu", weights_only=True)
+    payload["schema_version"] = 6
+    payload.pop("dream_ack_secret", None)
+    payload.pop("dream_display_cursor", None)
+    for band in payload["bands"].values():
+        for entry in band["entries"]:
+            entry.pop("dream_state", None)
+            entry.pop("dream_id", None)
+    torch.save(payload, cms_path)
 
     cortex = CortexStore()
     cortex.write_fact(Slot("legacy-proj" + suffix, "language", "rust"),
