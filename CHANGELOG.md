@@ -6,17 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-10 — scoped entry retrieval)
+- Dense retrieval applies source, episode, tag, logical-turn and optional
+  superseded-entry eligibility before each band's candidate cap. Eligible
+  evidence can surface even when higher-scoring out-of-scope entries fill the
+  global top-k. Unfiltered ranking is preserved; diagnostic traces include
+  total, eligible and excluded entry counts without exposing excluded text.
+
+### Added (2026-09-10 — offline supersession auditing)
+- `evals/audit_supersessions.py` audits a private entry snapshot on CPU using
+  saved embeddings and the current detector. It reports missing/ambiguous
+  replacement links and produces a stratified blinded review packet separately
+  from detector predictions. It does not change memory or infer historical
+  cause or semantic correctness from replay agreement.
+
 ### Added (2026-09-10 — verified Codex hook setup)
 - Both installers now detect PseudoLife's hook source automatically and offer
   one scoped approval for briefings, reminders, cleanup, and instruction fallback.
   Unattended approval uses `--codex-hook-trust yes` / `-CodexHookTrust yes`.
-- The shared setup helper backs up configuration, records Codex-generated trust
-  hashes for only the reviewed PseudoLife hooks, and verifies their actual
-  lifecycle without contacting an external model provider. Disabled hooks,
-  customized commands, unrelated plugins, and managed policy remain intact.
-- Standing instructions now depend on verified hook readiness, not selected
-  ownership. Approved fallback remains available when hooks fail or the helper
-  is unavailable; existing user instructions are preserved and backed up.
+- The shared setup helper backs up existing files before changing hook
+  definitions or trust, records Codex-generated trust hashes for PseudoLife's
+  verified scripts only with scoped user approval, and verifies their actual
+  lifecycle without contacting an external model provider. Disabled hooks and
+  managed trust restrictions are respected; unrelated plugin settings and
+  nonmatching commands are retained. Approved setup may replace recognized
+  manual definitions during migration; modified recognized script bundles or
+  mixed known/custom platform commands require manual review.
+- In automatic mode, verified hook readiness controls whether approved standing
+  instructions are needed; selecting an owner alone does not suppress fallback.
+  Explicit append/skip choices still apply. If the helper cannot run, native
+  fallback requires explicit instruction append or hook approval with automatic
+  instructions. Appending retains existing instruction bytes and backs up the
+  existing file first.
 
 ### Fixed (2026-09-10 — Codex memory onboarding)
 - The stdio shim now forwards the running daemon's MCP instructions, and all
@@ -26,13 +47,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Codex hook installation includes Windows and per-turn reminders. The plugin
   supplies native PowerShell lifecycle commands with bounded SessionEnd I/O;
   Unicode context survives OEM console encodings and SessionStart retries one
-  transient failure. Claude's existing Bash commands remain supported. New
-  definitions still need Codex hook trust review.
-- Hook ownership also controls the standing-instruction offer in both
-  installers. Skipping Codex hooks prompts interactive users for the block;
-  unattended installs print the explicit append option. An unavailable optional
-  instruction fetch no longer kills the shim before client initialization,
-  and its five-second deadline keeps a stalled endpoint from blocking startup.
+  transient failure. Claude's existing Bash commands remain supported. Codex
+  still enforces hook trust; scoped user approval through setup can authorize
+  the verified PseudoLife definitions without a separate trust step for them.
+- Both installers now base automatic instruction fallback on verified hook
+  readiness and scoped consent, with explicit append/skip overrides. Users can
+  choose instructions-only setup; skipping hooks alone does not authorize an
+  append. An unavailable optional instruction fetch no longer kills the shim
+  before client initialization, and its five-second deadline keeps a stalled
+  endpoint from blocking startup.
 
 ### Added (2026-09-10 — registered-runtime diagnostics)
 - `pseudolife-mcp doctor` verifies the invoking runtime, daemon health and actual

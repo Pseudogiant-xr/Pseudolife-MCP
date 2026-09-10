@@ -26,7 +26,7 @@ Construction is via :func:`build_band` from a
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import torch
 import torch.nn.functional as F
@@ -155,9 +155,14 @@ class MIRASBand:
     # ------------------------------------------------------------------
 
     def retrieve(
-        self, query_embedding: torch.Tensor, top_k: int = 5
+        self, query_embedding: torch.Tensor, top_k: int = 5, *,
+        entry_filter: Callable[[MemoryEntry], bool] | None = None,
     ) -> RetrievalResult:
-        """Top-k entries by cosine similarity to the query."""
+        """Top-k eligible entries by cosine similarity to the query.
+
+        Eligibility reads live metadata on each call; it is not cached with
+        the embedding matrix. Ineligible entries never consume the cap.
+        """
         if not self.entries:
             return RetrievalResult(entries=[], scores=[], surprises=[])
 
@@ -169,8 +174,18 @@ class MIRASBand:
         query = F.normalize(query.unsqueeze(0), p=2, dim=1).squeeze(0)
         scores = self._pattern_matrix @ query
 
-        k = min(top_k, len(self.entries))
+        eligible_indices = None
+        if entry_filter is not None:
+            indices = [i for i, entry in enumerate(self.entries) if entry_filter(entry)]
+            if not indices:
+                return RetrievalResult(entries=[], scores=[], surprises=[])
+            eligible_indices = torch.tensor(indices, dtype=torch.long, device=scores.device)
+            scores = scores[eligible_indices]
+
+        k = min(top_k, len(scores))
         top_scores, top_indices = torch.topk(scores, k)
+        if eligible_indices is not None:
+            top_indices = eligible_indices[top_indices]
 
         result_entries: list[MemoryEntry] = []
         result_surprises: list[float] = []
