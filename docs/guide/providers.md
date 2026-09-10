@@ -1,7 +1,7 @@
 # Providers — one memory bank across every coding agent
 
 The daemon speaks MCP, so any MCP-capable coding agent can use the same
-bank. What differs per agent is how much of the **memory loop enforcement**
+bank. What differs per agent is how much of the **memory loop guidance**
 its platform can carry: Claude Code and current Codex runtimes have
 lifecycle hooks, while generic MCP clients only get
 what the protocol itself delivers. This page is the honest map — what each
@@ -30,23 +30,25 @@ and the stdio shim forwards the running daemon's value unchanged.
 
 ## The hook-equivalent ladder
 
-Enforcement layers, strongest first. The installer wires the highest rung
-each platform supports:
+The installer combines the available delivery layers. These guide the model;
+they do not enforce semantic compliance with every memory instruction:
 
 1. **MCP registration** — the tools themselves. Universal.
 2. **Server `instructions`** — the protocol-level memory loop. Universal,
    automatic.
 3. **Standing instructions file** — the full memory-loop block
    (`examples/CLAUDE.memory.md`) appended to the agent's global context
-   file. For hook-less providers this *is* the session briefing, which is
-   why the installer recommends the append there — but it never writes a
+   file. For hook-less providers this supplies the full policy, without a
+   live briefing, so the installer recommends the append — but never writes a
    standing file without consent: an interactive prompt, or an explicit
-   `--instructions append` / `--agents-file`. It never appends silently in
-   a non-interactive run.
+   `--instructions append` / `--agents-file`. Codex's automatic-memory
+   approval also covers this fallback if hook verification fails. Unattended
+   Codex setup requires explicit `--codex-hook-trust yes` for that combined
+   approval; `--instructions skip` always prevents a standing-file edit.
 4. **SessionStart briefing hook** — the daemon-served briefing (memory-loop
    block + what your memory is unsure about + lessons + where you left
    off) injected at session start. Claude Code (hook or plugin), Codex
-   (review and trust the hook definitions first).
+   (approve setup or review the definitions in `/hooks` first).
 5. **Per-turn discipline line** — a one-line reminder injected on every
    prompt (recall before review, status questions are memory questions,
    log outcomes). Claude Code and current Codex runtimes.
@@ -83,27 +85,67 @@ Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 ## Codex specifics
 
 MCP wiring is first-class (`codex mcp add`, shim or `--url` HTTP;
-`PSEUDOLIFE_WRITER_ID=codex`). Current Codex runtimes support SessionStart
-and UserPromptSubmit on Windows as well as Unix. Hooks are enabled by
+`PSEUDOLIFE_WRITER_ID=codex`). Current Codex runtimes support SessionStart,
+UserPromptSubmit, and SessionEnd on Windows as well as Unix. Hooks are enabled by
 default; the canonical feature key is `hooks` (`codex_hooks` is a deprecated
 alias). A managed policy or `[features] hooks = false` can disable them.
 This is runtime support, not a model capability or a promise about ordinary
 ChatGPT conversations. See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
-Run `ops/install-hook.ps1 -Client codex` on Windows (PowerShell 7), or
-`ops/install-hook.sh --client codex` on Unix. Both write SessionStart and
-UserPromptSubmit to `~/.codex/hooks.json`, preserving unrelated hooks.
-For the full Docker installer, explicitly choose `-CodexHooks manual`
-(`--codex-hooks manual` on Unix), or `plugin` if an enabled plugin owns those
-events. The default `skip` leaves existing hooks alone on reruns; it never
-guesses plugin ownership. This choice does not enable or trust a plugin, and
-switching to `plugin` does not delete old manual hooks: review duplicate sources
-in `/hooks` before enabling both. With hooks skipped, an interactive install
-offers the standing block on every supported OS. For an unattended install,
-pass `--instructions append` (`-Instructions append` in PowerShell) to add it;
-the default `auto` prints guidance and leaves the standing file alone. Selecting
-`manual` or `plugin` skips that automatic offer; explicit `append` still adds
-the fallback while hook definitions await trust.
+The Docker installer defaults to automatic hook-source detection. One setup
+choice enables automatic memory briefings, reminders, and session cleanup,
+uses standing instructions only, or skips this integration. The automatic
+choice approves just PseudoLife's exact current hook definitions and permits
+the standing memory block as a fallback if verification fails. It does not
+approve unrelated hooks or turn off Codex's trust checks.
+
+For an existing installation with the daemon running, use the same helper:
+
+```bash
+python ops/setup-codex-hooks.py
+```
+
+Auto detection reuses an enabled PseudoLife plugin when its complete hook
+bundle matches this installation. Otherwise it installs a private copy of
+the three lifecycle scripts and writes manual definitions to the Codex home
+(`~/.codex/hooks.json` by default). Known old manual definitions are handled
+to avoid duplicate PseudoLife events; unrelated hooks are preserved. An
+incomplete or unrecognized plugin bundle requires review rather than
+automatically granting trust. Disabled hooks and intentional feature or
+policy restrictions remain in place.
+
+| Setting | Docker installer | Standalone helper |
+|---|---|---|
+| Hook source; default `auto` | `--codex-hooks auto\|manual\|plugin\|skip` | `--source auto\|manual\|plugin\|skip` |
+| Scoped approval; default `ask` | `--codex-hook-trust ask\|yes\|no` | `--trust ask\|yes\|no` |
+| Standing block; default `auto` | `--instructions auto\|append\|skip` | `--instructions auto\|append\|skip` |
+
+PowerShell uses `-CodexHooks`, `-CodexHookTrust`, and `-Instructions` with
+the same values. For unattended setup, explicit `yes` authorizes scoped
+trust and the fallback; `ask` without an interactive terminal does not grant
+approval. The helper also accepts `--non-interactive` to disable prompting.
+
+```bash
+# Full unattended setup with automatic memory approved:
+ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes
+# Existing installation, same scoped approval:
+python ops/setup-codex-hooks.py --trust yes --non-interactive
+# Standing instructions only:
+python ops/setup-codex-hooks.py --source skip --instructions append --non-interactive
+```
+
+```powershell
+ops\install.ps1 -Extractor sidecar -Client codex -CodexHookTrust yes
+# Standing instructions only:
+ops\install.ps1 -Extractor sidecar -Client codex -CodexHooks skip -Instructions append
+```
+
+`--instructions append` can keep a standing copy even with working hooks.
+Explicit `--instructions skip` prevents that edit, including fallback;
+`--source skip` leaves existing hooks alone. The older
+`ops/install-hook.ps1 -Client codex` and `ops/install-hook.sh --client codex`
+still write briefing and reminder definitions, but do not perform the new
+trust and readiness workflow.
 
 The Windows installer and plugin supply
 `commandWindows` overrides; Claude
@@ -113,14 +155,44 @@ SessionStart retries one transient failure within its 15-second budget. The
 native command escapes non-ASCII context so redirected JSON stays valid under
 Windows OEM code pages as well as UTF-8.
 
-**A file write is not an active hook.** Start Codex, open `/hooks`, review
-and trust the exact definitions, then start a new task and inspect its hook
-results. New or changed definitions require review again. Do not install
-manual hooks alongside an enabled plugin providing the same events: matching
-sources all run. The native Windows commands are exercised in isolated
-fixtures; this does not establish that a particular desktop app installation
-has loaded, trusted, and invoked them. Keep the standing memory block in
-`AGENTS.md` when hooks are unavailable or awaiting trust.
+**Readiness requires execution.** The helper obtains hook identities and
+hashes from the installed Codex runtime, backs up configuration, and persists
+approved trust through Codex's configuration interface. It then checks the
+startup briefing, per-prompt reminder, and episode open/close effects through
+an actual local Codex lifecycle, without sending requests to an external
+model provider. It reports
+memory ready only when those checks pass. The check uses the configured Codex
+home in a temporary workspace; project-specific overrides or a different app
+runtime can affect another task. Start a fresh task in your Codex application
+to receive its startup briefing.
+
+If the runtime's hook or trust interface is unavailable or unsupported, or a
+hook fails verification, setup reports what remains unresolved and provides
+`/hooks` repair guidance. It installs the standing block only when approved;
+installed files or saved hashes alone never count as working hooks. New or
+changed definitions require approval again. Manual script bundles use
+content-specific paths so updating their code also changes the definitions.
+
+### Hooks versus AGENTS.md
+
+The default SessionStart policy and `examples/CLAUDE.memory.md` contain the
+same standing memory instructions. This equivalence covers the **memory
+block**, not the rest of a project's `AGENTS.md`: personality, coding rules,
+project conventions, and other instructions still belong there. A custom
+daemon `hook-instructions.md` can override the default hook policy.
+
+| Mechanism | What it supplies |
+|---|---|
+| `AGENTS.md` memory block | Standing guidance to recall, capture, and reflect when the client loads instructions |
+| `SessionStart` | The memory policy, a live briefing, and session episode identity |
+| `UserPromptSubmit` | A short memory reminder on each prompt |
+| `SessionEnd` | Automatic session episode cleanup |
+
+Hooks provide timed execution and lifecycle bookkeeping. Their briefings
+and reminders still rely on the model to act on instructions: they do not
+block work when recall is skipped or guarantee a memory write. Use verified
+hooks as the primary integration and standing instructions when hooks cannot
+run, or keep both when a standing copy is useful for subagents.
 
 ### Verify the registered runtime
 
@@ -257,8 +329,8 @@ and fact writes round-tripped, writes attributed as writer `antigravity`.
 of spawning a host fallback that can shadow the real bank after a reboot —
 drop it only on the `[lite]` pip tier, where the spawn fallback is the
 zero-config path. Gemini CLI has no
-hook system that can inject session context, so the standing file is the
-briefing: the installer offers to append the block to `~/.gemini/GEMINI.md`
+hook system that can inject session context, so the standing file supplies
+the policy: the installer offers to append the block to `~/.gemini/GEMINI.md`
 (Gemini's default context file on a stock install; it also reads
 `AGENTS.md` where that has been configured as the context file name).
 

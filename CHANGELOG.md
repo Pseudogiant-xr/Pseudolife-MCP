@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-10 — verified Codex hook setup)
+- Both installers now detect PseudoLife's hook source automatically and offer
+  one scoped approval for briefings, reminders, cleanup, and instruction fallback.
+  Unattended approval uses `--codex-hook-trust yes` / `-CodexHookTrust yes`.
+- The shared setup helper backs up configuration, records Codex-generated trust
+  hashes for only the reviewed PseudoLife hooks, and verifies their actual
+  lifecycle without contacting an external model provider. Disabled hooks,
+  customized commands, unrelated plugins, and managed policy remain intact.
+- Standing instructions now depend on verified hook readiness, not selected
+  ownership. Approved fallback remains available when hooks fail or the helper
+  is unavailable; existing user instructions are preserved and backed up.
+
 ### Fixed (2026-09-10 — Codex memory onboarding)
 - The stdio shim now forwards the running daemon's MCP instructions, and all
   tools expose conservative read/write, destructive and external-access hints.

@@ -193,10 +193,10 @@ cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
-# Codex hook source: --codex-hooks manual / -CodexHooks manual
-# Use plugin instead of manual if an enabled plugin owns the hooks; default skip.
-# With hooks skipped, unattended installs need --instructions append / -Instructions append
-# to add the standing memory block; interactive installs offer it.
+# Codex defaults to automatic hook-source detection and asks once for approval.
+# Unattended hook approval: --codex-hook-trust yes / -CodexHookTrust yes
+# Instructions only: --codex-hooks skip --instructions append
+# PowerShell equivalent: -CodexHooks skip -Instructions append
 # Both:  add --client both  / -Client both
 # Gemini: add --client gemini — or several: --client claude,codex,gemini
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
@@ -226,16 +226,23 @@ then brings the stack up, installs the selected clients' session hooks
 stdio shim by default, with a per-provider writer id; direct HTTP via
 `--transport http`), and health-checks the daemon — finishing with a
 per-agent ladder of what got wired and what that agent's platform cannot
-support. Where a session-hook briefing exists (Claude, Codex off-Windows)
-no standing-file edit is needed; for hook-less providers (Gemini CLI,
-generic agents, Codex on Windows) the installer offers to append the
-standing block instead — there it *is* the briefing. `--instructions
+support. Codex setup offers one choice to enable automatic memory briefings,
+reminders, and session cleanup, use standing instructions only, or skip.
+Automatic setup reuses an enabled PseudoLife plugin or installs the three
+lifecycle hooks, backs up configuration, approves only their exact current
+definitions, and verifies execution. If verification fails, the same approval
+allows the standing memory block as a fallback; setup reports the remaining
+repair step. Hook-less providers (Gemini CLI and generic agents) are offered
+the standing block. `--instructions
 append` always writes the block from `examples/CLAUDE.memory.md` into
 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.gemini/GEMINI.md`
 (useful for subagent visibility even with hooks).
 Idempotent — re-run any time; `--extractor <mode>` switches extractor
 setups. Non-interactive example:
-`ops/install.sh --extractor sidecar --client codex`.
+`ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes`.
+Without explicit hook approval, unattended setup does not grant trust; use
+`--codex-hooks skip --instructions append` for instructions only. Explicit
+`--instructions skip` prevents fallback edits.
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
@@ -336,7 +343,7 @@ deep material lives in the user guide:
 | Page | What's in it |
 |---|---|
 | [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
-| [Providers](docs/guide/providers.md) | Capability matrix per coding agent, the hook-equivalent ladder, AGENTS.md standard, Codex hooks opt-in, writer ids |
+| [Providers](docs/guide/providers.md) | Capability matrix per coding agent, memory instruction layers, AGENTS.md standard, Codex hook setup and verification, writer ids |
 | [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
 | [Dreaming](docs/guide/dreaming.md) | Extractor tiers, the bundled sidecar, upgrading the extractor, Sonnet-fallback, cadence, deep dream, consolidation |
 | [Episodes & sessions](docs/guide/episodes.md) | Daemon-owned session episodes, the briefing hook, nested sub-episodes, tags |
@@ -695,11 +702,14 @@ daemon:
 
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
-The server's value depends entirely on the agent *using* it well — **this step
-is what makes the memory loop actually fire**. The MCP server advertises the
-core loop through protocol-level `instructions`, and the session hook (one
-command, below) delivers the full block every session — **plugin users and
-hook users need nothing more**. If you want it in a standing file instead —
+The server's value depends on the agent using it. The MCP server advertises
+the core loop through protocol-level `instructions`; the SessionStart hook
+delivers the full memory policy with a live briefing. The default hook policy
+and bundled standing memory block contain the same instructions. Hooks add
+per-prompt reminders and session bookkeeping; neither delivery method
+guarantees that the model performs every requested memory operation.
+
+With verified hooks, a standing copy is optional. If you want it instead —
 or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
 hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
@@ -716,8 +726,8 @@ Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.me
 Add-Content "$env:USERPROFILE\.codex\AGENTS.md" (Get-Content examples\CLAUDE.memory.md -Raw)
 ```
 
-For hook-less providers this standing block is not a nice-to-have — it *is*
-the session briefing. `AGENTS.md` is the cross-vendor standard for standing
+For hook-less providers this standing block supplies the full memory policy,
+but it cannot provide a live briefing or run session cleanup. `AGENTS.md` is the cross-vendor standard for standing
 agent instructions (Linux Foundation-governed; read by Codex, Copilot,
 Cursor, Gemini CLI, Zed, and 30+ others), so a per-project `AGENTS.md`
 carrying the block reaches almost every agent at once. Claude Code is the
@@ -734,19 +744,18 @@ verbose logs so they stay out of the dream), **REFLECT at the end**
 dream distils these signals into the lessons surfaced at your next session
 start).
 
-One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
-`ops/install-hook.sh --client codex` (Linux/macOS) — installs the
-**SessionStart briefing hook** for the selected client (what your memory is
-unsure about + lessons from past work + verified world facts + where we left
-off, injected at every session start) and a
-**UserPromptSubmit discipline hook**: a static one-line memory reminder on
-every turn — recall before reviewing code, docs, or PRs, then compare memory
-against the files; status questions are memory questions; log outcomes.
-Both Claude Code and current Codex runtimes support these events. The
-installer backs up `~/.claude/settings.json`
-or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
-the briefing budget flags, and how session episodes open/close/resume
-without any hooks: [Episodes & sessions](docs/guide/episodes.md).
+For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
+The helper asks once, detects the hook source, backs up changed configuration,
+persists scoped trust through Codex, and verifies startup briefing, prompt
+reminder, and session cleanup. The Docker installer runs this step for you.
+See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
+
+For Claude Code, use the [plugin](plugin/README.md), or the legacy
+`ops/install-hook.ps1 -Client claude` / `ops/install-hook.sh --client claude`
+for briefing and reminder hooks. The legacy `--client codex` path remains
+available but only writes hook definitions; it does not complete trust and
+verification. Session episodes also work without hooks through the daemon:
+[Episodes & sessions](docs/guide/episodes.md).
 
 **Current Codex runtimes enable hooks by default, including Windows.**
 Availability depends on the application/runtime and policy, not the model.
@@ -754,11 +763,13 @@ If `[features] hooks = false` is intentional, keep it and use the standing
 `AGENTS.md` block. Windows plugin hooks use native PowerShell 7 commands.
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
-**Codex hook trust:** Codex also skips every new or changed hook until you
-review and trust its exact definition. After installing the Codex hook, start
-Codex, open `/hooks`, review the definition from `~/.codex/hooks.json`, and
-approve it. Until then, MCP tools still work and the server-level
-`instructions` still load, but the richer session briefing is not injected.
+**Codex hook trust:** setup approval is limited to PseudoLife's three current
+hook definitions. It does not approve other plugins or bypass future trust
+checks. Changed definitions need approval again. If automatic setup cannot
+use the installed runtime's trust interface, it reports the problem and
+asks you to open `/hooks` to review and trust the definitions. Approved standing
+instructions remain available as fallback. Installed files alone do not
+establish that hooks are working.
 
 ## Usage patterns
 

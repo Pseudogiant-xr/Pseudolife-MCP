@@ -134,107 +134,143 @@ def test_native_prompt_reminder_matches_claude_script():
     assert re.search(r'\$disciplineLine = "(.*)"', ps)[1] == re.search(r'echo "(.*)"', sh)[1]
 
 
-@pytest.mark.parametrize("source", ["plugin", "skip"])
-def test_installer_hook_stage_respects_codex_hook_source(tmp_path, source):
-    ps = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
-    stage = ps.split("# -- 9. session lifecycle hooks", 1)[1].split(
-        "# -- 10. standing memory instructions", 1)[0]
-    # Discard the rest of the section-header line, execute ONLY this stage.
-    stage = stage.split("\n", 1)[1]
-    assert stage.strip() and "$hookState = @{}" in stage
-    script = tmp_path / "stage.ps1"
-    script.write_text(
-        f"$env:USERPROFILE = '{tmp_path.as_posix()}'\n"
-        f"$CodexHooks = '{source}'\n$clients = @('codex')\n"
-        "function Step($text) {}\n" + stage +
-        "\n$hookState['codex'] | ConvertTo-Json\n", encoding="utf-8")
-    result = pwsh_run("-File", script)
-    assert json.loads(result.stdout) == source
-    assert not (tmp_path / ".codex/hooks.json").exists()
-
-
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
-@pytest.mark.parametrize("source,interactive,instructions,expected_block,answer,existing", [
-    ("skip", True, "auto", True, "", False),
-    ("skip", False, "auto", False, "", False),
-    ("manual", True, "auto", False, "", False),
-    ("plugin", True, "auto", False, "", False),
-    ("skip", False, "append", True, "", False),
-    ("skip", True, "skip", False, "", False),
-    ("skip", True, "auto", False, "n", False),
-    ("manual", False, "append", True, "", False),
-    ("plugin", False, "append", True, "", False),
-    ("skip", True, "auto", True, "", True),
+@pytest.mark.parametrize("source,trust,instructions,status,fallback,exit_code", [
+    ("auto", "yes", "auto", "ready", "covered-by-hooks", 0),
+    ("manual", "yes", "append", "ready", "appended", 0),
+    ("plugin", "ask", "auto", "pending", "present", 0),
+    ("plugin", "no", "skip", "pending", "skipped", 1),
+    ("skip", "no", "append", "skipped", "appended", 0),
+    ("auto", "yes", "auto", "unavailable", "appended", 0),
+    ("auto", "ask", "auto", "unavailable", "skipped", 1),
+    ("auto", "yes", "auto", "ready", "covered-by-hooks", 2),
 ])
 def test_installer_hook_and_instruction_stages_together(
-        tmp_path, shell, source, interactive, instructions, expected_block, answer, existing):
-    """Exercise the instruction decision AFTER hook ownership is resolved.
+        tmp_path, shell, source, trust, instructions, status, fallback, exit_code):
+    """Real shell stages delegate Codex ownership and propagate readiness.
 
-    Only these adjacent stages run; Docker, MCP registration, and the user's
-    home are outside this fixture. Simulate prompt availability/answers at
-    the shell boundary, leaving the production decision branches intact.
+    The helper fixture records its arguments and returns the setup contract.
+    Stage 10 must not write or prompt again, even for explicit append. Docker,
+    MCP registration, and the real user home remain outside this fixture.
     """
     home = tmp_path / "home"
     home.mkdir()
-    block = home / ".codex/AGENTS.md"
-    original = b"Existing pseudolife-memory guidance: memory_search.\n"
-    if existing:
-        block.parent.mkdir()
-        block.write_bytes(original)
+    fixture_repo = tmp_path / "repo"
+    (fixture_repo / "ops").mkdir(parents=True)
+    (fixture_repo / "examples").mkdir()
+    shutil.copyfile(ROOT / "examples/CLAUDE.memory.md", fixture_repo / "examples/CLAUDE.memory.md")
+    result_data = {"source": source if source != "auto" else "manual",
+                   "status": status, "instructions": fallback,
+                   "recovery": "Review the hook in /hooks." if status != "ready" else None}
+    helper = fixture_repo / "ops/setup-codex-hooks.py"
+    helper.write_text(
+        "import json, os, sys\nfrom pathlib import Path\n"
+        "Path(os.environ['FIXTURE_CALL']).write_text(json.dumps({'args': sys.argv[1:], "
+        "'codex_home': os.environ['CODEX_HOME']}))\n"
+        f"print({json.dumps(result_data)!r})\nsys.exit({exit_code})\n", encoding="utf-8")
+    call = tmp_path / "call.json"
+    codex_home = home / "custom codex"
+    env = {**os.environ, "HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
+           "CODEX_HOME": codex_home.as_posix(), "FIXTURE_CALL": str(call)}
+    result = run_installer_stages(tmp_path, shell, fixture_repo, env, source, trust, instructions)
+    expected_status = status if exit_code < 2 else "unavailable"
+    expected_fallback = fallback if exit_code < 2 else "appended"
+    assert f"RESULT:{expected_status}:{expected_fallback}" in result
+    recorded = json.loads(call.read_text())
+    assert recorded == {"args": ["--source", source, "--trust", trust, "--instructions",
+                                 instructions, "--non-interactive"],
+                        "codex_home": codex_home.as_posix()}
+    assert (codex_home / "AGENTS.md").exists() == (exit_code == 2)
+    assert not (home / ".codex/hooks.json").exists()
+    assert not (home / ".codex/AGENTS.md").exists()
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash"])
+@pytest.mark.parametrize("trust,instructions,expected,existing", [
+    ("yes", "auto", "appended", None),
+    ("no", "append", "appended", None),
+    ("ask", "append", "appended", "override"),
+    ("yes", "auto", "appended", "mention"),
+    ("yes", "auto", "present", "complete"),
+    ("yes", "auto", "appended", "empty-override"),
+    ("yes", "skip", "skipped", None),
+    ("ask", "auto", "skipped", None),
+    ("no", "auto", "skipped", None),
+])
+def test_installer_codex_without_python_reports_unavailable(
+        tmp_path, shell, trust, instructions, expected, existing):
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_home = home / "custom codex"
+    codex_home.mkdir()
+    target = codex_home / ("AGENTS.override.md" if existing == "override" else "AGENTS.md")
+    old = {"override": b"User override rules.\n", "mention": b"Consider pseudolife-memory; use memory_search.\n",
+           "complete": (ROOT / "examples/CLAUDE.memory.md").read_bytes()}.get(existing)
+    if old:
+        target.write_bytes(old)
+    if existing == "empty-override":
+        (codex_home / "AGENTS.override.md").write_bytes(b" \n")
+    env = {**os.environ, "HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
+           "CODEX_HOME": codex_home.as_posix()}
+    result = run_installer_stages(tmp_path, shell, ROOT, env, "auto", trust, instructions,
+                                  missing_python=True)
+    assert f"RESULT:unavailable:{expected}" in result
+    assert "Install Python 3.10 or newer" in result
+    assert not (home / ".codex").exists()
+    assert target.exists() == (expected != "skipped")
+    if expected == "appended":
+        text = target.read_text(encoding="utf-8")
+        assert all(term in text for term in ("## Memory", "pseudolife-memory", "RECALL", "CAPTURE", "REFLECT"))
+        if old:
+            assert target.read_bytes().startswith(old)
+            backups = list(codex_home.glob(target.name + ".bak-pseudolife-*"))
+            assert len(backups) == 1 and backups[0].read_bytes() == old
+    elif expected == "present":
+        assert target.read_bytes() == old
+        assert not list(codex_home.glob("*.bak-pseudolife-*"))
+    if existing == "empty-override":
+        assert (codex_home / "AGENTS.override.md").read_bytes() == b" \n"
+
+
+def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions,
+                         missing_python=False):
     if shell == "powershell":
-        ps = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
-        start = "# -- 9. session lifecycle hooks"
-        end = "# -- 11. wire into selected MCP clients"
-        assert ps.count(start) == ps.count(end) == 1
-        stages = ps.split(start, 1)[1].split(end, 1)[0].split("\n", 1)[1]
-        assert "$hookState = @{}" in stages and "$instructionChoice =" in stages
-        shutil.copyfile(ROOT / "ops/install-hook.ps1", tmp_path / "install-hook.ps1")
+        text = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
+        stages = text.split("# -- 9. session lifecycle hooks", 1)[1].split(
+            "# -- 11. wire into selected MCP clients", 1)[0].split("\n", 1)[1]
         script = tmp_path / "stages.ps1"
         script.write_text(
             "$ErrorActionPreference = 'Stop'\n"
-            f"$env:USERPROFILE = '{home.as_posix()}'\n$repo = '{ROOT.as_posix()}'\n"
-            f"$CodexHooks = '{source}'\n$clients = @('codex')\n"
-            f"$Instructions = '{instructions}'\n$interactive = ${str(interactive).lower()}\n"
-            "function Step($text) {}\n"
-            f"function Read-Host($text) {{ return '{answer}' }}\n"
-            + stages + "\nWrite-Output ('RESULT:' + $hookState['codex'])\n", encoding="utf-8")
-        result = pwsh_run("-File", script)
-    else:
-        bash = shutil.which("bash")
-        if os.name == "nt":
-            # Windows' system32 bash is a WSL launcher, not Git Bash; it
-            # cannot consume the native fixture paths used by this test.
-            git = shutil.which("git")
-            candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-            bash = str(candidate) if candidate and candidate.is_file() else None
-        if not bash:
-            pytest.skip("Bash is not installed")
-        text = (ROOT / "ops/install.sh").read_text(encoding="utf-8")
-        parts = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)^# [^\n]*11\. wire into selected MCP clients", text)
-        assert parts, "installer stage boundaries changed"
-        stages = parts[1]
-        assert 'HOOK_CODEX=""' in stages and 'instruction_choice=' in stages
-        script = tmp_path / "stages.sh"
-        script.write_text(
-            "set -euo pipefail\n"
-            f"repo={shlex.quote(ROOT.as_posix())}\n"
-            f"CLIENTS=codex\nCODEX_HOOKS={source}\nINSTRUCTIONS={instructions}\n"
-            "CLAUDE_MD=''\nAGENTS_FILE=''\nstep() { :; }\n"
-            # Only the terminal-availability query is substituted; all file
-            # tests use the real shell builtin. Input below accepts the prompt.
-            "function [() { if [[ $# == 3 && $1 == -t && $2 == 0 ]]; then "
-            f"{str(interactive).lower()}; else builtin [ \"$@\"; fi; }}\n"
-            + stages + '\nprintf "RESULT:%s\\n" "$HOOK_CODEX"\n', encoding="utf-8")
-        # Bytes avoid Python translating LF to CRLF on Windows: a pipe is
-        # not a terminal, so Bash would otherwise receive a literal n\r.
-        result = subprocess.run([bash, script.as_posix()], input=(answer + "\n").encode(),
-                                env={**os.environ, "HOME": home.as_posix()},
-                                capture_output=True, timeout=30, check=True)
-    stdout = result.stdout.decode("utf-8") if isinstance(result.stdout, bytes) else result.stdout
-    assert f"RESULT:{'hook' if source == 'manual' else source}" in stdout
-    assert (home / ".codex/hooks.json").exists() == (source == "manual")
-    assert block.exists() == expected_block
-    if expected_block:
-        assert "memory_search" in block.read_text(encoding="utf-8")
-    if existing:
-        assert block.read_bytes() == original
+            f"$repo = '{repo.as_posix()}'\n$clients = @('codex')\n"
+            f"$CodexHooks = '{source}'\n$CodexHookTrust = '{trust}'\n"
+            f"$Instructions = '{instructions}'\n$interactive = $false\n"
+            "function Step($text) { Write-Host $text }\n"
+            "function Read-Host($text) { throw 'Unexpected second prompt' }\n"
+            + ("function Get-Command($Name) { return $null }\n" if missing_python else "")
+            + stages + "\nWrite-Output ('RESULT:' + $hookState['codex'] + ':' + $instrState['codex'])\n",
+            encoding="utf-8")
+        return pwsh_run("-File", script, env=env).stdout
+    bash = shutil.which("bash")
+    if os.name == "nt":
+        # The system32 bash is a WSL launcher; use native Git Bash here.
+        git = shutil.which("git")
+        candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
+        bash = str(candidate) if candidate and candidate.is_file() else None
+    if not bash:
+        pytest.skip("Bash is not installed")
+    text = (ROOT / "ops/install.sh").read_text(encoding="utf-8")
+    parts = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)^# [^\n]*11\. wire into selected MCP clients", text)
+    assert parts, "installer stage boundaries changed"
+    script = tmp_path / "stages.sh"
+    script.write_text(
+        "set -euo pipefail\n"
+        f"repo={shlex.quote(repo.as_posix())}\n"
+        f"CLIENTS=codex\nCODEX_HOOKS={source}\nCODEX_HOOK_TRUST={trust}\nINSTRUCTIONS={instructions}\n"
+        "CLAUDE_MD=''\nAGENTS_FILE=''\nstep() { echo \"$*\"; }\n"
+        + ("command() { case \"$*\" in '-v python'|'-v python3') return 1;; "
+           "*) builtin command \"$@\";; esac; }\n" if missing_python else "")
+        + parts[1] + '\nprintf "RESULT:%s:%s\\n" "$HOOK_CODEX" "$INSTR_CODEX"\n',
+        encoding="utf-8")
+    result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,
+                            timeout=30, check=True)
+    return result.stdout.decode("utf-8")

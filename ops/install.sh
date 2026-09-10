@@ -20,7 +20,8 @@
 #   both = claude,codex      all = claude,codex,gemini
 #
 # Other flags:
-#   --codex-hooks manual|plugin|skip  hook owner (default: skip)
+#   --codex-hooks auto|manual|plugin|skip  hook owner (default: auto)
+#   --codex-hook-trust ask|yes|no     approve PseudoLife hooks (default: ask)
 #   --instructions append|skip|auto  standing memory block (default: auto -
 #                                    prompts only where no briefing hook exists)
 #   --claude-md append|skip          compatibility alias for --instructions
@@ -45,7 +46,8 @@ set -euo pipefail
 EXTRACTOR=""
 MODEL=""
 CLIENT=""
-CODEX_HOOKS=skip
+CODEX_HOOKS=auto
+CODEX_HOOK_TRUST=ask
 CLAUDE_MD=""
 INSTRUCTIONS=""
 AGENTS_FILE=""
@@ -66,6 +68,7 @@ while [ $# -gt 0 ]; do
         --model) MODEL="$2"; shift 2 ;;
         --client) CLIENT="$2"; shift 2 ;;
         --codex-hooks) CODEX_HOOKS="$2"; shift 2 ;;
+        --codex-hook-trust) CODEX_HOOK_TRUST="$2"; shift 2 ;;
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
         --instructions) INSTRUCTIONS="$2"; shift 2 ;;
         --agents-file) AGENTS_FILE="$2"; shift 2 ;;
@@ -91,8 +94,11 @@ esac
 case "$TRANSPORT" in shim|http) ;; *)
     echo "invalid --transport '$TRANSPORT' (shim|http)" >&2; exit 2 ;;
 esac
-case "$CODEX_HOOKS" in manual|plugin|skip) ;; *)
-    echo "invalid --codex-hooks '$CODEX_HOOKS' (manual|plugin|skip)" >&2; exit 2 ;;
+case "$CODEX_HOOKS" in auto|manual|plugin|skip) ;; *)
+    echo "invalid --codex-hooks '$CODEX_HOOKS' (auto|manual|plugin|skip)" >&2; exit 2 ;;
+esac
+case "$CODEX_HOOK_TRUST" in ask|yes|no) ;; *)
+    echo "invalid --codex-hook-trust '$CODEX_HOOK_TRUST' (ask|yes|no)" >&2; exit 2 ;;
 esac
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -522,9 +528,9 @@ elif [ -n "$codex_shim_mode" ]; then
 fi
 
 # ── 9. session lifecycle hooks (hook-capable providers only) ───────────────
-# claude: unless the plugin already owns the hooks. codex: hooks exist but
-# need trust review — install-hook prints the runtime and policy guidance.
-# gemini/generic: no hook system.
+# Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
+# exact hook trust, runtime verification, and instruction fallback together.
+# Gemini/generic have no hook system.
 if grep -q "pseudolife-memory@pseudolife-mcp" \
         "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
     CLAUDE_PLUGIN_INSTALLED=1
@@ -539,6 +545,11 @@ fi
 
 HOOK_CLAUDE=""
 HOOK_CODEX=""
+INSTR_CODEX=""
+CODEX_HOOK_SOURCE=skip
+CODEX_HOOK_RECOVERY=""
+CODEX_SETUP_VALID=""
+instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 for selected_client in $CLIENTS; do
     case "$selected_client" in claude|codex) ;; *) continue ;; esac
@@ -546,9 +557,49 @@ for selected_client in $CLIENTS; do
         HOOK_CLAUDE=plugin
         continue
     fi
-    if [ "$selected_client" = codex ] && [ "$CODEX_HOOKS" != manual ]; then
-        HOOK_CODEX="$CODEX_HOOKS"
-        step "Codex hook source: $CODEX_HOOKS. No manual hooks written; use --codex-hooks manual for installer hooks or --codex-hooks plugin for an enabled plugin."
+    if [ "$selected_client" = codex ]; then
+        HOOK_CODEX=unavailable
+        INSTR_CODEX=skipped
+        CODEX_HOOK_RECOVERY="Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
+        codex_python=""
+        for candidate in python3 python; do
+            if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+                codex_python="$candidate"
+                break
+            fi
+        done
+        if [ -n "$codex_python" ]; then
+            setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
+                --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
+            if ! [ -t 0 ]; then setup_args+=(--non-interactive); fi
+            setup_exit=0
+            setup_output=$("$codex_python" "${setup_args[@]}") || setup_exit=$?
+            # Parse only data, never shell code. A failed helper must leave the
+            # remaining provider setup available and must never imply readiness.
+            if [ "$setup_exit" -le 1 ] && setup_fields=$("$codex_python" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+r = json.load(sys.stdin)
+assert r["status"] in ("ready", "pending", "unavailable", "skipped")
+assert r["source"] in ("manual", "plugin", "skip")
+assert r["instructions"] in ("present", "appended", "skipped", "covered-by-hooks")
+for key in ("status", "source", "instructions", "recovery"):
+    print(" ".join(str(r.get(key) or "").splitlines()))
+' <<< "$setup_output" 2>/dev/null); then
+                {
+                    IFS= read -r HOOK_CODEX
+                    IFS= read -r CODEX_HOOK_SOURCE
+                    IFS= read -r INSTR_CODEX
+                    IFS= read -r CODEX_HOOK_RECOVERY || true
+                } <<< "$setup_fields"
+                CODEX_SETUP_VALID=1
+            else
+                CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Run python3 ops/setup-codex-hooks.py to retry."
+            fi
+        fi
+        step "Codex hooks: $HOOK_CODEX; standing instructions: $INSTR_CODEX."
+        if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
         continue
     fi
     step "Installing $selected_client session hook..."
@@ -557,13 +608,9 @@ for selected_client in $CLIENTS; do
 done
 
 # ── 10. standing memory instructions (consent; never edited without it) ────
-# Default is `auto`: skip wherever a session-start briefing already delivers
-# the block (claude hook/plugin, codex hook), and offer an interactive append
-# where none exists (including codex with hooks skipped). `auto` never writes
-# a standing file in a non-interactive run; --instructions append is explicit.
-instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
+# Codex instructions are resolved by the setup helper after hook verification.
+# Other clients retain the existing auto/append/skip behavior and prompts.
 INSTR_CLAUDE=""
-INSTR_CODEX=""
 INSTR_GEMINI=""
 INSTR_GENERIC=""
 
@@ -592,12 +639,47 @@ append_block() {  # $1 = target path, $2 = provider
 }
 
 for selected_client in $CLIENTS; do
+    if [ "$selected_client" = codex ]; then
+        # A valid helper result owns the fallback. Otherwise preserve explicit
+        # append consent even when Python is missing or setup cannot run.
+        if [ -z "$CODEX_SETUP_VALID" ] && { [ "$instruction_choice" = append ] ||
+            { [ "$instruction_choice" = auto ] && [ "$CODEX_HOOK_TRUST" = yes ]; }; }; then
+            codex_home="${CODEX_HOME:-$HOME/.codex}"
+            fallback_path="$codex_home/AGENTS.md"
+            if [ -f "$codex_home/AGENTS.override.md" ] &&
+                grep -q '[^[:space:]]' "$codex_home/AGENTS.override.md"; then
+                fallback_path="$codex_home/AGENTS.override.md"
+            fi
+            if grep -Eq '^## Memory([[:space:]]|$)' "$fallback_path" 2>/dev/null &&
+                grep -q 'pseudolife-memory' "$fallback_path" &&
+                grep -q 'RECALL' "$fallback_path" && grep -q 'CAPTURE' "$fallback_path" &&
+                grep -q 'REFLECT' "$fallback_path"; then
+                INSTR_CODEX=present
+            else
+                fallback_ok=1
+                mkdir -p "$codex_home" || fallback_ok=""
+                if [ -n "$fallback_ok" ] && [ -f "$fallback_path" ]; then
+                    saved=$(mktemp "$fallback_path.bak-pseudolife-XXXXXXXX") &&
+                        cp "$fallback_path" "$saved" || fallback_ok=""
+                    if [ -n "$fallback_ok" ]; then step "Backed up Codex standing instructions to $saved"; fi
+                fi
+                if [ -n "$fallback_ok" ] && [ -r "$repo/examples/CLAUDE.memory.md" ] &&
+                    { printf '\n\n'; cat "$repo/examples/CLAUDE.memory.md"; } >> "$fallback_path"; then
+                    INSTR_CODEX=appended
+                else
+                    CODEX_HOOK_RECOVERY="$CODEX_HOOK_RECOVERY Could not write standing instructions; check the Codex home and file permissions."
+                    step "$CODEX_HOOK_RECOVERY"
+                fi
+            fi
+            step "Codex standing instructions: $INSTR_CODEX ($fallback_path). Hooks still require setup."
+        fi
+        continue
+    fi
     if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
         record_instr claude "covered-by-plugin"
         continue
     fi
     case "$selected_client" in
-        codex)   instruction_path="$HOME/.codex/AGENTS.md" ;;
         gemini)  instruction_path="$HOME/.gemini/GEMINI.md" ;;
         generic) instruction_path="$AGENTS_FILE" ;;
         *)       instruction_path="$HOME/.claude/CLAUDE.md" ;;
@@ -615,17 +697,6 @@ for selected_client in $CLIENTS; do
                 # A session-start briefing hook already delivers the block —
                 # a standing-file copy would double-inject.
                 choice=skip ;;
-            codex)
-                if [ "$HOOK_CODEX" = hook ] || [ "$HOOK_CODEX" = plugin ]; then
-                    choice=skip
-                elif [ -t 0 ]; then
-                    printf 'No Codex briefing hook selected - append the standing memory block to %s? [Y/n] ' "$instruction_path"
-                    read -r yn
-                    case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
-                else
-                    choice=skip
-                    step "Codex has no selected briefing hook. Use --instructions append for the standing block, or select --codex-hooks manual|plugin."
-                fi ;;
             gemini)
                 if [ -t 0 ]; then
                     printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"
@@ -897,6 +968,9 @@ describe_instr() {  # $1 = state
     case "$1" in
         appended:*|present:*) echo "[x] Standing file        ${1#*:}" ;;
         covered-by-plugin)    echo "[-] Standing file        plugin briefing covers it" ;;
+        covered-by-hooks)     echo "[x] Standing instructions verified session briefing covers them" ;;
+        present)             echo "[x] Standing file        existing Codex memory fallback" ;;
+        appended)            echo "[x] Standing file        Codex memory fallback appended" ;;
         skipped:*) echo "[-] Standing file        skipped - append later: cat examples/CLAUDE.memory.md >> ${1#*:}" ;;
         *)         echo "[-] Standing file        skipped" ;;
     esac
@@ -922,13 +996,11 @@ for selected_client in $CLIENTS; do
             echo "  OpenAI Codex"
             echo "    [x] MCP transport        $(describe_mcp "$MCP_CODEX")"
             echo "    [x] Server instructions  automatic (MCP instructions field)"
-            if [ "$HOOK_CODEX" = hook ]; then
-                echo "    [x] Session briefing     hook written - review and trust it in /hooks"
-                echo "    [x] Per-turn discipline  hook written - review and trust it in /hooks"
-            elif [ "$HOOK_CODEX" = plugin ]; then
-                echo "    [-] Session/per-turn     delegated to plugin - verify enabled and trusted in /hooks"
+            if [ "$HOOK_CODEX" = ready ]; then
+                echo "    [x] Memory hooks         trusted and verified ($CODEX_HOOK_SOURCE)"
             else
-                echo "    [-] Session/per-turn     skipped - use --codex-hooks manual or plugin"
+                echo "    [!] Memory hooks         $HOOK_CODEX"
+                if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
             fi
             echo "    Verify runtime: codex mcp get pseudolife-memory; run doctor from that command's environment."
             echo "    In its existing config.toml table set startup_timeout_sec = 240, tool_timeout_sec = 180, required = true."
