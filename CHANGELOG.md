@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-11 — regression gate input requirements)
+- The regression gate rejects a missing bank directory as an infrastructure failure
+  before clearing prior results or starting its GPU server. It no longer falls
+  back to copied contexts that could pass without testing fact ranking.
+  Its documented scope now distinguishes offline cortex reconstruction from
+  entry retrieval, service search and MCP rendering.
+
 ### Fixed (2026-09-11 — exact correction targets)
 - Explicit supersede and consolidation calls accept entry IDs from retrieval,
   and the Console carries those selected IDs through to the correction.
