@@ -813,6 +813,23 @@ class ContinuumMemorySystem:
             set(normalize_tags(tags)) if tags else None
         )
 
+        def _dense_eligible(entry: MemoryEntry) -> bool:
+            return (
+                _keep(entry)
+                and (source_filter is None or entry.source in source_filter)
+                and (episode_filter is None or entry.episode_id in episode_filter)
+                and (tag_filter is None or bool(set(entry.tags) & tag_filter))
+                and (min_logical_turn is None or (
+                    entry.last_logical_turn is not None
+                    and entry.last_logical_turn >= min_logical_turn))
+            )
+
+        dense_filter_active = bool(
+            hide_superseded or source_filter is not None
+            or episode_filter is not None or tag_filter is not None
+            or min_logical_turn is not None
+        )
+
         # ── Pool 1: neural memories — N bands, recency-weighted by depth ──────
         # The earlier the band, the stronger the recency boost. We schedule
         # the boost coefficient as a linear ramp: bands[0] gets boost=0.4 with
@@ -847,6 +864,8 @@ class ContinuumMemorySystem:
                 if _trace is not None:
                     _trace["tiers"].append({
                         "name": band.name, "depth": depth, "filtered_out": True,
+                        "entry_count": len(band.entries), "eligible_count": 0,
+                        "excluded_count": len(band.entries),
                         "candidates": [],
                     })
                 continue
@@ -867,13 +886,25 @@ class ContinuumMemorySystem:
                 # config-driven: 1h chat default, 24h in the MCP build.
                 half_life = self.config.recency_base_half_life_s * (2.0 ** depth)
 
-            band_result = band.retrieve(query_embedding, top_k=pool_k)
+            # Apply eligibility before the cap: a scoped fact may rank below
+            # arbitrarily many out-of-scope neighbors. The unfiltered path
+            # retains its existing selection and tie behavior.
+            if dense_filter_active:
+                band_result = band.retrieve(
+                    query_embedding, top_k=pool_k, entry_filter=_dense_eligible,
+                )
+            else:
+                band_result = band.retrieve(query_embedding, top_k=pool_k)
             pool_size = max(pool_size, len(band_result.entries))
             tier_trace: dict | None = None
             if _trace is not None:
+                eligible_count = (sum(_dense_eligible(e) for e in band.entries)
+                                  if dense_filter_active else len(band.entries))
                 tier_trace = {
                     "name": band.name, "depth": depth, "filtered_out": False,
                     "boost": round(boost, 4), "half_life_s": half_life,
+                    "entry_count": len(band.entries), "eligible_count": eligible_count,
+                    "excluded_count": len(band.entries) - eligible_count,
                     "candidates": [],
                 }
                 _trace["tiers"].append(tier_trace)

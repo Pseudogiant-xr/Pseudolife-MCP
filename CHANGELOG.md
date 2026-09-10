@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-10 — scoped entry retrieval)
+- Dense retrieval applies source, episode, tag, logical-turn and optional
+  superseded-entry eligibility before each band's candidate cap. Eligible
+  evidence can surface even when higher-scoring out-of-scope entries fill the
+  global top-k. Unfiltered ranking is preserved; diagnostic traces include
+  total, eligible and excluded entry counts without exposing excluded text.
+
+### Added (2026-09-10 — offline supersession auditing)
+- `evals/audit_supersessions.py` audits a private entry snapshot on CPU using
+  saved embeddings and the current detector. It reports missing/ambiguous
+  replacement links and produces a stratified blinded review packet separately
+  from detector predictions. It does not change memory or infer historical
+  cause or semantic correctness from replay agreement.
+
 ### Fixed (2026-09-10 — Codex memory onboarding)
 - The stdio shim now forwards the running daemon's MCP instructions, and all
   tools expose conservative read/write, destructive and external-access hints.

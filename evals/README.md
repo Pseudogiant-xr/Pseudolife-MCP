@@ -33,6 +33,33 @@ extractor change.
   pure *extraction quality*, not the cortex contender-parking policy.
 - Unreachable LLM rungs are skipped and recorded as `status: "unreachable"`.
 
+## Offline supersession audit
+
+`audit_supersessions.py` reads a private snapshot and replays uniquely linked
+replacement pairs through the current contradiction detector on CPU. It uses
+persisted vectors and slots; it never calls an embedding model, NLI model,
+external service or live database. Recorded replacements and current detector
+agreement are not semantic correctness labels or proof of historical cause.
+
+```powershell
+python evals/audit_supersessions.py --snapshot <private-dir>/entries.snapshot.json --out-dir <private-dir>/audit --sample-per-stratum 2 --seed 0
+```
+
+The JSON input is `{format_version: 1, metadata: {...}, entries: [...]}`.
+Each entry supplies `id`, `text`, `embedding` (a numeric array), `source`,
+`timestamp`, `superseded_at`, `superseded_by_text`, and `slots` (four-string
+entity/attribute/value/polarity arrays). Capture it from a read-only consistent
+snapshot, recording schema/model provenance where known. Preserve a backup
+before any later correction campaign; this utility never applies corrections.
+
+Outputs are `summary.json`, `pairs.json`, `manual-sample.json` and
+`sample-key.json`. Give reviewers only the manual sample until their labels
+are complete. Same-source, cross-source and status/digest strata are included;
+small stratified samples do not establish a bank-wide error rate. Missing or
+ambiguous exact-text links are explicit; no arbitrary match is selected.
+All output must remain outside Git checkouts because it may contain private
+bank text. Existing output files are refused rather than overwritten.
+
 ## Rungs
 
 `LADDER_ORDER` (`ladder_sweep.py`) is the sweep, in rung order — 14 rungs.
