@@ -842,12 +842,11 @@ class MemoryService(DreamOps):
         # ONNX embedder whenever the optional extra is installed (the
         # daemon image bakes it): ~3x faster single-text encode on CPU
         # with bit-identical embeddings (fp32 ONNX) -- true for MiniLM,
-        # which has a baked ONNX export. Qwen3-Embedding-0.6B (the default
-        # since embedding-backbone-v25) has NO in-repo ONNX export, so with
-        # the [onnx] extra installed this now fires the warn-and-fall-back
-        # path in EmbeddingPipeline on every construction (harmless -- it
-        # falls back to torch cleanly -- but no longer silent; expect it in
-        # the daemon log on every deploy that uses the Qwen default).
+        # which has a baked ONNX artifact. Qwen3-Embedding-0.6B (the default
+        # since embedding-backbone-v25) has NO in-repo ONNX artifact, so the
+        # load-only preflight takes the warn-and-fall-back path before ONNX
+        # construction. Expect that warning in the daemon log on every deploy
+        # that uses the Qwen default.
         # A plain pip install (no [onnx] extra) still never takes this
         # branch at all.
         if absent("embedding.backend") and _onnx_embedding_available():

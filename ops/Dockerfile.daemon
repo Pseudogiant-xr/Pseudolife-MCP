@@ -83,14 +83,13 @@ subprocess.check_call([sys.executable,'-m','pip','install','-c','/app/requiremen
 #    throws OSError under HF_HUB_OFFLINE=1 on the very first tool call
 #    (tests/test_release_ux.py pins this bake to the code default so the two
 #    can never drift apart again). Torch-only: there is no in-repo ONNX
-#    export for this model, so the daemon always runs the torch backend for
+#    artifact for this model, so the daemon always runs the torch backend for
 #    it (fails soft to torch if 'onnx' is ever requested — see embedding.py).
+COPY ops/provision_embedding_models.py /app/
+COPY pseudolife_memory/onnx_artifacts.py /app/pseudolife_memory/onnx_artifacts.py
 RUN --mount=type=cache,id=pseudolife-hf,target=/tmp/hf-cache,sharing=locked \
     HF_HOME=/tmp/hf-cache HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
-    python -c "from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('Qwen/Qwen3-Embedding-0.6B'); \
-SentenceTransformer('all-MiniLM-L6-v2'); \
-SentenceTransformer('all-MiniLM-L6-v2', backend='onnx', model_kwargs={'file_name': 'onnx/model.onnx'})" \
+    python /app/provision_embedding_models.py \
     && mkdir -p /opt/hf/hub \
     && cp -a /tmp/hf-cache/hub/models--Qwen--Qwen3-Embedding-0.6B /opt/hf/hub/ \
     && cp -a /tmp/hf-cache/hub/models--sentence-transformers--all-MiniLM-L6-v2 /opt/hf/hub/ \

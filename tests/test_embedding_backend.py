@@ -11,9 +11,10 @@ Contract pinned here:
 * ``backend`` defaults to ``"torch"`` and the torch path must NOT pass
   a ``backend=`` kwarg to SentenceTransformer — the pyproject floor
   (sentence-transformers>=2.2) predates the kwarg;
-* ``backend="onnx"`` passes ``backend`` + ``model_kwargs={"file_name"}``
-  (default ``onnx/model.onnx`` — without it ST warns and picks a file
-  nondeterministically from the repo's nine ONNX variants);
+* ``backend="onnx"`` preflights the configured local/cached artifact, then
+  passes a local model root plus ``backend`` and
+  ``model_kwargs={"file_name", "export": False}`` (default
+  ``onnx/model.onnx``);
 * an ONNX load failure (optimum missing, file not cached offline) falls
   back to torch with a warning — same fail-soft philosophy as the
   reranker: memory operations never break because of an optional
@@ -25,6 +26,7 @@ integration test loads the real model both ways and asserts parity.
 """
 from __future__ import annotations
 
+import json
 import numpy as np
 import pytest
 
@@ -49,6 +51,14 @@ class _StubST:
             v = rng.standard_normal(8)
             out.append(v / np.linalg.norm(v))
         return np.array(out, dtype=np.float32)
+
+
+@pytest.fixture(autouse=True)
+def _simulate_supported_onnx_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep backend tests on the Linux/Docker path unless stated otherwise."""
+    from pseudolife_memory.memory import embedding
+
+    monkeypatch.setattr(embedding, "_native_windows", lambda: False, raising=False)
 
 
 @pytest.fixture
@@ -82,26 +92,172 @@ def test_default_backend_is_torch_and_omits_backend_kwarg(captured) -> None:
         "(the pyproject floor) does not accept the kwarg")
 
 
-def test_onnx_backend_passes_backend_and_default_file_name(captured) -> None:
-    pipe = _pipeline(EmbeddingConfig(device="cpu", backend="onnx"))
+def test_onnx_backend_loads_verified_local_artifact(
+    captured, tmp_path,
+) -> None:
+    model = tmp_path / "model"
+    (model / "onnx").mkdir(parents=True)
+    (model / "onnx" / "model.onnx").write_bytes(b"onnx")
+
+    pipe = _pipeline(EmbeddingConfig(
+        device="cpu", backend="onnx", model_name=str(model),
+    ))
     assert pipe.backend == "onnx"
+    assert captured[0].model_name == str(model)
     assert captured[0].kwargs["backend"] == "onnx"
-    assert captured[0].kwargs["model_kwargs"] == {"file_name": "onnx/model.onnx"}
+    assert captured[0].kwargs["model_kwargs"] == {
+        "file_name": "onnx/model.onnx",
+        "export": False,
+    }
 
 
-def test_onnx_backend_honors_custom_file_name(captured) -> None:
+def test_native_windows_falls_back_before_onnx_constructor(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path,
+) -> None:
+    from pseudolife_memory.memory import embedding
+
+    model = tmp_path / "model"
+    (model / "onnx").mkdir(parents=True)
+    (model / "onnx" / "model.onnx").write_bytes(b"onnx")
+    calls: list[dict] = []
+
+    def factory(model_name, device=None, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get("backend") == "onnx":
+            raise AssertionError("native Windows reached ONNX construction")
+        return _StubST(model_name, device=device, **kwargs)
+
+    monkeypatch.setattr(embedding, "_native_windows", lambda: True, raising=False)
+    monkeypatch.setattr(embedding, "SentenceTransformer", factory)
+
+    with caplog.at_level("WARNING"):
+        pipe = _pipeline(EmbeddingConfig(
+            device="cpu", backend="onnx", model_name=str(model),
+        ))
+
+    assert pipe.backend == "torch"
+    assert calls == [{}]
+    assert "native windows" in caplog.text.lower()
+    assert "before onnx construction" in caplog.text.lower()
+
+
+def test_onnx_backend_honors_custom_file_name(captured, tmp_path) -> None:
+    model = tmp_path / "model"
+    (model / "custom").mkdir(parents=True)
+    (model / "custom" / "optimized.onnx").write_bytes(b"onnx")
     cfg = EmbeddingConfig(
-        device="cpu", backend="onnx",
-        onnx_file_name="onnx/model_qint8_avx512_vnni.onnx",
+        device="cpu", backend="onnx", model_name=str(model),
+        onnx_file_name="custom\\optimized.onnx",
     )
     pipe = _pipeline(cfg)
     assert captured[0].kwargs["model_kwargs"] == {
-        "file_name": "onnx/model_qint8_avx512_vnni.onnx",
+        "file_name": "custom/optimized.onnx",
+        "export": False,
     }
+
+
+def test_missing_local_onnx_with_named_template_falls_back_before_constructor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A malicious named template is inert when its ONNX file is absent.
+
+    Optimum 0.1.0 recomputes ``_export = len(onnx_files) == 0`` in
+    ``ORTModel.from_pretrained`` even when its caller supplied
+    ``export=False``.  The preflight therefore has to stop before the ONNX
+    SentenceTransformer constructor; merely asserting its kwargs would leave
+    the vulnerable tokenizer/processor save path reachable.
+    """
+    from pseudolife_memory.memory import embedding
+
+    model = tmp_path / "malicious-model"
+    model.mkdir()
+    (model / "tokenizer_config.json").write_text(json.dumps({
+        "chat_template": {"../../outside": "attacker-controlled template"},
+    }), encoding="utf-8")
+    calls: list[dict] = []
+
+    def _factory(model_name, device=None, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get("backend") == "onnx":
+            raise AssertionError("ONNX construction could enter auto-export")
+        return _StubST(model_name, device=device, **kwargs)
+
+    monkeypatch.setattr(embedding, "SentenceTransformer", _factory)
+
+    pipe = _pipeline(EmbeddingConfig(
+        device="cpu", backend="onnx", model_name=str(model),
+    ))
+    assert pipe.backend == "torch"
+    assert calls == [{}]
+
+
+@pytest.mark.parametrize("offline", [False, True], ids=["online", "offline"])
+def test_missing_cached_onnx_falls_back_before_constructor(
+    monkeypatch: pytest.MonkeyPatch,
+    offline: bool,
+) -> None:
+    from pseudolife_memory.memory import embedding
+
+    if offline:
+        monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    else:
+        monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    cache_checks: list[tuple[str, str, bool]] = []
+
+    def _cache_miss(repo_id, filename, local_files_only=False):
+        cache_checks.append((repo_id, filename, local_files_only))
+        raise FileNotFoundError("not cached")
+
+    calls: list[dict] = []
+
+    def _factory(model_name, device=None, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get("backend") == "onnx":
+            raise AssertionError("cache miss reached ONNX construction")
+        return _StubST(model_name, device=device, **kwargs)
+
+    monkeypatch.setattr(embedding, "_cached_hf_file", _cache_miss)
+    monkeypatch.setattr(embedding, "SentenceTransformer", _factory)
+
+    pipe = _pipeline(EmbeddingConfig(
+        device="cpu", backend="onnx", model_name="all-MiniLM-L6-v2",
+    ))
+    assert pipe.backend == "torch"
+    assert calls == [{}]
+    assert cache_checks == [
+        ("sentence-transformers/all-MiniLM-L6-v2", "onnx/model.onnx", True),
+        ("sentence-transformers/all-MiniLM-L6-v2", "modules.json", True),
+        ("sentence-transformers/all-MiniLM-L6-v2", "config.json", True),
+        ("all-MiniLM-L6-v2", "onnx/model.onnx", True),
+        ("all-MiniLM-L6-v2", "modules.json", True),
+        ("all-MiniLM-L6-v2", "config.json", True),
+    ]
+
+
+def test_onnx_file_name_cannot_escape_local_model(
+    captured, tmp_path,
+) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    (tmp_path / "outside.onnx").write_bytes(b"onnx")
+
+    pipe = _pipeline(EmbeddingConfig(
+        device="cpu",
+        backend="onnx",
+        model_name=str(model),
+        onnx_file_name="../outside.onnx",
+    ))
+    assert pipe.backend == "torch"
+    assert len(captured) == 1
+    assert "backend" not in captured[0].kwargs
 
 
 def test_onnx_load_failure_falls_back_to_torch(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+    tmp_path,
 ) -> None:
     """optimum missing / weights not cached must not break the embedder."""
     from pseudolife_memory.memory import embedding
@@ -117,12 +273,19 @@ def test_onnx_load_failure_falls_back_to_torch(
 
     monkeypatch.setattr(embedding, "SentenceTransformer", _factory)
 
+    model = tmp_path / "model"
+    (model / "onnx").mkdir(parents=True)
+    (model / "onnx" / "model.onnx").write_bytes(b"onnx")
+
     with caplog.at_level("WARNING"):
-        pipe = _pipeline(EmbeddingConfig(device="cpu", backend="onnx"))
+        pipe = _pipeline(EmbeddingConfig(
+            device="cpu", backend="onnx", model_name=str(model),
+        ))
     assert pipe.backend == "torch"
     assert len(instances) == 1  # the fallback torch construction
     assert any("onnx" in r.message.lower() for r in caplog.records), (
         "the silent-fallback must at least log a warning")
+    assert "identical" not in caplog.text.lower()
     # And the pipeline actually works post-fallback.
     assert pipe.encode_single("still alive").shape == (8,)
 
@@ -133,7 +296,7 @@ def test_unknown_backend_raises(captured) -> None:
 
 
 def test_onnx_offline_resolves_local_snapshot_path(
-    captured, monkeypatch: pytest.MonkeyPatch,
+    captured, monkeypatch: pytest.MonkeyPatch, tmp_path,
 ) -> None:
     """Deployment-critical: the ONNX loader (optimum) lists the hub repo
     tree even when every file is cached, which raises under
@@ -148,21 +311,59 @@ def test_onnx_offline_resolves_local_snapshot_path(
     which model ships as the default."""
     from pseudolife_memory.memory import embedding
 
-    def _fake_snapshot(repo_id: str, local_files_only: bool = False) -> str:
+    snapshot = tmp_path / "snapshots" / "deadbeef"
+    (snapshot / "onnx").mkdir(parents=True)
+    artifact = snapshot / "onnx" / "model.onnx"
+    artifact.write_bytes(b"onnx")
+
+    def _fake_cached_file(
+        repo_id: str, filename: str, local_files_only: bool = False,
+    ) -> str:
         assert local_files_only is True
         assert repo_id == "sentence-transformers/all-MiniLM-L6-v2", (
             "short model ids must be tried under the sentence-transformers/ "
             "org first, mirroring sentence-transformers' own resolution")
-        return "/opt/hf/snapshots/deadbeef"
+        assert filename == "onnx/model.onnx"
+        return str(artifact)
 
-    monkeypatch.setattr(embedding, "_hf_offline", lambda: True)
-    monkeypatch.setattr(embedding, "_local_snapshot", _fake_snapshot)
+    monkeypatch.setattr(embedding, "_cached_hf_file", _fake_cached_file)
 
     pipe = _pipeline(EmbeddingConfig(
         device="cpu", backend="onnx", model_name="all-MiniLM-L6-v2",
     ))
     assert pipe.backend == "onnx"
-    assert captured[0].model_name == "/opt/hf/snapshots/deadbeef"
+    assert captured[0].model_name == str(snapshot)
+
+
+def test_onnx_online_uses_cached_snapshot_without_remote_constructor(
+    captured, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """Online mode may inspect only the configured cached artifact.
+
+    Passing the Hub id after preflight would let SentenceTransformers and
+    Optimum list a newer, unverified repository head (including all nine
+    MiniLM ONNX variants).  The constructor must receive the snapshot that
+    owns the already-cached configured file instead.
+    """
+    from pseudolife_memory.memory import embedding
+
+    snapshot = tmp_path / "snapshots" / "cafebabe"
+    (snapshot / "onnx").mkdir(parents=True)
+    artifact = snapshot / "onnx" / "model.onnx"
+    artifact.write_bytes(b"onnx")
+
+    def _fake_cached_file(repo_id, filename, local_files_only=False):
+        assert local_files_only is True
+        return str(artifact)
+
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.setattr(embedding, "_cached_hf_file", _fake_cached_file)
+
+    pipe = _pipeline(EmbeddingConfig(
+        device="cpu", backend="onnx", model_name="all-MiniLM-L6-v2",
+    ))
+    assert pipe.backend == "onnx"
+    assert captured[0].model_name == str(snapshot)
 
 
 # ---------------------------------------------------------------------------
