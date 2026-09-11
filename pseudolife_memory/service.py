@@ -1720,8 +1720,9 @@ class MemoryService(DreamOps):
         """Resolve the entire selection without writes or retrieval effects.
 
         PostgreSQL row IDs survive hydration and band relocation. File mode
-        has no durable IDs; its legacy exact-text selector must be unique,
-        including historical entries. Caller holds the service lock.
+        has no durable IDs; its legacy exact-text selector must match exactly
+        one LIVE entry — retired twins are history, not rival targets.
+        Caller holds the service lock.
         """
         if (texts is None) == (entry_ids is None):
             return [], self._correction_noop(
@@ -1753,10 +1754,17 @@ class MemoryService(DreamOps):
         for value in dict.fromkeys(selectors):
             matches = [e for e in residents
                        if (e.db_id if by_id else e.text) == value]
+            live = [e for e in matches if e.superseded_at is None]
             selector = {"entry_id" if by_id else "text": value}
+            # A retired entry is not a correction target, so it cannot make a
+            # text ambiguous: correcting A to B and back to A leaves a retired
+            # A twin, and file mode has no ID fallback to offer. An ID still
+            # has to map to exactly one resident — a duplicate mapping there is
+            # a recovery artefact, not a history.
+            ambiguous = len(matches) != 1 if by_id else len(live) > 1
             if not matches:
                 errors.append({**selector, "reason": "target_not_found"})
-            elif len(matches) != 1:
+            elif ambiguous:
                 errors.append({
                     **selector, "reason": "ambiguous_target",
                     "candidates": [{
@@ -1765,11 +1773,11 @@ class MemoryService(DreamOps):
                         "superseded": e.superseded_at is not None,
                     } for e in matches],
                 })
-            elif matches[0].superseded_at is not None:
+            elif not live:
                 errors.append({**selector, "reason": "target_superseded",
                                "superseded_by_text": matches[0].superseded_by_text})
             else:
-                selected.append(matches[0])
+                selected.append(live[0])
         if errors:
             return [], self._correction_noop(
                 errors[0]["reason"],
@@ -5365,12 +5373,18 @@ class MemoryService(DreamOps):
             residents = [e for band in self._cms.bands for e in band.entries]
             resident_objects = {id(e) for e in residents}
             by_id = self._storage is not None
-            identity_counts = Counter(e.db_id if by_id else e.text for e in residents)
+            # Same uniqueness rule the correction path applies: a retired twin
+            # no longer competes for a text selector, so a note whose only
+            # duplicate is history stays offerable in file mode.
+            identity_counts = Counter(
+                e.db_id if by_id else e.text
+                for e in residents if by_id or e.superseded_at is None
+            )
 
             def actionable(entry: MemoryEntry) -> bool:
                 # Reference documents can appear in query results but are
-                # not correction targets. In file mode text must be unique
-                # across ALL residents, including retired/out-of-scope twins.
+                # not correction targets. In file mode text must identify one
+                # live entry across ALL residents, including out-of-scope ones.
                 if id(entry) not in resident_objects or entry.superseded_at is not None:
                     return False
                 key = entry.db_id if by_id else entry.text
@@ -5430,8 +5444,19 @@ class MemoryService(DreamOps):
                 # Filter unavailable rows individually: one phantom ID must
                 # not hide the remaining valid cluster. Check before the
                 # episode cap; query retrieval has already bounded its pool.
-                present = self._storage.existing_entry_ids([e.db_id for e, _ in candidates])
-                candidates = [(e, score) for e, score in candidates if e.db_id in present]
+                # A read failure degrades the suggestion — offering unverified
+                # residents is better than failing a read-only tool; the
+                # correction itself re-validates every ID before it mutates.
+                try:
+                    present = self._storage.existing_entry_ids(
+                        [e.db_id for e, _ in candidates])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "consolidation candidates unverified, storage read failed: %s",
+                        exc)
+                else:
+                    candidates = [(e, score) for e, score in candidates
+                                  if e.db_id in present]
             candidates = candidates[:top_k]
 
             clusters: list[Cluster] = cluster_candidates(
