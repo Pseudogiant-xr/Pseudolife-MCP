@@ -54,21 +54,29 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `onnx/model.onnx`; that exact artifact must already exist in a local model
   directory or a revision-specific cached Hub snapshot. A missing artifact falls
   back to torch before SentenceTransformers constructs its ONNX backend, in
-  online and offline processes alike. Online first use therefore may use torch
-  until the configured ONNX file has been provisioned. The daemon image
-  explicitly downloads and verifies MiniLM's file while building. Each
-  supported Transformer module must have the artifact in its own configured
-  subdirectory; a root-level file does not cover a missing module artifact.
+  online and offline processes alike. The daemon never downloads ONNX artifacts
+  at runtime. The daemon image provisions MiniLM's while building
+  (`ops/provision_embedding_models.py` is the reference for how); a pip install
+  stays on torch unless the operator puts `onnx/model.onnx`, or whatever
+  `onnx_file_name` names, into the local model directory or the cached Hub
+  snapshot. Each supported Transformer module must have the artifact in its own
+  configured subdirectory; a root-level file does not cover a missing module
+  artifact.
   Standard Transformer, Pooling, Normalize and Dense module layouts are
   recognized; unknown module classes use torch. Filenames must end in lowercase
   `.onnx` so validation matches the loader on case-sensitive filesystems.
-  Validated ONNX artifact paths and `modules.json` metadata for local models
-  cannot link outside their root. Standard Hub snapshot leaf links are accepted
-  only after local-only Hub cache resolution and only when they target that
-  cached repository's own `blobs` directory. With the pinned Optimum stack,
-  native Windows path inference can mis-detect an existing nested ONNX file and
-  enable export, so native Windows falls back to torch before ONNX construction.
-  The load-only ONNX path remains available in Linux and the daemon image.
+  No validated ONNX artifact path or `modules.json` may traverse a link between
+  the model directory and the file, because the loader's discovery glob does not
+  descend into linked directories — a link that stays inside the model directory
+  still hides the artifact and re-enables export. The one accepted link is a Hub
+  snapshot's leaf link, and only after local-only Hub cache resolution and only
+  when it targets that cached repository's own `blobs` directory. With the
+  pinned Optimum stack, native Windows does not detect an artifact under a
+  nested module subfolder such as `0_Transformer/onnx` and enables export, so a
+  model whose Transformer module loads from a subfolder falls back to torch
+  there before ONNX construction. A flat `onnx` subfolder resolves on both
+  platforms, and the load-only ONNX path remains available in Linux and the
+  daemon image.
 - **Surprise threshold `0.0`** — the v0.5 store gate measures *novelty*
   (`1 − max cos` to existing entries). Claude stores deliberately, so the
   gate stays permissive (store everything; novelty still drives
