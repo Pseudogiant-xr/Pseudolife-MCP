@@ -552,16 +552,75 @@ class DreamOps:
                 elif entry.source in excluded:
                     continue
                 rows.append(entry)
+        # Type-homogeneous tie-break. A resident can hold ``db_id=None`` in
+        # PostgreSQL mode — ``cms.store`` seats the entry in the band before
+        # its write-through insert — so an int-or-str key raised TypeError
+        # on the first tied timestamp, taking dream_status down with it.
+        # Both components are always comparable: file-mode entries have no
+        # db_id at all (0 for every row, ordered by dream_id), PostgreSQL
+        # entries have a unique one.
         rows.sort(key=lambda entry: (
             entry.timestamp,
-            entry.db_id if entry.db_id is not None else entry.dream_id,
+            entry.db_id if entry.db_id is not None else 0,
+            entry.dream_id or "",
         ))
         return rows if limit is None else rows[:max(0, int(limit))]
+
+    def _retry_dream_tracking(self) -> None:
+        """Re-attempt a dream-tracking initialization that failed transiently.
+
+        The initialization runs once from ``_ensure_init``, so before this
+        a storage blip at boot disabled the dream until the daemon was
+        restarted. Only a transient failure is retried: a corrupt bank
+        secret, an unusable legacy cursor or an invalid checkpoint is the
+        bank's own data, and re-running the same pass over the same bytes
+        fails identically — those stay latched so ``/health`` keeps
+        reporting them instead of burning a transaction per call.
+        Caller holds the service lock."""
+        if self._dream_tracking_error and self._dream_tracking_retryable:
+            self._initialize_dream_tracking()
+
+    def _persist_pending_rows(self, rows: list[MemoryEntry],
+                              ) -> tuple[list[MemoryEntry], int]:
+        """Give every pending resident a storage row before it is named in a
+        commit token, and drop the ones that still cannot get one.
+
+        ``cms.store`` seats the entry in the band BEFORE its write-through
+        insert, so a failed insert leaves a resident with ``db_id=None``.
+        The pull used to refuse the WHOLE batch on one of those — one lost
+        insert stalled every dream until restart. Re-flushing heals the
+        common case; an entry that still cannot be persisted is excluded
+        from this pull (it stays pending and is retried next sweep) rather
+        than holding the rest of the backlog hostage. Returns the pullable
+        rows and the number excluded. Caller holds the service lock."""
+        assert self._cms is not None
+        unpersisted = [entry for entry in rows if entry.db_id is None]
+        if not unpersisted:
+            return rows, 0
+        try:
+            healed = self._cms.flush_unpersisted_entries(unpersisted)
+            if healed:
+                logger.warning(
+                    "dream pull re-flushed %d pending entr%s that never "
+                    "reached storage", healed, "y" if healed == 1 else "ies")
+        except Exception as exc:  # noqa: BLE001 — a skip beats a stalled dream
+            logger.warning("dream pull could not persist %d pending entry/ies "
+                           "(%s); excluding them from this pull",
+                           len(unpersisted), exc)
+        pullable = [entry for entry in rows if entry.db_id is not None]
+        skipped = len(rows) - len(pullable)
+        if skipped:
+            logger.warning(
+                "dream pull skipped %d unpersisted pending entr%s; they stay "
+                "pending for the next sweep", skipped,
+                "y" if skipped == 1 else "ies")
+        return pullable, skipped
 
     def dream_pull(self, limit: int = 20) -> dict[str, Any]:
         """Pull exact pending entries and issue their signed commit token."""
         with self._lock:
             self._ensure_init()
+            self._retry_dream_tracking()
             assert self._cms is not None and self._cortex is not None
             cursor = self._dream_display_cursor()
             if self._dream_tracking_error:
@@ -570,10 +629,13 @@ class DreamOps:
                         "cursor": cursor, "count": 0, "entries": []}
             rows = self._pending_dream_entries(min(int(limit), MAX_ENTRY_IDS))
             backend = "postgres" if self._storage is not None else "file"
+            skipped_unpersisted = 0
+            if backend == "postgres":
+                rows, skipped_unpersisted = self._persist_pending_rows(rows)
             ids = [e.db_id if backend == "postgres" else e.dream_id for e in rows]
             if any(identity is None for identity in ids):
                 return {"error": "dream_ack_missing_entries",
-                        "detail": "pending PostgreSQL entry has no row id",
+                        "detail": "pending file entry has no identity",
                         "cursor": cursor, "count": 0, "entries": []}
             secret = self._cms.dream_ack_secret
             if not secret:
@@ -614,6 +676,8 @@ class DreamOps:
             }
             if token is not None:
                 response["commit_token"] = token
+            if skipped_unpersisted:
+                response["skipped_unpersisted"] = skipped_unpersisted
             return response
 
     def dream_commit(self, commit_token: str) -> dict[str, Any]:
@@ -641,9 +705,15 @@ class DreamOps:
                     result = self._storage.acknowledge_dream_entries(
                         list(payload.entry_ids), payload.display_timestamp)
                     acknowledged = set(result["acknowledged_ids"])
+                    missing = set(result.get("missing_ids") or ())
+                    # The resident copy of a vanished row is retired too.
+                    # Its row can never be pulled again, but the resident
+                    # can — leaving it pending would re-enter it into every
+                    # pull from here on, for a batch that no longer exists.
+                    settled = acknowledged | missing
                     for band in self._cms.bands:
                         for entry in band.entries:
-                            if entry.db_id in acknowledged:
+                            if entry.db_id in settled:
                                 entry.dream_state = "acknowledged"
                     cursor = float(result["dream_cursor"])
                     newly = int(result["newly_acknowledged"])
@@ -653,13 +723,15 @@ class DreamOps:
                         for band in self._cms.bands
                         for entry in band.entries
                     }
+                    # Same reading as the PostgreSQL path: an entry that is
+                    # no longer resident cannot be pulled again, so it is
+                    # reported, not raised over.
                     missing = [identity for identity in payload.entry_ids
                                if identity not in by_id]
-                    if missing:
-                        raise ValueError(
-                            f"dream_ack_missing_entries: {missing}")
+                    present = [identity for identity in payload.entry_ids
+                               if identity in by_id]
                     invalid = [
-                        identity for identity in payload.entry_ids
+                        identity for identity in present
                         if by_id[identity].dream_state
                         not in ("pending", "acknowledged")
                     ]
@@ -667,7 +739,7 @@ class DreamOps:
                         raise ValueError(
                             f"dream_ack_invalid_states: {invalid}")
                     newly_ids = [
-                        identity for identity in payload.entry_ids
+                        identity for identity in present
                         if by_id[identity].dream_state == "pending"
                     ]
                     cursor = max(
@@ -682,21 +754,30 @@ class DreamOps:
                             self.config.memory.save_dir,
                             dream_state_overrides={
                                 identity: "acknowledged"
-                                for identity in payload.entry_ids
+                                for identity in present
                             },
                             dream_ack_secret=secret,
                             dream_display_cursor=cursor,
                         )
-                    for identity in payload.entry_ids:
+                    for identity in present:
                         by_id[identity].dream_state = "acknowledged"
+                    acknowledged = present
                     newly = len(newly_ids)
                 self._cms.dream_display_cursor = cursor
                 self._cortex.dream_cursor = cursor
-                return {
+                if missing:
+                    logger.warning(
+                        "dream commit: %d pulled entr%s no longer exist(s); "
+                        "acknowledging the remaining %d", len(missing),
+                        "y" if len(missing) == 1 else "ies", len(acknowledged))
+                response = {
                     "dream_cursor": cursor,
-                    "acknowledged": len(payload.entry_ids),
+                    "acknowledged": len(acknowledged),
                     "newly_acknowledged": newly,
                 }
+                if missing:
+                    response["missing"] = len(missing)
+                return response
             except ValueError as exc:
                 code = str(exc).split(":", 1)[0]
                 if code not in {
@@ -2089,6 +2170,7 @@ class DreamOps:
         cfg = self.config.memory.dream
         with self._lock:
             self._ensure_init()
+            self._retry_dream_tracking()
             assert self._cms is not None and self._cortex is not None
             backlog = (
                 0 if self._dream_tracking_error

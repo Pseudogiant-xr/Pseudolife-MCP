@@ -106,6 +106,98 @@ def test_initialize_classifies_only_null_rows_under_current_source_policy(storag
     assert storage.initialize_dream_tracking()["secret"] == result["secret"]
 
 
+@pytest.mark.parametrize(
+    "policy,expected",
+    [
+        ({"exclude_sources": ["excluded"]},
+         {"eligible old": "legacy-covered",
+          "eligible boundary": "legacy-covered",
+          "eligible new": "pending",
+          "excluded old": "pending",
+          "excluded new": "pending"}),
+        ({"eligible_sources": ["eligible"]},
+         {"eligible old": "legacy-covered",
+          "eligible boundary": "legacy-covered",
+          "eligible new": "pending",
+          "excluded old": "pending",
+          "excluded new": "pending"}),
+    ],
+    ids=["exclude-list", "allow-list"],
+)
+def test_initialize_classification_equals_the_per_row_rule(
+        storage, policy, expected):
+    """Characterization pin for the set-based classification: over a mixed
+    fixture the result must equal the per-row rule it replaced — covered
+    only when the source is dream-eligible AND ``ts <= cursor`` (boundary
+    inclusive), pending otherwise — and rows that already carry a state
+    must not be touched under either source policy."""
+    storage.meta_set("cortex_dream_cursor", 10.0)
+    ids = {
+        text: storage.insert_entry(
+            _entry(text, ts=ts, source=source, dream_state=None))
+        for text, ts, source in (
+            ("eligible old", 9.0, "eligible"),
+            ("eligible boundary", 10.0, "eligible"),
+            ("eligible new", 11.0, "eligible"),
+            ("excluded old", 1.0, "excluded"),
+            ("excluded new", 12.0, "excluded"),
+        )
+    }
+    settled = storage.insert_entry(
+        _entry("already settled", ts=2.0, dream_state="acknowledged"))
+
+    result = storage.initialize_dream_tracking(**policy)
+
+    assert result["updated_states"] == {
+        ids[text]: state for text, state in expected.items()}
+    states = dict(storage.conn.execute(
+        "SELECT id, dream_state FROM entries"
+    ).fetchall())
+    assert states[settled] == "acknowledged"
+    assert {ids[text]: states[ids[text]] for text in expected} == {
+        ids[text]: state for text, state in expected.items()}
+
+
+def test_initialize_classifies_without_one_statement_per_row(
+        storage, monkeypatch):
+    """The classification runs under the service lock, so it must not cost
+    one round trip per legacy row: two set-based UPDATEs implement the
+    whole rule."""
+    storage.meta_set("cortex_dream_cursor", 10.0)
+    for index in range(12):
+        storage.insert_entry(_entry(f"legacy {index}", ts=float(index),
+                                    dream_state=None))
+    conn = storage.conn
+    real_cursor = conn.cursor
+    statements: list[str] = []
+
+    class _Counting:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __enter__(self):
+            self._inner.__enter__()
+            return self
+
+        def __exit__(self, *exc):
+            return self._inner.__exit__(*exc)
+
+        def execute(self, sql, *args, **kwargs):
+            statements.append(str(sql))
+            return self._inner.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(
+        conn, "cursor", lambda *a, **k: _Counting(real_cursor(*a, **k)))
+    storage.initialize_dream_tracking()
+
+    updates = [s for s in statements if s.lstrip().startswith("UPDATE entries")]
+    assert len(updates) == 2, (
+        f"expected two set-based UPDATEs, got {len(updates)}")
+
+
 @pytest.mark.parametrize("cursor", [math.nan, math.inf, -math.inf])
 def test_initialize_rejects_nonfinite_legacy_cursor_atomically(storage, cursor):
     # JSONB itself rejects bare IEEE non-finite numbers, but old snapshots
@@ -128,16 +220,10 @@ def test_acknowledge_exact_ids_is_atomic_and_idempotent(storage):
     second = storage.insert_entry(_entry("second", ts=7.0))
     storage.initialize_dream_tracking()
 
-    with pytest.raises(ValueError, match=r"^dream_ack_missing_entries:"):
-        storage.acknowledge_dream_entries([first, 999_999_999], 5.0)
-    assert dict(storage.conn.execute(
-        "SELECT id, dream_state FROM entries ORDER BY id"
-    ).fetchall()) == {first: "pending", second: "pending"}
-    assert storage.meta_get("cortex_dream_cursor", 0.0) == 0.0
-
     result = storage.acknowledge_dream_entries([second, first], 7.0)
     assert result == {
         "acknowledged_ids": [second, first],
+        "missing_ids": [],
         "newly_acknowledged": 2,
         "dream_cursor": 7.0,
     }
@@ -145,6 +231,37 @@ def test_acknowledge_exact_ids_is_atomic_and_idempotent(storage):
     assert retry["acknowledged_ids"] == [second, first]
     assert retry["newly_acknowledged"] == 0
     assert retry["dream_cursor"] == 7.0
+
+
+def test_acknowledge_commits_survivors_and_reports_vanished_ids(storage):
+    """A row deleted between the pull and the commit can never be pulled
+    again, so it must not cost the rest of the batch its acknowledgement
+    (which would re-extract the survivors on every sweep, forever)."""
+    survivor = storage.insert_entry(_entry("survivor", ts=5.0))
+    storage.initialize_dream_tracking()
+
+    result = storage.acknowledge_dream_entries([survivor, 999_999_999], 5.0)
+
+    assert result["acknowledged_ids"] == [survivor]
+    assert result["missing_ids"] == [999_999_999]
+    assert result["newly_acknowledged"] == 1
+    assert result["dream_cursor"] == 5.0
+    assert storage.conn.execute(
+        "SELECT dream_state FROM entries WHERE id = %s", (survivor,)
+    ).fetchone()[0] == "acknowledged"
+
+
+def test_acknowledge_of_an_entirely_vanished_batch_still_advances_display(
+        storage):
+    storage.insert_entry(_entry("unrelated", ts=1.0))
+    storage.initialize_dream_tracking()
+
+    result = storage.acknowledge_dream_entries([999_999_998, 999_999_999], 5.0)
+
+    assert result["acknowledged_ids"] == []
+    assert result["missing_ids"] == [999_999_998, 999_999_999]
+    assert result["newly_acknowledged"] == 0
+    assert result["dream_cursor"] == 5.0
 
 
 def test_acknowledge_rejects_unclassified_or_legacy_covered_batch(storage):

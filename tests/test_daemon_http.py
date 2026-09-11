@@ -163,6 +163,36 @@ def test_health_flags_a_partial_legacy_import_without_going_degraded():
     assert "migration_partial" not in clean
 
 
+def test_health_names_a_dream_tracking_failure_without_going_degraded():
+    """A failed dream-tracking initialization disables the dream alone —
+    pull/commit/status refuse while every other tool serves normally. It
+    was invisible outside the boot logs, so an operator had no way to see
+    why consolidation had stopped. Same treatment as ``migration_partial``:
+    named on the payload, ``status`` deliberately untouched (web/api.py
+    turns any non-ok payload into a 503 the healthcheck treats as fatal)."""
+    from pseudolife_memory.daemon import _build_health_payload
+
+    class _Stub:
+        _db_url = "postgresql://fake"
+        _persist_errors = 0
+        _init_refusal = None
+        _storage = None
+        _migration_partial = None
+        _dream_tracking_error = (
+            "dream_ack_initialization_failed: connection lost")
+
+    payload = _build_health_payload(_Stub(), token_present=False)
+    assert payload["status"] == "ok"
+    assert payload["dream_tracking_error"] == "dream_ack_initialization_failed"
+
+    class _Clean(_Stub):
+        _dream_tracking_error = None
+
+    clean = _build_health_payload(_Clean(), token_present=False)
+    assert clean["status"] == "ok"
+    assert "dream_tracking_error" not in clean
+
+
 def test_tool_call_requires_token(daemon):
     req = urllib.request.Request(
         daemon["url"] + "/mcp",

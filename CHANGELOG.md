@@ -54,6 +54,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are classified once against the legacy cursor and source policy; this keeps
   the prior boundary and does not repair historical omissions. File checkpoints
   move to format v7 with durable entry identities and acknowledgement state.
+- A memory whose storage write failed no longer stalls every later dream until
+  the daemon restarts. The pull re-persists such entries, excludes any that
+  still cannot be stored — reporting `skipped_unpersisted` and leaving them
+  pending for the next pass — and consolidates the rest. Pull ordering no
+  longer depends on every pending memory having a storage row, so a backlog
+  with tied timestamps reports its status instead of failing.
+- Entries deleted between a pull and its commit are reported as `missing`
+  instead of failing the whole batch, so a concurrent deletion no longer
+  leaves its batch to be re-extracted on every later pass.
+- A failed dream-tracking initialization is named on `/health`
+  (`dream_tracking_error`, without changing `status`) and a transient storage
+  failure is re-attempted by the next dream call. A corrupt bank secret or an
+  unusable legacy cursor still stops only the dream, and still requires repair.
+- Classifying a bank's pre-v38 entries is two statements rather than one per
+  entry, so startup no longer holds the service lock for a round trip per
+  legacy memory. The classification rule itself is unchanged.
 
 ### Fixed (2026-09-11 — exact correction targets)
 - Explicit supersede and consolidation calls accept entry IDs from retrieval,

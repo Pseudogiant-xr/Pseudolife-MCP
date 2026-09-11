@@ -2272,9 +2272,16 @@ For manual extraction, retain the opaque `commit_token` returned by
 `memory_dream(action="pull")`. After writing the extracted facts, call
 `memory_dream(action="commit", commit_token=<that token>)`. It acknowledges
 only that pull's entries. Repeating a successful commit is idempotent;
-a missing entry or a token from another bank is rejected. A numeric
+a token from another bank is rejected. A numeric
 `cursor` cannot safely identify a batch and is no longer accepted for a
 commit. Pull again to obtain a token. An empty pull has no token to commit.
+
+An entry deleted between the pull and the commit does not fail the batch:
+the surviving entries are acknowledged and the commit reports `missing: N`
+for the ones that are gone, since a deleted entry can never be pulled
+again. A pull likewise never stalls on an entry that failed to persist —
+it re-persists what it can, excludes what it cannot, and reports
+`skipped_unpersisted: N`; those entries stay pending for the next pass.
 
 PostgreSQL schema v38 classifies old entries once using the previous cursor
 and the configured source eligibility. Entries excluded by that policy stay

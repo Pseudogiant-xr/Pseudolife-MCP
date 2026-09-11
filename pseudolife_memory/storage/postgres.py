@@ -390,7 +390,7 @@ class PostgresStorage:
         updated_states: dict[int, str] = {}
         with conn.transaction() as tx, conn.cursor() as cur:
             cur.execute(
-                "SELECT id, ts, source FROM entries "
+                "SELECT id FROM entries "
                 "WHERE dream_state IS NULL ORDER BY id FOR UPDATE"
             )
             unclassified = cur.fetchall()
@@ -432,22 +432,38 @@ class PostgresStorage:
                         "be a 64-character hexadecimal string"
                     )
 
-            for entry_id, ts, source in unclassified:
-                eligible = (
-                    source in allowed if allowed is not None
-                    else source not in excluded
-                )
-                state = (
-                    "legacy-covered"
-                    if eligible and float(ts) <= dream_cursor
-                    else "pending"
-                )
+            # Set-based, not row-by-row: this runs under the service lock
+            # at startup, and one round trip per legacy row made boot time
+            # scale with bank size. Two statements implement the same rule
+            # the per-row loop did — covered when the source is
+            # dream-eligible AND the row predates the legacy cursor,
+            # pending for everything else — and both are confined to
+            # dream_state IS NULL, so no explicitly-stated row is touched.
+            # `source` is NOT NULL in the DDL, so = ANY / <> ALL are exact
+            # translations of Python's `in` / `not in` here.
+            if unclassified:
+                if allowed is not None:
+                    cur.execute(
+                        "UPDATE entries SET dream_state = 'legacy-covered' "
+                        "WHERE dream_state IS NULL AND source = ANY(%s) "
+                        "AND ts <= %s RETURNING id",
+                        (sorted(allowed), dream_cursor),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE entries SET dream_state = 'legacy-covered' "
+                        "WHERE dream_state IS NULL AND source <> ALL(%s) "
+                        "AND ts <= %s RETURNING id",
+                        (sorted(excluded), dream_cursor),
+                    )
+                updated_states.update(
+                    {int(row[0]): "legacy-covered" for row in cur.fetchall()})
                 cur.execute(
-                    "UPDATE entries SET dream_state = %s "
-                    "WHERE id = %s AND dream_state IS NULL",
-                    (state, entry_id),
+                    "UPDATE entries SET dream_state = 'pending' "
+                    "WHERE dream_state IS NULL RETURNING id"
                 )
-                updated_states[int(entry_id)] = state
+                updated_states.update(
+                    {int(row[0]): "pending" for row in cur.fetchall()})
         if tx.status is not tx.Status.COMMITTED:
             raise psycopg.OperationalError(
                 f"transaction did not commit (status={tx.status.name}); "
@@ -465,8 +481,15 @@ class PostgresStorage:
         """Atomically acknowledge the exact PostgreSQL entry identities.
 
         Already-acknowledged IDs are accepted so a retry after response loss
-        is idempotent. Missing, unclassified, and legacy-covered IDs reject
-        the complete batch before any row or display metadata is changed.
+        is idempotent. Unclassified and legacy-covered IDs reject the
+        complete batch before any row or display metadata is changed —
+        those are a real disagreement about what the batch was.
+
+        IDs whose row is GONE do not: a deleted row can never be pulled
+        again, so failing the batch over one only re-extracts its survivors
+        on every sweep forever. They are acknowledged as far as they can be
+        (nothing to update) and returned in ``missing_ids`` for the caller
+        to report and to retire in memory.
         """
         ids = list(entry_ids)
         if (not ids
@@ -491,13 +514,9 @@ class PostgresStorage:
             )
             states = {int(row[0]): row[1] for row in cur.fetchall()}
             missing = [entry_id for entry_id in ids if entry_id not in states]
-            if missing:
-                raise ValueError(
-                    "dream_ack_missing_entries: "
-                    + ",".join(str(value) for value in missing)
-                )
+            present = [entry_id for entry_id in ids if entry_id in states]
             invalid = [
-                entry_id for entry_id in ids
+                entry_id for entry_id in present
                 if states[entry_id] not in {"pending", "acknowledged"}
             ]
             if invalid:
@@ -511,7 +530,7 @@ class PostgresStorage:
             cur.execute(
                 "UPDATE entries SET dream_state = 'acknowledged' "
                 "WHERE id = ANY(%s) AND dream_state = 'pending' RETURNING id",
-                (ids,),
+                (present,),
             )
             newly_acknowledged = len(cur.fetchall())
             cur.execute(
@@ -537,7 +556,8 @@ class PostgresStorage:
                 "connection lost during dream acknowledgement"
             )
         return {
-            "acknowledged_ids": ids,
+            "acknowledged_ids": present,
+            "missing_ids": missing,
             "newly_acknowledged": newly_acknowledged,
             "dream_cursor": dream_cursor,
         }
