@@ -221,10 +221,11 @@ def test_the_mcp_search_projection_carries_the_flag(tmp_path, monkeypatch):
 
     And it stays PASSIVE. The fact below is fresh, evergreen and
     uncontested, so any ``correct_with`` on it could only have come from
-    ``re_verify`` — and there must not be one. The flag fires on ~25% of a
-    mature bank (measured 2026-09-02: 1264/5153 live facts), so wiring it
-    into an affordance whose served note says to write a correction NOW
-    would be a standing instruction to rewrite a quarter of the cortex."""
+    ``re_verify`` — and there must not be one. The flag fires on a large
+    share of a mature bank (``ops/measure_reverify_population.py``, live
+    bank 2026-09-11: 1668/6015 current facts, 27.7%), so wiring it into an
+    affordance whose served note says to write a correction NOW would be a
+    standing instruction to rewrite a quarter of the cortex."""
     from tests.helpers import reload_mcp_filemode
 
     mod = reload_mcp_filemode(tmp_path, monkeypatch)

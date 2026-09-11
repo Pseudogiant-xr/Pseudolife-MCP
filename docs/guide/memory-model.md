@@ -124,10 +124,19 @@ plus a `re_verify_reason` naming how many source memories were corrected
 since. It surfaces on `memory_fact_get`, `memory_search`'s cortex block,
 and `memory_recall`; on a set-valued slot the comparison is against the
 newest member's confirmation stamp, since a set is served as one grouped
-answer. It is a flag, never a cascade, and deliberately not routed into a
-`correct_with` call: correcting a source note does not establish that every
-fact derived from that note is wrong. Re-asserting or re-confirming the slot
-moves `last_confirmed` forward and clears the flag.
+answer — falling back to a member's assertion time when that member carries
+no confirmation stamp, so one legacy member cannot drag the slot's clock to
+zero and warn on every source it ever had corrected.
+
+It is a flag, never a cascade, and deliberately excluded from the
+`correct_with` affordance: correcting a source note does not establish that
+every fact derived from that note is wrong, and the signal is broad. Measured
+on the live bank on 2026-09-11 with `ops/measure_reverify_population.py`
+(read-only): 1668 of 6015 current facts, 27.7%, stood on a source memory
+corrected since they were last confirmed. Routing that into a call whose
+served note says to run a correction *now* would be a standing instruction to
+rewrite a quarter of the cortex every session. Re-asserting or re-confirming
+the slot moves `last_confirmed` forward and clears the flag.
 
 The **active** affordance for retracted evidence lives on the correction
 itself: `memory_supersede`'s result carries `derived_flagged` — the
@@ -147,6 +156,22 @@ and correction time, without source text or a foreign key to the entry or fact
 row. Cortex snapshots and fact compaction therefore retain it. Ordinary
 eviction or deletion of an uncorrected source does not establish a correction
 and creates no warning.
+
+**What the upgrade does to an existing bank.** The first start on v39
+materialises one durable event for every surviving `memory_traces` row whose
+source entry is already superseded — 2077 pairs on the reference bank on
+2026-09-11, which is what the same script reports as
+`trace_supersession_pairs`. That reproduces the warnings the bank was already
+serving; it does not invent new ones, and history already lost to deletion
+cannot be recovered. The difference afterwards is that these warnings no
+longer drain when their source is evicted. Each one clears only when its slot
+is confirmed again: a `memory_fact_set` at the slot with the same or a new
+value, or accepting a contender there. An operator who wants to clear a
+population deliberately re-asserts those slots — the flag is per slot, so
+there is no bulk switch, and there is deliberately no way to dismiss a warning
+without confirming the value it stands on. `re_verify` stays passive
+throughout: it is never rendered into `correct_with`, so a large flagged
+population never becomes a large instruction list.
 
 Both served signals are gated on `memory.traces.enabled`. Turning tracing off
 silences them and stops new trace formation; corrections still preserve events
@@ -180,13 +205,15 @@ bank and survive ordinary PostgreSQL hydration; they are not portable across
 bank replacement or arbitrary imports. The Console sends selected IDs too.
 
 Use exactly one selector mode. Legacy `old_text` and `replaces` calls still
-work when each full text identifies one entry, including consideration of
-retired duplicates. There is no paraphrase fallback or replace-all behavior.
-Missing, ambiguous, already-superseded or unavailable targets return
-`new_memory_stored: false` with `reason`, `error` and `target_errors`; none of
-the selected entries change on target-validation failure. Search again and
-resubmit IDs. Success results include `superseded_ids`. File-mode entries
-have no durable row ID and therefore require unique exact text.
+work when each full text identifies exactly one live entry; a retired
+duplicate is history rather than a rival target, so text that was corrected
+and later restated stays selectable. There is no paraphrase fallback or
+replace-all behavior. Missing, ambiguous, already-superseded or unavailable
+targets return `new_memory_stored: false` with `reason`, `error` and
+`target_errors`; none of the selected entries change on target-validation
+failure. Search again and resubmit IDs. Success results include
+`superseded_ids`, which is empty in file mode: file-mode entries have no
+durable row ID and therefore require unique exact text.
 
 Whole-selection validation does not provide transactional rollback for later
 encoding or storage failures. Operational failure recovery remains a separate
@@ -537,28 +564,43 @@ duplicate and counted (`lessons_deduped` in the dream-run row;
 `memory.lessons.synthesis_dedup_min_similarity`, default `0.88`, `0`
 disables). Opposite-polarity near-matches always write — a dead-end and a
 success about the same thing are both worth keeping — and explicit
-`lesson_write` calls are never gated.
+`lesson_write` calls are never gated. The comparison covers the lessons the
+same batch has already staged, so two near-identical claims in one batch
+write once.
 
 In PostgreSQL, synthesis stages lesson changes in memory and commits the
 lessons, their graph updates, and the handled signals' acknowledgements in one
-transaction. A write failure rolls back the whole selected write group. A
-fully deduplicated group is acknowledged only with its supporting lesson state
-durable. Extraction happens outside the service lock; changed or already
-consumed inputs invalidate the extracted batch before it writes anything.
+transaction. Each claim writes inside its own savepoint: a claim that cannot be
+written rolls back both halves of itself and is counted as `write_errors`,
+while the rest of the batch commits. A fully deduplicated group is acknowledged
+only with its supporting lesson state durable. Extraction happens outside the
+service lock; changed or already consumed inputs invalidate the extracted batch
+before it writes anything. One sweep drains at most
+`memory.lessons.synthesis_max_signals` signals (default 200), which bounds a
+single lock hold rather than the total work; the rest waits for the next sweep.
 
 An empty or failed extraction route leaves its signals pending for a later
-sweep, subject to the existing retention limit. This is a persistence guarantee,
-not evidence that every extracted lesson is correct or complete. A lost commit
-response triggers a durable-state check before retrying or saving; if that
-check is unavailable, normal service operations and saves fail until
-reconciliation succeeds. This exceptional availability restriction is global,
-not limited to lesson writes. If selected signal rows have been removed or
-retargeted during an extended outage, their state may no longer prove the
-commit outcome: the service remains blocked for operator recovery instead of
-claiming a successful retry. Restarting rehydrates the durable bank; this
-protocol does not repair historical losses or recover prior unsaved changes.
-It assumes the existing single-daemon writer. File-mode synthesis still
-returns `skipped: no-storage`.
+sweep, subject to the existing retention limit. A rule signal whose own claim
+failed stays pending too; the clustering route, whose claims do not map to
+single signals, is acknowledged once any of its claims lands. This is a
+persistence guarantee, not evidence that every extracted lesson is correct or
+complete. A lost commit response triggers a durable-state check before retrying
+or saving; if that check is unavailable, the service latches until it succeeds
+or the daemon restarts.
+
+While latched, lesson reads and the lesson half of a save fail; `/health`
+reports `lesson_reconciliation_required` (status stays `ok`, so the container
+healthcheck does not restart the daemon by itself) and the daemon logs the
+latch at ERROR. Everything else still persists: the autosave and exit flush
+write weights, access counts, and dirty cortex and world slots, then report the
+lesson failure. That split matters because restarting is the operator's
+recovery: it rehydrates the durable bank and clears the latch, and it discards
+anything that was still only in memory. If selected signal rows have been
+removed or retargeted during an extended outage, their state may no longer
+prove the commit outcome: the service remains blocked for operator recovery
+instead of claiming a successful retry. This protocol does not repair
+historical losses or recover prior unsaved changes. It assumes the existing
+single-daemon writer. File-mode synthesis still returns `skipped: no-storage`.
 
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or

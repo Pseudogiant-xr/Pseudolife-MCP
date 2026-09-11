@@ -25,6 +25,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Logical exports preserve the events. Upgrades and older imports reconstruct
   only surviving superseded source/trace pairs; already-deleted history cannot
   be recovered.
+- **Upgrade effect.** The first v39 start materialises one durable event per
+  surviving superseded-source trace pair — 2077 pairs on the reference bank on
+  2026-09-11. That reproduces the warnings the bank already served rather than
+  raising new ones, but from then on a warning no longer drains when its
+  source memory is evicted or deleted. Each clears only when its slot is
+  confirmed again: a `memory_fact_set` at that slot with the same or a new
+  value, or accepting a contender there. An operator clearing a population
+  deliberately re-asserts those slots; there is no dismissal that skips
+  confirming the value. `re_verify` remains passive and is still excluded from
+  `correct_with`, so a larger standing population does not become a larger
+  instruction list.
+- Grouped set-slot `last_confirmed` now falls back to each member's
+  `asserted_at` when the member carries no confirmation stamp, matching the
+  scalar and lookup paths. A set slot that previously warned only because a
+  legacy member held a zero clock may no longer warn, and the served
+  `last_confirmed` on a grouped set entry may report an assertion time.
+- A correction whose target list repeats the same entry no longer fails after
+  the rows are already retired. The atomic retirement count is checked against
+  the distinct targets, matching what the storage call reports.
+- `ops/measure_reverify_population.py` re-measures the flagged population
+  read-only from a DSN: current facts, the served `last_confirmed`-keyed
+  warning count, the latching "any source superseded" upper bound, and the
+  trace/supersession pair count the v39 backfill inserts. Measured on the live
+  bank 2026-09-11: 1668/6015 current facts (27.7%) served the warning, 1981
+  (32.9%) under the bare test, 2077 pairs.
 
 ### Fixed (2026-09-11 — durable dream acknowledgement)
 - Dream batches acknowledge their exact entries instead of moving a timestamp
@@ -36,6 +61,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are classified once against the legacy cursor and source policy; this keeps
   the prior boundary and does not repair historical omissions. File checkpoints
   move to format v7 with durable entry identities and acknowledgement state.
+- A memory whose storage write failed no longer stalls every later dream until
+  the daemon restarts. The pull re-persists such entries, excludes any that
+  still cannot be stored — reporting `skipped_unpersisted` and leaving them
+  pending for the next pass — and consolidates the rest. Pull ordering no
+  longer depends on every pending memory having a storage row, so a backlog
+  with tied timestamps reports its status instead of failing.
+- Entries deleted between a pull and its commit are reported as `missing`
+  instead of failing the whole batch, so a concurrent deletion no longer
+  leaves its batch to be re-extracted on every later pass.
+- A failed dream-tracking initialization is named on `/health`
+  (`dream_tracking_error`, without changing `status`) and a transient storage
+  failure is re-attempted by the next dream call. A corrupt bank secret or an
+  unusable legacy cursor still stops only the dream, and still requires repair.
+- Classifying a bank's pre-v38 entries is two statements rather than one per
+  entry, so startup no longer holds the service lock for a round trip per
+  legacy memory. The classification rule itself is unchanged.
 
 ### Security (2026-09-11 — require existing ONNX artifacts)
 - A configured ONNX backend with no matching artifact could enter
@@ -73,6 +114,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Correction results include the superseded IDs and actionable target errors.
   The Console keeps the edit open when the service rejects a correction,
   preserving replacement text instead of reporting a false success.
+- The Console treats a correction as rejected only when the service reports an
+  error or retired nothing. A correction whose replacement text was filtered
+  out still retired its target, so the Console now closes the edit and warns
+  that the replacement was not stored, instead of reporting a failure for work
+  that already happened and inviting a retry that cannot succeed.
+- A legacy text selector needs one LIVE match, not one match overall. Text that
+  was corrected and later restated leaves a retired twin behind; that twin no
+  longer makes the live entry ambiguous, which file mode could not work around
+  because it has no entry IDs. Two live duplicates are still ambiguous, and a
+  text whose only matches are retired still reports `target_superseded`.
+  Consolidation candidates apply the same rule, so such a note is offered again.
+- `memory_supersede` and `memory_consolidate` require `new_text` again; an
+  omitted replacement is a client-side schema error rather than a silent
+  empty-input no-op.
+- A failed storage read while listing consolidation candidates degrades to
+  unverified candidates with a logged warning instead of failing the call;
+  the correction itself still validates every ID before changing anything.
 
 ### Fixed (2026-09-11 — durable lesson acknowledgement)
 - Lesson synthesis commits staged lessons, graph updates and acknowledgements
@@ -84,6 +142,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   empty rule responses. Successful routes can proceed independently; a custom
   rule extractor with incomplete output coverage leaves that route pending.
   Signal retention and file-mode synthesis behavior are unchanged.
+- A claim the batch cannot write costs only itself: it rolls back on its own
+  savepoint (lesson and graph halves together), the rest of the batch still
+  commits, and the count appears as `write_errors` in the synthesis report.
+  Its rule signal stays pending; the clustering route is acknowledged once any
+  of its claims lands. A claim that fails every time no longer stalls every
+  later sweep.
+- Within one batch, the near-duplicate gate compares a claim against the
+  lessons that batch has already staged as well as the durable ones, so the
+  second of two near-identical claims is counted as `deduped`, not written.
+- Claim embeddings are computed before the batch transaction opens, and one
+  sweep drains at most `memory.lessons.synthesis_max_signals` signals
+  (default 200; 0 disables). Both bound how long a batch holds the service
+  lock and one PostgreSQL transaction; the remainder waits for the next sweep.
+- An unresolved lesson reconciliation no longer blocks unrelated persistence:
+  weights, access counts and cortex/world slots are written, only the lesson
+  snapshot is skipped, and the save still fails loudly afterwards. A restart
+  discards exactly what those parts would have made durable.
+- `/health` reports `lesson_reconciliation_required` while a lesson commit is
+  unresolved, and the daemon logs it at ERROR. Status stays `ok` so the
+  container healthcheck does not restart the daemon out from under the
+  unsaved state, matching `migration_partial`.
+- A synthesis report keeps its extraction-route errors when a transaction
+  error follows, instead of replacing them.
 
 ### Fixed (2026-09-10 — preserve source evidence)
 - Automatic contradiction candidates can admit a possible update through
@@ -2979,13 +3060,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     test latches on forever; measured on the live bank it would fire on
     1470/5153 current facts (28.5%). Keyed on `last_confirmed` it fires on
     1264 (24.5%) and — unlike the bare test — is cleared by re-asserting or
-    re-confirming the slot.
+    re-confirming the slot. *(Both figures are retired: see the
+    historical-contract note below, and `ops/measure_reverify_population.py`
+    for the current ones — 1981 and 1668 of 6015 on 2026-09-11.)*
   - **`re_verify` is deliberately PASSIVE**, exactly as it is on lessons: it
-    does NOT gate the `correct_with` affordance. At ~25% of a mature bank,
-    routing it into a call whose served note says to run a correction NOW
-    would be a standing instruction to rewrite a quarter of the cortex every
-    session. The active, targeted affordance is `derived_flagged`, which
-    fires only on an explicit correction.
+    does NOT gate the `correct_with` affordance. At ~25% of a mature bank
+    (retired figure, superseded by schema v39 — re-measured 2026-09-11 at
+    27.7%), routing it into a call whose served note says to run a correction
+    NOW would be a standing instruction to rewrite a quarter of the cortex
+    every session. The active, targeted affordance is `derived_flagged`,
+    which fires only on an explicit correction.
   - **Historical contract, superseded by schema v39:** correction warnings
     now survive source deletion; ordinary deletion alone is not a semantic
     correction. Automatic contradiction-based source retirement was also

@@ -659,8 +659,12 @@ class MemoryService(DreamOps):
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
         # Dream initialization failures are isolated from normal memory
-        # serving. Exact acknowledgement stays disabled until restart/fix.
+        # serving: exact acknowledgement stays disabled while the rest of
+        # the bank serves. A TRANSIENT failure is re-attempted by the next
+        # dream call (see DreamOps._retry_dream_tracking); a failure in the
+        # bank's own data latches until it is repaired.
         self._dream_tracking_error: str | None = None
+        self._dream_tracking_retryable = False
         # Set by _ensure_init when storage construction refuses to start
         # (schema v25's embedding-dim mismatch guard, schema.py's
         # RuntimeError) -- exposed via /health so the daemon doesn't report
@@ -1728,8 +1732,9 @@ class MemoryService(DreamOps):
         """Resolve the entire selection without writes or retrieval effects.
 
         PostgreSQL row IDs survive hydration and band relocation. File mode
-        has no durable IDs; its legacy exact-text selector must be unique,
-        including historical entries. Caller holds the service lock.
+        has no durable IDs; its legacy exact-text selector must match exactly
+        one LIVE entry — retired twins are history, not rival targets.
+        Caller holds the service lock.
         """
         if (texts is None) == (entry_ids is None):
             return [], self._correction_noop(
@@ -1761,10 +1766,17 @@ class MemoryService(DreamOps):
         for value in dict.fromkeys(selectors):
             matches = [e for e in residents
                        if (e.db_id if by_id else e.text) == value]
+            live = [e for e in matches if e.superseded_at is None]
             selector = {"entry_id" if by_id else "text": value}
+            # A retired entry is not a correction target, so it cannot make a
+            # text ambiguous: correcting A to B and back to A leaves a retired
+            # A twin, and file mode has no ID fallback to offer. An ID still
+            # has to map to exactly one resident — a duplicate mapping there is
+            # a recovery artefact, not a history.
+            ambiguous = len(matches) != 1 if by_id else len(live) > 1
             if not matches:
                 errors.append({**selector, "reason": "target_not_found"})
-            elif len(matches) != 1:
+            elif ambiguous:
                 errors.append({
                     **selector, "reason": "ambiguous_target",
                     "candidates": [{
@@ -1773,11 +1785,11 @@ class MemoryService(DreamOps):
                         "superseded": e.superseded_at is not None,
                     } for e in matches],
                 })
-            elif matches[0].superseded_at is not None:
+            elif not live:
                 errors.append({**selector, "reason": "target_superseded",
                                "superseded_by_text": matches[0].superseded_by_text})
             else:
-                selected.append(matches[0])
+                selected.append(live[0])
         if errors:
             return [], self._correction_noop(
                 errors[0]["reason"],
@@ -1885,12 +1897,16 @@ class MemoryService(DreamOps):
             if any(entry_id is None for entry_id in entry_ids):
                 raise RuntimeError(
                     "cannot retire an entry without a persisted row ID")
+            targets = {int(entry_id) for entry_id in entry_ids}
             persisted = self._storage.supersede_entries(
                 [int(entry_id) for entry_id in entry_ids],
                 superseded_at=superseded_at,
                 superseded_by_text=superseded_by_text,
             )
-            if persisted != len(entry_ids):
+            # ``supersede_entries`` reports DISTINCT rows retired, so the
+            # check is against the distinct targets: a target repeated in the
+            # caller's list is one row, not a short write.
+            if persisted != len(targets):
                 raise RuntimeError(
                     "atomic entry retirement returned an unexpected count")
         for entry in entries:
@@ -2230,6 +2246,7 @@ class MemoryService(DreamOps):
             # display/compatibility value and mirrors the co-located cursor.
             self._cortex.dream_cursor = self._cms.dream_display_cursor
             self._dream_tracking_error = None
+            self._dream_tracking_retryable = False
         except Exception as exc:  # noqa: BLE001 - dream-only degradation
             message = str(exc)
             if message.startswith(("invalid_legacy_dream_cursor:",
@@ -2238,6 +2255,14 @@ class MemoryService(DreamOps):
             else:
                 self._dream_tracking_error = (
                     f"dream_ack_initialization_failed: {message}")
+            # Retryability is decided on the exception CLASS, not on the
+            # message: every refusal this pass raises for the bank's own
+            # data (a corrupt secret, an unusable legacy cursor, an invalid
+            # checkpoint) is a ValueError, and re-running the same pass over
+            # the same bytes fails identically. Anything else -- a dropped
+            # connection, a transaction that never committed, a failed
+            # checkpoint write -- is transient and worth another attempt.
+            self._dream_tracking_retryable = not isinstance(exc, ValueError)
             logger.error("dream acknowledgement initialization failed: %s", exc)
 
     def _cortex_path(self) -> str:
@@ -2291,7 +2316,20 @@ class MemoryService(DreamOps):
         lazily-updated access counts and snapshot the cortex.
         File mode: legacy full-bank torch.save (v0.1 behavior).
         """
-        self._recover_lesson_synthesis()
+        # An unresolved lesson commit gates ONLY the lesson arm below. It
+        # says nothing about weights, access counts or the cortex/world
+        # slots — and the documented recovery for it is a restart, which
+        # discards exactly the unsaved state those parts would have made
+        # durable. So persist everything else first and re-raise afterwards:
+        # the save still fails loudly, it just no longer takes unrelated
+        # work down with it.
+        lesson_block: Exception | None = None
+        try:
+            self._recover_lesson_synthesis()
+        except Exception as exc:  # noqa: BLE001 — re-raised after the rest
+            lesson_block = exc
+            logger.error("%s save: lesson snapshot skipped, lesson "
+                         "reconciliation still required (%s)", kind, exc)
         assert self._cms is not None
         # Per-part durations, warned on a slow save: every persist runs
         # under the service lock, so a slow part IS a daemon pause — and
@@ -2342,15 +2380,19 @@ class MemoryService(DreamOps):
                 if self._world is not None:
                     _timed("world", lambda: _sync.snapshot_world_cortex(
                         self._world, self._storage))
-                if self._lessons is not None:
+                if self._lessons is not None and lesson_block is None:
                     _timed("lessons", lambda: _sync.snapshot_lessons(
                         self._lessons, self._storage))
             else:
                 _timed("cortex", self._save_cortex)
                 _timed("world", self._save_world)
-                _timed("lessons", self._save_lessons)
-            return _finish({"saved_to": self.config.memory.save_dir,
-                            "mode": "postgres+weights", "kind": kind})
+                if lesson_block is None:
+                    _timed("lessons", self._save_lessons)
+            out = _finish({"saved_to": self.config.memory.save_dir,
+                           "mode": "postgres+weights", "kind": kind})
+            if lesson_block is not None:
+                raise lesson_block
+            return out
         _timed("bank", lambda: self._cms.save(self.config.memory.save_dir))
         _timed("cortex", self._save_cortex)
         return _finish({"saved_to": self.config.memory.save_dir, "kind": kind})
@@ -3532,11 +3574,16 @@ class MemoryService(DreamOps):
             return {"action": action, **_lesson_record_to_dict(rec)}
 
     def _write_lesson_locked(self, lessons, task: str, aspect: str,
-                             lesson: str, **kwargs):
+                             lesson: str, *, embedding=None, **kwargs):
         """Shared write semantics for the live store or a synthesis stage.
-        Caller holds the service lock and owns persistence/publication."""
+        Caller holds the service lock and owns persistence/publication.
+
+        ``embedding`` accepts the claim vector when the caller already
+        computed it (lesson synthesis does, before opening its transaction —
+        a model pass has no business running inside one)."""
         assert self._embedder is not None and lessons is not None
-        emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
+        emb = (embedding if embedding is not None else
+               self._embedder.encode_single(f"{task} {aspect} {lesson}".strip()))
         writer_id, session_id = self._resolve_writer()
         action, rec = lessons.write_fact(
             task, aspect, lesson, emb, **kwargs,
@@ -3978,13 +4025,18 @@ class MemoryService(DreamOps):
 
     def _lesson_duplicate_locked(self, lessons, task: str, aspect: str,
                                  lesson: str, polarity: str,
-                                 threshold: float) -> bool:
-        """The synthesis dedup predicate over live or staged lesson records."""
+                                 threshold: float, *, embedding=None) -> bool:
+        """The synthesis dedup predicate over live or staged lesson records.
+
+        ``embedding`` is the same precomputed claim vector
+        :meth:`_write_lesson_locked` takes — the gate and the write embed
+        identical text."""
         from pseudolife_memory.memory.cortex import _norm_key
         if lessons is None or self._embedder is None:
             return False
         key = (_norm_key(task), _norm_key(aspect))
-        emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
+        emb = (embedding if embedding is not None else
+               self._embedder.encode_single(f"{task} {aspect} {lesson}".strip()))
         for rec, _score in lessons.search(emb, top_k=3, min_score=threshold):
             if rec.key != key and rec.polarity == polarity:
                 return True
@@ -5469,12 +5521,18 @@ class MemoryService(DreamOps):
             residents = [e for band in self._cms.bands for e in band.entries]
             resident_objects = {id(e) for e in residents}
             by_id = self._storage is not None
-            identity_counts = Counter(e.db_id if by_id else e.text for e in residents)
+            # Same uniqueness rule the correction path applies: a retired twin
+            # no longer competes for a text selector, so a note whose only
+            # duplicate is history stays offerable in file mode.
+            identity_counts = Counter(
+                e.db_id if by_id else e.text
+                for e in residents if by_id or e.superseded_at is None
+            )
 
             def actionable(entry: MemoryEntry) -> bool:
                 # Reference documents can appear in query results but are
-                # not correction targets. In file mode text must be unique
-                # across ALL residents, including retired/out-of-scope twins.
+                # not correction targets. In file mode text must identify one
+                # live entry across ALL residents, including out-of-scope ones.
                 if id(entry) not in resident_objects or entry.superseded_at is not None:
                     return False
                 key = entry.db_id if by_id else entry.text
@@ -5534,8 +5592,19 @@ class MemoryService(DreamOps):
                 # Filter unavailable rows individually: one phantom ID must
                 # not hide the remaining valid cluster. Check before the
                 # episode cap; query retrieval has already bounded its pool.
-                present = self._storage.existing_entry_ids([e.db_id for e, _ in candidates])
-                candidates = [(e, score) for e, score in candidates if e.db_id in present]
+                # A read failure degrades the suggestion — offering unverified
+                # residents is better than failing a read-only tool; the
+                # correction itself re-validates every ID before it mutates.
+                try:
+                    present = self._storage.existing_entry_ids(
+                        [e.db_id for e, _ in candidates])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "consolidation candidates unverified, storage read failed: %s",
+                        exc)
+                else:
+                    candidates = [(e, score) for e, score in candidates
+                                  if e.db_id in present]
             candidates = candidates[:top_k]
 
             clusters: list[Cluster] = cluster_candidates(

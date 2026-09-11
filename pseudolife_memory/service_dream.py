@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import logging
 import math
+from contextlib import contextmanager
+from copy import deepcopy
 from typing import Any
 
 from pseudolife_memory.dream_token import (
@@ -24,12 +26,43 @@ from pseudolife_memory.dream_token import (
     public_generation,
     verify_commit_token,
 )
+from pseudolife_memory.memory.cortex import _norm_key
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 
 from pseudolife_memory.memory.labels import (INHERIT, contains_verbatim,
                                              content_tokens)
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _staged_slot(lessons, task: str, aspect: str):
+    """Undo one staged lesson write when its body raises.
+
+    A tolerated claim's savepoint rolls back the SQL half of the write; the
+    store write that preceded it is plain RAM and would otherwise be
+    published — and synced — without the graph state it was meant to commit
+    with. ``LessonStore.write_fact`` touches exactly one slot: it marks the
+    slot dirty, may append record(s), and may mutate the record currently at
+    the slot in place. Restoring those three is the whole undo.
+    """
+    key = (_norm_key(task), _norm_key(aspect))
+    appended_from = len(lessons.records)
+    index = lessons._current.get(key)
+    before = deepcopy(lessons.records[index]) if index is not None else None
+    was_dirty = key in lessons.dirty_slots
+    try:
+        yield
+    except BaseException:
+        del lessons.records[appended_from:]
+        if before is not None:
+            lessons.records[index] = before
+            lessons._current[key] = index
+        else:
+            lessons._current.pop(key, None)
+        if not was_dirty:
+            lessons.dirty_slots.discard(key)
+        raise
 
 
 class DreamOps:
@@ -370,10 +403,15 @@ class DreamOps:
         if not (cfg.enabled and cfg.synthesize_in_dream):
             return {"signals": 0, "lessons": 0, "skipped": "disabled"}
         cutoff = _t.time() - cfg.signal_retention_days * 86400
+        # One sweep drains at most ``synthesis_max_signals``: the whole batch
+        # commits under the service lock, so an unbounded backlog would set
+        # the length of a single daemon pause. The remainder stays pending
+        # for the next sweep.
+        cap = limit if limit is not None else (cfg.synthesis_max_signals or None)
         with self._lock:
             self._ensure_init()
             self._storage.prune_signals(cutoff)
-            signals = self._storage.pending_signals(limit=limit)
+            signals = self._storage.pending_signals(limit=cap)
         if not signals:
             return {"signals": 0, "lessons": 0}
         all_inferred = bool(signals) and all(
@@ -419,18 +457,22 @@ class DreamOps:
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"rule extraction: {exc}")
                 rule_failed_ids = {s["id"] for s in rule_sigs}
-        handled_ids = [s["id"] for s in plain] if plain_claims else []
+        plain_handled = [s["id"] for s in plain] if plain_claims else []
         rule_handled = [s["id"] for s in rule_sigs
                         if s["id"] not in rule_failed_ids | rule_empty_ids]
         # Rule extractors promise one result per handled signal. If a custom
         # extractor omits outputs without identifying empty/failed inputs, the
         # unmatched results cannot safely acknowledge any of that route.
-        if len(rule_claims) == len(rule_handled):
-            handled_ids.extend(rule_handled)
-        else:
+        if len(rule_claims) != len(rule_handled):
             errors.append("rule extraction did not identify every unhandled signal")
-            rule_claims = []
+            rule_claims, rule_handled = [], []
         claims = plain_claims + rule_claims
+        # Per-claim acknowledgement map, mirroring those two derivations: a
+        # rule claim is the sole output of one signal (same order), so its
+        # signal is acknowledged only if it writes. Clustering claims do not
+        # map to single signals — that route is acknowledged as a whole once
+        # any of its claims lands.
+        claim_signals = [None] * len(plain_claims) + list(rule_handled)
         # Bitemporal event time: the synthesised lesson became *true* when its
         # underlying outcomes were observed, not when the dream wrote it. Claims
         # don't map 1:1 to signals, so use the earliest contributing signal's
@@ -452,13 +494,24 @@ class DreamOps:
             return out
         dedup_thr = float(getattr(cfg, "synthesis_dedup_min_similarity", 0.0)
                           or 0.0)
-        from copy import deepcopy
         from pseudolife_memory.storage.sync import sync_lesson_slots
         with self._lock:
             self._ensure_init()
-            written = deduped = 0
+            written = deduped = write_errors = plain_landed = 0
+            handled_ids: list = []
+            failed_rule_ids: set = set()
             writes_finished = False
             try:
+                # Claim embeddings are pure CPU work with no transaction
+                # state. Computed inside the batch they held an open
+                # PostgreSQL transaction — on the one shared connection —
+                # for a model pass per claim; the dedup gate and the write
+                # embed the same text. Still inside this try: a malformed
+                # claim must fail the batch, never the dream.
+                embeddings = [
+                    self._embedder.encode_single(
+                        f"{c['task']} {c.get('aspect', 'lesson')} {c['lesson']}".strip())
+                    for c in claims]
                 with self._storage.lesson_synthesis_transaction(signals) as current:
                     if not current:
                         out["skipped"] = "signals-changed"
@@ -470,24 +523,50 @@ class DreamOps:
                     for rec in staged.records:
                         if rec.key in staged.dirty_slots and rec.status == "current":
                             self._link_lesson_graph(rec.entity, rec.about, rec.polarity)
-                    for c in claims:
-                        is_rule = c.get("aspect") == "rule"
-                        if dedup_thr and not is_rule and self._lesson_duplicate_locked(
-                                staged, c["task"], c.get("aspect", "lesson"),
-                                c["lesson"], c.get("polarity", "+"), dedup_thr):
-                            deduped += 1
+                    for c, emb, sid in zip(claims, embeddings, claim_signals):
+                        aspect = c.get("aspect", "lesson")
+                        try:
+                            if dedup_thr and aspect != "rule" and self._lesson_duplicate_locked(
+                                    staged, c["task"], aspect, c["lesson"],
+                                    c.get("polarity", "+"), dedup_thr,
+                                    embedding=emb):
+                                deduped += 1
+                            else:
+                                # One savepoint per claim. PostgreSQL aborts
+                                # the whole transaction on the first error,
+                                # so without this a single claim whose graph
+                                # write raises killed the batch — and the
+                                # extractor re-derived that same claim from
+                                # the same signals on every later sweep.
+                                with _staged_slot(staged, c["task"], aspect), \
+                                        self._storage.savepoint():
+                                    self._write_lesson_locked(
+                                        staged, c["task"], aspect, c["lesson"],
+                                        embedding=emb,
+                                        about=c.get("about"),
+                                        outcome=c.get("outcome", "success"),
+                                        polarity=c.get("polarity", "+"),
+                                        confidence=(0.4 if all_inferred
+                                                    else float(c.get("confidence", 0.6))),
+                                        origin=c.get("origin", "agent"),
+                                        provenance=(set(c.get("provenance") or [])
+                                                    | ({"inferred"} if all_inferred else set())),
+                                        valid_time=batch_valid_time)
+                                written += 1
+                        except Exception as exc:  # noqa: BLE001 — bounded per-claim tolerance
+                            write_errors += 1
+                            if sid is not None:
+                                failed_rule_ids.add(sid)
+                            logger.warning("lesson claim failed (%s): %r", exc, c)
                             continue
-                        self._write_lesson_locked(
-                            staged, c["task"], c.get("aspect", "lesson"), c["lesson"],
-                            about=c.get("about"), outcome=c.get("outcome", "success"),
-                            polarity=c.get("polarity", "+"),
-                            confidence=(0.4 if all_inferred
-                                        else float(c.get("confidence", 0.6))),
-                            origin=c.get("origin", "agent"),
-                            provenance=(set(c.get("provenance") or [])
-                                        | ({"inferred"} if all_inferred else set())),
-                            valid_time=batch_valid_time)
-                        written += 1
+                        if sid is None:
+                            plain_landed += 1
+                    # A route is acknowledged only for work that landed: the
+                    # clustering route once any of its claims did, a rule
+                    # signal only if its own claim did.
+                    handled_ids = list(plain_handled) if plain_landed else []
+                    handled_ids += [i for i in rule_handled
+                                    if i not in failed_rule_ids]
                     sync_lesson_slots(staged, self._storage)
                     consumed = self._storage.consume_signals(handled_ids)
                     if consumed != len(handled_ids):
@@ -495,9 +574,14 @@ class DreamOps:
                     writes_finished = True
                 self._lessons = staged
                 out.update(lessons=written, deduped=deduped)
+                if write_errors:
+                    out["write_errors"] = write_errors
             except Exception as exc:  # noqa: BLE001
                 self._persist_errors += 1
-                out["error"] = str(exc)
+                errors.append(str(exc))
+                out["error"] = "; ".join(errors)
+                if write_errors:
+                    out["write_errors"] = write_errors
                 if writes_finished:
                     # COMMIT may have reached the server despite an exception
                     # reaching us. Never autosave old RAM over that outcome.
@@ -508,6 +592,14 @@ class DreamOps:
                     except Exception as recovery_exc:  # noqa: BLE001
                         out["error"] += f"; {recovery_exc}"
                         out["reconciliation_required"] = True
+                        # The latch now STAYS set: lesson reads and the
+                        # lesson snapshot fail until a later recheck
+                        # succeeds or the daemon restarts. /health mirrors
+                        # it as lesson_reconciliation_required.
+                        logger.error(
+                            "lesson commit reconciliation required (%s): lesson "
+                            "reads and the lesson snapshot are blocked until it "
+                            "resolves or the daemon restarts", recovery_exc)
                 logger.warning("lesson batch failed (%s); retry or durable reconciliation required", exc)
         return out
 
@@ -552,16 +644,75 @@ class DreamOps:
                 elif entry.source in excluded:
                     continue
                 rows.append(entry)
+        # Type-homogeneous tie-break. A resident can hold ``db_id=None`` in
+        # PostgreSQL mode — ``cms.store`` seats the entry in the band before
+        # its write-through insert — so an int-or-str key raised TypeError
+        # on the first tied timestamp, taking dream_status down with it.
+        # Both components are always comparable: file-mode entries have no
+        # db_id at all (0 for every row, ordered by dream_id), PostgreSQL
+        # entries have a unique one.
         rows.sort(key=lambda entry: (
             entry.timestamp,
-            entry.db_id if entry.db_id is not None else entry.dream_id,
+            entry.db_id if entry.db_id is not None else 0,
+            entry.dream_id or "",
         ))
         return rows if limit is None else rows[:max(0, int(limit))]
+
+    def _retry_dream_tracking(self) -> None:
+        """Re-attempt a dream-tracking initialization that failed transiently.
+
+        The initialization runs once from ``_ensure_init``, so before this
+        a storage blip at boot disabled the dream until the daemon was
+        restarted. Only a transient failure is retried: a corrupt bank
+        secret, an unusable legacy cursor or an invalid checkpoint is the
+        bank's own data, and re-running the same pass over the same bytes
+        fails identically — those stay latched so ``/health`` keeps
+        reporting them instead of burning a transaction per call.
+        Caller holds the service lock."""
+        if self._dream_tracking_error and self._dream_tracking_retryable:
+            self._initialize_dream_tracking()
+
+    def _persist_pending_rows(self, rows: list[MemoryEntry],
+                              ) -> tuple[list[MemoryEntry], int]:
+        """Give every pending resident a storage row before it is named in a
+        commit token, and drop the ones that still cannot get one.
+
+        ``cms.store`` seats the entry in the band BEFORE its write-through
+        insert, so a failed insert leaves a resident with ``db_id=None``.
+        The pull used to refuse the WHOLE batch on one of those — one lost
+        insert stalled every dream until restart. Re-flushing heals the
+        common case; an entry that still cannot be persisted is excluded
+        from this pull (it stays pending and is retried next sweep) rather
+        than holding the rest of the backlog hostage. Returns the pullable
+        rows and the number excluded. Caller holds the service lock."""
+        assert self._cms is not None
+        unpersisted = [entry for entry in rows if entry.db_id is None]
+        if not unpersisted:
+            return rows, 0
+        try:
+            healed = self._cms.flush_unpersisted_entries(unpersisted)
+            if healed:
+                logger.warning(
+                    "dream pull re-flushed %d pending entr%s that never "
+                    "reached storage", healed, "y" if healed == 1 else "ies")
+        except Exception as exc:  # noqa: BLE001 — a skip beats a stalled dream
+            logger.warning("dream pull could not persist %d pending entry/ies "
+                           "(%s); excluding them from this pull",
+                           len(unpersisted), exc)
+        pullable = [entry for entry in rows if entry.db_id is not None]
+        skipped = len(rows) - len(pullable)
+        if skipped:
+            logger.warning(
+                "dream pull skipped %d unpersisted pending entr%s; they stay "
+                "pending for the next sweep", skipped,
+                "y" if skipped == 1 else "ies")
+        return pullable, skipped
 
     def dream_pull(self, limit: int = 20) -> dict[str, Any]:
         """Pull exact pending entries and issue their signed commit token."""
         with self._lock:
             self._ensure_init()
+            self._retry_dream_tracking()
             assert self._cms is not None and self._cortex is not None
             cursor = self._dream_display_cursor()
             if self._dream_tracking_error:
@@ -570,10 +721,13 @@ class DreamOps:
                         "cursor": cursor, "count": 0, "entries": []}
             rows = self._pending_dream_entries(min(int(limit), MAX_ENTRY_IDS))
             backend = "postgres" if self._storage is not None else "file"
+            skipped_unpersisted = 0
+            if backend == "postgres":
+                rows, skipped_unpersisted = self._persist_pending_rows(rows)
             ids = [e.db_id if backend == "postgres" else e.dream_id for e in rows]
             if any(identity is None for identity in ids):
                 return {"error": "dream_ack_missing_entries",
-                        "detail": "pending PostgreSQL entry has no row id",
+                        "detail": "pending file entry has no identity",
                         "cursor": cursor, "count": 0, "entries": []}
             secret = self._cms.dream_ack_secret
             if not secret:
@@ -614,6 +768,8 @@ class DreamOps:
             }
             if token is not None:
                 response["commit_token"] = token
+            if skipped_unpersisted:
+                response["skipped_unpersisted"] = skipped_unpersisted
             return response
 
     def dream_commit(self, commit_token: str) -> dict[str, Any]:
@@ -641,9 +797,15 @@ class DreamOps:
                     result = self._storage.acknowledge_dream_entries(
                         list(payload.entry_ids), payload.display_timestamp)
                     acknowledged = set(result["acknowledged_ids"])
+                    missing = set(result.get("missing_ids") or ())
+                    # The resident copy of a vanished row is retired too.
+                    # Its row can never be pulled again, but the resident
+                    # can — leaving it pending would re-enter it into every
+                    # pull from here on, for a batch that no longer exists.
+                    settled = acknowledged | missing
                     for band in self._cms.bands:
                         for entry in band.entries:
-                            if entry.db_id in acknowledged:
+                            if entry.db_id in settled:
                                 entry.dream_state = "acknowledged"
                     cursor = float(result["dream_cursor"])
                     newly = int(result["newly_acknowledged"])
@@ -653,13 +815,15 @@ class DreamOps:
                         for band in self._cms.bands
                         for entry in band.entries
                     }
+                    # Same reading as the PostgreSQL path: an entry that is
+                    # no longer resident cannot be pulled again, so it is
+                    # reported, not raised over.
                     missing = [identity for identity in payload.entry_ids
                                if identity not in by_id]
-                    if missing:
-                        raise ValueError(
-                            f"dream_ack_missing_entries: {missing}")
+                    present = [identity for identity in payload.entry_ids
+                               if identity in by_id]
                     invalid = [
-                        identity for identity in payload.entry_ids
+                        identity for identity in present
                         if by_id[identity].dream_state
                         not in ("pending", "acknowledged")
                     ]
@@ -667,7 +831,7 @@ class DreamOps:
                         raise ValueError(
                             f"dream_ack_invalid_states: {invalid}")
                     newly_ids = [
-                        identity for identity in payload.entry_ids
+                        identity for identity in present
                         if by_id[identity].dream_state == "pending"
                     ]
                     cursor = max(
@@ -682,21 +846,30 @@ class DreamOps:
                             self.config.memory.save_dir,
                             dream_state_overrides={
                                 identity: "acknowledged"
-                                for identity in payload.entry_ids
+                                for identity in present
                             },
                             dream_ack_secret=secret,
                             dream_display_cursor=cursor,
                         )
-                    for identity in payload.entry_ids:
+                    for identity in present:
                         by_id[identity].dream_state = "acknowledged"
+                    acknowledged = present
                     newly = len(newly_ids)
                 self._cms.dream_display_cursor = cursor
                 self._cortex.dream_cursor = cursor
-                return {
+                if missing:
+                    logger.warning(
+                        "dream commit: %d pulled entr%s no longer exist(s); "
+                        "acknowledging the remaining %d", len(missing),
+                        "y" if len(missing) == 1 else "ies", len(acknowledged))
+                response = {
                     "dream_cursor": cursor,
-                    "acknowledged": len(payload.entry_ids),
+                    "acknowledged": len(acknowledged),
                     "newly_acknowledged": newly,
                 }
+                if missing:
+                    response["missing"] = len(missing)
+                return response
             except ValueError as exc:
                 code = str(exc).split(":", 1)[0]
                 if code not in {
@@ -2089,6 +2262,7 @@ class DreamOps:
         cfg = self.config.memory.dream
         with self._lock:
             self._ensure_init()
+            self._retry_dream_tracking()
             assert self._cms is not None and self._cortex is not None
             backlog = (
                 0 if self._dream_tracking_error

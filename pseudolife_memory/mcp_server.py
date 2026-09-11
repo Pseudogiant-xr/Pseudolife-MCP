@@ -435,9 +435,17 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
     # ``re_verify`` deliberately does NOT gate here. It is a passive
     # caution, exactly as it is on lessons (`_annotate_lesson_staleness`),
     # because source retirement says only that a derived fact needs review,
-    # not what its verified current value is. The active affordance at
-    # correction time is `memory_supersede`'s `derived_flagged`, which names
-    # exactly the facts affected by that explicit correction.
+    # not what its verified current value is — and it is a broad signal, not
+    # a rare one. Re-measured 2026-09-11 on the live bank with
+    # `ops/measure_reverify_population.py`: 1668 of 6015 current facts
+    # (27.7%) stand on a source memory corrected since they were last
+    # confirmed, and schema v39 keeps those warnings standing instead of
+    # letting source eviction drain them. Routing that into a call whose
+    # served CORRECTION_NOTE tells the reader to run it NOW would be a
+    # standing instruction to rewrite a quarter of the cortex every session.
+    # The active affordance at correction time is `memory_supersede`'s
+    # `derived_flagged`, which names exactly the facts affected by that
+    # explicit correction.
     if not (f.get("contested") or f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "
@@ -725,9 +733,9 @@ def memory_recent(
 def memory_supersede(
     old_text: Annotated[str | None, Field(
         description="Unique exact stored text; omit with entry_id.")] = None,
-    new_text: Annotated[str, Field(
-        description="The replacement claim; stored fresh.")] = "",
     *,
+    new_text: Annotated[str, Field(
+        description="The replacement claim; stored fresh.")],
     entry_id: Annotated[StrictInt | None, Field(
         description="Positive search/recent ID in this bank; preferred selector.")] = None,
 ) -> dict[str, Any]:
@@ -1741,6 +1749,10 @@ def memory_consolidation_candidates(
     ``query`` or an ``episode``; read the clusters, synthesise one
     canonical note, then commit it via ``memory_consolidate``.
 
+    Each member carries its ``id``; commit with
+    ``memory_consolidate(entry_ids=[...])`` rather than the members' texts —
+    IDs survive rewording and duplicate phrasing, exact text does not.
+
     Returns: ``{count, clusters: [{cohesion, size, members}]}``.
     """
     return service.consolidation_candidates(
@@ -1759,13 +1771,13 @@ def memory_consolidation_candidates(
 def memory_consolidate(
     replaces: Annotated[list[str] | None, Field(
         description="Unique exact stored texts; omit with entry_ids.")] = None,
+    *,
     new_text: Annotated[str, Field(
-        description="The canonical note that replaces them.")] = "",
+        description="The canonical note that replaces them.")],
     source: Annotated[str | None, Field(
         description="Source tag for the new note.")] = None,
     tags: Annotated[list[str] | None, Field(
         description="Labels for the new note.")] = None,
-    *,
     entry_ids: Annotated[list[StrictInt] | None, Field(
         description="Positive IDs in this bank; prefer over replaces.")] = None,
 ) -> dict[str, Any]:
