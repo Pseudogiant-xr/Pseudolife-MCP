@@ -9642,8 +9642,7 @@ subsection, silently dissolving the release boundary for twelve days.)
   NOTICE added, pyproject + README updated). Apache-2.0 keeps the same
   permissive terms and adds an explicit patent grant.
 - **Optional PDF extra: PyMuPDF → pypdfium2** (`pip install .[pdf]`).
-  PyMuPDF is AGPL-3.0, which conflicts with permissive distribution and any
-  future commercial/hosted offering; pypdfium2 (Chromium PDFium bindings,
+  PyMuPDF uses AGPL-3.0; pypdfium2 (Chromium PDFium bindings,
   Apache-2.0/BSD-3) fills the same higher-quality-extraction slot. The core
   pypdf fallback is unchanged.
 

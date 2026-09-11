@@ -221,6 +221,18 @@ leaked email already cost a full history rewrite plus a fresh-repo publish.
 - **If a real secret ever lands in a pushed commit: rotate it first.** A
   rewrite is tidiness, not remediation.
 
+## Repo hygiene — the tree describes what ships (public repo)
+
+Roadmap and strategy discussion belongs in the memory bank, never in a
+tracked file, a PR body, an issue, a commit message or a code comment. Docs
+and release notes describe what the code does today; the non-goals table in
+`docs/guide/comparison.md` is the only forward-looking statement the docs
+carry. Release notes are the usual leak: they explain a decision by naming
+what it was for. Explain the decision by its present effect instead.
+`tests/test_release_ux.py::test_tracked_tree_carries_no_commercial_vocabulary`
+guards the shape mechanically; extend it with a watched RED before any
+scrub, the same as the identifier guard.
+
 ## Memory (Pseudolife MCP tools)
 
 Log `memory_outcome` at task end — success/failure/correction signals are the

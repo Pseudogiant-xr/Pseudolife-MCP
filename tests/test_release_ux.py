@@ -429,11 +429,53 @@ def _scan_control_bytes(rel: str, data: bytes, hits: list) -> None:
     hits.append((rel, [hex(b) for b in bad]))
 
 
+# Vocabulary about offerings, tiers of service and pricing describes a
+# product, not the code, and an engineering repo documents what ships. It
+# drifts in through release notes that explain a decision by naming what it
+# was for. The bare words are assembled from fragments so this file passes
+# its own check, matching the identifier needles above.
+_COMMERCIAL_PAT = re.compile(
+    rb"\b(?:commercial(?:/hosted)? offering|hosted " rb"offering"
+    rb"|paid[- ](?:tier|plan|surface|feature|version|offering|edition|roadmap)"
+    rb"|(?:business|enterprise|pro|premium)[- ]tiers?"
+    rb"|premium[- ](?:plan|edition)"
+    rb"|" + ("monet" "is").encode() + rb"|" + ("monet" "iz").encode()
+    + rb"|" + ("pay" "wall").encode() + rb"|" + ("free" "mium").encode()
+    + rb"|" + ("up" "sell").encode()
+    + rb"|pricing[- ](?:tier|plan|model|page)"
+    rb"|commercial[- ](?:plan|roadmap|strategy|version|tier|edition|fork))")
+# Every alternative above starts with one of these literals, so the tuple
+# is an exact superset prescreen (the bare words are the assembled forms).
+_COMMERCIAL_PRESCREEN = (b"commercial", b"hosted " b"offering", b"paid",
+                         b"business", b"enterprise", b"pro " b"tier",
+                         b"pro-" b"tier",
+                         b"premium", ("monet" "is").encode(),
+                         ("monet" "iz").encode(), ("pay" "wall").encode(),
+                         ("free" "mium").encode(), ("up" "sell").encode(),
+                         b"pricing")
+# Benchmark corpora and their recorded serve/answer artifacts are
+# third-party conversation text that must stay byte-identical; the license
+# text is verbatim upstream wording.
+_COMMERCIAL_EXEMPT = ("evals/results/", "evals/data/", "LICENSE")
+
+
+def _scan_commercial_vocabulary(rel: str, low: bytes, hits: list) -> None:
+    """Record at most one product-vocabulary hit for ``low`` (lowercased)."""
+    if rel.startswith(_COMMERCIAL_EXEMPT) or rel.endswith(".jsonl"):
+        return
+    if not any(p in low for p in _COMMERCIAL_PRESCREEN):
+        return
+    m = _COMMERCIAL_PAT.search(low)
+    if m is not None:
+        hits.append((rel, m.group(0).decode("ascii", "replace")))
+
+
 @pytest.fixture(scope="module")
 def tracked_tree_scan():
-    """One ``git ls-files`` + one read of every tracked file, for both guards.
+    """One ``git ls-files`` + one read of every tracked file, for all three
+    guards.
 
-    Returns ``(identifier_hits, control_byte_hits)``.
+    Returns ``(identifier_hits, control_byte_hits, commercial_hits)``.
     """
     repo = Path(__file__).resolve().parents[1]
     try:
@@ -443,14 +485,17 @@ def tracked_tree_scan():
         pytest.skip("not a git checkout")
     ident_hits: list = []
     control_hits: list = []
+    commercial_hits: list = []
     for rel in proc.stdout.splitlines():
         try:
             data = (repo / rel).read_bytes()
         except OSError:
             continue
-        _scan_identifiers(rel, data.lower(), ident_hits)
+        low = data.lower()
+        _scan_identifiers(rel, low, ident_hits)
         _scan_control_bytes(rel, data, control_hits)
-    return ident_hits, control_hits
+        _scan_commercial_vocabulary(rel, low, commercial_hits)
+    return ident_hits, control_hits, commercial_hits
 
 
 def test_tracked_tree_carries_no_maintainer_identifiers(
@@ -479,6 +524,20 @@ def test_tracked_tree_carries_no_stray_control_bytes(
     containing NUL are treated as binary and skipped."""
     hits = tracked_tree_scan[1]
     assert hits == [], f"stray control bytes in tracked files: {hits}"
+
+
+def test_tracked_tree_carries_no_commercial_vocabulary(
+        tracked_tree_scan) -> None:
+    """Docs and comments describe what the code does today. Vocabulary about
+    offerings, tiers of service and pricing describes a product instead, and
+    it drifts in through release notes that explain a decision by naming
+    what it was for — a 2026-07-03 relicensing entry did exactly that. Guard
+    the tracked tree mechanically, the same way identifiers are guarded;
+    explain a decision by its present effect. Benchmark corpora, their
+    recorded artifacts and the license text are exempt: third-party wording
+    that must stay byte-identical."""
+    hits = tracked_tree_scan[2]
+    assert hits == [], f"product vocabulary in tracked files: {hits}"
 
 
 def test_changelog_mentions_current_schema_version() -> None:
