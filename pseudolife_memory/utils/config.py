@@ -16,7 +16,8 @@ class EmbeddingConfig:
     batch_size: int = 64
     # "torch" (default) or "onnx" — onnxruntime via sentence-transformers'
     # native backend (needs optimum[onnxruntime]). ~3x faster single-text
-    # encode on CPU with bit-identical embeddings; falls back to torch with
+    # encode on CPU with parity-checked embeddings (min cosine vs torch
+    # 1.00000 over 20 texts, 2026-07-12); falls back to torch with
     # a warning when the backend can't load.
     backend: str = "torch"
     # Which ONNX file inside the model repo to load. Explicit because the

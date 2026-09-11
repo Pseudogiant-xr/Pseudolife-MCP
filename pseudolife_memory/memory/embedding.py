@@ -13,7 +13,10 @@ import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from pseudolife_memory.onnx_artifacts import onnx_layout_available
+from pseudolife_memory.onnx_artifacts import (
+    has_nested_transformer_module,
+    onnx_layout_available,
+)
 from pseudolife_memory.utils.config import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
@@ -60,10 +63,9 @@ def _resolve_onnx_source(model_name: str, file_name: str) -> str | None:
     """Resolve a verified existing ONNX artifact to its local model root.
 
     Both SentenceTransformers and Optimum infer that a missing artifact should
-    be exported. On supported platforms, the preflight verifies the configured
+    be exported, on every platform. The preflight verifies the configured
     artifact at every recognized Transformer module's effective path before
-    either library sees the request. Native Windows falls back before ONNX
-    construction because the pinned Optimum stack can mis-detect that path.
+    either library sees the request.
 
     Hub models are resolved through ``hf_hub_download(local_files_only=True)``
     even when networking is enabled. It probes the configured artifact or the
@@ -119,7 +121,8 @@ class EmbeddingPipeline:
       encoding with cosine 1.00000 against torch; other configured artifacts
       carry no equivalence claim. The backend is load-only: its configured
       artifact must already exist in a local model or cached Hub snapshot. It
-      falls back to torch when the platform or artifact is unsupported.
+      falls back to torch when the artifact is missing, and when a nested
+      module layout would be mis-detected on native Windows.
     * ``cache_size > 0`` keeps an LRU of ``(text, normalize)`` →
       embedding. The service embeds the same strings repeatedly within
       and across requests (query text for search + slot ops, dedup keys,
@@ -141,14 +144,7 @@ class EmbeddingPipeline:
             )
         self.model = None
         self.backend = "torch"
-        if requested == "onnx" and _native_windows():
-            logger.warning(
-                "ONNX embedding backend is disabled on native Windows because "
-                "the pinned Optimum stack can mis-detect existing nested ONNX "
-                "paths and enable export; falling back to torch before ONNX "
-                "construction.",
-            )
-        elif requested == "onnx":
+        if requested == "onnx":
             try:
                 file_name = getattr(
                     config, "onnx_file_name", "onnx/model.onnx",
@@ -163,13 +159,32 @@ class EmbeddingPipeline:
                         f"configured ONNX artifact {file_name!r} is not "
                         "available in the local model or Hub cache",
                     )
-                self.model = SentenceTransformer(
+                if _native_windows() and has_nested_transformer_module(
                     onnx_source,
-                    device=device,
-                    backend="onnx",
-                    model_kwargs={"file_name": file_name, "export": False},
-                )
-                self.backend = "onnx"
+                ):
+                    # Narrower than a platform gate: the pinned Optimum stack
+                    # matches a POSIX subfolder pattern against OS-native path
+                    # strings, so only a nested module subfolder goes
+                    # undetected here and re-enables export. A flat layout
+                    # resolves on both platforms and keeps the accelerator.
+                    logger.warning(
+                        "ONNX embedding backend is disabled on native Windows "
+                        "for this model's nested module layout because the "
+                        "pinned Optimum stack mis-detects a nested "
+                        "subfolder's existing ONNX artifact and enables "
+                        "export; falling back to torch before ONNX "
+                        "construction.",
+                    )
+                else:
+                    self.model = SentenceTransformer(
+                        onnx_source,
+                        device=device,
+                        backend="onnx",
+                        model_kwargs={
+                            "file_name": file_name, "export": False,
+                        },
+                    )
+                    self.backend = "onnx"
             except Exception as exc:  # noqa: BLE001 — optional accelerator
                 logger.warning(
                     "ONNX embedding backend failed to load (%s) — falling "

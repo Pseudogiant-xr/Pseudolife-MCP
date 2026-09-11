@@ -42,27 +42,31 @@ def _existing_model_file(
     *,
     allow_hub_blob_links: bool,
 ) -> bool:
-    """Check one model-relative file without following an escaping directory."""
+    """Check one model-relative file without following a link off the path."""
     candidate = root.joinpath(*parts)
     if not candidate.is_file():
         return False
     try:
         resolved_root = root.resolve(strict=True)
+        # Optimum discovers artifacts with ``Path(model_id).glob("**/*.onnx")``
+        # and CPython's recursive glob does not descend into linked
+        # directories, so a link anywhere between the root and the file hides
+        # it from discovery even when the link target stays inside the root —
+        # and a hidden artifact is exactly the export trigger this guards.
+        if any(
+            root.joinpath(*parts[:depth]).is_symlink()
+            for depth in range(1, len(parts))
+        ):
+            return False
         candidate.parent.resolve(strict=True).relative_to(resolved_root)
         resolved_candidate = candidate.resolve(strict=True)
-        try:
+        if not candidate.is_symlink():
             resolved_candidate.relative_to(resolved_root)
             return True
-        except ValueError:
-            pass
 
         # Hub snapshots store files as leaf symlinks into this repository's
-        # blobs directory. Directory links were rejected by the parent check.
-        if (
-            not allow_hub_blob_links
-            or not candidate.is_symlink()
-            or root.parent.name != "snapshots"
-        ):
+        # blobs directory — the only link this check accepts.
+        if not allow_hub_blob_links or root.parent.name != "snapshots":
             return False
         blobs = root.parent.parent / "blobs"
         if not blobs.is_dir():
@@ -71,6 +75,36 @@ def _existing_model_file(
         return True
     except (FileNotFoundError, OSError, RuntimeError, ValueError):
         return False
+
+
+def has_nested_transformer_module(root: str | Path) -> bool:
+    """Report whether any recognized Transformer module loads from a subfolder.
+
+    With the pinned Optimum stack, artifact discovery compiles the loader
+    subfolder into a regular expression and matches it against OS-native path
+    strings. A nested subfolder such as ``0_Transformer/onnx`` therefore never
+    matches on native Windows, where the separator is a backslash, and export
+    is re-enabled despite ``export=False``. A flat ``onnx`` subfolder matches
+    on both platforms. Unreadable metadata reports nesting so callers that use
+    this as a fallback gate stay on torch.
+    """
+    root = Path(root)
+    modules_path = root / "modules.json"
+    try:
+        if not modules_path.exists():
+            # Plain Hugging Face models use the root Transformer directly.
+            return False
+        modules = json.loads(modules_path.read_text(encoding="utf-8"))
+        if not isinstance(modules, list):
+            return True
+        return any(
+            isinstance(module, dict)
+            and module.get("type") in _TRANSFORMERS
+            and module.get("path")
+            for module in modules
+        )
+    except (OSError, ValueError):
+        return True
 
 
 def onnx_layout_available(

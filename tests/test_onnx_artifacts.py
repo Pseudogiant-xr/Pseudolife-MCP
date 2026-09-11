@@ -98,6 +98,69 @@ def test_transformer_module_directory_link_outside_root_is_rejected(
     assert not onnx_layout_available(root, "onnx/model.onnx")
 
 
+def test_artifact_directory_link_inside_root_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+):
+    """A link that stays inside the root still hides the artifact.
+
+    Optimum discovers artifacts with ``Path(model_id).glob("**/*.onnx")``,
+    and CPython's recursive glob does not descend into linked directories.
+    Accepting the file would therefore let the loader find nothing and
+    re-enable export on exactly the artifact this check verified.
+    """
+    root = tmp_path / "model"
+    real = root / "real_onnx"
+    real.mkdir(parents=True)
+    (real / "model.onnx").write_bytes(b"fixture")
+    linked = root / "onnx"
+    linked.mkdir()
+    (linked / "model.onnx").write_bytes(b"fixture")
+    real_is_symlink = Path.is_symlink
+
+    def is_symlink(path):
+        return path == linked or real_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+    assert not onnx_layout_available(root, "onnx/model.onnx")
+
+
+def test_transformer_subfolder_link_inside_root_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+):
+    """Every component between the root and the file must be a real directory."""
+    root = _layout(tmp_path)
+    linked = root / "0_Transformer"
+    (linked / "onnx").mkdir(parents=True)
+    (linked / "onnx" / "model.onnx").write_bytes(b"fixture")
+    real_is_symlink = Path.is_symlink
+
+    def is_symlink(path):
+        return path == linked or real_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+    assert not onnx_layout_available(root, "onnx/model.onnx")
+
+
+def test_local_leaf_link_inside_model_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+):
+    """Only a cached Hub snapshot's blob leaf link may be a link at all."""
+    root = tmp_path / "model"
+    artifact = root / "onnx" / "model.onnx"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"fixture")
+    real_is_symlink = Path.is_symlink
+
+    def is_symlink(path):
+        return path == artifact or real_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+    assert not onnx_layout_available(root, "onnx/model.onnx")
+
+
 def test_local_snapshot_lookalike_leaf_link_is_rejected(
     monkeypatch: pytest.MonkeyPatch, tmp_path,
 ):

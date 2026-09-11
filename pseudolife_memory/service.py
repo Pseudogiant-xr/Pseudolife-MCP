@@ -848,7 +848,8 @@ class MemoryService(DreamOps):
             config.memory.traces.retention_boost = 1.0
         # ONNX embedder whenever the optional extra is installed (the
         # daemon image bakes it): ~3x faster single-text encode on CPU
-        # with bit-identical embeddings (fp32 ONNX) -- true for MiniLM,
+        # with parity-checked embeddings (fp32 ONNX, min cosine vs torch
+        # 1.00000 over 20 texts, 2026-07-12) -- true for MiniLM,
         # which has a baked ONNX artifact. Qwen3-Embedding-0.6B (the default
         # since embedding-backbone-v25) has NO in-repo ONNX artifact, so the
         # load-only preflight takes the warn-and-fall-back path before ONNX

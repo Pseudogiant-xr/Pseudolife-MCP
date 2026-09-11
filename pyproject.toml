@@ -104,4 +104,5 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 markers = [
     "slow: needs external infrastructure (a built docker image); skips itself when absent",
+    "real_model: loads real model weights; runs on the host platform, not a simulated one",
 ]

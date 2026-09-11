@@ -87,15 +87,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the configured artifact for each supported Transformer module and passes
   its owning local model directory to the backend. Missing files or unknown
   module layouts fall back to torch before ONNX construction; filenames must
-  use lowercase `.onnx` to match case-sensitive loader discovery. Validated
-  ONNX artifact paths and `modules.json` metadata for local models cannot link
-  outside their root; standard Hub snapshot leaf links are allowed only after
-  local-only cache resolution and only into the same repository's `blobs`
-  directory.
-- With the pinned Optimum stack, native Windows can mis-detect an existing
-  nested ONNX file and enable export despite `export=False`. Native Windows now
-  falls back to torch before ONNX construction; the contained Linux and daemon
-  image route remains enabled.
+  use lowercase `.onnx` to match case-sensitive loader discovery. No validated
+  ONNX artifact path or `modules.json` may traverse a link between the model
+  root and the file: the loader's discovery glob does not descend into linked
+  directories, so a link that stays inside the root still hides the artifact
+  and re-enables export. Only a cached Hub snapshot's leaf link is accepted,
+  and only after local-only cache resolution and only into the same
+  repository's `blobs` directory.
+- The pinned Optimum stack matches the loader subfolder against OS-native path
+  strings, so on native Windows an artifact under a nested module subfolder
+  such as `0_Transformer/onnx` goes undetected and export is enabled despite
+  `export=False`. A model whose recognized Transformer module loads from a
+  subfolder now falls back to torch there before ONNX construction. A flat
+  `onnx` layout resolves on both platforms and keeps the load-only backend, as
+  do Linux and the daemon image.
+- The daemon image's bake guard checks the provisioning script's model list and
+  the Dockerfile's call to it. It previously matched the default model name
+  anywhere in the Dockerfile, which a comment naming the model satisfied while
+  downloading nothing.
 - The daemon image explicitly downloads MiniLM's `onnx/model.onnx`, then loads
   it from the owning local snapshot with export disabled. A missing artifact or
   incompatible same-revision metadata now fails the build instead of creating

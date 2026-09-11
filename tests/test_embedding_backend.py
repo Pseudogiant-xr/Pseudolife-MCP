@@ -2,9 +2,9 @@
 
 The embedder is the daemon's dominant per-request cost (~5ms/encode on
 CPU torch). sentence-transformers' native ``backend="onnx"`` runs the
-same MiniLM through onnxruntime at ~3x the speed with *bit-identical*
-cosine geometry (benchmarked: min cosine vs torch = 1.00000 over 20
-texts), so the switch carries zero retrieval-quality risk.
+same MiniLM through onnxruntime at ~3x the speed with parity-checked
+cosine geometry (benchmarked 2026-07-12: min cosine vs torch = 1.00000
+over 20 texts), so the switch carries no measured retrieval-quality risk.
 
 Contract pinned here:
 
@@ -54,8 +54,16 @@ class _StubST:
 
 
 @pytest.fixture(autouse=True)
-def _simulate_supported_onnx_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep backend tests on the Linux/Docker path unless stated otherwise."""
+def _simulate_supported_onnx_platform(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the stubbed backend tests on the Linux/Docker path.
+
+    ``real_model`` tests load actual models and must see the host platform
+    they run on, so the simulation stops at the stub tests.
+    """
+    if request.node.get_closest_marker("real_model") is not None:
+        return
     from pseudolife_memory.memory import embedding
 
     monkeypatch.setattr(embedding, "_native_windows", lambda: False, raising=False)
@@ -81,6 +89,16 @@ def _pipeline(config: EmbeddingConfig):
     from pseudolife_memory.memory.embedding import EmbeddingPipeline
 
     return EmbeddingPipeline(config)
+
+
+def _modules_json(model, module_path: str) -> None:
+    model.mkdir(parents=True, exist_ok=True)
+    (model / "modules.json").write_text(json.dumps([
+        {"idx": 0, "name": "0", "path": module_path,
+         "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "name": "1", "path": "1_Pooling",
+         "type": "sentence_transformers.models.Pooling"},
+    ]), encoding="utf-8")
 
 
 def test_default_backend_is_torch_and_omits_backend_kwarg(captured) -> None:
@@ -111,16 +129,23 @@ def test_onnx_backend_loads_verified_local_artifact(
     }
 
 
-def test_native_windows_falls_back_before_onnx_constructor(
+def test_native_windows_nested_layout_falls_back_before_onnx_constructor(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     tmp_path,
 ) -> None:
+    """Only a NESTED module subfolder trips the Windows discovery defect.
+
+    The pinned Optimum stack matches a POSIX subfolder pattern against
+    OS-native path strings, so ``0_Transformer/onnx`` never matches on
+    native Windows and export is re-enabled despite ``export=False``.
+    """
     from pseudolife_memory.memory import embedding
 
     model = tmp_path / "model"
-    (model / "onnx").mkdir(parents=True)
-    (model / "onnx" / "model.onnx").write_bytes(b"onnx")
+    (model / "0_Transformer" / "onnx").mkdir(parents=True)
+    (model / "0_Transformer" / "onnx" / "model.onnx").write_bytes(b"onnx")
+    _modules_json(model, "0_Transformer")
     calls: list[dict] = []
 
     def factory(model_name, device=None, **kwargs):
@@ -140,7 +165,33 @@ def test_native_windows_falls_back_before_onnx_constructor(
     assert pipe.backend == "torch"
     assert calls == [{}]
     assert "native windows" in caplog.text.lower()
+    assert "nested" in caplog.text.lower()
     assert "before onnx construction" in caplog.text.lower()
+
+
+def test_native_windows_flat_layout_still_loads_onnx(
+    captured, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """The flat ``onnx`` subfolder matches on both platforms.
+
+    Disabling the backend for every Windows process was broader than the
+    defect: a root Transformer module keeps the load-only ONNX path.
+    """
+    from pseudolife_memory.memory import embedding
+
+    model = tmp_path / "model"
+    (model / "onnx").mkdir(parents=True)
+    (model / "onnx" / "model.onnx").write_bytes(b"onnx")
+    _modules_json(model, "")
+
+    monkeypatch.setattr(embedding, "_native_windows", lambda: True, raising=False)
+
+    pipe = _pipeline(EmbeddingConfig(
+        device="cpu", backend="onnx", model_name=str(model),
+    ))
+    assert pipe.backend == "onnx"
+    assert captured[0].model_name == str(model)
+    assert captured[0].kwargs["backend"] == "onnx"
 
 
 def test_onnx_backend_honors_custom_file_name(captured, tmp_path) -> None:
@@ -371,6 +422,7 @@ def test_onnx_online_uses_cached_snapshot_without_remote_constructor(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.real_model
 def test_real_onnx_parity_with_torch() -> None:
     """The whole point of the switch: identical cosine geometry.
 

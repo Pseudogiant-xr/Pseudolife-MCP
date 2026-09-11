@@ -218,19 +218,37 @@ def test_dockerfile_bakes_the_default_embedding_model() -> None:
     built from that state boots healthy (nothing touches the model until the
     first tool call) and then throws ``OSError`` the moment a client calls
     any memory tool, because the offline HF cache never has the new model.
-    Pin the Dockerfile bake to the code default so a future model swap can
-    never leave the two silently out of sync again."""
+    Pin the bake to the code default so a future model swap can never leave
+    the two silently out of sync again.
+
+    The bake moved into ``ops/provision_embedding_models.py`` (2026-09-11),
+    so the model name now reaches the Dockerfile only through that script.
+    Matching the name against the Dockerfile text would pass on the prose
+    comment that names the model, which downloads nothing — check the
+    script's model list and the Dockerfile's invocation of it instead."""
+    import importlib.util
+
     from pseudolife_memory.utils.config import EmbeddingConfig
 
+    ops = Path(__file__).resolve().parents[1] / "ops"
+    spec = importlib.util.spec_from_file_location(
+        "provision_embedding_models", ops / "provision_embedding_models.py",
+    )
+    assert spec is not None and spec.loader is not None
+    provisioner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(provisioner)
+
     default_model = EmbeddingConfig().model_name
-    dockerfile = (
-        Path(__file__).resolve().parents[1] / "ops" / "Dockerfile.daemon"
-    ).read_text(encoding="utf-8")
-    assert default_model in dockerfile, (
-        f"ops/Dockerfile.daemon does not bake the default embedding model "
-        f"({default_model!r}) — a container built from this image would "
-        f"boot healthy and OSError on the first tool call under "
-        f"HF_HUB_OFFLINE=1")
+    provisioned = {provisioner.QWEN_MODEL, provisioner.MINILM_MODEL}
+    assert default_model in provisioned, (
+        f"ops/provision_embedding_models.py does not provision the default "
+        f"embedding model ({default_model!r}, provisions {sorted(provisioned)}) "
+        f"— a container built from this image would boot healthy and OSError "
+        f"on the first tool call under HF_HUB_OFFLINE=1")
+    dockerfile = (ops / "Dockerfile.daemon").read_text(encoding="utf-8")
+    assert "python /app/provision_embedding_models.py" in dockerfile, (
+        "ops/Dockerfile.daemon does not run the provisioner, so nothing "
+        "downloads the models the guard above just checked")
 
 
 def test_ci_warms_the_default_embedding_model() -> None:
