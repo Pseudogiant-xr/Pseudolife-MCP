@@ -2,9 +2,9 @@
 
 The embedder is the daemon's dominant per-request cost (~5ms/encode on
 CPU torch). sentence-transformers' native ``backend="onnx"`` runs the
-same MiniLM through onnxruntime at ~3x the speed with *bit-identical*
-cosine geometry (benchmarked: min cosine vs torch = 1.00000 over 20
-texts), so the switch carries zero retrieval-quality risk.
+same MiniLM through onnxruntime at ~3x the speed with parity-checked
+cosine geometry (benchmarked 2026-07-12: min cosine vs torch = 1.00000
+over 20 texts), so the switch carries no measured retrieval-quality risk.
 
 Contract pinned here:
 
