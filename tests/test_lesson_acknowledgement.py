@@ -30,8 +30,21 @@ def claim(task="deploy", lesson="Keep a rollback tag", **extra):
                 polarity="+", **extra)
 
 
+class Bank:
+    """Initialized CMS stand-in: no model, no background workers, and just
+    enough surface for a real ``_persist_all`` to run its non-lesson parts."""
+
+    def __init__(self):
+        self.bands = []
+        self.saved = []
+
+    def save_weights(self, path):
+        self.saved.append(path)
+
+
 def make_service(path, pg_url):
     from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.memory.cortex import CortexStore
     from pseudolife_memory.memory.lessons import LessonStore
     from pseudolife_memory.memory.graph_store import PostgresNetworkxGraphStore
     from pseudolife_memory.storage.postgres import PostgresStorage
@@ -40,7 +53,8 @@ def make_service(path, pg_url):
     service = MemoryService(data_dir=path, database_url=pg_url)
     service._storage = PostgresStorage(pg_url)
     service._graph = PostgresNetworkxGraphStore(service._storage)
-    service._cms = object()  # initialized, with no model or background workers
+    service._cms = Bank()
+    service._cortex = CortexStore()
     service._embedder = Vectors()
     service._lessons = LessonStore()
     hydrate_lessons(service._lessons, service._storage)
@@ -67,8 +81,17 @@ def durable_values(svc):
     return [r["value"] for r in svc._storage.load_lessons()]
 
 
-def test_second_claim_failure_rolls_back_first_lesson_graph_and_ack(svc, monkeypatch):
-    ids = [signal(svc), signal(svc, "release")]
+def entity_names(svc):
+    return [r[0] for r in
+            svc._storage.conn.execute("SELECT canonical FROM entities").fetchall()]
+
+
+def test_one_failing_claim_rolls_back_only_itself(svc, monkeypatch):
+    """A claim whose write raises must cost that claim, not the batch: the
+    extractor re-derives the same poison claim from the same signals every
+    sweep, so an all-or-nothing batch never drains again."""
+    signal(svc)
+    signal(svc, "release")
     original = svc._link_lesson_graph
 
     def fail_second(task, about, polarity):
@@ -78,11 +101,143 @@ def test_second_claim_failure_rolls_back_first_lesson_graph_and_ack(svc, monkeyp
 
     monkeypatch.setattr(svc, "_link_lesson_graph", fail_second)
     result = svc.synthesize_lessons(Extractor([claim(), claim("release", "Check health")]))
-    assert result["lessons"] == 0
-    assert pending(svc) == ids
-    assert durable_values(svc) == []
-    assert svc._lessons.records == []
-    assert svc._storage.conn.execute("SELECT count(*) FROM entities").fetchone()[0] == 0
+    assert result["lessons"] == 1 and result["write_errors"] == 1
+    # The clustering route's claims do not map to single signals, so the
+    # route is acknowledged once any of its claims lands.
+    assert pending(svc) == []
+    # Both halves of the failed claim roll back: no lesson row in RAM or
+    # storage, and no graph node for it either.
+    assert durable_values(svc) == ["Keep a rollback tag"]
+    assert [r.value for r in svc._lessons.records] == ["Keep a rollback tag"]
+    assert "deploy" in entity_names(svc) and "release" not in entity_names(svc)
+
+
+def test_failing_rule_claim_leaves_only_its_own_signal_pending(svc, monkeypatch):
+    """The rule route emits one claim per handled signal, so a failed claim
+    withholds exactly that signal's acknowledgement."""
+    signal(svc, "deploy", "rule:git")
+    bad_id = signal(svc, "release", "rule:git")
+    original = svc._link_lesson_graph
+
+    def fail_release(task, about, polarity):
+        if task == "release":
+            raise RuntimeError("graph write rejected this claim")
+        original(task, about, polarity)
+
+    class Rules(Extractor):
+        def extract_rules(self, signals):
+            return [dict(task="deploy", aspect="rule", about="git",
+                         lesson="Keep a rollback tag"),
+                    dict(task="release", aspect="rule", about="git",
+                         lesson="Check health")]
+
+    monkeypatch.setattr(svc, "_link_lesson_graph", fail_release)
+    result = svc.synthesize_lessons(Rules([]))
+    assert result["lessons"] == 1 and result["write_errors"] == 1
+    assert pending(svc) == [bad_id]
+    assert durable_values(svc) == ["Keep a rollback tag"]
+
+
+def test_a_persistently_failing_claim_does_not_block_later_batches(svc, monkeypatch):
+    first = signal(svc, "release")
+    original = svc._link_lesson_graph
+
+    def fail_release(task, about, polarity):
+        if task == "release":
+            svc._storage.conn.execute("SELECT 1 / 0")
+        original(task, about, polarity)
+
+    monkeypatch.setattr(svc, "_link_lesson_graph", fail_release)
+    poison = claim("release", "Check health")
+    first_result = svc.synthesize_lessons(Extractor([poison]))
+    assert first_result["lessons"] == 0 and first_result["write_errors"] == 1
+    # Nothing landed, so the route keeps its signal for a later sweep.
+    assert pending(svc) == [first]
+    signal(svc)
+    result = svc.synthesize_lessons(Extractor([poison, claim()]))
+    assert result["lessons"] == 1 and result["write_errors"] == 1
+    assert pending(svc) == []
+    assert durable_values(svc) == ["Keep a rollback tag"]
+
+
+def test_batch_cap_leaves_the_rest_for_the_next_sweep(svc):
+    ids = [signal(svc), signal(svc, "release"), signal(svc, "triage")]
+    svc.config.memory.lessons.synthesis_max_signals = 2
+    seen = []
+
+    class Counting(Extractor):
+        def extract_lessons(self, signals):
+            seen.append(len(signals))
+            return self.claims
+
+    result = svc.synthesize_lessons(Counting([claim()]))
+    assert seen == [2] and result["signals"] == 2
+    assert pending(svc) == [ids[2]]
+
+
+def test_claim_embeddings_are_computed_before_the_transaction_opens(svc, monkeypatch):
+    """Embedding is pure CPU work; running it inside the batch transaction
+    held the shared connection (and the service lock) for a model pass per
+    claim. One encode per claim, all of them before the transaction."""
+    signal(svc)
+    svc.config.memory.lessons.synthesis_dedup_min_similarity = 0.9
+    order = []
+    encode = svc._embedder.encode_single
+    monkeypatch.setattr(svc._embedder, "encode_single",
+                        lambda text: (order.append("encode"), encode(text))[1])
+    original = svc._storage.lesson_synthesis_transaction
+
+    @contextmanager
+    def watched(signals):
+        order.append("transaction")
+        with original(signals) as current:
+            yield current
+
+    monkeypatch.setattr(svc._storage, "lesson_synthesis_transaction", watched)
+    assert svc.synthesize_lessons(Extractor([claim()]))["lessons"] == 1
+    assert order == ["encode", "transaction"]
+
+
+def test_transaction_error_keeps_the_extraction_route_error(svc, monkeypatch):
+    signal(svc)
+    rule_id = signal(svc, "release", "rule:git")
+
+    class Mixed(Extractor):
+        def extract_rules(self, signals):
+            raise RuntimeError("rule endpoint unavailable")
+
+    lose_commit_response(svc, monkeypatch)
+    result = svc.synthesize_lessons(Mixed([claim()]))
+    assert "rule extraction" in result["error"]
+    assert "commit response lost" in result["error"]
+    assert pending(svc) == [rule_id]
+
+
+def test_latched_reconciliation_still_persists_everything_but_lessons(svc, monkeypatch):
+    """The latch is process-local and a restart discards whatever never
+    reached disk, so blocking the whole save lost weights, access counts and
+    dirty cortex/world slots that have nothing to do with lessons."""
+    from pseudolife_memory.service import PersistenceError
+
+    signal(svc)
+    lose_commit_response(svc, monkeypatch)
+
+    def unavailable():
+        raise RuntimeError("reconciliation read unavailable")
+
+    monkeypatch.setattr(svc._storage, "load_lessons", unavailable)
+    assert svc.synthesize_lessons(Extractor([claim()]))["reconciliation_required"]
+
+    calls = []
+    monkeypatch.setattr(svc._storage, "update_access_counts",
+                        lambda pairs: calls.append("access_counts"))
+    monkeypatch.setattr(svc, "_save_cortex", lambda: calls.append("cortex"))
+    monkeypatch.setattr(svc, "_save_world", lambda: calls.append("world"))
+    monkeypatch.setattr(svc, "_save_lessons", lambda: calls.append("lessons"))
+    with pytest.raises(PersistenceError, match="reconciliation required"):
+        svc._persist_all(kind="auto")
+    assert svc._cms.saved == [svc.config.memory.save_dir]
+    assert calls == ["access_counts", "cortex", "world"]
 
 
 def test_ack_failure_after_sql_leaves_everything_retryable(svc, monkeypatch):

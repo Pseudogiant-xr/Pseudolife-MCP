@@ -251,6 +251,13 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   beside `lesson_signals`/`lessons_written` in the dream-run row).
   Opposite-polarity matches and explicit `lesson_write` callers are never
   gated. `0` disables.
+- **Lesson-synthesis batch cap** (`memory.lessons.synthesis_max_signals =
+  200`) — most outcome signals one dream sweep drains. The batch commits
+  its lessons, graph edges and acknowledgements in one transaction under
+  the service lock, so this bounds a single daemon pause rather than the
+  total work; whatever it leaves behind is picked up by the next sweep.
+  A chosen bound (roughly one extractor batch), not a measured one. `0`
+  drains everything pending.
 - **Slot-index shadow verification on** (`memory.slot_index_shadow_rate =
   0.01`) — ~1% of slot-pool queries recompute the index from scratch and
   compare; divergences land in `stats()` as

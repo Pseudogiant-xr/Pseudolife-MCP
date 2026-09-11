@@ -178,13 +178,15 @@ bank and survive ordinary PostgreSQL hydration; they are not portable across
 bank replacement or arbitrary imports. The Console sends selected IDs too.
 
 Use exactly one selector mode. Legacy `old_text` and `replaces` calls still
-work when each full text identifies one entry, including consideration of
-retired duplicates. There is no paraphrase fallback or replace-all behavior.
-Missing, ambiguous, already-superseded or unavailable targets return
-`new_memory_stored: false` with `reason`, `error` and `target_errors`; none of
-the selected entries change on target-validation failure. Search again and
-resubmit IDs. Success results include `superseded_ids`. File-mode entries
-have no durable row ID and therefore require unique exact text.
+work when each full text identifies exactly one live entry; a retired
+duplicate is history rather than a rival target, so text that was corrected
+and later restated stays selectable. There is no paraphrase fallback or
+replace-all behavior. Missing, ambiguous, already-superseded or unavailable
+targets return `new_memory_stored: false` with `reason`, `error` and
+`target_errors`; none of the selected entries change on target-validation
+failure. Search again and resubmit IDs. Success results include
+`superseded_ids`, which is empty in file mode: file-mode entries have no
+durable row ID and therefore require unique exact text.
 
 Whole-selection validation does not provide transactional rollback for later
 encoding or storage failures. Operational failure recovery remains a separate
@@ -535,28 +537,43 @@ duplicate and counted (`lessons_deduped` in the dream-run row;
 `memory.lessons.synthesis_dedup_min_similarity`, default `0.88`, `0`
 disables). Opposite-polarity near-matches always write — a dead-end and a
 success about the same thing are both worth keeping — and explicit
-`lesson_write` calls are never gated.
+`lesson_write` calls are never gated. The comparison covers the lessons the
+same batch has already staged, so two near-identical claims in one batch
+write once.
 
 In PostgreSQL, synthesis stages lesson changes in memory and commits the
 lessons, their graph updates, and the handled signals' acknowledgements in one
-transaction. A write failure rolls back the whole selected write group. A
-fully deduplicated group is acknowledged only with its supporting lesson state
-durable. Extraction happens outside the service lock; changed or already
-consumed inputs invalidate the extracted batch before it writes anything.
+transaction. Each claim writes inside its own savepoint: a claim that cannot be
+written rolls back both halves of itself and is counted as `write_errors`,
+while the rest of the batch commits. A fully deduplicated group is acknowledged
+only with its supporting lesson state durable. Extraction happens outside the
+service lock; changed or already consumed inputs invalidate the extracted batch
+before it writes anything. One sweep drains at most
+`memory.lessons.synthesis_max_signals` signals (default 200), which bounds a
+single lock hold rather than the total work; the rest waits for the next sweep.
 
 An empty or failed extraction route leaves its signals pending for a later
-sweep, subject to the existing retention limit. This is a persistence guarantee,
-not evidence that every extracted lesson is correct or complete. A lost commit
-response triggers a durable-state check before retrying or saving; if that
-check is unavailable, normal service operations and saves fail until
-reconciliation succeeds. This exceptional availability restriction is global,
-not limited to lesson writes. If selected signal rows have been removed or
-retargeted during an extended outage, their state may no longer prove the
-commit outcome: the service remains blocked for operator recovery instead of
-claiming a successful retry. Restarting rehydrates the durable bank; this
-protocol does not repair historical losses or recover prior unsaved changes.
-It assumes the existing single-daemon writer. File-mode synthesis still
-returns `skipped: no-storage`.
+sweep, subject to the existing retention limit. A rule signal whose own claim
+failed stays pending too; the clustering route, whose claims do not map to
+single signals, is acknowledged once any of its claims lands. This is a
+persistence guarantee, not evidence that every extracted lesson is correct or
+complete. A lost commit response triggers a durable-state check before retrying
+or saving; if that check is unavailable, the service latches until it succeeds
+or the daemon restarts.
+
+While latched, lesson reads and the lesson half of a save fail; `/health`
+reports `lesson_reconciliation_required` (status stays `ok`, so the container
+healthcheck does not restart the daemon by itself) and the daemon logs the
+latch at ERROR. Everything else still persists: the autosave and exit flush
+write weights, access counts, and dirty cortex and world slots, then report the
+lesson failure. That split matters because restarting is the operator's
+recovery: it rehydrates the durable bank and clears the latch, and it discards
+anything that was still only in memory. If selected signal rows have been
+removed or retargeted during an extended outage, their state may no longer
+prove the commit outcome: the service remains blocked for operator recovery
+instead of claiming a successful retry. This protocol does not repair
+historical losses or recover prior unsaved changes. It assumes the existing
+single-daemon writer. File-mode synthesis still returns `skipped: no-storage`.
 
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or

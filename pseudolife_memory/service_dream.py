@@ -15,14 +15,47 @@ for standalone use.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from copy import deepcopy
 from typing import Any
 
+from pseudolife_memory.memory.cortex import _norm_key
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 
 from pseudolife_memory.memory.labels import (INHERIT, contains_verbatim,
                                              content_tokens)
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _staged_slot(lessons, task: str, aspect: str):
+    """Undo one staged lesson write when its body raises.
+
+    A tolerated claim's savepoint rolls back the SQL half of the write; the
+    store write that preceded it is plain RAM and would otherwise be
+    published — and synced — without the graph state it was meant to commit
+    with. ``LessonStore.write_fact`` touches exactly one slot: it marks the
+    slot dirty, may append record(s), and may mutate the record currently at
+    the slot in place. Restoring those three is the whole undo.
+    """
+    key = (_norm_key(task), _norm_key(aspect))
+    appended_from = len(lessons.records)
+    index = lessons._current.get(key)
+    before = deepcopy(lessons.records[index]) if index is not None else None
+    was_dirty = key in lessons.dirty_slots
+    try:
+        yield
+    except BaseException:
+        del lessons.records[appended_from:]
+        if before is not None:
+            lessons.records[index] = before
+            lessons._current[key] = index
+        else:
+            lessons._current.pop(key, None)
+        if not was_dirty:
+            lessons.dirty_slots.discard(key)
+        raise
 
 
 class DreamOps:
@@ -355,10 +388,15 @@ class DreamOps:
         if not (cfg.enabled and cfg.synthesize_in_dream):
             return {"signals": 0, "lessons": 0, "skipped": "disabled"}
         cutoff = _t.time() - cfg.signal_retention_days * 86400
+        # One sweep drains at most ``synthesis_max_signals``: the whole batch
+        # commits under the service lock, so an unbounded backlog would set
+        # the length of a single daemon pause. The remainder stays pending
+        # for the next sweep.
+        cap = limit if limit is not None else (cfg.synthesis_max_signals or None)
         with self._lock:
             self._ensure_init()
             self._storage.prune_signals(cutoff)
-            signals = self._storage.pending_signals(limit=limit)
+            signals = self._storage.pending_signals(limit=cap)
         if not signals:
             return {"signals": 0, "lessons": 0}
         all_inferred = bool(signals) and all(
@@ -404,18 +442,22 @@ class DreamOps:
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"rule extraction: {exc}")
                 rule_failed_ids = {s["id"] for s in rule_sigs}
-        handled_ids = [s["id"] for s in plain] if plain_claims else []
+        plain_handled = [s["id"] for s in plain] if plain_claims else []
         rule_handled = [s["id"] for s in rule_sigs
                         if s["id"] not in rule_failed_ids | rule_empty_ids]
         # Rule extractors promise one result per handled signal. If a custom
         # extractor omits outputs without identifying empty/failed inputs, the
         # unmatched results cannot safely acknowledge any of that route.
-        if len(rule_claims) == len(rule_handled):
-            handled_ids.extend(rule_handled)
-        else:
+        if len(rule_claims) != len(rule_handled):
             errors.append("rule extraction did not identify every unhandled signal")
-            rule_claims = []
+            rule_claims, rule_handled = [], []
         claims = plain_claims + rule_claims
+        # Per-claim acknowledgement map, mirroring those two derivations: a
+        # rule claim is the sole output of one signal (same order), so its
+        # signal is acknowledged only if it writes. Clustering claims do not
+        # map to single signals — that route is acknowledged as a whole once
+        # any of its claims lands.
+        claim_signals = [None] * len(plain_claims) + list(rule_handled)
         # Bitemporal event time: the synthesised lesson became *true* when its
         # underlying outcomes were observed, not when the dream wrote it. Claims
         # don't map 1:1 to signals, so use the earliest contributing signal's
@@ -437,13 +479,24 @@ class DreamOps:
             return out
         dedup_thr = float(getattr(cfg, "synthesis_dedup_min_similarity", 0.0)
                           or 0.0)
-        from copy import deepcopy
         from pseudolife_memory.storage.sync import sync_lesson_slots
         with self._lock:
             self._ensure_init()
-            written = deduped = 0
+            written = deduped = write_errors = plain_landed = 0
+            handled_ids: list = []
+            failed_rule_ids: set = set()
             writes_finished = False
             try:
+                # Claim embeddings are pure CPU work with no transaction
+                # state. Computed inside the batch they held an open
+                # PostgreSQL transaction — on the one shared connection —
+                # for a model pass per claim; the dedup gate and the write
+                # embed the same text. Still inside this try: a malformed
+                # claim must fail the batch, never the dream.
+                embeddings = [
+                    self._embedder.encode_single(
+                        f"{c['task']} {c.get('aspect', 'lesson')} {c['lesson']}".strip())
+                    for c in claims]
                 with self._storage.lesson_synthesis_transaction(signals) as current:
                     if not current:
                         out["skipped"] = "signals-changed"
@@ -455,24 +508,50 @@ class DreamOps:
                     for rec in staged.records:
                         if rec.key in staged.dirty_slots and rec.status == "current":
                             self._link_lesson_graph(rec.entity, rec.about, rec.polarity)
-                    for c in claims:
-                        is_rule = c.get("aspect") == "rule"
-                        if dedup_thr and not is_rule and self._lesson_duplicate_locked(
-                                staged, c["task"], c.get("aspect", "lesson"),
-                                c["lesson"], c.get("polarity", "+"), dedup_thr):
-                            deduped += 1
+                    for c, emb, sid in zip(claims, embeddings, claim_signals):
+                        aspect = c.get("aspect", "lesson")
+                        try:
+                            if dedup_thr and aspect != "rule" and self._lesson_duplicate_locked(
+                                    staged, c["task"], aspect, c["lesson"],
+                                    c.get("polarity", "+"), dedup_thr,
+                                    embedding=emb):
+                                deduped += 1
+                            else:
+                                # One savepoint per claim. PostgreSQL aborts
+                                # the whole transaction on the first error,
+                                # so without this a single claim whose graph
+                                # write raises killed the batch — and the
+                                # extractor re-derived that same claim from
+                                # the same signals on every later sweep.
+                                with _staged_slot(staged, c["task"], aspect), \
+                                        self._storage.savepoint():
+                                    self._write_lesson_locked(
+                                        staged, c["task"], aspect, c["lesson"],
+                                        embedding=emb,
+                                        about=c.get("about"),
+                                        outcome=c.get("outcome", "success"),
+                                        polarity=c.get("polarity", "+"),
+                                        confidence=(0.4 if all_inferred
+                                                    else float(c.get("confidence", 0.6))),
+                                        origin=c.get("origin", "agent"),
+                                        provenance=(set(c.get("provenance") or [])
+                                                    | ({"inferred"} if all_inferred else set())),
+                                        valid_time=batch_valid_time)
+                                written += 1
+                        except Exception as exc:  # noqa: BLE001 — bounded per-claim tolerance
+                            write_errors += 1
+                            if sid is not None:
+                                failed_rule_ids.add(sid)
+                            logger.warning("lesson claim failed (%s): %r", exc, c)
                             continue
-                        self._write_lesson_locked(
-                            staged, c["task"], c.get("aspect", "lesson"), c["lesson"],
-                            about=c.get("about"), outcome=c.get("outcome", "success"),
-                            polarity=c.get("polarity", "+"),
-                            confidence=(0.4 if all_inferred
-                                        else float(c.get("confidence", 0.6))),
-                            origin=c.get("origin", "agent"),
-                            provenance=(set(c.get("provenance") or [])
-                                        | ({"inferred"} if all_inferred else set())),
-                            valid_time=batch_valid_time)
-                        written += 1
+                        if sid is None:
+                            plain_landed += 1
+                    # A route is acknowledged only for work that landed: the
+                    # clustering route once any of its claims did, a rule
+                    # signal only if its own claim did.
+                    handled_ids = list(plain_handled) if plain_landed else []
+                    handled_ids += [i for i in rule_handled
+                                    if i not in failed_rule_ids]
                     sync_lesson_slots(staged, self._storage)
                     consumed = self._storage.consume_signals(handled_ids)
                     if consumed != len(handled_ids):
@@ -480,9 +559,14 @@ class DreamOps:
                     writes_finished = True
                 self._lessons = staged
                 out.update(lessons=written, deduped=deduped)
+                if write_errors:
+                    out["write_errors"] = write_errors
             except Exception as exc:  # noqa: BLE001
                 self._persist_errors += 1
-                out["error"] = str(exc)
+                errors.append(str(exc))
+                out["error"] = "; ".join(errors)
+                if write_errors:
+                    out["write_errors"] = write_errors
                 if writes_finished:
                     # COMMIT may have reached the server despite an exception
                     # reaching us. Never autosave old RAM over that outcome.
@@ -493,6 +577,14 @@ class DreamOps:
                     except Exception as recovery_exc:  # noqa: BLE001
                         out["error"] += f"; {recovery_exc}"
                         out["reconciliation_required"] = True
+                        # The latch now STAYS set: lesson reads and the
+                        # lesson snapshot fail until a later recheck
+                        # succeeds or the daemon restarts. /health mirrors
+                        # it as lesson_reconciliation_required.
+                        logger.error(
+                            "lesson commit reconciliation required (%s): lesson "
+                            "reads and the lesson snapshot are blocked until it "
+                            "resolves or the daemon restarts", recovery_exc)
                 logger.warning("lesson batch failed (%s); retry or durable reconciliation required", exc)
         return out
 

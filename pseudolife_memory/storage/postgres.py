@@ -245,6 +245,19 @@ class PostgresStorage:
                 f"transaction did not commit (status={tx.status.name}); "
                 "connection lost during the block")
 
+    @contextmanager
+    def savepoint(self):
+        """A nested rollback boundary for ONE tolerated step of an open
+        transaction.
+
+        PostgreSQL aborts the whole transaction on the first error, so a
+        caller that wants to skip a failing step and keep the rest of its
+        batch (lesson synthesis skipping one poison claim) has to run that
+        step inside a savepoint. Same block as :meth:`_txn`, named for what
+        the caller means; outside a transaction it simply is one."""
+        with self._txn():
+            yield
+
     # ── entries ─────────────────────────────────────────────────────────
 
     def insert_entry(self, e: dict) -> int:
