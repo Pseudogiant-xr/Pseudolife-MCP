@@ -69,11 +69,16 @@ async function doConsolidate(members, newText, ctx) {
       : { replaces: members.map((m) => m.text) };
     const r = await api.post("/api/consolidate",
       { ...selector, new_text: newText });
-    if (!r.new_memory_stored) {
+    // Only `error` means nothing changed. A filtered merged text still left
+    // the members retired, so report that rather than a false failure.
+    if (r.error || !r.superseded_count) {
       throw new Error(r.error || "Merged memory was not stored; reload the candidates and try again.");
     }
     closeModal();
-    toast(`Consolidated ${r.superseded_count ?? members.length} → 1`, "ok");
+    toast(r.new_memory_stored
+      ? `Consolidated ${r.superseded_count} → 1`
+      : `Superseded ${r.superseded_count}, but the merged text was filtered and not stored`,
+      r.new_memory_stored ? "ok" : "warn");
     ctx?.refresh?.();
     load(ctx);
   } catch (e) { toast("Consolidate failed: " + e.message, "bad"); }

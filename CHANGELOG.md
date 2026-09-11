@@ -45,6 +45,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Correction results include the superseded IDs and actionable target errors.
   The Console keeps the edit open when the service rejects a correction,
   preserving replacement text instead of reporting a false success.
+- The Console treats a correction as rejected only when the service reports an
+  error or retired nothing. A correction whose replacement text was filtered
+  out still retired its target, so the Console now closes the edit and warns
+  that the replacement was not stored, instead of reporting a failure for work
+  that already happened and inviting a retry that cannot succeed.
+- A legacy text selector needs one LIVE match, not one match overall. Text that
+  was corrected and later restated leaves a retired twin behind; that twin no
+  longer makes the live entry ambiguous, which file mode could not work around
+  because it has no entry IDs. Two live duplicates are still ambiguous, and a
+  text whose only matches are retired still reports `target_superseded`.
+  Consolidation candidates apply the same rule, so such a note is offered again.
+- `memory_supersede` and `memory_consolidate` require `new_text` again; an
+  omitted replacement is a client-side schema error rather than a silent
+  empty-input no-op.
+- A failed storage read while listing consolidation candidates degrades to
+  unverified candidates with a logged warning instead of failing the call;
+  the correction itself still validates every ID before changing anything.
 
 ### Fixed (2026-09-11 — durable lesson acknowledgement)
 - Lesson synthesis commits staged lessons, graph updates and acknowledgements
@@ -56,6 +73,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   empty rule responses. Successful routes can proceed independently; a custom
   rule extractor with incomplete output coverage leaves that route pending.
   Signal retention and file-mode synthesis behavior are unchanged.
+- A claim the batch cannot write costs only itself: it rolls back on its own
+  savepoint (lesson and graph halves together), the rest of the batch still
+  commits, and the count appears as `write_errors` in the synthesis report.
+  Its rule signal stays pending; the clustering route is acknowledged once any
+  of its claims lands. A claim that fails every time no longer stalls every
+  later sweep.
+- Within one batch, the near-duplicate gate compares a claim against the
+  lessons that batch has already staged as well as the durable ones, so the
+  second of two near-identical claims is counted as `deduped`, not written.
+- Claim embeddings are computed before the batch transaction opens, and one
+  sweep drains at most `memory.lessons.synthesis_max_signals` signals
+  (default 200; 0 disables). Both bound how long a batch holds the service
+  lock and one PostgreSQL transaction; the remainder waits for the next sweep.
+- An unresolved lesson reconciliation no longer blocks unrelated persistence:
+  weights, access counts and cortex/world slots are written, only the lesson
+  snapshot is skipped, and the save still fails loudly afterwards. A restart
+  discards exactly what those parts would have made durable.
+- `/health` reports `lesson_reconciliation_required` while a lesson commit is
+  unresolved, and the daemon logs it at ERROR. Status stays `ok` so the
+  container healthcheck does not restart the daemon out from under the
+  unsaved state, matching `migration_partial`.
+- A synthesis report keeps its extraction-route errors when a transaction
+  error follows, instead of replacing them.
 
 ### Fixed (2026-09-10 — preserve source evidence)
 - Automatic contradiction candidates can admit a possible update through

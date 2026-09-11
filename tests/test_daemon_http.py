@@ -193,6 +193,35 @@ def test_health_names_a_dream_tracking_failure_without_going_degraded():
     assert "dream_tracking_error" not in clean
 
 
+def test_health_flags_pending_lesson_reconciliation_without_going_degraded():
+    """An uncertain lesson commit latches the service until a durable recheck
+    resolves it: lesson reads and the lesson snapshot fail meanwhile, and
+    nothing else on this payload says so. It must stay ``status: "ok"`` for
+    the same reason ``migration_partial`` does — web/api.py serves a non-ok
+    payload as HTTP 503, and the Docker healthcheck would restart the
+    container, discarding the unsaved state a restart cannot recover."""
+    from pseudolife_memory.daemon import _build_health_payload
+
+    class _Stub:
+        _db_url = "postgresql://fake"
+        _persist_errors = 1
+        _init_refusal = None
+        _storage = None
+        _migration_partial = None
+        _lesson_synthesis_recovery = ([{"id": 7}], [7])
+
+    payload = _build_health_payload(_Stub(), token_present=False)
+    assert payload["status"] == "ok"
+    assert payload["lesson_reconciliation_required"] is True
+
+    class _Clean(_Stub):
+        _lesson_synthesis_recovery = None
+
+    clean = _build_health_payload(_Clean(), token_present=False)
+    assert clean["status"] == "ok"
+    assert "lesson_reconciliation_required" not in clean
+
+
 def test_tool_call_requires_token(daemon):
     req = urllib.request.Request(
         daemon["url"] + "/mcp",

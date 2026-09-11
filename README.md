@@ -788,13 +788,17 @@ memory_store("Decided to use stdio transport for the MCP because no port conflic
 ```
 
 **When corrected** — marks the old fact superseded *and* stores the
-correction; both surface in future retrieval, the new one ranked higher:
+correction; both surface in future retrieval, the new one ranked higher.
+Select the entry by the `id` carried on the search or recent hit:
 ```
 memory_supersede(
-  "Provider interface uses synchronous calls",
-  "Provider interface uses async calls — sync version was the v0.7 prototype only"
+  entry_id=417,
+  new_text="Provider interface uses async calls — sync version was the v0.7 prototype only"
 )
 ```
+`old_text=` still selects by the full stored text when that text is exactly
+unique among live entries; it is the legacy selector and the only one file
+mode has. Ambiguous or missing targets change nothing.
 
 **Hygiene** — `memory` and `fact` scopes hard-delete (at least one filter
 is required for scope `memory`, preventing accidental wholesale deletion);

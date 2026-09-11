@@ -123,6 +123,17 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     dream_tracking_error = getattr(svc, "_dream_tracking_error", None)
     if dream_tracking_error:
         payload["dream_tracking_error"] = dream_tracking_error.split(":", 1)[0]
+    # An uncertain lesson commit latches until a durable recheck resolves it
+    # (service._recover_lesson_synthesis): lesson reads and the lesson
+    # snapshot fail meanwhile, and nothing else here would show it. Same
+    # deliberate choice as migration_partial above — NOT `degraded`. A
+    # restart IS the documented recovery, so a degraded payload would have
+    # the Docker healthcheck take one automatically, discarding every
+    # unsaved change the running daemon still holds (weights, access
+    # counts, dirty cortex/world slots) for a latch that a human should
+    # look at. The loudness lives in the ERROR log this flag mirrors.
+    if getattr(svc, "_lesson_synthesis_recovery", None) is not None:
+        payload["lesson_reconciliation_required"] = True
     # Honest DB liveness (2026-07-02 review fix): /health used to say
     # "ok" while a restarted Postgres had every memory tool failing.
     # ping() uses a dedicated short-lived connection so the probe can't

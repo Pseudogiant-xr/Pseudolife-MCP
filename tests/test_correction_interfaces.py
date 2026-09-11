@@ -1,6 +1,7 @@
 """Selected entry identity survives MCP, HTTP, and Console correction calls."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 import shutil
@@ -60,9 +61,20 @@ _NODE = shutil.which("node")
 _JS = Path(__file__).resolve().parents[1] / "pseudolife_memory/web/static/js"
 
 
+@pytest.mark.parametrize("tool", ["memory_supersede", "memory_consolidate"])
+def test_replacement_text_stays_a_required_tool_argument(tool):
+    """A correction without replacement text is a client error, not a no-op call."""
+    from pseudolife_memory import mcp_server
+
+    tools = {t.name: t for t in asyncio.run(mcp_server.mcp.list_tools())}
+    required = set(tools[tool].input_schema.get("required") or [])
+    assert "new_text" in required
+    assert not required & {"old_text", "entry_id", "replaces", "entry_ids"}
+
+
 @pytest.mark.skipif(_NODE is None, reason="Node.js is needed for Console behavior checks")
 @pytest.mark.parametrize("method", ["supersede", "consolidate"])
-@pytest.mark.parametrize("mode", ["ids", "files", "rejected"])
+@pytest.mark.parametrize("mode", ["ids", "files", "rejected", "unchanged", "filtered"])
 def test_console_correction_preserves_identity_and_reports_rejection(method, mode):
     """Execute the real action body with only UI/network dependencies replaced."""
     filename = "views/stream.js" if method == "supersede" else "consolidation.js"
@@ -70,6 +82,20 @@ def test_console_correction_preserves_identity_and_reports_rejection(method, mod
     entries = [{"id": 41, "text": "same text"}, {"id": 42, "text": "same text"}]
     if mode == "files":
         entries = [{"id": None, "text": "first note"}, {"id": None, "text": "second note"}]
+    retired = 1 if method == "supersede" else len(entries)
+    # "filtered": the target was retired and written through, but the meta
+    # filter dropped the replacement text. The correction happened.
+    response = {
+        "ids": {"new_memory_stored": True, "superseded_count": retired},
+        "files": {"new_memory_stored": True, "superseded_count": retired},
+        "filtered": {"new_memory_stored": False, "superseded_count": retired},
+        "rejected": {"new_memory_stored": False, "superseded_count": 0,
+                     "reason": "target_superseded",
+                     "error": "This entry changed; search again."},
+        # Belt for the braces above: nothing retired is a rejection even if
+        # some future caller loses the diagnostic.
+        "unchanged": {"new_memory_stored": False, "superseded_count": 0},
+    }[mode]
     script = r'''
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -88,9 +114,7 @@ const exports = {
   confirmDialog: noop, badge: noop, reVerifyBadge: noop, searchBox: noop, facetBar: noop,
   api: {post: async (url, payload) => {
     calls.push({url, payload});
-    return input.rejected ? {new_memory_stored: false, reason: 'target_superseded',
-      error: 'This entry changed; search again.', superseded_count: 0}
-      : {new_memory_stored: true, superseded_count: input.entries.length};
+    return input.response;
   }, get: async () => ({clusters: []})},
 };
 (async () => {
@@ -106,7 +130,7 @@ const exports = {
     result = subprocess.run(
         [_NODE, "--experimental-vm-modules", "-e", script],
         input=json.dumps({"path": str(_JS / filename), "function": function,
-                          "entries": entries, "rejected": mode == "rejected"}),
+                          "entries": entries, "response": response}),
         text=True, capture_output=True, timeout=20,
     )
     assert result.returncode == 0, result.stderr
@@ -116,10 +140,14 @@ const exports = {
                 else {"replaces": [entry["text"] for entry in entries]}) if mode == "files" else (
                     {"entry_id": 41} if method == "supersede" else {"entry_ids": [41, 42]})
     assert payload == {**expected, "new_text": "The revised note"}
-    if mode == "rejected":
+    if mode in ("rejected", "unchanged"):
         assert out["closed"] == 0
         assert out["notices"][-1][1] == "bad"
-        assert "search again" in out["notices"][-1][0]
+        assert ("search again" if mode == "rejected" else "try again") in out["notices"][-1][0]
+    elif mode == "filtered":
+        assert out["closed"] == 1
+        assert out["notices"][-1][1] == "warn"
+        assert "not stored" in out["notices"][-1][0]
     else:
         assert out["closed"] == 1
         assert out["notices"][-1][1] == "ok"
