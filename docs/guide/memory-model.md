@@ -178,13 +178,15 @@ bank and survive ordinary PostgreSQL hydration; they are not portable across
 bank replacement or arbitrary imports. The Console sends selected IDs too.
 
 Use exactly one selector mode. Legacy `old_text` and `replaces` calls still
-work when each full text identifies one entry, including consideration of
-retired duplicates. There is no paraphrase fallback or replace-all behavior.
-Missing, ambiguous, already-superseded or unavailable targets return
-`new_memory_stored: false` with `reason`, `error` and `target_errors`; none of
-the selected entries change on target-validation failure. Search again and
-resubmit IDs. Success results include `superseded_ids`. File-mode entries
-have no durable row ID and therefore require unique exact text.
+work when each full text identifies exactly one live entry; a retired
+duplicate is history rather than a rival target, so text that was corrected
+and later restated stays selectable. There is no paraphrase fallback or
+replace-all behavior. Missing, ambiguous, already-superseded or unavailable
+targets return `new_memory_stored: false` with `reason`, `error` and
+`target_errors`; none of the selected entries change on target-validation
+failure. Search again and resubmit IDs. Success results include
+`superseded_ids`, which is empty in file mode: file-mode entries have no
+durable row ID and therefore require unique exact text.
 
 Whole-selection validation does not provide transactional rollback for later
 encoding or storage failures. Operational failure recovery remains a separate

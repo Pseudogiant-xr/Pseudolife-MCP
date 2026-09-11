@@ -18,6 +18,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Correction results include the superseded IDs and actionable target errors.
   The Console keeps the edit open when the service rejects a correction,
   preserving replacement text instead of reporting a false success.
+- The Console treats a correction as rejected only when the service reports an
+  error or retired nothing. A correction whose replacement text was filtered
+  out still retired its target, so the Console now closes the edit and warns
+  that the replacement was not stored, instead of reporting a failure for work
+  that already happened and inviting a retry that cannot succeed.
+- A legacy text selector needs one LIVE match, not one match overall. Text that
+  was corrected and later restated leaves a retired twin behind; that twin no
+  longer makes the live entry ambiguous, which file mode could not work around
+  because it has no entry IDs. Two live duplicates are still ambiguous, and a
+  text whose only matches are retired still reports `target_superseded`.
+  Consolidation candidates apply the same rule, so such a note is offered again.
+- `memory_supersede` and `memory_consolidate` require `new_text` again; an
+  omitted replacement is a client-side schema error rather than a silent
+  empty-input no-op.
+- A failed storage read while listing consolidation candidates degrades to
+  unverified candidates with a logged warning instead of failing the call;
+  the correction itself still validates every ID before changing anything.
 
 ### Fixed (2026-09-11 — durable lesson acknowledgement)
 - Lesson synthesis commits staged lessons, graph updates and acknowledgements
