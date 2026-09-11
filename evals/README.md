@@ -1933,6 +1933,16 @@ re-extract):
 committed baseline (`evals/results/regression_gate.baseline.json`) —
 see the script header for scope and the `-Establish` flow.
 
+The pinned bank dumps are required: a missing bank directory exits with
+infrastructure code 2 before prior gate results are cleared or the GPU server
+starts. Missing individual dump files fail during rebuilding, after cleanup
+but before the GPU server starts.
+There is no fallback that can pass by copying all contexts. With the banks
+present, the gate reconstructs cortex fact ranking offline and judges the
+resulting contexts. Raw-entry contexts remain copied from the pinned run;
+CMS candidate selection, entry reranking, service search and MCP rendering
+need separate tests or a replay through those actual paths.
+
 > **SUPERSEDED 2026-07-27.** Everything in this block was measured on the
 > nondeterministic turboq server. The baseline was re-established on the
 > reproducible q8_0 config at commit `1f0f13a`: **rag 0.6282, cortex 0.7051,

@@ -63,9 +63,8 @@ resolve model behavior, host wake latency or real store/search overhead.
 
 A separate loopback socket experiment exercised the actual daemon, CPU embedder,
 PostgreSQL and stdio shim with identical store/search inputs in all three modes.
-Result counts and ordinary response sizes matched, health remained responsive,
-and the observed warm-path latency stayed within the experimental target. This
-was one short run in fixed arm order, with harness acknowledgments; it supports
+Result counts and ordinary response sizes matched and health remained responsive.
+This was one short run in fixed arm order, with harness acknowledgments; it supports
 no speedup or general latency guarantee. Its frozen source preceded the final
 failure-cleanup and structured-hint fixes, so it measures the successful ordinary
 path, not the revised failure path. Tagged traces and summaries are retained

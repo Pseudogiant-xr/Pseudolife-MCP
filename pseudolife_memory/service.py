@@ -31,6 +31,7 @@ Design notes
 
 from __future__ import annotations
 
+from collections import Counter
 import heapq
 import logging
 import os
@@ -636,8 +637,12 @@ class MemoryService(DreamOps):
         self._cortex: CortexStore | None = None
         self._world = None  # WorldCortexStore | None (world-knowledge cortex, v9)
         self._lessons = None  # LessonStore | None (procedural / outcome memory, v10)
+        self._lesson_synthesis_recovery = None  # uncertain commit: (inputs, handled IDs)
         from pseudolife_memory.memory.hlc import HybridLogicalClock
         self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
+        # A late reseed failure leaves the resident stores initialized, but no
+        # write may tick until the durable coordination clock is read.
+        self._hlc_reseed_pending = False
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._last_saved_fingerprint = None
@@ -656,6 +661,13 @@ class MemoryService(DreamOps):
         # Count of durable-save failures (cortex/world/lessons). Exposed via the
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
+        # Dream initialization failures are isolated from normal memory
+        # serving: exact acknowledgement stays disabled while the rest of
+        # the bank serves. A TRANSIENT failure is re-attempted by the next
+        # dream call (see DreamOps._retry_dream_tracking); a failure in the
+        # bank's own data latches until it is repaired.
+        self._dream_tracking_error: str | None = None
+        self._dream_tracking_retryable = False
         # Set by _ensure_init when storage construction refuses to start
         # (schema v25's embedding-dim mismatch guard, schema.py's
         # RuntimeError) -- exposed via /health so the daemon doesn't report
@@ -839,13 +851,13 @@ class MemoryService(DreamOps):
             config.memory.traces.retention_boost = 1.0
         # ONNX embedder whenever the optional extra is installed (the
         # daemon image bakes it): ~3x faster single-text encode on CPU
-        # with bit-identical embeddings (fp32 ONNX) -- true for MiniLM,
-        # which has a baked ONNX export. Qwen3-Embedding-0.6B (the default
-        # since embedding-backbone-v25) has NO in-repo ONNX export, so with
-        # the [onnx] extra installed this now fires the warn-and-fall-back
-        # path in EmbeddingPipeline on every construction (harmless -- it
-        # falls back to torch cleanly -- but no longer silent; expect it in
-        # the daemon log on every deploy that uses the Qwen default).
+        # with parity-checked embeddings (fp32 ONNX, min cosine vs torch
+        # 1.00000 over 20 texts, 2026-07-12) -- true for MiniLM,
+        # which has a baked ONNX artifact. Qwen3-Embedding-0.6B (the default
+        # since embedding-backbone-v25) has NO in-repo ONNX artifact, so the
+        # load-only preflight takes the warn-and-fall-back path before ONNX
+        # construction. Expect that warning in the daemon log on every deploy
+        # that uses the Qwen default.
         # A plain pip install (no [onnx] extra) still never takes this
         # branch at all.
         if absent("embedding.backend") and _onnx_embedding_available():
@@ -965,7 +977,10 @@ class MemoryService(DreamOps):
         return self._storage
 
     def _ensure_init(self) -> None:
+        self._recover_lesson_synthesis()
         if self._cms is not None:
+            if self._hlc_reseed_pending:
+                self._reseed_hlc()
             return
         logger.info("MemoryService: initialising embedder + CMS (first call).")
         # Storage connects BEFORE any model load (2026-08-04 boot balloon):
@@ -1043,6 +1058,8 @@ class MemoryService(DreamOps):
             try:
                 summary = _migrate.migrate_legacy(
                     self.data_dir, self._storage, self._embedder,
+                    eligible_sources=self.config.memory.dream.eligible_sources,
+                    exclude_sources=self.config.memory.dream.exclude_sources,
                 )
                 if summary.get("migrated"):
                     logger.warning("legacy .pt bank migrated: %s", summary)
@@ -1106,6 +1123,8 @@ class MemoryService(DreamOps):
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Cortex load skipped: %s", exc)
 
+        self._initialize_dream_tracking()
+
         self._refuse_on_stale_hydrated_dims()
 
         # World-knowledge cortex (schema v9) — sibling slot store for sourced
@@ -1140,6 +1159,7 @@ class MemoryService(DreamOps):
         # let stored stamps outrank every new write — pre-fix, a user
         # correction landing "before" history got parked as a contender until
         # real time caught up.
+        self._hlc_reseed_pending = True
         best = (0, 0)
         for recs in ((self._cortex.records if self._cortex else ()),
                      (self._world.records if self._world else ()),
@@ -1159,6 +1179,7 @@ class MemoryService(DreamOps):
                 best = max(best, tuple(stamp))
         if best > (0, 0):
             self._hlc.observe(*best)
+        self._hlc_reseed_pending = False
 
     # ------------------------------------------------------------------
     # Tool: store
@@ -1708,66 +1729,153 @@ class MemoryService(DreamOps):
     # Tool: supersede
     # ------------------------------------------------------------------
 
-    def supersede(self, old_text: str, new_text: str) -> dict[str, Any]:
-        """Explicit correction: mark entries matching ``old_text`` as
-        superseded by ``new_text``, then store ``new_text`` itself.
+    @staticmethod
+    def _correction_noop(reason: str, error: str,
+                         target_errors: list[dict] | None = None) -> dict[str, Any]:
+        return {
+            "superseded_count": 0,
+            "superseded_texts": [],
+            "superseded_ids": [],
+            "new_memory_stored": False,
+            "derived_flagged": [],
+            "derived_flagged_total": 0,
+            "derived_flagged_truncated": False,
+            "reason": reason,
+            "error": error,
+            "target_errors": target_errors or [],
+        }
 
-        Matching is by exact-text first, falling back to top-1 embedding
-        retrieval — so a near-paraphrase of the wrong fact still gets
-        caught even if the user phrasing drifted.
+    def _resolve_correction_targets_locked(
+        self, *, texts: list[str] | None, entry_ids: list[int] | None,
+    ) -> tuple[list[MemoryEntry], dict[str, Any] | None]:
+        """Resolve the entire selection without writes or retrieval effects.
+
+        PostgreSQL row IDs survive hydration and band relocation. File mode
+        has no durable IDs; its legacy exact-text selector must match exactly
+        one LIVE entry — retired twins are history, not rival targets.
+        Caller holds the service lock.
+        """
+        if (texts is None) == (entry_ids is None):
+            return [], self._correction_noop(
+                "invalid_selector", "Supply exactly one of entry IDs or exact texts.")
+        by_id = entry_ids is not None
+        selectors = entry_ids if by_id else texts
+        if not isinstance(selectors, list):
+            return [], self._correction_noop(
+                "invalid_selector", "Correction targets must be a list.")
+        if not selectors:
+            return [], self._correction_noop("empty_input", "No correction targets supplied.")
+        if by_id:
+            if any(type(value) is not int or value <= 0 for value in selectors):
+                return [], self._correction_noop(
+                    "invalid_selector", "Entry IDs must be positive integers, not coerced values.")
+            if self._storage is None:
+                return [], self._correction_noop(
+                    "id_unavailable", "File mode has no durable entry IDs; use unique exact text.")
+        elif any(not isinstance(value, str) for value in selectors):
+            return [], self._correction_noop(
+                "invalid_selector", "Exact-text targets must be strings.")
+        elif any(not value.strip() for value in selectors):
+            return [], self._correction_noop("empty_input", "Exact-text targets must be non-empty.")
+
+        assert self._cms is not None
+        residents = [e for band in self._cms.bands for e in band.entries]
+        selected: list[MemoryEntry] = []
+        errors: list[dict] = []
+        for value in dict.fromkeys(selectors):
+            matches = [e for e in residents
+                       if (e.db_id if by_id else e.text) == value]
+            live = [e for e in matches if e.superseded_at is None]
+            selector = {"entry_id" if by_id else "text": value}
+            # A retired entry is not a correction target, so it cannot make a
+            # text ambiguous: correcting A to B and back to A leaves a retired
+            # A twin, and file mode has no ID fallback to offer. An ID still
+            # has to map to exactly one resident — a duplicate mapping there is
+            # a recovery artefact, not a history.
+            ambiguous = len(matches) != 1 if by_id else len(live) > 1
+            if not matches:
+                errors.append({**selector, "reason": "target_not_found"})
+            elif ambiguous:
+                errors.append({
+                    **selector, "reason": "ambiguous_target",
+                    "candidates": [{
+                        "id": e.db_id, "source": e.source,
+                        "episode_id": e.episode_id,
+                        "superseded": e.superseded_at is not None,
+                    } for e in matches],
+                })
+            elif not live:
+                errors.append({**selector, "reason": "target_superseded",
+                               "superseded_by_text": matches[0].superseded_by_text})
+            else:
+                selected.append(live[0])
+        if errors:
+            return [], self._correction_noop(
+                errors[0]["reason"],
+                "No entries changed. Resolve the reported targets and resubmit exact IDs or unique texts.",
+                errors,
+            )
+
+        if self._storage is not None:
+            # Failed inserts can leave a resident object holding a phantom
+            # db_id until dream recovery reflushes it. Never correct that
+            # object or infer its replacement from text during recovery.
+            ids = [e.db_id for e in selected]
+            if any(entry_id is None for entry_id in ids):
+                return [], self._correction_noop(
+                    "target_unavailable", "A selected entry has no persisted row ID; retry after recovery.")
+            if any(sum(e.db_id == entry_id for e in residents) != 1
+                   for entry_id in ids):
+                return [], self._correction_noop(
+                    "ambiguous_target", "A selected row ID has multiple resident entries; retry after recovery.")
+            try:
+                existing = self._storage.existing_entry_ids(ids)
+            except Exception:  # Read failure must not turn into a correction.
+                return [], self._correction_noop(
+                    "target_unavailable", "Could not verify selected rows; retry when storage is available.")
+            missing = [{"entry_id": entry_id, "reason": "target_unavailable"}
+                       for entry_id in ids if entry_id not in existing]
+            if missing:
+                return [], self._correction_noop(
+                    "target_unavailable", "Selected rows are no longer persisted; reselect after recovery.",
+                    missing,
+                )
+        return selected, None
+
+    def supersede(
+        self, old_text: str | None = None, new_text: str = "", *,
+        entry_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Correct one entry selected by durable ID or unique exact text.
+
+        Resolve identity before any mutation; missing, ambiguous, or retired
+        targets are no-ops. Replacement storage is not a rollback transaction.
         """
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cms is not None
-            old_text = (old_text or "").strip()
-            new_text = (new_text or "").strip()
-            if not old_text or not new_text:
-                return {"superseded_count": 0, "reason": "empty_input"}
+            if not isinstance(new_text, str) or not new_text.strip():
+                return self._correction_noop("empty_input", "Replacement text must be non-empty.")
+            new_text = new_text.strip()
+            superseded_entries, error = self._resolve_correction_targets_locked(
+                texts=[old_text] if old_text is not None else None,
+                entry_ids=[entry_id] if entry_id is not None else None,
+            )
+            if error is not None:
+                return error
 
             now = time.time()
-            superseded: list[str] = []
-            superseded_entries: list[MemoryEntry] = []
-
-            # Exact-text pass.
-            for band in self._cms.bands:
-                for entry in band.entries:
-                    if entry.text == old_text and entry.superseded_at is None:
-                        entry.superseded_at = now
-                        entry.superseded_by_text = new_text
-                        superseded.append(entry.text)
-                        superseded_entries.append(entry)
-
-            # If no exact match, fall back to top-1 retrieval on old_text.
-            if not superseded:
-                emb = self._embedder.encode_query(old_text)
-                result = self._cms.retrieve(emb, top_k=1, query_text=old_text)
-                if result.entries:
-                    target = result.entries[0]
-                    if target.superseded_at is None:
-                        target.superseded_at = now
-                        target.superseded_by_text = new_text
-                        superseded.append(target.text)
-                        superseded_entries.append(target)
-
-            # Write-through the supersession marks.
-            if self._storage is not None:
-                for e in superseded_entries:
-                    if e.db_id is not None:
-                        self._storage.update_entry(
-                            e.db_id,
-                            superseded_at=e.superseded_at,
-                            superseded_by_text=e.superseded_by_text,
-                        )
+            superseded = [e.text for e in superseded_entries]
+            self._retire_entries_locked(
+                superseded_entries, superseded_at=now,
+                superseded_by_text=new_text)
 
             # Retract traversal: what the dream derived from the memories
             # just corrected. Reported, never cascaded — the caller decides
             # whether a derivation still holds. The same facts also carry
-            # ``re_verify`` on later reads, but that is a BEST-EFFORT read of
-            # still-present evidence and stops the moment the superseded
-            # entry is evicted (see ``_annotate_evidence_supersession``).
-            # This list, named once at the moment of correction, is the
-            # durable half of the affordance — which is why it is capped
-            # rather than truncated silently.
+            # ``re_verify`` on later reads from a durable slot invalidation
+            # event that survives source-entry eviction. This immediate list
+            # is capped rather than truncated silently.
             derived_total = self._derived_from_entries_locked(
                 [e.db_id for e in superseded_entries])
             derived = derived_total[:DERIVED_FLAGGED_CAP]
@@ -1787,12 +1895,42 @@ class MemoryService(DreamOps):
             return {
                 "superseded_count": len(superseded),
                 "superseded_texts": superseded,
+                "superseded_ids": [e.db_id for e in superseded_entries if e.db_id is not None],
                 "derived_flagged": derived,
                 "derived_flagged_total": len(derived_total),
                 "derived_flagged_truncated": len(derived) < len(derived_total),
                 "new_memory_stored": stored,
                 "new_memory_surprise": round(float(surprise), 4),
             }
+
+    def _retire_entries_locked(self, entries, *, superseded_at: float,
+                               superseded_by_text: str) -> None:
+        """Persist semantic retirement before exposing it in resident RAM.
+
+        PostgreSQL validates and retires the full target set atomically while
+        capturing durable trace invalidations. File mode keeps its existing
+        resident/file behavior. Caller holds ``self._lock``.
+        """
+        if self._storage is not None:
+            entry_ids = [entry.db_id for entry in entries]
+            if any(entry_id is None for entry_id in entry_ids):
+                raise RuntimeError(
+                    "cannot retire an entry without a persisted row ID")
+            targets = {int(entry_id) for entry_id in entry_ids}
+            persisted = self._storage.supersede_entries(
+                [int(entry_id) for entry_id in entry_ids],
+                superseded_at=superseded_at,
+                superseded_by_text=superseded_by_text,
+            )
+            # ``supersede_entries`` reports DISTINCT rows retired, so the
+            # check is against the distinct targets: a target repeated in the
+            # caller's list is one row, not a short write.
+            if persisted != len(targets):
+                raise RuntimeError(
+                    "atomic entry retirement returned an unexpected count")
+        for entry in entries:
+            entry.superseded_at = superseded_at
+            entry.superseded_by_text = superseded_by_text
 
     # ------------------------------------------------------------------
     # Tool: delete — hygiene
@@ -2013,6 +2151,139 @@ class MemoryService(DreamOps):
     # Cortex — sibling slot-keyed canonical-fact store (schema v7)
     # ------------------------------------------------------------------
 
+    def _initialize_dream_tracking(self) -> None:
+        """Initialize exact dream state without blocking ordinary serving."""
+        assert self._cms is not None and self._cortex is not None
+        cfg = self.config.memory.dream
+        try:
+            if self._storage is not None:
+                result = self._storage.initialize_dream_tracking(
+                    eligible_sources=cfg.eligible_sources,
+                    exclude_sources=cfg.exclude_sources,
+                )
+                self._cms.dream_ack_secret = result["secret"]
+                self._cms.dream_display_cursor = float(result["dream_cursor"])
+                updated = result.get("updated_states") or {}
+                for band in self._cms.bands:
+                    for entry in band.entries:
+                        if entry.db_id in updated:
+                            entry.dream_state = updated[entry.db_id]
+            else:
+                import math
+                import secrets
+                from pseudolife_memory.dream_token import public_generation
+
+                entries = [
+                    entry
+                    for band in self._cms.bands
+                    for entry in band.entries
+                ]
+                invalid_states = [
+                    entry.dream_id for entry in entries
+                    if entry.dream_state not in (
+                        None, "pending", "acknowledged", "legacy-covered")
+                ]
+                identities = [entry.dream_id for entry in entries]
+                invalid_ids = [identity for identity in identities if not (
+                    isinstance(identity, str)
+                    and len(identity) == 32
+                    and all(c in "0123456789abcdef" for c in identity)
+                )]
+                if invalid_states:
+                    raise ValueError(
+                        f"invalid_dream_ack_state: invalid states {invalid_states}")
+                if invalid_ids or len(set(identities)) != len(identities):
+                    raise ValueError(
+                        "invalid_dream_ack_state: invalid or duplicate file IDs")
+
+                loaded_schema = self._cms._loaded_schema_version  # noqa: SLF001
+                if loaded_schema == 7 and self._cms.dream_ack_secret is None:
+                    raise ValueError(
+                        "invalid_dream_ack_state: v7 checkpoint has no secret")
+                if self._cms.dream_ack_secret is not None:
+                    try:
+                        public_generation(self._cms.dream_ack_secret)
+                    except ValueError as exc:
+                        raise ValueError(
+                            "invalid_dream_ack_state: invalid checkpoint secret"
+                        ) from exc
+
+                missing = [entry for entry in entries
+                           if entry.dream_state is None]
+                legacy_cursor = float(self._cortex.dream_cursor or 0.0)
+                has_checkpoint = self._cms.dream_ack_secret is not None
+                if has_checkpoint:
+                    try:
+                        display_cursor = float(self._cms.dream_display_cursor)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            "invalid_dream_ack_state: invalid display cursor"
+                        ) from exc
+                    if not math.isfinite(display_cursor):
+                        raise ValueError(
+                            "invalid_dream_ack_state: non-finite display cursor")
+                    classification_cursor = display_cursor
+                else:
+                    classification_cursor = legacy_cursor
+                    display_cursor = (
+                        legacy_cursor if math.isfinite(legacy_cursor) else 0.0)
+                if missing and not math.isfinite(classification_cursor):
+                    raise ValueError(
+                        "invalid_legacy_dream_cursor: non-finite file cursor")
+
+                secret = self._cms.dream_ack_secret or secrets.token_hex(32)
+                excluded = set(cfg.exclude_sources or [])
+                allowed = set(cfg.eligible_sources) \
+                    if cfg.eligible_sources else None
+                overrides: dict[str, str] = {}
+                for entry in missing:
+                    eligible = (
+                        entry.source in allowed if allowed is not None
+                        else entry.source not in excluded
+                    )
+                    overrides[entry.dream_id] = (
+                        "legacy-covered"
+                        if eligible and entry.timestamp <= classification_cursor
+                        else "pending"
+                    )
+
+                if self._cms.dream_ack_secret is None or overrides:
+                    self._cms.save(
+                        self.config.memory.save_dir,
+                        dream_state_overrides=overrides,
+                        dream_ack_secret=secret,
+                        dream_display_cursor=display_cursor,
+                    )
+                for band in self._cms.bands:
+                    for entry in band.entries:
+                        if entry.dream_id in overrides:
+                            entry.dream_state = overrides[entry.dream_id]
+                self._cms.dream_ack_secret = secret
+                self._cms.dream_display_cursor = display_cursor
+
+            # The exact states are authoritative; the old scalar remains a
+            # display/compatibility value and mirrors the co-located cursor.
+            self._cortex.dream_cursor = self._cms.dream_display_cursor
+            self._dream_tracking_error = None
+            self._dream_tracking_retryable = False
+        except Exception as exc:  # noqa: BLE001 - dream-only degradation
+            message = str(exc)
+            if message.startswith(("invalid_legacy_dream_cursor:",
+                                   "invalid_dream_ack_state:")):
+                self._dream_tracking_error = message
+            else:
+                self._dream_tracking_error = (
+                    f"dream_ack_initialization_failed: {message}")
+            # Retryability is decided on the exception CLASS, not on the
+            # message: every refusal this pass raises for the bank's own
+            # data (a corrupt secret, an unusable legacy cursor, an invalid
+            # checkpoint) is a ValueError, and re-running the same pass over
+            # the same bytes fails identically. Anything else -- a dropped
+            # connection, a transaction that never committed, a failed
+            # checkpoint write -- is transient and worth another attempt.
+            self._dream_tracking_retryable = not isinstance(exc, ValueError)
+            logger.error("dream acknowledgement initialization failed: %s", exc)
+
     def _cortex_path(self) -> str:
         return str(self.data_dir / "cortex_state.pt")
 
@@ -2045,6 +2316,7 @@ class MemoryService(DreamOps):
             raise PersistenceError(f"world cortex save failed: {exc}") from exc
 
     def _save_lessons(self) -> None:
+        self._recover_lesson_synthesis()
         if getattr(self, "_lessons", None) is None or self._storage is None:
             return
         try:
@@ -2063,6 +2335,20 @@ class MemoryService(DreamOps):
         lazily-updated access counts and snapshot the cortex.
         File mode: legacy full-bank torch.save (v0.1 behavior).
         """
+        # An unresolved lesson commit gates ONLY the lesson arm below. It
+        # says nothing about weights, access counts or the cortex/world
+        # slots — and the documented recovery for it is a restart, which
+        # discards exactly the unsaved state those parts would have made
+        # durable. So persist everything else first and re-raise afterwards:
+        # the save still fails loudly, it just no longer takes unrelated
+        # work down with it.
+        lesson_block: Exception | None = None
+        try:
+            self._recover_lesson_synthesis()
+        except Exception as exc:  # noqa: BLE001 — re-raised after the rest
+            lesson_block = exc
+            logger.error("%s save: lesson snapshot skipped, lesson "
+                         "reconciliation still required (%s)", kind, exc)
         assert self._cms is not None
         # Per-part durations, warned on a slow save: every persist runs
         # under the service lock, so a slow part IS a daemon pause — and
@@ -2113,15 +2399,19 @@ class MemoryService(DreamOps):
                 if self._world is not None:
                     _timed("world", lambda: _sync.snapshot_world_cortex(
                         self._world, self._storage))
-                if self._lessons is not None:
+                if self._lessons is not None and lesson_block is None:
                     _timed("lessons", lambda: _sync.snapshot_lessons(
                         self._lessons, self._storage))
             else:
                 _timed("cortex", self._save_cortex)
                 _timed("world", self._save_world)
-                _timed("lessons", self._save_lessons)
-            return _finish({"saved_to": self.config.memory.save_dir,
-                            "mode": "postgres+weights", "kind": kind})
+                if lesson_block is None:
+                    _timed("lessons", self._save_lessons)
+            out = _finish({"saved_to": self.config.memory.save_dir,
+                           "mode": "postgres+weights", "kind": kind})
+            if lesson_block is not None:
+                raise lesson_block
+            return out
         _timed("bank", lambda: self._cms.save(self.config.memory.save_dir))
         _timed("cortex", self._save_cortex)
         return _finish({"saved_to": self.config.memory.save_dir, "kind": kind})
@@ -2507,147 +2797,64 @@ class MemoryService(DreamOps):
     # through derived facts is a review judgment, which is the same
     # two-man rule the consolidation quarantine already encodes.
 
-    def _superseded_evidence(self, ids: set[int]) -> dict[int, float]:
-        """``{entry_id: superseded_at}`` for the superseded ones among these
-        source entries, scoped to the ids actually being served.
+    def _annotate_trace_invalidations(self, targets) -> None:
+        """Annotate ``(row, normalized_slot, seen_time)`` triples in one read.
 
-        ``entries.superseded_at`` is the single authority. An earlier draft
-        also scanned the live band entries, because :meth:`consolidate`
-        stamped its marks in RAM and never wrote them through. PR #239
-        closed that: all three entry-level supersession sites —
-        :meth:`supersede`, ``cms.store``'s contradiction decay, and
-        :meth:`consolidate` — now write through inside the same locked call
-        that sets the mark, so normal operation opens no window in which
-        RAM and the column disagree. The scan was therefore paying an
-        O(bank) pass on every annotated read to cover a state no live path
-        produces, and it went. The consequence is recorded, not hidden:
-        anything that leaves a mark in RAM only is a known miss for this
-        flag — a future site that forgets the write-through, all three
-        existing loops' ``if e.db_id is not None`` guard if an entry could
-        ever reach them unpersisted, and a write-through that raises after
-        the marks are set (loud, but the RAM marks are not rolled back).
-        Pinned by ``test_a_mark_that_never_reached_postgres_does_not_flag``.
-
-        No cached index — the same no-stored-state rule as
-        :meth:`_cortex_change_index`. Caller holds the lock."""
-        if not ids or self._storage is None:
-            return {}
-        return self._storage.superseded_evidence(ids)
-
-    def _annotate_evidence_supersession(self, rows: list[dict]) -> list[dict]:
-        """Read-time flag: a served fact standing on evidence that was
-        corrected AFTER the fact was last confirmed gets ``re_verify`` +
-        ``re_verify_reason`` — the SAME shape lessons already carry for
-        "subject facts changed since"
-        (:meth:`_annotate_lesson_staleness`), not a parallel one.
-
-        The ``last_confirmed`` comparison is what makes the flag mean
-        something and what makes it CLEARABLE. The cross-index is keyed on
-        the slot, so ``source_entries`` lists every entry that ever formed
-        it across the slot's whole supersession history, and trace rows are
-        never deleted. A bare "any source superseded" test would therefore
-        latch on forever — including on slots whose current value was
-        asserted long after the retracted contributor, which on a mature
-        bank is a large fraction of the cortex. Worse, it would latch while
-        routing into ``correct_with``, whose served note tells the reader to
-        write a correction NOW: an unclearable flag there is a standing
-        instruction to rewrite a quarter of the cortex, every session.
-        Keying on ``last_confirmed`` means the documented remedy —
-        re-assert the slot, which confirms it and moves the clock — is
-        exactly what silences it.
-
-        The keys are ABSENT on unaffected facts, keeping their payloads
-        byte-identical (the ``stance`` precedent in
-        ``_cortex_record_to_dict``).
-
-        BEST-EFFORT, and deliberately so. The flag is derived at read time
-        from evidence that still exists, so LOSING the evidence loses the
-        flag: ``memory_traces.entry_id`` is ``ON DELETE CASCADE``, a
-        true-drop capacity eviction hard-deletes the entry row (every
-        eviction under the default flat preset), and a superseded entry is
-        the top eviction candidate because contradiction decay multiplies
-        its surprise by 0.3. So a flag can appear and later vanish with no
-        re-verification having happened, and ``memory_delete`` — the
-        strongest retraction of all — raises no flag at any point. Making
-        the caution outlive its evidence needs durable per-slot state, i.e.
-        a schema change, which is out of scope here; both behaviours are
-        pinned by tests so the limit is a recorded contract rather than a
-        surprise. Caller holds the lock."""
-        if not self.config.memory.traces.enabled:
-            return rows
-        cited = {i for r in rows for i in (r.get("source_entries") or [])}
-        if not cited:
-            return rows                 # nothing to traverse — skip the scan
-        dead = self._superseded_evidence(cited)
-        if not dead:
-            return rows
-        for row in rows:
-            # Fall back to asserted_at only when the record carries no
-            # confirmation stamp at all (legacy rows); never to 0.0, which
-            # would re-open the latch this comparison exists to close.
-            seen = row.get("last_confirmed") or row.get("asserted_at")
+        Durable slot events are independent of entries and trace rows, so a
+        semantic correction warning survives later source eviction or deletion.
+        A newer confirmation clears the warning. Caller holds ``self._lock``.
+        """
+        if (not targets or self._storage is None
+                or not self.config.memory.traces.enabled):
+            return
+        slots = sorted({slot for _row, slot, _seen in targets})
+        invalidations = self._storage.trace_invalidations_for_slots(slots)
+        for row, slot, seen in targets:
             if not seen:
                 continue
-            hit = [i for i in (row.get("source_entries") or [])
-                   if (ts := dead.get(i)) is not None and ts > seen]
-            if not hit:
+            source_ids = {
+                int(event["source_entry_id"])
+                for event in invalidations.get(slot, ())
+                if (event.get("cause") == "source_superseded"
+                    and float(event["invalidated_at"]) > float(seen))
+            }
+            if not source_ids:
                 continue
+            count = len(source_ids)
             row["re_verify"] = True
             row["re_verify_reason"] = (
-                f"derived from {len(hit)} source "
-                f"{'memory' if len(hit) == 1 else 'memories'} "
+                f"derived from {count} source "
+                f"{'memory' if count == 1 else 'memories'} "
                 "corrected since this fact was last confirmed")
+
+    def _annotate_evidence_supersession(self, rows: list[dict]) -> list[dict]:
+        """Annotate served fact rows from durable normalized-slot events."""
+        if not self.config.memory.traces.enabled:
+            return rows
+        from pseudolife_memory.memory.cortex import _norm_key
+        targets = []
+        for row in rows:
+            entity, attribute = row.get("entity"), row.get("attribute")
+            if entity is None or attribute is None:
+                continue
+            seen = row.get("last_confirmed") or row.get("asserted_at")
+            targets.append((
+                row, (_norm_key(entity), _norm_key(attribute)), seen))
+        self._annotate_trace_invalidations(targets)
         return rows
 
     def _annotate_set_slot_evidence(self, out: dict, entity: str,
                                     attribute: str, members: list) -> None:
-        """Carry the flag onto a set-valued slot's payload.
-
-        A set slot is served as ONE grouped dict with no scalar record
-        behind it, so this lookup payload carried neither the
-        ``source_entries`` the scalar path fetches nor a confirmation stamp
-        (``cortex_search``'s grouped entry has carried ``last_confirmed``
-        since the Task-6 review; it lacked only the traces). Either way no
-        set slot could carry ``re_verify``, while ``slots_for_entries``
-        (kind-agnostic) named set slots in ``derived_flagged`` and
-        ``memory_fact_get`` promised the flag without qualification.
-
-        The cross-index is keyed on the SLOT, not the member, so one
-        ``traces_for_slot`` answers for the whole set. The slot's
-        confirmation stamp is the newest member's, which makes the flag
-        clearable the way the scalar path's ``last_confirmed`` does — but
-        bluntly: ADDING a member also stamps the slot, so an unrelated add
-        silences the caution for members nobody re-checked. Accepted rather
-        than keyed to confirmations only, because a set slot is a single
-        served answer and a per-member flag on a grouped payload has
-        nowhere to render. ``_annotate_recalled_facts``, where members ARE
-        served individually, matches per member instead. Only the flag keys
-        are merged out, so the set payload does not otherwise change shape.
-        Gated on ``traces.enabled`` before the query, not after: unlike the
-        scalar path — which SERVES its traces as ``source_entries`` and so
-        fetches them either way — this lookup is purely feeding the
-        annotation and discards the result, so with the cross-index off the
-        query is pure waste. ``test_flag_off_when_the_cross_index_is_disabled``
-        states the rule it would break: "the read surface must not pay for
-        one". Caller holds the lock."""
+        """Carry a slot-wide warning onto a grouped set payload."""
         if not self.config.memory.traces.enabled:
             return
         from pseudolife_memory.memory.cortex import _norm_key
-        probe = {
-            "source_entries": self._storage.traces_for_slot(
-                _norm_key(entity), _norm_key(attribute)),
-            # ``or m.asserted_at`` is the same legacy fallback the scalar
-            # path applies, taken per member so one unstamped member cannot
-            # drag the slot's clock back to nothing.
-            "last_confirmed": max(
-                (s for m in members
-                 if (s := m.last_confirmed or m.asserted_at)),
-                default=None),
-        }
-        self._annotate_evidence_supersession([probe])
-        if probe.get("re_verify"):
-            out["re_verify"] = True
-            out["re_verify_reason"] = probe["re_verify_reason"]
+        seen = max(
+            (stamp for member in members
+             if (stamp := member.last_confirmed or member.asserted_at)),
+            default=None)
+        self._annotate_trace_invalidations([(
+            out, (_norm_key(entity), _norm_key(attribute)), seen)])
 
     def _derived_from_entries_locked(self, entry_ids) -> list[dict]:
         """Slots these source entries helped form, in display vocabulary.
@@ -2927,7 +3134,8 @@ class MemoryService(DreamOps):
                         "score": round(float(score), 4) if score is not None else 0.0,
                         "contested": False,
                         "last_confirmed": max(
-                            (m.last_confirmed for m in all_members), default=None),
+                            (m.last_confirmed or m.asserted_at
+                             for m in all_members), default=None),
                         "asserted_at": anchor,
                         "age": _relative_time(anchor) if anchor else None,
                     })
@@ -3376,18 +3584,58 @@ class MemoryService(DreamOps):
         """
         with self._lock:
             self._ensure_init()
-            assert self._embedder is not None and self._lessons is not None
-            emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
-            writer_id, session_id = self._resolve_writer()
-            action, rec = self._lessons.write_fact(
-                task, aspect, lesson, emb, about=about, outcome=outcome,
+            action, rec = self._write_lesson_locked(
+                self._lessons, task, aspect, lesson, about=about, outcome=outcome,
                 polarity=polarity, confidence=confidence, origin=origin,
                 provenance=provenance, support=support, now=now,
-                valid_time=valid_time,
-                hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
-            self._link_lesson_graph(task, rec.about, rec.polarity)
+                valid_time=valid_time)
             self._save_lessons()
             return {"action": action, **_lesson_record_to_dict(rec)}
+
+    def _write_lesson_locked(self, lessons, task: str, aspect: str,
+                             lesson: str, *, embedding=None, **kwargs):
+        """Shared write semantics for the live store or a synthesis stage.
+        Caller holds the service lock and owns persistence/publication.
+
+        ``embedding`` accepts the claim vector when the caller already
+        computed it (lesson synthesis does, before opening its transaction —
+        a model pass has no business running inside one)."""
+        assert self._embedder is not None and lessons is not None
+        emb = (embedding if embedding is not None else
+               self._embedder.encode_single(f"{task} {aspect} {lesson}".strip()))
+        writer_id, session_id = self._resolve_writer()
+        action, rec = lessons.write_fact(
+            task, aspect, lesson, emb, **kwargs,
+            hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
+        self._link_lesson_graph(task, rec.about, rec.polarity)
+        return action, rec
+
+    def _recover_lesson_synthesis(self) -> str | None:
+        """Resolve an uncertain commit before reads or snapshots use lesson RAM.
+
+        Caller holds the service lock. If the transaction rolled back, the
+        original store (including prior dirty slots) is still authoritative.
+        A committed batch is rehydrated; failed/ambiguous reconciliation stays
+        latched so a later autosave cannot overwrite durable state with old RAM.
+        """
+        recovery = getattr(self, "_lesson_synthesis_recovery", None)
+        if recovery is None:
+            return
+        from pseudolife_memory.memory.lessons import LessonStore
+        from pseudolife_memory.storage.sync import hydrate_lessons
+        signals, handled_ids = recovery
+        try:
+            status = self._storage.lesson_batch_status(signals, handled_ids)
+            if status == "consumed":
+                restored = LessonStore()
+                hydrate_lessons(restored, self._storage)
+                self._lessons = restored
+            elif status != "pending":
+                raise RuntimeError("selected lesson signals changed during commit recovery")
+        except Exception as exc:
+            raise PersistenceError(f"lesson commit reconciliation required: {exc}") from exc
+        self._lesson_synthesis_recovery = None
+        return status
 
     def _link_lesson_graph(self, task: str, about: str | None, polarity: str) -> None:
         """Upsert the task-type entity + object entity + prefers/avoids edge so a
@@ -3789,18 +4037,28 @@ class MemoryService(DreamOps):
         own search metric). Same-key hits pass through: supersession is the
         store's job. Opposite-polarity hits pass through: an "avoid"
         inversion of a "do" lesson is new information, never a duplicate."""
-        from pseudolife_memory.memory.cortex import _norm_key
         with self._lock:
             self._ensure_init()
-            if self._lessons is None or self._embedder is None:
-                return False
-            key = (_norm_key(task), _norm_key(aspect))
-            emb = self._embedder.encode_single(
-                f"{task} {aspect} {lesson}".strip())
-            for rec, _score in self._lessons.search(emb, top_k=3,
-                                                    min_score=threshold):
-                if rec.key != key and rec.polarity == polarity:
-                    return True
+            return self._lesson_duplicate_locked(
+                self._lessons, task, aspect, lesson, polarity, threshold)
+
+    def _lesson_duplicate_locked(self, lessons, task: str, aspect: str,
+                                 lesson: str, polarity: str,
+                                 threshold: float, *, embedding=None) -> bool:
+        """The synthesis dedup predicate over live or staged lesson records.
+
+        ``embedding`` is the same precomputed claim vector
+        :meth:`_write_lesson_locked` takes — the gate and the write embed
+        identical text."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        if lessons is None or self._embedder is None:
+            return False
+        key = (_norm_key(task), _norm_key(aspect))
+        emb = (embedding if embedding is not None else
+               self._embedder.encode_single(f"{task} {aspect} {lesson}".strip()))
+        for rec, _score in lessons.search(emb, top_k=3, min_score=threshold):
+            if rec.key != key and rec.polarity == polarity:
+                return True
         return False
 
     def cortex_dump(self) -> dict[str, Any]:
@@ -5247,7 +5505,10 @@ class MemoryService(DreamOps):
 
         The clustering algorithm is exposed in
         :mod:`pseudolife_memory.memory.consolidation`. This method is
-        glue: filter + score → cluster → serialise.
+        glue: filter + score → cluster → serialise. Only resident entries
+        that can be addressed by the correction API are offered. Query
+        retrieval stays bounded, so filtering non-addressable hits can
+        produce fewer than ``top_k`` candidates.
 
         Args:
             query: Topic to consolidate around. None when episode-scoping.
@@ -5276,6 +5537,26 @@ class MemoryService(DreamOps):
 
             # Build the candidate pool — either via retrieval (query) or
             # by direct band scan (episode).
+            residents = [e for band in self._cms.bands for e in band.entries]
+            resident_objects = {id(e) for e in residents}
+            by_id = self._storage is not None
+            # Same uniqueness rule the correction path applies: a retired twin
+            # no longer competes for a text selector, so a note whose only
+            # duplicate is history stays offerable in file mode.
+            identity_counts = Counter(
+                e.db_id if by_id else e.text
+                for e in residents if by_id or e.superseded_at is None
+            )
+
+            def actionable(entry: MemoryEntry) -> bool:
+                # Reference documents can appear in query results but are
+                # not correction targets. In file mode text must identify one
+                # live entry across ALL residents, including out-of-scope ones.
+                if id(entry) not in resident_objects or entry.superseded_at is not None:
+                    return False
+                key = entry.db_id if by_id else entry.text
+                return (not by_id or key is not None) and identity_counts[key] == 1
+
             candidates: list[tuple[MemoryEntry, float]] = []
             if query:
                 embedding = self._embedder.encode_query(query)
@@ -5286,11 +5567,15 @@ class MemoryService(DreamOps):
                     episodes=[episode] if episode else None,
                     tags=tags,
                     query_text=query,
+                    # Proposed targets must still be actionable. Apply this
+                    # before retrieval caps and text dedup, not to the result.
+                    hide_superseded=True,
                     # Wider net than the default — clustering wants more
                     # to work with.
                     min_score=0.0,
                 )
-                candidates = list(zip(result.entries, result.scores))
+                candidates = [(e, score) for e, score in zip(result.entries, result.scores)
+                              if actionable(e)]
             elif episode:
                 # Pull every entry tagged with this episode, ordered by
                 # recency. Score is 1.0 across the board so the seed
@@ -5299,6 +5584,8 @@ class MemoryService(DreamOps):
                 seen_texts: set[str] = set()
                 for band in self._cms.bands:
                     for e in band.entries:
+                        if not actionable(e):
+                            continue
                         if e.episode_id != episode:
                             continue
                         if e.text in seen_texts:
@@ -5309,8 +5596,6 @@ class MemoryService(DreamOps):
                             continue
                         candidates.append((e, 1.0))
                         seen_texts.add(e.text)
-                # Cap to ``top_k`` to keep clustering bounded.
-                candidates = candidates[:top_k]
             else:
                 # Neither query nor episode — there's nothing principled
                 # to cluster, so return empty. Callers should pass at
@@ -5321,6 +5606,25 @@ class MemoryService(DreamOps):
                     "count": 0,
                     "clusters": [],
                 }
+
+            if self._storage is not None and candidates:
+                # Filter unavailable rows individually: one phantom ID must
+                # not hide the remaining valid cluster. Check before the
+                # episode cap; query retrieval has already bounded its pool.
+                # A read failure degrades the suggestion — offering unverified
+                # residents is better than failing a read-only tool; the
+                # correction itself re-validates every ID before it mutates.
+                try:
+                    present = self._storage.existing_entry_ids(
+                        [e.db_id for e, _ in candidates])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "consolidation candidates unverified, storage read failed: %s",
+                        exc)
+                else:
+                    candidates = [(e, score) for e, score in candidates
+                                  if e.db_id in present]
+            candidates = candidates[:top_k]
 
             clusters: list[Cluster] = cluster_candidates(
                 candidates,
@@ -5345,94 +5649,60 @@ class MemoryService(DreamOps):
 
     def consolidate(
         self,
-        replaces: list[str],
-        new_text: str,
+        replaces: list[str] | None = None,
+        new_text: str = "",
         source: str | None = None,
         tags: list[str] | None = None,
+        *,
+        entry_ids: list[int] | None = None,
     ) -> dict[str, Any]:
-        """Atomic supersede-and-store: replace a cluster with one note.
+        """Replace an exactly selected cluster with one note.
 
-        The cluster of stale entries (``replaces`` — list of exact texts
-        or near-paraphrases) gets marked superseded by ``new_text``;
+        The cluster (``entry_ids`` or unique exact texts in ``replaces``)
+        gets marked superseded by ``new_text``;
         the new note is stored as a fresh memory carrying ``source``
         (defaults to ``"consolidation"``) and ``tags``. Reuses the
         existing supersession machinery so deeper-band promotion +
         retrieval ordering already work correctly with consolidated
         entries.
 
-        Defensive: empty ``replaces`` returns a no-op rather than just
+        Defensive: an empty selection returns a no-op rather than just
         storing ``new_text`` — the caller should use ``memory_store``
         for that. Keeps the "consolidate" semantics unambiguous.
 
         Args:
-            replaces: Exact or near-paraphrase texts to retire. Exact
-                match first; embedding-fallback per text.
+            replaces: Unique exact texts to retire, when IDs are unavailable.
+            entry_ids: Durable PostgreSQL row IDs; never transient sequence numbers.
             new_text: The consolidated summary to store.
             source: Defaults to ``"consolidation"`` for audit clarity.
             tags: Optional tag list — useful for marking the new entry
                 as ``["consolidated"]`` so it's discoverable.
 
         Returns:
-            ``{"superseded_count": N, "superseded_texts": [...],
+            ``{"superseded_count": N, "superseded_texts": [...], "superseded_ids": [...],
             "new_memory_stored": bool, "new_memory_surprise": float}``.
+
+        Every target is validated before any mutation. Replacement storage
+        and old-row updates are not one rollback transaction.
         """
         with self._lock:
             self._ensure_init()
             assert self._cms is not None and self._embedder is not None
 
-            replaces = [t for t in (replaces or []) if (t or "").strip()]
-            new_text = (new_text or "").strip()
-            if not replaces or not new_text:
-                return {
-                    "superseded_count": 0,
-                    "superseded_texts": [],
-                    "new_memory_stored": False,
-                    "error": "replaces and new_text must both be non-empty",
-                }
+            if not isinstance(new_text, str) or not new_text.strip():
+                return self._correction_noop("empty_input", "Replacement text must be non-empty.")
+            new_text = new_text.strip()
+            superseded_entries, error = self._resolve_correction_targets_locked(
+                texts=replaces, entry_ids=entry_ids,
+            )
+            if error is not None:
+                return error
 
             now = time.time()
-            superseded: list[str] = []
-            superseded_entries: list[MemoryEntry] = []
-            for old_text in replaces:
-                marked_this_round = False
-                # Exact-text pass for this specific replacement.
-                for band in self._cms.bands:
-                    for entry in band.entries:
-                        if (
-                            entry.text == old_text
-                            and entry.superseded_at is None
-                        ):
-                            entry.superseded_at = now
-                            entry.superseded_by_text = new_text
-                            superseded.append(entry.text)
-                            superseded_entries.append(entry)
-                            marked_this_round = True
-                if marked_this_round:
-                    continue
-                # Embedding fallback for paraphrases.
-                emb = self._embedder.encode_query(old_text)
-                result = self._cms.retrieve(emb, top_k=1, query_text=old_text)
-                if result.entries:
-                    target = result.entries[0]
-                    if target.superseded_at is None:
-                        target.superseded_at = now
-                        target.superseded_by_text = new_text
-                        superseded.append(target.text)
-                        superseded_entries.append(target)
-
-            # Write-through the supersession marks, exactly as ``supersede``
-            # does. Postgres is the source of truth across a restart and
-            # ``_persist_all`` syncs only ``access_count`` for entries — a
-            # mark left in RAM is lost at the next ``hydrate_cms`` and the
-            # consolidated-away entry comes back looking current.
-            if self._storage is not None:
-                for e in superseded_entries:
-                    if e.db_id is not None:
-                        self._storage.update_entry(
-                            e.db_id,
-                            superseded_at=e.superseded_at,
-                            superseded_by_text=e.superseded_by_text,
-                        )
+            superseded = [e.text for e in superseded_entries]
+            self._retire_entries_locked(
+                superseded_entries, superseded_at=now,
+                superseded_by_text=new_text)
 
             # Always store the consolidated entry — source defaults to
             # ``"consolidation"`` for audit / filtering. v35: the note
@@ -5453,6 +5723,7 @@ class MemoryService(DreamOps):
             return {
                 "superseded_count": len(superseded),
                 "superseded_texts": superseded,
+                "superseded_ids": [e.db_id for e in superseded_entries if e.db_id is not None],
                 "new_memory_stored": stored,
                 "new_memory_surprise": round(float(surprise), 4),
             }
@@ -6868,8 +7139,8 @@ class MemoryService(DreamOps):
         composes: that method also backs the Console's Atlas and the whole-
         graph view, where the facts are a label on a node rather than an
         answer being acted on, and where the node set is capped in the
-        hundreds. Scoping the work to recall keeps it to one batched trace
-        query plus one evidence query per call, whatever the graph's size.
+        hundreds. Scoping the work to recall keeps it to one batched
+        invalidation query per call, whatever the graph's size.
 
         Facts are matched back to their slot on ``(entity, attribute,
         VALUE)``. The entity side is the record's entity RESOLVED through
@@ -6905,13 +7176,9 @@ class MemoryService(DreamOps):
         slot's members each match on their own value, so a member is
         cleared by ITS own re-confirmation rather than the slot's newest.
 
-        Only the flag keys are written onto the served fact; the
-        ``source_entries`` the traversal needs stay on a probe, since a
-        recalled fact is a label and would double in size carrying them.
-
         Cost: one graph load for the alias table (the same load
-        ``graph_neighborhood`` makes per hop), one batched trace query and
-        one evidence query per call — and one pass over
+        ``graph_neighborhood`` makes per hop), one batched invalidation query
+        per call, and one pass over
         ``current_records()`` with two normalizations per record, which is
         the same sweep ``graph_neighborhood`` has already made to assemble
         these facts. ``recall`` holds no lock of its own, so this takes
@@ -6964,14 +7231,5 @@ class MemoryService(DreamOps):
                         targets.append((fact, hit[0], hit[1]))
             if not targets:
                 return
-            traces = self._storage.traces_for_slots(
-                sorted({slot for _f, slot, _s in targets}))
-            probes = [{"source_entries": traces.get(slot, []),
-                       "last_confirmed": stamp}
-                      for _f, slot, stamp in targets]
-            self._annotate_evidence_supersession(probes)
-            for probe, (fact, _slot, _stamp) in zip(probes, targets):
-                if probe.get("re_verify"):
-                    fact["re_verify"] = True
-                    fact["re_verify_reason"] = probe["re_verify_reason"]
+            self._annotate_trace_invalidations(targets)
 

@@ -155,8 +155,19 @@ function openEntryActions(e) {
 async function doSupersede(e, newText) {
   if (!newText) { toast("Replacement text is required", "bad"); return; }
   try {
-    await api.post("/api/supersede", { old_text: e.text, new_text: newText });
-    closeModal(); toast("Superseded", "ok"); viewCtx?.refresh?.();
+    const selector = e.id != null ? { entry_id: e.id } : { old_text: e.text };
+    const r = await api.post("/api/supersede", { ...selector, new_text: newText });
+    // The service rejects a whole selection with `error`; a retirement that
+    // happened while the replacement text was filtered out is not a rejection,
+    // so keeping the modal open would only invite a doomed retry.
+    if (r.error || !r.superseded_count) {
+      throw new Error(r.error || "Replacement was not stored; reload the memory and try again.");
+    }
+    closeModal();
+    toast(r.new_memory_stored ? "Superseded"
+      : "Superseded, but the replacement text was filtered and not stored",
+      r.new_memory_stored ? "ok" : "warn");
+    viewCtx?.refresh?.();
   } catch (err) { toast("Supersede failed: " + err.message, "bad"); }
 }
 

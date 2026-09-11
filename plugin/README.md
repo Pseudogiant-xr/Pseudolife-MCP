@@ -35,12 +35,16 @@ you how to start it.
 
 When loaded by a current Codex runtime, the plugin's lifecycle hooks use the
 same events. On Windows, `commandWindows` runs native PowerShell 7 helpers;
-Claude keeps the Bash commands. Open `/hooks` and review and trust the exact
-definitions before expecting them to run. A plugin installation or a passing
-script fixture does not prove a particular app has invoked its hooks.
+Claude keeps the Bash commands. With the daemon running, use
+`python ops/setup-codex-hooks.py` from the repository, or the Docker installer,
+to approve the three PseudoLife hook definitions and verify their lifecycle.
+Automatic detection reuses a recognized, enabled plugin bundle. If the
+runtime cannot support automatic trust, setup gives `/hooks` review guidance
+and uses standing instructions when approved. A plugin installation or a
+passing script fixture alone does not establish readiness.
 
-Use either the plugin hooks or `ops/install-hook.*`, so the same event does
-not run twice. Keep a single MCP transport registration, and follow the
+Use one hook source so the same event does not run twice; the setup helper
+checks for known duplicates. Keep a single MCP transport registration, and follow the
 [Codex setup and verification guide](../docs/guide/providers.md#codex-specifics)
 for startup budgets, standing instructions and runtime diagnostics.
 

@@ -68,20 +68,27 @@ CALLER_HOLDS_LOCK = {
     # HLC startup seeding is reached only through _ensure_init; the fixpoint
     # below verifies that entire caller chain remains under the service lock.
     "_reseed_hlc",
+    # Reached only from _ensure_init; the fixpoint below verifies its lock.
+    "_initialize_dream_tracking",
     "_ensure_postgres_storage",
     "_ensure_subject_entity",
     "_persist_all",
     "_entity_kind_map",
     "_emit_correction_signal",
     "_link_lesson_graph",
+    "_write_lesson_locked",
+    "_lesson_duplicate_locked",
+    "_recover_lesson_synthesis",
     "_link_dream_relations",
     "_annotate_lesson_staleness",
     # Retract traversal — read-time helpers over the engram cross-index,
     # each reached only from an already-locked read surface (the fixpoint
     # below is what actually verifies that).
-    "_superseded_evidence",
+    "_annotate_trace_invalidations",
     "_annotate_set_slot_evidence",
     "_derived_from_entries_locked",
+    "_resolve_correction_targets_locked",
+    "_retire_entries_locked",
     # Constraint pinning (schema v35) — cortex_search's per-fact dict builder
     # and the TypeRetrieve pin step, both reached only from inside
     # cortex_search's lock (the fixpoint verifies the callers).

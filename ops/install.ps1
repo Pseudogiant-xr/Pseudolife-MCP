@@ -41,8 +41,11 @@ param(
     # which cannot express a list.
     [string]$Client = "",
     # Explicit ownership avoids duplicating hooks from an installed Codex plugin.
-    [ValidateSet("manual", "plugin", "skip")]
-    [string]$CodexHooks = "skip",
+    [ValidateSet("auto", "manual", "plugin", "skip")]
+    [string]$CodexHooks = "auto",
+    # yes is explicit consent to PseudoLife hook execution and an auto fallback.
+    [ValidateSet("ask", "yes", "no")]
+    [string]$CodexHookTrust = "ask",
     [ValidateSet("", "append", "skip")]
     [string]$ClaudeMd = "",
     [ValidateSet("", "append", "skip", "auto")]
@@ -491,9 +494,9 @@ if ($claudeShimMode) {
 }
 
 # -- 9. session lifecycle hooks (hook-capable providers only) ---------------------
-# claude: unless the plugin already owns the hooks. codex: current runtimes
-# support both hooks on Windows too; definitions still require trust. gemini/generic: no
-# hook system.
+# Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
+# exact hook trust, runtime verification, and instruction fallback together.
+# Gemini/generic have no hook system.
 $installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
 $claudePluginInstalled = (Test-Path $installedPlugins) -and
     ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
@@ -504,6 +507,9 @@ if ($claudePluginInstalled -and ($clients -contains "claude")) {
 }
 
 $hookState = @{}
+$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
+$codexSetup = $null
+$codexSetupValid = $false
 $briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 foreach ($selectedClient in $clients) {
     if ($selectedClient -notin "claude", "codex") { continue }
@@ -511,9 +517,45 @@ foreach ($selectedClient in $clients) {
         $hookState["claude"] = "plugin"
         continue
     }
-    if (($selectedClient -eq "codex") -and ($CodexHooks -ne "manual")) {
-        $hookState["codex"] = $CodexHooks
-        Step "Codex hook source: $CodexHooks. No manual hooks written; use -CodexHooks manual for installer hooks or -CodexHooks plugin for an enabled plugin."
+    if ($selectedClient -eq "codex") {
+        $codexSetup = [pscustomobject]@{
+            source = "skip"; status = "unavailable"; instructions = "skipped"
+            recovery = "Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
+        }
+        # Probe real interpreters; Windows Store aliases and old Python versions
+        # must not prevent trying the next candidate. Do not alter the user's PATH.
+        $codexPython = $null
+        foreach ($candidate in @("python", "python3", "py")) {
+            if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+            $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+            try {
+                $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
+                if (($LASTEXITCODE -eq 0) -and $probe) { $codexPython = "$probe".Trim(); break }
+            } catch { continue }
+        }
+        if ($codexPython) {
+            $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
+                "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
+            if (-not $interactive) { $setupArgs += "--non-interactive" }
+            try {
+                $setupOutput = & $codexPython @setupArgs
+                $setupExit = $LASTEXITCODE
+                $result = ($setupOutput -join "`n") | ConvertFrom-Json
+                if (($setupExit -notin 0, 1) -or
+                    ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
+                    ($result.source -notin "manual", "plugin", "skip") -or
+                    ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
+                    throw "Invalid Codex setup result"
+                }
+                $codexSetup = $result
+                $codexSetupValid = $true
+            } catch {
+                $codexSetup.recovery = "Codex setup did not return a valid result. Run python ops/setup-codex-hooks.py to retry."
+            }
+        }
+        $hookState["codex"] = $codexSetup.status
+        Step "Codex hooks: $($codexSetup.status); standing instructions: $($codexSetup.instructions)."
+        if ($codexSetup.recovery) { Write-Host "    $($codexSetup.recovery)" }
         continue
     }
     Step "Installing $selectedClient session hook..."
@@ -522,12 +564,8 @@ foreach ($selectedClient in $clients) {
 }
 
 # -- 10. standing memory instructions (consent; never edited without it) ----------
-# Default is `auto`: skip wherever a session-start briefing already delivers
-# the block (claude hook/plugin, codex hook), and offer an interactive append
-# where none exists (including codex with hooks skipped). `auto` never writes
-# a standing file in a non-interactive run; -Instructions append behaves
-# exactly as before. -ClaudeMd remains a compatibility alias.
-$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
+# Codex instructions are resolved by the setup helper after hook verification.
+# Other clients retain the existing auto/append/skip behavior and prompts.
 $instrState = @{}
 function Add-MemoryBlock($path, $provider) {
     # Presence check HERE, not only at the loop top: the generic prompt
@@ -547,12 +585,46 @@ function Add-MemoryBlock($path, $provider) {
     $instrState[$provider] = "appended:$path"
 }
 foreach ($selectedClient in $clients) {
+    if ($selectedClient -eq "codex") {
+        # Explicit consent also covers instruction-only setup when Python or
+        # the helper is unavailable. A valid helper result already owns this.
+        if (-not $codexSetupValid -and ($instructionChoice -eq "append" -or
+            ($instructionChoice -eq "auto" -and $CodexHookTrust -eq "yes"))) {
+            try {
+                $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
+                $override = Join-Path $codexHome "AGENTS.override.md"
+                $fallbackPath = if ((Test-Path $override) -and ([string](Get-Content $override -Raw)).Trim()) {
+                    $override
+                } else { Join-Path $codexHome "AGENTS.md" }
+                $existing = if (Test-Path $fallbackPath) { Get-Content $fallbackPath -Raw } else { "" }
+                if ($existing -cmatch '(?m)^## Memory\b' -and $existing -match 'pseudolife-memory' -and
+                    $existing -cmatch 'RECALL' -and $existing -cmatch 'CAPTURE' -and $existing -cmatch 'REFLECT') {
+                    $codexSetup.instructions = "present"
+                } else {
+                    $block = Get-Content (Join-Path $repo "examples/CLAUDE.memory.md") -Raw
+                    New-Item -ItemType Directory -Force -Path $codexHome | Out-Null
+                    if (Test-Path $fallbackPath) {
+                        $saved = "$fallbackPath.bak-pseudolife-$([guid]::NewGuid().ToString('N'))"
+                        Copy-Item -LiteralPath $fallbackPath -Destination $saved
+                        Step "Backed up Codex standing instructions to $saved"
+                    }
+                    Add-Content -LiteralPath $fallbackPath -Value ("`n`n" + $block) -Encoding utf8
+                    $codexSetup.instructions = "appended"
+                }
+                Step "Codex standing instructions: $($codexSetup.instructions) ($fallbackPath). Hooks still require setup."
+            } catch {
+                $codexSetup.recovery += " Could not write standing instructions; check the Codex home and file permissions."
+                Step $codexSetup.recovery
+            }
+        }
+        $instrState["codex"] = $codexSetup.instructions
+        continue
+    }
     if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
         $instrState["claude"] = "covered-by-plugin"
         continue
     }
     $instructionPath = switch ($selectedClient) {
-        "codex" { Join-Path $env:USERPROFILE ".codex\AGENTS.md" }
         "gemini" { Join-Path $env:USERPROFILE ".gemini\GEMINI.md" }
         "generic" { $AgentsFile }
         default { Join-Path $env:USERPROFILE ".claude\CLAUDE.md" }
@@ -571,17 +643,6 @@ foreach ($selectedClient in $clients) {
                 # The SessionStart hook already delivers the block — a
                 # standing-file copy would double-inject.
                 $choice = "skip"
-            }
-            "codex" {
-                if ($hookState["codex"] -in "hook", "plugin") {
-                    $choice = "skip"
-                } elseif ($interactive) {
-                    $yn = Read-Host "No Codex briefing hook selected - append the standing memory block to $instructionPath? [Y/n]"
-                    $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
-                } else {
-                    $choice = "skip"
-                    Step "Codex has no selected briefing hook. Use -Instructions append for the standing block, or select -CodexHooks manual|plugin."
-                }
             }
             "gemini" {
                 if ($interactive) {
@@ -878,6 +939,9 @@ function Describe-Instr($state) {
         "appended:*" { "[x] Standing file        $tail" }
         "present:*" { "[x] Standing file        $tail" }
         "covered-by-plugin" { "[-] Standing file        plugin briefing covers it" }
+        "covered-by-hooks" { "[x] Standing instructions verified session briefing covers them" }
+        "present" { "[x] Standing file        existing Codex memory fallback" }
+        "appended" { "[x] Standing file        Codex memory fallback appended" }
         "skipped:*" { "[-] Standing file        skipped - append later to $tail" }
         default { "[-] Standing file        skipped" }
     }
@@ -904,13 +968,11 @@ foreach ($selectedClient in $clients) {
             Write-Host "  OpenAI Codex"
             Write-Host "    $(Get-McpMarker $mcpState['codex']) MCP transport        $(Describe-Mcp $mcpState['codex'])"
             Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
-            if ($hookState["codex"] -eq "hook") {
-                Write-Host "    [x] Session briefing     hook written - review and trust it in /hooks"
-                Write-Host "    [x] Per-turn discipline  hook written - review and trust it in /hooks"
-            } elseif ($hookState["codex"] -eq "plugin") {
-                Write-Host "    [-] Session/per-turn     delegated to plugin - verify enabled and trusted in /hooks"
+            if ($hookState["codex"] -eq "ready") {
+                Write-Host "    [x] Memory hooks         trusted and verified ($($codexSetup.source))"
             } else {
-                Write-Host "    [-] Session/per-turn     skipped - use -CodexHooks manual or plugin"
+                Write-Host "    [!] Memory hooks         $($hookState['codex'])"
+                if ($codexSetup.recovery) { Write-Host "    $($codexSetup.recovery)" }
             }
             Write-Host "    Verify runtime: codex mcp get pseudolife-memory; run doctor from that command's environment."
             Write-Host "    In its existing config.toml table set startup_timeout_sec = 240, tool_timeout_sec = 180, required = true."

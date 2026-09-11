@@ -162,14 +162,14 @@ def test_source_changes_do_not_invalidate_dependencies_or_baked_models() -> None
     lock_install = dockerfile.index(
         "subprocess.check_call"
     )
-    qwen_bake = dockerfile.index(
-        "SentenceTransformer('Qwen/Qwen3-Embedding-0.6B')"
+    provisioner_copy = dockerfile.index(
+        "COPY ops/provision_embedding_models.py /app/"
     )
-    minilm_bake = dockerfile.index(
-        "SentenceTransformer('all-MiniLM-L6-v2')"
+    model_bake = dockerfile.index(
+        "python /app/provision_embedding_models.py"
     )
     source_copy = dockerfile.index("COPY pseudolife_memory /app/pseudolife_memory")
-    assert lock_install < qwen_bake < minilm_bake < source_copy, (
+    assert lock_install < provisioner_copy < model_bake < source_copy, (
         "dependency/model layers must precede the source COPY or every code "
         "edit redownloads the embedding models"
     )

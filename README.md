@@ -150,7 +150,7 @@ Windows needs an ASCII-only data path
 | External volumes, health-checked services, deploy/rollback tooling | no | yes |
 
 **The gap, stated plainly.** Lite ships no **extractor**, so the **dream**
-pass still runs, prunes, and advances its **cursor**, but writes no
+pass still runs, prunes, and acknowledges its input batch, but writes no
 canonical facts: on this path `memory_fact_set` is the only **cortex**
 writer. Everything else above works. Nothing about this is silent —
 `curl http://127.0.0.1:8765/health` reports `"extractor": "none"`, and the
@@ -194,10 +194,10 @@ cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
-# Codex hook source: --codex-hooks manual / -CodexHooks manual
-# Use plugin instead of manual if an enabled plugin owns the hooks; default skip.
-# With hooks skipped, unattended installs need --instructions append / -Instructions append
-# to add the standing memory block; interactive installs offer it.
+# Codex defaults to automatic hook-source detection and asks once for approval.
+# Unattended hook approval: --codex-hook-trust yes / -CodexHookTrust yes
+# Instructions only: --codex-hooks skip --instructions append
+# PowerShell equivalent: -CodexHooks skip -Instructions append
 # Both:  add --client both  / -Client both
 # Gemini: add --client gemini — or several: --client claude,codex,gemini
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
@@ -227,16 +227,23 @@ then brings the stack up, installs the selected clients' session hooks
 stdio shim by default, with a per-provider writer id; direct HTTP via
 `--transport http`), and health-checks the daemon — finishing with a
 per-agent ladder of what got wired and what that agent's platform cannot
-support. Where a session-hook briefing exists (Claude, Codex off-Windows)
-no standing-file edit is needed; for hook-less providers (Gemini CLI,
-generic agents, Codex on Windows) the installer offers to append the
-standing block instead — there it *is* the briefing. `--instructions
+support. Codex setup offers one choice to enable automatic memory briefings,
+reminders, and session cleanup, use standing instructions only, or skip.
+Automatic setup reuses an enabled PseudoLife plugin or installs the three
+lifecycle hooks, backs up configuration, approves only their exact current
+definitions, and verifies execution. If verification fails, the same approval
+allows the standing memory block as a fallback; setup reports the remaining
+repair step. Hook-less providers (Gemini CLI and generic agents) are offered
+the standing block. `--instructions
 append` always writes the block from `examples/CLAUDE.memory.md` into
 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.gemini/GEMINI.md`
 (useful for subagent visibility even with hooks).
 Idempotent — re-run any time; `--extractor <mode>` switches extractor
 setups. Non-interactive example:
-`ops/install.sh --extractor sidecar --client codex`.
+`ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes`.
+Without explicit hook approval, unattended setup does not grant trust; use
+`--codex-hooks skip --instructions append` for instructions only. Explicit
+`--instructions skip` prevents fallback edits.
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
@@ -338,7 +345,7 @@ deep material lives in the user guide:
 | Page | What's in it |
 |---|---|
 | [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
-| [Providers](docs/guide/providers.md) | Capability matrix per coding agent, the hook-equivalent ladder, AGENTS.md standard, Codex hooks opt-in, writer ids |
+| [Providers](docs/guide/providers.md) | Capability matrix per coding agent, memory instruction layers, AGENTS.md standard, Codex hook setup and verification, writer ids |
 | [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
 | [Dreaming](docs/guide/dreaming.md) | Extractor tiers, the bundled sidecar, upgrading the extractor, Sonnet-fallback, cadence, deep dream, consolidation |
 | [Episodes & sessions](docs/guide/episodes.md) | Daemon-owned session episodes, the briefing hook, nested sub-episodes, tags |
@@ -363,7 +370,7 @@ is agent context every session, so it stays lean.
 | `memory_store(text, source?, tags?, origin?, episode?, authority?, distortion_tolerance?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`); `authority`/`distortion_tolerance` label the speech act and how exactly it must survive — `auto` (default) is a deterministic form heuristic, no model call, and both labels are inherited through supersession unless restated |
 | `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits, each dated (`asserted_at` / `last_confirmed` / human `age`, plus `stale` when it has rotted); `explain=True` attaches a ranking trace |
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
-| `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history; the result's `derived_flagged` names the canonical facts the dream built on what was corrected (flagged, never rewritten) |
+| `memory_supersede(old_text?, new_text, entry_id?)` | Correct the selected entry by ID, or one unique exact-text match; ambiguous/missing targets fail closed. Keep the old entry as history; `derived_flagged` names canonical facts built on it (flagged, never rewritten) |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?)` | Experimental, opt-in peer awareness or update of the caller's registered context; unknown episode scope stays unknown, and activity is not a resource reservation |
@@ -378,13 +385,13 @@ is agent context every session, so it stays lean.
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
-| `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
+| `memory_dream(action, limit?, commit_token?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
 | `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
 | `memory_session_title(title, episode?)` | Name THIS session's auto-opened episode (default titles are generic); `episode` is your session handle from the briefing — concurrent sessions share one HTTP connection, so pass it to land the rename on your own episode |
 | `memory_episode_start(title, hint?, episode?)` / `memory_episode_end(episode?)` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id; `episode` is your session handle so the nest/pop lands in your own tree when several sessions run concurrently |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
 | `memory_consolidation_candidates(query?, episode?, ...)` | Cluster near-duplicate memories ripe for consolidation |
-| `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
+| `memory_consolidate(replaces?, new_text, source?, tags?, entry_ids?)` | Replace selected entries with one canonical note; validate every ID (or unique exact text) before any changes |
 | `memory_graph_relate(src, relation, dst, ...)` | Assert a typed edge (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — lookups resolve aliases first |
@@ -700,11 +707,14 @@ daemon:
 
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
-The server's value depends entirely on the agent *using* it well — **this step
-is what makes the memory loop actually fire**. The MCP server advertises the
-core loop through protocol-level `instructions`, and the session hook (one
-command, below) delivers the full block every session — **plugin users and
-hook users need nothing more**. If you want it in a standing file instead —
+The server's value depends on the agent using it. The MCP server advertises
+the core loop through protocol-level `instructions`; the SessionStart hook
+delivers the full memory policy with a live briefing. The default hook policy
+and bundled standing memory block contain the same instructions. Hooks add
+per-prompt reminders and session bookkeeping; neither delivery method
+guarantees that the model performs every requested memory operation.
+
+With verified hooks, a standing copy is optional. If you want it instead —
 or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
 hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
@@ -721,8 +731,8 @@ Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.me
 Add-Content "$env:USERPROFILE\.codex\AGENTS.md" (Get-Content examples\CLAUDE.memory.md -Raw)
 ```
 
-For hook-less providers this standing block is not a nice-to-have — it *is*
-the session briefing. `AGENTS.md` is the cross-vendor standard for standing
+For hook-less providers this standing block supplies the full memory policy,
+but it cannot provide a live briefing or run session cleanup. `AGENTS.md` is the cross-vendor standard for standing
 agent instructions (Linux Foundation-governed; read by Codex, Copilot,
 Cursor, Gemini CLI, Zed, and 30+ others), so a per-project `AGENTS.md`
 carrying the block reaches almost every agent at once. Claude Code is the
@@ -739,19 +749,18 @@ verbose logs so they stay out of the dream), **REFLECT at the end**
 dream distils these signals into the lessons surfaced at your next session
 start).
 
-One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
-`ops/install-hook.sh --client codex` (Linux/macOS) — installs the
-**SessionStart briefing hook** for the selected client (what your memory is
-unsure about + lessons from past work + verified world facts + where we left
-off, injected at every session start) and a
-**UserPromptSubmit discipline hook**: a static one-line memory reminder on
-every turn — recall before reviewing code, docs, or PRs, then compare memory
-against the files; status questions are memory questions; log outcomes.
-Both Claude Code and current Codex runtimes support these events. The
-installer backs up `~/.claude/settings.json`
-or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
-the briefing budget flags, and how session episodes open/close/resume
-without any hooks: [Episodes & sessions](docs/guide/episodes.md).
+For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
+The helper asks once, detects the hook source, backs up changed configuration,
+persists scoped trust through Codex, and verifies startup briefing, prompt
+reminder, and session cleanup. The Docker installer runs this step for you.
+See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
+
+For Claude Code, use the [plugin](plugin/README.md), or the legacy
+`ops/install-hook.ps1 -Client claude` / `ops/install-hook.sh --client claude`
+for briefing and reminder hooks. The legacy `--client codex` path remains
+available but only writes hook definitions; it does not complete trust and
+verification. Session episodes also work without hooks through the daemon:
+[Episodes & sessions](docs/guide/episodes.md).
 
 **Current Codex runtimes enable hooks by default, including Windows.**
 Availability depends on the application/runtime and policy, not the model.
@@ -759,11 +768,13 @@ If `[features] hooks = false` is intentional, keep it and use the standing
 `AGENTS.md` block. Windows plugin hooks use native PowerShell 7 commands.
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
-**Codex hook trust:** Codex also skips every new or changed hook until you
-review and trust its exact definition. After installing the Codex hook, start
-Codex, open `/hooks`, review the definition from `~/.codex/hooks.json`, and
-approve it. Until then, MCP tools still work and the server-level
-`instructions` still load, but the richer session briefing is not injected.
+**Codex hook trust:** setup approval is limited to PseudoLife's three current
+hook definitions. It does not approve other plugins or bypass future trust
+checks. Changed definitions need approval again. If automatic setup cannot
+use the installed runtime's trust interface, it reports the problem and
+asks you to open `/hooks` to review and trust the definitions. Approved standing
+instructions remain available as fallback. Installed files alone do not
+establish that hooks are working.
 
 ## Usage patterns
 
@@ -780,13 +791,17 @@ memory_store("Decided to use stdio transport for the MCP because no port conflic
 ```
 
 **When corrected** — marks the old fact superseded *and* stores the
-correction; both surface in future retrieval, the new one ranked higher:
+correction; both surface in future retrieval, the new one ranked higher.
+Select the entry by the `id` carried on the search or recent hit:
 ```
 memory_supersede(
-  "Provider interface uses synchronous calls",
-  "Provider interface uses async calls — sync version was the v0.7 prototype only"
+  entry_id=417,
+  new_text="Provider interface uses async calls — sync version was the v0.7 prototype only"
 )
 ```
+`old_text=` still selects by the full stored text when that text is exactly
+unique among live entries; it is the legacy selector and the only one file
+mode has. Ambiguous or missing targets change nothing.
 
 **Hygiene** — `memory` and `fact` scopes hard-delete (at least one filter
 is required for scope `memory`, preventing accidental wholesale deletion);
@@ -810,12 +825,14 @@ episodes, and full-table views all live there. Going deeper:
 
 A **dream** distils the recent associative stream into canonical cortex
 facts while you're not looking: pull unconsolidated memories → extract
-`(entity, attribute, value)` → advance a cursor so nothing is reprocessed.
+`(entity, attribute, value)` → acknowledge those exact entries durably.
+New entries remain pending regardless of their timestamps; failed acknowledgement
+can replay claim application. Manual commits use the token returned by `pull`.
 Extraction is pluggable:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — none** | no extractor configured — the dream still runs, prunes, and advances its cursor, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
+| **0 — none** | no extractor configured — the dream still runs, prunes, and acknowledges input batches, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep → the bundled CPU sidecar, or any OpenAI-compatible endpoint | nothing (sidecar) | high; free if local |
 
@@ -928,9 +945,9 @@ bank.
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only and auto-selected when installed, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder fall back to torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v38 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v40 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 

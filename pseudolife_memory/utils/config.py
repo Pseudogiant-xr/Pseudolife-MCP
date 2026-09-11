@@ -16,7 +16,8 @@ class EmbeddingConfig:
     batch_size: int = 64
     # "torch" (default) or "onnx" — onnxruntime via sentence-transformers'
     # native backend (needs optimum[onnxruntime]). ~3x faster single-text
-    # encode on CPU with bit-identical embeddings; falls back to torch with
+    # encode on CPU with parity-checked embeddings (min cosine vs torch
+    # 1.00000 over 20 texts, 2026-07-12); falls back to torch with
     # a warning when the backend can't load.
     backend: str = "torch"
     # Which ONNX file inside the model repo to load. Explicit because the
@@ -688,6 +689,13 @@ class LessonsConfig:
     # Opposite-polarity near-matches are NEVER gated (an "avoid" inversion
     # of a "do" lesson is new information). 0 disables.
     synthesis_dedup_min_similarity: float = 0.88
+    # Most signals one synthesis sweep drains. The batch writes its lessons,
+    # graph edges and acknowledgements in one transaction under the service
+    # lock, so an undrained backlog otherwise sets the length of a single
+    # daemon pause. 200 is a CHOSEN bound, not a measured one: it is roughly
+    # one extractor batch, and whatever it leaves behind is picked up by the
+    # next sweep. 0 disables the cap (drain everything pending).
+    synthesis_max_signals: int = 200
     # Rule mode (2026-09-08, the "Learning on the Job" delta, arXiv
     # 2607.22157): synthesise ONE situation-specific rule per signal — keyed
     # (situation, "rule"), decision-critical values copied verbatim, no

@@ -60,10 +60,25 @@ function preview(c, ctx) {
 async function doConsolidate(members, newText, ctx) {
   if (!newText) { toast("Merged text can't be empty", "bad"); return; }
   try {
+    const withIds = members.filter((m) => m.id != null);
+    if (withIds.length && withIds.length !== members.length) {
+      throw new Error("Some selected memories changed; reload the candidates.");
+    }
+    const selector = withIds.length
+      ? { entry_ids: members.map((m) => m.id) }
+      : { replaces: members.map((m) => m.text) };
     const r = await api.post("/api/consolidate",
-      { replaces: members.map((m) => m.text), new_text: newText });
+      { ...selector, new_text: newText });
+    // Only `error` means nothing changed. A filtered merged text still left
+    // the members retired, so report that rather than a false failure.
+    if (r.error || !r.superseded_count) {
+      throw new Error(r.error || "Merged memory was not stored; reload the candidates and try again.");
+    }
     closeModal();
-    toast(`Consolidated ${r.superseded_count ?? members.length} → 1`, "ok");
+    toast(r.new_memory_stored
+      ? `Consolidated ${r.superseded_count} → 1`
+      : `Superseded ${r.superseded_count}, but the merged text was filtered and not stored`,
+      r.new_memory_stored ? "ok" : "warn");
     ctx?.refresh?.();
     load(ctx);
   } catch (e) { toast("Consolidate failed: " + e.message, "bad"); }

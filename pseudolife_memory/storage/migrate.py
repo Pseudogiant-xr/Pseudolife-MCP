@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import time
 from collections import Counter
 from pathlib import Path
@@ -106,7 +107,14 @@ def _already_imported(rows: list[dict]) -> Counter:
     )
 
 
-def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
+def migrate_legacy(
+    data_dir: str | Path,
+    storage,
+    embedder,
+    *,
+    eligible_sources=None,
+    exclude_sources=None,
+) -> dict:
     """Import a legacy .pt bank into storage. Idempotent, and resumable.
 
     ``embedder`` is the service's own, already-constructed
@@ -138,7 +146,7 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
         if record.get("status") == "in_progress":
             renamed = [p.with_name(p.name + ".pre-v8.bak")
                        for p in (cms_path, cortex_path)]
-            if any(p.exists() for p in renamed):
+            if record.get("stage") != "preflight" and any(p.exists() for p in renamed):
                 storage.meta_set(MIGRATION_META_KEY,
                                  {**record, "status": "done",
                                   "finished_at": time.time()})
@@ -172,7 +180,19 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
             sources[name].with_name(sources[name].name + ".pre-v8.bak").exists()
             for name in recorded if name not in fingerprint and name in sources
         )
-        if on_disk_matches and vanished_were_renamed:
+        # Preflight has written no imported content. A repaired source may
+        # therefore be re-fingerprinted even if the daemon has since served
+        # new writes. Once importing starts, preserve the strict source match.
+        repaired_preflight = (
+            record.get("stage") == "preflight"
+            and record.get("entries_done", 0) == 0
+            and set(recorded) == set(fingerprint)
+        )
+        importing_match = (
+            record.get("stage") != "preflight"
+            and on_disk_matches and vanished_were_renamed
+        )
+        if repaired_preflight or importing_match:
             resuming = True
         else:
             # Refuse rather than merge: the bank holds the leftovers of a
@@ -191,17 +211,96 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
         # A real bank with no migration ever started — unchanged behavior.
         return {"migrated": False, "reason": "storage_not_empty"}
 
+    started_at = record.get("started_at") if resuming else time.time()
+    stage = "importing" if resuming and record.get("stage") != "preflight" else "preflight"
+    storage.meta_set(MIGRATION_META_KEY, {
+        "status": "in_progress", "stage": stage, "source": fingerprint,
+        "entries_done": int(record.get("entries_done") or 0) if resuming else 0,
+        "started_at": started_at, "updated_at": time.time(),
+    })
+
     import torch
+
+    cms_state = None
+    if cms_path.exists():
+        # weights_only=True: legacy CMS snapshot is tensors + plain containers;
+        # avoid unpickling arbitrary objects from an imported .pt bank (CWE-502).
+        cms_state = torch.load(
+            str(cms_path), map_location="cpu", weights_only=True)
+
+    cortex = None
+    if cortex_path.exists():
+        from pseudolife_memory.memory.cortex import CortexStore
+
+        cortex = CortexStore()
+        cortex.load(cortex_path)
+
+    # A storage conversion translates old file rows directly into PG states.
+    # Read and validate the source cutoff before the resumable row-by-row
+    # writes begin, so a bad legacy cursor cannot leave a newly partial bank.
+    cursor_value = cortex.dream_cursor if cortex is not None else 0.0
+    if cms_state is not None and (
+        cms_state.get("schema_version") == 7
+        or cms_state.get("dream_ack_secret") is not None
+    ):
+        from pseudolife_memory.dream_token import public_generation
+
+        try:
+            if cms_state.get("schema_version") != 7:
+                raise ValueError("checkpoint metadata requires CMS schema 7")
+            public_generation(cms_state.get("dream_ack_secret"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "invalid_dream_ack_state: invalid file checkpoint authority"
+            ) from exc
+        # A v7 acknowledgement can commit after the last cortex save. Its
+        # co-located display value travels with those entry states; the
+        # source signing secret itself never becomes the target's secret.
+        cursor_value = cms_state.get("dream_display_cursor", 0.0)
+    try:
+        legacy_cursor = float(cursor_value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "invalid_legacy_dream_cursor: file import requires a numeric cursor"
+        ) from exc
+    if not math.isfinite(legacy_cursor):
+        raise ValueError(
+            "invalid_legacy_dream_cursor: file import requires a finite "
+            "dream display cursor before PostgreSQL writes"
+        )
+    allowed = set(eligible_sources) if eligible_sources else None
+    excluded = set(exclude_sources or [])
+
+    def _source_state(entry: dict, ts: float) -> str:
+        state = entry.get("dream_state")
+        if state is not None:
+            if state not in {"pending", "acknowledged", "legacy-covered"}:
+                raise ValueError(
+                    f"invalid_dream_entry_state: {state!r} in legacy source"
+                )
+            return state
+        source = entry.get("source", "")
+        eligible = (
+            source in allowed if allowed is not None
+            else source not in excluded
+        )
+        return (
+            "legacy-covered"
+            if eligible and ts <= legacy_cursor
+            else "pending"
+        )
 
     # Same meta keys the live cortex persistence writes — imported rather
     # than re-spelled so a rename cannot silently orphan the resume path.
     from pseudolife_memory.storage.sync import (
-        _CORTEX_CURSOR_KEY, _CORTEX_LOG_KEY, _record_to_row,
+        _CORTEX_LOG_KEY, _record_to_row,
     )
 
-    started_at = record.get("started_at") if resuming else time.time()
+    # Persist the transition before the first content write, including
+    # episodes. A failed partial import must never re-baseline its source.
     storage.meta_set(MIGRATION_META_KEY, {
         "status": "in_progress",
+        "stage": "importing",
         "source": fingerprint,
         "entries_done": int(record.get("entries_done") or 0) if resuming else 0,
         "started_at": started_at,
@@ -216,15 +315,13 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
 
     def _checkpoint() -> None:
         storage.meta_set(MIGRATION_META_KEY, {
-            "status": "in_progress", "source": fingerprint,
+            "status": "in_progress", "stage": "importing", "source": fingerprint,
             "entries_done": entries + skipped,
             "started_at": started_at, "updated_at": time.time(),
         })
 
-    if cms_path.exists():
-        # weights_only=True: legacy CMS snapshot is tensors + plain containers;
-        # avoid unpickling arbitrary objects from an imported .pt bank (CWE-502).
-        state = torch.load(str(cms_path), map_location="cpu", weights_only=True)
+    if cms_state is not None:
+        state = cms_state
         # Episodes first (entries carry episode_id FKs). upsert_episode is
         # keyed on the legacy id, so a resume re-applies these harmlessly.
         ep_payload = (state.get("episodes") or {}).get("episodes") or {}
@@ -270,6 +367,7 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
                     "episode_title": e.get("episode_title"),
                     "tags": list(e.get("tags") or []),
                     "slots": [list(s) for s in (e.get("slots") or [])],
+                    "dream_state": _source_state(e, ts),
                 })
                 entries += 1
                 if (entries + skipped) % _CHECKPOINT_EVERY == 0:
@@ -279,10 +377,7 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
         _checkpoint()
 
     reembedded_facts = facts_skipped = 0
-    if cortex_path.exists():
-        from pseudolife_memory.memory.cortex import CortexStore
-        cortex = CortexStore()
-        cortex.load(cortex_path)
+    if cortex is not None:
         for r in cortex.records:
             if r.embedding is not None and len(r.embedding) != target_dim:
                 # Same treatment as the entries branch above, and for the
@@ -302,7 +397,6 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
             # the snapshot rewrite has nothing to destroy.
             storage.replace_facts(rows)
             storage.meta_set(_CORTEX_LOG_KEY, cortex.supersession_log[-200:])
-            storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
             facts = len(rows)
         else:
             # Resume: the daemon has been SERVING since the failed boot (the
@@ -321,18 +415,15 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
                 storage.replace_slot_facts(slots, keep)
             facts = len(keep)
             facts_skipped = len(rows) - len(keep)
-            # The dream cursor is monotonic by contract; a legacy value is
-            # necessarily older than anything the degraded window advanced
-            # it to, and moving it backwards would force re-extraction of
-            # every memory since.
-            current_cursor = float(storage.meta_get(_CORTEX_CURSOR_KEY, 0.0) or 0.0)
-            storage.meta_set(_CORTEX_CURSOR_KEY,
-                             max(current_cursor, float(cortex.dream_cursor or 0.0)))
             # Same reasoning for the supersession log: only seed it if the
             # live one is still empty, never overwrite real audit history.
             if not (storage.meta_get(_CORTEX_LOG_KEY) or []):
                 storage.meta_set(_CORTEX_LOG_KEY,
                                  cortex.supersession_log[-200:])
+
+    # Display metadata also exists when a v7 CMS checkpoint has no cortex
+    # file. A resumed import must not regress a live acknowledgement.
+    storage.advance_dream_cursor(legacy_cursor)
 
     # Rename sources — migration is read-only on content, rename-only on
     # the filesystem, and never deletes.

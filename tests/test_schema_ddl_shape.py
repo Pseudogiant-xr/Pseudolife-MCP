@@ -43,6 +43,10 @@ _REQUIRED_COLUMNS = [
     # v13 — provenance-as-link: the trace index is SLOT-keyed.
     ("memory_traces",
      {"entity_norm", "attribute_norm", "entry_id", "created_at"}),
+    # v39 — survives deletion of its evictable source entry.
+    ("memory_trace_invalidations",
+     {"entity_norm", "attribute_norm", "source_entry_id",
+      "invalidated_at", "cause"}),
     # v13 reinforcements / v33 explicit_reinforcements (the split counter).
     ("entries", {"reinforcements", "explicit_reinforcements"}),
     # v16 — per-entity source attribution.
@@ -93,6 +97,8 @@ _REQUIRED_COLUMNS = [
     # v33 — per-slot read counters.
     ("slot_reads",
      {"entity_norm", "attribute_norm", "read_count", "last_read_at"}),
+    # v38 — durable dream acknowledgement state, per entry.
+    ("entries", {"dream_state"}),
 ]
 
 
@@ -123,6 +129,7 @@ _COLUMN_TYPES = [
     ("slot_reads", "read_count", "bigint"),
     ("slot_reads", "last_read_at", "double precision"),
     ("entries", "explicit_reinforcements", "integer"),
+    ("entries", "dream_state", "text"),           # v38
 ]
 
 _NULLABLE_COLUMNS = [
@@ -149,6 +156,7 @@ _NULLABLE_COLUMNS = [
     ("entries", "distortion_tolerance"),          # v35: NULL = unlabelled
     ("facts", "authority"),
     ("facts", "distortion_tolerance"),
+    ("entries", "dream_state"),                   # v38: NULL = pre-bump row
 ]
 
 
@@ -193,6 +201,25 @@ def test_memory_traces_is_slot_keyed_not_fact_keyed(pg_conn):
     fact-keyed trace index goes stale silently. Lock the slot anchor so a
     regression to the old one fails."""
     assert "fact_id" not in _columns(pg_conn, "memory_traces")
+
+
+def test_trace_invalidations_are_slot_keyed_and_fk_free(pg_conn):
+    """v39 events outlive both evictable source and regenerated fact rows."""
+    pk = pg_conn.execute(
+        "SELECT a.attname FROM pg_index i "
+        "JOIN pg_attribute a ON a.attrelid=i.indrelid "
+        "AND a.attnum=ANY(i.indkey) "
+        "WHERE i.indrelid='memory_trace_invalidations'::regclass "
+        "AND i.indisprimary ORDER BY array_position(i.indkey, a.attnum)"
+    ).fetchall()
+    assert [r[0] for r in pk] == [
+        "entity_norm", "attribute_norm", "source_entry_id"]
+    fks = pg_conn.execute(
+        "SELECT conname FROM pg_constraint c "
+        "JOIN pg_class t ON c.conrelid=t.oid "
+        "WHERE t.relname='memory_trace_invalidations' AND c.contype='f'"
+    ).fetchall()
+    assert fks == []
 
 
 def test_entity_kinds_primary_key_is_entity_norm(pg_conn):
@@ -273,3 +300,22 @@ def test_schema_import_does_not_load_database_driver():
         "assert not any(n == 'psycopg' or n.startswith('psycopg.') for n in sys.modules)",
     ], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
+
+
+def test_entries_dream_state_defaults_to_pending_under_its_named_check(pg_conn):
+    """v38. Two halves of one contract. The DEFAULT is what makes every new
+    write eligible for the dream without a backfill, and NULL (the pre-bump
+    reading) is the only legacy marker — so a default of NULL would make
+    daemon writes indistinguishable from pre-bump rows and hand them to the
+    one-shot legacy classification. The CHECK is pinned BY NAME because
+    ``ensure_schema`` looks it up by that name to decide whether to add it;
+    a rename would silently re-add it on every boot."""
+    default = _column_attr(pg_conn, "entries", "dream_state", "column_default")
+    assert "'pending'" in (default or ""), (
+        "dream_state must default to 'pending' — NULL is reserved for rows "
+        "written before the column existed")
+    row = pg_conn.execute(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+        "WHERE conname = 'entries_dream_state_check'").fetchone()
+    assert row is not None, "entries_dream_state_check is missing"
+    assert "dream_state" in row[0]

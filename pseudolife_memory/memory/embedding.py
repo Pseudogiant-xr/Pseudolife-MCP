@@ -3,44 +3,81 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from collections import OrderedDict
+from pathlib import Path, PurePosixPath
+
 
 import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from pseudolife_memory.onnx_artifacts import (
+    has_nested_transformer_module,
+    onnx_layout_available,
+)
 from pseudolife_memory.utils.config import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
 
-def _hf_offline() -> bool:
-    """True when the HF hub is in offline mode (HF_HUB_OFFLINE=1)."""
-    from huggingface_hub import constants  # noqa: PLC0415
-
-    return bool(getattr(constants, "HF_HUB_OFFLINE", False))
+def _native_windows() -> bool:
+    return sys.platform == "win32"
 
 
-def _local_snapshot(repo_id: str, local_files_only: bool = True) -> str:
-    """Resolve a hub repo id to its local cache snapshot directory."""
-    from huggingface_hub import snapshot_download  # noqa: PLC0415
+def _cached_hf_file(
+    repo_id: str,
+    filename: str,
+    local_files_only: bool = True,
+) -> str:
+    """Return one configured file from a locally cached Hub snapshot."""
+    from huggingface_hub import hf_hub_download  # noqa: PLC0415
 
-    return snapshot_download(repo_id, local_files_only=local_files_only)
+    return hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        local_files_only=local_files_only,
+    )
 
 
-def _resolve_onnx_source(model_name: str) -> str:
-    """Pick what to hand SentenceTransformer for an ONNX load.
+def _onnx_file_parts(file_name: str) -> tuple[str, ...]:
+    """Validate a model-relative ONNX path and return its components."""
+    normalized = file_name.replace("\\", "/")
+    raw_parts = normalized.split("/")
+    path = PurePosixPath(normalized)
+    if (
+        not normalized
+        or path.is_absolute()
+        or any(not part or part in {".", ".."} or ":" in part for part in raw_parts)
+        or path.suffix != ".onnx"
+    ):
+        raise ValueError(
+            "embedding.onnx_file_name must be a relative .onnx path "
+            "inside the configured model",
+        )
+    return path.parts
 
-    The ONNX loader (optimum) lists the hub repo tree even when every
-    file is already cached — that API call has no offline cache and
-    raises under HF_HUB_OFFLINE=1, the Docker daemon's runtime contract.
-    In offline mode, resolve the repo to its local snapshot directory
-    and load from that path: no hub calls at all. Online, keep the hub
-    id so first use can still download.
+
+def _resolve_onnx_source(model_name: str, file_name: str) -> str | None:
+    """Resolve a verified existing ONNX artifact to its local model root.
+
+    Both SentenceTransformers and Optimum infer that a missing artifact should
+    be exported, on every platform. The preflight verifies the configured
+    artifact at every recognized Transformer module's effective path before
+    either library sees the request.
+
+    Hub models are resolved through ``hf_hub_download(local_files_only=True)``
+    even when networking is enabled. It probes the configured artifact or the
+    minimal ``modules.json`` / ``config.json`` metadata needed to find effective
+    module paths, then returns their revision-specific cached snapshot. It does
+    not list a mutable remote head or download every ONNX variant.
     """
-    if not _hf_offline():
-        return model_name
+    parts = _onnx_file_parts(file_name)
+    local_root = Path(model_name).expanduser()
+    if local_root.is_dir():
+        return str(local_root) if onnx_layout_available(local_root, file_name) else None
+
     # Mirror sentence-transformers' short-id resolution: bare names live
     # under the sentence-transformers/ org.
     candidates = (
@@ -48,12 +85,30 @@ def _resolve_onnx_source(model_name: str) -> str:
         if "/" in model_name
         else [f"sentence-transformers/{model_name}", model_name]
     )
+    lookups = ("/".join(parts), "modules.json", "config.json")
     for repo_id in candidates:
-        try:
-            return _local_snapshot(repo_id, local_files_only=True)
-        except Exception:  # noqa: BLE001 — not cached under this id
-            continue
-    return model_name
+        for lookup in lookups:
+            try:
+                artifact = Path(_cached_hf_file(
+                    repo_id,
+                    lookup,
+                    local_files_only=True,
+                ))
+            except Exception:  # noqa: BLE001 — absent from this local cache key
+                continue
+            lookup_parts = PurePosixPath(lookup).parts
+            if tuple(artifact.parts[-len(lookup_parts):]) != lookup_parts:
+                continue
+            snapshot_root = artifact
+            for _ in lookup_parts:
+                snapshot_root = snapshot_root.parent
+            if onnx_layout_available(
+                snapshot_root,
+                file_name,
+                allow_hub_blob_links=True,
+            ):
+                return str(snapshot_root)
+    return None
 
 
 class EmbeddingPipeline:
@@ -61,11 +116,13 @@ class EmbeddingPipeline:
 
     Two perf levers (both config-driven, both fail-soft):
 
-    * ``backend = "onnx"`` runs the same model through onnxruntime via
-      sentence-transformers' native ONNX backend — ~3x faster single-text
-      encode on CPU with bit-identical embeddings (fp32 ONNX cosine vs
-      torch = 1.00000). Falls back to torch with a warning when optimum
-      is missing or the ONNX weights aren't in the (offline) HF cache.
+    * ``backend = "onnx"`` uses sentence-transformers' native ONNX backend.
+      The historical MiniLM fp32 artifact measured ~3x faster single-text CPU
+      encoding with cosine 1.00000 against torch; other configured artifacts
+      carry no equivalence claim. The backend is load-only: its configured
+      artifact must already exist in a local model or cached Hub snapshot. It
+      falls back to torch when the artifact is missing, and when a nested
+      module layout would be mis-detected on native Windows.
     * ``cache_size > 0`` keeps an LRU of ``(text, normalize)`` →
       embedding. The service embeds the same strings repeatedly within
       and across requests (query text for search + slot ops, dedup keys,
@@ -89,22 +146,49 @@ class EmbeddingPipeline:
         self.backend = "torch"
         if requested == "onnx":
             try:
-                self.model = SentenceTransformer(
-                    _resolve_onnx_source(config.model_name),
-                    device=device,
-                    backend="onnx",
-                    model_kwargs={
-                        "file_name": getattr(
-                            config, "onnx_file_name", "onnx/model.onnx",
-                        ),
-                    },
+                file_name = getattr(
+                    config, "onnx_file_name", "onnx/model.onnx",
                 )
-                self.backend = "onnx"
+                file_name = "/".join(_onnx_file_parts(file_name))
+                onnx_source = _resolve_onnx_source(
+                    config.model_name,
+                    file_name,
+                )
+                if onnx_source is None:
+                    raise FileNotFoundError(
+                        f"configured ONNX artifact {file_name!r} is not "
+                        "available in the local model or Hub cache",
+                    )
+                if _native_windows() and has_nested_transformer_module(
+                    onnx_source,
+                ):
+                    # Narrower than a platform gate: the pinned Optimum stack
+                    # matches a POSIX subfolder pattern against OS-native path
+                    # strings, so only a nested module subfolder goes
+                    # undetected here and re-enables export. A flat layout
+                    # resolves on both platforms and keeps the accelerator.
+                    logger.warning(
+                        "ONNX embedding backend is disabled on native Windows "
+                        "for this model's nested module layout because the "
+                        "pinned Optimum stack mis-detects a nested "
+                        "subfolder's existing ONNX artifact and enables "
+                        "export; falling back to torch before ONNX "
+                        "construction.",
+                    )
+                else:
+                    self.model = SentenceTransformer(
+                        onnx_source,
+                        device=device,
+                        backend="onnx",
+                        model_kwargs={
+                            "file_name": file_name, "export": False,
+                        },
+                    )
+                    self.backend = "onnx"
             except Exception as exc:  # noqa: BLE001 — optional accelerator
                 logger.warning(
                     "ONNX embedding backend failed to load (%s) — falling "
-                    "back to torch. Embeddings are identical either way; "
-                    "only encode latency differs.",
+                    "back to torch.",
                     exc,
                 )
         if self.model is None:

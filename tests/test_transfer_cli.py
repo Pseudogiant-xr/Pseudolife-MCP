@@ -236,7 +236,13 @@ def _seed_bank(conn) -> None:
     )
     cur.execute(
         "INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, "
-        "created_at) VALUES ('widget', 'color', 1, 152.0)"
+        "created_at) VALUES ('widget', 'color', 1, 152.0), "
+        "('widget', 'color', 2, 152.5)"
+    )
+    cur.execute(
+        "INSERT INTO memory_trace_invalidations "
+        "(entity_norm, attribute_norm, source_entry_id, invalidated_at, cause) "
+        "VALUES ('widget', 'color', 2, 170.0, 'source_superseded')"
     )
     cur.execute(
         "INSERT INTO entity_sources (entity_id, source, count, origin, "
@@ -355,6 +361,87 @@ def test_export_import_roundtrip_preserves_every_table(pg_url, tmp_path):
         assert after[table] == before[table], f"{table} did not roundtrip"
 
 
+def test_import_advances_entry_ids_past_deleted_invalidation_sources(
+    pg_url, tmp_path,
+):
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+        conn.execute("DELETE FROM entries WHERE id = 2")
+    archive = tmp_path / "deleted-source.zip"
+    perform_export(pg_url, archive)
+
+    with _bank(pg_url):
+        pass
+    perform_import(pg_url, archive)
+
+    with psycopg.connect(pg_url) as conn:
+        retained_source_id = conn.execute(
+            "SELECT MAX(source_entry_id) FROM memory_trace_invalidations"
+        ).fetchone()[0]
+        new_id = conn.execute(
+            "INSERT INTO entries (band, text, embedding, ts) "
+            "VALUES ('flat', 'post-import entry', %s::vector, 999.0) "
+            "RETURNING id",
+            (_VEC,),
+        ).fetchone()[0]
+    assert new_id > retained_source_id
+
+
+def test_old_export_without_invalidation_member_backfills_surviving_pairs(
+    pg_url, tmp_path,
+):
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+    current = tmp_path / "current.zip"
+    old = tmp_path / "old.zip"
+    perform_export(pg_url, current)
+
+    def remove_v39_member(blobs):
+        blobs.pop("memory_trace_invalidations.jsonl")
+        manifest = json.loads(blobs["manifest.json"])
+        manifest["schema_version"] = 38
+        manifest["counts"].pop("memory_trace_invalidations", None)
+        blobs["manifest.json"] = json.dumps(manifest).encode()
+
+    _rewrite_zip(current, old, remove_v39_member)
+    with _bank(pg_url):
+        pass
+    result = perform_import(pg_url, old)
+    assert result["counts"]["memory_trace_invalidations"] == 1
+    with psycopg.connect(pg_url) as conn:
+        rows = conn.execute(
+            "SELECT entity_norm, attribute_norm, source_entry_id, "
+            "invalidated_at, cause FROM memory_trace_invalidations"
+        ).fetchall()
+    assert rows == [("widget", "color", 2, 170.0, "source_superseded")]
+
+
+def test_current_export_empty_invalidation_member_is_authoritative(
+    pg_url, tmp_path,
+):
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+    current = tmp_path / "current.zip"
+    empty = tmp_path / "empty-events.zip"
+    perform_export(pg_url, current)
+
+    def empty_v39_member(blobs):
+        blobs["memory_trace_invalidations.jsonl"] = b""
+        manifest = json.loads(blobs["manifest.json"])
+        manifest["counts"]["memory_trace_invalidations"] = 0
+        blobs["manifest.json"] = json.dumps(manifest).encode()
+
+    _rewrite_zip(current, empty, empty_v39_member)
+    with _bank(pg_url):
+        pass
+    perform_import(pg_url, empty)
+    with psycopg.connect(pg_url) as conn:
+        count = conn.execute(
+            "SELECT count(*) FROM memory_trace_invalidations"
+        ).fetchone()[0]
+    assert count == 0
+
+
 def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
     with _bank(pg_url) as conn:
         _seed_bank(conn)
@@ -373,6 +460,12 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "('sampleext_schema_version', '\"v34-sampleext\"'::jsonb) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES "
+            "('dream_ack_secret_v1', '\"bank-local-secret\"'::jsonb), "
+            "('coordination_hlc_highwater', '[10000, 1]'::jsonb) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
         conn.commit()
 
     out = tmp_path / "bank.zip"
@@ -389,6 +482,8 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert "schema_version" not in meta_keys
         assert "sampleext_schema_version" not in meta_keys
         assert "active_session_pointer" not in meta_keys
+        assert "dream_ack_secret_v1" not in meta_keys
+        assert "coordination_hlc_highwater" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["format_version"] == 1

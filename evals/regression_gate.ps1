@@ -2,15 +2,17 @@
 # Regression gate: pinned oracle/e4b-ft "arm1" slice, replicated, vs the
 # committed baseline (evals/results/regression_gate.baseline.json).
 #
-# SCOPE: retrieval knobs + fact-ranking + answer/judge path. Extraction and
+# SCOPE: offline cortex fact-ranking reconstruction + answer/judge path.
+# Raw-entry contexts are copied, so this does NOT exercise CMS candidate
+# selection/reranking, MemoryService search, or MCP rendering. Extraction and
 # dream-path changes are NOT covered here — re-run the ladder for those
 # (existing rule). Run this before committing eval- or retrieval-affecting
 # changes (CLAUDE.md review discipline).
 #
 # Stages: 0 cleanup of the arm1-gate namespace (stale judged gate files
 # would resume as no-ops and silently pass); 1 rebuild contexts from local
-# bank dumps with CURRENT knobs (falls back to strip-copying pinned
-# contexts if banks are absent — reduced scope, loud warning); 2 judge
+# bank dumps with the supported fact-ranking knobs (required inputs;
+# absent banks invalidate the run); 2 judge
 # N replicates; 3 verdict vs baseline.
 #
 #   evals\regression_gate.ps1                # 2 replicates, gate verdict
@@ -47,6 +49,13 @@ $env:PYTHONPATH = $repo
 
 function Log($msg) { Write-Host "$(Get-Date -Format 'HH:mm:ss') $msg" }
 
+# Missing fixtures are an invalid run, never a narrower passing gate. Check
+# before clearing prior results or loading/starting the model helper.
+if (-not (Test-Path -LiteralPath $banks -PathType Container)) {
+    Log "required bank dumps missing at $banks; restore the pinned banks before running the gate"
+    exit 2
+}
+
 # Start-Qwen / Stop-Qwen, including the eval env protocol. Default (no -Fast)
 # is the reproducible q8_0 config, which is mandatory here: this gate judges.
 . (Join-Path $PSScriptRoot "qwen_server.ps1")
@@ -57,17 +66,10 @@ Remove-Item (Join-Path $results "longmemeval-ku-oracle-e4b-ft-arm1-gate*") `
     -Force -ErrorAction SilentlyContinue
 
 # -- Stage 1: contexts -----------------------------------------------------
-if (Test-Path $banks) {
-    Log "stage 1: rebuilding contexts from banks with current knobs"
-    & $py $rebuild --dataset oracle --extractor e4b-ft `
-        --src-tag arm1 --out-tag arm1-gate
-    if ($LASTEXITCODE -ne 0) { Log "rebuild failed"; exit 2 }
-} else {
-    Write-Warning ("banks missing at $banks — falling back to pinned " +
-        "contexts; gate covers answer/judge drift only")
-    & $py $replicatePy copy --extractor e4b-ft --tag arm1 --to-tag arm1-gate
-    if ($LASTEXITCODE -ne 0) { Log "copy failed"; exit 2 }
-}
+Log "stage 1: rebuilding cortex contexts from required bank dumps; raw-entry contexts remain pinned"
+& $py $rebuild --dataset oracle --extractor e4b-ft `
+    --src-tag arm1 --out-tag arm1-gate
+if ($LASTEXITCODE -ne 0) { Log "rebuild failed"; exit 2 }
 
 # -- Stage 2: judge replicates --------------------------------------------
 try {

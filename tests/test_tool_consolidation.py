@@ -47,7 +47,10 @@ def test_dream_status_pull_commit_via_one_tool(tmp_path: Path, monkeypatch) -> N
     pulled = _invoke("memory_dream", {"action": "pull"})
     assert "cursor" in pulled and "entries" in pulled
 
-    committed = _invoke("memory_dream", {"action": "commit", "cursor": pulled["cursor"]})
+    committed = _invoke(
+        "memory_dream",
+        {"action": "commit", "commit_token": pulled["commit_token"]},
+    )
     assert "dream_cursor" in committed
 
 
@@ -67,10 +70,18 @@ def test_dream_run_passes_limit(tmp_path: Path, monkeypatch) -> None:
     assert seen["limit"] == 500
 
 
-def test_dream_commit_requires_cursor(tmp_path: Path, monkeypatch) -> None:
+def test_dream_commit_requires_token(tmp_path: Path, monkeypatch) -> None:
     _reload(tmp_path, monkeypatch)
     out = _invoke("memory_dream", {"action": "commit"})
-    assert out.get("error") == "cursor_required"
+    assert out.get("error") == "commit_token_required"
+
+
+def test_dream_commit_explains_legacy_cursor_rejection(
+        tmp_path: Path, monkeypatch) -> None:
+    _reload(tmp_path, monkeypatch)
+    out = _invoke("memory_dream", {"action": "commit", "cursor": 123.0})
+    assert out.get("error") == "legacy_cursor_unsupported"
+    assert "commit_token" in out.get("detail", "")
 
 
 def test_dream_deep_delegates_with_apply_flag(tmp_path: Path, monkeypatch) -> None:

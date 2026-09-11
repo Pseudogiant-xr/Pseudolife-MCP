@@ -1449,9 +1449,12 @@ class OpenAICompatExtractor:
         discard the rules already extracted. The signals whose call failed
         are listed in ``last_rule_failed_ids`` (reset per call) so the
         caller leaves exactly those pending; ``last_rule_failures`` counts
-        them. Only a batch with NO successful call raises."""
+        them. Valid-but-empty responses are listed separately in
+        ``last_rule_empty_ids`` and also stay pending. Only a batch with NO
+        successful call raises."""
         out: list[LessonClaim] = []
         self.last_rule_failed_ids: list = []
+        self.last_rule_empty_ids: list = []
         self.last_rule_failures = 0
         first_error: Exception | None = None
         for s in signals:
@@ -1479,6 +1482,8 @@ class OpenAICompatExtractor:
                 logger.warning("extract_rules: signal %s failed (%s); "
                                "left pending", s.get("id"), exc)
                 continue
+            if not claims:
+                self.last_rule_empty_ids.append(s.get("id"))
             for c in claims[:1]:
                 c["about"] = (_strip_rule_prefix(c.get("about"))
                               or _strip_rule_prefix(s.get("about")))

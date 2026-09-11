@@ -239,6 +239,8 @@ class MIRASBand:
                     # label on a file-mode restart (the stance lesson).
                     "authority": e.authority,
                     "distortion_tolerance": e.distortion_tolerance,
+                    "dream_state": e.dream_state,
+                    "dream_id": e.dream_id,
                 }
                 for e in self.entries
             ]
@@ -266,6 +268,8 @@ class MIRASBand:
                 tags=list(e.get("tags") or []),
                 authority=e.get("authority"),
                 distortion_tolerance=e.get("distortion_tolerance"),
+                dream_state=e.get("dream_state"),
+                dream_id=e.get("dream_id", ""),
             )
             for e in state.get("entries", [])
         ]

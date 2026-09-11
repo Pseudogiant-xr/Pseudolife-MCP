@@ -70,7 +70,7 @@ def test_the_previously_leaking_tables_are_covered():
     ``pg_fixtures`` had (#181, 2026-08-25)."""
     for table in ("chronicle_events", "entity_kinds", "retrieval_events",
                   "outcome_signals", "dismissed_pairs", "merge_decisions",
-                  "communities"):
+                  "communities", "memory_trace_invalidations"):
         assert table in schema.BENCH_RESET_TABLES, table
 
 

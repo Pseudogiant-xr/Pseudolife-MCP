@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v38). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v40). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -125,8 +125,8 @@ attachment response can leave a lease until expiry; failed competing attachment
 attempts do not renew it.
 
 Full database backups contain coordination mail. Portable `export`/`import`
-archives omit both coordination tables so moving knowledge cannot clone live
-mailboxes or instance credentials. Follow the
+archives omit both coordination tables and their clock metadata so moving
+knowledge cannot clone live mailboxes or instance credentials. Follow the
 [offline mailbox recovery procedure](coordination-recovery.md) after a database
 restore. See the [experimental design](../specs/2026-09-11-agent-coordination-design.md)
 for delivery-state and host-verification contracts.
@@ -149,6 +149,35 @@ for delivery-state and host-verification contracts.
   for what this changes about retrieval, and the
   [schema version history](#schema-version-history) below for the v25
   cutover itself.
+- **ONNX acceleration is load-only** (`EmbeddingConfig.backend = "onnx"`,
+  selected automatically by the MCP defaults when the optional ONNX stack is
+  installed). `EmbeddingConfig.onnx_file_name` defaults to
+  `onnx/model.onnx`; that exact artifact must already exist in a local model
+  directory or a revision-specific cached Hub snapshot. A missing artifact falls
+  back to torch before SentenceTransformers constructs its ONNX backend, in
+  online and offline processes alike. The daemon never downloads ONNX artifacts
+  at runtime. The daemon image provisions MiniLM's while building
+  (`ops/provision_embedding_models.py` is the reference for how); a pip install
+  stays on torch unless the operator puts `onnx/model.onnx`, or whatever
+  `onnx_file_name` names, into the local model directory or the cached Hub
+  snapshot. Each supported Transformer module must have the artifact in its own
+  configured subdirectory; a root-level file does not cover a missing module
+  artifact.
+  Standard Transformer, Pooling, Normalize and Dense module layouts are
+  recognized; unknown module classes use torch. Filenames must end in lowercase
+  `.onnx` so validation matches the loader on case-sensitive filesystems.
+  No validated ONNX artifact path or `modules.json` may traverse a link between
+  the model directory and the file, because the loader's discovery glob does not
+  descend into linked directories — a link that stays inside the model directory
+  still hides the artifact and re-enables export. The one accepted link is a Hub
+  snapshot's leaf link, and only after local-only Hub cache resolution and only
+  when it targets that cached repository's own `blobs` directory. With the
+  pinned Optimum stack, native Windows does not detect an artifact under a
+  nested module subfolder such as `0_Transformer/onnx` and enables export, so a
+  model whose Transformer module loads from a subfolder falls back to torch
+  there before ONNX construction. A flat `onnx` subfolder resolves on both
+  platforms, and the load-only ONNX path remains available in Linux and the
+  daemon image.
 - **Surprise threshold `0.0`** — the v0.5 store gate measures *novelty*
   (`1 − max cos` to existing entries). Claude stores deliberately, so the
   gate stays permissive (store everything; novelty still drives
@@ -273,6 +302,9 @@ for delivery-state and host-verification contracts.
   `memory_supersede` (see [Memory model](memory-model.md#how-current-is-this-fact)).
   Set `false` to silence both — the read surfaces stop paying for the
   cross-index query but otherwise serve exactly as before.
+  Since schema v39, correction events for existing traces survive source
+  deletion and are preserved even while tracing is off; new trace formation
+  remains disabled. Re-enabling tracing can therefore surface those warnings.
   `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
   MTT-retention weight this same cross-index feeds; `0.0` is today's
   eviction behavior unchanged.
@@ -323,6 +355,13 @@ for delivery-state and host-verification contracts.
   beside `lesson_signals`/`lessons_written` in the dream-run row).
   Opposite-polarity matches and explicit `lesson_write` callers are never
   gated. `0` disables.
+- **Lesson-synthesis batch cap** (`memory.lessons.synthesis_max_signals =
+  200`) — most outcome signals one dream sweep drains. The batch commits
+  its lessons, graph edges and acknowledgements in one transaction under
+  the service lock, so this bounds a single daemon pause rather than the
+  total work; whatever it leaves behind is picked up by the next sweep.
+  A chosen bound (roughly one extractor batch), not a measured one. `0`
+  drains everything pending.
 - **Slot-index shadow verification on** (`memory.slot_index_shadow_rate =
   0.01`) — ~1% of slot-pool queries recompute the index from scratch and
   compare; divergences land in `stats()` as
@@ -786,7 +825,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v38**; migrations are additive
+The current Postgres meta version is **v40**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -829,7 +868,9 @@ The milestones:
 | v35 | `entries.authority` / `entries.distortion_tolerance` and `facts.authority` / `facts.distortion_tolerance` — the write-time label pair (authority collapse, arXiv 2608.01679; the compaction cliff, arXiv 2608.22752). `authority` is the SPEECH ACT of the text (`directive` \| `observation` \| `quoted`), deliberately a separate axis from the `origin` tier (who wrote — which drives supersession arithmetic and which entries never persisted anyway); `distortion_tolerance` is the fidelity class (`constraint` \| `procedural` \| `belief` \| `preference` \| `episodic`). Set at write time — explicit `memory_store` / `memory_fact_set` parameters, or a deterministic heuristic under the `auto` default that asserts only `constraint` (rule-sized deontic/imperative text) and `quoted`/`directive` — and inherited through `memory_supersede` / `memory_consolidate` / fact supersession unless the new write restates one. Consumers: the dream carries a `constraint` source's text verbatim onto a derived fact and a post-dream guard reports any constraint entry left without a verbatim carrier (`constraint_verbatim` / `constraint_misses`); a `quoted` source is low-trust for the two-man rule; `constraint` facts are pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` (`memory.cortex.pin_constraints`). `NULL` = observation / unlabelled, exactly the pre-v35 reading, so the migration is a no-op on an existing bank — no backfill, by design. Additive/idempotent |
 | v36 | Review-queue autonomy (2026-09-02). `edge_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` / `judge_relation` / `decided_by` / `decided_at` — the link judge's opinion on a pending link proposal (the retype verdict's corrected relation in `judge_relation`) and who settled the row; `entity_proposals.judge2_verdict` / `judge2_confidence` / `judge2_model` / `judged2_at` — the merge judge's SECOND opinion beside the v30 first one (two-vote agreement is the apply gate for rows the single-vote 0.8 reject gate leaves pending); and `curation_judgments` (`store`, sorted slot keys, verdict, keep, fold, confidence, note, model, judged_at) — the store-curation judge's memo, because the lesson/world duplicate listings are recomputed per pass and would otherwise be re-sent every sweep. `NULL` judge columns = not yet judged, exactly the pre-v36 behaviour, so the migration is a no-op on existing banks. Gates measured by `evals/queue_judge_ladder.py` against `evals/results/queue-judge-panel-20260902.json`. Additive/idempotent |
 | v37 | Retire-not-delete (2026-09-03). `store_decisions` (`id`, `store`, `entity_norm`, `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB, `decided_at`) — the FK-free audit of lesson/world forgets and restores. A `memory_forget(scope="lesson"\|"world")` now retires the slot's rows (`status='retired'`, rows kept; `memory.compaction` treats them like any non-live record) instead of deleting them, and the audit row carries the verbatim record so `lesson_restore` / `world_restore` (`memory_graph_review(action="restore_slot")`, `POST /api/lessons/restore`, `POST /api/world/restore`) still work after compaction has purged the retired row. Also (no DDL): merge and junk rejects write text-keyed tombstones to `dismissed_pairs` (canonical pair / `junk:<canonical>` self-pair) so a verdict outlives the CASCADE-deleted proposal row. No column changes; the table starts empty on an existing bank, so the migration is a no-op there. Additive/idempotent |
-| v38 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
+| v38 | Durable dream acknowledgement. `entries.dream_state` records `pending`, `acknowledged`, or `legacy-covered`; pre-existing rows retain `NULL` for one-time classification against the legacy cursor and configured source eligibility. New writes default to `pending`, regardless of their timestamps. Exact-entry commit tokens use a bank-local secret in `meta`; logical export excludes that secret. The numeric cursor remains display metadata. This preserves the previous migration boundary; it does not repair historical skipped entries. Additive/idempotent |
+| v39 | `memory_trace_invalidations` preserves source-supersession events by normalized slot and source entry ID, without entry or fact foreign keys. Explicit correction records entry retirement and existing trace invalidations together. Events survive source deletion, cortex snapshots and compaction; confirmation still clears the served warning. Table creation and older logical imports reconstruct only surviving superseded source/trace pairs. **Upgrade effect:** the first v39 start materialises one event per surviving superseded-source trace pair — 2077 pairs on the reference bank on 2026-09-11, measured with `ops/measure_reverify_population.py`. That reproduces the warnings the bank already served, but from then on they no longer drain when the source is evicted or deleted; each clears only when its slot is confirmed again (`memory_fact_set` at the slot with the same or a new value, or accepting a contender). To clear a population deliberately, re-assert those slots. `re_verify` stays a passive flag and is still excluded from `correct_with`. Additive/idempotent |
+| v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

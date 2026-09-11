@@ -124,15 +124,19 @@ plus a `re_verify_reason` naming how many source memories were corrected
 since. It surfaces on `memory_fact_get`, `memory_search`'s cortex block,
 and `memory_recall`; on a set-valued slot the comparison is against the
 newest member's confirmation stamp, since a set is served as one grouped
-answer. It is a flag, never a cascade, and deliberately not routed into a
-`correct_with` call: keyed on `last_confirmed`, a slot re-asserted long
-after its retracted contributor still fires it, which on a mature bank is
-common — on the live bank on 2026-09-02 roughly a quarter of current facts
-stood on a source memory contradicted since they were last confirmed.
-Routing that into the same call `correct_with` tells the reader
-to run *now* would turn a common, weak signal into a standing instruction
-to rewrite a quarter of the cortex every session. Re-asserting or
-re-confirming the slot moves `last_confirmed` forward and clears the flag.
+answer — falling back to a member's assertion time when that member carries
+no confirmation stamp, so one legacy member cannot drag the slot's clock to
+zero and warn on every source it ever had corrected.
+
+It is a flag, never a cascade, and deliberately excluded from the
+`correct_with` affordance: correcting a source note does not establish that
+every fact derived from that note is wrong, and the signal is broad. Measured
+on the live bank on 2026-09-11 with `ops/measure_reverify_population.py`
+(read-only): 1668 of 6015 current facts, 27.7%, stood on a source memory
+corrected since they were last confirmed. Routing that into a call whose
+served note says to run a correction *now* would be a standing instruction to
+rewrite a quarter of the cortex every session. Re-asserting or re-confirming
+the slot moves `last_confirmed` forward and clears the flag.
 
 The **active** affordance for retracted evidence lives on the correction
 itself: `memory_supersede`'s result carries `derived_flagged` — the
@@ -144,15 +148,38 @@ nothing to go re-check), the list is capped at 50 entries with live slots
 first, and `derived_flagged_truncated` / `derived_flagged_total` say
 whether a correction reached further than the cap.
 
-Both signals are **best-effort**, on purpose: they are derived at read
-time from evidence that still exists, so losing the evidence loses the
-flag. `memory_traces.entry_id` is `ON DELETE CASCADE`, a true-drop
-capacity eviction hard-deletes the entry row, including superseded history
-when selected for eviction — so a flag can appear and later vanish with
-no re-verification having happened, and `memory_delete`, the strongest retraction of all,
-raises no flag at any point. Both are gated on `memory.traces.enabled`;
-turning it off silences both without changing anything else about how
-facts are served.
+PostgreSQL schema v39 preserves the correction event separately from the
+evictable source and its trace. A corrected source can later disappear from
+`source_entries` while its fact's `re_verify` warning remains, until the fact
+is confirmed again. The event holds a normalized slot, opaque source entry ID
+and correction time, without source text or a foreign key to the entry or fact
+row. Cortex snapshots and fact compaction therefore retain it. Ordinary
+eviction or deletion of an uncorrected source does not establish a correction
+and creates no warning.
+
+**What the upgrade does to an existing bank.** The first start on v39
+materialises one durable event for every surviving `memory_traces` row whose
+source entry is already superseded — 2077 pairs on the reference bank on
+2026-09-11, which is what the same script reports as
+`trace_supersession_pairs`. That reproduces the warnings the bank was already
+serving; it does not invent new ones, and history already lost to deletion
+cannot be recovered. The difference afterwards is that these warnings no
+longer drain when their source is evicted. Each one clears only when its slot
+is confirmed again: a `memory_fact_set` at the slot with the same or a new
+value, or accepting a contender there. An operator who wants to clear a
+population deliberately re-asserts those slots — the flag is per slot, so
+there is no bulk switch, and there is deliberately no way to dismiss a warning
+without confirming the value it stands on. `re_verify` stays passive
+throughout: it is never rendered into `correct_with`, so a large flagged
+population never becomes a large instruction list.
+
+Both served signals are gated on `memory.traces.enabled`. Turning tracing off
+silences them and stops new trace formation; corrections still preserve events
+for trace relationships that already exist, so turning it back on does not
+erase known provenance. Upgrades and older logical imports can reconstruct
+events only from surviving superseded sources and traces. History already
+lost to deletion cannot be recovered. These warnings remain passive: they
+request scrutiny without changing or deleting a fact.
 
 **Source notes retain their evidence when a potential conflict is stored.**
 The contradiction detector runs before the surprise gate: a different
@@ -170,6 +197,27 @@ under its existing rules. Existing source-note supersession marks and
 history are preserved, with no automatic repair or backfill. Their
 retrieval treatment is described under
 [superseded entries](retrieval.md#superseded-entries).
+
+For an explicit correction, carry the selected entry's `id` from search or
+recent results into `memory_supersede(entry_id=..., new_text=...)`. Use
+`entry_ids=[...]` for `memory_consolidate`. IDs identify entries in the same
+bank and survive ordinary PostgreSQL hydration; they are not portable across
+bank replacement or arbitrary imports. The Console sends selected IDs too.
+
+Use exactly one selector mode. Legacy `old_text` and `replaces` calls still
+work when each full text identifies exactly one live entry; a retired
+duplicate is history rather than a rival target, so text that was corrected
+and later restated stays selectable. There is no paraphrase fallback or
+replace-all behavior. Missing, ambiguous, already-superseded or unavailable
+targets return `new_memory_stored: false` with `reason`, `error` and
+`target_errors`; none of the selected entries change on target-validation
+failure. Search again and resubmit IDs. Success results include
+`superseded_ids`, which is empty in file mode: file-mode entries have no
+durable row ID and therefore require unique exact text.
+
+Whole-selection validation does not provide transactional rollback for later
+encoding or storage failures. Operational failure recovery remains a separate
+limitation of explicit corrections.
 
 ### Who said it, and how exactly must it survive? (schema v35)
 
@@ -516,7 +564,43 @@ duplicate and counted (`lessons_deduped` in the dream-run row;
 `memory.lessons.synthesis_dedup_min_similarity`, default `0.88`, `0`
 disables). Opposite-polarity near-matches always write — a dead-end and a
 success about the same thing are both worth keeping — and explicit
-`lesson_write` calls are never gated.
+`lesson_write` calls are never gated. The comparison covers the lessons the
+same batch has already staged, so two near-identical claims in one batch
+write once.
+
+In PostgreSQL, synthesis stages lesson changes in memory and commits the
+lessons, their graph updates, and the handled signals' acknowledgements in one
+transaction. Each claim writes inside its own savepoint: a claim that cannot be
+written rolls back both halves of itself and is counted as `write_errors`,
+while the rest of the batch commits. A fully deduplicated group is acknowledged
+only with its supporting lesson state durable. Extraction happens outside the
+service lock; changed or already consumed inputs invalidate the extracted batch
+before it writes anything. One sweep drains at most
+`memory.lessons.synthesis_max_signals` signals (default 200), which bounds a
+single lock hold rather than the total work; the rest waits for the next sweep.
+
+An empty or failed extraction route leaves its signals pending for a later
+sweep, subject to the existing retention limit. A rule signal whose own claim
+failed stays pending too; the clustering route, whose claims do not map to
+single signals, is acknowledged once any of its claims lands. This is a
+persistence guarantee, not evidence that every extracted lesson is correct or
+complete. A lost commit response triggers a durable-state check before retrying
+or saving; if that check is unavailable, the service latches until it succeeds
+or the daemon restarts.
+
+While latched, lesson reads and the lesson half of a save fail; `/health`
+reports `lesson_reconciliation_required` (status stays `ok`, so the container
+healthcheck does not restart the daemon by itself) and the daemon logs the
+latch at ERROR. Everything else still persists: the autosave and exit flush
+write weights, access counts, and dirty cortex and world slots, then report the
+lesson failure. That split matters because restarting is the operator's
+recovery: it rehydrates the durable bank and clears the latch, and it discards
+anything that was still only in memory. If selected signal rows have been
+removed or retargeted during an extended outage, their state may no longer
+prove the commit outcome: the service remains blocked for operator recovery
+instead of claiming a successful retry. This protocol does not repair
+historical losses or recover prior unsaved changes. It assumes the existing
+single-daemon writer. File-mode synthesis still returns `skipped: no-storage`.
 
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
@@ -587,6 +671,14 @@ gate, so look-alike situations with different actions coexist. The
 retried once before being accepted. Default off; an extractor without the
 rule path synthesises such signals under the shipped prompt instead and
 the dream report says so (`rules_fallback`).
+
+Failed rule calls and valid-but-empty rule responses stay pending individually
+(`rules_failed` and `rules_empty` in the synthesis report). Plain and rule
+extraction failures do not prevent a successful route from committing. A custom
+rule extractor must return one rule per handled input and identify failed or
+empty input IDs through `last_rule_failed_ids` / `last_rule_empty_ids`; if its
+counts do not establish coverage, that route is left pending without writing
+its unmatched outputs.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,
