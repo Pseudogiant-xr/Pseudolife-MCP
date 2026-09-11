@@ -138,6 +138,8 @@ def test_disconnected_http_wait_cleans_hub_without_sending_response(monkeypatch)
     (TypeError("private-fixture-body"), 400, "invalid_request"),
     (RuntimeError("private-fixture-body"), 500, "coordination_unavailable"),
     (ValueError("stale_attachment"), 400, "stale_attachment"),
+    (ValueError("instance_not_found"), 404, "instance_not_found"),
+    (ValueError("invalid_credential"), 403, "invalid_credential"),
 ])
 def test_mailbox_errors_do_not_expose_data_in_response_or_logs(monkeypatch, caplog, exception, status, code):
     from pseudolife_memory.web.coordination import CoordinationHub

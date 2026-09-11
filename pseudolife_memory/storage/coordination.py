@@ -91,16 +91,18 @@ class CoordinationStore:
 
     def _auth(self, principal, agent_id, credential, *, lock=False):
         if not isinstance(credential, str) or not credential or len(credential) > 256:
-            raise CoordinationError("unauthorized")
+            raise CoordinationError("invalid_credential")
         try:
             credential_hash = _hash(credential)
         except UnicodeError:
-            raise CoordinationError("unauthorized") from None
+            raise CoordinationError("invalid_credential") from None
         row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s" +
                         (" FOR UPDATE" if lock else ""), (agent_id,))
-        if (row is None or row["principal"] != principal or not row["credential_hash"]
+        if row is None:
+            raise CoordinationError("instance_not_found")
+        if (row["principal"] != principal or not row["credential_hash"]
                 or not hmac.compare_digest(row["credential_hash"], credential_hash)):
-            raise CoordinationError("unauthorized")
+            raise CoordinationError("invalid_credential")
         return row
 
     def _public(self, row):

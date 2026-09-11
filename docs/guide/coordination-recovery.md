@@ -70,19 +70,39 @@ message pruning, so restart with a backward wall clock cannot regress its stamps
 
 ### Malformed coordination clock row
 
-Every memory call fails with `invalid coordination clock high-water mark`, reads
-included, while `/health` still reports the daemon up. The cause is a hand-edited
-or foreign `meta` row: the `coordination_hlc_highwater` value must be a
-two-element list of non-negative integers. Stop nothing; delete the row against
-the bank:
+Calls that initialize the bank fail with `invalid coordination clock high-water
+mark`, reads included, while `/health` can still report the daemon up. The
+`coordination_hlc_highwater` value in `meta` must be a two-element list of
+non-negative integers: the physical and logical parts of the HLC.
 
-```console
-psql <bank-dsn> -c "DELETE FROM meta WHERE key = 'coordination_hlc_highwater';"
-```
+Do not delete this row or reset it to zero. It can be the only surviving bound
+for mailbox-only writes after message pruning. Neither the remaining messages
+nor the cortex, world and lesson records necessarily contain the latest stamp;
+an older backup alone does not cover writes made after that backup.
 
-The next memory call re-seeds the clock from the highest stamp in the cortex,
-world and lesson records, so no restart is needed. The next coordination send
-re-creates the row.
+1. Stop the daemon and adapters, take a database backup, and preserve the damaged
+   row for diagnosis before editing it.
+2. Establish a verified HLC bound that is at least as high as every stamp issued
+   before the corruption, including pruned messages. Use a trustworthy copy of
+   the latest high-water mark or complete evidence of subsequent writes. Compare
+   stamps as integer pairs, not strings. If no such bound can be established,
+   keep the bank stopped; do not guess a replacement or discard the safeguard.
+3. In a database session with errors configured to stop execution, replace the
+   placeholders below with that verified pair and update only the damaged row:
+
+   ```sql
+   BEGIN;
+   UPDATE meta SET value = '[<verified-physical>, <verified-logical>]'::jsonb
+   WHERE key = 'coordination_hlc_highwater';
+   SELECT value FROM meta WHERE key = 'coordination_hlc_highwater';
+   COMMIT;
+   ```
+
+   Confirm one row was updated and the returned value matches the verified pair.
+4. Restart the daemon with adapters still stopped. Re-seeding observes this bound
+   alongside the slot stores, so subsequent stamps must exceed it even if the
+   wall clock moved backward. Verify initialization succeeds before restarting
+   the adapters. Retain the backup and repair evidence.
 
 Portable knowledge exports exclude agent mailboxes, credentials and operational
 metadata. Full database backups retain them. See

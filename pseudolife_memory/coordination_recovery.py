@@ -13,7 +13,9 @@ import sys
 
 import psycopg
 
-from pseudolife_memory.coordination_adapter import CoordinationAdapter, _open_state
+from pseudolife_memory.coordination_adapter import (
+    CoordinationAdapter, _StateReservation, _open_state,
+)
 from pseudolife_memory.storage.coordination import CoordinationStore
 from pseudolife_memory.utils.config import load_config
 
@@ -82,7 +84,7 @@ def _perform(args):
         raise RecoveryError("state output must be a new private file; existing files are never replaced") from None
     try:
         stat = os.fstat(fd)
-        reservation = stat.st_dev, stat.st_ino
+        reservation = _StateReservation(stat.st_dev, stat.st_ino)
     finally:
         os.close(fd)
     with _connect() as conn:

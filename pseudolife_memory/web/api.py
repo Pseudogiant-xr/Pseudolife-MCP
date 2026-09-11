@@ -113,6 +113,7 @@ async def _send_coordination_error(send, exc):
     status = (401 if code in {"unauthorized", "authentication_required",
                              "instance_authentication_required"}
               else 403 if code in {"principal_not_allowed", "invalid_credential"}
+              else 404 if code == "instance_not_found"
               else 429 if code in {"wait_capacity_exceeded", "rate_limited", "queue_full"}
               else 500 if code == "coordination_unavailable" else 400)
     if status == 500:

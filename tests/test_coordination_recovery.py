@@ -1,5 +1,6 @@
 """Offline restore recovery never exposes or silently replaces credentials."""
 import json
+from contextlib import contextmanager
 
 import pytest
 
@@ -19,6 +20,39 @@ def invoke(monkeypatch, pg_url, config, action, *options):
     return main([action, "--config", str(config), "--confirm-daemon-stopped", *options])
 
 
+def test_rebind_persists_identity_with_adapter_reservation(tmp_path, monkeypatch):
+    from pseudolife_memory import coordination_recovery as recovery
+
+    @contextmanager
+    def connect():
+        yield object()
+
+    class Storage:
+        def __init__(self, conn):
+            pass
+
+        @contextmanager
+        def _txn(self):
+            yield
+
+    class Store:
+        def __init__(self, storage):
+            pass
+
+        def rebind(self, agent, principal):
+            return {"agent_id": agent, "credential": "fixture-key"}
+
+    monkeypatch.setattr(recovery, "_connect", connect)
+    monkeypatch.setattr(recovery, "_RecoveryStorage", Storage)
+    monkeypatch.setattr(recovery, "CoordinationStore", Store)
+    state = tmp_path / "agent.json"
+    assert recovery.main(["rebind", "--config", str(settings(tmp_path)),
+                          "--confirm-daemon-stopped", "--agent", "agent-a",
+                          "--principal", "alice", "--bank-url", "http://127.0.0.1:8099",
+                          "--state", str(state)]) == 0
+    assert json.loads(state.read_text(encoding="utf-8"))["agent_id"] == "agent-a"
+
+
 def test_recovery_revokes_and_rebinds_private_state_without_exposing_key(store, pg_url, tmp_path, monkeypatch, capsys):
     from pseudolife_memory.storage.coordination import CoordinationError
     a, b = pair(store)
@@ -26,7 +60,7 @@ def test_recovery_revokes_and_rebinds_private_state_without_exposing_key(store, 
     message = store.send(*creds(a), to=b["agent_id"], text="pending", request_id="r")
     config = settings(tmp_path)
     assert invoke(monkeypatch, pg_url, config, "recover", "--confirm-restore") == 0
-    with pytest.raises(CoordinationError, match="unauthorized"):
+    with pytest.raises(CoordinationError, match="invalid_credential"):
         store.authenticate(*creds(b))
     path = tmp_path / "new-agent.json"
     assert invoke(monkeypatch, pg_url, config, "rebind", "--agent", b["agent_id"], "--principal", "alice",

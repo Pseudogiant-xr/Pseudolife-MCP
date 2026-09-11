@@ -47,8 +47,10 @@ def test_credentials_and_public_views(store):
     assert a["credential"] != b["credential"]
     for args in [("bob", a["agent_id"], a["credential"]),
                  ("alice", a["agent_id"], b["credential"])]:
-        with pytest.raises(CoordinationError, match="unauthorized"):
+        with pytest.raises(CoordinationError, match="invalid_credential"):
             store.authenticate(*args)
+    with pytest.raises(CoordinationError, match="instance_not_found"):
+        store.authenticate("alice", "missing-agent", a["credential"])
     assert "credential" not in store.authenticate(*creds(a))
     raw = store.storage.conn.execute("SELECT credential_hash FROM coordination_agents WHERE agent_id=%s", (a["agent_id"],)).fetchone()[0]
     assert raw != a["credential"]
@@ -58,7 +60,7 @@ def test_credentials_and_public_views(store):
 
 def test_malformed_credential_rejected_without_encoding_error(store):
     agent = store.register("alice")
-    with pytest.raises(CoordinationError, match="unauthorized"):
+    with pytest.raises(CoordinationError, match="invalid_credential"):
         store.authenticate("alice", agent["agent_id"], "\ud800")
 
 
@@ -125,7 +127,7 @@ def test_attempt_is_not_ack_and_restore_revokes_credentials(store):
     assert store.storage.conn.execute("SELECT attempts FROM coordination_messages").fetchone() == (1,)
     assert len(store.receive(*creds(b))["messages"]) == 1
     store.recover()
-    with pytest.raises(CoordinationError, match="unauthorized"):
+    with pytest.raises(CoordinationError, match="invalid_credential"):
         store.mark_attempt(*creds(b), **args)
     recovered = store.rebind(b["agent_id"], "alice")
     assert recovered["wake_enabled"] is False
@@ -308,7 +310,7 @@ def test_prune_removes_idle_unattached_agents_and_keeps_active_or_referenced_one
     assert ghost["agent_id"] not in remaining
     assert remaining == {active["agent_id"], attached["agent_id"],
                          sender["agent_id"], referenced["agent_id"]}
-    with pytest.raises(CoordinationError, match="unauthorized"):
+    with pytest.raises(CoordinationError, match="instance_not_found"):
         store.authenticate(*creds(ghost))
 
 

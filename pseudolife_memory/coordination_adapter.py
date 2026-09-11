@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from contextlib import suppress
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ import anyio
 import httpx
 
 from .channel import ChannelEvent
+from .coordination import PUBLIC_ERROR_CODES
 
 
 class AdapterError(RuntimeError):
@@ -28,9 +30,18 @@ class AdapterError(RuntimeError):
     transport failures) so callers can tell a daemon's verdict from an outage.
     """
 
-    def __init__(self, message: str, *, status: int | None = None):
+    def __init__(self, message: str, *, status: int | None = None,
+                 code: str | None = None):
         super().__init__(message)
         self.status = status
+        self.code = code
+
+
+@dataclass
+class _StateReservation:
+    dev: int
+    ino: int
+    lock_fd: int | None = None
 
 
 def frame_content(message: dict) -> str:
@@ -137,6 +148,7 @@ class CoordinationAdapter:
         self._generation = None
         self._heartbeat_task = None
         self._failure = None
+        self._permanent_failure = False
         self._entered = False
         self._after = None
         self._recent_ids = deque(maxlen=self.MAX_RECENT_IDS)
@@ -152,6 +164,9 @@ class CoordinationAdapter:
     @property
     def unread_hint(self) -> str | None:
         """A count from the last adapter check; reading it does no I/O or ACK."""
+        if self._permanent_failure:
+            return ("Coordination: background delivery stopped; check bearer access or "
+                    "restore/rebind the saved identity.")
         if self._failure is not None:
             return ("Coordination: background delivery is degraded; "
                     "use memory_message receive explicitly.")
@@ -168,6 +183,18 @@ class CoordinationAdapter:
     def _record_failure(self, error: AdapterError) -> None:
         """Enter the degraded state once per outage; recovery clears it."""
         self._pending_count = None
+        if self._is_permanent_identity_error(error):
+            already_reported = self._permanent_failure
+            self._failure = error
+            self._permanent_failure = True
+            self._recovered.clear()
+            # Wake a renewal task that may be sleeping so it can terminate.
+            self._degraded.set()
+            if not already_reported:
+                print("pseudolife-mcp: live coordination background delivery stopped; "
+                      "check bearer access or restore/rebind the saved identity.",
+                      file=sys.stderr)
+            return
         if self._failure is not None:
             return
         self._failure = error
@@ -175,6 +202,16 @@ class CoordinationAdapter:
         self._degraded.set()
         print("pseudolife-mcp: live coordination delivery unavailable; retrying in the "
               "background, use explicit receive meanwhile.", file=sys.stderr)
+
+    @staticmethod
+    def _is_permanent_identity_error(error: AdapterError) -> bool:
+        if error.code in {"authentication_required", "unauthorized", "principal_not_allowed",
+                          "instance_authentication_required", "invalid_credential",
+                          "instance_not_found"}:
+            return True
+        # Older daemons may not return a categorical body. Treat an auth status
+        # as terminal, but never infer that the saved address itself is gone.
+        return error.code is None and error.status in {401, 403}
 
     @property
     def instance_headers(self) -> dict[str, str]:
@@ -204,9 +241,9 @@ class CoordinationAdapter:
                         # one identity, so this start yields.
                         raise AdapterError("adapter state is being registered by another process")
                     # A crash between the reservation and the identity write
-                    # left an empty file behind long ago. It is this start's
-                    # reservation now, not invalid state to refuse forever.
-                    return info.st_dev, info.st_ino
+                    # left an empty file behind long ago. Claim it under the
+                    # sibling kernel lock before treating it as ours.
+                    return self._claim_stale_reservation(info)
                 with os.fdopen(fd, "r", encoding="utf-8") as stream:
                     state = json.load(stream)
             except (OSError, ValueError):
@@ -222,7 +259,81 @@ class CoordinationAdapter:
         else:
             info = os.fstat(fd)
             os.close(fd)
-            return info.st_dev, info.st_ino
+            return _StateReservation(info.st_dev, info.st_ino)
+
+    def _claim_stale_reservation(self, expected):
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        try:
+            lock_fd = _open_state(lock_path, os.O_CREAT | os.O_RDWR)
+        except OSError:
+            raise AdapterError("cannot claim stale adapter state") from None
+        try:
+            try:
+                acquired = self._try_reservation_lock(lock_fd)
+            except OSError:
+                raise AdapterError("cannot claim stale adapter state") from None
+            if not acquired:
+                raise AdapterError("adapter state is being registered by another process")
+            # The state may have changed between the initial read and acquiring
+            # the lock. Re-open it with the normal link/type checks and require
+            # the same old, empty inode before any network request.
+            try:
+                fd = _open_state(self.state_path, os.O_RDONLY)
+            except OSError:
+                raise AdapterError("adapter state reservation changed") from None
+            try:
+                current = os.fstat(fd)
+            finally:
+                os.close(fd)
+            if ((current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino)
+                    or current.st_size != 0
+                    or time.time() - current.st_mtime < self.STALE_RESERVATION_SECONDS):
+                raise AdapterError("adapter state reservation changed")
+            return _StateReservation(current.st_dev, current.st_ino, lock_fd)
+        except BaseException:
+            self._unlock_reservation_fd(lock_fd)
+            raise
+
+    @staticmethod
+    def _try_reservation_lock(fd: int) -> bool:
+        if os.name == "nt":
+            import msvcrt
+            if os.fstat(fd).st_size < 1:
+                os.ftruncate(fd, 1)
+                os.fsync(fd)
+            os.lseek(fd, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return True
+            except OSError:
+                return False
+        import fcntl
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _unlock_reservation_fd(fd: int) -> None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        finally:
+            with suppress(OSError):
+                os.close(fd)
+
+    def _release_reservation(self, reservation) -> None:
+        if reservation is not None and reservation.lock_fd is not None:
+            lock_fd, reservation.lock_fd = reservation.lock_fd, None
+            self._unlock_reservation_fd(lock_fd)
 
     async def _register(self, reservation):
         result = await self._post("register", self._registration)
@@ -255,10 +366,14 @@ class CoordinationAdapter:
         one that now holds an identity, is left alone."""
         if self.state_path is None or reservation is None:
             return
-        with suppress(OSError):
-            info = self.state_path.stat(follow_symlinks=False)
-            if (info.st_dev, info.st_ino) == reservation and info.st_size == 0:
-                self.state_path.unlink()
+        try:
+            with suppress(OSError):
+                info = self.state_path.stat(follow_symlinks=False)
+                if ((info.st_dev, info.st_ino) == (reservation.dev, reservation.ino)
+                        and info.st_size == 0):
+                    self.state_path.unlink()
+        finally:
+            self._release_reservation(reservation)
 
     def _save_new_identity(self, reservation):
         if self.state_path is None:
@@ -273,13 +388,15 @@ class CoordinationAdapter:
                 stream.flush()
                 os.fsync(stream.fileno())
             info = self.state_path.stat(follow_symlinks=False)
-            if (info.st_dev, info.st_ino) != reservation or self.state_path.is_symlink():
+            if ((info.st_dev, info.st_ino) != (reservation.dev, reservation.ino)
+                    or self.state_path.is_symlink()):
                 raise AdapterError("adapter state reservation changed")
             os.replace(temp_path, self.state_path)
             temp_path = None
         except OSError:
             raise AdapterError("cannot persist private adapter identity") from None
         finally:
+            self._release_reservation(reservation)
             if temp_path is not None:
                 with suppress(OSError):
                     temp_path.unlink()
@@ -299,8 +416,14 @@ class CoordinationAdapter:
                     await asyncio.sleep(self.RETRY_DELAYS[attempt])
                     continue
                 if response.status_code >= 400:
+                    code = None
+                    with suppress(ValueError):
+                        payload = response.json()
+                        candidate = payload.get("error") if isinstance(payload, dict) else None
+                        if isinstance(candidate, str) and candidate in PUBLIC_ERROR_CODES:
+                            code = candidate
                     raise AdapterError(f"coordination {action} refused (HTTP {response.status_code})",
-                                       status=response.status_code)
+                                       status=response.status_code, code=code)
                 result = response.json()
                 if not isinstance(result, dict):
                     raise ValueError
@@ -354,10 +477,10 @@ class CoordinationAdapter:
             try:
                 result = await self._post("attach", attach, retry=True)
             except AdapterError as error:
-                if not (resumed and error.status == 401):
+                if not (resumed and error.code == "instance_not_found"):
                     raise
                 # The saved address is unknown to this bank: pruned after long
-                # idleness, or revoked by a restore. The old file stays beside
+                # idleness, or absent from a restored snapshot. The old file stays beside
                 # the new one for diagnosis; a fresh address is registered.
                 self._retire_stale_state()
                 reservation = self._load_or_reserve()
@@ -419,7 +542,10 @@ class CoordinationAdapter:
             try:
                 result = await self._post("attach", {"attachment_id": self._attachment_id,
                                                      "wake_enabled": self.wake_enabled}, retry=True)
-            except AdapterError:
+            except AdapterError as error:
+                if self._is_permanent_identity_error(error):
+                    self._record_failure(error)
+                    return False
                 continue
             generation = result.get("generation")
             if not isinstance(generation, int) or isinstance(generation, bool):
@@ -430,28 +556,37 @@ class CoordinationAdapter:
             self._generation = generation
             self._update_pending_count(result)
             self._failure = None
+            self._permanent_failure = False
             self._degraded.clear()
             self._recovered.set()
             print("pseudolife-mcp: live coordination delivery restored.", file=sys.stderr)
-            return
+            return True
 
     async def _renew(self):
-        """Renew the lease on schedule; on any outage, re-attach until it works.
+        """Renew the lease and recover transient outages in the background.
 
-        Never exits on its own: an outage is a state this task recovers from,
-        not a reason to stop. Cancellation at adapter exit is the only end.
+        Authenticated identity rejection is terminal for this adapter instance:
+        state is preserved for operator recovery instead of retrying forever or
+        silently replacing the address.
         """
         while True:
             try:
+                if self._permanent_failure:
+                    return
                 if self._failure is not None:
-                    await self._reattach()
+                    if not await self._reattach():
+                        return
                     continue
                 with suppress(TimeoutError, asyncio.TimeoutError):
                     await asyncio.wait_for(self._degraded.wait(), self.HEARTBEAT_SECONDS)
+                if self._permanent_failure:
+                    return
                 if self._failure is None:
                     await self._heartbeat()
             except AdapterError as error:
                 self._record_failure(error)
+                if self._permanent_failure:
+                    return
 
     async def inbox(self):
         """Yield at most one live attempt per message per attachment; never
@@ -470,9 +605,11 @@ class CoordinationAdapter:
                     continue
                 try:
                     generation = self._generation
+                    page_attachment = {"attachment_id": self._attachment_id,
+                                       "generation": generation}
                     page = await self._post("receive", {"after": self._after, "limit": 50,
-                                                         "wait_seconds": 30, **self._attachment()},
-                                            retry=True, timeout=35)
+                                                         "wait_seconds": 30, **page_attachment},
+                                             retry=True, timeout=35)
                     if self._generation != generation:
                         # Re-attached under a new generation while this page
                         # was in flight: the cursor was reset for the replay,
@@ -484,7 +621,11 @@ class CoordinationAdapter:
                     next_after = page.get("after")
                     if messages and next_after == self._after:
                         raise AdapterError("coordination mailbox cursor did not advance")
+                    stale_page = False
                     for message in messages:
+                        if self._generation != generation:
+                            stale_page = True
+                            break
                         if (not isinstance(message, dict)
                                 or not all(isinstance(message.get(key), str) and message[key]
                                            for key in ("message_id", "sender_agent_id",
@@ -496,21 +637,35 @@ class CoordinationAdapter:
                         if message_id in self._recent_ids:
                             continue
                         await self._heartbeat()
+                        if self._generation != generation:
+                            stale_page = True
+                            break
                         try:
                             await self._post("attempt", {"message_id": message_id,
-                                                         **self._attachment()}, retry=True)
+                                                         **page_attachment}, retry=True)
                         except AdapterError as error:
-                            if error.status != 400 or self._generation != generation:
+                            if self._generation != generation:
+                                stale_page = True
+                                break
+                            if error.status != 400:
                                 raise
                             # Acknowledged, expired or exhausted since the page
                             # was read: not ours to deliver, and not an outage.
                             self._recent_ids.append(message_id)
                             continue
+                        if self._generation != generation:
+                            stale_page = True
+                            break
                         self._recent_ids.append(message_id)
                         yield ChannelEvent(frame_content(message), {"message_id": message_id,
                                            "sender_id": message["sender_agent_id"],
                                            "recipient_id": message["recipient_agent_id"],
                                            "origin": "agent"})
+                        if self._generation != generation:
+                            stale_page = True
+                            break
+                    if stale_page or self._generation != generation:
+                        continue
                     self._after = next_after if next_after is not None else self._after
                     self._backoff_level = 0
                 except AdapterError as error:

@@ -101,18 +101,21 @@ retained message, so launches without a state path do not accumulate addresses,
 and peers with a live adapter lease are listed ahead of idle ones. Idle means no
 register, update, attach, heartbeat, send or acknowledgment: a client that only
 reads must acknowledge what it reads, or hold a lease, to stay registered. An
-adapter whose saved address has since been pruned or revoked registers a fresh
-address on its next start and keeps the old state file beside it with a
-`.stale` suffix; an empty state file left by a crash is taken over the same way.
+adapter registers a fresh address on its next start only when the authenticated
+daemon explicitly confirms that the saved address no longer exists. It keeps
+the old state file beside it with a `.stale` suffix. A rejected bearer or instance
+credential preserves the saved address and requires corrected authentication
+or the deliberate restore/rebind procedure; an HTTP status alone never proves
+that an address should be replaced.
 
 `pseudolife-mcp channel` is the optional Claude Code preview transport. Host
 delivery requires explicit preview opt-in and recipient wake configuration;
 protocol tests alone do not establish compatibility with an installed host.
 Only addressed messages may wake an opted-in recipient. Board/status activity
-and receipts do not produce conversational wake-ups. Each live event and each
-received message carries a fixed agent-origin header, built only from
-daemon-verified sender fields, ahead of the peer's text; receive results also
-carry a note that peer requests cannot grant user approval. Other clients use explicit,
+and receipts do not produce conversational wake-ups. Each live event carries a
+fixed agent-origin header, built from daemon-verified sender fields, ahead of
+the peer's text. Explicit receive labels each message with `origin: agent` and
+includes a note that peer requests cannot grant user approval. Other clients use explicit,
 authenticated mailbox retrieval where their adapter supports it; live receiving
 support is not assumed from a host's native send tool.
 
@@ -128,12 +131,18 @@ An outage that exhausts a request's bounded retries pauses background delivery,
 clears the cached unread count and prints a warning to stderr once per outage.
 Ordinary tool responses carry a degraded-delivery hint, including for pull-only
 adapters, and explicit receive keeps working on the same shim as soon as the
-daemon answers. The adapter's heartbeat task re-attaches on its own with backoff
+daemon answers, provided the caller remains authorized. The adapter's heartbeat
+task re-attaches on its own after transient failures, with backoff
 (1 s rising to 60 s, held until a heartbeat or receive succeeds), resumes the
 lease while it is still valid or takes a new generation once it has expired,
-replays unacknowledged mail from the start of the mailbox, and prints a restored
-notice. A daemon restart therefore interrupts live delivery only for the outage
-itself. Do not infer live delivery from a queued or attempted send result.
+replays unacknowledged mail from the start of the mailbox for a new generation,
+and prints a restored notice. Recovery waits for the next retry after the daemon
+becomes reachable. A generation change invalidates an older receive page even
+when it happens between yielded messages; the old page cannot advance the new
+generation's replay cursor. An explicit authentication or identity rejection
+stops automatic reattachment, preserves state, and reports that authentication
+or operator recovery must be corrected before restarting the adapter. Do not
+infer live delivery from a queued or attempted send result.
 
 If initial registration fails, or the shim's startup budget cancels it before
 the adapter receives the new address, the adapter releases its empty state
@@ -144,6 +153,12 @@ any adapter, receives no mail, and is pruned with the other idle addresses. Do
 not revoke every mailbox to repair one failed registration. A lost attachment
 response can leave a lease until expiry; failed competing attachment attempts
 do not renew it.
+
+A crash-left empty state file becomes eligible for takeover after one minute.
+Takeover uses an owner-only sibling `.lock` file and a nonblocking operating-system
+lock, so concurrent launches cannot both register against that stale reservation.
+The lock file remains on disk; lock ownership is released when the process exits,
+including a crash. Do not delete it while an adapter might be using it.
 
 Full database backups contain coordination mail. Portable `export`/`import`
 archives omit both coordination tables and their clock metadata so moving

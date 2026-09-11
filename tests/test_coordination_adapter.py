@@ -479,10 +479,48 @@ def test_page_in_flight_across_a_new_generation_is_discarded(monkeypatch):
     asyncio.run(asyncio.wait_for(drive(), 6))
 
 
+def test_page_is_fenced_across_yields_when_generation_changes(monkeypatch):
+    """A page remains owned by the generation that received it even while the
+    async generator is suspended at a yield.  A new generation must replay
+    from its reset cursor before another message from the old page is used."""
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "REATTACH_DELAYS", (0,))
+        daemon = FakeDaemon()
+        generation = {"value": 3}
+        one = {"message_id": "mail-1", "sender_agent_id": "agent-b",
+               "recipient_agent_id": "agent-a", "text": "one"}
+        two = {**one, "message_id": "mail-2", "text": "two"}
+        daemon.pages = [{"messages": [one, two], "after": "agent-a:2"}]
+
+        def current_generation(action, body):
+            if action in {"attach", "heartbeat"}:
+                return httpx.Response(200, json={"generation": generation["value"]})
+
+        daemon.hook = current_generation
+        client, instance = adapter(daemon, wake_enabled=True)
+        async with client, instance:
+            async with aclosing(instance.inbox()) as inbox:
+                assert (await anext(inbox)).content.endswith("\n\none")
+                generation["value"] = 4
+                await instance._reattach()
+                daemon.pages = [{"messages": [one, two], "after": "agent-a:2"}]
+                replay = await asyncio.wait_for(anext(inbox), 2)
+                assert replay.content.endswith("\n\none")
+                assert instance._after is None
+        attempts = [(c[1]["message_id"], c[1]["generation"])
+                    for c in daemon.calls if c[0] == "attempt"]
+        assert attempts[:2] == [("mail-1", 3), ("mail-1", 4)]
+        receives = [c[1] for c in daemon.calls if c[0] == "receive"]
+        assert receives[1]["generation"] == 4 and receives[1]["after"] is None
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+
+
 def test_saved_address_unknown_to_the_bank_is_retired_and_replaced(tmp_path, capsys):
-    """An address the bank no longer accepts (pruned after long idleness or
-    revoked by a restore) is retired to a .stale file and a fresh one is
-    registered, instead of every start failing on the same 401."""
+    """An address proven absent (pruned after long idleness or missing from a
+    restored snapshot) is retired and replaced. Credential rejection remains
+    operator-recoverable state and is covered separately."""
     async def drive():
         state = tmp_path / "agent.json"
         state.write_text(json.dumps({"bank_url": "http://127.0.0.1:8099",
@@ -492,7 +530,7 @@ def test_saved_address_unknown_to_the_bank_is_retired_and_replaced(tmp_path, cap
 
         def hook(action, body):
             if action == "attach" and daemon.calls[-1][2].get("x-pl-agent") == "agent-old":
-                return httpx.Response(401, json={"error": "unauthorized"})
+                return httpx.Response(404, json={"error": "instance_not_found"})
 
         daemon.hook = hook
         client, instance = adapter(daemon, state_path=state)
@@ -504,6 +542,54 @@ def test_saved_address_unknown_to_the_bank_is_retired_and_replaced(tmp_path, cap
         assert json.loads(stale.read_text(encoding="utf-8"))["agent_id"] == "agent-old"
         captured = capsys.readouterr()
         assert "no longer valid" in captured.err and "old-key" not in captured.err
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+
+
+@pytest.mark.parametrize("status,code", [
+    (401, "unauthorized"),
+    (403, "invalid_credential"),
+])
+def test_auth_rejection_does_not_retire_a_saved_address(tmp_path, status, code):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import AdapterError
+        state = tmp_path / "agent.json"
+        saved = {"bank_url": "http://127.0.0.1:8099",
+                 "agent_id": "agent-old", "credential": "old-key"}
+        state.write_text(json.dumps(saved), encoding="utf-8")
+        original = state.read_bytes()
+        daemon = FakeDaemon()
+        daemon.hook = lambda action, body: httpx.Response(
+            status, json={"error": code})
+        client, instance = adapter(daemon, state_path=state)
+        async with client:
+            with pytest.raises(AdapterError) as caught:
+                await instance.__aenter__()
+        assert caught.value.code == code
+        assert daemon.actions() == ["attach"]
+        assert state.read_bytes() == original
+        assert not state.with_name(state.name + ".stale").exists()
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+
+
+def test_malformed_error_code_keeps_sanitized_http_classification(tmp_path):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import AdapterError
+        state = tmp_path / "agent.json"
+        state.write_text(json.dumps({"bank_url": "http://127.0.0.1:8099",
+                                     "agent_id": "agent-old", "credential": "old-key"}),
+                         encoding="utf-8")
+        original = state.read_bytes()
+        daemon = FakeDaemon()
+        daemon.hook = lambda action, body: httpx.Response(401, json={"error": []})
+        client, instance = adapter(daemon, state_path=state)
+        async with client:
+            with pytest.raises(AdapterError) as caught:
+                await instance.__aenter__()
+        assert caught.value.status == 401 and caught.value.code is None
+        assert state.read_bytes() == original
+        assert not state.with_name(state.name + ".stale").exists()
 
     asyncio.run(asyncio.wait_for(drive(), 4))
 
@@ -531,6 +617,129 @@ def test_empty_state_file_from_a_crash_is_taken_over(tmp_path):
             pass
         assert daemon.actions()[:2] == ["register", "attach"]
         assert json.loads(state.read_text(encoding="utf-8"))["agent_id"] == "agent-a"
+        lock = state.with_name(state.name + ".lock")
+        assert lock.is_file()
+        if os.name != "nt":
+            assert lock.stat().st_mode & 0o077 == 0
+        else:
+            _assert_windows_owner_only(lock)
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+
+
+def test_stale_reservation_has_one_atomic_claimant(tmp_path):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
+        state = tmp_path / "agent.json"
+        state.write_bytes(b"")
+        old = time.time() - CoordinationAdapter.STALE_RESERVATION_SECONDS - 1
+        os.utime(state, (old, old))
+        daemon = FakeDaemon()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        registrations = 0
+
+        async def hold_first_registration(request):
+            nonlocal registrations
+            if request.url.path.endswith("/register"):
+                registrations += 1
+                if registrations == 1:
+                    entered.set()
+                    await release.wait()
+            return await daemon(request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(hold_first_registration)) as client:
+            first = CoordinationAdapter("http://127.0.0.1:8099", "fixture-bearer",
+                                        client=client, state_path=state)
+            pending = asyncio.create_task(first.__aenter__())
+            await entered.wait()
+            second = CoordinationAdapter("http://127.0.0.1:8099", "fixture-bearer",
+                                         client=client, state_path=state)
+            with pytest.raises(AdapterError, match="another process"):
+                await asyncio.wait_for(second.__aenter__(), 1)
+            assert registrations == 1
+            release.set()
+            await pending
+            await first.__aexit__(None, None, None)
+        assert json.loads(state.read_text(encoding="utf-8"))["agent_id"] == "agent-a"
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+
+
+def test_stale_reservation_lock_releases_after_cancelled_registration(tmp_path):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        state = tmp_path / "agent.json"
+        state.write_bytes(b"")
+        old = time.time() - CoordinationAdapter.STALE_RESERVATION_SECONDS - 1
+        os.utime(state, (old, old))
+
+        class SlowDaemon(FakeDaemon):
+            async def __call__(self, request):
+                if request.url.path.endswith("/register"):
+                    await asyncio.sleep(10)
+                return await super().__call__(request)
+
+        client, cancelled = adapter(SlowDaemon(), state_path=state)
+        async with client:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(cancelled.__aenter__(), 0.05)
+        assert not state.exists()
+
+        state.write_bytes(b"")
+        os.utime(state, (old, old))
+        daemon = FakeDaemon()
+        client, recovered = adapter(daemon, state_path=state)
+        async with client, recovered:
+            pass
+        assert daemon.actions()[:2] == ["register", "attach"]
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+
+
+def test_stale_reservation_lock_hardlink_is_refused(tmp_path):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
+        state = tmp_path / "agent.json"
+        state.write_bytes(b"")
+        old = time.time() - CoordinationAdapter.STALE_RESERVATION_SECONDS - 1
+        os.utime(state, (old, old))
+        lock = state.with_name(state.name + ".lock")
+        other = tmp_path / "other.lock"
+        other.write_bytes(b"0")
+        os.link(other, lock)
+        daemon = FakeDaemon()
+        client, instance = adapter(daemon, state_path=state)
+        async with client:
+            with pytest.raises(AdapterError, match="private regular file"):
+                await instance.__aenter__()
+        assert not daemon.calls
+        assert state.exists() and other.read_bytes() == b"0"
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+
+
+def test_stale_reservation_lock_symlink_is_refused(tmp_path):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
+        state = tmp_path / "agent.json"
+        state.write_bytes(b"")
+        old = time.time() - CoordinationAdapter.STALE_RESERVATION_SECONDS - 1
+        os.utime(state, (old, old))
+        lock = state.with_name(state.name + ".lock")
+        other = tmp_path / "other.lock"
+        other.write_bytes(b"0")
+        try:
+            lock.symlink_to(other)
+        except OSError as error:
+            pytest.skip(f"symlinks unavailable: {error}")
+        daemon = FakeDaemon()
+        client, instance = adapter(daemon, state_path=state)
+        async with client:
+            with pytest.raises(AdapterError, match="private regular file"):
+                await instance.__aenter__()
+        assert not daemon.calls
+        assert state.exists() and other.read_bytes() == b"0"
 
     asyncio.run(asyncio.wait_for(drive(), 4))
 
@@ -657,6 +866,70 @@ def test_pull_adapter_renew_failure_reports_degraded_hint_once(monkeypatch, caps
         captured = capsys.readouterr()
         assert captured.err.count("live coordination delivery unavailable") == 1
         assert "fixture-key" not in captured.err
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+
+
+@pytest.mark.parametrize("status,code", [
+    (401, "unauthorized"),
+    (403, "invalid_credential"),
+    (404, "instance_not_found"),
+])
+def test_permanent_background_identity_failure_stops_retrying_and_preserves_state(
+        monkeypatch, tmp_path, capsys, status, code):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        monkeypatch.setattr(CoordinationAdapter, "RETRY_DELAYS", (0, 0))
+        monkeypatch.setattr(CoordinationAdapter, "REATTACH_DELAYS", (0,))
+        daemon = FakeDaemon()
+        state = tmp_path / "agent.json"
+        client, instance = adapter(daemon, state_path=state)
+        await instance.__aenter__()
+        original = state.read_bytes()
+
+        def reject_identity(action, body):
+            if action in {"heartbeat", "attach"}:
+                return httpx.Response(status, json={"error": code})
+
+        daemon.hook = reject_identity
+        await asyncio.wait_for(instance._heartbeat_task, 1)
+        calls = len(daemon.calls)
+        await asyncio.sleep(0.05)
+        assert len(daemon.calls) == calls
+        assert instance._failure.code == code
+        assert "restore/rebind" in instance.unread_hint
+        assert state.read_bytes() == original
+        assert not state.with_name(state.name + ".stale").exists()
+        await instance.__aexit__(None, None, None)
+
+    asyncio.run(asyncio.wait_for(drive(), 4))
+    stderr = capsys.readouterr().err
+    assert stderr.count("background delivery stopped") == 1
+    assert "fixture-key" not in stderr
+
+
+def test_permanent_receive_failure_wakes_and_stops_heartbeat(monkeypatch, tmp_path):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 10)
+        monkeypatch.setattr(CoordinationAdapter, "REATTACH_DELAYS", (0,))
+        daemon = FakeDaemon()
+        state = tmp_path / "agent.json"
+        client, instance = adapter(daemon, state_path=state, wake_enabled=True)
+        async with client, instance:
+            original = state.read_bytes()
+            daemon.hook = lambda action, body: (httpx.Response(
+                403, json={"error": "invalid_credential"}) if action == "receive" else None)
+            async with aclosing(instance.inbox()) as inbox:
+                pending = asyncio.create_task(anext(inbox))
+                await asyncio.wait_for(instance._heartbeat_task, 0.5)
+                pending.cancel()
+                with suppress(asyncio.CancelledError):
+                    await pending
+            assert instance._permanent_failure is True
+            assert state.read_bytes() == original
+            assert daemon.actions().count("attach") == 1
 
     asyncio.run(asyncio.wait_for(drive(), 4))
 

@@ -54,7 +54,8 @@ def test_two_adapters_mail_reply_ack_and_resume(pg_url, tmp_path):
                 denied = await client.post("http://fixture/api/coordination/receive", headers={
                     "Authorization": "Bearer fixture-bearer", "X-PL-Agent": recipient_id,
                     "X-PL-Agent-Key": sender.instance_headers["X-PL-Agent-Key"]}, json={})
-                assert denied.status_code == 401
+                assert denied.status_code == 403
+                assert denied.json() == {"error": "invalid_credential"}
                 await post(recipient, "ack", {"message_id": first["message_id"]})
                 assert (await post(recipient, "receive", {}))["messages"] == []
                 reply = await post(recipient, "send", {"to": sender.instance_headers["X-PL-Agent"],

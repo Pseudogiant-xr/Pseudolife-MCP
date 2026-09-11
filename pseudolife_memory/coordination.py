@@ -35,6 +35,7 @@ _REQUIRED = {
 }
 PUBLIC_ERROR_CODES = frozenset({
     "authentication_required", "unauthorized", "principal_not_allowed",
+    "instance_not_found", "invalid_credential",
     "unknown_coordination_action", "unexpected_parameter", "missing_parameter",
     "instance_authentication_required", "coordination_requires_postgres",
     "attachment_required", "attachment_busy", "stale_attachment",
