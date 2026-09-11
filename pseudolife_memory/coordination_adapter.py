@@ -127,7 +127,8 @@ class CoordinationAdapter:
     MAX_RECENT_IDS = 256
 
     def __init__(self, url: str, token: str, *, state_path=None, wake_enabled=False,
-                 label="", project="", task="", episode=None, client=None):
+                 label="", project="", task="", episode=None, client=None,
+                 delivery_transport="channel"):
         parsed = urlsplit(url)
         if (parsed.scheme not in {"http", "https"} or not parsed.hostname
                 or parsed.username or parsed.password or parsed.query or parsed.fragment):
@@ -141,6 +142,11 @@ class CoordinationAdapter:
         self._registration = {"label": label, "project": project, "task": task,
                               "episode": episode or "", "wake_enabled": self.wake_enabled,
                               "capabilities": {"pull": True, "channel": self.wake_enabled}}
+        if delivery_transport == "codex":
+            self._registration["capabilities"] = {
+                "pull": True, "channel": False, "codex": self.wake_enabled}
+        elif delivery_transport != "channel":
+            raise AdapterError("unsupported coordination delivery transport")
         self._client = client
         self._owns_client = client is None
         self._identity = None
@@ -517,6 +523,47 @@ class CoordinationAdapter:
                 finally:
                     if self._owns_client:
                         await self._client.aclose()
+
+    async def downgrade_to_pull(self) -> bool:
+        """Stop push delivery and keep this identity usable for explicit pull.
+
+        The local flag changes before network I/O, so every later recovery
+        attach is conservative.  A failed immediate attach leaves the normal
+        recovery worker queued with ``wake_enabled=False``; the previous
+        wake-capable lease receives no more heartbeats and therefore expires.
+        """
+        self.wake_enabled = False
+        self._registration["wake_enabled"] = False
+        heartbeat = self._heartbeat_task
+        self._heartbeat_task = None
+        if heartbeat is not None and heartbeat is not asyncio.current_task():
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
+
+        try:
+            result = await self._post(
+                "attach", {"attachment_id": self._attachment_id,
+                           "wake_enabled": False}, retry=True)
+            generation = result.get("generation")
+            if not isinstance(generation, int) or isinstance(generation, bool):
+                raise AdapterError("coordination attach returned invalid generation")
+        except AdapterError as error:
+            self._record_failure(error)
+            self._heartbeat_task = asyncio.create_task(self._renew())
+            return False
+
+        if generation != self._generation:
+            self._after = None
+            self._recent_ids.clear()
+        self._generation = generation
+        self._update_pending_count(result)
+        self._failure = None
+        self._permanent_failure = False
+        self._degraded.clear()
+        self._recovered.set()
+        self._heartbeat_task = asyncio.create_task(self._renew())
+        return True
 
     async def _heartbeat(self):
         result = await self._post("heartbeat", self._attachment(), retry=True)

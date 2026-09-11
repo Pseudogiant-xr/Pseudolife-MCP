@@ -3418,12 +3418,97 @@ loopback install.
 Enable the installed shim adapter with `PSEUDOLIFE_AGENT_COORDINATION=1` and set
 `PSEUDOLIFE_MCP_TOKEN` to that principal's bearer token. Optional
 `PSEUDOLIFE_AGENT_LABEL`, `PSEUDOLIFE_AGENT_PROJECT` and `PSEUDOLIFE_AGENT_TASK`
-provide explicit display and relevance fields. Set `PSEUDOLIFE_AGENT_STATE` to a
+provide explicit display and relevance fields. For clients other than Codex,
+set `PSEUDOLIFE_AGENT_STATE` to a
 private file outside the repository for deliberate mailbox resume. Each concurrent
 adapter needs its own state file; sharing one does not create a second identity.
 Without a state path, each launch gets a new address. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
 private file and adapter headers, not model arguments or memory entries.
+
+### Codex CLI and desktop
+
+Use the ordinary stdio shim with `PSEUDOLIFE_WRITER_ID=codex`. Codex supplies
+`_meta.threadId` on MCP tool calls; the shim uses this validated task UUID for
+attribution and lazily attaches the task's mailbox on its first call. CLI and
+desktop runtime probes confirmed that this metadata survives resume and changes
+on fork. Process environment variables, checkout names and titles do not select
+the mailbox. Missing or malformed metadata leaves ordinary memory available
+without attaching a mailbox.
+
+For an existing Codex stdio registration, run the following from a checkout using
+the Python environment where Pseudolife is installed:
+
+```sh
+python ops/setup-codex-coordination.py --check
+python ops/setup-codex-coordination.py --enable
+```
+
+The check is read-only. Enable requires a configured bearer and an enabled daemon
+that allows its principal; it does not change the daemon's authentication or
+allowlist. The token must be in the MCP registration's `env`, or explicitly
+forwarded through `env_vars`. Setup preserves the command and unrelated settings,
+backs up the configuration privately, and uses Codex's versioned configuration
+writer. Reconnect the MCP server after changing its environment.
+
+Setup pins `PSEUDOLIFE_AGENT_STATE_DIR` under the selected Codex home's
+`pseudolife/agents` directory unless an explicit directory is already configured.
+Files are scoped by bank URL, bearer token and task ID, with credentials stored
+privately. Token rotation changes that namespace; retaining an address across a
+rotation requires deliberate state migration. Do not set `PSEUDOLIFE_AGENT_STATE`
+to one shared file in Codex: automatic attachment refuses that configuration.
+`--disable` stops registration on subsequent connections and preserves saved mail.
+
+An active task should use `memory_agents` before shared-resource work and
+`memory_message(action="receive")` on resume and when a pending-count hint
+appears. Receive does not acknowledge; use `action="ack"` after reading.
+These calls work in the CLI and desktop without live wake support.
+Setup leaves Codex tool approvals unchanged. A recipient running with approval
+policy `never` cannot execute a tool that still requires approval. To authorize
+unattended mailbox operations specifically, configure the installed server's
+`tools.memory_message.approval_mode = "approve"` in Codex. This permits that
+tool's send, receive and acknowledgment actions; it does not approve file writes,
+commands or other tools. Without that choice, use the host's normal approval flow.
+
+### Optional Codex live delivery
+
+Codex's documented app-server API can accept tool output into an idle or busy
+task. This integration is experimental: OpenAI also labels its WebSocket transport
+experimental and unsupported. Install the optional dependency in the shim's exact
+runtime with `python -m pip install 'pseudolife-mcp[codex]'`, or install the `codex`
+extra from the checkout when testing unreleased changes.
+
+The owner must expose an authenticated loopback WebSocket app-server and keep its
+client connected. Configure that server's `--ws-auth capability-token` and
+`--ws-token-file` options, then connect its CLI with `codex --remote` using the
+same endpoint and credential. Follow the installed Codex CLI's help for client
+authentication options. In that server's Pseudolife MCP environment, set:
+
+```toml
+PSEUDOLIFE_AGENT_WAKE = "1"
+PSEUDOLIFE_CODEX_SERVER_URL = "ws://127.0.0.1:4500"
+PSEUDOLIFE_CODEX_SERVER_TOKEN = "<local-server-bearer>"
+```
+
+The local-server bearer is separate from `PSEUDOLIFE_MCP_TOKEN`, which authenticates
+to the bank. Keep both out of repositories and model prompts. The bridge accepts
+only literal loopback endpoints with an explicit port and bearer authentication.
+It verifies that the metadata-selected recipient is already loaded on that exact
+server, then submits `turn/start` with empty user input and `toolOutput`. Peer
+content remains tool output; no approval policy, model, sandbox or user-authority
+override is supplied. Only the recipient's explicit acknowledgment marks receipt.
+
+An installed desktop app using a private stdio app-server has no corresponding
+external WebSocket endpoint. The bridge cannot attach to that connection and does
+not start another server or resume the task elsewhere. Use pull messaging there.
+Native app messaging tools and hooks do not establish a generic external wake API.
+The desktop app-server binary was exercised separately; this does not establish
+live delivery into the installed desktop UI.
+
+See the [Codex validation record](../specs/2026-09-12-codex-coordination.md) and
+[OpenAI's app-server contract](https://learn.chatgpt.com/docs/app-server).
+
+### Delivery and recovery
 
 Use ordinary `pseudolife-mcp` for authenticated pull messaging. The optional
 `pseudolife-mcp channel` mode also requires `PSEUDOLIFE_AGENT_WAKE=1` to emit live
