@@ -2149,7 +2149,20 @@ class MemoryService(DreamOps):
         lazily-updated access counts and snapshot the cortex.
         File mode: legacy full-bank torch.save (v0.1 behavior).
         """
-        self._recover_lesson_synthesis()
+        # An unresolved lesson commit gates ONLY the lesson arm below. It
+        # says nothing about weights, access counts or the cortex/world
+        # slots — and the documented recovery for it is a restart, which
+        # discards exactly the unsaved state those parts would have made
+        # durable. So persist everything else first and re-raise afterwards:
+        # the save still fails loudly, it just no longer takes unrelated
+        # work down with it.
+        lesson_block: Exception | None = None
+        try:
+            self._recover_lesson_synthesis()
+        except Exception as exc:  # noqa: BLE001 — re-raised after the rest
+            lesson_block = exc
+            logger.error("%s save: lesson snapshot skipped, lesson "
+                         "reconciliation still required (%s)", kind, exc)
         assert self._cms is not None
         # Per-part durations, warned on a slow save: every persist runs
         # under the service lock, so a slow part IS a daemon pause — and
@@ -2200,15 +2213,19 @@ class MemoryService(DreamOps):
                 if self._world is not None:
                     _timed("world", lambda: _sync.snapshot_world_cortex(
                         self._world, self._storage))
-                if self._lessons is not None:
+                if self._lessons is not None and lesson_block is None:
                     _timed("lessons", lambda: _sync.snapshot_lessons(
                         self._lessons, self._storage))
             else:
                 _timed("cortex", self._save_cortex)
                 _timed("world", self._save_world)
-                _timed("lessons", self._save_lessons)
-            return _finish({"saved_to": self.config.memory.save_dir,
-                            "mode": "postgres+weights", "kind": kind})
+                if lesson_block is None:
+                    _timed("lessons", self._save_lessons)
+            out = _finish({"saved_to": self.config.memory.save_dir,
+                           "mode": "postgres+weights", "kind": kind})
+            if lesson_block is not None:
+                raise lesson_block
+            return out
         _timed("bank", lambda: self._cms.save(self.config.memory.save_dir))
         _timed("cortex", self._save_cortex)
         return _finish({"saved_to": self.config.memory.save_dir, "kind": kind})
@@ -3472,11 +3489,16 @@ class MemoryService(DreamOps):
             return {"action": action, **_lesson_record_to_dict(rec)}
 
     def _write_lesson_locked(self, lessons, task: str, aspect: str,
-                             lesson: str, **kwargs):
+                             lesson: str, *, embedding=None, **kwargs):
         """Shared write semantics for the live store or a synthesis stage.
-        Caller holds the service lock and owns persistence/publication."""
+        Caller holds the service lock and owns persistence/publication.
+
+        ``embedding`` accepts the claim vector when the caller already
+        computed it (lesson synthesis does, before opening its transaction —
+        a model pass has no business running inside one)."""
         assert self._embedder is not None and lessons is not None
-        emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
+        emb = (embedding if embedding is not None else
+               self._embedder.encode_single(f"{task} {aspect} {lesson}".strip()))
         writer_id, session_id = self._resolve_writer()
         action, rec = lessons.write_fact(
             task, aspect, lesson, emb, **kwargs,
@@ -3918,13 +3940,18 @@ class MemoryService(DreamOps):
 
     def _lesson_duplicate_locked(self, lessons, task: str, aspect: str,
                                  lesson: str, polarity: str,
-                                 threshold: float) -> bool:
-        """The synthesis dedup predicate over live or staged lesson records."""
+                                 threshold: float, *, embedding=None) -> bool:
+        """The synthesis dedup predicate over live or staged lesson records.
+
+        ``embedding`` is the same precomputed claim vector
+        :meth:`_write_lesson_locked` takes — the gate and the write embed
+        identical text."""
         from pseudolife_memory.memory.cortex import _norm_key
         if lessons is None or self._embedder is None:
             return False
         key = (_norm_key(task), _norm_key(aspect))
-        emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
+        emb = (embedding if embedding is not None else
+               self._embedder.encode_single(f"{task} {aspect} {lesson}".strip()))
         for rec, _score in lessons.search(emb, top_k=3, min_score=threshold):
             if rec.key != key and rec.polarity == polarity:
                 return True

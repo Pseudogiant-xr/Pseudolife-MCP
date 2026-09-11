@@ -29,6 +29,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   empty rule responses. Successful routes can proceed independently; a custom
   rule extractor with incomplete output coverage leaves that route pending.
   Signal retention and file-mode synthesis behavior are unchanged.
+- A claim the batch cannot write costs only itself: it rolls back on its own
+  savepoint (lesson and graph halves together), the rest of the batch still
+  commits, and the count appears as `write_errors` in the synthesis report.
+  Its rule signal stays pending; the clustering route is acknowledged once any
+  of its claims lands. A claim that fails every time no longer stalls every
+  later sweep.
+- Within one batch, the near-duplicate gate compares a claim against the
+  lessons that batch has already staged as well as the durable ones, so the
+  second of two near-identical claims is counted as `deduped`, not written.
+- Claim embeddings are computed before the batch transaction opens, and one
+  sweep drains at most `memory.lessons.synthesis_max_signals` signals
+  (default 200; 0 disables). Both bound how long a batch holds the service
+  lock and one PostgreSQL transaction; the remainder waits for the next sweep.
+- An unresolved lesson reconciliation no longer blocks unrelated persistence:
+  weights, access counts and cortex/world slots are written, only the lesson
+  snapshot is skipped, and the save still fails loudly afterwards. A restart
+  discards exactly what those parts would have made durable.
+- `/health` reports `lesson_reconciliation_required` while a lesson commit is
+  unresolved, and the daemon logs it at ERROR. Status stays `ok` so the
+  container healthcheck does not restart the daemon out from under the
+  unsaved state, matching `migration_partial`.
+- A synthesis report keeps its extraction-route errors when a transaction
+  error follows, instead of replacing them.
 
 ### Fixed (2026-09-10 — preserve source evidence)
 - Automatic contradiction candidates can admit a possible update through
