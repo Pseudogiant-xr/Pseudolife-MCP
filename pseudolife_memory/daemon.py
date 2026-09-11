@@ -112,6 +112,17 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     migration_partial = getattr(svc, "_migration_partial", None)
     if migration_partial:
         payload["migration_partial"] = migration_partial
+    # A failed dream-tracking initialization disables the dream alone —
+    # pull/commit/status refuse while every other tool serves normally —
+    # so it was visible only in the boot logs, and consolidation could be
+    # stopped for days with nothing to see it by. Named here for the same
+    # reason migration_partial is, and with the same deliberate refusal to
+    # touch `status`: a dream-only degradation must not become the 503 the
+    # healthcheck and ops/update.* treat as fatal. Only the code, not the
+    # detail — the message can carry a DSN.
+    dream_tracking_error = getattr(svc, "_dream_tracking_error", None)
+    if dream_tracking_error:
+        payload["dream_tracking_error"] = dream_tracking_error.split(":", 1)[0]
     # Honest DB liveness (2026-07-02 review fix): /health used to say
     # "ok" while a restarted Postgres had every memory tool failing.
     # ping() uses a dedicated short-lived connection so the probe can't

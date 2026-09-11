@@ -659,8 +659,12 @@ class MemoryService(DreamOps):
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
         # Dream initialization failures are isolated from normal memory
-        # serving. Exact acknowledgement stays disabled until restart/fix.
+        # serving: exact acknowledgement stays disabled while the rest of
+        # the bank serves. A TRANSIENT failure is re-attempted by the next
+        # dream call (see DreamOps._retry_dream_tracking); a failure in the
+        # bank's own data latches until it is repaired.
         self._dream_tracking_error: str | None = None
+        self._dream_tracking_retryable = False
         # Set by _ensure_init when storage construction refuses to start
         # (schema v25's embedding-dim mismatch guard, schema.py's
         # RuntimeError) -- exposed via /health so the daemon doesn't report
@@ -2219,6 +2223,7 @@ class MemoryService(DreamOps):
             # display/compatibility value and mirrors the co-located cursor.
             self._cortex.dream_cursor = self._cms.dream_display_cursor
             self._dream_tracking_error = None
+            self._dream_tracking_retryable = False
         except Exception as exc:  # noqa: BLE001 - dream-only degradation
             message = str(exc)
             if message.startswith(("invalid_legacy_dream_cursor:",
@@ -2227,6 +2232,14 @@ class MemoryService(DreamOps):
             else:
                 self._dream_tracking_error = (
                     f"dream_ack_initialization_failed: {message}")
+            # Retryability is decided on the exception CLASS, not on the
+            # message: every refusal this pass raises for the bank's own
+            # data (a corrupt secret, an unusable legacy cursor, an invalid
+            # checkpoint) is a ValueError, and re-running the same pass over
+            # the same bytes fails identically. Anything else -- a dropped
+            # connection, a transaction that never committed, a failed
+            # checkpoint write -- is transient and worth another attempt.
+            self._dream_tracking_retryable = not isinstance(exc, ValueError)
             logger.error("dream acknowledgement initialization failed: %s", exc)
 
     def _cortex_path(self) -> str:

@@ -242,6 +242,181 @@ def test_postgres_ack_failure_marks_automatic_run_failed(
     ).fetchone()[0] == "pending"
 
 
+def _resident(service, text: str):
+    return next(entry for band in service._cms.bands  # noqa: SLF001
+                for entry in band.entries if entry.text == text)
+
+
+def test_pending_order_survives_a_resident_without_a_row_id(pg_service) -> None:
+    """``cms.store`` seats the entry in the band BEFORE its write-through
+    insert, so a failed insert leaves a resident holding ``db_id=None``.
+    The pull order must stay type-homogeneous through that — a tie on
+    timestamp used to compare an int against a str and raise."""
+    svc = pg_service
+    svc.store("tied alpha is enabled", source="notes")
+    svc.store("tied beta is enabled", source="notes")
+    for entry in _entries(svc):
+        entry.timestamp = 100.0
+    _resident(svc, "tied alpha is enabled").db_id = None
+
+    first = [entry.text for entry in svc._pending_dream_entries()]  # noqa: SLF001
+    assert first == [entry.text for entry in svc._pending_dream_entries()]  # noqa: SLF001
+    assert len(first) == 2
+    assert svc.dream_status()["backlog"] == 2
+
+
+def test_pull_reflushes_a_resident_that_never_reached_storage(pg_service) -> None:
+    svc = pg_service
+    svc.store("healed probe is enabled", source="notes")
+    svc.store("intact probe is enabled", source="notes")
+    orphan = _resident(svc, "healed probe is enabled")
+    svc._storage.conn.execute(  # noqa: SLF001
+        "DELETE FROM entries WHERE id = %s", (orphan.db_id,))
+    orphan.db_id = None
+
+    pulled = svc.dream_pull(limit=10)
+
+    assert "error" not in pulled
+    assert pulled["count"] == 2
+    assert orphan.db_id is not None
+    assert pulled.get("skipped_unpersisted", 0) == 0
+    assert svc.dream_commit(pulled["commit_token"])["newly_acknowledged"] == 2
+
+
+def test_pull_skips_an_unpersistable_resident_instead_of_stalling(
+        pg_service, monkeypatch) -> None:
+    svc = pg_service
+    svc.store("intact probe is enabled", source="notes")
+    svc.store("doomed probe is enabled", source="notes")
+    doomed = _resident(svc, "doomed probe is enabled")
+    svc._storage.conn.execute(  # noqa: SLF001
+        "DELETE FROM entries WHERE id = %s", (doomed.db_id,))
+    doomed.db_id = None
+    monkeypatch.setattr(
+        svc._storage, "insert_entry",  # noqa: SLF001
+        lambda *a, **k: (_ for _ in ()).throw(OSError("insert failed")))
+
+    pulled = svc.dream_pull(limit=10)
+
+    assert "error" not in pulled
+    assert pulled["count"] == 1
+    assert pulled["skipped_unpersisted"] == 1
+    assert pulled["entries"][0]["text"] == "intact probe is enabled"
+    assert svc.dream_status()["backlog"] == 2
+    assert svc.dream_commit(pulled["commit_token"])["newly_acknowledged"] == 1
+
+
+def test_postgres_commit_reports_a_vanished_entry_and_keeps_the_rest(
+        pg_service) -> None:
+    svc = pg_service
+    svc.store("survivor probe is enabled", source="notes")
+    svc.store("vanished probe is enabled", source="notes")
+    pulled = svc.dream_pull(limit=10)
+    vanished = _resident(svc, "vanished probe is enabled")
+    svc._storage.conn.execute(  # noqa: SLF001
+        "DELETE FROM entries WHERE id = %s", (vanished.db_id,))
+
+    result = svc.dream_commit(pulled["commit_token"])
+
+    assert "error" not in result
+    assert result["acknowledged"] == 1
+    assert result["newly_acknowledged"] == 1
+    assert result["missing"] == 1
+    assert svc.dream_status()["backlog"] == 0
+
+
+def test_file_commit_reports_a_forgotten_entry_and_keeps_the_rest(
+        pristine_service) -> None:
+    svc = pristine_service
+    svc.store("survivor note is enabled", source="notes")
+    svc.store("forgotten note is enabled", source="notes")
+    pulled = svc.dream_pull(limit=10)
+    forgotten = _resident(svc, "forgotten note is enabled")
+    for band in svc._cms.bands:  # noqa: SLF001
+        if forgotten in band.entries:
+            band.entries.remove(forgotten)
+
+    result = svc.dream_commit(pulled["commit_token"])
+
+    assert "error" not in result
+    assert result["acknowledged"] == 1
+    assert result["missing"] == 1
+    assert svc.dream_pull(limit=10)["count"] == 0
+
+
+def test_transient_tracking_failure_is_retried_by_the_next_dream_call(
+        pg_conn, pg_url, tmp_path: Path, monkeypatch) -> None:
+    """A dream-tracking failure used to latch until the daemon restarted.
+    A storage blip must clear itself on the next dream call."""
+    import psycopg
+
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    real = PostgresStorage.initialize_dream_tracking
+    calls: list[int] = []
+
+    def flaky(self, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise psycopg.OperationalError("connection lost")
+        return real(self, **kwargs)
+
+    monkeypatch.setattr(PostgresStorage, "initialize_dream_tracking", flaky)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
+    svc = MemoryService(data_dir=tmp_path)
+    try:
+        svc._ensure_init()  # noqa: SLF001
+        assert svc._dream_tracking_error is not None  # noqa: SLF001
+
+        status = svc.dream_status()
+
+        assert "error" not in status
+        assert svc._dream_tracking_error is None  # noqa: SLF001
+        assert len(calls) == 2
+        svc.store("post-recovery probe is enabled", source="notes")
+        assert svc.dream_pull(limit=10)["count"] == 1
+        assert len(calls) == 2
+    finally:
+        svc._storage.close()  # noqa: SLF001
+
+
+def test_corrupt_bank_secret_is_not_retried_on_every_dream_call(
+        pg_conn, pg_url, tmp_path: Path, monkeypatch) -> None:
+    """The companion guard to the retry: a corrupt secret is the bank's own
+    data, and re-running the same pass over the same bytes fails the same
+    way. It stays latched so the failure is reported, not re-attempted on
+    every call."""
+    import json
+
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    pg_conn.execute(
+        "INSERT INTO meta (key, value) VALUES "
+        "('dream_ack_secret_v1', %s::jsonb)", (json.dumps("not-a-secret"),))
+    pg_conn.commit()
+    real = PostgresStorage.initialize_dream_tracking
+    calls: list[int] = []
+
+    def counted(self, **kwargs):
+        calls.append(1)
+        return real(self, **kwargs)
+
+    monkeypatch.setattr(PostgresStorage, "initialize_dream_tracking", counted)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
+    svc = MemoryService(data_dir=tmp_path)
+    try:
+        svc._ensure_init()  # noqa: SLF001
+        assert len(calls) == 1
+
+        assert svc.dream_pull()["error"] == "dream_ack_initialization_failed"
+        assert svc.dream_status()["error"] == "dream_ack_initialization_failed"
+        assert len(calls) == 1
+    finally:
+        svc._storage.close()  # noqa: SLF001
+
+
 def test_invalid_legacy_cursor_blocks_only_dream_initialization(
         tmp_path: Path, monkeypatch) -> None:
     import torch

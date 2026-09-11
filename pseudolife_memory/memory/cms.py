@@ -1859,6 +1859,27 @@ class ContinuumMemorySystem:
                     n += 1
         return n
 
+    def flush_unpersisted_entries(self, entries) -> int:
+        """Insert resident entries that never reached storage at all — the
+        sibling of :meth:`reflush_entries` for ``db_id is None`` rather than
+        a phantom id. :meth:`store` seats the entry in ``bands[0]`` BEFORE
+        its write-through ``insert_entry``, and that insert is not wrapped,
+        so a failed insert leaves a resident with no row. Each hit gets a
+        row + id; entries already carrying an id are skipped. Returns the
+        number inserted. Raises whatever the insert raises — the caller
+        decides whether a still-unpersisted entry is fatal — and stops at
+        the first failure with the entries inserted so far already stamped.
+        The caller holds the service lock."""
+        if self.storage is None:
+            return 0
+        from pseudolife_memory.storage.sync import entry_to_row
+        n = 0
+        for e in entries:
+            if e.db_id is None:
+                e.db_id = self.storage.insert_entry(entry_to_row(e))
+                n += 1
+        return n
+
     def bump_entry_access_count(self, db_id: int, delta: int) -> bool:
         """Bump the resident entry's in-memory access_count to match a DB bump, so
         the save-cadence sync (update_access_counts, in-memory -> DB) reconciles to
