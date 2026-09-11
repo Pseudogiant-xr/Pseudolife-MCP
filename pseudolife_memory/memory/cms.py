@@ -33,6 +33,7 @@ import logging
 import math
 import random
 import re
+import secrets
 import time
 from functools import partial
 from pathlib import Path
@@ -148,7 +149,9 @@ def has_date_cue(text: str) -> bool:
 #                 ``episodes`` block holds the :class:`EpisodeManager`
 #                 state. Pre-v6 entries default to ``None`` / ``[]`` on
 #                 load; pre-v6 ``episodes`` block defaults to empty.
-SCHEMA_VERSION = 6
+#   v7 — entries carry durable dream identity/state; the top-level snapshot
+#        co-locates the signing secret and display cursor with those states.
+SCHEMA_VERSION = 7
 
 # Shared tokenizer for the slot-query pool (Pool 1.5): the query side and
 # the entry-slot-token index below must use the identical rule, or the two
@@ -310,6 +313,12 @@ class ContinuumMemorySystem:
         # and the band MLPs restarted from fresh init. Entries are NOT
         # affected (they live in storage); surfaced via stats().
         self.weights_reset: bool = False
+
+        # File-mode dream acknowledgement metadata. ``None`` means an old
+        # snapshot that still needs one-time classification by MemoryService.
+        self.dream_ack_secret: str | None = None
+        self.dream_display_cursor: float = 0.0
+        self._loaded_schema_version: int | None = None
 
         # Slot-token inverted index (Pool 1.5 candidate gathering,
         # 2026-07-12 perf fix): token -> (ordinal, containing band, entry)
@@ -658,6 +667,7 @@ class ContinuumMemorySystem:
         rerank: bool | None = None,
         bm25: bool | None = None,
         timeline: bool | None = None,
+        hide_superseded: bool | None = None,
         _trace: dict | None = None,
     ) -> RetrievalResult:
         """Retrieve from CMS bands and merge results.
@@ -674,6 +684,8 @@ class ContinuumMemorySystem:
         Args:
             query_embedding: The encoded query.
             top_k: Maximum neural results. Falls back to ``config.top_k``.
+            hide_superseded: Override the configured history visibility for
+                this retrieval only. Applied before candidate caps and dedup.
             bands: When provided, restrict the neural pool to bands with
                 these names — e.g. ``["working", "instant"]`` for "just the
                 fast tiers" or ``["forever"]`` for identity recall only.
@@ -779,7 +791,8 @@ class ContinuumMemorySystem:
         # event — so it is opt-in, for debugging and audit.
         # ``getattr`` (not an attribute read) because library callers
         # and eval harnesses pass config objects predating the field.
-        hide_superseded = bool(getattr(self.config, "hide_superseded", False))
+        if hide_superseded is None:
+            hide_superseded = bool(getattr(self.config, "hide_superseded", False))
 
         def _keep(entry: MemoryEntry) -> bool:
             if not hide_superseded:
@@ -1846,6 +1859,27 @@ class ContinuumMemorySystem:
                     n += 1
         return n
 
+    def flush_unpersisted_entries(self, entries) -> int:
+        """Insert resident entries that never reached storage at all — the
+        sibling of :meth:`reflush_entries` for ``db_id is None`` rather than
+        a phantom id. :meth:`store` seats the entry in ``bands[0]`` BEFORE
+        its write-through ``insert_entry``, and that insert is not wrapped,
+        so a failed insert leaves a resident with no row. Each hit gets a
+        row + id; entries already carrying an id are skipped. Returns the
+        number inserted. Raises whatever the insert raises — the caller
+        decides whether a still-unpersisted entry is fatal — and stops at
+        the first failure with the entries inserted so far already stamped.
+        The caller holds the service lock."""
+        if self.storage is None:
+            return 0
+        from pseudolife_memory.storage.sync import entry_to_row
+        n = 0
+        for e in entries:
+            if e.db_id is None:
+                e.db_id = self.storage.insert_entry(entry_to_row(e))
+                n += 1
+        return n
+
     def bump_entry_access_count(self, db_id: int, delta: int) -> bool:
         """Bump the resident entry's in-memory access_count to match a DB bump, so
         the save-cadence sync (update_access_counts, in-memory -> DB) reconciles to
@@ -2001,6 +2035,8 @@ class ContinuumMemorySystem:
         # Schema v35: the label pair follows the entry across bands.
         moved.authority = entry.authority
         moved.distortion_tolerance = entry.distortion_tolerance
+        moved.dream_state = entry.dream_state
+        moved.dream_id = entry.dream_id
         moved.db_id = entry.db_id
         if self.storage is not None and entry.db_id is not None:
             # Must not escape. On the demotion path this runs inside
@@ -2074,7 +2110,14 @@ class ContinuumMemorySystem:
     # Persistence — schema v2 (N bands) with v1 migration
     # ------------------------------------------------------------------
 
-    def save(self, directory: str | Path) -> None:
+    def save(
+        self,
+        directory: str | Path,
+        *,
+        dream_state_overrides: dict[str, str] | None = None,
+        dream_ack_secret: str | None = None,
+        dream_display_cursor: float | None = None,
+    ) -> None:
         """Save the CMS state to ``directory/cms_state.pt``.
 
         Always writes the current ``SCHEMA_VERSION``. Reference bank
@@ -2083,10 +2126,17 @@ class ContinuumMemorySystem:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
 
+        bands = {b.name: b.get_state_dict() for b in self.bands}
+        if dream_state_overrides:
+            for band_state in bands.values():
+                for entry in band_state.get("entries", []):
+                    identity = entry.get("dream_id")
+                    if identity in dream_state_overrides:
+                        entry["dream_state"] = dream_state_overrides[identity]
         state = {
             "schema_version": SCHEMA_VERSION,
             "preset_name": self.config.miras.preset,
-            "bands": {b.name: b.get_state_dict() for b in self.bands},
+            "bands": bands,
             "interaction_count": self._interaction_count,
             "logical_turn_count": self._logical_turn_count,
             "surprise_history": self._surprise_history,
@@ -2097,8 +2147,18 @@ class ContinuumMemorySystem:
             # losslessly through torch.save. Pre-v6 loaders ignore unknown
             # keys; v6 loaders restore via EpisodeManager.from_dict.
             "episodes": self.episodes.to_dict(),
+            "dream_ack_secret": (
+                self.dream_ack_secret if dream_ack_secret is None
+                else dream_ack_secret
+            ),
+            "dream_display_cursor": (
+                self.dream_display_cursor if dream_display_cursor is None
+                else float(dream_display_cursor)
+            ),
         }
-        torch.save(state, directory / "cms_state.pt")
+        from pseudolife_memory.utils.atomic_io import atomic_torch_save
+        atomic_torch_save(state, directory / "cms_state.pt")
+        self._loaded_schema_version = SCHEMA_VERSION
 
     # ------------------------------------------------------------------
     # Weights-only persistence (v0.2 — entries live in Postgres)
@@ -2174,7 +2234,7 @@ class ContinuumMemorySystem:
         directory = Path(directory)
         state_path = directory / "cms_state.pt"
 
-        if not state_path.exists():
+        if not state_path.exists() and not state_path.with_suffix(".pt.bak").exists():
             legacy_path = directory / "memory_state.pt"
             if legacy_path.exists():
                 self._load_legacy_hopfield(legacy_path)
@@ -2183,14 +2243,33 @@ class ContinuumMemorySystem:
                 self.rebalance_bands()
             return
 
-        # weights_only=True: the CMS snapshot is tensors + plain containers, so
-        # the safe loader handles it without unpickling arbitrary objects (CWE-502).
-        state = torch.load(state_path, weights_only=True, map_location="cpu")
+        # The CMS snapshot is tensors + plain containers, so the safe loader
+        # handles it without unpickling arbitrary objects (CWE-502). Fall back
+        # to the last complete checkpoint if the primary was interrupted.
+        from pseudolife_memory.utils.atomic_io import load_with_backup
+        state, used_backup = load_with_backup(state_path)
+        if used_backup:
+            logger.warning("cms_state.pt corrupt — restored from .bak.")
         schema_version = state.get("schema_version", 1)
+        self._loaded_schema_version = schema_version
+        if schema_version < 7:
+            # Old snapshots had no durable file identity. Assign it before
+            # the shared band loader runs; a v7 row missing its ID remains
+            # visibly corrupt and is rejected by dream initialization.
+            if schema_version == 1:
+                saved_band_states = [
+                    state[key] for key in
+                    ("instant", "short_term", "long_term") if key in state
+                ]
+            else:
+                saved_band_states = list((state.get("bands") or {}).values())
+            for band_state in saved_band_states:
+                for entry in band_state.get("entries", []):
+                    entry.setdefault("dream_id", secrets.token_hex(16))
 
         if schema_version == 1:
             self._load_schema_v1(state)
-        elif schema_version in (2, 3, 4, 5, 6):
+        elif schema_version in (2, 3, 4, 5, 6, 7):
             # v3 / v4 / v5 / v6 are all fully backwards-compatible with v2 —
             # each added optional entry fields with sensible defaults:
             # v3: ``last_logical_turn`` + top-level ``chain_residual``,
@@ -2306,6 +2385,8 @@ class ContinuumMemorySystem:
                         tags=list(e.get("tags") or []),
                         authority=e.get("authority"),
                         distortion_tolerance=e.get("distortion_tolerance"),
+                        dream_state=e.get("dream_state"),
+                        dream_id=e.get("dream_id", ""),
                     ))
                 except Exception as exc:  # noqa: BLE001 — one bad entry
                     logger.warning("Skipping unrestorable entry from saved "
@@ -2330,6 +2411,11 @@ class ContinuumMemorySystem:
         # v6 episode log — pre-v6 saves have no ``episodes`` key, in which
         # case from_dict returns an empty manager.
         self.episodes = EpisodeManager.from_dict(state.get("episodes") or {})
+        self.dream_ack_secret = state.get("dream_ack_secret")
+        # Preserve malformed metadata for the service's dream-only validator.
+        # Raising here would discard otherwise-readable entries when load() is
+        # wrapped by the normal service startup tolerance.
+        self.dream_display_cursor = state.get("dream_display_cursor", 0.0)
         # Band entries were wholesale replaced without going through
         # store() — a previously-built slot index must not survive.
         self._slot_index_dirty = True
@@ -2356,6 +2442,7 @@ class ContinuumMemorySystem:
                     surprise_score=e.get("surprise_score", 0.0),
                     source=e.get("source", ""),
                     bank=first_band.name,
+                    dream_state=None,
                 ))
             first_band._dirty = True
 
@@ -2369,10 +2456,12 @@ class ContinuumMemorySystem:
                         surprise_score=e.get("surprise_score", 0.0),
                         source=e.get("source", ""),
                         bank=last_band.name,
+                        dream_state=None,
                     ))
                 last_band._dirty = True
 
             self._interaction_count = state.get("interaction_count", 0)
+            self._loaded_schema_version = 0
             # Entries appended without going through store() — invalidate
             # any previously-built slot index.
             self._slot_index_dirty = True
@@ -2393,6 +2482,8 @@ class ContinuumMemorySystem:
         self._interaction_count = 0
         self._surprise_history = {b.name: [] for b in self.bands}
         self._consolidation_events = []
+        self.dream_ack_secret = secrets.token_hex(32)
+        self.dream_display_cursor = 0.0
         # Tier C — reset the episode log too so test fixtures get clean
         # bookkeeping on every ``clear``. Without this, ``pristine_service``
         # leaks episodes from earlier tests in the same module.

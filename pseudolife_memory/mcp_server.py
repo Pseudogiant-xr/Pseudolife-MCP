@@ -73,7 +73,7 @@ from mcp.types import ToolAnnotations  # noqa: E402
 # lands in ``inputSchema.properties[arg].description``. Defaults stay plain
 # signature defaults — Field carries description ONLY, so coercion and
 # optionality are untouched.
-from pydantic import Field  # noqa: E402
+from pydantic import Field, StrictInt  # noqa: E402
 
 from pseudolife_memory.service import MemoryService  # noqa: E402
 
@@ -434,16 +434,18 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
         f.get("last_confirmed") or f.get("asserted_at"))
     # ``re_verify`` deliberately does NOT gate here. It is a passive
     # caution, exactly as it is on lessons (`_annotate_lesson_staleness`),
-    # and it fires on ~25% of a mature bank's facts — measured 2026-09-02
-    # on the live bank: 1264/5153 current facts stand on a source memory
-    # contradicted since they were last confirmed, because `cms.store`'s
-    # contradiction decay marks entries superseded automatically and
-    # liberally. Routing that into a call the served CORRECTION_NOTE tells
-    # the reader to run NOW would turn a common, weak signal into a
-    # standing instruction to rewrite a quarter of the cortex every
-    # session. The ACTIVE affordance for retracted evidence is
-    # `memory_supersede`'s `derived_flagged`, which fires only on an
-    # explicit correction and names exactly the facts affected.
+    # because source retirement says only that a derived fact needs review,
+    # not what its verified current value is — and it is a broad signal, not
+    # a rare one. Re-measured 2026-09-11 on the live bank with
+    # `ops/measure_reverify_population.py`: 1668 of 6015 current facts
+    # (27.7%) stand on a source memory corrected since they were last
+    # confirmed, and schema v39 keeps those warnings standing instead of
+    # letting source eviction drain them. Routing that into a call whose
+    # served CORRECTION_NOTE tells the reader to run it NOW would be a
+    # standing instruction to rewrite a quarter of the cortex every session.
+    # The active affordance at correction time is `memory_supersede`'s
+    # `derived_flagged`, which names exactly the facts affected by that
+    # explicit correction.
     if not (f.get("contested") or f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "
@@ -729,18 +731,22 @@ def memory_recent(
 
 @_tool()
 def memory_supersede(
-    old_text: Annotated[str, Field(
-        description="The memory now obsolete. Matched exact-text first, "
-                    "then by nearest embedding — a close paraphrase "
-                    "works.")],
+    old_text: Annotated[str | None, Field(
+        description="Unique exact stored text; omit with entry_id.")] = None,
+    *,
     new_text: Annotated[str, Field(
         description="The replacement claim; stored fresh.")],
+    entry_id: Annotated[StrictInt | None, Field(
+        description="Positive search/recent ID in this bank; preferred selector.")] = None,
 ) -> dict[str, Any]:
     """Mark a stored memory obsolete and record its replacement. The old
     entry is kept but flagged superseded, so retrieval ranks the correction
     higher and shows both together.
 
-    Returns: ``{superseded_count, superseded_texts, new_memory_stored,
+    Use exactly one selector. Missing, retired, or ambiguous targets cause
+    no mutation; search again and resubmit an ID. No similarity fallback.
+
+    Returns: ``{superseded_count, superseded_texts, superseded_ids, new_memory_stored,
     derived_flagged}`` — the last being the canonical facts the dream built
     on the memories just corrected. They are FLAGGED, never rewritten;
     check each and re-assert the ones that moved. Each row carries
@@ -750,7 +756,7 @@ def memory_supersede(
     ``derived_flagged_total`` say when a correction reached further than
     the cap.
     """
-    return service.supersede(old_text=old_text, new_text=new_text)
+    return service.supersede(old_text=old_text, new_text=new_text, entry_id=entry_id)
 
 
 @_tool(tier="core")
@@ -891,11 +897,11 @@ def memory_fact_get(
     ``candidates`` lists nearby slots — ranked leads, not answers.
     ``re_verify`` = a memory this fact was derived from has since been
     corrected; the value still stands but check it before acting. Set slots
-    carry it too, at the slot. Its absence is not a guarantee: the flag is
-    read from evidence that still exists, so it stops once the corrected
-    memory is evicted or deleted. ``verbose=True`` adds the record's
-    provenance, support and temporal stamp; ``memory_history`` shows the
-    slot's version chain.
+    carry it too, at the slot. PostgreSQL keeps this warning after the
+    corrected source memory is evicted or deleted; file mode has no durable
+    retraction warning. ``verbose=True`` adds the record's provenance,
+    support and temporal stamp; ``memory_history`` shows the slot's version
+    chain.
     """
     rec = service.cortex_lookup(entity, attribute)
     out = {
@@ -1458,9 +1464,10 @@ def memory_dream(
         description="pull/run: how many memories to process (pull defaults "
                     "to 40). runs: how many passes to list (defaults to "
                     "10).")] = None,
+    commit_token: Annotated[str | None, Field(
+        description="commit: token returned by pull.")] = None,
     cursor: Annotated[float | None, Field(
-        description="commit: the newest pulled timestamp. Required for "
-                    "that action.")] = None,
+        description="Deprecated; use commit_token.")] = None,
     apply: Annotated[bool, Field(
         description="deep: True writes the consolidation (graph tables are "
                     "snapshotted first); the default is a dry run.")] = False,
@@ -1494,9 +1501,15 @@ def memory_dream(
     if action == "pull":
         return service.dream_pull(limit=limit or 40)
     if action == "commit":
-        if cursor is None:
-            return {"error": "cursor_required"}
-        return service.dream_commit(cursor)
+        if commit_token is not None:
+            return service.dream_commit(commit_token)
+        if cursor is not None:
+            return {
+                "error": "legacy_cursor_unsupported",
+                "detail": "Timestamp commits are unsafe. Pull again and pass "
+                          "the returned commit_token.",
+            }
+        return {"error": "commit_token_required"}
     if action == "run":
         return service.dream_run_auto(limit=limit)
     if action == "deep":
@@ -1736,6 +1749,10 @@ def memory_consolidation_candidates(
     ``query`` or an ``episode``; read the clusters, synthesise one
     canonical note, then commit it via ``memory_consolidate``.
 
+    Each member carries its ``id``; commit with
+    ``memory_consolidate(entry_ids=[...])`` rather than the members' texts —
+    IDs survive rewording and duplicate phrasing, exact text does not.
+
     Returns: ``{count, clusters: [{cohesion, size, members}]}``.
     """
     return service.consolidation_candidates(
@@ -1752,25 +1769,29 @@ def memory_consolidation_candidates(
 
 @_tool()
 def memory_consolidate(
-    replaces: Annotated[list[str], Field(
-        description="The memories being folded in; each is matched by "
-                    "exact text or close paraphrase.")],
+    replaces: Annotated[list[str] | None, Field(
+        description="Unique exact stored texts; omit with entry_ids.")] = None,
+    *,
     new_text: Annotated[str, Field(
         description="The canonical note that replaces them.")],
     source: Annotated[str | None, Field(
         description="Source tag for the new note.")] = None,
     tags: Annotated[list[str] | None, Field(
         description="Labels for the new note.")] = None,
+    entry_ids: Annotated[list[StrictInt] | None, Field(
+        description="Positive IDs in this bank; prefer over replaces.")] = None,
 ) -> dict[str, Any]:
     """Replace a cluster of near-duplicate memories with one canonical note.
-    Every entry matching ``replaces`` is marked superseded by ``new_text``,
-    which is stored fresh — the bank gets shorter without losing the audit
-    trail.
+    Use exactly one selector mode; there is no similarity fallback.
+    All targets must resolve before any changes. Missing, retired or
+    ambiguous targets cause no mutation; search again and resubmit IDs.
+    Selected entries remain as history after replacement.
 
-    Returns: ``{superseded_count, superseded_texts, new_memory_stored}``.
+    Returns: ``{superseded_count, superseded_texts, superseded_ids, new_memory_stored}``.
     """
     return service.consolidate(
         replaces=replaces, new_text=new_text, source=source, tags=tags,
+        entry_ids=entry_ids,
     )
 
 

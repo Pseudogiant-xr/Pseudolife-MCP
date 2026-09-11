@@ -43,8 +43,7 @@ leads, read the evidence, and disagree freely.
      the user maintains (bikes owned, pending tasks), use `memory_set_add`
      / `memory_set_remove` instead — `memory_fact_set` on a set-valued
      slot errors and names the right tool.
-   - `memory_dream(action="commit", cursor=<newest timestamp from the
-     pull>)`.
+   - `memory_dream(action="commit", commit_token=<token from the pull>)`.
    - Surface any `contested` results to the user — those are conflicts to
      settle, not silent overwrites (an add onto a number-led scalar parks
      as a contender by design; `member_capped` means the 100-member cap

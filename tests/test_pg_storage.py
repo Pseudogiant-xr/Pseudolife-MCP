@@ -78,8 +78,9 @@ def test_entry_crud_roundtrip(storage):
     assert r["tags"] == ["x"] and r["slots"] == [["e", "a", "v", "+"]]
     assert np.allclose(r["embedding"], _entry()["embedding"], atol=1e-6)
 
-    storage.update_entry(eid, band="fast", access_count=3,
-                         superseded_at=2000.0, superseded_by_text="newer")
+    storage.update_entry(eid, band="fast", access_count=3)
+    storage.supersede_entries(
+        [eid], superseded_at=2000.0, superseded_by_text="newer")
     r = storage.load_entries()[0]
     assert (r["band"], r["access_count"], r["superseded_at"],
             r["superseded_by_text"]) == ("fast", 3, 2000.0, "newer")

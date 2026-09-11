@@ -174,11 +174,10 @@ def test_consolidate_supersession_survives_restart(pg_conn, pg_url, tmp_path):
     assert entry["superseded_by_text"] == "Consolidated: fact A current"
 
 
-def test_consolidate_paraphrase_supersession_survives_restart(
+def test_consolidate_paraphrase_refusal_survives_restart(
     pg_conn, pg_url, tmp_path,
 ):
-    """The embedding fallback marks a different entry object than the
-    exact-text pass, so it needs its own pin."""
+    """A close paraphrase must not change a source row or insert a note."""
     from pseudolife_memory.service import MemoryService
 
     svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
@@ -188,15 +187,16 @@ def test_consolidate_paraphrase_supersession_survives_restart(
         replaces=["deploy target: staging cluster"],
         new_text="Consolidated: the deploy target is production",
     )
-    assert out["superseded_count"] == 1
+    assert out["superseded_count"] == 0
+    assert out["new_memory_stored"] is False
+    assert out["reason"] == "target_not_found"
+    assert len(svc._storage.load_entries()) == 1
 
     entry = _rehydrated(
         tmp_path, pg_url, "the deploy target is the staging cluster",
     )
-    assert entry["superseded"] is True
-    assert entry["superseded_by_text"] == (
-        "Consolidated: the deploy target is production"
-    )
+    assert entry["superseded"] is False
+    assert entry["superseded_by_text"] is None
 
 
 def test_supersede_supersession_survives_restart(pg_conn, pg_url, tmp_path):

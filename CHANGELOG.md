@@ -6,6 +6,175 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-11 — regression gate input requirements)
+- The regression gate rejects a missing bank directory as an infrastructure failure
+  before clearing prior results or starting its GPU server. It no longer falls
+  back to copied contexts that could pass without testing fact ranking.
+  Its documented scope now distinguishes offline cortex reconstruction from
+  entry retrieval, service search and MCP rendering.
+
+### Fixed (2026-09-11 — durable correction warnings)
+- Facts retain their `re_verify` warning when a corrected source memory is
+  later evicted or deleted. PostgreSQL schema v39 records source supersession
+  independently of evictable traces, in the same transaction as source-entry
+  retirement.
+  Re-confirming a fact still clears its warning; deleting an uncorrected source
+  does not create one.
+- Existing trace relationships retain correction events while tracing is
+  disabled, with warning serving still controlled by `memory.traces.enabled`.
+  Logical exports preserve the events. Upgrades and older imports reconstruct
+  only surviving superseded source/trace pairs; already-deleted history cannot
+  be recovered.
+- **Upgrade effect.** The first v39 start materialises one durable event per
+  surviving superseded-source trace pair — 2077 pairs on the reference bank on
+  2026-09-11. That reproduces the warnings the bank already served rather than
+  raising new ones, but from then on a warning no longer drains when its
+  source memory is evicted or deleted. Each clears only when its slot is
+  confirmed again: a `memory_fact_set` at that slot with the same or a new
+  value, or accepting a contender there. An operator clearing a population
+  deliberately re-asserts those slots; there is no dismissal that skips
+  confirming the value. `re_verify` remains passive and is still excluded from
+  `correct_with`, so a larger standing population does not become a larger
+  instruction list.
+- Grouped set-slot `last_confirmed` now falls back to each member's
+  `asserted_at` when the member carries no confirmation stamp, matching the
+  scalar and lookup paths. A set slot that previously warned only because a
+  legacy member held a zero clock may no longer warn, and the served
+  `last_confirmed` on a grouped set entry may report an assertion time.
+- A correction whose target list repeats the same entry no longer fails after
+  the rows are already retired. The atomic retirement count is checked against
+  the distinct targets, matching what the storage call reports.
+- `ops/measure_reverify_population.py` re-measures the flagged population
+  read-only from a DSN: current facts, the served `last_confirmed`-keyed
+  warning count, the latching "any source superseded" upper bound, and the
+  trace/supersession pair count the v39 backfill inserts. Measured on the live
+  bank 2026-09-11: 1668/6015 current facts (27.7%) served the warning, 1981
+  (32.9%) under the bare test, 2077 pairs.
+
+### Fixed (2026-09-11 — durable dream acknowledgement)
+- Dream batches acknowledge their exact entries instead of moving a timestamp
+  boundary past other entries. New memories remain eligible after equal or
+  backdated timestamps, source-policy changes and restarts. Manual commits use
+  the token returned by the pull; numeric cursor writes are rejected with
+  instructions to pull again.
+- PostgreSQL schema v38 adds per-entry acknowledgement state. Existing entries
+  are classified once against the legacy cursor and source policy; this keeps
+  the prior boundary and does not repair historical omissions. File checkpoints
+  move to format v7 with durable entry identities and acknowledgement state.
+- A memory whose storage write failed no longer stalls every later dream until
+  the daemon restarts. The pull re-persists such entries, excludes any that
+  still cannot be stored — reporting `skipped_unpersisted` and leaving them
+  pending for the next pass — and consolidates the rest. Pull ordering no
+  longer depends on every pending memory having a storage row, so a backlog
+  with tied timestamps reports its status instead of failing.
+- Entries deleted between a pull and its commit are reported as `missing`
+  instead of failing the whole batch, so a concurrent deletion no longer
+  leaves its batch to be re-extracted on every later pass.
+- A failed dream-tracking initialization is named on `/health`
+  (`dream_tracking_error`, without changing `status`) and a transient storage
+  failure is re-attempted by the next dream call. A corrupt bank secret or an
+  unusable legacy cursor still stops only the dream, and still requires repair.
+- Classifying a bank's pre-v38 entries is two statements rather than one per
+  entry, so startup no longer holds the service lock for a round trip per
+  legacy memory. The classification rule itself is unchanged.
+
+### Security (2026-09-11 — require existing ONNX artifacts)
+- A configured ONNX backend with no matching artifact could enter
+  SentenceTransformers and Optimum's automatic export path. That path saves a
+  model's tokenizer or processor and made Transformers
+  GHSA-xrqw-3rrv-vx5w conditionally reachable for a malicious local or cached
+  model even with Hugging Face offline mode enabled. ONNX loading now verifies
+  the configured artifact for each supported Transformer module and passes
+  its owning local model directory to the backend. Missing files or unknown
+  module layouts fall back to torch before ONNX construction; filenames must
+  use lowercase `.onnx` to match case-sensitive loader discovery. No validated
+  ONNX artifact path or `modules.json` may traverse a link between the model
+  root and the file: the loader's discovery glob does not descend into linked
+  directories, so a link that stays inside the root still hides the artifact
+  and re-enables export. Only a cached Hub snapshot's leaf link is accepted,
+  and only after local-only cache resolution and only into the same
+  repository's `blobs` directory.
+- The pinned Optimum stack matches the loader subfolder against OS-native path
+  strings, so on native Windows an artifact under a nested module subfolder
+  such as `0_Transformer/onnx` goes undetected and export is enabled despite
+  `export=False`. A model whose recognized Transformer module loads from a
+  subfolder now falls back to torch there before ONNX construction. A flat
+  `onnx` layout resolves on both platforms and keeps the load-only backend, as
+  do Linux and the daemon image.
+- The daemon image's bake guard checks the provisioning script's model list and
+  the Dockerfile's call to it. It previously matched the default model name
+  anywhere in the Dockerfile, which a comment naming the model satisfied while
+  downloading nothing.
+- The daemon image explicitly downloads MiniLM's `onnx/model.onnx`, then loads
+  it from the owning local snapshot with export disabled. A missing artifact or
+  incompatible same-revision metadata now fails the build instead of creating
+  an ONNX model implicitly. Dependency versions are unchanged because
+  `optimum-onnx` 0.1.0 still requires Transformers below 4.58.
+
+### Fixed (2026-09-11 — exact correction targets)
+- Explicit supersede and consolidation calls accept entry IDs from retrieval,
+  and the Console carries those selected IDs through to the correction.
+  A correction no longer retires a similarly worded note or every duplicate
+  across sources and episodes. Legacy text selectors require one exact match;
+  missing, retired, ambiguous or unavailable targets reject the whole selection
+  before any changes. File mode retains unique exact-text selection.
+- Consolidation candidates exclude retired entries before candidate limits
+  and clustering, so suggested IDs do not include already-replaced targets.
+- Correction results include the superseded IDs and actionable target errors.
+  The Console keeps the edit open when the service rejects a correction,
+  preserving replacement text instead of reporting a false success.
+- The Console treats a correction as rejected only when the service reports an
+  error or retired nothing. A correction whose replacement text was filtered
+  out still retired its target, so the Console now closes the edit and warns
+  that the replacement was not stored, instead of reporting a failure for work
+  that already happened and inviting a retry that cannot succeed.
+- A legacy text selector needs one LIVE match, not one match overall. Text that
+  was corrected and later restated leaves a retired twin behind; that twin no
+  longer makes the live entry ambiguous, which file mode could not work around
+  because it has no entry IDs. Two live duplicates are still ambiguous, and a
+  text whose only matches are retired still reports `target_superseded`.
+  Consolidation candidates apply the same rule, so such a note is offered again.
+- `memory_supersede` and `memory_consolidate` require `new_text` again; an
+  omitted replacement is a client-side schema error rather than a silent
+  empty-input no-op.
+- A failed storage read while listing consolidation candidates degrades to
+  unverified candidates with a logged warning instead of failing the call;
+  the correction itself still validates every ID before changing anything.
+
+### Fixed (2026-09-11 — durable lesson acknowledgement)
+- Lesson synthesis commits staged lessons, graph updates and acknowledgements
+  together in PostgreSQL. A failed write leaves the batch retryable without
+  exposing tentative lessons; overlapping extractions recheck their selected
+  signals before applying changes. A lost commit response is reconciled from
+  durable state before further service use or saving.
+- Empty or failed extraction routes retain their signals, including individual
+  empty rule responses. Successful routes can proceed independently; a custom
+  rule extractor with incomplete output coverage leaves that route pending.
+  Signal retention and file-mode synthesis behavior are unchanged.
+- A claim the batch cannot write costs only itself: it rolls back on its own
+  savepoint (lesson and graph halves together), the rest of the batch still
+  commits, and the count appears as `write_errors` in the synthesis report.
+  Its rule signal stays pending; the clustering route is acknowledged once any
+  of its claims lands. A claim that fails every time no longer stalls every
+  later sweep.
+- Within one batch, the near-duplicate gate compares a claim against the
+  lessons that batch has already staged as well as the durable ones, so the
+  second of two near-identical claims is counted as `deduped`, not written.
+- Claim embeddings are computed before the batch transaction opens, and one
+  sweep drains at most `memory.lessons.synthesis_max_signals` signals
+  (default 200; 0 disables). Both bound how long a batch holds the service
+  lock and one PostgreSQL transaction; the remainder waits for the next sweep.
+- An unresolved lesson reconciliation no longer blocks unrelated persistence:
+  weights, access counts and cortex/world slots are written, only the lesson
+  snapshot is skipped, and the save still fails loudly afterwards. A restart
+  discards exactly what those parts would have made durable.
+- `/health` reports `lesson_reconciliation_required` while a lesson commit is
+  unresolved, and the daemon logs it at ERROR. Status stays `ok` so the
+  container healthcheck does not restart the daemon out from under the
+  unsaved state, matching `migration_partial`.
+- A synthesis report keeps its extraction-route errors when a transaction
+  error follows, instead of replacing them.
+
 ### Fixed (2026-09-10 — preserve source evidence)
 - Automatic contradiction candidates can admit a possible update through
   the surprise gate, but no longer retire or weaken whole source entries.
@@ -2900,14 +3069,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     test latches on forever; measured on the live bank it would fire on
     1470/5153 current facts (28.5%). Keyed on `last_confirmed` it fires on
     1264 (24.5%) and — unlike the bare test — is cleared by re-asserting or
-    re-confirming the slot.
+    re-confirming the slot. *(Both figures are retired: see the
+    historical-contract note below, and `ops/measure_reverify_population.py`
+    for the current ones — 1981 and 1668 of 6015 on 2026-09-11.)*
   - **`re_verify` is deliberately PASSIVE**, exactly as it is on lessons: it
-    does NOT gate the `correct_with` affordance. At ~25% of a mature bank,
-    routing it into a call whose served note says to run a correction NOW
-    would be a standing instruction to rewrite a quarter of the cortex every
-    session. The active, targeted affordance is `derived_flagged`, which
-    fires only on an explicit correction.
-  - **`re_verify` is BEST-EFFORT, and the docs now say so.** It is derived
+    does NOT gate the `correct_with` affordance. At ~25% of a mature bank
+    (retired figure, superseded by schema v39 — re-measured 2026-09-11 at
+    27.7%), routing it into a call whose served note says to run a correction
+    NOW would be a standing instruction to rewrite a quarter of the cortex
+    every session. The active, targeted affordance is `derived_flagged`,
+    which fires only on an explicit correction.
+  - **Historical contract, superseded by schema v39:** correction warnings
+    now survive source deletion; ordinary deletion alone is not a semantic
+    correction. Automatic contradiction-based source retirement was also
+    removed on 2026-09-11. The original behavior below describes this release.
+    **`re_verify` is BEST-EFFORT, and the docs now say so.** It is derived
     at read time from evidence that still exists, so losing the evidence
     loses the flag: `memory_traces.entry_id` is `ON DELETE CASCADE`, a
     true-drop capacity eviction hard-deletes the entry row (every eviction

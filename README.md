@@ -150,7 +150,7 @@ Windows needs an ASCII-only data path
 | External volumes, health-checked services, deploy/rollback tooling | no | yes |
 
 **The gap, stated plainly.** Lite ships no **extractor**, so the **dream**
-pass still runs, prunes, and advances its **cursor**, but writes no
+pass still runs, prunes, and acknowledges its input batch, but writes no
 canonical facts: on this path `memory_fact_set` is the only **cortex**
 writer. Everything else above works. Nothing about this is silent —
 `curl http://127.0.0.1:8765/health` reports `"extractor": "none"`, and the
@@ -370,7 +370,7 @@ is agent context every session, so it stays lean.
 | `memory_store(text, source?, tags?, origin?, episode?, authority?, distortion_tolerance?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`); `authority`/`distortion_tolerance` label the speech act and how exactly it must survive — `auto` (default) is a deterministic form heuristic, no model call, and both labels are inherited through supersession unless restated |
 | `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits, each dated (`asserted_at` / `last_confirmed` / human `age`, plus `stale` when it has rotted); `explain=True` attaches a ranking trace |
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
-| `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history; the result's `derived_flagged` names the canonical facts the dream built on what was corrected (flagged, never rewritten) |
+| `memory_supersede(old_text?, new_text, entry_id?)` | Correct the selected entry by ID, or one unique exact-text match; ambiguous/missing targets fail closed. Keep the old entry as history; `derived_flagged` names canonical facts built on it (flagged, never rewritten) |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
@@ -383,13 +383,13 @@ is agent context every session, so it stays lean.
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
-| `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
+| `memory_dream(action, limit?, commit_token?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
 | `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
 | `memory_session_title(title, episode?)` | Name THIS session's auto-opened episode (default titles are generic); `episode` is your session handle from the briefing — concurrent sessions share one HTTP connection, so pass it to land the rename on your own episode |
 | `memory_episode_start(title, hint?, episode?)` / `memory_episode_end(episode?)` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id; `episode` is your session handle so the nest/pop lands in your own tree when several sessions run concurrently |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
 | `memory_consolidation_candidates(query?, episode?, ...)` | Cluster near-duplicate memories ripe for consolidation |
-| `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
+| `memory_consolidate(replaces?, new_text, source?, tags?, entry_ids?)` | Replace selected entries with one canonical note; validate every ID (or unique exact text) before any changes |
 | `memory_graph_relate(src, relation, dst, ...)` | Assert a typed edge (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — lookups resolve aliases first |
@@ -788,13 +788,17 @@ memory_store("Decided to use stdio transport for the MCP because no port conflic
 ```
 
 **When corrected** — marks the old fact superseded *and* stores the
-correction; both surface in future retrieval, the new one ranked higher:
+correction; both surface in future retrieval, the new one ranked higher.
+Select the entry by the `id` carried on the search or recent hit:
 ```
 memory_supersede(
-  "Provider interface uses synchronous calls",
-  "Provider interface uses async calls — sync version was the v0.7 prototype only"
+  entry_id=417,
+  new_text="Provider interface uses async calls — sync version was the v0.7 prototype only"
 )
 ```
+`old_text=` still selects by the full stored text when that text is exactly
+unique among live entries; it is the legacy selector and the only one file
+mode has. Ambiguous or missing targets change nothing.
 
 **Hygiene** — `memory` and `fact` scopes hard-delete (at least one filter
 is required for scope `memory`, preventing accidental wholesale deletion);
@@ -818,12 +822,14 @@ episodes, and full-table views all live there. Going deeper:
 
 A **dream** distils the recent associative stream into canonical cortex
 facts while you're not looking: pull unconsolidated memories → extract
-`(entity, attribute, value)` → advance a cursor so nothing is reprocessed.
+`(entity, attribute, value)` → acknowledge those exact entries durably.
+New entries remain pending regardless of their timestamps; failed acknowledgement
+can replay claim application. Manual commits use the token returned by `pull`.
 Extraction is pluggable:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — none** | no extractor configured — the dream still runs, prunes, and advances its cursor, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
+| **0 — none** | no extractor configured — the dream still runs, prunes, and acknowledges input batches, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep → the bundled CPU sidecar, or any OpenAI-compatible endpoint | nothing (sidecar) | high; free if local |
 
@@ -936,9 +942,9 @@ bank.
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only and auto-selected when installed, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder fall back to torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v37 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v39 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 

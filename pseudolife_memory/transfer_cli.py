@@ -50,7 +50,11 @@ import psycopg
 
 from pseudolife_memory.backup_cli import _default_data_dir
 from pseudolife_memory.storage import embedded_pg
-from pseudolife_memory.storage.schema import BENCH_RESET_TABLES, ensure_schema
+from pseudolife_memory.storage.schema import (
+    BENCH_RESET_TABLES,
+    _backfill_trace_invalidations,
+    ensure_schema,
+)
 
 FORMAT_VERSION = 1
 
@@ -64,7 +68,8 @@ EXPORTED_TABLES = (
     "relations", "edges", "edge_proposals", "entity_proposals",
     "entity_kinds", "dismissed_pairs", "facts", "world_facts", "lessons",
     "outcome_signals", "communities", "entity_communities",
-    "memory_traces", "entity_sources", "merge_decisions",
+    "memory_traces", "memory_trace_invalidations", "entity_sources",
+    "merge_decisions",
     "chronicle_events",
     # v35: the store-curation judge's verdict memo travels like
     # dismissed_pairs — a settled pair stays settled on the target bank.
@@ -86,7 +91,12 @@ EXCLUDED_TABLES = (
 # and any extension lineage marker (the `*_schema_version` convention —
 # see docs/guide/configuration.md#extension-schemas), and the
 # active-session pointer is transient session state.
-_META_SKIP_KEYS = {"schema_version", "active_session_pointer"}
+_META_SKIP_KEYS = {
+    "schema_version", "active_session_pointer",
+    # Bank-local acknowledgement authority. Logical transfer creates or
+    # retains the target generation; only physical restore preserves it.
+    "dream_ack_secret_v1",
+}
 
 
 def _skip_meta_key(key) -> bool:
@@ -282,7 +292,21 @@ def perform_import(dsn: str, zip_path: Path | str, force: bool = False) -> dict:
                             counts[table] = _import_meta(conn, lines)
                         else:
                             counts[table] = _import_table(
-                                conn, table, lines)
+                                conn, table, lines,
+                                legacy_entry_states=(
+                                    table == "entries"
+                                    and int(manifest.get("schema_version") or 0)
+                                    < 38
+                                ),
+                            )
+                # ensure_schema ran against the empty target before import,
+                # so its one-time v39 backfill could not see an older
+                # archive's entries/traces. Absence of the table member is
+                # the compatibility marker; a present-but-empty v39 member
+                # is authoritative and must remain empty.
+                if "memory_trace_invalidations.jsonl" not in names:
+                    counts["memory_trace_invalidations"] = (
+                        _backfill_trace_invalidations(conn))
                 _advance_sequences(conn)
     return {"counts": counts}
 
@@ -372,7 +396,9 @@ def _encode(value, udt: str):
     return value
 
 
-def _import_table(conn, table: str, lines) -> int:
+def _import_table(
+    conn, table: str, lines, *, legacy_entry_states: bool = False,
+) -> int:
     types = _column_types(conn, table)
     # Builtin relations are (re-)seeded by every daemon start; an export
     # naturally carries them, so collisions on name are expected identity,
@@ -413,6 +439,12 @@ def _import_table(conn, table: str, lines) -> int:
             if not line:
                 continue
             rec = json.loads(line)
+            if table == "entries" and legacy_entry_states:
+                # Do not let the target column default classify old rows as
+                # new writes. Service initialization applies the imported
+                # finite display cursor plus the target's current source
+                # policy once the complete transaction has landed.
+                rec["dream_state"] = None
             unknown = set(rec) - set(types)
             if unknown:
                 raise TransferError(
@@ -441,7 +473,12 @@ def _import_table(conn, table: str, lines) -> int:
 
 def _advance_sequences(conn) -> None:
     """Move each serial id sequence past the imported rows so fresh writes
-    extend the bank instead of colliding."""
+    extend the bank instead of colliding.
+
+    Entry IDs also survive in FK-free invalidation events after their source
+    row is deleted. Keep those identities retired: reusing one could collide
+    with an old slot/source event and suppress a later correction warning.
+    """
     for table in EXPORTED_TABLES:
         if "id" not in _column_types(conn, table):
             continue
@@ -450,6 +487,17 @@ def _advance_sequences(conn) -> None:
         ).fetchone()[0]
         if not seq:
             continue  # e.g. communities: BIGINT PK without a sequence
+        if table == "entries":
+            max_retained_id = conn.execute(
+                "SELECT GREATEST("
+                "  COALESCE((SELECT MAX(id) FROM entries), 0), "
+                "  COALESCE((SELECT MAX(source_entry_id) "
+                "            FROM memory_trace_invalidations), 0))"
+            ).fetchone()[0]
+            if max_retained_id:
+                conn.execute("SELECT setval(%s, %s, true)",
+                             (seq, max_retained_id))
+            continue
         conn.execute(
             f"SELECT setval(%s, (SELECT MAX(id) FROM {table}), true) "
             f"WHERE EXISTS (SELECT 1 FROM {table})",

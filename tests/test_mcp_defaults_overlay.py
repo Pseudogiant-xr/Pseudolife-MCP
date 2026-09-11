@@ -43,7 +43,7 @@ def test_mcp_defaults_apply_when_no_config_file(tmp_path):
 def test_onnx_backend_defaults_on_when_optimum_installed(tmp_path, monkeypatch):
     """The daemon image ships optimum[onnxruntime]; with it installed the
     MCP default flips the embedder to the ~3x-faster ONNX backend
-    (bit-identical embeddings, fail-soft back to torch)."""
+    (parity-checked embeddings, fail-soft back to torch)."""
     import pseudolife_memory.service as service_mod
 
     monkeypatch.setattr(service_mod, "_onnx_embedding_available", lambda: True)

@@ -1,5 +1,10 @@
 # Provenance-as-link — Plan 1: the engram index + retrieval
 
+> Historical API note (2026-09-11): numeric dream cursor commits in this plan
+> have been replaced by exact-batch `commit_token` acknowledgement. Use the
+> [current dreaming guide](../guide/dreaming.md) for manual calls and retry semantics.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give each cortex fact a bidirectional link to the dense episodes it was consolidated from, dereferenceable on demand, and let an agent reinforce a useful episode.

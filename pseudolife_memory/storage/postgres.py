@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import secrets
 import time
 from contextlib import contextmanager
 from typing import Any, Sequence
@@ -32,6 +34,9 @@ _ENTRY_COLS = (
     "episode_id", "episode_title", "tags", "slots",
     # v35: the write-time label pair — nullable, NULL = unlabelled.
     "authority", "distortion_tolerance",
+    # v38: NULL is accepted only when an importer explicitly marks an
+    # old-format row; an omitted value is a new pending write.
+    "dream_state",
 )
 _ENTRY_JSONB = {"tags", "slots"}
 
@@ -114,8 +119,7 @@ _BUILTIN_RELATIONS = (
 
 # Mutable entry fields update_entry accepts — everything else is identity.
 _ENTRY_UPDATABLE = {
-    "band", "surprise", "access_count", "superseded_at",
-    "superseded_by_text", "last_logical_turn", "episode_id",
+    "band", "surprise", "access_count", "last_logical_turn", "episode_id",
     "episode_title", "tags", "slots",
 }
 
@@ -145,6 +149,7 @@ class PostgresStorage:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
+        self._lesson_transaction_connection = None
         self._conn = self._connect()
         ensure_schema(self._conn)
         register_vector(self._conn)
@@ -180,6 +185,10 @@ class PostgresStorage:
         the dead connection still raises; the *next* one reconnects.
         Schema is NOT re-ensured (it exists); the vector adapter is
         per-connection and must be re-registered."""
+        # A lesson batch must not silently reconnect halfway through its
+        # transaction: later helpers would then commit outside that batch.
+        if self._lesson_transaction_connection is not None:
+            return self._lesson_transaction_connection
         c = self._conn
         if c.closed or c.broken:
             logger.warning("postgres connection lost (closed=%s broken=%s); "
@@ -240,12 +249,27 @@ class PostgresStorage:
                 f"transaction did not commit (status={tx.status.name}); "
                 "connection lost during the block")
 
+    @contextmanager
+    def savepoint(self):
+        """A nested rollback boundary for ONE tolerated step of an open
+        transaction.
+
+        PostgreSQL aborts the whole transaction on the first error, so a
+        caller that wants to skip a failing step and keep the rest of its
+        batch (lesson synthesis skipping one poison claim) has to run that
+        step inside a savepoint. Same block as :meth:`_txn`, named for what
+        the caller means; outside a transaction it simply is one."""
+        with self._txn():
+            yield
+
     # ── entries ─────────────────────────────────────────────────────────
 
     def insert_entry(self, e: dict) -> int:
         values = []
         for c in _ENTRY_COLS:
             v = e.get(c)
+            if c == "dream_state" and c not in e:
+                v = "pending"
             if c == "embedding":
                 v = _embedding_in(v)
             elif c in _ENTRY_JSONB:
@@ -275,6 +299,76 @@ class PostgresStorage:
                 f"UPDATE entries SET {', '.join(sets)} WHERE id = %s", values,
             )
 
+    def supersede_entries(
+        self, entry_ids, *, superseded_at: float,
+        superseded_by_text: str,
+    ) -> int:
+        """Atomically retire source entries and capture their traced slots.
+
+        Every target must exist and still be live. The source rows are locked
+        in stable ID order so a concurrent :meth:`add_trace` either lands
+        before this operation's trace scan or observes the committed
+        supersession and creates the event itself.
+        """
+        try:
+            raw_ids = [] if entry_ids is None else list(entry_ids)
+        except TypeError as exc:
+            raise ValueError(
+                "supersede_entries: entry_ids must be positive integers"
+            ) from exc
+        if any(type(value) is not int or value <= 0 for value in raw_ids):
+            raise ValueError("supersede_entries: entry_ids must be positive integers")
+        ids = sorted(set(raw_ids))
+        try:
+            superseded_at = float(superseded_at)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "supersede_entries: superseded_at must be finite"
+            ) from exc
+        if not math.isfinite(superseded_at):
+            raise ValueError("supersede_entries: superseded_at must be finite")
+        if not ids:
+            return 0
+
+        conn = self.conn
+        with conn.transaction() as tx:
+            rows = conn.execute(
+                "SELECT id, superseded_at FROM entries "
+                "WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+                (ids,),
+            ).fetchall()
+            found = {int(row[0]) for row in rows}
+            missing = [i for i in ids if i not in found]
+            retired = [int(row[0]) for row in rows if row[1] is not None]
+            if missing or retired:
+                detail = []
+                if missing:
+                    detail.append(f"missing={missing}")
+                if retired:
+                    detail.append(f"already_retired={retired}")
+                raise ValueError("supersede_entries: " + ", ".join(detail))
+            conn.execute(
+                "UPDATE entries SET superseded_at = %s, "
+                "superseded_by_text = %s WHERE id = ANY(%s)",
+                (superseded_at, superseded_by_text, ids),
+            )
+            conn.execute(
+                "INSERT INTO memory_trace_invalidations "
+                "(entity_norm, attribute_norm, source_entry_id, "
+                " invalidated_at, cause) "
+                "SELECT entity_norm, attribute_norm, entry_id, %s, "
+                "       'source_superseded' FROM memory_traces "
+                "WHERE entry_id = ANY(%s) "
+                "ON CONFLICT (entity_norm, attribute_norm, source_entry_id) "
+                "DO NOTHING",
+                (superseded_at, ids),
+            )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
+        return len(ids)
+
     def delete_entry_ids(self, ids: list[int]) -> int:
         if not ids:
             return 0
@@ -293,6 +387,193 @@ class PostgresStorage:
             d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
+
+    def initialize_dream_tracking(
+        self, *, eligible_sources=None, exclude_sources=None,
+    ) -> dict:
+        """Create the bank secret and classify pre-v38 entry rows once.
+
+        ``NULL`` is the only old-format marker. Explicit ``pending`` rows are
+        never interpreted through the legacy timestamp, which is what keeps
+        daemon writes made between interrupted import attempts visible.
+        """
+        allowed = set(eligible_sources) if eligible_sources else None
+        excluded = set(exclude_sources or [])
+        conn = self.conn  # one captured connection for the whole transaction
+        updated_states: dict[int, str] = {}
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM entries "
+                "WHERE dream_state IS NULL ORDER BY id FOR UPDATE"
+            )
+            unclassified = cur.fetchall()
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor'"
+            )
+            cursor_row = cur.fetchone()
+            dream_cursor = float(cursor_row[0] if cursor_row else 0.0)
+            if unclassified and not math.isfinite(dream_cursor):
+                raise ValueError(
+                    "invalid_legacy_dream_cursor: unclassified entries require "
+                    "a finite cortex_dream_cursor"
+                )
+
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'dream_ack_secret_v1'"
+            )
+            secret_row = cur.fetchone()
+            if secret_row is None:
+                secret = secrets.token_hex(32)
+                cur.execute(
+                    "INSERT INTO meta (key, value) VALUES "
+                    "('dream_ack_secret_v1', %s::jsonb)",
+                    (json.dumps(secret),),
+                )
+            else:
+                secret = secret_row[0]
+                try:
+                    valid_secret = (
+                        isinstance(secret, str)
+                        and len(secret) == 64
+                        and len(bytes.fromhex(secret)) == 32
+                    )
+                except ValueError:
+                    valid_secret = False
+                if not valid_secret:
+                    raise ValueError(
+                        "invalid_dream_ack_secret: dream_ack_secret_v1 must "
+                        "be a 64-character hexadecimal string"
+                    )
+
+            # Set-based, not row-by-row: this runs under the service lock
+            # at startup, and one round trip per legacy row made boot time
+            # scale with bank size. Two statements implement the same rule
+            # the per-row loop did — covered when the source is
+            # dream-eligible AND the row predates the legacy cursor,
+            # pending for everything else — and both are confined to
+            # dream_state IS NULL, so no explicitly-stated row is touched.
+            # `source` is NOT NULL in the DDL, so = ANY / <> ALL are exact
+            # translations of Python's `in` / `not in` here.
+            if unclassified:
+                if allowed is not None:
+                    cur.execute(
+                        "UPDATE entries SET dream_state = 'legacy-covered' "
+                        "WHERE dream_state IS NULL AND source = ANY(%s) "
+                        "AND ts <= %s RETURNING id",
+                        (sorted(allowed), dream_cursor),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE entries SET dream_state = 'legacy-covered' "
+                        "WHERE dream_state IS NULL AND source <> ALL(%s) "
+                        "AND ts <= %s RETURNING id",
+                        (sorted(excluded), dream_cursor),
+                    )
+                updated_states.update(
+                    {int(row[0]): "legacy-covered" for row in cur.fetchall()})
+                cur.execute(
+                    "UPDATE entries SET dream_state = 'pending' "
+                    "WHERE dream_state IS NULL RETURNING id"
+                )
+                updated_states.update(
+                    {int(row[0]): "pending" for row in cur.fetchall()})
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during dream initialization"
+            )
+        return {
+            "secret": secret,
+            "dream_cursor": dream_cursor,
+            "updated_states": updated_states,
+        }
+
+    def acknowledge_dream_entries(
+        self, entry_ids: list[int], display_timestamp: float,
+    ) -> dict:
+        """Atomically acknowledge the exact PostgreSQL entry identities.
+
+        Already-acknowledged IDs are accepted so a retry after response loss
+        is idempotent. Unclassified and legacy-covered IDs reject the
+        complete batch before any row or display metadata is changed —
+        those are a real disagreement about what the batch was.
+
+        IDs whose row is GONE do not: a deleted row can never be pulled
+        again, so failing the batch over one only re-extracts its survivors
+        on every sweep forever. They are acknowledged as far as they can be
+        (nothing to update) and returned in ``missing_ids`` for the caller
+        to report and to retire in memory.
+        """
+        ids = list(entry_ids)
+        if (not ids
+                or any(type(value) is not int or value <= 0 for value in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError(
+                "dream_ack_invalid_states: entry ids must be distinct "
+                "positive integers"
+            )
+        display_timestamp = float(display_timestamp)
+        if not math.isfinite(display_timestamp):
+            raise ValueError(
+                "dream_ack_invalid_states: display timestamp must be finite"
+            )
+
+        conn = self.conn  # never re-resolve/reconnect inside this transaction
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, dream_state FROM entries "
+                "WHERE id = ANY(%s) FOR UPDATE",
+                (ids,),
+            )
+            states = {int(row[0]): row[1] for row in cur.fetchall()}
+            missing = [entry_id for entry_id in ids if entry_id not in states]
+            present = [entry_id for entry_id in ids if entry_id in states]
+            invalid = [
+                entry_id for entry_id in present
+                if states[entry_id] not in {"pending", "acknowledged"}
+            ]
+            if invalid:
+                raise ValueError(
+                    "dream_ack_invalid_states: "
+                    + ",".join(
+                        f"{entry_id}={states[entry_id]!r}" for entry_id in invalid
+                    )
+                )
+
+            cur.execute(
+                "UPDATE entries SET dream_state = 'acknowledged' "
+                "WHERE id = ANY(%s) AND dream_state = 'pending' RETURNING id",
+                (present,),
+            )
+            newly_acknowledged = len(cur.fetchall())
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor'"
+            )
+            cursor_row = cur.fetchone()
+            current_cursor = float(cursor_row[0] if cursor_row else 0.0)
+            if not math.isfinite(current_cursor):
+                raise ValueError(
+                    "dream_ack_invalid_states: stored display cursor must "
+                    "be finite"
+                )
+            dream_cursor = max(current_cursor, display_timestamp)
+            cur.execute(
+                "INSERT INTO meta (key, value) VALUES "
+                "('cortex_dream_cursor', %s::jsonb) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (json.dumps(dream_cursor),),
+            )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during dream acknowledgement"
+            )
+        return {
+            "acknowledged_ids": present,
+            "missing_ids": missing,
+            "newly_acknowledged": newly_acknowledged,
+            "dream_cursor": dream_cursor,
+        }
 
     # ── episodes ────────────────────────────────────────────────────────
 
@@ -624,6 +905,52 @@ class PostgresStorage:
                 (t, list(ids)),
             )
         return cur.rowcount
+
+    def lesson_batch_status(self, signals: list[dict], handled_ids: list[int],
+                            *, lock: bool = False) -> str:
+        """Revalidate extracted inputs, or reconcile an uncertain lesson commit.
+
+        Under the single-daemon writer contract, a batch commits all handled
+        acknowledgements together. Changed/missing/partly acknowledged inputs
+        cannot establish either outcome and must not authorize a replay.
+        """
+        cols = ("id",) + _SIGNAL_COLS
+        rows = self.conn.execute(
+            f"SELECT {', '.join(cols)}, consumed_at FROM outcome_signals "
+            "WHERE id = ANY(%s) ORDER BY id" + (" FOR UPDATE" if lock else ""),
+            ([s["id"] for s in signals],),
+        ).fetchall()
+        expected = {s["id"]: s for s in signals}
+        if len(rows) != len(expected):
+            return "changed"
+        if any(dict(zip(cols, row[:-1])) != expected[row[0]] for row in rows):
+            return "changed"
+        if all(row[-1] is None for row in rows):
+            return "pending"
+        handled = set(handled_ids)
+        if handled and all((row[-1] is not None) == (row[0] in handled)
+                           for row in rows):
+            return "consumed"
+        return "changed"
+
+    @contextmanager
+    def lesson_synthesis_transaction(self, signals: list[dict]):
+        """Lock/recheck the selected input rows and pin one connection until
+        lesson, graph and acknowledgement writes commit or roll back.
+
+        Extraction happens before this short transaction. A concurrent drain
+        or signal retargeting invalidates that extraction before any write.
+        The caller holds the service lock and publishes staged RAM only after
+        this context exits successfully.
+        """
+        if self._lesson_transaction_connection is not None:
+            raise RuntimeError("lesson synthesis transaction is already active")
+        self._lesson_transaction_connection = self.conn
+        try:
+            with self._txn():
+                yield self.lesson_batch_status(signals, [], lock=True) == "pending"
+        finally:
+            self._lesson_transaction_connection = None
 
     def prune_signals(self, older_than_ts: float) -> int:
         """Delete signals (consumed or not) older than the cutoff, so the log
@@ -1070,6 +1397,42 @@ class PostgresStorage:
                 (key, Jsonb(value)),
             )
 
+    def advance_dream_cursor(self, value: float) -> float:
+        """Persist display-only dream metadata without moving it backward.
+
+        A response-lost acknowledgement deliberately leaves RAM conservative.
+        Later generic cortex snapshots must not overwrite the committed display
+        value with that stale copy.
+        """
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("invalid_legacy_dream_cursor: cursor must be finite")
+        conn = self.conn
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor' "
+                "FOR UPDATE"
+            )
+            row = cur.fetchone()
+            current = float(row[0] if row else 0.0)
+            if not math.isfinite(current):
+                raise ValueError(
+                    "invalid_legacy_dream_cursor: stored cursor must be finite"
+                )
+            persisted = max(current, value)
+            cur.execute(
+                "INSERT INTO meta (key, value) VALUES "
+                "('cortex_dream_cursor', %s::jsonb) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (json.dumps(persisted),),
+            )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost while advancing dream display metadata"
+            )
+        return persisted
+
     def meta_get(self, key: str, default: Any = None) -> Any:
         row = self.conn.execute(
             "SELECT value FROM meta WHERE key = %s", (key,),
@@ -1492,14 +1855,34 @@ class PostgresStorage:
         """Link a cortex slot to a source episode. Idempotent on the PK; returns
         True iff a NEW row was inserted (so the caller bumps reinforcements only on
         genuine new formation, never on a re-assert)."""
-        with self._txn():
-            row = self.conn.execute(
+        conn = self.conn
+        with conn.transaction() as tx:
+            source = conn.execute(
+                "SELECT superseded_at FROM entries "
+                "WHERE id = %s FOR UPDATE",
+                (entry_id,),
+            ).fetchone()
+            row = conn.execute(
                 "INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
                 "VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (entity_norm, attribute_norm, entry_id) DO NOTHING "
                 "RETURNING entry_id",
                 (entity_norm, attribute_norm, entry_id, now),
             ).fetchone()
+            if source is not None and source[0] is not None:
+                conn.execute(
+                    "INSERT INTO memory_trace_invalidations "
+                    "(entity_norm, attribute_norm, source_entry_id, "
+                    " invalidated_at, cause) "
+                    "VALUES (%s, %s, %s, %s, 'source_superseded') "
+                    "ON CONFLICT (entity_norm, attribute_norm, "
+                    "             source_entry_id) DO NOTHING",
+                    (entity_norm, attribute_norm, entry_id, source[0]),
+                )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
         return row is not None
 
     # ── dream-run audit + pre-image journal (schema v27) ─────────────────
@@ -2159,6 +2542,31 @@ class PostgresStorage:
                 "ORDER BY t.entity_norm, t.attribute_norm, t.entry_id",
                 ([k[0] for k in keys], [k[1] for k in keys])).fetchall():
             out.setdefault((e, a), []).append(int(eid))
+        return out
+
+    def trace_invalidations_for_slots(
+        self, slot_keys,
+    ) -> dict[tuple[str, str], list[dict]]:
+        """Durable source-supersession events for normalized cortex slots."""
+        keys = list(dict.fromkeys((str(e), str(a)) for e, a in (slot_keys or [])))
+        if not keys:
+            return {}
+        out: dict[tuple[str, str], list[dict]] = {}
+        rows = self.conn.execute(
+            "SELECT i.entity_norm, i.attribute_norm, i.source_entry_id, "
+            "       i.invalidated_at, i.cause "
+            "FROM memory_trace_invalidations i "
+            "JOIN unnest(%s::text[], %s::text[]) AS k(e, a) "
+            "  ON i.entity_norm = k.e AND i.attribute_norm = k.a "
+            "ORDER BY i.entity_norm, i.attribute_norm, i.source_entry_id",
+            ([k[0] for k in keys], [k[1] for k in keys]),
+        ).fetchall()
+        for entity, attribute, source_id, invalidated_at, cause in rows:
+            out.setdefault((entity, attribute), []).append({
+                "source_entry_id": int(source_id),
+                "invalidated_at": float(invalidated_at),
+                "cause": cause,
+            })
         return out
 
     def superseded_evidence(self, entry_ids) -> dict[int, float]:

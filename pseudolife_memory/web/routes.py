@@ -237,13 +237,13 @@ class ConsoleRoutes:
             sources=_list(q, "source"), tags=_list(q, "tag"),
             top_k=_i(q, "top_k", 20), min_cohesion=_f(q, "min_cohesion", 0.6)))
         p("/api/consolidate", lambda q, b: svc.consolidate(
-            replaces=b["replaces"], new_text=b["new_text"],
+            replaces=b.get("replaces"), entry_ids=b.get("entry_ids"), new_text=b["new_text"],
             source=b.get("source"), tags=b.get("tags")))
 
         # ---- hygiene / corrections ----
         p("/api/delete", lambda q, b: self._delete(b))
         p("/api/supersede", lambda q, b: svc.supersede(
-            old_text=b["old_text"], new_text=b["new_text"]))
+            old_text=b.get("old_text"), entry_id=b.get("entry_id"), new_text=b["new_text"]))
 
         # ---- config ----
         g("/api/config", lambda q, b: config_io.read_config(svc))

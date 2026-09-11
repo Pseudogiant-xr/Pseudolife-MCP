@@ -1,4 +1,4 @@
-"""The ``cms_state.pt`` file format — ``cms.SCHEMA_VERSION``, currently 6.
+"""The ``cms_state.pt`` file format — ``cms.SCHEMA_VERSION``, currently 7.
 
 NOTE: this is NOT the Postgres bank schema. ``cms.SCHEMA_VERSION`` versions
 the on-disk ``.pt`` save produced by ``ContinuumMemorySystem.save`` and is
@@ -89,10 +89,10 @@ def _append_entry(cms: ContinuumMemorySystem, **fields: object) -> MemoryEntry:
     return entry
 
 
-def test_pt_schema_version_constant_is_v6() -> None:
+def test_pt_schema_version_constant_is_v7() -> None:
     """The .pt file-format version — protects against regressions on the
     version field ``cms.load`` branches on."""
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 7
 
 
 def test_save_load_preserves_episode_and_tag_fields(tmp_path: Path) -> None:

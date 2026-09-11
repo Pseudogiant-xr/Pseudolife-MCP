@@ -14,11 +14,9 @@ Two halves, both flag-only:
   backwards, so ``supersede`` can report what it invalidated;
 * served cortex facts carry ``re_verify`` + ``re_verify_reason`` — the
   SAME shape lessons already use for "subject facts changed since"
-  (``service.MemoryService._annotate_lesson_staleness``) — computed at
-  read time from the cross-index plus live entry state. Nothing is stored,
-  nothing is auto-deleted, and nothing is auto-superseded: cascading a
-  correction is a review judgment, which is the project's two-man-rule
-  culture.
+  (``service.MemoryService._annotate_lesson_staleness``) — computed from
+  durable normalized-slot invalidation events. Nothing is auto-deleted or
+  cascaded: correcting a derived fact remains a review judgment.
 
 PG-backed (the cross-index is a Postgres table); skips without a test
 server.
@@ -124,7 +122,7 @@ def test_superseding_the_source_entry_flags_what_the_dream_derived(svc):
     eid = _entry(svc, "payments db is db-prod-1")
     svc._storage.add_trace("payments-db", "host", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+    svc._storage.supersede_entries([eid], superseded_at=_time.time() + 60,
                               superseded_by_text="payments db is db-prod-9")
 
     rec = svc.cortex_lookup("payments-db", "host")
@@ -141,7 +139,7 @@ def test_flag_reaches_the_search_cortex_block_and_fact_get(svc):
     eid = _entry(svc, "payments db is db-prod-1")
     svc._storage.add_trace("payments-db", "host", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+    svc._storage.supersede_entries([eid], superseded_at=_time.time() + 60,
                               superseded_by_text="payments db is db-prod-9")
 
     hits = svc.cortex_search("payments-db host", top_k=5)["entries"]
@@ -171,19 +169,46 @@ def test_supersede_reports_the_derivations_it_invalidated(svc):
 
 
 def test_flag_off_when_the_cross_index_is_disabled(svc):
-    """``memory.traces.enabled`` gates the whole feature — with the
-    cross-index off there is no evidence edge to traverse and the read
-    surface must not pay for one."""
+    """The serving toggle hides warnings while durable events remain known."""
     svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
     eid = _entry(svc, "payments db is db-prod-1")
     svc._storage.add_trace("payments-db", "host", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+    svc._storage.supersede_entries([eid], superseded_at=_time.time() + 60,
                               superseded_by_text="corrected")
 
     svc.config.memory.traces.enabled = False
     rec = svc.cortex_lookup("payments-db", "host")
     assert "re_verify" not in rec
+
+
+def test_disabled_serving_still_captures_known_trace_invalidation(
+        svc, monkeypatch):
+    """Retirement capture is unconditional; the toggle gates only reads."""
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    svc.store("payments db is db-prod-1", source="pseudolife")
+    with svc._lock:
+        eid = svc._cms.bands[0].entries[-1].db_id
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc.config.memory.traces.enabled = False
+
+    svc.supersede("payments db is db-prod-1", "payments db is db-prod-9")
+    events = svc._storage.trace_invalidations_for_slots(
+        [("payments-db", "host")])
+    assert [e["source_entry_id"]
+            for e in events[("payments-db", "host")]] == [eid]
+
+    calls = []
+    real = svc._storage.trace_invalidations_for_slots
+    monkeypatch.setattr(
+        svc._storage, "trace_invalidations_for_slots",
+        lambda keys: (calls.append(keys), real(keys))[1])
+    assert "re_verify" not in svc.cortex_lookup("payments-db", "host")
+    assert calls == []
+
+    svc.config.memory.traces.enabled = True
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+    assert len(calls) == 1
 
 
 # ── the MCP read surface (file mode; the whitelist is the risk) ───────────
@@ -196,10 +221,11 @@ def test_the_mcp_search_projection_carries_the_flag(tmp_path, monkeypatch):
 
     And it stays PASSIVE. The fact below is fresh, evergreen and
     uncontested, so any ``correct_with`` on it could only have come from
-    ``re_verify`` — and there must not be one. The flag fires on ~25% of a
-    mature bank (measured 2026-09-02: 1264/5153 live facts), so wiring it
-    into an affordance whose served note says to write a correction NOW
-    would be a standing instruction to rewrite a quarter of the cortex."""
+    ``re_verify`` — and there must not be one. The flag fires on a large
+    share of a mature bank (``ops/measure_reverify_population.py``, live
+    bank 2026-09-11: 1668/6015 current facts, 27.7%), so wiring it into an
+    affordance whose served note says to write a correction NOW would be a
+    standing instruction to rewrite a quarter of the cortex."""
     from tests.helpers import reload_mcp_filemode
 
     mod = reload_mcp_filemode(tmp_path, monkeypatch)
@@ -292,8 +318,8 @@ def test_recall_flags_an_alias_keyed_fact_through_the_default_projection(
     svc._storage.conn.commit()
     svc.graph_relate("PR #235", "part-of", "pseudolife-mcp", origin="user")
     assert svc.graph_merge("pr-235", "PR #235")["merged"] is True
-    svc._storage.update_entry(
-        eid, superseded_at=_time.time(),
+    svc._storage.supersede_entries(
+        [eid], superseded_at=_time.time(),
         superseded_by_text="PR 235 moved to branch feat/refind-v2")
 
     out = svc.recall("which branch is pr-235 on", hops=1)
@@ -335,7 +361,7 @@ def test_recall_flags_a_fact_on_a_display_enriched_node(svc):
     svc._storage.add_trace("gnd", "host", eid, 1234.0)
     svc._storage.conn.commit()
     svc.graph_alias("gnd", "enshrouded")
-    svc._storage.update_entry(eid, superseded_at=_time.time(),
+    svc._storage.supersede_entries([eid], superseded_at=_time.time(),
                               superseded_by_text="GND moved to 10.0.0.103")
 
     out = svc.recall("which host runs enshrouded", hops=1)
@@ -359,7 +385,7 @@ def test_evidence_corrected_before_the_fact_was_confirmed_does_not_flag(svc):
     svc._storage.add_trace("payments-db", "host", old_entry, 1.0)
     svc._storage.conn.commit()
     # Retracted in the past...
-    svc._storage.update_entry(old_entry, superseded_at=_time.time() - 600,
+    svc._storage.supersede_entries([old_entry], superseded_at=_time.time() - 600,
                               superseded_by_text="superseded long ago")
     # ...and the standing value asserted AFTER that retraction.
     svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
@@ -376,7 +402,7 @@ def test_re_asserting_the_fact_clears_the_flag(svc):
     eid = _entry(svc, "payments db is db-prod-1")
     svc._storage.add_trace("payments-db", "host", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time(),
+    svc._storage.supersede_entries([eid], superseded_at=_time.time(),
                               superseded_by_text="payments db is db-prod-9")
     assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
 
@@ -393,7 +419,7 @@ def test_re_confirming_the_same_value_also_clears_it(svc):
     eid = _entry(svc, "payments db is db-prod-1")
     svc._storage.add_trace("payments-db", "host", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time(),
+    svc._storage.supersede_entries([eid], superseded_at=_time.time(),
                               superseded_by_text="corrected")
     assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
 
@@ -401,13 +427,23 @@ def test_re_confirming_the_same_value_also_clears_it(svc):
     assert "re_verify" not in svc.cortex_lookup("payments-db", "host")
 
 
-def test_consolidate_marks_reach_the_flag_through_the_durable_column(svc):
-    """``memory_consolidate`` is the third entry-level supersession site, and
-    since PR #239 it writes its marks through to ``entries.superseded_at``
-    like ``supersede`` and ``cms.store``'s contradiction decay always have.
-    Both halves are asserted together deliberately: the flag reaches a
-    consolidate-corrected slot BECAUSE the column is written, so if a future
-    change drops that write-through this test says which half broke."""
+def test_warning_counts_distinct_corrected_sources(svc):
+    """One slot can cite several independently corrected memories."""
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    first = _entry(svc, "payments host source one")
+    second = _entry(svc, "payments host source two")
+    for eid in (first, second):
+        svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc._storage.supersede_entries(
+        [first, second], superseded_at=_time.time() + 60,
+        superseded_by_text="corrected together")
+
+    reason = svc.cortex_lookup("payments-db", "host")["re_verify_reason"]
+    assert "derived from 2 source memories" in reason
+
+
+def test_consolidate_marks_reach_the_flag_through_atomic_retirement(svc):
+    """Consolidation uses the same durable retirement as supersede."""
     svc.store("payments db is db-prod-1", source="pseudolife")
     with svc._lock:
         eid = svc._cms.bands[0].entries[-1].db_id
@@ -425,19 +461,44 @@ def test_consolidate_marks_reach_the_flag_through_the_durable_column(svc):
     assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
 
 
+@pytest.mark.parametrize("cleanup", ["delete", "evict"])
+def test_public_consolidate_warning_survives_source_cleanup(svc, cleanup):
+    """The public consolidation path records durable invalidation before a
+    later hard delete or continuum eviction removes its source entry."""
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    source_text = "payments db is db-prod-1"
+    svc.store(source_text, source="pseudolife")
+    with svc._lock:
+        entry = svc._cms.bands[0].entries[-1]
+        eid = entry.db_id
+    assert eid is not None
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+
+    result = svc.consolidate(
+        replaces=[source_text], new_text="payments db is db-prod-9")
+    assert result["superseded_count"] == 1
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+    if cleanup == "delete":
+        assert svc.delete(text=source_text)["deleted_count"] == 1
+    else:
+        with svc._lock:
+            band = svc._cms.bands[0]
+            svc._cms._on_band_evict(entry, band_idx=0)
+            band.entries = [e for e in band.entries if e is not entry]
+
+    rec = svc.cortex_lookup("payments-db", "host")
+    assert rec["re_verify"] is True
+    assert rec["value"] == "db-prod-1"
+
+
 def test_a_mark_that_never_reached_postgres_does_not_flag(svc):
     """The durable column is the authority, and this is the recorded contract
     for that choice — not an accident.
 
-    Every entry-level site that stamps ``superseded_at`` writes it through in
-    the same locked call (``supersede``, ``cms.store``'s contradiction decay,
-    and ``consolidate`` since PR #239), so a RAM-only mark is not a state any
-    live path can produce; the in-memory scan that used to back-stop it cost
-    an O(bank) pass on every annotated read for a window that cannot open.
-    Constructed directly here because nothing else can construct it. A future
-    site that marks in RAM without writing through is a KNOWN miss for the
-    flag — this test is where that trade-off is written down, and re-adding
-    the scan is what turns it red."""
+    Both explicit entry correction paths persist an atomic retirement and its
+    slot event before marking RAM. This direct RAM-only construction therefore
+    has no durable semantic event and must not warn."""
     svc.store("payments db is db-prod-1", source="pseudolife")
     with svc._lock:
         entry = svc._cms.bands[0].entries[-1]
@@ -458,19 +519,10 @@ def test_a_mark_that_never_reached_postgres_does_not_flag(svc):
     assert "re_verify" not in svc.cortex_lookup("payments-db", "host")
 
 
-# ── the flag is BEST-EFFORT: losing the evidence loses the flag ───────────
+# ── durable warning vs ordinary evidence removal ─────────────────────────
 
-def test_evicting_the_superseded_source_clears_the_flag(svc):
-    """Pins the known limitation rather than claiming it away.
-
-    ``memory_traces.entry_id`` is ``ON DELETE CASCADE`` and a true-drop
-    capacity eviction hard-deletes the row (every eviction under the default
-    flat preset, since there is no deeper band to demote into). A superseded
-    entry is also the TOP eviction candidate — contradiction decay multiplies
-    its surprise by 0.3, and eviction ranks on retention. So the flag can
-    appear and then vanish with no re-verification having happened. Fixing
-    that needs durable per-slot state, i.e. a schema change; until then the
-    contract is "best-effort", and this is the test that says so."""
+def test_evicting_the_superseded_source_preserves_the_flag(svc):
+    """The warning survives loss of the entry and its cascading trace row."""
     svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
     svc.store("payments db is db-prod-1", source="pseudolife")
     with svc._lock:
@@ -478,7 +530,7 @@ def test_evicting_the_superseded_source_clears_the_flag(svc):
         eid = entry.db_id
     svc._storage.add_trace("payments-db", "host", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+    svc._storage.supersede_entries([eid], superseded_at=_time.time() + 60,
                               superseded_by_text="payments db is db-prod-9")
     assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
 
@@ -488,15 +540,12 @@ def test_evicting_the_superseded_source_clears_the_flag(svc):
         band.entries = [e for e in band.entries if e is not entry]
 
     rec = svc.cortex_lookup("payments-db", "host")
-    assert "re_verify" not in rec               # traces cascaded away with it
+    assert rec["re_verify"] is True
     assert rec["value"] == "db-prod-1"          # the fact itself is untouched
 
 
-def test_deleting_the_source_entry_produces_no_flag(svc):
-    """``memory_delete`` is the strongest retraction there is and it raises no
-    flag at all — the row and its trace rows are gone, so there is nothing
-    left to traverse. Recorded, not fixed: same schema-change gate as the
-    eviction case above."""
+def test_deleting_an_unsuperseded_source_entry_produces_no_flag(svc):
+    """Evidence removal alone is not a semantic correction."""
     svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
     svc.store("payments db is db-prod-1", source="pseudolife")
     with svc._lock:
@@ -507,6 +556,100 @@ def test_deleting_the_source_entry_produces_no_flag(svc):
     assert svc.delete(text="payments db is db-prod-1")["deleted_count"] == 1
 
     assert "re_verify" not in svc.cortex_lookup("payments-db", "host")
+
+
+def test_deleting_a_superseded_source_entry_preserves_the_flag(svc):
+    """A semantic correction remains visible after explicit source cleanup."""
+    svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
+    svc.store("payments db is db-prod-1", source="pseudolife")
+    with svc._lock:
+        eid = svc._cms.bands[0].entries[-1].db_id
+    svc._storage.add_trace("payments-db", "host", eid, 1234.0)
+    svc._storage.supersede_entries(
+        [eid], superseded_at=_time.time() + 60,
+        superseded_by_text="payments db is db-prod-9")
+
+    assert svc.delete(text="payments db is db-prod-1")["deleted_count"] == 1
+
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+
+def test_warning_survives_full_snapshot_compaction_and_restart(
+        svc, pg_url):
+    """Fact rewrites and restart must not erase the independent slot event."""
+    base = _time.time() - 600
+    svc.cortex_write("payments-db", "host", "db-prod-0",
+                     support="user", now=base)
+    svc.cortex_write("payments-db", "host", "db-prod-1",
+                     support="user", now=base + 10)
+    svc.store("payments db is db-prod-1", source="pseudolife")
+    with svc._lock:
+        eid = svc._cms.bands[0].entries[-1].db_id
+    svc._storage.add_trace("payments-db", "host", eid, base + 10)
+    svc.supersede("payments db is db-prod-1", "payments db is db-prod-9")
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+    with svc._lock:
+        svc._persist_all(kind="explicit")
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+    cfg = svc.config.memory.compaction
+    cfg.keep_per_slot, cfg.min_age_days = 0, 0.0
+    assert svc.compact_superseded()["facts"] >= 1
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+    from pseudolife_memory.service import MemoryService
+    svc._storage.close()
+    restarted = MemoryService(data_dir=svc.data_dir, database_url=pg_url)
+    try:
+        assert restarted.cortex_lookup(
+            "payments-db", "host")["re_verify"] is True
+    finally:
+        if restarted._storage is not None:
+            restarted._storage.close()
+
+
+def test_parking_a_contender_does_not_clear_the_current_facts_warning(svc):
+    """A parked alternative does not confirm the standing current value."""
+    base = _time.time() - 60
+    svc.cortex_write("payments-db", "host", "db-prod-1",
+                     support="user", now=base)
+    eid = _entry(svc, "payments db is db-prod-1", ts=base)
+    svc._storage.add_trace("payments-db", "host", eid, base)
+    svc._storage.supersede_entries(
+        [eid], superseded_at=base + 10,
+        superseded_by_text="payments db is db-prod-9")
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+    parked = svc.cortex_write(
+        "payments-db", "host", "db-prod-2", support="agent",
+        force_contend=True, now=base + 20)
+    assert parked["action"] == "contested"
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+
+def test_accepting_a_contender_clears_the_current_facts_warning(svc):
+    """Promotion is a fresh confirmation clock for the newly current value."""
+    base = _time.time() - 60
+    svc.cortex_write("payments-db", "host", "db-prod-1",
+                     support="user", now=base)
+    eid = _entry(svc, "payments db is db-prod-1", ts=base)
+    svc._storage.add_trace("payments-db", "host", eid, base)
+    svc._storage.supersede_entries(
+        [eid], superseded_at=base + 10,
+        superseded_by_text="payments db is db-prod-9")
+    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+
+    parked = svc.cortex_write(
+        "payments-db", "host", "db-prod-2", support="agent",
+        force_contend=True, now=base + 20)
+    assert parked["action"] == "contested"
+
+    resolved = svc.cortex_resolve("payments-db", "host", accept=True)
+    assert resolved["resolved"] is True and resolved["accepted"] is True
+    rec = svc.cortex_lookup("payments-db", "host")
+    assert rec["value"] == "db-prod-2"
+    assert "re_verify" not in rec
 
 
 # ── cost: the annotation is for SERVING, not for verification ─────────────
@@ -521,7 +664,7 @@ def test_verification_lookups_do_not_pay_for_the_annotation(svc,
     eid = _entry(svc, "payments db is db-prod-1")
     svc._storage.add_trace("payments-db", "host", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+    svc._storage.supersede_entries([eid], superseded_at=_time.time() + 60,
                               superseded_by_text="corrected")
 
     seen = []
@@ -545,7 +688,7 @@ def _superseded_set_slot(svc):
     eid = _entry(svc, "the stack is python and rust")
     svc._storage.add_trace("stack", "languages", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+    svc._storage.supersede_entries([eid], superseded_at=_time.time() + 60,
                               superseded_by_text="the stack is python and go")
     return eid
 
@@ -582,6 +725,41 @@ def test_set_slot_with_live_evidence_stays_byte_identical(svc):
     assert "re_verify" not in rec and "re_verify_reason" not in rec
 
 
+def test_grouped_set_uses_each_members_asserted_fallback_clock(svc):
+    """A legacy member with no confirmation stamp can clear the group."""
+    _superseded_set_slot(svc)
+    events = svc._storage.trace_invalidations_for_slots(
+        [("stack", "languages")])[("stack", "languages")]
+    invalidated_at = events[0]["invalidated_at"]
+    members = svc._cortex.members("stack", "languages")
+    members[-1].last_confirmed = 0.0
+    members[-1].asserted_at = invalidated_at + 1.0
+
+    assert "re_verify" not in svc.cortex_lookup("stack", "languages")
+    grouped = [row for row in svc.cortex_search(
+        "stack languages", top_k=5)["entries"] if row.get("kind") == "set"]
+    assert grouped and "re_verify" not in grouped[0]
+
+
+def test_recall_compares_set_member_confirmation_clocks_individually(svc):
+    """Recall serves members separately, so one confirmation clears one row."""
+    svc.graph_relate("stack", "runs-on", "prod")
+    _superseded_set_slot(svc)
+    events = svc._storage.trace_invalidations_for_slots(
+        [("stack", "languages")])[("stack", "languages")]
+    invalidated_at = events[0]["invalidated_at"]
+    members = svc._cortex.members("stack", "languages")
+    python = next(member for member in members if member.value == "python")
+    python.last_confirmed = invalidated_at + 1.0
+
+    facts = {fact["value"]: fact
+             for node in svc.recall("stack languages")["entities"]
+             for fact in node["facts"]
+             if fact.get("attribute") == "languages"}
+    assert "re_verify" not in facts["python"]
+    assert facts["rust"]["re_verify"] is True
+
+
 # ── consistency across read paths ─────────────────────────────────────────
 
 def test_recall_facts_carry_the_flag(svc):
@@ -595,7 +773,7 @@ def test_recall_facts_carry_the_flag(svc):
     eid = _entry(svc, "payments db is db-prod-1")
     svc._storage.add_trace("payments-db", "host", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+    svc._storage.supersede_entries([eid], superseded_at=_time.time() + 60,
                               superseded_by_text="payments db is db-prod-9")
 
     out = svc.recall("payments-db host")
@@ -622,7 +800,7 @@ def test_recall_does_not_confuse_slots_that_share_a_graph_node(svc):
     # Cited by the HYPHEN slot only.
     svc._storage.add_trace("host-port", "role", eid, 1234.0)
     svc._storage.conn.commit()
-    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+    svc._storage.supersede_entries([eid], superseded_at=_time.time() + 60,
                               superseded_by_text="corrected")
 
     facts = {f["value"]: f
