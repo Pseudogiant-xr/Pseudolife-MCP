@@ -60,6 +60,11 @@ EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     # re-composes the exact string lesson_write embeds, so the comparison
     # against stored lesson embeddings is symmetric.
     ("_lesson_duplicate_locked", "encode_single"),
+    # Synthesis batch (2026-09-11): document-side on purpose -- the claim
+    # embeddings are computed once before the lesson transaction opens and
+    # handed to both the dedup gate and the write, so they are the stored
+    # lesson vectors, not retrieval probes.
+    ("synthesize_lessons", "encode_single"),
     ("search", "encode_query"),
     ("search_documents", "encode_query"),
     ("set_add", "encode_single"),
