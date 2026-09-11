@@ -138,6 +138,8 @@ class ConsoleRoutes:
         g("/api/briefing", lambda q, b: svc.session_briefing(
             max_unsure=_i(q, "max_unsure", 3), max_lessons=_i(q, "max_lessons", 3),
             max_world=_i(q, "max_world", 3)))
+        g("/api/agents", lambda q, b: svc.coordination_awareness(
+            limit=_i(q, "limit", 5)))
 
         # ---- episodes ----
         # The write endpoints (start/end/prune/rename/merge) are deliberately

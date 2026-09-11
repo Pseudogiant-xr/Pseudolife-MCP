@@ -1132,6 +1132,9 @@ class MemoryService(DreamOps):
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Lesson store hydration skipped: %s", exc)
 
+        self._reseed_hlc()
+
+    def _reseed_hlc(self) -> None:
         # Re-seed the HLC from the stored high-water stamp (2026-07-02 P1): a
         # wall-clock step-back across restarts (NTP, laptop resume) must not
         # let stored stamps outrank every new write — pre-fix, a user
@@ -1146,6 +1149,14 @@ class MemoryService(DreamOps):
                     cand = (int(r.hlc_phys), int(r.hlc_logical or 0))
                     if cand > best:
                         best = cand
+        if self._storage is not None:
+            from pseudolife_memory.storage.coordination import HLC_META_KEY
+            stamp = self._storage.get_meta(HLC_META_KEY)
+            if stamp is not None:
+                if (not isinstance(stamp, list) or len(stamp) != 2
+                        or any(type(part) is not int or part < 0 for part in stamp)):
+                    raise ValueError("invalid coordination clock high-water mark")
+                best = max(best, tuple(stamp))
         if best > (0, 0):
             self._hlc.observe(*best)
 
@@ -6299,8 +6310,74 @@ class MemoryService(DreamOps):
             return {"available": False, "reason": "no_digest"}
         return {"available": True, "digest": digest}
 
+    def coordination_awareness(
+        self, *, session_id: str | None = None, limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Bounded open-session evidence, without initialization or mutation.
+
+        ``session_id`` is supplied only by the trusted hook/adapter integration,
+        never exposed as a model argument. Otherwise use the request's explicit
+        session binding. The shared last-started pointer cannot identify a caller
+        during concurrent work. Neither this exclusion nor an episode ID grants
+        ownership or permission to operate another agent's mailbox.
+        """
+        cfg = self.config.coordination
+        result: dict[str, Any] = {
+            "enabled": cfg.enabled, "available": False,
+            "peers": [], "truncated": False,
+        }
+        if not cfg.enabled:
+            return result
+        if limit is not None and (type(limit) is not int or limit < 1):
+            raise ValueError("awareness limit must be a positive integer")
+        cap = min(cfg.awareness_limit, limit if limit is not None else cfg.awareness_limit, 20)
+        # The header/context is an attribution signal, not bearer authentication.
+        # Do not fall back to _resolve_writer's shared active-session pointer.
+        if session_id is None:
+            _, session_id, _ = resolve_writer_detailed(self._writer_id)
+        with self._lock:
+            if self._cms is None:
+                return {**result, "reason": "not_initialized"}
+            em = self._cms.episodes
+            roots = sorted(
+                (ep for ep in em.episodes.values()
+                 if ep.parent_id is None and ep.ended_at is None
+                 and ep.session_key and ep.session_key != session_id),
+                key=lambda ep: (ep.started_at, ep.id), reverse=True,
+            )
+            result["truncated"] = len(roots) > cap
+            roots = roots[:cap]
+            # Read live state each time: close/prune/resume, band hydration and
+            # direct legacy appends all bypass an awareness-specific write API.
+            # No cached index or invalidation contract is introduced here.
+            owner = {
+                ep.id: root.id for root in roots for ep in em.episodes.values()
+                if em._descends_from(ep, root.id)
+            }
+            activity: dict[str, float] = {}
+            for episode_id, timestamp in self._episode_touches.items():
+                root_id = owner.get(episode_id)
+                if root_id is not None:
+                    activity[root_id] = max(activity.get(root_id, timestamp), timestamp)
+            for band in self._cms.bands:
+                for entry in band.entries:
+                    root_id = owner.get(entry.episode_id)
+                    if root_id is not None:
+                        activity[root_id] = max(
+                            activity.get(root_id, entry.timestamp), entry.timestamp)
+            result["peers"] = [{
+                "episode_id": root.id,
+                "title": " ".join(root.title.split())[:160],
+                "principal": None, "project": None, "task": None,
+                "scope": "unknown", "capability": "unknown",
+                "last_reported_at": activity.get(root.id),
+            } for root in roots]
+            result["available"] = True
+        return result
+
     def session_briefing(self, max_unsure: int = 3, max_lessons: int = 3,
-                         max_world: int = 3) -> dict[str, Any]:
+                         max_world: int = 3, *,
+                         session_id: str | None = None) -> dict[str, Any]:
         """Assemble the session-start briefing: graph 'unsure-about' + avoid-first
         lessons + fresh world facts + a one-line recap of the last closed session.
         Read-only; no LLM. Each sub-call takes the lock itself, so this
@@ -6338,9 +6415,12 @@ class MemoryService(DreamOps):
                     recap["summary"] = summary
                 break
 
+        coordination = (self.coordination_awareness(session_id=session_id)
+                        if self.config.coordination.enabled else None)
         markdown = format_briefing(surprises, questions, lessons,
-                                   world=world, recap=recap)
-        return {
+                                   world=world, recap=recap,
+                                   coordination=coordination)
+        result = {
             "available": bool(markdown),
             "markdown": markdown,
             "unsure": {"surprises": surprises, "questions": questions},
@@ -6348,6 +6428,9 @@ class MemoryService(DreamOps):
             "world": world,
             "recap": recap,
         }
+        if coordination is not None:
+            result["coordination"] = coordination
+        return result
 
     def _episode_digest_body(self, episode_id: str | None) -> str | None:
         """The narrative body (header line stripped) of ``episode_id``'s

@@ -2,8 +2,8 @@
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.15.0",
-  "schema": 37,
-  "verified": "2026-09-03"
+  "schema": 38,
+  "verified": "2026-09-11"
  },
  "groups": {
   "clients": {
@@ -201,7 +201,8 @@
     "Fresh upstream HTTP connection PER TOOL CALL — dodges idle-connection reaping that used to hang post-pause calls",
     "Probes /health; spawns `pseudolife-mcp serve` detached if daemon absent",
     "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
-    "Re-emits tools/list_changed downstream after memory_toolset tier changes"
+    "Re-emits tools/list_changed downstream after memory_toolset tier changes",
+    "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification"
    ]
   },
   {
@@ -213,7 +214,7 @@
    "s": "pseudolife-mcp entry · torch-free",
    "p": "pseudolife_memory/cli.py",
    "d": [
-    "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio",
+    "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio · channel → optional preview transport",
     "briefing / episode-start / episode-end subcommands",
     "Heavy imports deferred into serve/embedded branches — shim start is near-instant"
    ]
@@ -255,7 +256,8 @@
    "p": "pseudolife_memory/transfer_cli.py",
    "d": [
     "ZIP of JSONL (one per table) + manifest — decoupled from Postgres major version and deployment tier, unlike pg_dump's physical backup",
-    "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim"
+    "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim",
+    "Operational coordination_agents and coordination_messages never enter portable knowledge exports; full database backups retain them"
    ]
   },
   {
@@ -294,12 +296,13 @@
    "x": 940,
    "y": 160,
    "t": "mcp_server.py",
-   "s": "MCPServer (SDK v2) · 35 tools",
+   "s": "MCPServer (SDK v2) · 37 tools",
    "p": "pseudolife_memory/mcp_server.py",
    "d": [
     "Every tool is a thin tier-tagged wrapper over MemoryService",
     "_async_offload: tool bodies run on worker threads",
-    "tools/list filtered per principal tier; hidden tools stay callable server-side"
+    "tools/list filtered per principal tier; hidden tools stay callable server-side",
+    "Core memory_agents and memory_message delegate to coordination.py; mailbox authority requires bearer plus private adapter instance binding"
    ]
   },
   {
@@ -313,7 +316,7 @@
    "d": [
     "Resolution: principal override → tier map → env default (core)",
     "12h-TTL principal overrides (PrincipalTierState); visibility is a token lever, NOT security",
-    "core = 22 of 35 tools; minimal = 9; auth is the bearer token"
+    "core = 24 of 37 tools; minimal = 9; mailbox operations additionally require an adapter-held instance credential"
    ]
   },
   {
@@ -409,11 +412,12 @@
    "s": "one instance · coarse lock",
    "p": "pseudolife_memory/service.py",
    "d": [
-    "Owns CMS, cortex, world, lessons, graph, refbank, episodes (~5,300 lines)",
+    "Owns CMS, cortex, world, lessons, graph, refbank and episodes",
     "Dream + deep-dream methods live in service_dream.py (DreamOps mixin — one class, one lock at runtime)",
     "_resolve_writer: X-PL-Session → hook pointer (6h TTL) → legacy header",
     "PersistenceError counter surfaces save failures via /health",
-    "No LLM inside — deterministic Python; the dream is the only LLM path"
+    "No LLM inside — deterministic Python; the dream is the only LLM path",
+    "coordination_awareness reads current open roots without initializing a cold bank or using the shared active-session pointer for caller exclusion"
    ]
   },
   {
@@ -580,7 +584,8 @@
    "p": "pseudolife_memory/memory/briefing.py",
    "d": [
     "Pure assembly — no LLM, no torch",
-    "Unsure-abouts + avoid-first lessons + fresh world facts + last-episode recap"
+    "Unsure-abouts + avoid-first lessons + fresh world facts + last-episode recap",
+    "Default-off bounded peer awareness; labels are context, not identity, and last reported activity is not liveness"
    ]
   },
   {
@@ -694,7 +699,8 @@
    "d": [
     "~20 sub-configs; unknown YAML keys ignored",
     "DSN resolved in service.py from PSEUDOLIFE_MCP_DATABASE_URL",
-    "No DSN → legacy file mode (.pt + ChromaDB under data_dir)"
+    "No DSN → legacy file mode (.pt + ChromaDB under data_dir)",
+    "coordination.enabled defaults off; awareness_limit bounds peer summaries and allowed_principals defaults empty"
    ]
   },
   {
@@ -852,7 +858,8 @@
    "d": [
     "One psycopg conn: autocommit reads + explicit _txn() writes",
     "_txn COMMITTED check — no phantom RETURNING ids on a dead conn",
-    "Heal-on-next-use reconnect; ping() on a dedicated conn for /health"
+    "Heal-on-next-use reconnect; ping() on a dedicated conn for /health",
+    "CoordinationStore uses the same transaction discipline; locked recipient sequence allocation and message insertion commit together"
    ]
   },
   {
@@ -861,13 +868,14 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 37",
+   "s": "DDL · SCHEMA_META_VERSION 38",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
-    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads · curation_judgments · store_decisions",
-    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction)",
-    "One-current-row-per-slot partial unique indexes"
+    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads · curation_judgments · store_decisions · coordination_agents · coordination_messages",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 agent coordination (coordination_agents instance credentials/attachment generations; coordination_messages addressed mail, recipient sequence, request-key deduplication, expiry and explicit acknowledgment; no episode cascade and no embeddings)",
+    "One-current-row-per-slot partial unique indexes",
+    "Owns driver-free COORDINATION_SCHEMA_SQL; both operational tables enter the shared bench reset roster"
    ]
   },
   {
@@ -1368,7 +1376,7 @@
   {
    "f": "mcpsrv",
    "t": "service",
-   "l": "35 tools → service.*",
+   "l": "37 tools → service / coordination",
    "k": "data"
   },
   {

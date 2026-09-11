@@ -80,6 +80,8 @@ EXPORTED_TABLES = (
 EXCLUDED_TABLES = (
     "dream_runs", "dream_run_slots", "retrieval_events", "retrieval_uses",
     "slot_reads",
+    # Mail and instance credentials belong to the source bank's runtime.
+    "coordination_agents", "coordination_messages",
 )
 
 # meta keys that must not travel: the target build owns its schema_version

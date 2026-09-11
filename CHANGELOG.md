@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-11 — experimental agent coordination)
+- Agents can discover other open sessions and exchange addressed messages within
+  one bank. Coordination defaults off; mailbox access requires an allowed bearer
+  principal and a separate adapter-held instance credential. Awareness reports
+  last observed activity without claiming that an open session is alive or that
+  a resource is reserved.
+- Schema **v38** adds `coordination_agents` and `coordination_messages` outside
+  retrieval and dream extraction. Transactional recipient ordering, idempotent
+  sends and explicit recipient acknowledgments preserve pending mail across
+  reconnects. Expiring bodies and retained request fingerprints bound storage;
+  portable knowledge exports omit both operational tables.
+- Offline restore recovery revokes restored credentials and wake grants, then
+  deliberately rebinds retained addresses through private state files. Mailbox
+  HLC high-water metadata survives body pruning and backward-clock restarts.
+- Optional Claude channel transport uses the documented preview protocol and
+  preserves the ordinary shim's per-call upstream connections. Transport
+  submission is not proof of host receipt; real-host delivery remains subject
+  to explicit opt-in and host verification. Authenticated retrieval remains the
+  fallback when live delivery is unavailable.
+- Live Claude checks cover addressed review/reply/acknowledgment, busy delivery,
+  crash replay and explicit retrieval fallback. On Claude Code 2.1.267, a first
+  channel turn after startup/resume can precede host tool readiness; pending mail
+  can require an ordinary prompt and explicit receive. Live delivery stays
+  experimental and does not promise unattended startup recovery.
+
 ### Fixed (2026-09-10 — preserve source evidence)
 - Automatic contradiction candidates can admit a possible update through
   the surprise gate, but no longer retire or weaken whole source entries.
@@ -9445,8 +9470,7 @@ subsection, silently dissolving the release boundary for twelve days.)
   NOTICE added, pyproject + README updated). Apache-2.0 keeps the same
   permissive terms and adds an explicit patent grant.
 - **Optional PDF extra: PyMuPDF → pypdfium2** (`pip install .[pdf]`).
-  PyMuPDF is AGPL-3.0, which conflicts with permissive distribution and any
-  future commercial/hosted offering; pypdfium2 (Chromium PDFium bindings,
+  PyMuPDF uses AGPL-3.0; pypdfium2 (Chromium PDFium bindings,
   Apache-2.0/BSD-3) fills the same higher-quality-extraction slot. The core
   pypdf fallback is unchanged.
 

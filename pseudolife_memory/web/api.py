@@ -64,17 +64,62 @@ async def _send_bytes(send, status: int, body: bytes, content_type: str,
     await send({"type": "http.response.body", "body": body})
 
 
-async def _read_body(receive) -> bytes:
+async def _read_body(receive, max_bytes: int | None = None) -> bytes:
     chunks = []
+    size = 0
     while True:
         message = await receive()
         if message["type"] == "http.request":
-            chunks.append(message.get("body", b"") or b"")
+            chunk = message.get("body", b"") or b""
+            size += len(chunk)
+            if max_bytes is not None and size > max_bytes:
+                raise ValueError("request_too_large")
+            chunks.append(chunk)
             if not message.get("more_body"):
                 break
         elif message["type"] == "http.disconnect":
             break
     return b"".join(chunks)
+
+
+async def _wait_while_connected(operation, receive):
+    """Cancel a long mailbox request when its HTTP client disconnects."""
+    async def disconnected():
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            # ASGI normally blocks after the body. Tolerate a repeated request
+            # event without starving the handler (also used by simple drivers).
+            await asyncio.sleep(0)
+
+    work = asyncio.create_task(operation)
+    gone = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait({work, gone}, return_when=asyncio.FIRST_COMPLETED)
+        if gone in done:
+            return False, None
+        return True, work.result()
+    finally:
+        for task in (work, gone):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(work, gone, return_exceptions=True)
+
+
+async def _send_coordination_error(send, exc):
+    from pseudolife_memory.coordination import public_error
+    code = public_error(exc)
+    status = (401 if code in {"unauthorized", "authentication_required",
+                             "instance_authentication_required"}
+              else 403 if code in {"principal_not_allowed", "invalid_credential"}
+              else 429 if code in {"wait_capacity_exceeded", "rate_limited", "queue_full"}
+              else 500 if code == "coordination_unavailable" else 400)
+    if status == 500:
+        # Database errors can include complete rows. Neither exception messages
+        # nor tracebacks are appropriate diagnostics for private mail failures.
+        logger.error("coordination handler failed (%s)", type(exc).__name__)
+    await _send_json(send, status, {"error": code})
 
 
 def _parse_query(scope) -> dict[str, str]:
@@ -132,6 +177,8 @@ def build_console_app(
     token_map = dict(token_map or {})
     auth_configured = token is not None or bool(token_map)
     routes = ConsoleRoutes(service)
+    from pseudolife_memory.web.coordination import CoordinationHub
+    coordination = CoordinationHub(service)
 
     def _authorized(scope) -> bool:
         if not auth_configured:
@@ -305,8 +352,16 @@ def build_console_app(
                 return
             params = _parse_query(scope)
             body: dict = {}
+            coordination_path = path.startswith("/api/coordination/")
+            if coordination_path and method != "POST":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
             if method == "POST":
-                raw = await _read_body(receive)
+                try:
+                    raw = await _read_body(receive, max_bytes=32768 if coordination_path else None)
+                except ValueError:
+                    await _send_json(send, 413, {"error": "request_too_large"})
+                    return
                 if raw:
                     # A cross-site form/fetch can send text/plain or
                     # urlencoded WITHOUT a CORS preflight; application/json
@@ -320,6 +375,11 @@ def build_console_app(
                         return
                     try:
                         body = json.loads(raw.decode("utf-8"))
+                    except UnicodeDecodeError:
+                        if not coordination_path:
+                            raise
+                        await _send_json(send, 400, {"error": "invalid_json"})
+                        return
                     except json.JSONDecodeError:
                         await _send_json(send, 400, {"error": "invalid_json"})
                         return
@@ -327,20 +387,57 @@ def build_console_app(
                         await _send_json(send, 400, {"error": "body_must_be_object"})
                         return
             try:
+                if coordination_path:
+                    from pseudolife_memory.coordination import authenticated_principal
+                    headers = {k.decode().lower(): v.decode("latin-1")
+                               for k, v in scope.get("headers", [])}
+                    principal = authenticated_principal(headers, token_map=token_map, token=token)
+                    action = path.removeprefix("/api/coordination/")
+                    wait = body.get("wait_seconds", 0)
+                    operation = coordination.handle(action, body, headers, principal)
+                    if action == "receive" and type(wait) in (int, float) and wait > 0:
+                        connected, result = await _wait_while_connected(operation, receive)
+                        if not connected:
+                            return
+                    else:
+                        result = await operation
+                    await _send_json(send, 200, result)
+                    return
+                def dispatch():
+                    if path not in ("/api/agents", "/api/briefing"):
+                        return routes.dispatch(method, path, params, body)
+                    from pseudolife_memory.writer_context import (
+                        bind_request_headers, unbind_request_headers)
+                    headers = {k.decode().lower(): v.decode("latin-1")
+                               for k, v in scope.get("headers", [])}
+                    binding = bind_request_headers(headers)
+                    try:
+                        return routes.dispatch(method, path, params, body)
+                    finally:
+                        unbind_request_headers(binding)
                 result = await asyncio.get_running_loop().run_in_executor(
-                    None, routes.dispatch, method, path, params, body)
+                    None, dispatch)
                 await _send_json(send, 200, result)
-            except KeyError:
+            except KeyError as exc:
+                if coordination_path:
+                    await _send_coordination_error(send, exc)
+                    return
                 # unknown path, or a wrong-verb hit on a known path
                 status = 405 if routes.has(path) else 404
                 await _send_json(send, status, {
                     "error": "not_found" if status == 404 else "method_not_allowed",
                     "path": path})
             except ValueError as exc:
-                await _send_json(send, 400, {"error": str(exc)})
+                if coordination_path:
+                    await _send_coordination_error(send, exc)
+                else:
+                    await _send_json(send, 400, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001
-                logger.exception("api handler error: %s %s", method, path)
-                await _send_json(send, 500, {"error": str(exc)})
+                if coordination_path:
+                    await _send_coordination_error(send, exc)
+                else:
+                    logger.exception("api handler error: %s %s", method, path)
+                    await _send_json(send, 500, {"error": str(exc)})
             return
 
         # 6) everything else -> the MCP app (token gate preserved)

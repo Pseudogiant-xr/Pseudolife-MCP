@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 37
+SCHEMA_META_VERSION = 38
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -380,6 +380,64 @@ CREATE TABLE IF NOT EXISTS entity_sources (
 CREATE INDEX IF NOT EXISTS entity_sources_source_idx ON entity_sources (source);
 """
 
+# Keep DDL independent of database-driver imports: daemon health and warmup
+# can import this module concurrently during startup.
+COORDINATION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS coordination_agents (
+    agent_id TEXT PRIMARY KEY,
+    principal TEXT NOT NULL,
+    credential_hash TEXT,
+    label TEXT NOT NULL DEFAULT '',
+    project TEXT NOT NULL DEFAULT '',
+    task TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    episode TEXT NOT NULL DEFAULT '',
+    capabilities JSONB NOT NULL DEFAULT '{}',
+    wake_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DOUBLE PRECISION NOT NULL,
+    last_activity DOUBLE PRECISION NOT NULL,
+    lifecycle TEXT NOT NULL DEFAULT 'registered',
+    next_sequence BIGINT NOT NULL DEFAULT 0,
+    attachment_id TEXT,
+    generation BIGINT NOT NULL DEFAULT 0,
+    lease_until DOUBLE PRECISION
+);
+CREATE INDEX IF NOT EXISTS coordination_agents_scope_idx
+    ON coordination_agents (project, task);
+CREATE TABLE IF NOT EXISTS coordination_messages (
+    message_id TEXT PRIMARY KEY,
+    sender_agent_id TEXT NOT NULL REFERENCES coordination_agents(agent_id),
+    recipient_agent_id TEXT NOT NULL REFERENCES coordination_agents(agent_id),
+    sender_principal TEXT NOT NULL,
+    project TEXT NOT NULL DEFAULT '',
+    task TEXT NOT NULL DEFAULT '',
+    text TEXT,
+    reply_to TEXT,
+    request_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    recipient_sequence BIGINT NOT NULL,
+    hlc TEXT NOT NULL DEFAULT '',
+    created_at DOUBLE PRECISION NOT NULL,
+    expires_at DOUBLE PRECISION NOT NULL,
+    attempt_at DOUBLE PRECISION,
+    attempt_generation BIGINT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    acknowledged_at DOUBLE PRECISION,
+    UNIQUE (sender_agent_id, request_id),
+    UNIQUE (recipient_agent_id, recipient_sequence)
+);
+CREATE INDEX IF NOT EXISTS coordination_messages_pending_idx
+    ON coordination_messages (recipient_agent_id, recipient_sequence)
+    WHERE acknowledged_at IS NULL;
+CREATE INDEX IF NOT EXISTS coordination_messages_sender_time_idx
+    ON coordination_messages (sender_agent_id, created_at);
+CREATE INDEX IF NOT EXISTS coordination_messages_expiry_idx
+    ON coordination_messages (expires_at);
+"""
+
+# v38: operational identities and addressed mail never enter the memory tables.
+SCHEMA_SQL += COORDINATION_SCHEMA_SQL
+
 # Every table this schema declares — the ONE list a bench/test reset
 # truncates. It lives here, beside the DDL, because it has to grow in the
 # same edit that adds a table; `tests/test_bench_reset_tables.py` fails the
@@ -409,6 +467,7 @@ BENCH_RESET_TABLES = (
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
     "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",
     "store_decisions",
+    "coordination_agents", "coordination_messages",
 )
 
 # The dimension every embedding column is declared at (schema v25). Not

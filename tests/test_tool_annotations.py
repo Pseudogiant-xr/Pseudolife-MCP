@@ -27,8 +27,8 @@ def test_all_tools_have_conservative_approval_hints():
         assert a is not None, tool.name
         assert a.read_only_hint == (tool.name in READS), tool.name
         assert a.destructive_hint == (tool.name in DESTRUCTIVE), tool.name
-        # Ingest reads a local path; dream can call the configured extractor.
-        assert a.open_world_hint == (tool.name == "memory_dream")
+        # Dream calls an extractor; addressed mail can reach another agent.
+        assert a.open_world_hint == (tool.name in {"memory_dream", "memory_message"})
         if tool.name not in READS:
             assert a.idempotent_hint is False, tool.name
 

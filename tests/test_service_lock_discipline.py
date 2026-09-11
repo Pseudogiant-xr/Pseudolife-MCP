@@ -65,6 +65,9 @@ SERVICE_PY = SERVICE_FILES[0]
 CALLER_HOLDS_LOCK = {
     "_assert_public_search_path",
     "_ensure_init",
+    # HLC startup seeding is reached only through _ensure_init; the fixpoint
+    # below verifies that entire caller chain remains under the service lock.
+    "_reseed_hlc",
     "_ensure_postgres_storage",
     "_ensure_subject_entity",
     "_persist_all",

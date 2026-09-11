@@ -48,6 +48,9 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/configuration.md",
      "Every configuration knob, the DSN, schema version history, and "
      "extractor setups"),
+    ("docs/guide/coordination-recovery.md",
+     "Offline mailbox recovery after a full restore: revoke attachments, "
+     "rebind private adapter state, and explicitly resume delivery"),
     ("docs/guide/providers.md",
      "Per-coding-agent capability matrix, the hook-equivalent ladder, "
      "the AGENTS.md standard, and writer ids"),

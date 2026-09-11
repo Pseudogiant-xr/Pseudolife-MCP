@@ -81,6 +81,9 @@ def test_all_tools_registered() -> None:
         "memory_toolset",
         "document_ingest",
         "document_search",
+        # Agent coordination.
+        "memory_agents",
+        "memory_message",
         # Episodes + consolidation.
         "memory_session_title",
         "memory_episode_start",
@@ -170,6 +173,7 @@ _EXPECTED_MINIMAL = sorted([
 ])
 
 _EXPECTED_CORE = sorted(_EXPECTED_MINIMAL + [
+    "memory_agents", "memory_message",
     "memory_fact_resolve", "memory_graph", "memory_recall",
     "memory_graph_relate", "memory_world_search", "memory_world_set",
     "memory_lesson_search", "document_search", "document_ingest",

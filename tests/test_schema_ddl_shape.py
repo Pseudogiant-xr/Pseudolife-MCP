@@ -259,3 +259,17 @@ def test_facts_table_declares_freshness_class_defaulting_to_evergreen():
     assert "'evergreen'" in facts_block, (
         "personal facts must default to evergreen — defaulting to volatile "
         "would silently re-rank every existing fact")
+
+
+def test_schema_import_does_not_load_database_driver():
+    """Health/schema imports must not race the warmup thread's driver import."""
+    import subprocess
+    import sys
+
+    result = subprocess.run([
+        sys.executable, "-c",
+        "import sys; from pseudolife_memory.storage import schema; "
+        "assert 'coordination_messages' in schema.SCHEMA_SQL; "
+        "assert not any(n == 'psycopg' or n.startswith('psycopg.') for n in sys.modules)",
+    ], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
