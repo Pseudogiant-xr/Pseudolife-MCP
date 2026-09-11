@@ -18,6 +18,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Logical exports preserve the events. Upgrades and older imports reconstruct
   only surviving superseded source/trace pairs; already-deleted history cannot
   be recovered.
+- **Upgrade effect.** The first v39 start materialises one durable event per
+  surviving superseded-source trace pair — 2077 pairs on the reference bank on
+  2026-09-11. That reproduces the warnings the bank already served rather than
+  raising new ones, but from then on a warning no longer drains when its
+  source memory is evicted or deleted. Each clears only when its slot is
+  confirmed again: a `memory_fact_set` at that slot with the same or a new
+  value, or accepting a contender there. An operator clearing a population
+  deliberately re-asserts those slots; there is no dismissal that skips
+  confirming the value. `re_verify` remains passive and is still excluded from
+  `correct_with`, so a larger standing population does not become a larger
+  instruction list.
+- Grouped set-slot `last_confirmed` now falls back to each member's
+  `asserted_at` when the member carries no confirmation stamp, matching the
+  scalar and lookup paths. A set slot that previously warned only because a
+  legacy member held a zero clock may no longer warn, and the served
+  `last_confirmed` on a grouped set entry may report an assertion time.
+- A correction whose target list repeats the same entry no longer fails after
+  the rows are already retired. The atomic retirement count is checked against
+  the distinct targets, matching what the storage call reports.
+- `ops/measure_reverify_population.py` re-measures the flagged population
+  read-only from a DSN: current facts, the served `last_confirmed`-keyed
+  warning count, the latching "any source superseded" upper bound, and the
+  trace/supersession pair count the v39 backfill inserts. Measured on the live
+  bank 2026-09-11: 1668/6015 current facts (27.7%) served the warning, 1981
+  (32.9%) under the bare test, 2077 pairs.
 
 ### Fixed (2026-09-11 — durable dream acknowledgement)
 - Dream batches acknowledge their exact entries instead of moving a timestamp
@@ -2948,13 +2973,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     test latches on forever; measured on the live bank it would fire on
     1470/5153 current facts (28.5%). Keyed on `last_confirmed` it fires on
     1264 (24.5%) and — unlike the bare test — is cleared by re-asserting or
-    re-confirming the slot.
+    re-confirming the slot. *(Both figures are retired: see the
+    historical-contract note below, and `ops/measure_reverify_population.py`
+    for the current ones — 1981 and 1668 of 6015 on 2026-09-11.)*
   - **`re_verify` is deliberately PASSIVE**, exactly as it is on lessons: it
-    does NOT gate the `correct_with` affordance. At ~25% of a mature bank,
-    routing it into a call whose served note says to run a correction NOW
-    would be a standing instruction to rewrite a quarter of the cortex every
-    session. The active, targeted affordance is `derived_flagged`, which
-    fires only on an explicit correction.
+    does NOT gate the `correct_with` affordance. At ~25% of a mature bank
+    (retired figure, superseded by schema v39 — re-measured 2026-09-11 at
+    27.7%), routing it into a call whose served note says to run a correction
+    NOW would be a standing instruction to rewrite a quarter of the cortex
+    every session. The active, targeted affordance is `derived_flagged`,
+    which fires only on an explicit correction.
   - **Historical contract, superseded by schema v39:** correction warnings
     now survive source deletion; ordinary deletion alone is not a semantic
     correction. Automatic contradiction-based source retirement was also

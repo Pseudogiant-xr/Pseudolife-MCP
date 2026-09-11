@@ -124,10 +124,19 @@ plus a `re_verify_reason` naming how many source memories were corrected
 since. It surfaces on `memory_fact_get`, `memory_search`'s cortex block,
 and `memory_recall`; on a set-valued slot the comparison is against the
 newest member's confirmation stamp, since a set is served as one grouped
-answer. It is a flag, never a cascade, and deliberately not routed into a
-`correct_with` call: correcting a source note does not establish that every
-fact derived from that note is wrong. Re-asserting or re-confirming the slot
-moves `last_confirmed` forward and clears the flag.
+answer — falling back to a member's assertion time when that member carries
+no confirmation stamp, so one legacy member cannot drag the slot's clock to
+zero and warn on every source it ever had corrected.
+
+It is a flag, never a cascade, and deliberately excluded from the
+`correct_with` affordance: correcting a source note does not establish that
+every fact derived from that note is wrong, and the signal is broad. Measured
+on the live bank on 2026-09-11 with `ops/measure_reverify_population.py`
+(read-only): 1668 of 6015 current facts, 27.7%, stood on a source memory
+corrected since they were last confirmed. Routing that into a call whose
+served note says to run a correction *now* would be a standing instruction to
+rewrite a quarter of the cortex every session. Re-asserting or re-confirming
+the slot moves `last_confirmed` forward and clears the flag.
 
 The **active** affordance for retracted evidence lives on the correction
 itself: `memory_supersede`'s result carries `derived_flagged` — the
@@ -147,6 +156,22 @@ and correction time, without source text or a foreign key to the entry or fact
 row. Cortex snapshots and fact compaction therefore retain it. Ordinary
 eviction or deletion of an uncorrected source does not establish a correction
 and creates no warning.
+
+**What the upgrade does to an existing bank.** The first start on v39
+materialises one durable event for every surviving `memory_traces` row whose
+source entry is already superseded — 2077 pairs on the reference bank on
+2026-09-11, which is what the same script reports as
+`trace_supersession_pairs`. That reproduces the warnings the bank was already
+serving; it does not invent new ones, and history already lost to deletion
+cannot be recovered. The difference afterwards is that these warnings no
+longer drain when their source is evicted. Each one clears only when its slot
+is confirmed again: a `memory_fact_set` at the slot with the same or a new
+value, or accepting a contender there. An operator who wants to clear a
+population deliberately re-asserts those slots — the flag is per slot, so
+there is no bulk switch, and there is deliberately no way to dismiss a warning
+without confirming the value it stands on. `re_verify` stays passive
+throughout: it is never rendered into `correct_with`, so a large flagged
+population never becomes a large instruction list.
 
 Both served signals are gated on `memory.traces.enabled`. Turning tracing off
 silences them and stops new trace formation; corrections still preserve events

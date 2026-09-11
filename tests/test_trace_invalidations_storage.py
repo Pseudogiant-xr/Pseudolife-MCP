@@ -313,3 +313,64 @@ def test_trace_and_supersession_serialize_on_the_source_row(pg_conn, pg_url, fir
     finally:
         a.close()
         b.close()
+
+
+# ── the population the served warning covers (ops/measure_reverify_population) ──
+
+def _fact(storage, entity, attribute, *, last_confirmed, asserted_at=None):
+    storage.conn.execute(
+        "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, "
+        " value, status, confidence, asserted_at, last_confirmed) "
+        "VALUES (%s, %s, %s, %s, 'v', 'current', 1.0, %s, %s)",
+        (entity, attribute, entity, attribute,
+         asserted_at if asserted_at is not None else last_confirmed,
+         last_confirmed),
+    )
+    storage.conn.commit()
+
+
+def test_the_population_script_separates_the_served_flag_from_the_bare_test(
+        storage):
+    """``ops/measure_reverify_population`` re-derives the figure the comment
+    and the guide cite, so its predicate has to be the SERVED one: a source
+    superseded after the fact was last confirmed. The bare "any source
+    superseded" count is reported beside it as the latching upper bound the
+    ``last_confirmed`` comparison exists to reject — the two must not collapse
+    into one number."""
+    from ops import measure_reverify_population as measure
+
+    eid = storage.insert_entry(_entry())
+    assert storage.add_trace("daemon", "host", eid, 10.0) is True
+    assert storage.add_trace("daemon", "port", eid, 10.0) is True
+    storage.supersede_entries(
+        [eid], superseded_at=50.0, superseded_by_text="corrected")
+    # Same corrected source; only the confirmation clock differs.
+    _fact(storage, "daemon", "host", last_confirmed=20.0)   # served warning
+    _fact(storage, "daemon", "port", last_confirmed=90.0)   # re-confirmed
+    _fact(storage, "daemon", "region", last_confirmed=20.0)  # untraced slot
+
+    counts = measure.run(storage.conn)
+    assert counts["current_facts"] == 3
+    assert counts["bare_flag_facts"] == 2
+    assert counts["keyed_flag_facts"] == 1
+    assert counts["trace_supersession_pairs"] == 2
+    assert counts["keyed_flag_facts_pct"] == 33.3
+
+
+def test_the_population_script_cannot_write_to_the_bank_it_measures(
+        storage, monkeypatch):
+    """It is meant to be run against the live bank with the daemon up, so the
+    read-only transaction is a guard and not a comment: a query that tried to
+    write is refused by the server. The caller's session is left writable."""
+    from psycopg import errors
+
+    from ops import measure_reverify_population as measure
+
+    monkeypatch.setitem(
+        measure._QUERIES, "current_facts",
+        "INSERT INTO meta (key, value) VALUES ('probe', 'null') "
+        "RETURNING 1")
+    with pytest.raises(errors.ReadOnlySqlTransaction):
+        measure.run(storage.conn)
+    assert storage.conn.execute(
+        "SHOW default_transaction_read_only").fetchone()[0] == "off"

@@ -435,9 +435,17 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
     # ``re_verify`` deliberately does NOT gate here. It is a passive
     # caution, exactly as it is on lessons (`_annotate_lesson_staleness`),
     # because source retirement says only that a derived fact needs review,
-    # not what its verified current value is. The active affordance at
-    # correction time is `memory_supersede`'s `derived_flagged`, which names
-    # exactly the facts affected by that explicit correction.
+    # not what its verified current value is — and it is a broad signal, not
+    # a rare one. Re-measured 2026-09-11 on the live bank with
+    # `ops/measure_reverify_population.py`: 1668 of 6015 current facts
+    # (27.7%) stand on a source memory corrected since they were last
+    # confirmed, and schema v39 keeps those warnings standing instead of
+    # letting source eviction drain them. Routing that into a call whose
+    # served CORRECTION_NOTE tells the reader to run it NOW would be a
+    # standing instruction to rewrite a quarter of the cortex every session.
+    # The active affordance at correction time is `memory_supersede`'s
+    # `derived_flagged`, which names exactly the facts affected by that
+    # explicit correction.
     if not (f.get("contested") or f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "

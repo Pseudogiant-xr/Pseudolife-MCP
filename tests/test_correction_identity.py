@@ -530,3 +530,19 @@ def test_pg_candidates_omit_phantom_and_duplicate_ids_without_losing_valid_targe
     corrected = svc.consolidate(entry_ids=[m["id"] for m in members], new_text=NEW_TEXT)
     assert corrected["superseded_count"] == 2
     assert corrected["new_memory_stored"] is True
+
+
+def test_a_repeated_retirement_target_is_counted_once(svc):
+    """``supersede_entries`` reports DEDUPLICATED rows — its storage contract,
+    pinned in ``test_trace_invalidations_storage`` — so the service has to
+    check that count against the distinct targets. Checking it against the raw
+    list length turned a repeated target into a spurious retirement failure
+    after the rows were already committed."""
+    old = _seed(svc)
+    with svc._lock:
+        svc._retire_entries_locked(
+            [old, old], superseded_at=1234.0, superseded_by_text=NEW_TEXT)
+    assert old.superseded_at == 1234.0
+    assert svc._storage.supersessions == [([old.db_id], {
+        "superseded_at": 1234.0, "superseded_by_text": NEW_TEXT,
+    })]

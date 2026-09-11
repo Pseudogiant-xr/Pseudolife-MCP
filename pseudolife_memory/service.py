@@ -1886,12 +1886,16 @@ class MemoryService(DreamOps):
             if any(entry_id is None for entry_id in entry_ids):
                 raise RuntimeError(
                     "cannot retire an entry without a persisted row ID")
+            targets = {int(entry_id) for entry_id in entry_ids}
             persisted = self._storage.supersede_entries(
                 [int(entry_id) for entry_id in entry_ids],
                 superseded_at=superseded_at,
                 superseded_by_text=superseded_by_text,
             )
-            if persisted != len(entry_ids):
+            # ``supersede_entries`` reports DISTINCT rows retired, so the
+            # check is against the distinct targets: a target repeated in the
+            # caller's list is one row, not a short write.
+            if persisted != len(targets):
                 raise RuntimeError(
                     "atomic entry retirement returned an unexpected count")
         for entry in entries:
