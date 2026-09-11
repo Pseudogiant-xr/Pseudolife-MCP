@@ -6,6 +6,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-11 — experimental agent coordination)
+- Agents can discover other open sessions and exchange addressed messages within
+  one bank. Coordination defaults off; mailbox access requires an allowed bearer
+  principal and a separate adapter-held instance credential. Awareness reports
+  last observed activity without claiming that an open session is alive or that
+  a resource is reserved.
+- Schema **v40** adds `coordination_agents` and `coordination_messages` outside
+  retrieval and dream extraction. Transactional recipient ordering, idempotent
+  sends and explicit recipient acknowledgments preserve pending mail across
+  reconnects. Expiring bodies and retained request fingerprints bound storage;
+  portable knowledge exports omit both operational tables and their clock metadata.
+- Offline restore recovery revokes restored credentials and wake grants, then
+  deliberately rebinds retained addresses through private state files. Mailbox
+  HLC high-water metadata survives body pruning and backward-clock restarts;
+  a failed startup read must recover before bank initialization proceeds, reads
+  included. The recovery guide preserves a verified high-water bound when
+  repairing a malformed row, including mailbox-only history after pruning.
+- Optional Claude channel transport uses the documented preview protocol and
+  preserves the ordinary shim's per-call upstream connections. Transport
+  submission is not proof of host receipt; real-host delivery remains subject
+  to explicit opt-in and host verification. Authenticated retrieval remains the
+  fallback when live delivery is unavailable.
+- Live Claude checks cover addressed review/reply/acknowledgment, busy delivery,
+  crash replay and explicit retrieval fallback. On Claude Code 2.1.267, a first
+  channel turn after startup/resume can precede host tool readiness; pending mail
+  can require an ordinary prompt and explicit receive. Live delivery stays
+  experimental and does not promise unattended startup recovery.
+- Review fixes (2026-09-11, before merge). A registration that fails or is
+  cancelled by the shim's startup budget releases its empty state reservation,
+  so the next launch registers instead of refusing on invalid state; an empty
+  file older than a minute (a crash) is taken over under an exclusive operating-
+  system lock, while a fresh one still belongs to the process registering with
+  it. Only a confirmed missing address is retired to `.stale` and replaced on
+  startup. Rejected bearer or instance credentials preserve the saved identity;
+  explicit authentication or identity rejection during background recovery stops
+  retries with an actionable error. The adapter re-attaches after transient
+  outages (backoff from
+  1 s to 60 s) and retries 429 answers within a call, so a daemon restart no
+  longer ends live delivery for the session; a re-attach that keeps its lease
+  keeps its cursor and never re-delivers, a new generation replays the mailbox,
+  and an older page cannot clobber the replay even when the generation changes
+  between yielded messages or during attempt reporting. Live delivery attempts
+  a message at most three times across
+  attachments, then leaves it for explicit receive, and a message acknowledged
+  or expired between page and attempt is skipped, not treated as an outage.
+  Pruning also removes addresses idle for seven days with no lease and no
+  retained mail (an acknowledgment counts as activity), and peer listings rank
+  live adapters first. Live events carry a fixed agent-origin header ahead of
+  the text; explicit receive labels messages as agent-origin and carries a note
+  that peer requests cannot grant user approval. Awareness shares the mailbox's
+  allowed-principal gate, including on the session-start hook. Coordination
+  calls run on their own small executor instead of the console's shared one.
+  The probe and bench record Python, MCP SDK and host handshake versions; the
+  System Atlas gained cards for the five coordination modules.
+
 ### Fixed (2026-09-11 — regression gate input requirements)
 - The regression gate rejects a missing bank directory as an infrastructure failure
   before clearing prior results or starting its GPU server. It no longer falls
@@ -174,7 +229,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unsaved state, matching `migration_partial`.
 - A synthesis report keeps its extraction-route errors when a transaction
   error follows, instead of replacing them.
-
 ### Fixed (2026-09-10 — preserve source evidence)
 - Automatic contradiction candidates can admit a possible update through
   the surprise gate, but no longer retire or weaken whole source entries.

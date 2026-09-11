@@ -460,6 +460,12 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "('sampleext_schema_version', '\"v34-sampleext\"'::jsonb) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES "
+            "('dream_ack_secret_v1', '\"bank-local-secret\"'::jsonb), "
+            "('coordination_hlc_highwater', '[10000, 1]'::jsonb) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
         conn.commit()
 
     out = tmp_path / "bank.zip"
@@ -476,6 +482,8 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert "schema_version" not in meta_keys
         assert "sampleext_schema_version" not in meta_keys
         assert "active_session_pointer" not in meta_keys
+        assert "dream_ack_secret_v1" not in meta_keys
+        assert "coordination_hlc_highwater" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["format_version"] == 1

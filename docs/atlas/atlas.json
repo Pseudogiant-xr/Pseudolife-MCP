@@ -2,7 +2,7 @@
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.15.0",
-  "schema": 39,
+  "schema": 40,
   "verified": "2026-09-11"
  },
  "groups": {
@@ -201,7 +201,8 @@
     "Fresh upstream HTTP connection PER TOOL CALL — dodges idle-connection reaping that used to hang post-pause calls",
     "Probes /health; spawns `pseudolife-mcp serve` detached if daemon absent",
     "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
-    "Re-emits tools/list_changed downstream after memory_toolset tier changes"
+    "Re-emits tools/list_changed downstream after memory_toolset tier changes",
+    "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification"
    ]
   },
   {
@@ -213,7 +214,7 @@
    "s": "pseudolife-mcp entry · torch-free",
    "p": "pseudolife_memory/cli.py",
    "d": [
-    "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio",
+    "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio · channel → optional preview transport",
     "briefing / episode-start / episode-end subcommands",
     "Heavy imports deferred into serve/embedded branches — shim start is near-instant"
    ]
@@ -256,7 +257,39 @@
    "d": [
     "ZIP of JSONL (one per table) + manifest — decoupled from Postgres major version and deployment tier, unlike pg_dump's physical backup",
     "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim",
-    "Carries entry dream state but excludes the acknowledgement secret; an imported bank creates its own token identity"
+    "Carries entry dream state but excludes the acknowledgement secret; an imported bank creates its own token identity",
+    "Operational coordination_agents and coordination_messages never enter portable knowledge exports; full database backups retain them"
+   ]
+  },
+  {
+   "id": "adapter",
+   "g": "transport",
+   "x": 330,
+   "y": 660,
+   "t": "coordination_adapter.py",
+   "s": "one attachment · explicit private state",
+   "p": "pseudolife_memory/coordination_adapter.py",
+   "d": [
+    "Holds the instance credential privately and injects it as X-PL-Agent / X-PL-Agent-Key on every coordination call — never from model arguments",
+    "The explicit state path is the only resume key: opened O_EXCL/O_NOFOLLOW at owner-only permissions, never overwritten; a failed or cancelled first register releases its empty reservation",
+    "60s attachment lease renewed by a 20s heartbeat task; a request retries at most twice (5xx and 429) before the adapter degrades",
+    "An outage pauses the stream and the heartbeat task re-attaches with backoff (1 s to 60 s), replaying unacknowledged mail under the new generation; a restored notice follows the once-per-outage warning",
+    "inbox() long-polls receive (wait_seconds 30), marks one attempt per message per attachment and frames every event with a fixed agent-origin header; acknowledgment stays an explicit model action"
+   ]
+  },
+  {
+   "id": "channel",
+   "g": "transport",
+   "x": 330,
+   "y": 760,
+   "t": "channel.py",
+   "s": "optional Claude channel transport",
+   "p": "pseudolife_memory/channel.py",
+   "d": [
+    "Declares exactly one experimental capability, claude/channel; no mailbox, host launch or implicit receipt",
+    "Serializes every outbound write through one lock, so events never interleave with tool replies on the shared stdout",
+    "Delivery starts only after the client's notifications/initialized; an out-of-order notification cannot open the inbox early",
+    "The caller supplies the inbox and this module owns only that worker's lifetime — stream submission is not proof of host receipt"
    ]
   },
   {
@@ -295,12 +328,13 @@
    "x": 940,
    "y": 160,
    "t": "mcp_server.py",
-   "s": "MCPServer (SDK v2) · 35 tools",
+   "s": "MCPServer (SDK v2) · 37 tools",
    "p": "pseudolife_memory/mcp_server.py",
    "d": [
     "Every tool is a thin tier-tagged wrapper over MemoryService",
     "_async_offload: tool bodies run on worker threads",
-    "tools/list filtered per principal tier; hidden tools stay callable server-side"
+    "tools/list filtered per principal tier; hidden tools stay callable server-side",
+    "Core memory_agents and memory_message delegate to coordination.py; mailbox authority requires bearer plus private adapter instance binding"
    ]
   },
   {
@@ -314,7 +348,7 @@
    "d": [
     "Resolution: principal override → tier map → env default (core)",
     "12h-TTL principal overrides (PrincipalTierState); visibility is a token lever, NOT security",
-    "core = 22 of 35 tools; minimal = 9; auth is the bearer token"
+    "core = 24 of 37 tools; minimal = 9; mailbox operations additionally require an adapter-held instance credential"
    ]
   },
   {
@@ -402,6 +436,22 @@
    ]
   },
   {
+   "id": "coordhub",
+   "g": "daemon",
+   "x": 1200,
+   "y": 470,
+   "t": "web/coordination.py · CoordinationHub",
+   "s": "bounded async receive waits",
+   "p": "pseudolife_memory/web/coordination.py",
+   "d": [
+    "Every dispatch runs on the hub's own 4-thread pool behind a 16-permit semaphore — never on the loop's default executor the console routes share, never on the event loop",
+    "A waiting receive subscribes to an asyncio.Event OUTSIDE the service lock and clears it BEFORE reading durable state, so a commit during the read cannot fall into a race gap",
+    "Caps: 30s wait, 64 waiters, one wait per (agent, attachment, generation) — a second is refused, not queued",
+    "A wait timeout still re-reads the authoritative database, covering a restart or any writer outside this loop",
+    "Shielded jobs own their capacity until the synchronous work ends; a disconnected caller cannot release it early"
+   ]
+  },
+  {
    "id": "service",
    "g": "engine",
    "x": 900,
@@ -410,11 +460,12 @@
    "s": "one instance · coarse lock",
    "p": "pseudolife_memory/service.py",
    "d": [
-    "Owns CMS, cortex, world, lessons, graph, refbank, episodes (~5,300 lines)",
+    "Owns CMS, cortex, world, lessons, graph, refbank and episodes",
     "Dream + deep-dream methods live in service_dream.py (DreamOps mixin — one class, one lock at runtime)",
     "_resolve_writer: X-PL-Session → hook pointer (6h TTL) → legacy header",
     "PersistenceError counter surfaces save failures via /health",
-    "No LLM inside — deterministic Python; the dream is the only LLM path"
+    "No LLM inside — deterministic Python; the dream is the only LLM path",
+    "coordination_awareness reads current open roots without initializing a cold bank or using the shared active-session pointer for caller exclusion"
    ]
   },
   {
@@ -582,7 +633,8 @@
    "p": "pseudolife_memory/memory/briefing.py",
    "d": [
     "Pure assembly — no LLM, no torch",
-    "Unsure-abouts + avoid-first lessons + fresh world facts + last-episode recap"
+    "Unsure-abouts + avoid-first lessons + fresh world facts + last-episode recap",
+    "Default-off bounded peer awareness; labels are context, not identity, and last reported activity is not liveness"
    ]
   },
   {
@@ -696,7 +748,24 @@
    "d": [
     "~20 sub-configs; unknown YAML keys ignored",
     "DSN resolved in service.py from PSEUDOLIFE_MCP_DATABASE_URL",
-    "No DSN → legacy file mode (.pt + ChromaDB under data_dir)"
+    "No DSN → legacy file mode (.pt + ChromaDB under data_dir)",
+    "coordination.enabled defaults off; awareness_limit bounds peer summaries and allowed_principals defaults empty"
+   ]
+  },
+  {
+   "id": "coordination",
+   "g": "engine",
+   "x": 1160,
+   "y": 1020,
+   "t": "coordination.py · dispatch",
+   "s": "authenticated action dispatch",
+   "p": "pseudolife_memory/coordination.py",
+   "d": [
+    "Bearer principal must be listed in coordination.allowed_principals; every action except register also needs the adapter's X-PL-Agent / X-PL-Agent-Key headers",
+    "Per-action parameter allow-lists reject unexpected or missing parameters before any database work",
+    "Holds the service lock only for the store call; send stamps the message with the service HLC on the way in",
+    "Failures re-raise through public_error, so callers see a stable code and never a supplied value",
+    "Disabled configuration answers {enabled: false} rather than an error, so a disabled bank stays quiet"
    ]
   },
   {
@@ -856,7 +925,8 @@
     "_txn COMMITTED check — no phantom RETURNING ids on a dead conn",
     "Heal-on-next-use reconnect; ping() on a dedicated conn for /health",
     "Dream acknowledgement captures one connection and transaction for exact entry IDs plus display cursor; pre-v38 rows are classified once",
-    "Explicit source retirement and trace invalidations commit together; late trace writes lock the same source row"
+    "Explicit source retirement and trace invalidations commit together; late trace writes lock the same source row",
+    "CoordinationStore uses the same transaction discipline; locked recipient sequence allocation and message insertion commit together"
    ]
   },
   {
@@ -865,13 +935,14 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 39",
+   "s": "DDL · SCHEMA_META_VERSION 40",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
-    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces/memory_trace_invalidations · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads · curation_judgments · store_decisions",
-    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 entries.dream_state (per-entry acknowledgement; NULL marks old rows for one-time source-aware legacy classification; new rows default pending) · v39 memory_trace_invalidations (FK-free source correction events survive entry deletion and fact snapshots; atomic with explicit source retirement)",
-    "One-current-row-per-slot partial unique indexes"
+    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces/memory_trace_invalidations · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads · curation_judgments · store_decisions · coordination_agents · coordination_messages",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 entries.dream_state (per-entry acknowledgement; NULL marks old rows for one-time source-aware legacy classification; new rows default pending) · v39 memory_trace_invalidations (FK-free source correction events survive entry deletion and fact snapshots; atomic with explicit source retirement) · v40 agent coordination (coordination_agents instance credentials/attachment generations; coordination_messages addressed mail, recipient sequence, request-key deduplication, expiry and explicit acknowledgment; no episode cascade and no embeddings)",
+    "One-current-row-per-slot partial unique indexes",
+    "Owns driver-free COORDINATION_SCHEMA_SQL; both operational tables enter the shared bench reset roster"
    ]
   },
   {
@@ -954,6 +1025,24 @@
    "p": "(inside state volume)",
    "d": [
     "Persistent local vector store for the document RAG tier"
+   ]
+  },
+  {
+   "id": "coordstore",
+   "g": "storage",
+   "x": 1760,
+   "y": 1530,
+   "t": "storage/coordination.py",
+   "s": "agent rows + addressed mail",
+   "p": "pseudolife_memory/storage/coordination.py",
+   "d": [
+    "send locks both agent rows FOR UPDATE in agent-ID order, so reciprocal sends cannot deadlock each other",
+    "(sender, request_id) is the idempotency key: a repeat with the same fingerprint returns the first receipt, a different one is request_conflict",
+    "receive is cursor-based and non-destructive — ordered by per-recipient sequence, nothing is consumed until ack or expiry",
+    "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
+    "The coordination_hlc_highwater meta row only ever moves forward (numeric compare), so pruning mail cannot regress mailbox stamps",
+    "Live delivery is bounded to MAX_ATTEMPTS (3) per message across attachments; the adapter's receive skips exhausted mail, an explicit receive still returns it",
+    "prune() also removes addresses idle for seven days with no lease and no retained message; list_agents ranks live adapter leases first"
    ]
   },
   {
@@ -1374,7 +1463,7 @@
   {
    "f": "mcpsrv",
    "t": "service",
-   "l": "35 tools → service.*",
+   "l": "37 tools → service / coordination",
    "k": "data"
   },
   {
@@ -1814,6 +1903,48 @@
    "t": "pypi",
    "l": "OIDC publish",
    "k": "deploy"
+  },
+  {
+   "f": "shim",
+   "t": "adapter",
+   "l": "attaches when PSEUDOLIFE_AGENT_COORDINATION=1 · wake only with PSEUDOLIFE_AGENT_WAKE",
+   "k": "control"
+  },
+  {
+   "f": "shim",
+   "t": "channel",
+   "l": "channel mode · serve_channel owns the connection",
+   "k": "control"
+  },
+  {
+   "f": "adapter",
+   "t": "api",
+   "l": "POST /api/coordination/* · X-PL-Agent headers",
+   "k": "data"
+  },
+  {
+   "f": "api",
+   "t": "coordhub",
+   "l": "/api/coordination/*",
+   "k": "data"
+  },
+  {
+   "f": "coordhub",
+   "t": "coordination",
+   "l": "dispatch in a worker thread",
+   "k": "data"
+  },
+  {
+   "f": "coordination",
+   "t": "coordstore",
+   "l": "CoordinationStore under the service lock",
+   "k": "data"
+  },
+  {
+   "f": "coordstore",
+   "t": "pgstorage",
+   "l": "coordination_agents / messages · _txn()",
+   "k": "data"
   }
  ],
  "flows": {

@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v39). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v40). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -29,6 +29,143 @@ For the Docker stack, set these in `ops/.env`
 every value is commented, a missing file runs entirely on defaults). The
 dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 [Dreaming](dreaming.md).
+
+## Experimental agent coordination
+
+Coordination adds peer awareness and addressed mail within one bank. It defaults
+off and does not reserve files or prevent conflicting edits. Configure it in the
+daemon's `config.yaml`, then restart the daemon:
+
+```yaml
+coordination:
+  enabled: true
+  awareness_limit: 5
+  allowed_principals: [editor, reviewer]
+```
+
+`awareness_limit` must be an integer from 1 to 20 and caps peer summaries. Existing
+episodes have no trustworthy project/task or principal fields, so unregistered
+peers are shown with unknown scope and host capability. Titles do not establish
+identity. Last reported activity comes from attributed writes; an open episode
+does not prove a process is running. Refresh awareness before shared-resource
+work and on resume.
+
+The allowed names are principals from the bearer-token configuration above;
+the default list is empty. Mailbox operations require PostgreSQL, configured
+bearer authentication and a registered adapter's private instance credential.
+Two sessions sharing a principal still need distinct adapter identities. A
+public agent ID, episode handle or task label never grants mailbox access.
+Clients lacking a per-session credential-injecting adapter can use awareness,
+but cannot send, receive or acknowledge another instance's mail. Awareness is
+gated on the same allowed-principal list: a bearer whose principal is not listed
+sees no peers and no awareness section in its briefing, and with no bearer token
+configured there is no principal to list, so awareness stays empty on an open
+loopback install.
+
+Enable the installed shim adapter with `PSEUDOLIFE_AGENT_COORDINATION=1` and set
+`PSEUDOLIFE_MCP_TOKEN` to that principal's bearer token. Optional
+`PSEUDOLIFE_AGENT_LABEL`, `PSEUDOLIFE_AGENT_PROJECT` and `PSEUDOLIFE_AGENT_TASK`
+provide explicit display and relevance fields. Set `PSEUDOLIFE_AGENT_STATE` to a
+private file outside the repository for deliberate mailbox resume. Each concurrent
+adapter needs its own state file; sharing one does not create a second identity.
+Without a state path, each launch gets a new address. Never infer recovery from a
+title, checkout directory or implicit host resume. Credentials stay in that
+private file and adapter headers, not model arguments or memory entries.
+
+Use ordinary `pseudolife-mcp` for authenticated pull messaging. The optional
+`pseudolife-mcp channel` mode also requires `PSEUDOLIFE_AGENT_WAKE=1` to emit live
+events, plus the host's preview launch opt-in. A cached pending-count hint can
+appear in tool responses; fetching the hint adds no network request to the tool
+path and never acknowledges mail. Optional adapter startup requests cancellation after three seconds, then waits
+for bounded in-flight request cleanup before falling back to ordinary memory
+service. This is not a three-second ceiling on total shim startup time.
+
+Messages have one recipient. Sending confirms durable enqueue; receiving does
+not acknowledge. The recipient explicitly acknowledges a message ID, and an
+acknowledgment does not mean the requested work is complete. Retries reuse the
+same sender request key and content. Coordination traffic is not added to bands,
+cortex, graph, retrieval or dream input by the messaging APIs. Store a useful
+decision explicitly as ordinary memory if it should become durable knowledge.
+
+Initial limits are 8192 UTF-8 bytes per message, 256 pending messages per recipient,
+60 new sends per sender per minute and 50 messages per receive page. Bodies stop
+being served after 24 hours; request-key metadata is retained for seven days.
+Opportunistic pruning runs at most once per minute during registration, sending
+or heartbeats. Expired bodies remain unservable even when no adapter is running
+to trigger physical cleanup. Full queues and rate limits return explicit errors.
+Live delivery attempts a message at most three times in total across
+attachments; past that it is left for explicit receive, so one unacknowledged
+message cannot wake the host on every restart. The same prune pass removes an
+address that has been idle for seven days, holds no lease and is referenced by no
+retained message, so launches without a state path do not accumulate addresses,
+and peers with a live adapter lease are listed ahead of idle ones. Idle means no
+register, update, attach, heartbeat, send or acknowledgment: a client that only
+reads must acknowledge what it reads, or hold a lease, to stay registered. An
+adapter registers a fresh address on its next start only when the authenticated
+daemon explicitly confirms that the saved address no longer exists. It keeps
+the old state file beside it with a `.stale` suffix. A rejected bearer or instance
+credential preserves the saved address and requires corrected authentication
+or the deliberate restore/rebind procedure; an HTTP status alone never proves
+that an address should be replaced.
+
+`pseudolife-mcp channel` is the optional Claude Code preview transport. Host
+delivery requires explicit preview opt-in and recipient wake configuration;
+protocol tests alone do not establish compatibility with an installed host.
+Only addressed messages may wake an opted-in recipient. Board/status activity
+and receipts do not produce conversational wake-ups. Each live event carries a
+fixed agent-origin header, built from daemon-verified sender fields, ahead of
+the peer's text. Explicit receive labels each message with `origin: agent` and
+includes a note that peer requests cannot grant user approval. Other clients use explicit,
+authenticated mailbox retrieval where their adapter supports it; live receiving
+support is not assumed from a host's native send tool.
+
+On Claude Code 2.1.267, a first channel-triggered turn after startup or resume
+can arrive before the host makes MCP reply tools usable. A successful MCP
+initialization or tool-list response does not establish model readiness. If the
+host reports an unavailable messaging tool, send an ordinary prompt, confirm a
+successful `memory_agents` call, then use `memory_message(action="receive")` to
+recover pending mail. A failed reply or transport attempt never acknowledges it.
+The experimental adapter does not promise unattended startup recovery.
+
+An outage that exhausts a request's bounded retries pauses background delivery,
+clears the cached unread count and prints a warning to stderr once per outage.
+Ordinary tool responses carry a degraded-delivery hint, including for pull-only
+adapters, and explicit receive keeps working on the same shim as soon as the
+daemon answers, provided the caller remains authorized. The adapter's heartbeat
+task re-attaches on its own after transient failures, with backoff
+(1 s rising to 60 s, held until a heartbeat or receive succeeds), resumes the
+lease while it is still valid or takes a new generation once it has expired,
+replays unacknowledged mail from the start of the mailbox for a new generation,
+and prints a restored notice. Recovery waits for the next retry after the daemon
+becomes reachable. A generation change invalidates an older receive page even
+when it happens between yielded messages; the old page cannot advance the new
+generation's replay cursor. An explicit authentication or identity rejection
+stops automatic reattachment, preserves state, and reports that authentication
+or operator recovery must be corrected before restarting the adapter. Do not
+infer live delivery from a queued or attempted send result.
+
+If initial registration fails, or the shim's startup budget cancels it before
+the adapter receives the new address, the adapter releases its empty state
+reservation and the next launch registers a fresh address; it never retries
+inside the same start and never overwrites a state file that already holds an
+identity. An address the daemon created for a lost response was never held by
+any adapter, receives no mail, and is pruned with the other idle addresses. Do
+not revoke every mailbox to repair one failed registration. A lost attachment
+response can leave a lease until expiry; failed competing attachment attempts
+do not renew it.
+
+A crash-left empty state file becomes eligible for takeover after one minute.
+Takeover uses an owner-only sibling `.lock` file and a nonblocking operating-system
+lock, so concurrent launches cannot both register against that stale reservation.
+The lock file remains on disk; lock ownership is released when the process exits,
+including a crash. Do not delete it while an adapter might be using it.
+
+Full database backups contain coordination mail. Portable `export`/`import`
+archives omit both coordination tables and their clock metadata so moving
+knowledge cannot clone live mailboxes or instance credentials. Follow the
+[offline mailbox recovery procedure](coordination-recovery.md) after a database
+restore. See the [experimental design](../specs/2026-09-11-agent-coordination-design.md)
+for delivery-state and host-verification contracts.
 
 ## Built-in defaults (tuned for Claude's use case)
 
@@ -410,9 +547,9 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 ## Toolset tiers
 
 Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
-set-slot pair, the gate), `core` (22: + graph/recall, world facts, lessons,
-documents, episodes, stats, `memory_get`, `memory_fact_resolve`),
-`full` (35) — filtered per principal at `tools/list` (the named principal
+set-slot pair, the gate), `core` (24: + graph/recall, world facts, lessons,
+documents, episodes, stats, `memory_get`, `memory_fact_resolve`, coordination),
+`full` (37) — filtered per principal at `tools/list` (the named principal
 from a `PSEUDOLIFE_MCP_TOKENS` bearer, else the writer id; sessions sharing
 a credential share a tier view). The filter is
 visibility, not auth (the bearer token is the security boundary) — but
@@ -708,7 +845,8 @@ while any other connection holds the database — stop the daemon first
 pseudolife-daemon`); `--force` overrides for connections you know are
 inert — and refuses an export whose format version or embedding dimension
 it cannot honor. Operational telemetry (retrieval/read logs, the dream-run
-journal) deliberately stays behind, and the manifest lists exactly which
+journal), agent instance credentials and coordination mail deliberately stay
+behind, and the manifest lists exactly which
 tables were excluded. Ingested `document_ingest` files live on the state
 volume/data dir, not in Postgres — carry those with the physical backup's
 state archive.
@@ -723,7 +861,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v39**; migrations are additive
+The current Postgres meta version is **v40**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -768,6 +906,7 @@ The milestones:
 | v37 | Retire-not-delete (2026-09-03). `store_decisions` (`id`, `store`, `entity_norm`, `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB, `decided_at`) — the FK-free audit of lesson/world forgets and restores. A `memory_forget(scope="lesson"\|"world")` now retires the slot's rows (`status='retired'`, rows kept; `memory.compaction` treats them like any non-live record) instead of deleting them, and the audit row carries the verbatim record so `lesson_restore` / `world_restore` (`memory_graph_review(action="restore_slot")`, `POST /api/lessons/restore`, `POST /api/world/restore`) still work after compaction has purged the retired row. Also (no DDL): merge and junk rejects write text-keyed tombstones to `dismissed_pairs` (canonical pair / `junk:<canonical>` self-pair) so a verdict outlives the CASCADE-deleted proposal row. No column changes; the table starts empty on an existing bank, so the migration is a no-op there. Additive/idempotent |
 | v38 | Durable dream acknowledgement. `entries.dream_state` records `pending`, `acknowledged`, or `legacy-covered`; pre-existing rows retain `NULL` for one-time classification against the legacy cursor and configured source eligibility. New writes default to `pending`, regardless of their timestamps. Exact-entry commit tokens use a bank-local secret in `meta`; logical export excludes that secret. The numeric cursor remains display metadata. This preserves the previous migration boundary; it does not repair historical skipped entries. Additive/idempotent |
 | v39 | `memory_trace_invalidations` preserves source-supersession events by normalized slot and source entry ID, without entry or fact foreign keys. Explicit correction records entry retirement and existing trace invalidations together. Events survive source deletion, cortex snapshots and compaction; confirmation still clears the served warning. Table creation and older logical imports reconstruct only surviving superseded source/trace pairs. **Upgrade effect:** the first v39 start materialises one event per surviving superseded-source trace pair — 2077 pairs on the reference bank on 2026-09-11, measured with `ops/measure_reverify_population.py`. That reproduces the warnings the bank already served, but from then on they no longer drain when the source is evicted or deleted; each clears only when its slot is confirmed again (`memory_fact_set` at the slot with the same or a new value, or accepting a contender). To clear a population deliberately, re-assert those slots. `re_verify` stays a passive flag and is still excluded from `correct_with`. Additive/idempotent |
+| v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

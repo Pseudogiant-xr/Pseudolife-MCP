@@ -96,11 +96,13 @@ def daemon(tmp_path_factory):
         "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
         "PSEUDOLIFE_MCP_TOKEN": _TOKEN,
     }
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=_NO_WINDOW,
-    )
+    stderr_path = data_dir / "daemon-stderr.log"
+    with stderr_path.open("wb") as stderr_log:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
+            env=env, stdout=subprocess.DEVNULL, stderr=stderr_log,
+            creationflags=_NO_WINDOW,
+        )
     deadline = time.time() + 60  # torch import is slow on a cold cache
     health = None
     while time.time() < deadline:
@@ -108,11 +110,13 @@ def daemon(tmp_path_factory):
         if health is not None:
             break
         if proc.poll() is not None:
-            pytest.fail(f"daemon exited early ({proc.returncode})")
+            pytest.fail(f"daemon exited early ({proc.returncode}):\n" +
+                        stderr_path.read_text(encoding="utf-8", errors="replace")[-4000:])
         time.sleep(0.5)
     if health is None:
         proc.terminate()
-        pytest.fail("daemon never became healthy")
+        pytest.fail("daemon never became healthy:\n" +
+                    stderr_path.read_text(encoding="utf-8", errors="replace")[-4000:])
     yield {"port": port, "url": f"http://127.0.0.1:{port}", "health": health}
     proc.terminate()
     try:
@@ -346,11 +350,13 @@ def trust_bind_daemon(tmp_path_factory):
     }
     env.pop("PSEUDOLIFE_MCP_TOKEN", None)
     env.pop("PSEUDOLIFE_MCP_TOKENS", None)
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=_NO_WINDOW,
-    )
+    stderr_path = data_dir / "daemon-stderr.log"
+    with stderr_path.open("wb") as stderr_log:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
+            env=env, stdout=subprocess.DEVNULL, stderr=stderr_log,
+            creationflags=_NO_WINDOW,
+        )
     deadline = time.time() + 60
     health = None
     while time.time() < deadline:
@@ -358,11 +364,13 @@ def trust_bind_daemon(tmp_path_factory):
         if health is not None:
             break
         if proc.poll() is not None:
-            pytest.fail(f"daemon exited early ({proc.returncode})")
+            pytest.fail(f"daemon exited early ({proc.returncode}):\n" +
+                        stderr_path.read_text(encoding="utf-8", errors="replace")[-4000:])
         time.sleep(0.5)
     if health is None:
         proc.terminate()
-        pytest.fail("trust-bind daemon never became healthy")
+        pytest.fail("trust-bind daemon never became healthy:\n" +
+                    stderr_path.read_text(encoding="utf-8", errors="replace")[-4000:])
     yield {"port": port, "health": health}
     proc.terminate()
     try:

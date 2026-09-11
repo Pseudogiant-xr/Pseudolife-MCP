@@ -85,6 +85,8 @@ EXPORTED_TABLES = (
 EXCLUDED_TABLES = (
     "dream_runs", "dream_run_slots", "retrieval_events", "retrieval_uses",
     "slot_reads",
+    # Mail and instance credentials belong to the source bank's runtime.
+    "coordination_agents", "coordination_messages",
 )
 
 # meta keys that must not travel: the target build owns its schema_version
@@ -96,6 +98,8 @@ _META_SKIP_KEYS = {
     # Bank-local acknowledgement authority. Logical transfer creates or
     # retains the target generation; only physical restore preserves it.
     "dream_ack_secret_v1",
+    # Monotonic coordination clock state belongs to the target bank.
+    "coordination_hlc_highwater",
 }
 
 

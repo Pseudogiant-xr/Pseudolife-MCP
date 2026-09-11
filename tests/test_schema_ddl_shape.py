@@ -288,6 +288,20 @@ def test_facts_table_declares_freshness_class_defaulting_to_evergreen():
         "would silently re-rank every existing fact")
 
 
+def test_schema_import_does_not_load_database_driver():
+    """Health/schema imports must not race the warmup thread's driver import."""
+    import subprocess
+    import sys
+
+    result = subprocess.run([
+        sys.executable, "-c",
+        "import sys; from pseudolife_memory.storage import schema; "
+        "assert 'coordination_messages' in schema.SCHEMA_SQL; "
+        "assert not any(n == 'psycopg' or n.startswith('psycopg.') for n in sys.modules)",
+    ], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+
+
 def test_entries_dream_state_defaults_to_pending_under_its_named_check(pg_conn):
     """v38. Two halves of one contract. The DEFAULT is what makes every new
     write eligible for the dream without a backfill, and NULL (the pre-bump

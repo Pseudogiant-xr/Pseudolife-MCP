@@ -1181,12 +1181,35 @@ class StorageConfig:
 
 
 @dataclass
+class CoordinationConfig:
+    """Opt-in peer awareness; limits bound injected session context."""
+
+    enabled: bool = False
+    # Initial context limit, not a measured throughput tuning constant.
+    awareness_limit: int = 5
+    allowed_principals: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if type(self.enabled) is not bool:
+            raise ValueError("coordination.enabled must be a boolean")
+        if type(self.awareness_limit) is not int or not 1 <= self.awareness_limit <= 20:
+            raise ValueError("coordination.awareness_limit must be an integer in 1..20")
+        if not isinstance(self.allowed_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.allowed_principals
+        ):
+            raise ValueError("coordination.allowed_principals must be a list of names")
+        self.allowed_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.allowed_principals))
+
+
+@dataclass
 class AppConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     time: TimeConfig = field(default_factory=TimeConfig)
+    coordination: CoordinationConfig = field(default_factory=CoordinationConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
@@ -1315,5 +1338,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.storage = _dict_to_dataclass(StorageConfig, raw["storage"])
     if "time" in raw:
         config.time = _dict_to_dataclass(TimeConfig, raw["time"])
+    if "coordination" in raw:
+        config.coordination = _dict_to_dataclass(CoordinationConfig, raw["coordination"])
 
     return config

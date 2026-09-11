@@ -186,7 +186,8 @@ def _instructions(service: Any) -> str:
     return MEMORY_LOOP_BLOCK.rstrip()
 
 
-def session_start_context(service: Any, authorized: bool) -> str:
+def session_start_context(service: Any, authorized: bool, *,
+                          session_id: str | None = None) -> str:
     """Instructions always; briefing only for authorized callers (the
     instructions are public repo content, the briefing is memory content)."""
     parts = [_instructions(service)]
@@ -194,7 +195,10 @@ def session_start_context(service: Any, authorized: bool) -> str:
         if _cold_bank(service):
             parts.append(ONBOARDING_BLOCK)
         try:
-            md = (service.session_briefing() or {}).get("markdown", "") or ""
+            coordination = getattr(getattr(service, "config", None), "coordination", None)
+            kwargs = ({"session_id": session_id}
+                      if session_id and getattr(coordination, "enabled", False) else {})
+            md = (service.session_briefing(**kwargs) or {}).get("markdown", "") or ""
         except Exception:  # noqa: BLE001 — never break a session start
             md = ""
         md = md.strip()
@@ -243,7 +247,7 @@ def hook_session_start(
         ad = _episode_advertisement(session_id, source, service)
         if ad:
             prefix = ad + "\n\n"
-    body = session_start_context(service, authorized)
+    body = session_start_context(service, authorized, session_id=session_id)
     return (prefix + body)[:HOOK_CONTEXT_MAX_CHARS]
 
 

@@ -359,8 +359,8 @@ Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 
 ## Tools exposed
 
-The surface was consolidated 2026-07-02 (55 → 32 tools; now 35 with
-`memory_toolset` and the set-slot pair): lifecycle families became verb-dispatched tools
+The surface was consolidated 2026-07-02 (55 → 32 tools; now 37 with
+`memory_toolset`, the set-slot pair and coordination): lifecycle families became verb-dispatched tools
 (`memory_dream`, `memory_forget`, `memory_graph_review`), and
 dump/introspection views moved to the Cortex Console (REST) — the manifest
 is agent context every session, so it stays lean.
@@ -373,6 +373,8 @@ is agent context every session, so it stays lean.
 | `memory_supersede(old_text?, new_text, entry_id?)` | Correct the selected entry by ID, or one unique exact-text match; ambiguous/missing targets fail closed. Keep the old entry as history; `derived_flagged` names canonical facts built on it (flagged, never rewritten) |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
+| `memory_agents(action, project?, task?, status?)` | Experimental, opt-in peer awareness or update of the caller's registered context; unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack`; requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -408,7 +410,7 @@ metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
-(22), `full` (35) — filtered per principal at
+(24), `full` (37) — filtered per principal at
 `tools/list`; a principal (the named bearer-token identity, or the writer
 id for single-token installs) steps its own tier up or down with
 `memory_toolset` before calling a hidden tool. Defaults, per-client mapping, and weak-model
@@ -700,7 +702,8 @@ per-session identity)? A thin torch-free **shim** proxies stdio to the
 daemon:
 [stdio shim](docs/guide/configuration.md#stdio-shim-per-session-identity)
 · [LAN sharing](docs/guide/configuration.md#sharing-memory-on-the-lan)
-· [backups & restore rehearsal](docs/guide/configuration.md#backups).
+· [backups & restore rehearsal](docs/guide/configuration.md#backups)
+· [agent mailbox recovery](docs/guide/coordination-recovery.md).
 
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
@@ -944,7 +947,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only and auto-selected when installed, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder fall back to torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v39 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v40 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 

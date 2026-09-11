@@ -21,6 +21,8 @@ usage: pseudolife-mcp [mode]
 
 modes:
   (no arg)       stdio shim: find/start the daemon and proxy to it
+  channel        experimental Claude channel transport (requires explicit opt-in)
+  coordination-recovery  offline mailbox recovery after a database restore
   serve          run the HTTP memory daemon (deployment mode)
   embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
   briefing       print the session-start briefing (for a SessionStart hook;
@@ -53,6 +55,12 @@ def main() -> None:
     elif mode == "shim":
         from pseudolife_memory.shim import run_shim
         run_shim()
+    elif mode == "channel":
+        from pseudolife_memory.shim import run_shim
+        run_shim(channel=True)
+    elif mode == "coordination-recovery":
+        from pseudolife_memory.coordination_recovery import main as recover_main
+        sys.exit(recover_main(sys.argv[2:]))
     elif mode == "briefing":
         from pseudolife_memory.briefing_cli import run_briefing
         run_briefing()
