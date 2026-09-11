@@ -192,20 +192,47 @@ def test_id_selects_only_one_duplicate_across_source_episode_and_band(svc, opera
 
 
 @pytest.mark.parametrize("operation", ["supersede", "consolidate"])
-@pytest.mark.parametrize("retired_twin", [False, True])
-def test_legacy_duplicate_text_is_ambiguous_including_retired_twins(
-        svc, operation, retired_twin):
+def test_legacy_duplicate_text_is_ambiguous_between_live_twins(svc, operation):
     old = _seed(svc)
     sibling = _seed(svc, source="other", episode="other-episode", band=1)
-    if retired_twin:
-        sibling.superseded_at = 123.0
-        sibling.superseded_by_text = "Earlier replacement"
     before = _state(svc)
     result = _call(svc, operation, texts=[old.text])
     _assert_refused(svc, before, result, "ambiguous_target")
     candidates = result["target_errors"][0]["candidates"]
     assert {c["id"] for c in candidates} == {old.db_id, sibling.db_id}
     assert {c["episode_id"] for c in candidates} == {"selected-episode", "other-episode"}
+
+
+@pytest.mark.parametrize("operation", ["supersede", "consolidate"])
+def test_file_mode_duplicate_text_is_ambiguous_between_live_twins(file_svc, operation):
+    old = _seed(file_svc)
+    _seed(file_svc, source="other", episode="other-episode", band=1)
+    before = _state(file_svc)
+    result = _call(file_svc, operation, texts=[old.text])
+    _assert_refused(file_svc, before, result, "ambiguous_target")
+
+
+@pytest.mark.parametrize("fixture", ["file_svc", "svc"])
+@pytest.mark.parametrize("operation", ["supersede", "consolidate"])
+def test_reverted_wording_stays_correctable_by_text(request, fixture, operation):
+    """store A, correct A to B, correct B back to A: the retired A twin must
+    not make the live A ambiguous. File mode has no ID fallback to offer."""
+    service = request.getfixturevalue(fixture)
+    original = _seed(service, "Gateway runs on the blue cluster")
+    interim = "Gateway runs on the green cluster"
+    assert service.supersede(
+        old_text=original.text, new_text=interim)["superseded_count"] == 1
+    assert service.supersede(
+        old_text=interim, new_text=original.text)["superseded_count"] == 1
+    live = [e for e in _entries(service)
+            if e.text == original.text and e.superseded_at is None]
+    assert len(live) == 1 and live[0] is not original
+
+    result = _call(service, operation, texts=[original.text])
+    assert result["superseded_count"] == 1
+    assert result["new_memory_stored"] is True
+    assert live[0].superseded_by_text == NEW_TEXT
+    assert original.superseded_by_text == interim
 
 
 @pytest.mark.parametrize("operation", ["supersede", "consolidate"])
@@ -464,13 +491,8 @@ def test_retrieval_hide_override_filters_before_bm25_candidate_cap(file_svc, mon
 
 
 @pytest.mark.parametrize("mode", ["query", "episode"])
-@pytest.mark.parametrize("retired_twin", [False, True])
-def test_file_candidates_omit_text_ambiguous_outside_selected_scope(
-        file_svc, mode, retired_twin):
-    twin = _seed(file_svc, "Duplicate gateway evidence", episode="other-episode")
-    if retired_twin:
-        twin.superseded_at = 123.0
-        twin.superseded_by_text = "Earlier replacement"
+def test_file_candidates_omit_text_ambiguous_outside_selected_scope(file_svc, mode):
+    _seed(file_svc, "Duplicate gateway evidence", episode="other-episode")
     _seed(file_svc, "Duplicate gateway evidence")
     first = _seed(file_svc, "First unique gateway evidence")
     second = _seed(file_svc, "Second unique gateway evidence")
@@ -484,6 +506,40 @@ def test_file_candidates_omit_text_ambiguous_outside_selected_scope(
     corrected = file_svc.consolidate(replaces=[m["text"] for m in members], new_text=NEW_TEXT)
     assert corrected["superseded_count"] == 2
     assert corrected["new_memory_stored"] is True
+
+
+@pytest.mark.parametrize("mode", ["query", "episode"])
+def test_file_candidates_offer_a_note_whose_only_text_twin_is_retired(file_svc, mode):
+    twin = _seed(file_svc, "Duplicate gateway evidence", episode="other-episode")
+    twin.superseded_at = 123.0
+    twin.superseded_by_text = "Earlier replacement"
+    live = _seed(file_svc, "Duplicate gateway evidence")
+    second = _seed(file_svc, "Second unique gateway evidence")
+
+    result = file_svc.consolidation_candidates(
+        query="gateway" if mode == "query" else None,
+        episode="selected-episode", top_k=10,
+    )
+    members = [m for cluster in result["clusters"] for m in cluster["members"]]
+    assert {m["text"] for m in members} == {live.text, second.text}
+    corrected = file_svc.consolidate(
+        replaces=[m["text"] for m in members], new_text=NEW_TEXT)
+    assert corrected["superseded_count"] == 2
+    assert corrected["new_memory_stored"] is True
+
+
+def test_candidates_degrade_when_the_row_check_is_unavailable(svc, monkeypatch):
+    """A transient storage read must not turn a suggestion list into an error."""
+    first = _seed(svc, "First durable gateway evidence")
+    second = _seed(svc, "Second durable gateway evidence")
+
+    def fail_read(ids):
+        raise RuntimeError("synthetic unavailable database")
+
+    monkeypatch.setattr(svc._storage, "existing_entry_ids", fail_read)
+    result = svc.consolidation_candidates(query="gateway", top_k=10)
+    members = [m for cluster in result["clusters"] for m in cluster["members"]]
+    assert {m["id"] for m in members} == {first.db_id, second.db_id}
 
 
 @pytest.mark.parametrize("with_residents", [False, True])

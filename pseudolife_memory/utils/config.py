@@ -688,6 +688,13 @@ class LessonsConfig:
     # Opposite-polarity near-matches are NEVER gated (an "avoid" inversion
     # of a "do" lesson is new information). 0 disables.
     synthesis_dedup_min_similarity: float = 0.88
+    # Most signals one synthesis sweep drains. The batch writes its lessons,
+    # graph edges and acknowledgements in one transaction under the service
+    # lock, so an undrained backlog otherwise sets the length of a single
+    # daemon pause. 200 is a CHOSEN bound, not a measured one: it is roughly
+    # one extractor batch, and whatever it leaves behind is picked up by the
+    # next sweep. 0 disables the cap (drain everything pending).
+    synthesis_max_signals: int = 200
     # Rule mode (2026-09-08, the "Learning on the Job" delta, arXiv
     # 2607.22157): synthesise ONE situation-specific rule per signal — keyed
     # (situation, "rule"), decision-critical values copied verbatim, no

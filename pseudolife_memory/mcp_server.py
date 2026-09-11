@@ -733,9 +733,9 @@ def memory_recent(
 def memory_supersede(
     old_text: Annotated[str | None, Field(
         description="Unique exact stored text; omit with entry_id.")] = None,
-    new_text: Annotated[str, Field(
-        description="The replacement claim; stored fresh.")] = "",
     *,
+    new_text: Annotated[str, Field(
+        description="The replacement claim; stored fresh.")],
     entry_id: Annotated[StrictInt | None, Field(
         description="Positive search/recent ID in this bank; preferred selector.")] = None,
 ) -> dict[str, Any]:
@@ -1749,6 +1749,10 @@ def memory_consolidation_candidates(
     ``query`` or an ``episode``; read the clusters, synthesise one
     canonical note, then commit it via ``memory_consolidate``.
 
+    Each member carries its ``id``; commit with
+    ``memory_consolidate(entry_ids=[...])`` rather than the members' texts —
+    IDs survive rewording and duplicate phrasing, exact text does not.
+
     Returns: ``{count, clusters: [{cohesion, size, members}]}``.
     """
     return service.consolidation_candidates(
@@ -1767,13 +1771,13 @@ def memory_consolidation_candidates(
 def memory_consolidate(
     replaces: Annotated[list[str] | None, Field(
         description="Unique exact stored texts; omit with entry_ids.")] = None,
+    *,
     new_text: Annotated[str, Field(
-        description="The canonical note that replaces them.")] = "",
+        description="The canonical note that replaces them.")],
     source: Annotated[str | None, Field(
         description="Source tag for the new note.")] = None,
     tags: Annotated[list[str] | None, Field(
         description="Labels for the new note.")] = None,
-    *,
     entry_ids: Annotated[list[StrictInt] | None, Field(
         description="Positive IDs in this bank; prefer over replaces.")] = None,
 ) -> dict[str, Any]:
