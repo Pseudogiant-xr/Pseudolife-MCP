@@ -68,6 +68,22 @@ expired bodies and old metadata during coordination activity. Pending capacity
 errors never silently discard mail. The mailbox clock high-water mark survives
 message pruning, so restart with a backward wall clock cannot regress its stamps.
 
+### Malformed coordination clock row
+
+Every memory call fails with `invalid coordination clock high-water mark`, reads
+included, while `/health` still reports the daemon up. The cause is a hand-edited
+or foreign `meta` row: the `coordination_hlc_highwater` value must be a
+two-element list of non-negative integers. Stop nothing; delete the row against
+the bank:
+
+```console
+psql <bank-dsn> -c "DELETE FROM meta WHERE key = 'coordination_hlc_highwater';"
+```
+
+The next memory call re-seeds the clock from the highest stamp in the cortex,
+world and lesson records, so no restart is needed. The next coordination send
+re-creates the row.
+
 Portable knowledge exports exclude agent mailboxes, credentials and operational
 metadata. Full database backups retain them. See
 [configuration](configuration.md#experimental-agent-coordination) for the

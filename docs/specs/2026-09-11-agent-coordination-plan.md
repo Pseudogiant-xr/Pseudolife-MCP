@@ -255,8 +255,10 @@ artifacts; `docs/guide/providers.md`, `episodes.md`, `configuration.md`,
 `security-posture.md`, README and plugin/installer docs when actually applicable.
 
 - [x] Build a reusable probe that always writes a redacted JSONL trace and summary.
-  Include protocol, SDK/host versions, capability registration, message IDs,
-  enqueue/attempt/ack times and failures. Do not log secrets or real project data.
+  Include the negotiated protocol, the Python and MCP SDK versions, the host name
+  and version it declares in the handshake when it declares them, capability
+  registration, message IDs, enqueue/attempt/ack times and failures. Do not log
+  secrets or real project data.
 - [x] Execute every design acceptance case against disposable Postgres. Compare
   identical disabled/pull/channel workloads; record p95 overhead, context bytes,
   calls, wakes and duplicates. Include a same-input control for model comparisons.

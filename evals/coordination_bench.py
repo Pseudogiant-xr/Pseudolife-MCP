@@ -10,10 +10,12 @@ import argparse
 import asyncio
 from collections import Counter
 from contextlib import AsyncExitStack, aclosing, contextmanager
+import importlib.metadata
 import json
 import math
 import os
 from pathlib import Path
+import platform
 import threading
 import time
 import uuid
@@ -26,6 +28,13 @@ from psycopg import sql
 ARMS = ("disabled", "pull", "channel")
 TRACE_FIELDS = frozenset({"arm", "kind", "action", "status", "elapsed_ms", "bytes", "sample"})
 BENCH_ADMIN = "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres"
+
+
+def _sdk_version():
+    try:
+        return importlib.metadata.version("mcp")
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def percentile(values, percent):
@@ -56,6 +65,10 @@ def summarize(arms):
     control = percentile(arms["disabled"]["ordinary_ms"], 95)
     result = {"schema": 1, "instrument": "local_asgi_actual_adapter_synthetic_stats",
               "ack_actor": "test_harness", "host_wake_ms": None, "model_ack_ms": None,
+              "python_version": platform.python_version(), "mcp_sdk_version": _sdk_version(),
+              # No MCP host runs in this instrument, so there is no host version
+              # to report; the probe records one when a host actually connects.
+              "host_version": None,
               "limitations": ["No model, host channel transport, network socket, embedding or GPU timing.",
                               "Fixed arm order; short synthetic workload is not a throughput claim.",
                               "Enqueue-to-event starts after the durable send response returns.",

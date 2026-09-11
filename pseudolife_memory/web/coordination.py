@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import contextvars
+import functools
 import math
 
 from pseudolife_memory.coordination import dispatch
@@ -11,6 +14,11 @@ class CoordinationHub:
     # Conservative initial connection budget; no throughput claim is implied.
     MAX_WAITERS = 64
     MAX_WAIT_SECONDS = 30
+    # Coordination calls block on the service lock, which a dream run can
+    # hold for tens of seconds. They run on this small pool of their own so
+    # they cannot occupy the loop's default executor, which every console
+    # route shares; the 16-permit semaphore still bounds admission.
+    EXECUTOR_WORKERS = 4
 
     def __init__(self, service):
         self.service = service
@@ -18,6 +26,8 @@ class CoordinationHub:
         self.waiters: dict[str, set[asyncio.Event]] = {}
         self.attachments: set[tuple] = set()
         self.workers = asyncio.Semaphore(16)
+        self.executor = ThreadPoolExecutor(max_workers=self.EXECUTOR_WORKERS,
+                                           thread_name_prefix="coordination")
         self.pending_calls = 0
         self.jobs: set[asyncio.Task] = set()
         service._coordination_notifier = self.notify
@@ -44,9 +54,12 @@ class CoordinationHub:
 
             async def run():
                 async with self.workers:
-                    return await asyncio.to_thread(
-                        dispatch, self.service, action, parameters,
-                        headers=headers, principal=principal)
+                    # Same contract as asyncio.to_thread (context propagated),
+                    # on the hub's own pool instead of the loop default.
+                    call = functools.partial(dispatch, self.service, action, parameters,
+                                             headers=headers, principal=principal)
+                    return await asyncio.get_running_loop().run_in_executor(
+                        self.executor, contextvars.copy_context().run, call)
 
             def finished(job):
                 self.jobs.discard(job)

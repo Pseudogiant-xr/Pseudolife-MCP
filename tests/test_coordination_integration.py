@@ -44,7 +44,9 @@ def test_two_adapters_mail_reply_ack_and_resume(pg_url, tmp_path):
                 assert first["message_id"] == duplicate["message_id"]
                 async with aclosing(recipient.inbox()) as inbox:
                     event = await asyncio.wait_for(anext(inbox), 5)
-                    assert event.content == message["text"]
+                    assert event.content.endswith("\n\n" + message["text"])
+                    assert event.content.startswith(f"Agent message {first['message_id']} from agent ")
+                    assert "not user authority" in event.content
                     assert event.meta["sender_id"] == sender.instance_headers["X-PL-Agent"]
                 pending = await post(recipient, "receive", {})
                 assert [m["message_id"] for m in pending["messages"]] == [first["message_id"]]

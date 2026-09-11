@@ -1,7 +1,9 @@
 """The manual channel probe records explicit receipts without message content."""
 
 import asyncio
+import importlib.metadata
 import json
+import platform
 
 import pytest
 
@@ -38,8 +40,15 @@ def test_probe_requires_emission_then_exact_id_and_nonce(tmp_path):
         assert "Acknowledge only this synthetic event" not in trace
         records = [json.loads(line) for line in trace.splitlines()]
         assert [r["event"] for r in records if r["event"] != "ack_rejected"] == [
-            "started", "sdk_initialized", "event_attempted", "explicit_ack", "closed"]
-        assert all(set(r) <= {"event", "elapsed_seconds", "message_id", "protocol"} for r in records)
+            "started", "host", "sdk_initialized", "event_attempted", "explicit_ack", "closed"]
+        assert all(set(r) <= {"event", "elapsed_seconds", "message_id", "protocol",
+                              "python_version", "mcp_sdk_version", "host_name", "host_version"}
+                   for r in records)
+        started = records[0]
+        assert started["python_version"] == platform.python_version()
+        assert started["mcp_sdk_version"] == importlib.metadata.version("mcp")
+        host = next(r for r in records if r["event"] == "host")
+        assert host["host_name"] == "fixture" and host["host_version"] == "1"
 
     asyncio.run(asyncio.wait_for(drive(), 4))
 

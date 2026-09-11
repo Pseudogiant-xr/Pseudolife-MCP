@@ -34,9 +34,22 @@ MAX_PAGE = 50
 MAX_PENDING = 256
 MESSAGE_TTL = 86400
 DEDUPE_RETENTION = 7 * 86400
+# An address that has been idle this long, holds no lease and is referenced
+# by no retained message is removed by the same prune pass. A shim without a
+# state path registers a new address per launch, so without this the peer
+# list fills with addresses nobody will ever read again.
+AGENT_RETENTION = DEDUPE_RETENTION
+# Live delivery attempts per message across attachments. Each attachment
+# may attempt a pending message once; past this total the message is left
+# for explicit receive so one unacknowledged message cannot wake the host on
+# every restart.
+MAX_ATTEMPTS = 3
 ATTACHMENT_LEASE = 60
 SEND_RATE = 60
 HLC_META_KEY = "coordination_hlc_highwater"
+# Every message a recipient reads is agent-origin collaboration, never the
+# operator's authority; the label rides on the row so no consumer infers it.
+MESSAGE_ORIGIN = "agent"
 
 
 
@@ -162,8 +175,11 @@ class CoordinationStore:
                 _string(value, MAX_SCOPE, key)
                 clauses.append(f"{key}=%s")
                 values.append(value)
+        # Reachable adapters first: a burst of idle addresses must not push
+        # the peers that can actually receive live mail off a bounded page.
         rows = self._all("SELECT * FROM coordination_agents WHERE " + " AND ".join(clauses)
-                         + " ORDER BY last_activity DESC,agent_id LIMIT %s", (*values, limit))
+                         + " ORDER BY (attachment_id IS NOT NULL AND coalesce(lease_until,0)>%s) DESC,"
+                         "last_activity DESC,agent_id LIMIT %s", (*values, self.clock(), limit))
         return {"agents": [self._public(row) for row in rows]}
 
     def _pending_count(self, agent_id):
@@ -311,7 +327,11 @@ class CoordinationStore:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_PAGE:
             raise CoordinationError("invalid_limit")
 
-    def receive(self, principal, agent_id, credential, *, after=None, limit=50):
+    def receive(self, principal, agent_id, credential, *, after=None, limit=50,
+                for_delivery=False):
+        """Page pending mail. ``for_delivery`` is the adapter's live path: it
+        skips messages whose attempts are exhausted, which an explicit receive
+        still returns."""
         row = self._auth(principal, agent_id, credential)
         self._limit(limit)
         seq = 0
@@ -323,17 +343,23 @@ class CoordinationStore:
                     raise ValueError
             except (AttributeError, ValueError):
                 raise CoordinationError("invalid_cursor") from None
+        attempt_clause = " AND attempts<%s" if for_delivery else ""
+        params = [agent_id, seq, self.clock()] + ([MAX_ATTEMPTS] if for_delivery else []) + [limit]
         rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
-                         "AND recipient_sequence>%s AND acknowledged_at IS NULL AND expires_at>%s "
-                         "ORDER BY recipient_sequence LIMIT %s", (agent_id, seq, self.clock(), limit))
+                         "AND recipient_sequence>%s AND acknowledged_at IS NULL AND expires_at>%s"
+                         + attempt_clause + " ORDER BY recipient_sequence LIMIT %s", params)
         keys = ("message_id", "sender_agent_id", "sender_principal", "recipient_agent_id",
                 "project", "task", "text", "reply_to", "recipient_sequence", "hlc", "created_at", "expires_at")
-        return {"messages": [{k: r[k] for k in keys} for r in rows],
+        return {"messages": [{**{k: r[k] for k in keys}, "origin": MESSAGE_ORIGIN} for r in rows],
                 "after": f"{agent_id}:{rows[-1]['recipient_sequence'] if rows else seq}"}
 
     def ack(self, principal, agent_id, credential, *, message_id):
         with self.storage._txn():
             self._auth(principal, agent_id, credential, lock=True)
+            # An acknowledgment is activity for retention: a client that only
+            # reads and acknowledges, holding no lease, must not count as idle.
+            self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
+                                      "WHERE agent_id=%s", (self.clock(), agent_id))
             row = self._one("SELECT * FROM coordination_messages WHERE message_id=%s "
                             "AND recipient_agent_id=%s FOR UPDATE", (message_id, agent_id))
             if row is None:
@@ -355,19 +381,30 @@ class CoordinationStore:
             if row is None:
                 raise CoordinationError("message_not_pending")
             if row["attempt_generation"] != generation:
+                if row["attempts"] >= MAX_ATTEMPTS:
+                    raise CoordinationError("attempts_exhausted")
                 row = self._one("UPDATE coordination_messages SET attempt_at=%s,attempt_generation=%s,"
                                 "attempts=attempts+1 WHERE message_id=%s RETURNING *",
                                 (self.clock(), generation, message_id))
         return self._receipt(row)
 
     def prune(self):
-        """Expire bodies and discard terminal retry metadata after seven days."""
+        """Expire bodies, discard terminal retry metadata after seven days, and
+        remove addresses that are idle, unleased and referenced by no retained
+        message (the message rows go first, so a referenced address outlives
+        its mail by the retention window)."""
+        now = self.clock()
         with self.storage._txn():
             bodies = self.storage.conn.execute("UPDATE coordination_messages SET text=NULL "
-                "WHERE expires_at<=%s AND text IS NOT NULL", (self.clock(),)).rowcount
+                "WHERE expires_at<=%s AND text IS NOT NULL", (now,)).rowcount
             removed = self.storage.conn.execute("DELETE FROM coordination_messages WHERE created_at<=%s "
-                "AND expires_at<=%s", (self.clock() - DEDUPE_RETENTION, self.clock())).rowcount
-        return {"bodies_expired": bodies, "removed": removed}
+                "AND expires_at<=%s", (now - DEDUPE_RETENTION, now)).rowcount
+            agents = self.storage.conn.execute(
+                "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR a.lease_until<=%s) "
+                "AND a.last_activity<=%s AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
+                "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id)",
+                (now, now - AGENT_RETENTION)).rowcount
+        return {"bodies_expired": bodies, "removed": removed, "agents_removed": agents}
 
     def recover(self):
         """Operator-only restore reset; never call on an ordinary restart."""

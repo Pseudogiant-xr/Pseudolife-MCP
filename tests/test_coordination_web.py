@@ -39,6 +39,27 @@ def test_hook_passes_its_own_session_for_awareness():
     assert "'session_id': 'own-session'" in text
 
 
+def test_hook_route_binds_request_headers_for_the_awareness_gate():
+    """The session-start hook route binds its request headers like
+    /api/agents does, so the briefing's awareness section can resolve the
+    caller's principal instead of denying every hook-driven briefing."""
+    from pseudolife_memory.writer_context import _http_request_headers
+    service = FixtureService()
+    service.config = SimpleNamespace(coordination=SimpleNamespace(enabled=True))
+    service.episode_start_session = lambda *a: {"id": "fixture-episode"}
+    service.set_active_session = lambda *a: None
+    service.session_briefing = lambda **kw: {
+        "markdown": "auth=" + str((_http_request_headers() or {}).get("authorization"))}
+    app = build_console_app(stub_mcp, None, lambda: {"secret-a": "alpha", "secret-b": "beta"}, service)
+    status, body = call(app, "GET", "/api/hook/session-start", query="session_id=own-session",
+                        headers=[(b"authorization", b"Bearer secret-a")])
+    assert status == 200 and b"auth=Bearer secret-a" in body
+    # Bound per request: a second caller sees its own bearer, never the first.
+    status, body = call(app, "GET", "/api/hook/session-start", query="session_id=other-session",
+                        headers=[(b"authorization", b"Bearer secret-b")])
+    assert status == 200 and b"auth=Bearer secret-b" in body
+
+
 def test_mailbox_rest_receives_validated_principal(monkeypatch):
     import json
     from pseudolife_memory.web.coordination import CoordinationHub

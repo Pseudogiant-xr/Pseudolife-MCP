@@ -6,14 +6,26 @@ import pytest
 from pseudolife_memory.memory.episodes import Episode, EpisodeManager
 from pseudolife_memory.service import MemoryService
 from pseudolife_memory.utils.config import load_config
-from pseudolife_memory.writer_context import reset_writer_context, set_writer_context
+from pseudolife_memory.writer_context import (
+    bind_request_headers, reset_writer_context, set_writer_context,
+    unbind_request_headers)
 
 
 @pytest.fixture
-def awareness_service(tmp_path):
+def awareness_service(tmp_path, monkeypatch):
+    """A service whose live request carries the configured bearer, so the
+    caller resolves to the ``default`` principal, which the fixture allows.
+    Awareness shares the mailbox gate: without this binding no peers show."""
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
     svc = MemoryService(data_dir=tmp_path)
     svc._cms = SimpleNamespace(episodes=EpisodeManager(), bands=[])
-    return svc
+    svc.config.coordination.allowed_principals = ["default"]
+    binding = bind_request_headers({"authorization": "Bearer fixture-secret"})
+    try:
+        yield svc
+    finally:
+        unbind_request_headers(binding)
 
 
 def _root(svc, id, *, session=None, title="Peer task", started=10.0,
@@ -58,10 +70,50 @@ def test_invalid_coordination_config_is_rejected(tmp_path, setting):
 def test_enabled_cold_bank_does_not_load_embedder(tmp_path, monkeypatch):
     svc = MemoryService(data_dir=tmp_path)
     svc.config.coordination.enabled = True
+    svc.config.coordination.allowed_principals = ["editor"]
     monkeypatch.setattr(svc, "_ensure_init", lambda: pytest.fail("initialized"))
-    out = svc.coordination_awareness()
+    out = svc.coordination_awareness(principal="editor")
     assert out["available"] is False
     assert out["reason"] == "not_initialized"
+
+
+def test_awareness_shares_the_allowed_principal_gate(awareness_service, monkeypatch):
+    """A bearer whose principal is not listed may not read who else is
+    working, the same rule that keeps it out of the mailbox: no peers, an
+    explicit reason, and no bank initialization on the way."""
+    svc = awareness_service
+    svc.config.coordination.enabled = True
+    _root(svc, "peer", session="session-b")
+    monkeypatch.setattr(svc, "_ensure_init", lambda: pytest.fail("initialized"))
+    assert [p["episode_id"] for p in svc.coordination_awareness()["peers"]] == ["peer"]
+    svc.config.coordination.allowed_principals = ["editor"]
+    denied = svc.coordination_awareness()
+    assert denied["peers"] == [] and denied["available"] is False
+    assert denied["reason"] == "principal_not_allowed"
+    assert svc.coordination_awareness(principal="editor")["available"] is True
+    # An unauthenticated request never resolves to a principal at all.
+    unbind_request_headers(bind_request_headers({}))
+    binding = bind_request_headers({})
+    try:
+        assert svc.coordination_awareness()["reason"] == "principal_not_allowed"
+    finally:
+        unbind_request_headers(binding)
+
+
+def test_briefing_omits_peers_for_a_principal_outside_the_gate(awareness_service, monkeypatch):
+    svc = awareness_service
+    _root(svc, "caller", session="session-a")
+    _root(svc, "peer", session="session-b", title="Peer task")
+    monkeypatch.setattr(svc, "graph_digest", lambda: {"available": False})
+    monkeypatch.setattr(svc, "lessons_dump", lambda **kw: {"entries": []})
+    monkeypatch.setattr(svc, "world_dump", lambda: {"entries": []})
+    monkeypatch.setattr(svc, "episode_list", lambda **kw: {"episodes": []})
+    svc.config.coordination.enabled = True
+    svc.config.coordination.allowed_principals = ["editor"]
+    briefing = svc.session_briefing(session_id="session-a")
+    assert briefing["coordination"]["reason"] == "principal_not_allowed"
+    assert "## Other open sessions" not in briefing["markdown"]
+    assert "Peer task" not in briefing["markdown"]
 
 
 def test_peers_exclude_actual_caller_and_closed_or_non_session_roots(awareness_service):

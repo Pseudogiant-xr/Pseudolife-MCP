@@ -283,3 +283,97 @@ def test_attachment_metadata_counts_only_unacknowledged_unexpired_mail(store):
     assert store.heartbeat(*creds(b), **heartbeat)["pending_count"] == 1
     store.test_time[0] += 86401
     assert store.attach(*creds(b), attachment_id="two")["pending_count"] == 0
+
+
+def test_prune_removes_idle_unattached_agents_and_keeps_active_or_referenced_ones(store):
+    """A shim without a state path registers a new address per launch, so
+    idle addresses accumulate and crowd the peer list. Pruning removes an
+    address once it has been inactive for the retention window, holds no
+    lease, and is referenced by no retained message; an active lease, recent
+    activity or retained mail keeps it."""
+    from pseudolife_memory.storage.coordination import AGENT_RETENTION, DEDUPE_RETENTION
+    assert AGENT_RETENTION == DEDUPE_RETENTION
+    ghost = store.register("alice")
+    active = store.register("alice")
+    attached = store.register("alice")
+    sender, referenced = store.register("alice"), store.register("alice")
+    store.test_time[0] += AGENT_RETENTION - 3600
+    store.send(*creds(sender), to=referenced["agent_id"], text="keep", request_id="r")
+    store.test_time[0] += 3601
+    store.update(*creds(active), status="still here")
+    store.attach(*creds(attached), attachment_id="live")
+    store.prune()
+    remaining = {row[0] for row in store.storage.conn.execute(
+        "SELECT agent_id FROM coordination_agents").fetchall()}
+    assert ghost["agent_id"] not in remaining
+    assert remaining == {active["agent_id"], attached["agent_id"],
+                         sender["agent_id"], referenced["agent_id"]}
+    with pytest.raises(CoordinationError, match="unauthorized"):
+        store.authenticate(*creds(ghost))
+
+
+def test_peer_list_ranks_attached_adapters_before_idle_addresses(store):
+    """Peers with a live adapter lease come first regardless of last
+    activity, so a burst of idle addresses cannot push the reachable ones
+    off a bounded page."""
+    caller = store.register("alice")
+    idle = store.register("alice")
+    live = store.register("alice")
+    store.attach(*creds(live), attachment_id="one")
+    store.test_time[0] += 1
+    store.update(*creds(idle), status="most recent activity")
+    listed = [row["agent_id"] for row in store.list_agents(*creds(caller))["agents"]]
+    assert listed == [live["agent_id"], idle["agent_id"]]
+
+
+def test_attempts_are_bounded_across_generations_for_live_delivery_only(store):
+    """Each new attachment may attempt an unacknowledged message once, but
+    only up to ``MAX_ATTEMPTS`` in total: past that, live delivery skips the
+    message so it cannot wake the host on every restart, while an explicit
+    ``receive`` still returns it for the recipient to read and acknowledge."""
+    from pseudolife_memory.storage.coordination import MAX_ATTEMPTS
+    a = store.register("alice")
+    b = store.register("alice", wake_enabled=True)
+    msg = store.send(*creds(a), to=b["agent_id"], text="x", request_id="r")
+    for _ in range(MAX_ATTEMPTS):
+        attachment = store.attach(*creds(b), attachment_id="att", wake_enabled=True)
+        args = dict(message_id=msg["message_id"], attachment_id="att",
+                    generation=attachment["generation"])
+        assert store.mark_attempt(*creds(b), **args)["state"] == "attempted"
+        store.detach(*creds(b), **{k: args[k] for k in ("attachment_id", "generation")})
+    attachment = store.attach(*creds(b), attachment_id="att", wake_enabled=True)
+    args = dict(message_id=msg["message_id"], attachment_id="att",
+                generation=attachment["generation"])
+    with pytest.raises(CoordinationError, match="attempts_exhausted"):
+        store.mark_attempt(*creds(b), **args)
+    assert store.receive(*creds(b), for_delivery=True)["messages"] == []
+    delivered = store.receive(*creds(b))["messages"]
+    assert [m["message_id"] for m in delivered] == [msg["message_id"]]
+    assert store.ack(*creds(b), message_id=msg["message_id"])["state"] == "acknowledged"
+
+
+def test_acknowledging_counts_as_activity_for_retention(store):
+    """A client that only reads and acknowledges, holding no lease, is not
+    idle: its acknowledgment refreshes last_activity, so it survives the
+    retention sweep that removes a sender who did nothing since."""
+    from pseudolife_memory.storage.coordination import AGENT_RETENTION
+    sender, reader = pair(store)
+    msg = store.send(*creds(sender), to=reader["agent_id"], text="x", request_id="r")
+    store.test_time[0] += AGENT_RETENTION - 3600
+    store.ack(*creds(reader), message_id=msg["message_id"])
+    store.test_time[0] += 2 * 3600 + 1
+    store.prune()
+    remaining = {row[0] for row in store.storage.conn.execute(
+        "SELECT agent_id FROM coordination_agents").fetchall()}
+    assert remaining == {reader["agent_id"]}
+
+
+def test_received_messages_are_labelled_agent_origin(store):
+    """Every message a recipient reads carries its origin label beside the
+    daemon-verified sender fields, so a consumer never has to infer it from
+    the text."""
+    a, b = pair(store)
+    store.send(*creds(a), to=b["agent_id"], text="please review", request_id="r")
+    message = store.receive(*creds(b))["messages"][0]
+    assert message["origin"] == "agent"
+    assert message["sender_principal"] == "alice"

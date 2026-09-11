@@ -44,6 +44,31 @@ def test_cancelled_wait_releases_subscription(monkeypatch):
     asyncio.run(asyncio.wait_for(drive(), 2))
 
 
+def test_dispatch_runs_on_the_hub_executor_not_the_loop_default(monkeypatch):
+    """Coordination calls block on the service lock, which a dream run can
+    hold for tens of seconds. They run on the hub's own small pool so they
+    cannot occupy the loop's default executor, which every console route
+    shares."""
+    import threading
+    from pseudolife_memory.web import coordination
+    seen = []
+
+    async def drive():
+        hub = coordination.CoordinationHub(SimpleNamespace())
+
+        def dispatch(*args, **kwargs):
+            seen.append(threading.current_thread().name)
+            return {"messages": [], "after": None}
+
+        monkeypatch.setattr(coordination, "dispatch", dispatch)
+        await hub.handle("receive", {}, {"x-pl-agent": "recipient"}, "default")
+        assert seen and seen[0].startswith("coordination")
+        assert hub.executor._max_workers == hub.EXECUTOR_WORKERS
+        assert hub.EXECUTOR_WORKERS < hub.workers._value
+
+    asyncio.run(asyncio.wait_for(drive(), 2))
+
+
 def test_long_wait_requires_attachment_generation():
     import pytest
     from pseudolife_memory.web.coordination import CoordinationHub

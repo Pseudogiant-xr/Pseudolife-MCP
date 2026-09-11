@@ -11,9 +11,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hmac
+import importlib.metadata
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import sys
 import time
@@ -32,6 +34,35 @@ from pseudolife_memory.coordination_adapter import AdapterError, _open_state
 
 class ProbeError(RuntimeError):
     """Safe probe diagnostic, without supplied values or paths."""
+
+
+# Host identity is recorded only in this short printable shape, so the trace
+# still cannot carry arbitrary supplied text.
+_HOST_FIELD = re.compile(r"[A-Za-z0-9 ._+@/-]{1,64}")
+
+
+def _sdk_version():
+    try:
+        return importlib.metadata.version("mcp")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _host_identity(params):
+    """The host's own declared name and version from the handshake request.
+
+    Read from the initialize params the host sent; the probe never inspects
+    the environment to infer a host. A field of any other shape is recorded
+    as undeclared rather than written through.
+    """
+    info = (params or {}).get("clientInfo")
+    info = info if isinstance(info, dict) else {}
+    identity = {}
+    for field, key in (("host_name", "name"), ("host_version", "version")):
+        value = info.get(key)
+        if isinstance(value, str) and _HOST_FIELD.fullmatch(value):
+            identity[field] = value
+    return identity
 
 
 class Probe:
@@ -53,6 +84,7 @@ class Probe:
         self._started = time.monotonic()
         self._attempted = False
         self._protocol = None
+        self._host = None
         self.server = Server(
             "pseudolife-coordination-probe",
             instructions=("This server emits one synthetic coordination probe. "
@@ -62,11 +94,13 @@ class Probe:
             on_list_tools=self._list_tools,
             on_call_tool=self._call_tool,
         )
-        self.record("started")
+        self.server.middleware.append(self._observe_handshake)
+        self.record("started", python_version=platform.python_version(),
+                    mcp_sdk_version=_sdk_version())
 
-    def record(self, event):
+    def record(self, event, **fields):
         record = {"event": event, "elapsed_seconds": round(time.monotonic() - self._started, 3),
-                  "message_id": self.message_id}
+                  "message_id": self.message_id, **fields}
         if self._protocol:
             record["protocol"] = self._protocol
         self._trace.write(json.dumps(record) + "\n")
@@ -81,6 +115,14 @@ class Probe:
             self.record("closed")
         finally:
             self._trace.close()
+
+    async def _observe_handshake(self, ctx, call_next):
+        """Record the host's declared identity once its handshake succeeds."""
+        result = await call_next(ctx)
+        if ctx.method == "initialize" and self._host is None:
+            self._host = _host_identity(ctx.params)
+            self.record("host", **self._host)
+        return result
 
     async def _list_tools(self, ctx, params):
         self._protocol = ctx.protocol_version

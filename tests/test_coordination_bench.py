@@ -1,5 +1,7 @@
 """The local coordination instrument reports bounded, explicitly synthetic evidence."""
+import importlib.metadata
 import json
+import platform
 
 import pytest
 
@@ -21,6 +23,10 @@ def test_summary_keeps_control_comparison_and_host_uncertainty(tmp_path):
     assert summary["arms"]["channel"]["ordinary_p95_delta_ms"] == 2
     assert summary["host_wake_ms"] is None and summary["model_ack_ms"] is None
     assert summary["ack_actor"] == "test_harness"
+    assert summary["python_version"] == platform.python_version()
+    assert summary["mcp_sdk_version"] == importlib.metadata.version("mcp")
+    # No MCP host takes part in the local instrument, so it can report none.
+    assert summary["host_version"] is None
     path = tmp_path / "summary.json"
     write_summary(path, summary)
     assert json.loads(path.read_text()) == summary

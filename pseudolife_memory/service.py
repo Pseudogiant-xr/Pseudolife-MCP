@@ -6581,16 +6581,34 @@ class MemoryService(DreamOps):
             return {"available": False, "reason": "no_digest"}
         return {"available": True, "digest": digest}
 
+    def _request_principal(self) -> str | None:
+        """The bearer principal of the live request, or ``None`` when the
+        request is unauthenticated or no bearer auth is configured. Resolved
+        exactly as mailbox operations resolve it, so awareness and mail share
+        one gate."""
+        from pseudolife_memory.coordination import authenticated_principal
+        from pseudolife_memory.writer_context import _http_request_headers
+        headers = _http_request_headers() or {}
+        try:
+            return authenticated_principal({k.lower(): v for k, v in headers.items()})
+        except ValueError:
+            return None
+
     def coordination_awareness(
         self, *, session_id: str | None = None, limit: int | None = None,
+        principal: str | None = None,
     ) -> dict[str, Any]:
         """Bounded open-session evidence, without initialization or mutation.
 
-        ``session_id`` is supplied only by the trusted hook/adapter integration,
-        never exposed as a model argument. Otherwise use the request's explicit
-        session binding. The shared last-started pointer cannot identify a caller
-        during concurrent work. Neither this exclusion nor an episode ID grants
-        ownership or permission to operate another agent's mailbox.
+        ``session_id`` and ``principal`` are supplied only by trusted
+        integrations (the hook, the adapter, tests), never exposed as model
+        arguments; otherwise both come from the request's own binding. The
+        caller's principal must be in ``allowed_principals``, the same gate
+        mailbox operations enforce: a bearer that may not exchange mail may
+        not read who else is working either. The shared last-started pointer
+        cannot identify a caller during concurrent work. Neither this
+        exclusion nor an episode ID grants ownership or permission to operate
+        another agent's mailbox.
         """
         cfg = self.config.coordination
         result: dict[str, Any] = {
@@ -6601,6 +6619,10 @@ class MemoryService(DreamOps):
             return result
         if limit is not None and (type(limit) is not int or limit < 1):
             raise ValueError("awareness limit must be a positive integer")
+        if principal is None:
+            principal = self._request_principal()
+        if principal not in cfg.allowed_principals:
+            return {**result, "reason": "principal_not_allowed"}
         cap = min(cfg.awareness_limit, limit if limit is not None else cfg.awareness_limit, 20)
         # The header/context is an attribution signal, not bearer authentication.
         # Do not fall back to _resolve_writer's shared active-session pointer.

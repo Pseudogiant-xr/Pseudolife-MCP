@@ -293,9 +293,21 @@ def build_console_app(
             params = _parse_query(scope)
             session_id = params.get("session_id") if authorized else None
             source = params.get("source") if authorized else None
-            text = await asyncio.get_running_loop().run_in_executor(
-                None, hook_session_start, service, session_id, source,
-                authorized)
+
+            def start_hook():
+                # Bind the request headers so the briefing's awareness
+                # section can resolve the caller's principal the same way
+                # /api/agents and /api/briefing do.
+                from pseudolife_memory.writer_context import (
+                    bind_request_headers, unbind_request_headers)
+                headers = {k.decode().lower(): v.decode("latin-1")
+                           for k, v in scope.get("headers", [])}
+                binding = bind_request_headers(headers)
+                try:
+                    return hook_session_start(service, session_id, source, authorized)
+                finally:
+                    unbind_request_headers(binding)
+            text = await asyncio.get_running_loop().run_in_executor(None, start_hook)
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")
             return
