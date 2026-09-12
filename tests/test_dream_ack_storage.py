@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import zipfile
+from contextlib import contextmanager
 
 import numpy as np
 import psycopg
@@ -640,6 +641,140 @@ def test_resumed_file_import_never_reclassifies_interleaved_daemon_write(
                     if row["id"] != daemon_id]
         assert len(imported) == 2
         assert {row["dream_state"] for row in imported} == {"legacy-covered"}
+    finally:
+        storage.close()
+
+
+@pytest.mark.parametrize("interrupt_again", [False, True])
+def test_repaired_preflight_preserves_colliding_daemon_entries(
+        pg_conn, pg_url, tmp_path, interrupt_again):
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+    from tests.test_migration import _FakeEmbedder
+
+    _legacy_bank_with_cursor(tmp_path, 10.0)
+    cms_path = tmp_path / "memory_state" / "cms_state.pt"
+    state = torch.load(cms_path, map_location="cpu", weights_only=True)
+    state.update(schema_version=7, dream_ack_secret="a" * 64,
+                 dream_display_cursor="invalid")
+    source_rows = [e for b in state["bands"].values() for e in b["entries"]]
+    torch.save(state, cms_path)
+    storage = PostgresStorage(pg_url)
+    daemon_ids = []
+    try:
+        with pytest.raises(ValueError, match="invalid_legacy_dream_cursor:"):
+            migrate_legacy(tmp_path, storage, _FakeEmbedder())
+        first = source_rows[0]
+        daemon_ids.append(storage.insert_entry(_entry(
+            first["text"], ts=first["timestamp"], source="daemon",
+            tags=["live"], dream_state="pending")))
+        state["dream_display_cursor"] = 10.0
+        torch.save(state, cms_path)
+        if interrupt_again:
+            real_insert = storage.insert_entry
+            calls = 0
+
+            def die_on_second(row):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise RuntimeError("interrupted again")
+                return real_insert(row)
+
+            storage.insert_entry = die_on_second
+            with pytest.raises(RuntimeError, match="interrupted again"):
+                migrate_legacy(tmp_path, storage, _FakeEmbedder())
+            storage.close()
+            storage = PostgresStorage(pg_url)
+            second = source_rows[1]
+            daemon_ids.append(storage.insert_entry(_entry(
+                second["text"], ts=second["timestamp"], source="daemon",
+                tags=["live"], dream_state="pending")))
+
+        result = migrate_legacy(tmp_path, storage, _FakeEmbedder())
+        assert result["migrated"] is True
+        rows = storage.load_entries()
+        assert len(rows) == len(source_rows) + len(daemon_ids)
+        live = [r for r in rows if r["id"] in daemon_ids]
+        assert all(r["source"] == "daemon" and r["tags"] == ["live"]
+                   and r["dream_state"] == "pending" for r in live)
+        imported = [r for r in rows if r["id"] not in daemon_ids]
+        assert len(imported) == len(source_rows)
+        assert {r["dream_state"] for r in imported} == {"legacy-covered"}
+        assert {r["text"] for r in imported} == {e["text"] for e in source_rows}
+    finally:
+        storage.close()
+
+
+@pytest.mark.parametrize("lost_response", [False, True])
+def test_import_entry_and_cursor_recover_together(
+        pg_conn, pg_url, tmp_path, monkeypatch, lost_response):
+    from pseudolife_memory.storage.migrate import MIGRATION_META_KEY, migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+    from tests.test_migration import _FakeEmbedder
+
+    _legacy_bank_with_cursor(tmp_path, 10.0)
+    storage = PostgresStorage(pg_url)
+    try:
+        if lost_response:
+            transaction = storage.entry_import_transaction
+
+            @contextmanager
+            def lose_response():
+                with transaction():
+                    yield
+                raise RuntimeError("commit response lost")
+
+            monkeypatch.setattr(storage, "entry_import_transaction", lose_response)
+        else:
+            meta_set = storage.meta_set
+
+            def fail_cursor(key, value):
+                if key == MIGRATION_META_KEY and value.get("entry_cursor") == 1:
+                    raise RuntimeError("cursor write failed")
+                meta_set(key, value)
+
+            monkeypatch.setattr(storage, "meta_set", fail_cursor)
+        with pytest.raises(RuntimeError):
+            migrate_legacy(tmp_path, storage, _FakeEmbedder())
+        storage.close()
+        storage = PostgresStorage(pg_url)
+        expected = 1 if lost_response else 0
+        assert len(storage.load_entries()) == expected
+        assert storage.meta_get(MIGRATION_META_KEY)["entry_cursor"] == expected
+        result = migrate_legacy(tmp_path, storage, _FakeEmbedder())
+        assert result["migrated"] is True
+        assert len(storage.load_entries()) == 2
+        assert storage.meta_get(MIGRATION_META_KEY)["entry_cursor"] == 2
+    finally:
+        storage.close()
+
+
+def test_import_refuses_cursor_beyond_unchanged_source(
+        pg_conn, pg_url, tmp_path, monkeypatch):
+    from pseudolife_memory.storage.migrate import MIGRATION_META_KEY, migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+    from tests.test_migration import _FakeEmbedder
+
+    _legacy_bank_with_cursor(tmp_path, 10.0)
+    storage = PostgresStorage(pg_url)
+    try:
+        with monkeypatch.context() as patch:
+            def interrupt(row):
+                raise RuntimeError("before first episode")
+            patch.setattr(storage, "upsert_episode", interrupt)
+            with pytest.raises(RuntimeError, match="before first episode"):
+                migrate_legacy(tmp_path, storage, _FakeEmbedder())
+        record = storage.meta_get(MIGRATION_META_KEY)
+        record["entry_cursor"] = 3  # The fingerprint still covers two entries.
+        storage.meta_set(MIGRATION_META_KEY, record)
+        with pytest.raises(ValueError, match="invalid_legacy_entry_cursor:"):
+            migrate_legacy(tmp_path, storage, _FakeEmbedder())
+        assert storage.load_entries() == []
+        assert storage.load_facts() == []
+        assert storage.meta_get(MIGRATION_META_KEY)["status"] == "in_progress"
+        assert (tmp_path / "memory_state" / "cms_state.pt").exists()
+        assert (tmp_path / "cortex_state.pt").exists()
     finally:
         storage.close()
 

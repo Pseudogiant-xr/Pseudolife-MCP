@@ -5,11 +5,11 @@ exists under the data dir AND either the bank is empty or a previous,
 interrupted import of *these same sources* is on record. Sources are
 renamed ``*.pre-v8.bak`` afterwards — never deleted.
 
-The import is NOT atomic and cannot be: ``insert_entry`` commits per row
-and the renames are filesystem operations. So progress is *recorded*
-rather than inferred. A ``legacy_migration`` meta row carries the source
-fingerprint and a status; a partial import leaves ``status=in_progress``
-and the next boot resumes it, skipping rows already present. This
+The whole import is not atomic: rows commit individually and the renames
+are filesystem operations. Each new imported entry and its source-order
+cursor commit together. A ``legacy_migration`` meta row carries the source
+fingerprint and progress; a partial import leaves ``status=in_progress``
+and the next boot resumes the recorded source prefix. This
 replaces the old "the entries table is non-empty ⇒ nothing to do" guard,
 under which any mid-import failure (malformed row, embedder failure,
 dropped connection, full disk, killed machine) durably committed some
@@ -37,6 +37,7 @@ import logging
 import math
 import time
 from collections import Counter
+from contextlib import nullcontext
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -55,10 +56,8 @@ PARTIAL_REASONS = frozenset({
     "partial_migration_source_mismatch", "legacy_source_missing",
 })
 
-# Checkpoint cadence for ``entries_done``. Purely observational: the
-# resume SKIP is identity-based (see ``_already_imported``), so a
-# checkpoint that lags the truly-committed count can never cause
-# duplicates — it only makes the logged progress coarser.
+# Legacy progress reporting cadence. New imports commit entry_cursor with
+# every entry; old interrupted imports without it retain identity matching.
 _CHECKPOINT_EVERY = 200
 
 
@@ -213,10 +212,22 @@ def migrate_legacy(
 
     started_at = record.get("started_at") if resuming else time.time()
     stage = "importing" if resuming and record.get("stage") != "preflight" else "preflight"
+    # New imports own a prefix of the fingerprint-bound source order. Old
+    # interrupted imports lack this provenance and retain their legacy fallback.
+    entry_cursor = 0 if stage == "preflight" else record.get("entry_cursor")
+    if entry_cursor is not None and (
+        type(entry_cursor) is not int or entry_cursor < 0
+    ):
+        raise ValueError("invalid_legacy_entry_cursor: expected a nonnegative integer")
+
+    def _cursor_state():
+        return {"entry_cursor": entry_cursor} if entry_cursor is not None else {}
+
     storage.meta_set(MIGRATION_META_KEY, {
         "status": "in_progress", "stage": stage, "source": fingerprint,
         "entries_done": int(record.get("entries_done") or 0) if resuming else 0,
         "started_at": started_at, "updated_at": time.time(),
+        **_cursor_state(),
     })
 
     import torch
@@ -227,6 +238,21 @@ def migrate_legacy(
         # avoid unpickling arbitrary objects from an imported .pt bank (CWE-502).
         cms_state = torch.load(
             str(cms_path), map_location="cpu", weights_only=True)
+
+    if entry_cursor is not None:
+        source_count = (
+            sum(len(band.get("entries", []))
+                for band in (cms_state.get("bands") or {}).values())
+            if cms_state is not None else 0
+        )
+        # A renamed CMS is a legitimate later resume of the cortex phase.
+        cms_was_renamed = (
+            cms_state is None and "cms" in (record.get("source") or {})
+            and cms_path.with_name(cms_path.name + ".pre-v8.bak").exists()
+        )
+        if not cms_was_renamed and entry_cursor > source_count:
+            raise ValueError(
+                "invalid_legacy_entry_cursor: exceeds the source entry count")
 
     cortex = None
     if cortex_path.exists():
@@ -305,11 +331,15 @@ def migrate_legacy(
         "entries_done": int(record.get("entries_done") or 0) if resuming else 0,
         "started_at": started_at,
         "updated_at": time.time(),
+        **_cursor_state(),
     })
 
     # Only a resume can meet pre-existing rows; on a fresh import the
     # guard above already proved the bank is empty, so skip the scan.
-    already = _already_imported(existing) if resuming else Counter()
+    already = (
+        _already_imported(existing)
+        if resuming and entry_cursor is None else Counter()
+    )
     target_dim = embedder.embedding_dim
     entries = episodes = facts = reembedded = skipped = 0
 
@@ -318,6 +348,7 @@ def migrate_legacy(
             "status": "in_progress", "stage": "importing", "source": fingerprint,
             "entries_done": entries + skipped,
             "started_at": started_at, "updated_at": time.time(),
+            **_cursor_state(),
         })
 
     if cms_state is not None:
@@ -334,11 +365,16 @@ def migrate_legacy(
                 "parent_id": ep.get("parent_id"),
             })
             episodes += 1
+        ordinal = 0
         for band_name, band_state in (state.get("bands") or {}).items():
             for e in band_state.get("entries", []):
+                ordinal += 1
                 ts = float(e.get("timestamp", 0.0))
                 key = (e["text"], ts)
-                if already[key]:
+                if entry_cursor is not None and ordinal <= entry_cursor:
+                    skipped += 1
+                    continue
+                if entry_cursor is None and already[key]:
                     # Committed by an earlier, interrupted pass.
                     already[key] -= 1
                     skipped += 1
@@ -352,7 +388,7 @@ def migrate_legacy(
                     # anything at search time if the column allowed it).
                     embedding = embedder.encode_single(e["text"])
                     reembedded += 1
-                storage.insert_entry({
+                row = {
                     "band": band_name,
                     "text": e["text"],
                     "embedding": embedding,
@@ -368,7 +404,19 @@ def migrate_legacy(
                     "tags": list(e.get("tags") or []),
                     "slots": [list(s) for s in (e.get("slots") or [])],
                     "dream_state": _source_state(e, ts),
-                })
+                }
+                with (storage.entry_import_transaction()
+                      if entry_cursor is not None else nullcontext()):
+                    storage.insert_entry(row)
+                    if entry_cursor is not None:
+                        storage.meta_set(MIGRATION_META_KEY, {
+                            "status": "in_progress", "stage": "importing",
+                            "source": fingerprint, "entries_done": ordinal,
+                            "entry_cursor": ordinal, "started_at": started_at,
+                            "updated_at": time.time(),
+                        })
+                if entry_cursor is not None:
+                    entry_cursor = ordinal
                 entries += 1
                 if (entries + skipped) % _CHECKPOINT_EVERY == 0:
                     _checkpoint()
@@ -438,6 +486,7 @@ def migrate_legacy(
         "status": "done", "source": fingerprint,
         "entries_done": entries + skipped,
         "started_at": started_at, "finished_at": time.time(),
+        **_cursor_state(),
     })
 
     summary = {"migrated": True, "resumed": resuming, "entries": entries,

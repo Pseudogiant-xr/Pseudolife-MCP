@@ -150,6 +150,7 @@ class PostgresStorage:
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
         self._lesson_transaction_connection = None
+        self._entry_import_connection = None
         self._conn = self._connect()
         ensure_schema(self._conn)
         register_vector(self._conn)
@@ -187,6 +188,8 @@ class PostgresStorage:
         per-connection and must be re-registered."""
         # A lesson batch must not silently reconnect halfway through its
         # transaction: later helpers would then commit outside that batch.
+        if self._entry_import_connection is not None:
+            return self._entry_import_connection
         if self._lesson_transaction_connection is not None:
             return self._lesson_transaction_connection
         c = self._conn
@@ -248,6 +251,23 @@ class PostgresStorage:
             raise psycopg.OperationalError(
                 f"transaction did not commit (status={tx.status.name}); "
                 "connection lost during the block")
+
+    @contextmanager
+    def entry_import_transaction(self):
+        """Commit one imported entry and its source cursor on one connection.
+
+        The boot importer owns storage during initialization. Pinning prevents
+        a dropped connection from reconnecting between the entry and meta writes.
+        """
+        if (self._entry_import_connection is not None
+                or self._lesson_transaction_connection is not None):
+            raise RuntimeError("entry import transaction is already active")
+        self._entry_import_connection = self.conn
+        try:
+            with self._txn():
+                yield
+        finally:
+            self._entry_import_connection = None
 
     @contextmanager
     def savepoint(self):

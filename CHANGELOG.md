@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-12 — interrupted legacy imports)
+- Repairing a failed legacy import preserves source entries even when daemon
+  writes have identical text and timestamps. New imports commit each entry and
+  its source-order cursor together, so another interruption or a lost commit
+  response resumes without skipping source entries or duplicating committed ones.
+  Previously interrupted imports without a source cursor retain their legacy
+  matching behavior because their original row ownership was not recorded.
+
 ### Added (2026-09-12 — Codex task coordination)
 - Codex CLI and desktop MCP calls use their host-supplied task ID for attribution
   and, when coordination is enabled, a private mailbox that survives resume.
