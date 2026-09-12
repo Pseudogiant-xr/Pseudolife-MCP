@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-12 — Codex task coordination)
+- Codex CLI and desktop MCP calls use their host-supplied task ID for attribution
+  and, when coordination is enabled, a private mailbox that survives resume.
+  Forks receive separate mailboxes. Registration is lazy and bounded; optional
+  coordination failures leave ordinary memory available.
+- `ops/setup-codex-coordination.py` checks access without registering an agent
+  and enables pull messaging through scoped, version-checked Codex configuration
+  writes with a private backup. It refuses a single shared state file.
+- An optional experimental bridge submits addressed messages as tool output to
+  an authenticated local Codex app-server. It requires explicit wake opt-in and
+  an already loaded recipient; it never starts or resumes a task, grants approval,
+  or acknowledges mail for the recipient. Ordinary desktop stdio connections
+  continue to use pull messaging.
+
 ### Added (2026-09-11 — experimental agent coordination)
 - Agents can discover other open sessions and exchange addressed messages within
   one bank. Coordination defaults off; mailbox access requires an allowed bearer

@@ -379,7 +379,8 @@ def _toolset_changed(result) -> bool:
 
 
 async def _proxy(url: str, token: str | None, session_uid: str, *,
-                 channel_inbox=None, agent_headers=None, coordination_hint=None) -> None:
+                 channel_inbox=None, agent_headers=None, coordination_hint=None,
+                 codex_metadata: bool = False, coordination_registry=None) -> None:
     import asyncio
     import contextlib
 
@@ -397,7 +398,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *,
         headers.update({name: agent_headers[name] for name in ("X-PL-Agent", "X-PL-Agent-Key")})
 
     @contextlib.asynccontextmanager
-    async def _upstream():
+    async def _upstream(call_headers=None):
         # A FRESH upstream connection per call. The shim owns no state and the
         # daemon owns the bank, so a short-lived connection costs only a local
         # handshake and CANNOT go stale. A single long-lived session (the prior
@@ -410,7 +411,10 @@ async def _proxy(url: str, token: str | None, session_uid: str, *,
         # attribution (X-PL-Writer / X-PL-Session) rides the httpx client's
         # headers on every request (SDK v2 moved headers off the transport
         # helper onto the http_client).
-        async with create_mcp_http_client(headers=headers or None) as http:
+        request_headers = dict(headers)
+        if call_headers:
+            request_headers.update(call_headers)
+        async with create_mcp_http_client(headers=request_headers or None) as http:
             async with streamable_http_client(
                 url + "/mcp", http_client=http,
             ) as (read, write):
@@ -431,7 +435,20 @@ async def _proxy(url: str, token: str | None, session_uid: str, *,
             return await remote.list_tools(params=params)
 
     async def _call_tool(ctx, params):
-        async with _upstream() as (remote, _):
+        call_headers = {}
+        call_hint = coordination_hint
+        if codex_metadata:
+            from pseudolife_memory.codex_coordination import thread_id_from_meta
+            thread_id = thread_id_from_meta(params.meta)
+            if thread_id is not None:
+                call_headers["X-PL-Session"] = thread_id
+                if coordination_registry is not None:
+                    adapter = await coordination_registry.get(thread_id)
+                    if adapter is not None:
+                        call_headers.update(adapter.instance_headers)
+                    call_hint = lambda: coordination_registry.unread_hint(
+                        thread_id, adapter)
+        async with _upstream(call_headers) as (remote, _):
             # Seed the output-schema cache: v2's call_tool otherwise fetches
             # the full tool manifest (list_tools) on every call to
             # revalidate structured output — and this session is fresh per
@@ -455,8 +472,8 @@ async def _proxy(url: str, token: str | None, session_uid: str, *,
                 await ctx.session.send_tool_list_changed()
             except Exception:  # noqa: BLE001 — notify is best-effort
                 pass
-        if coordination_hint is not None:
-            hint = coordination_hint()
+        if call_hint is not None:
+            hint = call_hint()
             if hint:
                 from mcp.types import TextContent
                 update = {"content": [
@@ -569,7 +586,53 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
 
     enabled = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower() in {
         "1", "true", "yes", "on"}
+    codex_pull = (not channel
+                  and os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
+                  == "codex")
     async with AsyncExitStack() as stack:
+        kwargs = {}
+        if codex_pull:
+            # Codex supplies the thread only on each tools/call request.  Do
+            # not bind an identity during process startup: launcher env is not
+            # thread-scoped and future hosts may share one MCP process.
+            kwargs["codex_metadata"] = True
+            if enabled:
+                if os.environ.get("PSEUDOLIFE_AGENT_STATE"):
+                    print("pseudolife-mcp: Codex automatic coordination is disabled by "
+                          "the fixed PSEUDOLIFE_AGENT_STATE setting because threads must "
+                          "not share credentials; remove it and use "
+                          "PSEUDOLIFE_AGENT_STATE_DIR instead.",
+                          file=sys.stderr)
+                else:
+                    from pseudolife_memory.codex_coordination import (
+                        CodexCoordinationRegistry)
+                    registry_options = {
+                        "startup_seconds": _ADAPTER_STARTUP_SECONDS}
+                    wake = os.environ.get(
+                        "PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {
+                            "1", "true", "yes", "on"}
+                    if wake:
+                        delivery_url = os.environ.get(
+                            "PSEUDOLIFE_CODEX_SERVER_URL")
+                        delivery_token = os.environ.get(
+                            "PSEUDOLIFE_CODEX_SERVER_TOKEN")
+                        if delivery_url and delivery_token and delivery_token != token:
+                            registry_options.update({
+                                "delivery_url": delivery_url,
+                                "delivery_token": delivery_token,
+                            })
+                        else:
+                            print("pseudolife-mcp: Codex live delivery requires an "
+                                  "authenticated bridge with a separate host credential; "
+                                  "using pull coordination.",
+                                  file=sys.stderr)
+                    registry = CodexCoordinationRegistry(
+                        url, token, **registry_options)
+                    stack.push_async_callback(registry.aclose)
+                    kwargs["coordination_registry"] = registry
+            await _proxy(url, token, session_uid, **kwargs)
+            return
+
         adapter = None
         if enabled:
             from pseudolife_memory.coordination_adapter import CoordinationAdapter, AdapterError
@@ -585,7 +648,6 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             except (AdapterError, TimeoutError):
                 print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
                       "Check daemon opt-in, authentication and private adapter state.", file=sys.stderr)
-        kwargs = {}
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_hint"] = lambda: adapter.unread_hint

@@ -43,6 +43,74 @@ def adapter(daemon, **kwargs):
                                        client=client, **kwargs)
 
 
+def test_codex_delivery_does_not_advertise_a_claude_channel():
+    async def drive():
+        daemon = FakeDaemon()
+        client, instance = adapter(daemon, wake_enabled=True, delivery_transport="codex")
+        async with client, instance:
+            capabilities = daemon.calls[0][1]["capabilities"]
+            assert capabilities == {"pull": True, "channel": False, "codex": True}
+    asyncio.run(drive())
+
+
+def test_codex_delivery_can_downgrade_same_identity_to_pull():
+    async def drive():
+        daemon = FakeDaemon()
+        client, instance = adapter(
+            daemon, wake_enabled=True, delivery_transport="codex")
+        async with client, instance:
+            identity = dict(instance.instance_headers)
+            assert await instance.downgrade_to_pull() is True
+            assert instance.wake_enabled is False
+            assert instance.instance_headers == identity
+            attaches = [body for action, body, _ in daemon.calls if action == "attach"]
+            assert [body["wake_enabled"] for body in attaches] == [True, False]
+            assert attaches[0]["attachment_id"] == attaches[1]["attachment_id"]
+            assert instance._heartbeat_task is not None
+            assert not instance._heartbeat_task.done()
+
+    asyncio.run(drive())
+
+
+def test_failed_pull_downgrade_stops_old_renewal_and_recovers_wake_false(monkeypatch):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+
+        monkeypatch.setattr(CoordinationAdapter, "RETRY_DELAYS", ())
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 100)
+        monkeypatch.setattr(CoordinationAdapter, "REATTACH_DELAYS", (0.01,))
+        daemon = FakeDaemon()
+        attach_count = 0
+
+        def fail_downgrade(action, body):
+            nonlocal attach_count
+            if action == "attach":
+                attach_count += 1
+                if attach_count == 2:
+                    raise httpx.ReadTimeout("private-fixture")
+
+        daemon.hook = fail_downgrade
+        client, instance = adapter(
+            daemon, wake_enabled=True, delivery_transport="codex")
+        async with client, instance:
+            old_heartbeat = instance._heartbeat_task
+            assert await instance.downgrade_to_pull() is False
+            assert instance.wake_enabled is False
+            assert old_heartbeat.done()
+            while attach_count < 3 or instance._failure is not None:
+                await asyncio.sleep(0.005)
+            # The failed downgrade never resumes wake-capable heartbeats.  The
+            # recovery attach reads the local False value.
+            assert "heartbeat" not in daemon.actions()
+            attaches = [body for action, body, _ in daemon.calls if action == "attach"]
+            assert [body["wake_enabled"] for body in attaches] == [True, False, False]
+            assert instance._heartbeat_task is not old_heartbeat
+            assert not instance._heartbeat_task.done()
+            assert instance._failure is None
+
+    asyncio.run(drive())
+
+
 def _assert_windows_owner_only(path):
     import ctypes
     from ctypes import wintypes
