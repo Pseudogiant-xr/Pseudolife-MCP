@@ -1,5 +1,6 @@
 """Scoped consent, preservation, and real runtime coverage for hook setup."""
 import argparse
+import hmac
 import importlib.util
 import io
 import json
@@ -108,6 +109,23 @@ def test_read_only_rerun_rejects_modified_trusted_manual_scripts(tmp_path, monke
         setup.vet_manual(hooks, tmp_path)
 
 
+def test_manual_bash_hooks_mark_codex_context_and_recognize_legacy_commands(tmp_path):
+    directory = tmp_path / "pseudolife" / "hooks" / ("a" * 20)
+    directory.mkdir(parents=True)
+    current = setup.manual_definitions(directory)
+    legacy = setup.manual_definitions(directory, codex_marker=False)
+
+    for event in setup.EVENTS.values():
+        assert current[event]["command"].startswith(
+            "env PSEUDOLIFE_CODEX_HOOK=1 bash ")
+        assert "PSEUDOLIFE_CODEX_HOOK" not in current[event]["commandWindows"]
+        old = hook(tmp_path, eventName=next(
+            key for key, value in setup.EVENTS.items() if value == event),
+            sourcePath=str(tmp_path / "hooks.json"), source="user",
+            command=legacy[event]["command"])
+        assert setup.owned_manual(old, tmp_path)
+
+
 def hook(home, event="sessionStart", **kwargs):
     return dict(dict(key="our-key", currentHash="sha256:" + "a" * 64,
                      eventName=event, enabled=True, trustStatus="untrusted", isManaged=False,
@@ -206,6 +224,79 @@ def test_daemon_readiness_failure_is_bounded(monkeypatch):
     monkeypatch.setattr(setup, "daemon_request", lambda _: {"status": "starting"})
     with pytest.raises(setup.SetupError, match="not ready"):
         setup.wait_for_daemon(timeout=0)
+
+
+def test_daemon_request_reads_explicit_credential_file(tmp_path, monkeypatch):
+    from pseudolife_memory.credentials import _write_token_file
+
+    path = tmp_path / "token"
+    _write_token_file(path, "file-token")
+    seen = []
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    def opened(request, timeout):
+        seen.append(hmac.compare_digest(
+            request.get_header("Authorization") or "", "Bearer file-token"))
+        return Response()
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(path))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "stale-token")
+    monkeypatch.setattr(setup, "urlopen", opened)
+    monkeypatch.setattr(setup.json, "load", lambda _: {"status": "ok"})
+    assert setup.daemon_request("/health") == {"status": "ok"}
+    assert seen == [True]
+
+
+def test_daemon_request_refuses_redirect_without_forwarding_authorization(
+        tmp_path, monkeypatch):
+    from pseudolife_memory.credentials import _write_token_file
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    target_headers = []
+    class Target(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_GET(self):
+            target_headers.append(bool(self.headers.get("Authorization")))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+    class Redirect(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{target.server_port}/health")
+            self.end_headers()
+
+    redirect = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    workers = [Thread(target=server.serve_forever, daemon=True)
+               for server in (target, redirect)]
+    for worker in workers:
+        worker.start()
+    token = tmp_path / "token"
+    _write_token_file(token, "fixture-token")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(token))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL",
+                       f"http://127.0.0.1:{redirect.server_port}")
+    try:
+        with pytest.raises(Exception):
+            setup.daemon_request("/health")
+        assert target_headers == []
+    finally:
+        for server in (redirect, target):
+            server.shutdown()
+            server.server_close()
+        for worker in workers:
+            worker.join(timeout=2)
 
 
 @pytest.mark.parametrize("extra", [{"currentHash": "unknown"}, {"isManaged": True},

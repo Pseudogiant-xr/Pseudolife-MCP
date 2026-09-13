@@ -15,17 +15,30 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
+from dataclasses import dataclass
 from typing import NoReturn
 
 from pseudolife_memory.session_title import title_from_cwd
+
+try:
+    from builtins import BaseExceptionGroup as _BaseExceptionGroup
+except ImportError:  # pragma: no cover - Python 3.10 uses anyio's backport
+    try:
+        from exceptiongroup import BaseExceptionGroup as _BaseExceptionGroup
+    except ImportError:  # pragma: no cover - defensive for a minimal 3.10 env
+        _BaseExceptionGroup = None
+_BASE_EXCEPTION_GROUP_TYPES = ((_BaseExceptionGroup,)
+                               if _BaseExceptionGroup is not None else ())
 
 DEFAULT_URL = "http://127.0.0.1:8765"
 # Floor wait for a spawned daemon: torch import on a cold cache. The lite
@@ -52,10 +65,188 @@ _NO_SPAWN_WAIT_S = _SPAWN_WAIT_ALIVE_S
 # wait_for also awaits bounded adapter cleanup; the subsequent instruction fetch
 # has its own 5s timeout. These limits do not guarantee a 10s host startup deadline.
 _ADAPTER_STARTUP_SECONDS = 3.0
+# The provider guide's 2026-08-31 cold-start check budgets 180 s for a first
+# model-loading tool call. This replaces the MCP SDK's 300 s SSE default while
+# preserving that measured/documented path; deployments may set any finite,
+# positive override for a different host budget.
+_UPSTREAM_OPERATION_TIMEOUT_SECONDS = 180.0
+_COORDINATION_HEADERS = (
+    "X-PL-Agent", "X-PL-Agent-Key", "X-PL-Bank", "X-PL-Principal")
+
+
+@dataclass
+class _UpstreamAttempt:
+    """Non-sensitive evidence captured before the MCP SDK normalizes errors."""
+
+    phase: str = "initialize"
+    http_status: int | None = None
+    response_phase: str | None = None
+    dispatched: bool = False
+    transport_failure: str | None = None
+
+    async def observe_response(self, response) -> None:
+        status = int(response.status_code)
+        if status >= 400:
+            self.http_status = status
+            self.response_phase = self.phase
+
+    def note_transport_failure(self, kind: str) -> None:
+        priority = {None: 0, "protocol": 1, "timeout": 2, "connection_failure": 3}
+        if priority[kind] > priority[self.transport_failure]:
+            self.transport_failure = kind
+
+
+def _operation_timeout_seconds() -> float:
+    raw = os.environ.get("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS")
+    if raw is None:
+        return _UPSTREAM_OPERATION_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return _UPSTREAM_OPERATION_TIMEOUT_SECONDS
+    if not math.isfinite(value) or value <= 0:
+        return _UPSTREAM_OPERATION_TIMEOUT_SECONDS
+    return value
+
+
+def _exception_leaves(exc: BaseException):
+    if _BASE_EXCEPTION_GROUP_TYPES and isinstance(exc, _BASE_EXCEPTION_GROUP_TYPES):
+        for child in exc.exceptions:
+            yield from _exception_leaves(child)
+    else:
+        yield exc
+
+
+def _transport_failure_kind(exc: BaseException) -> str:
+    names = {type(leaf).__name__ for leaf in _exception_leaves(exc)}
+    if any(name in {"TimeoutError", "ReadTimeout", "WriteTimeout",
+                    "PoolTimeout"} for name in names):
+        return "timeout"
+    if any(name in {"ConnectError", "ConnectTimeout", "ConnectionError", "ConnectionResetError",
+                    "BrokenPipeError", "EndOfStream", "ClosedResourceError",
+                    "BrokenResourceError", "RemoteProtocolError", "ReadError",
+                    "WriteError", "NetworkError"} for name in names):
+        return "connection_failure"
+    return "protocol"
+
+
+class _CredentialChangedError(Exception):
+    """Internal sentinel: an operation's credential generation went stale."""
+
+
+class _CoordinationUnavailableError(Exception):
+    """Internal sentinel for tools that cannot run without an instance key."""
+
+    def __init__(self, hint: str | None = None):
+        super().__init__()
+        self.hint = hint
+
+
+def _require_current_credential(provider, snapshot) -> None:
+    if provider.snapshot().generation != snapshot.generation:
+        raise _CredentialChangedError
+
+
+def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
+                     requested_phase: str):
+    """Map an upstream failure to a stable, non-sensitive MCP error."""
+    from mcp.shared.exceptions import MCPError
+
+    leaves = tuple(_exception_leaves(exc))
+    names = {type(leaf).__name__ for leaf in leaves}
+    sdk_error = next((leaf for leaf in leaves if isinstance(leaf, MCPError)), None)
+    status = attempt.http_status
+    phase = attempt.response_phase or attempt.phase or requested_phase
+
+    coordination_failure = next(
+        (leaf for leaf in leaves if isinstance(leaf, _CoordinationUnavailableError)),
+        None)
+    if coordination_failure is not None:
+        classification = "coordination_unavailable"
+        message = "Coordination identity is unavailable; reattach coordination and retry."
+        outcome = "not_dispatched"
+    elif names & {"CredentialError", "_CredentialChangedError"}:
+        classification = "credential_unavailable"
+        message = "The memory credential is unavailable; restore the configured credential and retry."
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif status in {401, 403}:
+        classification = "authentication_required"
+        message = "Memory daemon authentication is required; refresh the configured credential and retry."
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif status in {429, 502, 503, 504}:
+        classification = "service_unavailable"
+        message = "The memory daemon is temporarily unavailable; retry this operation."
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif attempt.transport_failure == "connection_failure":
+        classification = "connection_failure"
+        message = "The memory daemon connection failed; check the daemon and retry."
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif attempt.transport_failure == "timeout" or any(
+            name in {"TimeoutError", "ReadTimeout", "WriteTimeout",
+                     "PoolTimeout"} for name in names):
+        classification = "timeout"
+        message = "The memory daemon did not respond before the operation timeout."
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif any(name in {"ConnectError", "ConnectTimeout", "ConnectionError", "ConnectionResetError",
+                      "BrokenPipeError", "EndOfStream", "ClosedResourceError",
+                      "BrokenResourceError", "RemoteProtocolError", "ReadError",
+                      "WriteError", "NetworkError"} for name in names):
+        classification = "connection_failure"
+        message = "The memory daemon connection failed; check the daemon and retry."
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    else:
+        classification = "protocol"
+        message = "The memory daemon returned an invalid MCP response."
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+
+    if outcome == "unknown":
+        message = (
+            "The memory operation may have completed before the response failed. "
+            "Check its result before retrying; reuse the same request_id when available."
+        )
+
+    data = {
+        "classification": classification,
+        "phase": phase,
+        "operation_outcome": outcome,
+    }
+    if coordination_failure is not None and coordination_failure.hint:
+        data["hint"] = coordination_failure.hint
+    code = (sdk_error.code if classification == "protocol" and sdk_error is not None
+            else -32603)
+    return MCPError(code, message, data)
 
 
 def _daemon_url() -> str:
-    return os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", DEFAULT_URL).rstrip("/")
+    return _validated_daemon_url(
+        os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", DEFAULT_URL))
+
+
+def _validated_daemon_url(value: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        valid_port = parsed.port
+    except (TypeError, ValueError):
+        parsed = None
+        valid_port = None
+    valid = bool(
+        parsed is not None
+        and parsed.scheme in {"http", "https"}
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.query == ""
+        and parsed.fragment == ""
+        and parsed.path in {"", "/"}
+        and not any(character.isspace() or ord(character) < 0x20
+                    for character in value)
+    )
+    if not valid:
+        print("[shim] invalid PSEUDOLIFE_MCP_DAEMON_URL; use an http(s) origin "
+              "without credentials, a path, query, or fragment.", file=sys.stderr)
+        raise SystemExit(1)
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc.rstrip("/"), "", "", ""))
 
 
 def probe_health(url: str, timeout: float = 0.25) -> dict | None:
@@ -252,6 +443,7 @@ def _exit_unreachable(url: str) -> NoReturn:
 
 
 def ensure_daemon(url: str) -> dict:
+    url = _validated_daemon_url(url)
     health = probe_health(url)
     if health is not None:
         return _accept_health(url, health)
@@ -342,16 +534,25 @@ def _session_headers(token: str | None, session_uid: str) -> dict[str, str]:
     return headers
 
 
-def _post_episode(url: str, token: str | None, path: str, payload: dict) -> None:
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _post_episode(url: str, token: str | None, path: str, payload: dict, *,
+                  provider=None) -> None:
     """Best-effort REST call to open/close the session episode. Swallows every
     error so episode bookkeeping can never break or slow a Claude session."""
     try:
+        if provider is not None:
+            token = provider.snapshot().token
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url + path, data=data, method="POST")
         req.add_header("content-type", "application/json")
         if token:
             req.add_header("Authorization", f"Bearer {token}")
-        with urllib.request.urlopen(req, timeout=5) as r:
+        opener = urllib.request.build_opener(_NoRedirectHandler)
+        with opener.open(req, timeout=5) as r:
             r.read()
     except Exception:  # noqa: BLE001
         pass
@@ -378,27 +579,37 @@ def _toolset_changed(result) -> bool:
     return False
 
 
-async def _proxy(url: str, token: str | None, session_uid: str, *,
+def _requires_coordination_identity(name: str, arguments: dict | None) -> bool:
+    if name == "memory_message":
+        return True
+    return name == "memory_agents" and (arguments or {}).get("action") == "update"
+
+
+async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None,
                  channel_inbox=None, agent_headers=None, coordination_hint=None,
-                 codex_metadata: bool = False, coordination_registry=None) -> None:
+                 coordination_adapter=None, codex_metadata: bool = False,
+                 coordination_registry=None) -> None:
     import asyncio
     import contextlib
+    import anyio
 
+    url = _validated_daemon_url(url)
+
+    from mcp.client import streamable_http
     from mcp.client.session import ClientSession
-    from mcp.client.streamable_http import (
-        create_mcp_http_client, streamable_http_client)
     from mcp.server import Server
     from mcp.server.lowlevel.server import NotificationOptions
     from mcp.server.stdio import stdio_server
     from mcp.server.subscriptions import (
         InMemorySubscriptionBus, ListenHandler, ToolsListChanged)
 
-    headers = _session_headers(token, session_uid)
-    if agent_headers:
-        headers.update({name: agent_headers[name] for name in ("X-PL-Agent", "X-PL-Agent-Key")})
+    from pseudolife_memory.credentials import CredentialProvider
+
+    if provider is None:
+        provider = CredentialProvider(token=token or None)
 
     @contextlib.asynccontextmanager
-    async def _upstream(call_headers=None):
+    async def _upstream(snapshot, attempt, call_headers=None):
         # A FRESH upstream connection per call. The shim owns no state and the
         # daemon owns the bank, so a short-lived connection costs only a local
         # handshake and CANNOT go stale. A single long-lived session (the prior
@@ -411,16 +622,91 @@ async def _proxy(url: str, token: str | None, session_uid: str, *,
         # attribution (X-PL-Writer / X-PL-Session) rides the httpx client's
         # headers on every request (SDK v2 moved headers off the transport
         # helper onto the http_client).
-        request_headers = dict(headers)
+        request_headers = _session_headers(snapshot.token, session_uid)
+        if agent_headers and coordination_adapter is None:
+            request_headers.update({
+                name: agent_headers[name]
+                for name in _COORDINATION_HEADERS if name in agent_headers
+            })
         if call_headers:
             request_headers.update(call_headers)
-        async with create_mcp_http_client(headers=request_headers or None) as http:
-            async with streamable_http_client(
+        timeout_seconds = _operation_timeout_seconds()
+        # Leave the enclosing total-operation deadline room to translate a
+        # refused/unreachable connection before cancellation wins the race.
+        connect_seconds = min(5.0, max(0.01, timeout_seconds / 2))
+        timeout = streamable_http.httpx2.Timeout(
+            timeout_seconds, connect=connect_seconds)
+        async with streamable_http.create_mcp_http_client(
+                headers=request_headers or None, timeout=timeout) as http:
+            # The SDK enables redirects by default. httpx strips Authorization
+            # across origins but retains custom coordination credentials, so a
+            # redirect could disclose an instance key or bank binding.
+            if hasattr(http, "follow_redirects"):
+                http.follow_redirects = False
+            hooks = getattr(http, "event_hooks", None)
+            if hooks is not None:
+                hooks.setdefault("response", []).append(attempt.observe_response)
+            original_send = getattr(http, "send", None)
+            if original_send is not None:
+                async def observed_send(request, *args, **kwargs):
+                    try:
+                        return await original_send(request, *args, **kwargs)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        attempt.note_transport_failure(_transport_failure_kind(exc))
+                        raise
+                http.send = observed_send
+            original_stream = getattr(http, "stream", None)
+            if original_stream is not None:
+                @contextlib.asynccontextmanager
+                async def observed_stream(*args, **kwargs):
+                    try:
+                        async with original_stream(*args, **kwargs) as response:
+                            yield response
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        attempt.note_transport_failure(_transport_failure_kind(exc))
+                        raise
+                http.stream = observed_stream
+            async with streamable_http.streamable_http_client(
                 url + "/mcp", http_client=http,
             ) as (read, write):
                 async with ClientSession(read, write) as remote:
+                    attempt.phase = "initialize"
                     initialization = await remote.initialize()
                     yield remote, initialization
+
+    async def _perform(requested_phase, operation, *, snapshot=None):
+        attempt = _UpstreamAttempt(phase=requested_phase)
+        try:
+            with anyio.fail_after(_operation_timeout_seconds()):
+                snapshot = snapshot or provider.snapshot()
+                call_headers = {}
+                if coordination_adapter is not None:
+                    try:
+                        await coordination_adapter.validate_snapshot(snapshot)
+                    except Exception:  # optional context must not block ordinary memory
+                        pass
+                    else:
+                        call_headers.update({
+                            name: coordination_adapter.instance_headers[name]
+                            for name in _COORDINATION_HEADERS
+                            if name in coordination_adapter.instance_headers
+                        })
+                _require_current_credential(provider, snapshot)
+                async with _upstream(
+                        snapshot, attempt, call_headers) as (remote, initialization):
+                    _require_current_credential(provider, snapshot)
+                    attempt.phase = requested_phase
+                    result = await operation(remote, initialization, snapshot)
+                _require_current_credential(provider, snapshot)
+                return result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise _transport_error(exc, attempt, requested_phase) from None
 
     # v2 low-level handlers are constructor params taking (ctx, params) and
     # returning result types verbatim. The proxy registers NO tool schemas of
@@ -431,31 +717,71 @@ async def _proxy(url: str, token: str | None, session_uid: str, *,
     async def _list_tools(ctx, params):
         # Forward pagination params verbatim — swallowing a client cursor
         # would replay page 1 forever if the daemon ever paginates.
-        async with _upstream() as (remote, _):
+        async def forward(remote, _initialization, _snapshot):
             return await remote.list_tools(params=params)
+        return await _perform("list", forward)
 
     async def _call_tool(ctx, params):
         call_headers = {}
         call_hint = coordination_hint
-        if codex_metadata:
-            from pseudolife_memory.codex_coordination import thread_id_from_meta
-            thread_id = thread_id_from_meta(params.meta)
-            if thread_id is not None:
-                call_headers["X-PL-Session"] = thread_id
-                if coordination_registry is not None:
-                    adapter = await coordination_registry.get(thread_id)
-                    if adapter is not None:
-                        call_headers.update(adapter.instance_headers)
-                    call_hint = lambda: coordination_registry.unread_hint(
-                        thread_id, adapter)
-        async with _upstream(call_headers) as (remote, _):
-            # Seed the output-schema cache: v2's call_tool otherwise fetches
-            # the full tool manifest (list_tools) on every call to
-            # revalidate structured output — and this session is fresh per
-            # call by design. None = known, no schema, no validation; the
-            # DAEMON is the validating authority, exactly as on v1.
-            remote._tool_output_schemas[params.name] = None
-            result = await remote.call_tool(params.name, params.arguments or {})
+        attempt = _UpstreamAttempt(phase="initialize")
+        try:
+            with anyio.fail_after(_operation_timeout_seconds()):
+                snapshot = provider.snapshot()
+                if coordination_adapter is not None:
+                    try:
+                        await coordination_adapter.validate_snapshot(snapshot)
+                    except Exception:
+                        if _requires_coordination_identity(
+                                params.name, params.arguments):
+                            hint = (coordination_hint()
+                                    if coordination_hint is not None else None)
+                            raise _CoordinationUnavailableError(hint)
+                    else:
+                        call_headers.update({
+                            name: coordination_adapter.instance_headers[name]
+                            for name in _COORDINATION_HEADERS
+                            if name in coordination_adapter.instance_headers
+                        })
+                if codex_metadata:
+                    from pseudolife_memory.codex_coordination import thread_id_from_meta
+                    thread_id = thread_id_from_meta(params.meta)
+                    if thread_id is not None:
+                        call_headers["X-PL-Session"] = thread_id
+                        if coordination_registry is not None:
+                            adapter = await coordination_registry.get(
+                                thread_id, snapshot=snapshot)
+                            failure_hint = coordination_registry.unread_hint(
+                                thread_id, adapter)
+                            if adapter is not None:
+                                call_headers.update({
+                                    name: adapter.instance_headers[name]
+                                    for name in _COORDINATION_HEADERS
+                                    if name in adapter.instance_headers
+                                })
+                            call_hint = lambda: coordination_registry.unread_hint(
+                                thread_id, adapter)
+                            if (adapter is None and _requires_coordination_identity(
+                                    params.name, params.arguments)):
+                                raise _CoordinationUnavailableError(failure_hint)
+                _require_current_credential(provider, snapshot)
+                async with _upstream(snapshot, attempt, call_headers) as (remote, _):
+                    _require_current_credential(provider, snapshot)
+                    attempt.phase = "call"
+                    # Seed the output-schema cache: v2's call_tool otherwise fetches
+                    # the full tool manifest (list_tools) on every call to
+                    # revalidate structured output — and this session is fresh per
+                    # call by design. None = known, no schema, no validation; the
+                    # DAEMON is the validating authority, exactly as on v1.
+                    remote._tool_output_schemas[params.name] = None
+                    attempt.dispatched = True
+                    result = await remote.call_tool(params.name, params.arguments or {})
+                    _require_current_credential(provider, snapshot)
+                _require_current_credential(provider, snapshot)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise _transport_error(exc, attempt, "call") from None
         # The daemon's tools/list_changed lands on the per-call upstream
         # session above and dies with it, so a tier change would be invisible
         # to the real client — re-emit it downstream on BOTH eras: the
@@ -493,8 +819,9 @@ async def _proxy(url: str, token: str | None, session_uid: str, *,
     # source version. Fetch before the downstream initialize handshake; keep
     # per-call connections so idle reconnect behavior remains unchanged.
     async def _fetch_instructions():
-        async with _upstream() as (_, initialization):
+        async def fetch(_remote, initialization, _snapshot):
             return initialization.instructions
+        return await _perform("initialize", fetch)
 
     instructions = None
     try:
@@ -579,10 +906,14 @@ def _require_mcp_sdk_v2() -> None:
 
 
 async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
-                             channel: bool = False) -> None:
+                             channel: bool = False, provider=None) -> None:
     import asyncio
     from contextlib import AsyncExitStack
     from pseudolife_memory.channel import idle_inbox
+    from pseudolife_memory.credentials import CredentialProvider
+
+    if provider is None:
+        provider = CredentialProvider(token=token or None)
 
     enabled = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower() in {
         "1", "true", "yes", "on"}
@@ -616,7 +947,12 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                             "PSEUDOLIFE_CODEX_SERVER_URL")
                         delivery_token = os.environ.get(
                             "PSEUDOLIFE_CODEX_SERVER_TOKEN")
-                        if delivery_url and delivery_token and delivery_token != token:
+                        try:
+                            bank_token = provider.snapshot().token
+                        except Exception:  # credential failure disables optional wake only
+                            bank_token = None
+                        if (delivery_url and delivery_token and bank_token is not None
+                                and delivery_token != bank_token):
                             registry_options.update({
                                 "delivery_url": delivery_url,
                                 "delivery_token": delivery_token,
@@ -627,56 +963,63 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                                   "using pull coordination.",
                                   file=sys.stderr)
                     registry = CodexCoordinationRegistry(
-                        url, token, **registry_options)
+                        url, token, provider=provider, **registry_options)
                     stack.push_async_callback(registry.aclose)
                     kwargs["coordination_registry"] = registry
-            await _proxy(url, token, session_uid, **kwargs)
+            await _proxy(url, token, session_uid, provider=provider, **kwargs)
             return
 
         adapter = None
         if enabled:
             from pseudolife_memory.coordination_adapter import CoordinationAdapter, AdapterError
+            from pseudolife_memory.credentials import CredentialError
             wake = channel and os.environ.get("PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {
                 "1", "true", "yes", "on"}
             try:
+                startup_snapshot = provider.snapshot()
                 adapter = await asyncio.wait_for(stack.enter_async_context(CoordinationAdapter(
-                    url, token, state_path=os.environ.get("PSEUDOLIFE_AGENT_STATE") or None,
+                    url, startup_snapshot.token, provider=provider,
+                    initial_snapshot=startup_snapshot,
+                    state_path=os.environ.get("PSEUDOLIFE_AGENT_STATE") or None,
                     wake_enabled=wake, label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "agent"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
                     task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid)),
                     timeout=_ADAPTER_STARTUP_SECONDS)
-            except (AdapterError, TimeoutError):
+            except (AdapterError, CredentialError, TimeoutError):
                 print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
                       "Check daemon opt-in, authentication and private adapter state.", file=sys.stderr)
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
+            kwargs["coordination_adapter"] = adapter
             kwargs["coordination_hint"] = lambda: adapter.unread_hint
         if channel:
             kwargs["channel_inbox"] = adapter.inbox if adapter is not None else idle_inbox
-        await _proxy(url, token, session_uid, **kwargs)
+        await _proxy(url, token, session_uid, provider=provider, **kwargs)
 
 
 def run_shim(*, channel: bool = False) -> None:
     import asyncio
+    from pseudolife_memory.credentials import CredentialProvider
 
     _require_mcp_sdk_v2()
     url = _daemon_url()
     ensure_daemon(url)
-    token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
+    provider = CredentialProvider.from_environment()
     # One shim == one Claude session. This uid keys BOTH the session episode
     # (opened/closed here) and per-store stamping (rides every call as
     # X-PL-Session), so lifecycle and attribution always agree — no dependency
     # on Claude's session_id (which MCP servers don't receive).
     session_uid = uuid.uuid4().hex
-    _post_episode(url, token, "/api/episode/start", {
+    _post_episode(url, None, "/api/episode/start", {
         "session_key": session_uid,
         "title": title_from_cwd(os.getcwd()),
-    })
+    }, provider=provider)
     try:
-        asyncio.run(_run_session_proxy(url, token, session_uid, channel=channel))
+        asyncio.run(_run_session_proxy(
+            url, None, session_uid, channel=channel, provider=provider))
     except KeyboardInterrupt:  # session closed
         pass
     finally:
         # Close the session episode (prune-on-empty if it captured nothing).
-        _post_episode(url, token, "/api/episode/end",
-                      {"session_key": session_uid})
+        _post_episode(url, None, "/api/episode/end",
+                      {"session_key": session_uid}, provider=provider)

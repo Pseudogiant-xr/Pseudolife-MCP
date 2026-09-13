@@ -549,6 +549,12 @@ INSTR_CODEX=""
 CODEX_HOOK_SOURCE=skip
 CODEX_HOOK_RECOVERY=""
 CODEX_SETUP_VALID=""
+CODEX_CREDENTIAL_FILE=""
+CODEX_CREDENTIAL_URL=""
+CODEX_CONNECTION_CONFIGURED=""
+CODEX_CREDENTIAL_BOOTSTRAP_FAILED=""
+CODEX_RUNTIME_DEFAULTS=""
+CODEX_RUNTIME_RECOVERY=""
 instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 for selected_client in $CLIENTS; do
@@ -570,14 +576,66 @@ for selected_client in $CLIENTS; do
             fi
         done
         if [ -n "$codex_python" ]; then
-            setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
-                --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
-            if ! [ -t 0 ]; then setup_args+=(--non-interactive); fi
-            setup_exit=0
-            setup_output=$("$codex_python" "${setup_args[@]}") || setup_exit=$?
-            # Parse only data, never shell code. A failed helper must leave the
-            # remaining provider setup available and must never imply readiness.
-            if [ "$setup_exit" -le 1 ] && setup_fields=$("$codex_python" -c '
+            credential_exit=0
+            installer_token="$(get_env PSEUDOLIFE_MCP_TOKEN)"
+            installer_url="$(get_env PSEUDOLIFE_MCP_DAEMON_URL)"
+            installer_url="${installer_url:-http://127.0.0.1:8765}"
+            credential_args=("$repo/ops/setup-codex-coordination.py" --credentials
+                --installer-daemon-url "$installer_url")
+            if [ -n "$installer_token" ]; then
+                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
+                    --credentials --installer-token-stdin \
+                    --installer-daemon-url "$installer_url" <<< "$installer_token") || credential_exit=$?
+            else
+                credential_output=$("$codex_python" "${credential_args[@]}") || credential_exit=$?
+            fi
+            if [ "$credential_exit" -eq 0 ] && credential_fields=$("$codex_python" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+r = json.load(sys.stdin)
+assert r["status"] in ("ready", "tokenless")
+assert isinstance(r.get("credential_file_configured"), bool)
+assert isinstance(r.get("connection_configured"), bool)
+print("1" if r["credential_file_configured"] else "0")
+print("1" if r["connection_configured"] else "0")
+print(r.get("credential_file_path") or "")
+print(r.get("daemon_url") or "")
+' <<< "$credential_output" 2>/dev/null); then
+                {
+                    IFS= read -r credential_configured
+                    IFS= read -r CODEX_CONNECTION_CONFIGURED
+                    IFS= read -r CODEX_CREDENTIAL_FILE || true
+                    IFS= read -r CODEX_CREDENTIAL_URL || true
+                } <<< "$credential_fields"
+                if [ "$CODEX_CONNECTION_CONFIGURED" != 1 ]; then
+                    CODEX_CONNECTION_CONFIGURED=""
+                fi
+                if [ "$credential_configured" = 1 ]; then
+                    step "Codex credential file ready; future rotations are picked up by new requests."
+                fi
+            else
+                CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
+                CODEX_HOOK_RECOVERY="Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+            fi
+            if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
+                setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
+                    --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
+                if ! [ -t 0 ]; then setup_args+=(--non-interactive); fi
+                setup_exit=0
+                if [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
+                    if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                    else
+                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKEN_FILE PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                    fi
+                elif [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                    setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                else
+                    setup_output=$("$codex_python" "${setup_args[@]}") || setup_exit=$?
+                fi
+                # Parse only data, never shell code. A failed helper must leave the
+                # remaining provider setup available and must never imply readiness.
+                if [ "$setup_exit" -le 1 ] && setup_fields=$("$codex_python" -c '
 import json, sys
 sys.stdout.reconfigure(encoding="utf-8", newline="\n")
 r = json.load(sys.stdin)
@@ -587,15 +645,16 @@ assert r["instructions"] in ("present", "appended", "skipped", "covered-by-hooks
 for key in ("status", "source", "instructions", "recovery"):
     print(" ".join(str(r.get(key) or "").splitlines()))
 ' <<< "$setup_output" 2>/dev/null); then
-                {
-                    IFS= read -r HOOK_CODEX
-                    IFS= read -r CODEX_HOOK_SOURCE
-                    IFS= read -r INSTR_CODEX
-                    IFS= read -r CODEX_HOOK_RECOVERY || true
-                } <<< "$setup_fields"
-                CODEX_SETUP_VALID=1
-            else
-                CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Run python3 ops/setup-codex-hooks.py to retry."
+                    {
+                        IFS= read -r HOOK_CODEX
+                        IFS= read -r CODEX_HOOK_SOURCE
+                        IFS= read -r INSTR_CODEX
+                        IFS= read -r CODEX_HOOK_RECOVERY || true
+                    } <<< "$setup_fields"
+                    CODEX_SETUP_VALID=1
+                else
+                    CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Run python3 ops/setup-codex-hooks.py to retry."
+                fi
             fi
         fi
         step "Codex hooks: $HOOK_CODEX; standing instructions: $INSTR_CODEX."
@@ -783,6 +842,33 @@ cli_env_flag() {  # $1 = cli; echoes the supported env flag, or nothing
 MCP_CLAUDE=""
 MCP_CODEX=""
 MCP_GEMINI=""
+configure_codex_runtime_defaults() {
+    if [ -z "$codex_python" ]; then
+        MCP_CODEX=failed
+        CODEX_RUNTIME_DEFAULTS=failed
+        CODEX_RUNTIME_RECOVERY="Install Python 3.10 or newer, then run python3 ops/setup-codex-coordination.py --runtime-defaults."
+        echo "WARNING: Codex was registered, but its runtime defaults could not be configured because Python 3.10 or newer was not found." >&2
+        return 0
+    fi
+    runtime_exit=0
+    runtime_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" --runtime-defaults) || runtime_exit=$?
+    if [ "$runtime_exit" -eq 0 ] && runtime_state=$("$codex_python" -c '
+import json, sys
+r = json.load(sys.stdin)
+assert r["status"] == "ready"
+assert r["runtime_defaults"] in ("configured", "preserved")
+print(r["runtime_defaults"])
+' <<< "$runtime_output" 2>/dev/null); then
+        CODEX_RUNTIME_DEFAULTS="$runtime_state"
+        step "Codex runtime defaults ready (startup 240s, tools 240s, required)."
+    else
+        MCP_CODEX=failed
+        CODEX_RUNTIME_DEFAULTS=failed
+        CODEX_RUNTIME_RECOVERY="Run python3 ops/setup-codex-coordination.py --runtime-defaults, then retry the Codex task."
+        echo "WARNING: Codex was registered, but its runtime defaults were not confirmed. $CODEX_RUNTIME_RECOVERY" >&2
+    fi
+    return 0
+}
 for selected_client in $CLIENTS; do
     if [ "$selected_client" = generic ]; then
         echo ""
@@ -793,7 +879,11 @@ for selected_client in $CLIENTS; do
         continue
     fi
     if [ "$selected_client" = codex ]; then
-        if existing_codex=$(codex mcp get pseudolife-memory 2>/dev/null); then
+        if [ -n "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
+            MCP_CODEX=failed
+            echo "WARNING: Codex MCP registration was skipped because credential setup failed. Rerun the installer after repairing the reported credential problem." >&2
+            continue
+        elif existing_codex=$(codex mcp get pseudolife-memory 2>/dev/null); then
             if [ "$TRANSPORT" = "shim" ] && ! printf '%s' "$existing_codex" | grep -q PSEUDOLIFE_MCP_NO_SPAWN; then
                 echo "WARNING: the existing Codex registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 — its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot." >&2
                 echo "  Upgrade it (re-check any custom command first: codex mcp get pseudolife-memory):" >&2
@@ -802,6 +892,7 @@ for selected_client in $CLIENTS; do
             fi
             step "MCP server already wired into Codex — skipping."
             MCP_CODEX=present
+            CODEX_RUNTIME_DEFAULTS=preserved
         elif [ "$TRANSPORT" = "shim" ]; then
             ensure_shim
             if [ -n "$SHIM_OK" ]; then
@@ -816,28 +907,52 @@ for selected_client in $CLIENTS; do
                     # against a still-booting Docker and shadow the real
                     # bank (2026-08-29 incident). Flag repeated per pair:
                     # codex's --env takes one KEY=VALUE per occurrence.
-                    codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                    if [ -n "$CODEX_CONNECTION_CONFIGURED" ] && [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 "$env_flag" "PSEUDOLIFE_MCP_DAEMON_URL=$CODEX_CREDENTIAL_URL" "$env_flag" "PSEUDOLIFE_MCP_TOKEN_FILE=$CODEX_CREDENTIAL_FILE" -- pseudolife-mcp
+                    elif [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 "$env_flag" "PSEUDOLIFE_MCP_DAEMON_URL=$CODEX_CREDENTIAL_URL" -- pseudolife-mcp
+                    else
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                    fi
                     MCP_CODEX=shim-env
+                    configure_codex_runtime_defaults
+                elif [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
+                    echo "WARNING: this Codex CLI cannot pin the managed connection because its MCP command has no env flag; registration was skipped." >&2
+                    MCP_CODEX=failed
                 else
                     codex mcp add pseudolife-memory -- pseudolife-mcp
                     echo "  (this codex CLI takes no env flag — for per-provider write attribution"
                     echo "   and the Docker-tier no-spawn guard, add to the server's entry in"
                     echo "   ~/.codex/config.toml:"
-                    echo "     env = { PSEUDOLIFE_WRITER_ID = \"codex\", PSEUDOLIFE_MCP_NO_SPAWN = \"1\" })"
+                    echo "     env = { PSEUDOLIFE_WRITER_ID = \"codex\", PSEUDOLIFE_MCP_NO_SPAWN = \"1\","
+                    echo "       PSEUDOLIFE_MCP_TOKEN_FILE = \"<the validated credential file, when configured>\" })"
                     MCP_CODEX=shim
+                    configure_codex_runtime_defaults
                 fi
                 step "Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
             else
                 echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
                 echo "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity." >&2
-                codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-                step "Wired into Codex (codex mcp add, HTTP fallback)."
-                MCP_CODEX=http
+                if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                    echo "WARNING: Codex authentication requires the stdio shim; HTTP fallback was not registered." >&2
+                    MCP_CODEX=failed
+                else
+                    codex_http_url="${CODEX_CREDENTIAL_URL:-http://127.0.0.1:8765}/mcp"
+                    codex mcp add pseudolife-memory --url "$codex_http_url"
+                    MCP_CODEX=http
+                    step "Wired into Codex (codex mcp add, HTTP fallback)."
+                    configure_codex_runtime_defaults
+                fi
             fi
         else
-            codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-            step "Wired into Codex (codex mcp add, HTTP)."
-            MCP_CODEX=http
+            if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                echo "WARNING: Codex authentication requires the stdio shim; HTTP transport was not registered." >&2
+                MCP_CODEX=failed
+            else
+                codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+                step "Wired into Codex (codex mcp add, HTTP)."
+                MCP_CODEX=http
+            fi
         fi
     elif [ "$selected_client" = gemini ]; then
         if gemini mcp list 2>/dev/null | grep -q pseudolife-memory; then
@@ -1003,7 +1118,12 @@ for selected_client in $CLIENTS; do
                 if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
             fi
             echo "    Verify runtime: codex mcp get pseudolife-memory; run doctor from that command's environment."
-            echo "    In its existing config.toml table set startup_timeout_sec = 240, tool_timeout_sec = 180, required = true."
+            case "$CODEX_RUNTIME_DEFAULTS" in
+                configured) echo "    [x] Runtime defaults     startup 240s; tools 240s; required" ;;
+                preserved)  echo "    [-] Runtime settings     existing registration unchanged" ;;
+                failed)     echo "    [!] Runtime defaults     not confirmed - $CODEX_RUNTIME_RECOVERY" ;;
+                *)          echo "    [!] Runtime defaults     unavailable" ;;
+            esac
             describe_instr "$INSTR_CODEX" | sed 's/^/    /' ;;
         gemini)
             echo "  Gemini CLI"

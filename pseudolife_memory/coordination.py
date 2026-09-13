@@ -9,11 +9,13 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Mapping
+from urllib.parse import quote, unquote
 
 from pseudolife_memory.principals import parse_token_map, resolve_principal
 
 
 _PARAMETERS = {
+    "context": {"agent_id", "nonce"},
     "register": {"label", "project", "task", "status", "episode", "capabilities", "wake_enabled"},
     "update": {"project", "task", "status"},
     "agents": {"project", "task", "limit"},
@@ -48,6 +50,8 @@ PUBLIC_ERROR_CODES = frozenset({
     "wake_disabled", "invalid_principal", "invalid_label", "invalid_project",
     "invalid_task", "invalid_status", "invalid_episode", "invalid_attachment_id",
     "invalid_recipient", "invalid_request_id", "invalid_hlc", "invalid_generation",
+    "invalid_agent_id", "invalid_nonce", "invalid_bank_identity",
+    "bank_identity_mismatch",
     "coordination_unavailable", "invalid_request",
 })
 
@@ -79,6 +83,34 @@ def authenticated_principal(headers: Mapping[str, str], *, token_map=None, token
     return principal
 
 
+def encode_bound_principal(principal: str) -> str:
+    """Represent existing Unicode principal names in an ASCII HTTP header."""
+    return quote(principal, safe="", encoding="utf-8", errors="strict")
+
+
+def bound_identity(headers: Mapping[str, str]) -> tuple[str, str] | None:
+    """Parse optional bank/principal binding headers without consulting storage."""
+    bank_id = headers.get("x-pl-bank")
+    principal = headers.get("x-pl-principal")
+    if bank_id is None and principal is None:
+        return None
+    if not bank_id or not principal:
+        raise ValueError("bank_identity_mismatch")
+    try:
+        decoded = unquote(principal, encoding="utf-8", errors="strict")
+        if (not 1 <= len(decoded) <= 256 or any(ord(char) < 32 for char in decoded)
+                or encode_bound_principal(decoded) != principal):
+            raise ValueError
+    except (UnicodeError, ValueError):
+        raise ValueError("bank_identity_mismatch") from None
+    return bank_id, decoded
+
+
+def enforce_bound_identity(binding: tuple[str, str], context: Mapping[str, str]) -> None:
+    if binding != (context.get("bank_id"), context.get("principal")):
+        raise ValueError("bank_identity_mismatch")
+
+
 def _store(service):
     from pseudolife_memory.storage.coordination import CoordinationStore
     return CoordinationStore(service._storage)
@@ -99,10 +131,21 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
         raise ValueError("principal_not_allowed")
     if action not in _PARAMETERS:
         raise ValueError("unknown_coordination_action")
+    binding = None if action == "context" else bound_identity(headers)
     if set(parameters) - _PARAMETERS[action]:
         raise ValueError("unexpected_parameter")
     if _REQUIRED.get(action, set()) - set(parameters):
         raise ValueError("missing_parameter")
+    if action == "context":
+        supplied = set(parameters)
+        if supplied and supplied != {"agent_id", "nonce"}:
+            raise ValueError("missing_parameter")
+        for key in supplied:
+            value = parameters[key]
+            if (not isinstance(value, str) or len(value) != 32
+                    or value != value.lower()
+                    or any(c not in "0123456789abcdef" for c in value)):
+                raise ValueError(f"invalid_{key}")
     if "generation" in parameters and (
             type(parameters["generation"]) is not int or parameters["generation"] < 1):
         raise ValueError("invalid_generation")
@@ -111,16 +154,36 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
                   if action == "receive" and k in parameters}
     if attachment and set(attachment) != {"attachment_id", "generation"}:
         raise ValueError("attachment_required")
-    if action != "register":
+    if action not in {"context", "register"}:
         agent_id = headers.get("x-pl-agent")
         credential = headers.get("x-pl-agent-key")
         if not agent_id or not credential:
             raise ValueError("instance_authentication_required")
     with service._lock:
-        service._ensure_init()
+        lightweight = action == "context" or binding is not None
+        full_init_done = False
+        if lightweight:
+            if service._storage is None:
+                if hasattr(service, "_ensure_postgres_storage"):
+                    service._ensure_postgres_storage()
+                else:
+                    service._ensure_init()
+                    full_init_done = True
+        else:
+            service._ensure_init()
+            full_init_done = True
         if service._storage is None:
             raise ValueError("coordination_requires_postgres")
         store = _store(service)
+        if action == "context":
+            return store.context(principal, **parameters)
+        if binding is not None:
+            enforce_bound_identity(binding, store.context(principal))
+            if not full_init_done:
+                service._ensure_init()
+                if service._storage is None:
+                    raise ValueError("coordination_requires_postgres")
+                store = _store(service)
         if action in {"register", "send", "heartbeat"}:
             now = time.monotonic()
             if now - getattr(service, "_coordination_pruned_at", float("-inf")) >= 60:

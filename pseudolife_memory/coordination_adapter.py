@@ -20,7 +20,7 @@ import anyio
 import httpx
 
 from .channel import ChannelEvent
-from .coordination import PUBLIC_ERROR_CODES
+from .coordination import PUBLIC_ERROR_CODES, encode_bound_principal
 
 
 class AdapterError(RuntimeError):
@@ -94,12 +94,34 @@ def _private_fd(fd: int, path: Path) -> None:
 def _open_state(path: Path, flags: int) -> int:
     if path.is_symlink():
         raise AdapterError("adapter state must be a private regular file")
-    fd = os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    open_flags = flags | getattr(os, "O_NOFOLLOW", 0)
+    created = False
+    if flags & os.O_CREAT:
+        try:
+            fd = os.open(path, open_flags | os.O_EXCL, 0o600)
+            created = True
+        except FileExistsError:
+            if flags & os.O_EXCL:
+                raise
+            fd = os.open(path, open_flags & ~os.O_CREAT, 0o600)
+    else:
+        fd = os.open(path, open_flags, 0o600)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise AdapterError("adapter state must be a private regular file")
-        _private_fd(fd, path)
+        # Only newly created files may be secured here. Tightening an existing
+        # record's ACL cannot prove who created or previously modified it.
+        if created:
+            _private_fd(fd, path)
+        if os.name == "nt":
+            from .credentials import _windows_owner_only
+
+            private = _windows_owner_only(fd)
+        else:
+            private = info.st_uid == os.geteuid() and not (info.st_mode & 0o077)
+        if not private:
+            raise AdapterError("adapter state must be private and owned by the current user")
         return fd
     except BaseException:
         os.close(fd)
@@ -128,7 +150,8 @@ class CoordinationAdapter:
 
     def __init__(self, url: str, token: str, *, state_path=None, wake_enabled=False,
                  label="", project="", task="", episode=None, client=None,
-                 delivery_transport="channel"):
+                 delivery_transport="channel", provider=None, initial_snapshot=None,
+                 legacy_state_path=None):
         parsed = urlsplit(url)
         if (parsed.scheme not in {"http", "https"} or not parsed.hostname
                 or parsed.username or parsed.password or parsed.query or parsed.fragment):
@@ -136,7 +159,13 @@ class CoordinationAdapter:
         if not token:
             raise AdapterError("coordination requires bearer authentication")
         self.url = url.rstrip("/")
-        self._token = token
+        self._token = token if provider is None else None
+        self._provider = provider
+        self._startup_snapshot = initial_snapshot
+        self._context = None
+        self._legacy_state_path = Path(legacy_state_path) if legacy_state_path is not None else None
+        self._loaded_state_info = None
+        self._failed_credential_generation = None
         self.state_path = Path(state_path) if state_path is not None else None
         self.wake_enabled = wake_enabled is True
         self._registration = {"label": label, "project": project, "task": task,
@@ -156,6 +185,7 @@ class CoordinationAdapter:
         self._failure = None
         self._permanent_failure = False
         self._entered = False
+        self._closing = False
         self._after = None
         self._recent_ids = deque(maxlen=self.MAX_RECENT_IDS)
         self._inbox_active = False
@@ -190,6 +220,9 @@ class CoordinationAdapter:
         """Enter the degraded state once per outage; recovery clears it."""
         self._pending_count = None
         if self._is_permanent_identity_error(error):
+            if self._provider is not None:
+                with suppress(AdapterError):
+                    self._failed_credential_generation = self._snapshot().generation
             already_reported = self._permanent_failure
             self._failure = error
             self._permanent_failure = True
@@ -213,7 +246,7 @@ class CoordinationAdapter:
     def _is_permanent_identity_error(error: AdapterError) -> bool:
         if error.code in {"authentication_required", "unauthorized", "principal_not_allowed",
                           "instance_authentication_required", "invalid_credential",
-                          "instance_not_found"}:
+                          "instance_not_found", "bank_identity_mismatch"}:
             return True
         # Older daemons may not return a categorical body. Treat an auth status
         # as terminal, but never infer that the saved address itself is gone.
@@ -223,8 +256,58 @@ class CoordinationAdapter:
     def instance_headers(self) -> dict[str, str]:
         if self._identity is None:
             raise AdapterError("coordination adapter is not registered")
-        return {"X-PL-Agent": self._identity["agent_id"],
-                "X-PL-Agent-Key": self._identity["credential"]}
+        headers = {"X-PL-Agent": self._identity["agent_id"],
+                   "X-PL-Agent-Key": self._identity["credential"]}
+        if self._context is not None:
+            headers.update({"X-PL-Bank": self._context["bank_id"],
+                            "X-PL-Principal": encode_bound_principal(self._context["principal"])})
+        return headers
+
+    def _snapshot(self):
+        if self._provider is None:
+            return None
+        try:
+            return self._startup_snapshot or self._provider.snapshot()
+        except Exception:
+            raise AdapterError("coordination credential source is unavailable", code="credential_unavailable") from None
+
+    def _credential_changed(self, generation):
+        if self._provider is None:
+            return False
+        try:
+            return self._provider.snapshot().generation != generation
+        except Exception:
+            return True
+
+    def _check_snapshot(self, snapshot):
+        if snapshot is not None and self._credential_changed(snapshot.generation):
+            raise AdapterError("coordination credential changed during the operation; outcome may be unknown",
+                               code="credential_changed")
+
+    async def validate_snapshot(self, snapshot):
+        """Verify current authority before returning instance headers to a proxy."""
+        if self._provider is None:
+            return
+        from .coordination_identity import fetch_context, check_binding
+
+        self._check_snapshot(snapshot)
+        context = await fetch_context(self._client, self.url, snapshot)
+        self._check_snapshot(snapshot)
+        if self._identity is not None:
+            check_binding(self._identity, context)
+        elif self._context is not None and context != self._context:
+            raise AdapterError("coordination bank or principal changed", code="bank_identity_mismatch")
+        self._context = context
+        if self._failure is not None and self._failure.code in {
+                "unauthorized", "authentication_required", "principal_not_allowed",
+                "credential_unavailable", "credential_changed", "bank_identity_mismatch"}:
+            self._permanent_failure = False
+            self._failure = None
+            self._degraded.clear()
+            self._recovered.set()
+            if (not self._closing and self._generation is not None
+                    and (self._heartbeat_task is None or self._heartbeat_task.done())):
+                self._heartbeat_task = asyncio.create_task(self._renew())
 
     def _load_or_reserve(self):
         if self.state_path is None:
@@ -259,6 +342,7 @@ class CoordinationAdapter:
                                for key in ("agent_id", "credential"))):
                 raise AdapterError("adapter state does not match this bank or is incomplete")
             self._identity = state
+            self._loaded_state_info = _StateReservation(info.st_dev, info.st_ino)
             return None
         except OSError:
             raise AdapterError("cannot reserve private adapter state") from None
@@ -347,6 +431,8 @@ class CoordinationAdapter:
                    for key in ("agent_id", "credential")):
             raise AdapterError("coordination registration returned invalid identity")
         self._identity = {key: result[key] for key in ("agent_id", "credential")}
+        if self._context is not None:
+            self._identity.update(version=2, **self._context)
         self._save_new_identity(reservation)
 
     def _retire_stale_state(self):
@@ -390,7 +476,10 @@ class CoordinationAdapter:
             temp_path = Path(name)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 _private_fd(stream.fileno(), temp_path)
-                json.dump({"bank_url": self.url, **self._identity}, stream)
+                state = {"bank_url": self.url, **self._identity}
+                if self._context is not None:
+                    state.update(version=2, **self._context)
+                json.dump(state, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
             info = self.state_path.stat(follow_symlinks=False)
@@ -408,13 +497,21 @@ class CoordinationAdapter:
                     temp_path.unlink()
 
     async def _post(self, action, body, *, retry=False, timeout=None):
-        headers = {"Authorization": f"Bearer {self._token}"}
+        snapshot = self._snapshot()
+        if snapshot is not None:
+            await self.validate_snapshot(snapshot)
+        headers = {"Authorization": f"Bearer {snapshot.token if snapshot is not None else self._token}"}
+        if self._context is not None:
+            headers.update({"X-PL-Bank": self._context["bank_id"],
+                            "X-PL-Principal": encode_bound_principal(self._context["principal"])})
         if action != "register":
             headers.update(self.instance_headers)
         attempts = len(self.RETRY_DELAYS) + 1 if retry else 1
         for attempt in range(attempts):
             try:
+                self._check_snapshot(snapshot)
                 response = await self._request_once(action, body, headers, timeout)
+                self._check_snapshot(snapshot)
                 # 429 is how the daemon answers its own transient limits
                 # (wait capacity, send rate, queue); retry it like a 5xx.
                 if ((response.status_code >= 500 or response.status_code == 429)
@@ -472,7 +569,42 @@ class CoordinationAdapter:
             self._client = httpx.AsyncClient(follow_redirects=False)
         reservation = None
         try:
+            snapshot = self._snapshot()
+            if snapshot is not None:
+                from .coordination_identity import fetch_context
+
+                self._startup_snapshot = snapshot
+                self._context = await fetch_context(self._client, self.url, snapshot)
+                self._check_snapshot(snapshot)
             reservation = self._load_or_reserve()
+            if snapshot is not None:
+                from .coordination_identity import read_legacy, fetch_context, check_binding
+
+                if self._identity is None and self._legacy_state_path is not None:
+                    # Only the exact legacy path derived from this configured
+                    # credential is eligible; never search neighboring namespaces.
+                    if self._legacy_state_path.exists() or self._legacy_state_path.is_symlink():
+                        self._identity = read_legacy(self._legacy_state_path, self.url)
+                if self._identity is not None:
+                    if self._identity.get("version") not in (None, 2):
+                        raise AdapterError("unsupported adapter state version; state was preserved")
+                    needs_upgrade = self._identity.get("version") != 2
+                    if not needs_upgrade:
+                        check_binding(self._identity, self._context)
+                    else:
+                        proved = await fetch_context(self._client, self.url, snapshot, identity=self._identity)
+                        self._check_snapshot(snapshot)
+                        if proved != self._context:
+                            raise AdapterError("coordination context changed during migration", code="bank_identity_mismatch")
+                    self._identity = {**self._identity, "version": 2, **self._context}
+                    if reservation is not None:
+                        self._save_new_identity(reservation)
+                        reservation = None
+                    elif needs_upgrade and self._loaded_state_info is not None:
+                        # Existing records receive binding metadata atomically;
+                        # retaining the original inode fence prevents a stale upgrade.
+                        self._save_new_identity(self._loaded_state_info)
+                        self._loaded_state_info = None
             resumed = self._identity is not None
             if not resumed:
                 await self._register(reservation)
@@ -483,7 +615,7 @@ class CoordinationAdapter:
             try:
                 result = await self._post("attach", attach, retry=True)
             except AdapterError as error:
-                if not (resumed and error.code == "instance_not_found"):
+                if not (resumed and self._provider is None and error.code == "instance_not_found"):
                     raise
                 # The saved address is unknown to this bank: pruned after long
                 # idleness, or absent from a restored snapshot. The old file stays beside
@@ -497,6 +629,9 @@ class CoordinationAdapter:
                 raise AdapterError("coordination attach returned invalid generation")
             self._generation = result["generation"]
             self._update_pending_count(result)
+            if self._context is not None:
+                self._identity.update(version=2, **self._context)
+            self._startup_snapshot = None
             self._heartbeat_task = asyncio.create_task(self._renew())
             return self
         except BaseException:
@@ -509,6 +644,7 @@ class CoordinationAdapter:
             raise
 
     async def __aexit__(self, *exc):
+        self._closing = True
         with anyio.CancelScope(shield=True):
             try:
                 if self._heartbeat_task:
@@ -609,31 +745,51 @@ class CoordinationAdapter:
             print("pseudolife-mcp: live coordination delivery restored.", file=sys.stderr)
             return True
 
+    async def _wait_for_new_credential(self):
+        # Auth rejection is not a reason to replay requests. Observe only the
+        # configured source until it changes, then validate authority afresh.
+        if (self._provider is None or self._failure is None or self._failure.code not in {
+                "unauthorized", "authentication_required", "principal_not_allowed",
+                "bank_identity_mismatch"}):
+            return False
+        await asyncio.sleep(self.HEARTBEAT_SECONDS)
+        try:
+            snapshot = self._snapshot()
+            if snapshot.generation == self._failed_credential_generation:
+                return True
+            await self.validate_snapshot(snapshot)
+            await self._heartbeat()
+        except AdapterError as error:
+            self._record_failure(error)
+        return True
+
     async def _renew(self):
         """Renew the lease and recover transient outages in the background.
 
-        Authenticated identity rejection is terminal for this adapter instance:
-        state is preserved for operator recovery instead of retrying forever or
-        silently replacing the address.
+        Authentication rejection pauses network retries until a file-backed
+        credential changes. Authority mismatches preserve state for deliberate
+        recovery and never silently replace the address.
         """
         while True:
             try:
                 if self._permanent_failure:
+                    if await self._wait_for_new_credential():
+                        continue
                     return
                 if self._failure is not None:
                     if not await self._reattach():
+                        if self._provider is not None and self._permanent_failure:
+                            continue
                         return
                     continue
                 with suppress(TimeoutError, asyncio.TimeoutError):
                     await asyncio.wait_for(self._degraded.wait(), self.HEARTBEAT_SECONDS)
                 if self._permanent_failure:
-                    return
+                    continue
                 if self._failure is None:
                     await self._heartbeat()
             except AdapterError as error:
                 self._record_failure(error)
-                if self._permanent_failure:
-                    return
 
     async def inbox(self):
         """Yield at most one live attempt per message per attachment; never
@@ -652,12 +808,14 @@ class CoordinationAdapter:
                     continue
                 try:
                     generation = self._generation
+                    snapshot = self._snapshot()
+                    page_credential = snapshot.generation if snapshot is not None else None
                     page_attachment = {"attachment_id": self._attachment_id,
                                        "generation": generation}
                     page = await self._post("receive", {"after": self._after, "limit": 50,
                                                          "wait_seconds": 30, **page_attachment},
                                              retry=True, timeout=35)
-                    if self._generation != generation:
+                    if self._generation != generation or self._credential_changed(page_credential):
                         # Re-attached under a new generation while this page
                         # was in flight: the cursor was reset for the replay,
                         # and this page's cursor must not overwrite it.
@@ -670,7 +828,7 @@ class CoordinationAdapter:
                         raise AdapterError("coordination mailbox cursor did not advance")
                     stale_page = False
                     for message in messages:
-                        if self._generation != generation:
+                        if self._generation != generation or self._credential_changed(page_credential):
                             stale_page = True
                             break
                         if (not isinstance(message, dict)
@@ -684,14 +842,14 @@ class CoordinationAdapter:
                         if message_id in self._recent_ids:
                             continue
                         await self._heartbeat()
-                        if self._generation != generation:
+                        if self._generation != generation or self._credential_changed(page_credential):
                             stale_page = True
                             break
                         try:
                             await self._post("attempt", {"message_id": message_id,
                                                          **page_attachment}, retry=True)
                         except AdapterError as error:
-                            if self._generation != generation:
+                            if self._generation != generation or self._credential_changed(page_credential):
                                 stale_page = True
                                 break
                             if error.status != 400:
@@ -700,7 +858,7 @@ class CoordinationAdapter:
                             # was read: not ours to deliver, and not an outage.
                             self._recent_ids.append(message_id)
                             continue
-                        if self._generation != generation:
+                        if self._generation != generation or self._credential_changed(page_credential):
                             stale_page = True
                             break
                         self._recent_ids.append(message_id)
@@ -708,10 +866,10 @@ class CoordinationAdapter:
                                            "sender_id": message["sender_agent_id"],
                                            "recipient_id": message["recipient_agent_id"],
                                            "origin": "agent"})
-                        if self._generation != generation:
+                        if self._generation != generation or self._credential_changed(page_credential):
                             stale_page = True
                             break
-                    if stale_page or self._generation != generation:
+                    if stale_page or self._generation != generation or self._credential_changed(page_credential):
                         continue
                     self._after = next_after if next_after is not None else self._after
                     self._backoff_level = 0
