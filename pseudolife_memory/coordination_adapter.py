@@ -66,30 +66,12 @@ def _private_fd(fd: int, path: Path) -> None:
     if os.name != "nt":
         os.fchmod(fd, 0o600)
         return
-    # chmod does not restrict a Windows ACL. Grant only the file owner access,
-    # and protect this DACL from inherited directory permissions before secrets.
-    import ctypes
-    from ctypes import wintypes
+    from .credentials import CredentialError, _secure_windows_file
 
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
-    convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
-                        ctypes.POINTER(wintypes.DWORD)]
-    convert.restype = wintypes.BOOL
-    apply = advapi.SetFileSecurityW
-    apply.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
-    apply.restype = wintypes.BOOL
-    kernel.LocalFree.argtypes = [ctypes.c_void_p]
-    descriptor = ctypes.c_void_p()
-    if not convert("D:P(A;;FA;;;OW)", 1, ctypes.byref(descriptor), None):
-        raise AdapterError("cannot secure adapter state")
     try:
-        if not apply(str(path), 0x80000004, descriptor):
-            raise AdapterError("cannot secure adapter state")
-    finally:
-        kernel.LocalFree(descriptor)
-
+        _secure_windows_file(path)
+    except CredentialError as error:
+        raise AdapterError("cannot secure adapter state") from error
 
 def _open_state(path: Path, flags: int) -> int:
     if path.is_symlink():

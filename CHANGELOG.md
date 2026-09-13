@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-14 — Windows credential ownership)
+- Newly created credential and coordination state files belong to the current user even
+  when Windows defaults elevated processes to group ownership. Existing files
+  still require private permissions and current-user ownership before rotation.
+
 ### Fixed (2026-09-13 — client authentication recovery)
 - Codex setup connects the shim and lifecycle hooks to one private credential
   file. Running clients reload changes without replaying failed tool calls;

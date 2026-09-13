@@ -66,6 +66,46 @@ def _secure_windows_file(path: Path) -> None:
 
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    class TOKEN_USER(ctypes.Structure):
+        _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
+
+    open_token = advapi.OpenProcessToken
+    open_token.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                           ctypes.POINTER(wintypes.HANDLE)]
+    open_token.restype = wintypes.BOOL
+    get_token = advapi.GetTokenInformation
+    get_token.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p,
+                          wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    get_token.restype = wintypes.BOOL
+    sid_to_string = advapi.ConvertSidToStringSidW
+    sid_to_string.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+    sid_to_string.restype = wintypes.BOOL
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    token_handle = wintypes.HANDLE()
+    if not open_token(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token_handle)):
+        raise CredentialError("credential file owner could not be determined")
+    sid_text = wintypes.LPWSTR()
+    try:
+        needed = wintypes.DWORD()
+        get_token(token_handle, 1, None, 0, ctypes.byref(needed))
+        if not needed.value:
+            raise CredentialError("credential file owner could not be determined")
+        token_buffer = ctypes.create_string_buffer(needed.value)
+        if not get_token(token_handle, 1, token_buffer, needed, ctypes.byref(needed)):
+            raise CredentialError("credential file owner could not be determined")
+        user_sid = ctypes.cast(token_buffer, ctypes.POINTER(TOKEN_USER)).contents.Sid
+        if not sid_to_string(user_sid, ctypes.byref(sid_text)):
+            raise CredentialError("credential file owner could not be determined")
+        # Elevated tokens can default new file ownership to Administrators.
+        # Pin TokenUser explicitly; protecting the DACL alone retains that owner.
+        sddl = f"O:{sid_text.value}D:P(A;;FA;;;OW)"
+    finally:
+        if sid_text:
+            kernel.LocalFree(sid_text)
+        kernel.CloseHandle(token_handle)
     convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
     convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
                         ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.DWORD)]
@@ -75,10 +115,10 @@ def _secure_windows_file(path: Path) -> None:
     apply.restype = wintypes.BOOL
     kernel.LocalFree.argtypes = [ctypes.c_void_p]
     descriptor = ctypes.c_void_p()
-    if not convert("D:P(A;;FA;;;OW)", 1, ctypes.byref(descriptor), None):
+    if not convert(sddl, 1, ctypes.byref(descriptor), None):
         raise CredentialError("credential file permissions could not be protected")
     try:
-        if not apply(str(path), 0x80000004, descriptor):
+        if not apply(str(path), 0x80000005, descriptor):
             raise CredentialError("credential file permissions could not be protected")
     finally:
         kernel.LocalFree(descriptor)

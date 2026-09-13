@@ -19,6 +19,73 @@ def private_token(path: Path, token: str) -> None:
     _write_token_file(path, token)
 
 
+@pytest.mark.parametrize("writer", ["credential", "coordination"])
+def test_windows_writer_assigns_token_user_before_protecting_file(monkeypatch, writer):
+    """Model an elevated token whose default file owner is a group."""
+    import ctypes
+    from types import SimpleNamespace
+
+    from pseudolife_memory.credentials import _secure_windows_file
+
+    user_sid = "S-1-5-21-100-200-300-1001"
+    state = {"owner": "S-1-5-32-544", "protected": False}
+    buffers = []
+
+    def convert_descriptor(sddl, revision, output, size):
+        state["descriptor"] = sddl
+        ctypes.cast(output, ctypes.POINTER(ctypes.c_void_p))[0] = 123
+        return True
+
+    def apply_security(path, flags, descriptor):
+        sddl = state["descriptor"]
+        if flags & 1:
+            state["owner"] = sddl.split("O:", 1)[1].split("D:", 1)[0]
+        state["protected"] = bool(flags & 0x80000004 == 0x80000004)
+        return True
+
+    def open_token(process, access, output):
+        ctypes.cast(output, ctypes.POINTER(ctypes.c_void_p))[0] = 456
+        return True
+
+    def get_token(handle, info_class, buffer, length, needed):
+        # TokenUser, not TokenOwner: the latter would keep the group owner.
+        assert info_class == 1
+        ctypes.cast(needed, ctypes.POINTER(ctypes.c_ulong))[0] = 32
+        if buffer is None:
+            return False
+        ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0] = 789
+        return True
+
+    def sid_to_string(sid, output):
+        assert sid == 789
+        buffer = ctypes.create_unicode_buffer(user_sid)
+        buffers.append(buffer)
+        ctypes.cast(output, ctypes.POINTER(ctypes.c_void_p))[0] = ctypes.addressof(buffer)
+        return True
+
+    def success(*args):
+        return True
+
+    advapi = SimpleNamespace(
+        ConvertStringSecurityDescriptorToSecurityDescriptorW=convert_descriptor,
+        SetFileSecurityW=apply_security, OpenProcessToken=open_token,
+        GetTokenInformation=get_token, ConvertSidToStringSidW=sid_to_string)
+    kernel = SimpleNamespace(LocalFree=success, CloseHandle=success,
+                             GetCurrentProcess=success)
+    monkeypatch.setattr(ctypes, "WinDLL",
+                        lambda name, **kwargs: advapi if name == "advapi32" else kernel,
+                        raising=False)
+    if writer == "coordination":
+        from pseudolife_memory import coordination_adapter
+        monkeypatch.setattr(coordination_adapter, "os", SimpleNamespace(name="nt"))
+        coordination_adapter._private_fd(-1, Path("new-identity-file"))
+    else:
+        _secure_windows_file(Path("new-credential-file"))
+    assert state["owner"] == user_sid
+    assert state["protected"]
+    assert state["descriptor"].endswith("D:P(A;;FA;;;OW)")
+
+
 def test_static_snapshot_is_frozen_stable_and_secret_free() -> None:
     provider = CredentialProvider(token="fixture-secret")
     first = provider.snapshot()

@@ -700,7 +700,8 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
               "if [ \"$PSEUDOLIFE_MCP_TOKEN\" = ambient-static-token ] && "
               "[ \"$PSEUDOLIFE_MCP_TOKEN_FILE\" = \"$FIXTURE_AMBIENT_FILE\" ] && "
               "[ \"$PSEUDOLIFE_MCP_DAEMON_URL\" = http://127.0.0.1:4321 ]; then restored=1; fi\n"
-              "printf 'RESULT:%s:%s\\n' \"$MCP_CODEX\" \"$restored\"\n")
+              "printf 'RESULT:%s:%s\\n' \"$MCP_CODEX\" \"$restored\"\n",
+        encoding="utf-8")
     home = tmp_path / "home"
     ambient = tmp_path / "ambient-token"
     from pseudolife_memory.credentials import CredentialProvider, _write_token_file
