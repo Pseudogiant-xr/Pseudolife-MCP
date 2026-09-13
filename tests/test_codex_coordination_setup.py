@@ -119,6 +119,33 @@ def test_enable_verifies_effective_values_after_write(tmp_path, monkeypatch):
         setup.configure(Overridden(tmp_path), tmp_path, tmp_path, "enable")
 
 
+def test_coordination_route_exposes_authenticated_readiness_boundary():
+    from pseudolife_memory.web.api import build_console_app
+    from pseudolife_memory.web.fixtures import FixtureService
+    from tests.asgi_helpers import call, stub_mcp
+
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["agent-user"]
+    app = build_console_app(stub_mcp, None, lambda: {}, service, token_map={
+        "fixture-secret": "agent-user", "denied-secret": "denied-user"})
+
+    def headers(token):
+        return [(b"authorization", ("Bearer " + token).encode()),
+                (b"content-type", b"application/json")]
+    status, body = call(app, "POST", "/api/coordination/agents", body=b"{}", headers=[
+        (b"authorization", b"Bearer fixture-secret"),
+        (b"content-type", b"application/json")])
+    assert status == 401
+    assert json.loads(body) == {"error": "instance_authentication_required"}
+    status, body = call(app, "POST", "/api/coordination/agents", body=b"{}",
+                        headers=headers("bad-secret"))
+    assert status == 401 and json.loads(body)["error"] == "unauthorized"
+    status, body = call(app, "POST", "/api/coordination/agents", body=b"{}",
+                        headers=headers("denied-secret"))
+    assert status == 403 and json.loads(body)["error"] == "principal_not_allowed"
+
+
 def test_probe_uses_authenticated_read_only_gate(monkeypatch):
     from urllib.error import HTTPError
     import io
@@ -126,7 +153,7 @@ def test_probe_uses_authenticated_read_only_gate(monkeypatch):
 
     def respond(request, timeout):
         seen.append(request)
-        raise HTTPError(request.full_url, 400, "Bad Request", {},
+        raise HTTPError(request.full_url, 401, "Unauthorized", {},
                         io.BytesIO(b'{"error":"instance_authentication_required"}'))
 
     monkeypatch.setattr(setup, "urlopen", respond)
@@ -135,6 +162,24 @@ def test_probe_uses_authenticated_read_only_gate(monkeypatch):
     assert seen[0].data == b"{}"
     assert seen[0].get_header("Authorization") == "Bearer fixture-token"
     assert not setup.probe("http://user:password@127.0.0.1:8765", "fixture-token")
+
+
+@pytest.mark.parametrize(("status", "body"), [
+    (400, b'{"error":"instance_authentication_required"}'),
+    (401, b'{"error":"authentication_required"}'),
+    (401, b'{"error":"unauthorized"}'),
+    (403, b'{"error":"principal_not_allowed"}'),
+    (401, b'not-json'),
+])
+def test_probe_rejects_other_status_and_error_pairs(monkeypatch, status, body):
+    from urllib.error import HTTPError
+    import io
+
+    def respond(request, timeout):
+        raise HTTPError(request.full_url, status, "fixture", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(setup, "urlopen", respond)
+    assert not setup.probe("http://127.0.0.1:8765", "fixture-token")
 
 
 def test_real_codex_config_writer_preserves_other_settings(tmp_path, monkeypatch):
@@ -156,7 +201,7 @@ def test_real_codex_config_writer_preserves_other_settings(tmp_path, monkeypatch
         def do_POST(self):
             seen.append(self.path)
             self.rfile.read(int(self.headers.get("Content-Length", "0")))
-            self.send_response(400)
+            self.send_response(401)
             self.end_headers()
             self.wfile.write(b'{"error":"instance_authentication_required"}')
 

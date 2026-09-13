@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-13 — Codex coordination readiness)
+- The Codex coordination setup helper now recognizes the daemon's authenticated
+  instance-credential challenge as readiness, so an enabled and allowed bearer
+  principal no longer reports that the daemon is unavailable.
+
 ### Fixed (2026-09-12 — interrupted legacy imports)
 - Repairing a failed legacy import preserves source entries even when daemon
   writes have identical text and timestamps. New imports commit each entry and
