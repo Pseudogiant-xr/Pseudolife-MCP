@@ -199,7 +199,18 @@ export async function renderGraph(root, ctx) {
         api.get("/api/graph/review", { scope: state.scope }),
         api.get("/api/curation/duplicates").catch(() => null),
       ]);
-      mount(reviewHost, reviewPanel(rd, (f) => actOnFinding(f)),
+      const recheck = el("button", { class: "btn sm", onclick: async () => {
+        recheck.disabled = true;
+        try {
+          const result = await api.post("/api/graph/rejudge", { limit: 32 });
+          if (result.error) throw new Error(result.error);
+          toast(`${result.requeued} pending opinions queued for re-evaluation`, "ok");
+          await loadReview();
+        } catch (err) { toast(err.message, "bad"); recheck.disabled = false; }
+      } }, "Re-evaluate pending opinions");
+      mount(reviewHost, el("div", { class: "toolbar" }, recheck,
+              el("span", { class: "dim" }, "Up to 32 at a time; your completed decisions stay closed.")),
+            reviewPanel(rd, (f) => actOnFinding(f)),
             curationPanel(cd, (f) => actOnFinding(f)));
     } catch (err) { mount(reviewHost, errorBlock(err)); }
   }

@@ -16,8 +16,9 @@ const CHIP = { background: "var(--bg-2)", padding: "2px 7px",
 
 export function reviewPanel(data, onAct) {
   const findings = (data && data.findings) || [];
-  const recent = recentMerges((data && data.recent_merges) || [],
-    data && data.merge_decision_stats);
+  const recent = el("div", {},
+    recentMerges((data && data.recent_merges) || [], data && data.merge_decision_stats),
+    recentAutomaticDecisions((data && data.automatic_decisions) || []));
   if (!findings.length) {
     return panel("Review queue",
       el("div", {},
@@ -34,6 +35,18 @@ export function reviewPanel(data, onAct) {
 }
 
 // Read-only audit list: who folded / rejected which near-duplicate, and when.
+function recentAutomaticDecisions(rows) {
+  if (!rows.length) return null;
+  return el("div", { style: { marginTop: "10px" } },
+    el("div", { class: "eyebrow" }, "Recent automatic decisions"),
+    rows.map((row) => el("div", { style: { marginTop: "4px", fontSize: "12px" } },
+      el("span", {}, `${row.queue} · ${row.action} · `),
+      badge(String(row.state || "").replace(/_/g, " ")),
+      " ", dim(row.pair ? row.pair.join(" / ") : `proposal ${row.proposal_id}`),
+      " ", dim(row.end_reason),
+      " ", dim(fmtAge(row.ended_at || row.recorded_at)))));
+}
+
 function recentMerges(rows, stats) {
   const rate = stats && stats.total
     ? dim(`accept rate ${Math.round(stats.accept_rate * 100)}% `
@@ -211,6 +224,11 @@ function findingRow(f, onAct) {
       badge(String(f.type || "").replace(/_/g, " ")),
       el("span", { style: { fontWeight: "500" } }, f.label),
       el("span", { style: { marginLeft: "auto", display: "flex", gap: "6px" } }, buttons || null)),
+    f.automation ? el("div", { style: { marginTop: "6px" } },
+      badge(({ unfiled: "Waiting to be queued", pending: "Queued",
+        terminal: "Already decided", gated: "Automation paused",
+        manual: "Manual review" })[f.automation.state] || f.automation.state),
+      " ", dim(f.automation.reason)) : null,
     el("div", { style: { marginTop: "6px" } }, inner));
 
   if (SELECTABLE.has(f.type)) {

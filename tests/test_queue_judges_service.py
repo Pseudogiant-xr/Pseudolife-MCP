@@ -74,6 +74,7 @@ class _JunkJudge:
 
 class _SlotJudge:
     model = "stub-slot-judge"
+    served_model = "stub-slot-judge"
 
     def __init__(self, verdicts):
         self._v = verdicts            # {frozenset(a_key,b_key): (verdict, keep, fold, conf)}
@@ -95,6 +96,7 @@ class _MergeJudge:
     second opinion — so two-vote agreement can be scripted."""
 
     model = "stub-merge-judge"
+    served_model = "stub-merge-judge"
 
     def __init__(self, *rounds):
         self._rounds = list(rounds)   # [{(from, into): (verdict, conf)}, ...]
@@ -113,6 +115,7 @@ class _MergeJudge:
 
 
 class _CandidateJudge:
+    served_model = "stub-candidate-judge"
     model = "stub-candidate-judge"
 
     def __init__(self, verdicts):
@@ -294,7 +297,10 @@ def test_junk_judge_auto_keeps_and_deletes_under_evidence_bar(svc):
         "rich thing / other": ("delete", 0.99),
     })
     out = svc.deep_dream_judge_junk(judge)
-    assert out["judged"] == 3 and out["applied"] == 2
+    assert out["judged"] == 2 and out["applied"] == 2
+    # A structural delete invalidates the remaining batch projection. The
+    # next sweep evaluates that row against the changed graph.
+    assert svc.deep_dream_judge_junk(judge)["judged"] == 1
     st = svc._storage
     assert st.get_entity_proposal(keep_pid)["status"] == "rejected"
     assert st.get_entity_proposal(keep_pid)["decided_by"] == "dream-judge"
@@ -350,17 +356,22 @@ def test_curation_judge_duplicate_waits_in_auto_distinct_and_forgets_in_auto(svc
     judge2 = _SlotJudge({pair: ("duplicate", "a", None, 0.95)})
     assert svc.deep_dream_judge_curation(judge2)["judged"] == 0
     assert judge2.seen == []
-    # auto mode applies the memoised duplicate: loser forgotten, fold carried
+    # Auto mode never writes judge-authored prose. The invented fold is kept
+    # as an opinion for review, while both original records remain live.
     cfg.curation_judge_mode = "auto"
     cfg.curation_rejudge_days = 0                                    # memo expired
     out = svc.deep_dream_judge_curation(judge)
+    assert out["applied"] == 0
+    assert len(svc._lessons.current_records()) == 2
+    # With no invented fold, this exact-text class is safe to retire.
+    out = svc.deep_dream_judge_curation(judge2)
     assert out["applied"] == 1
     recs = {r.key: r for r in svc._lessons.current_records()}
     keys = {"|".join(k) for k in recs}
     assert "deploy-daemon-to-homelab-host|approach" in keys
     assert "deploy-the-daemon-to-the-host|pitfall" not in keys
     survivor = recs[("deploy-daemon-to-homelab-host", "approach")]
-    assert "carry the backup step" in survivor.value
+    assert survivor.value == _DUP
 
 
 # ── merge judge: second opinion + guarded auto-accept ─────────────────────
@@ -413,6 +424,7 @@ def test_second_opinion_two_vote_reject_applies_below_single_gate(svc):
 
 class _SecondJudge(_MergeJudge):
     model = "stub-merge-judge-2"
+    served_model = "stub-merge-judge-2"
 
 
 def test_auto_mode_accepts_only_two_vote_non_low_differential(svc):
@@ -470,7 +482,12 @@ def test_auto_mode_refuses_same_model_second_vote_and_name_vetoes(svc):
             "UPDATE entity_proposals SET judge2_verdict = NULL WHERE id = %s", (row,))
     svc._storage.conn.commit()
     out = svc.deep_dream_judge(judge, second_extractor=second)
-    assert out["auto_accepted"] == 1 and out["auto_accept_refused"] == 1
+    assert out["auto_accepted"] == 1
+    # The fold changes differential evidence: defer the remaining row to
+    # a fresh first opinion, then exercise its name veto on the second.
+    following = [svc.deep_dream_judge(judge, second_extractor=second)
+                 for _ in range(2)]
+    assert sum(r.get("auto_accept_refused", 0) for r in following) == 1
     note = _merge_row(svc, variant)["judge_note"]
     # merge_veto (numeric-substitution) screens E4B/E2B before the variant
     # check gets its turn; either name veto is a refusal.
@@ -530,6 +547,8 @@ def test_auto_accept_same_endpoint_never_distinct_even_if_stamp_differs(svc):
             ("claude-opus-5", pid))                        # legacy configured stamp
         svc._storage.conn.commit()
     judge.served_model = "claude-opus-5-20260901"          # dated served id
+    # A changed served identity first invalidates and replaces the old vote.
+    assert svc.deep_dream_judge(judge)["judged"] == 1
     out = svc.deep_dream_judge(judge)                       # ex2 is ex
     assert out["auto_accepted"] == 0 and out["auto_accept_refused"] == 1
     assert "distinct second model" in _merge_row(svc, pid)["judge_note"]
@@ -793,6 +812,10 @@ def test_sweep_runs_every_judge_stage():
         def dream_status(self):
             return {"would_fire": False, "backlog": 0}
 
+        def analyzer_duplicate_tick(self):
+            calls.append("analyzer")
+            return {"fired": True, "filed": 1}
+
         def deep_dream_judge(self):
             calls.append("merge")
             return {"judged": 0}
@@ -814,6 +837,8 @@ def test_sweep_runs_every_judge_stage():
             return {"judged": 0}
 
     out = run_sweep_once(_FakeService())
-    assert calls == ["merge", "links", "junk", "curation", "candidates"]
+    assert calls == ["analyzer", "merge", "links", "junk", "curation", "candidates"]
+    assert out["analyzer_tick"] == {"fired": True, "filed": 1}
+    assert "analyzer_tick" in out["timings"]
     assert out["deep_judge_links"] == {"judged": 1, "applied": 1}
     assert "judge_links" in out["timings"]

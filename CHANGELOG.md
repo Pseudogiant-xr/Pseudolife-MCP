@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-14 — review queue resolution)
+- Settled analyzer link proposals close their matching duplicate findings in
+  the same transaction. Bounded reconciliation covers earlier decisions, and
+  ordinary sweeps file analyzer candidates without waiting for a deep apply.
+- Pending graph opinions are bound to their evidence and judging policy.
+  Changed inputs are re-evaluated and stale replies cannot authorize actions.
+  The Console explains waiting states and can requeue a bounded set of opinions.
+- Tagged automatic rejections and dismissals can reopen on changed evidence or
+  policy; human confirmations and legacy decisions remain closed. The Console
+  exposes the decision audit, and interrupted actions have bounded retry paths.
+- Automatic lesson/world duplicate retirement validates both original records
+  and commits retirement and audit together, leaving the survivor unchanged.
+  Exact-content and metadata checks preserve guidance; model-authored rewrites
+  remain for review. Existing automation defaults are unchanged.
+- A Terra/high diagnostic ladder completed 54 calls across five review categories
+  with no call failures. Its simulated gates still made incorrect decisions outside
+  junk detection, so the run does not justify broader enablement. The tagged
+  evidence contains labels and vote summaries, not private memory text.
+
 ### Fixed (2026-09-13 — Codex coordination readiness)
 - The Codex coordination setup helper now recognizes the daemon's authenticated
   instance-credential challenge as readiness, so an enabled and allowed bearer

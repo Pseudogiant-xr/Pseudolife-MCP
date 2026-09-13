@@ -638,6 +638,7 @@ class MemoryService(DreamOps):
         self._world = None  # WorldCortexStore | None (world-knowledge cortex, v9)
         self._lessons = None  # LessonStore | None (procedural / outcome memory, v10)
         self._lesson_synthesis_recovery = None  # uncertain commit: (inputs, handled IDs)
+        self._slot_curation_recovery = None  # uncertain atomic lesson/world fold
         from pseudolife_memory.memory.hlc import HybridLogicalClock
         self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
         # A late reseed failure leaves the resident stores initialized, but no
@@ -977,6 +978,8 @@ class MemoryService(DreamOps):
         return self._storage
 
     def _ensure_init(self) -> None:
+        from pseudolife_memory.curation_safety import recover_slot_curation
+        recover_slot_curation(self, locked=True)
         self._recover_lesson_synthesis()
         if self._cms is not None:
             if self._hlc_reseed_pending:
@@ -2342,13 +2345,30 @@ class MemoryService(DreamOps):
         # durable. So persist everything else first and re-raise afterwards:
         # the save still fails loudly, it just no longer takes unrelated
         # work down with it.
-        lesson_block: Exception | None = None
+        curation_block: Exception | None = None
+        curation_store = getattr(
+            getattr(self, "_slot_curation_recovery", None), "evidence", None)
+        curation_store = getattr(curation_store, "store", None)
         try:
-            self._recover_lesson_synthesis()
-        except Exception as exc:  # noqa: BLE001 — re-raised after the rest
-            lesson_block = exc
-            logger.error("%s save: lesson snapshot skipped, lesson "
-                         "reconciliation still required (%s)", kind, exc)
+            from pseudolife_memory.curation_safety import recover_slot_curation
+            recover_slot_curation(self, locked=True)
+        except Exception as exc:  # noqa: BLE001 — re-raised after safe arms
+            curation_block = exc
+            logger.error("%s save: %s snapshot skipped, curation "
+                         "reconciliation still required (%s)",
+                         kind, curation_store or "slot-store", exc)
+        curation_blocks_world = (curation_block is not None
+                                 and curation_store != "lesson")
+        curation_blocks_lessons = (curation_block is not None
+                                   and curation_store != "world")
+        lesson_block: Exception | None = None
+        if not curation_blocks_lessons:
+            try:
+                self._recover_lesson_synthesis()
+            except Exception as exc:  # noqa: BLE001 — re-raised after the rest
+                lesson_block = exc
+                logger.error("%s save: lesson snapshot skipped, lesson "
+                             "reconciliation still required (%s)", kind, exc)
         assert self._cms is not None
         # Per-part durations, warned on a slow save: every persist runs
         # under the service lock, so a slow part IS a daemon pause — and
@@ -2396,21 +2416,25 @@ class MemoryService(DreamOps):
                 from pseudolife_memory.storage import sync as _sync
                 _timed("cortex",
                        lambda: _sync.snapshot_cortex(self._cortex, self._storage))
-                if self._world is not None:
+                if self._world is not None and not curation_blocks_world:
                     _timed("world", lambda: _sync.snapshot_world_cortex(
                         self._world, self._storage))
-                if self._lessons is not None and lesson_block is None:
+                if (self._lessons is not None and lesson_block is None
+                        and not curation_blocks_lessons):
                     _timed("lessons", lambda: _sync.snapshot_lessons(
                         self._lessons, self._storage))
             else:
                 _timed("cortex", self._save_cortex)
-                _timed("world", self._save_world)
-                if lesson_block is None:
+                if not curation_blocks_world:
+                    _timed("world", self._save_world)
+                if lesson_block is None and not curation_blocks_lessons:
                     _timed("lessons", self._save_lessons)
             out = _finish({"saved_to": self.config.memory.save_dir,
                            "mode": "postgres+weights", "kind": kind})
             if lesson_block is not None:
                 raise lesson_block
+            if curation_block is not None:
+                raise curation_block
             return out
         _timed("bank", lambda: self._cms.save(self.config.memory.save_dir))
         _timed("cortex", self._save_cortex)
@@ -3393,6 +3417,14 @@ class MemoryService(DreamOps):
         with self._lock:
             self._ensure_init()
             assert self._world is not None
+            if self._storage is not None:
+                from pseudolife_memory.curation_safety import (
+                    restore_curated_duplicate)
+                restored = restore_curated_duplicate(
+                    self, "world", entity, attribute,
+                    decided_by=decided_by, locked=True)
+                if restored is not None:
+                    return restored
             now = _t.time()
             recs = self._world.restore(entity, attribute)
             if recs:
@@ -3884,6 +3916,14 @@ class MemoryService(DreamOps):
         with self._lock:
             self._ensure_init()
             assert self._lessons is not None
+            if self._storage is not None:
+                from pseudolife_memory.curation_safety import (
+                    restore_curated_duplicate)
+                restored = restore_curated_duplicate(
+                    self, "lesson", task, aspect,
+                    decided_by=decided_by, locked=True)
+                if restored is not None:
+                    return restored
             now = _t.time()
             recs = self._lessons.restore(task, aspect)
             if recs:
@@ -6029,6 +6069,7 @@ class MemoryService(DreamOps):
             src_map = self._storage.entity_sources_map()
             proposals = self._storage.pending_proposals()
             entity_proposals = self._storage.pending_entity_proposals()
+            proposal_states = self._storage.review_proposal_states()
             dismissed = self._storage.dismissed_pairs()
             lesson_ids = self._storage.lesson_entity_ids()
             fact_counts = self._storage.entity_fact_counts()
@@ -6060,12 +6101,62 @@ class MemoryService(DreamOps):
                         entity_proposals=entity_proposals,
                         dismissed_pairs=dismissed,
                         lesson_entity_ids=lesson_ids)
+        by_display = {e["display"]: e["id"] for e in entities}
+        counts = {"unfiled": 0, "pending": 0, "gated": 0,
+                  "manual": 0, "terminal": 0}
+        queue_types = {"proposed_link", "merge_candidate", "junk_candidate"}
+        for finding in out["findings"]:
+            ftype = finding.get("type")
+            state, reason = "manual", "no automated filing path"
+            if ftype in queue_types:
+                state, reason = "pending", "filed for review"
+            elif ftype == "duplicate":
+                left, right = finding.get("entities", (None, None))
+                left_id, right_id = by_display.get(left), by_display.get(right)
+                status = None
+                if left_id is not None and right_id is not None:
+                    if finding.get("action") == "relate":
+                        relation = finding.get("suggested_relation") or "related-to"
+                        status = proposal_states["links"].get(
+                            (left_id, relation, right_id))
+                    else:
+                        status = proposal_states["entities"].get(
+                            ("merge", min(left_id, right_id),
+                             max(left_id, right_id)))
+                if status == "pending":
+                    state, reason = "pending", "filed for review"
+                elif status is not None:
+                    state = "terminal"
+                    reason = "already decided; proposal prevents refiling"
+                elif not self.config.memory.deep_dream.judges_enabled:
+                    state, reason = "gated", "review-queue judges disabled"
+                elif not self.config.memory.deep_dream.analyzer_file_duplicates:
+                    state, reason = "gated", "analyzer filing disabled"
+                else:
+                    state, reason = "unfiled", "awaiting bounded analyzer scan"
+            finding["automation"] = {"state": state, "reason": reason}
+            counts[state] += 1
+        out["automation"] = counts
         with self._lock:
             out["recent_merges"] = self._storage.recent_entity_decisions()
             out["merge_decision_stats"] = self._storage.merge_decision_stats()
+            from pseudolife_memory.memory.review_decisions import recent_decisions
+            out["automatic_decisions"] = recent_decisions(self._storage, limit=20)
         return out
 
-    def graph_dismiss_duplicate(self, a: str, b: str) -> dict[str, Any]:
+    def graph_dismiss_duplicate(self, a: str, b: str, *, _review_guard=None) -> dict[str, Any]:
+        """Human verdict on a duplicate finding: these two names are genuinely
+        distinct. Persisted by the ENTITY's stored canonical when the name
+        resolves to a live entity (falling back to ``norm_name``): the
+        analyzer filters on stored canonicals, and an entity minted from a
+        bare name later display-enriched has a canonical ``norm_name`` of the
+        display never reproduces — 'GND (Enshrouded server)' (canonical
+        ``gnd``) re-listed after every dismissal because the two key spaces
+        never met (live bank, 2026-08-16)."""
+        with self._lock:
+            return self._graph_dismiss_duplicate_locked(a, b, _review_guard=_review_guard)
+
+    def _graph_dismiss_duplicate_locked(self, a: str, b: str, *, _review_guard=None) -> dict[str, Any]:
         """Human verdict on a duplicate finding: these two names are genuinely
         distinct. Persisted by the ENTITY's stored canonical when the name
         resolves to a live entity (falling back to ``norm_name``): the
@@ -6078,20 +6169,25 @@ class MemoryService(DreamOps):
         an, bn = G.norm_name(a), G.norm_name(b)
         if not an or not bn or an == bn:
             return {"dismissed": False, "reason": "bad_pair", "a": a, "b": b}
-        with self._lock:
-            self._ensure_init()
-            if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            canon_by_norm: dict[str, str] = {}
-            for e in self._storage.load_graph()["entities"]:
-                canon_by_norm.setdefault(e["canonical"], e["canonical"])
-                canon_by_norm.setdefault(G.norm_name(e["display"]),
-                                         e["canonical"])
-            an = canon_by_norm.get(an, an)
-            bn = canon_by_norm.get(bn, bn)
-            if an == bn:        # both names resolve to one entity: not a pair
-                return {"dismissed": False, "reason": "bad_pair",
-                        "a": a, "b": b}
+        self._ensure_init()
+        if self._storage is None:
+            return dict(self._GRAPH_UNAVAILABLE)
+        if _review_guard is not None and not _review_guard():
+            return {"dismissed": False, "reason": "stale_review"}
+        canon_by_norm: dict[str, str] = {}
+        for e in self._storage.load_graph()["entities"]:
+            canon_by_norm.setdefault(e["canonical"], e["canonical"])
+            canon_by_norm.setdefault(G.norm_name(e["display"]),
+                                     e["canonical"])
+        an = canon_by_norm.get(an, an)
+        bn = canon_by_norm.get(bn, bn)
+        if an == bn:        # both names resolve to one entity: not a pair
+            return {"dismissed": False, "reason": "bad_pair",
+                    "a": a, "b": b}
+        with self._storage.transaction():
+            if _review_guard is None:
+                from pseudolife_memory.memory.review_decisions import confirm_human_pair
+                confirm_human_pair(self._storage, an, bn)
             new = self._storage.dismiss_pair(an, bn)
         return {"dismissed": True, "new": new, "a": a, "b": b}
 
@@ -6113,7 +6209,10 @@ class MemoryService(DreamOps):
             self._ensure_init()
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
-            new = self._storage.dismiss_pair(f"{store}:{a_key}", f"{store}:{b_key}")
+            from pseudolife_memory.curation_safety import (
+                mark_human_curation_dismissal)
+            new = mark_human_curation_dismissal(
+                self._storage, store, a_key, b_key)
         return {"dismissed": True, "new": new, "store": store,
                 "a_key": a_key, "b_key": b_key}
 
@@ -6127,6 +6226,8 @@ class MemoryService(DreamOps):
             self._ensure_init()
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
+            from pseudolife_memory.curation_safety import refresh_auto_dismissals
+            refresh_auto_dismissals(self, locked=True)
             dismissed = self._storage.dismissed_pairs()
             lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
             world_recs = self._curation_records("world", cfg.snippet_max_chars)
@@ -6842,7 +6943,15 @@ class MemoryService(DreamOps):
         return (into, frm) if evidence(frm) > evidence(into) else (frm, into)
 
     def graph_propose_links(self, proposals: list[dict], *,
-                            source: str = "deep-dream") -> dict[str, Any]:
+                            source: str = "deep-dream", _review_guard=None) -> dict[str, Any]:
+        """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
+        production uses (resolve_relation -> closed vocab; edge_confidence; drop hard
+        type-violations) and inserted into edge_proposals — never into edges."""
+        with self._lock:
+            return self._graph_propose_links_locked(proposals, source=source, _review_guard=_review_guard)
+
+    def _graph_propose_links_locked(self, proposals: list[dict], *,
+                            source: str = "deep-dream", _review_guard=None) -> dict[str, Any]:
         """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
         production uses (resolve_relation -> closed vocab; edge_confidence; drop hard
         type-violations) and inserted into edge_proposals — never into edges."""
@@ -6851,179 +6960,236 @@ class MemoryService(DreamOps):
             edge_confidence, is_hard_type_violation)
         import time as _t
         proposed = skipped = 0
-        with self._lock:
-            self._ensure_init()
-            if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            known = [r["name"] for r in self._graph.load_relations()
-                     if r["name"] not in ("prefers", "avoids")]
-            for p in proposals:
-                src, dst = str(p.get("src", "")), str(p.get("dst", ""))
-                resolved, _ = G.resolve_relation(known, str(p.get("relation", "")))
-                relation = resolved or "related-to"
-                if not src or not dst or G.norm_name(src) == G.norm_name(dst) \
-                        or is_hard_type_violation(src, relation, dst):
-                    skipped += 1
-                    continue
-                se = self._resolve_or_create_entity(src)
-                de = self._resolve_or_create_entity(dst)
-                conf = edge_confidence(src, relation, dst)
-                pid = self._storage.insert_proposal(
-                    se["id"], relation, de["id"], conf,
-                    p.get("similarity"), p.get("rationale"), source, _t.time())
-                if pid is not None:
-                    proposed += 1
-                else:
-                    skipped += 1
+        self._ensure_init()
+        if _review_guard is not None and not _review_guard():
+            return {"proposed": 0, "reason": "stale_review"}
+        if self._storage is None:
+            return dict(self._GRAPH_UNAVAILABLE)
+        known = [r["name"] for r in self._graph.load_relations()
+                 if r["name"] not in ("prefers", "avoids")]
+        for p in proposals:
+            src, dst = str(p.get("src", "")), str(p.get("dst", ""))
+            resolved, _ = G.resolve_relation(known, str(p.get("relation", "")))
+            relation = resolved or "related-to"
+            if not src or not dst or G.norm_name(src) == G.norm_name(dst) \
+                    or is_hard_type_violation(src, relation, dst):
+                skipped += 1
+                continue
+            se = self._resolve_or_create_entity(src)
+            de = self._resolve_or_create_entity(dst)
+            conf = edge_confidence(src, relation, dst)
+            pid = self._storage.insert_proposal(
+                se["id"], relation, de["id"], conf,
+                p.get("similarity"), p.get("rationale"), source, _t.time())
+            if pid is not None:
+                proposed += 1
+            else:
+                skipped += 1
         return {"proposed": proposed, "skipped": skipped}
 
     def graph_accept_proposal(self, proposal_id: int, *,
                               decided_by: str | None = None,
-                              relation: str | None = None) -> dict[str, Any]:
+                              relation: str | None = None,
+                              _review_guard=None) -> dict[str, Any]:
+        """Promote a pending link proposal to a live edge. ``relation``
+        overrides the proposed relation (the link judge's retype verdict);
+        the row is then marked ``retyped`` rather than ``accepted`` so the
+        audit shows the edge differs from what was filed."""
+        with self._lock:
+            return self._graph_accept_proposal_locked(proposal_id, decided_by=decided_by, relation=relation, _review_guard=_review_guard)
+
+    def _graph_accept_proposal_locked(self, proposal_id: int, *,
+                              decided_by: str | None = None,
+                              relation: str | None = None,
+                              _review_guard=None) -> dict[str, Any]:
         """Promote a pending link proposal to a live edge. ``relation``
         overrides the proposed relation (the link judge's retype verdict);
         the row is then marked ``retyped`` rather than ``accepted`` so the
         audit shows the edge differs from what was filed."""
         import time as _t
         from pseudolife_memory import graph as G
-        with self._lock:
-            self._ensure_init()
-            if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            prop = self._storage.get_proposal(proposal_id)
-            if prop is None or prop["status"] != "pending":
-                return {"accepted": False, "reason": "not_pending", "id": proposal_id}
-            rel = prop["relation"]
-            status = "accepted"
-            if relation and relation != rel:
-                # The same gate graph_propose_links applies: the lesson
-                # relations are never edge material, and a hard type
-                # violation is never written — a retype is an unattended
-                # write path and must not be looser than the filing one.
-                from pseudolife_memory.memory.relation_quality import (
-                    is_hard_type_violation)
-                registry = [r["name"] for r in self._graph.load_relations()
-                            if r["name"] not in ("prefers", "avoids")]
-                resolved, _ = G.resolve_relation(registry, relation)
-                if resolved is None:
-                    return {"accepted": False, "reason": "unknown_relation",
-                            "id": proposal_id, "relation": relation}
-                disp0 = {e["id"]: e["display"]
-                         for e in self._storage.load_graph()["entities"]}
-                if is_hard_type_violation(disp0.get(prop["src_id"], ""),
-                                          resolved,
-                                          disp0.get(prop["dst_id"], "")):
-                    return {"accepted": False, "reason": "type_violation",
-                            "id": proposal_id, "relation": resolved}
-                rel, status = resolved, "retyped"
-            # A reviewed edge is no longer dubious: floor its confidence above
-            # the dubious_edges threshold AND store it as a confirming action —
-            # origin "agent" would be recaptured by the next apply's
-            # rescore_edges (pure name-based recompute, e.g. related-to back
-            # to 0.45) and re-flagged, undoing the verdict.
-            conf = max(float(prop["confidence"] or 0.0), self._REVIEWED_EDGE_MIN_CONF)
-            self._graph.upsert_edge(prop["src_id"], rel, prop["dst_id"],
-                                    confidence=conf, origin="action")
-            self._storage.set_proposal_status(
-                proposal_id, status, decided_by=decided_by, decided_at=_t.time())
-            disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
+        self._ensure_init()
+        if self._storage is None:
+            return dict(self._GRAPH_UNAVAILABLE)
+        if _review_guard is not None and not _review_guard():
+            return {"accepted": False, "reason": "stale_review",
+                    "id": proposal_id}
+        prop = self._storage.get_proposal(proposal_id)
+        if prop is None or prop["status"] != "pending":
+            return {"accepted": False, "reason": "not_pending", "id": proposal_id}
+        rel = prop["relation"]
+        status = "accepted"
+        if relation and relation != rel:
+            # The same gate graph_propose_links applies: the lesson
+            # relations are never edge material, and a hard type
+            # violation is never written — a retype is an unattended
+            # write path and must not be looser than the filing one.
+            from pseudolife_memory.memory.relation_quality import (
+                is_hard_type_violation)
+            registry = [r["name"] for r in self._graph.load_relations()
+                        if r["name"] not in ("prefers", "avoids")]
+            resolved, _ = G.resolve_relation(registry, relation)
+            if resolved is None:
+                return {"accepted": False, "reason": "unknown_relation",
+                        "id": proposal_id, "relation": relation}
+            disp0 = {e["id"]: e["display"]
+                     for e in self._storage.load_graph()["entities"]}
+            if is_hard_type_violation(disp0.get(prop["src_id"], ""),
+                                      resolved,
+                                      disp0.get(prop["dst_id"], "")):
+                return {"accepted": False, "reason": "type_violation",
+                        "id": proposal_id, "relation": resolved}
+            rel, status = resolved, "retyped"
+        # A reviewed edge is no longer dubious: floor its confidence above
+        # the dubious_edges threshold AND store it as a confirming action —
+        # origin "agent" would be recaptured by the next apply's
+        # rescore_edges (pure name-based recompute, e.g. related-to back
+        # to 0.45) and re-flagged, undoing the verdict.
+        conf = max(float(prop["confidence"] or 0.0), self._REVIEWED_EDGE_MIN_CONF)
+        self._graph.upsert_edge(prop["src_id"], rel, prop["dst_id"],
+                                confidence=conf, origin="action")
+        self._storage.set_proposal_status(
+            proposal_id, status, decided_by=decided_by, decided_at=_t.time())
+        disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
         return {"accepted": True, "src": disp.get(prop["src_id"]),
                 "relation": rel, "dst": disp.get(prop["dst_id"]),
                 "status": status}
 
     def graph_reject_proposal(self, proposal_id: int, *,
-                              decided_by: str | None = None) -> dict[str, Any]:
-        import time as _t
+                              decided_by: str | None = None,
+                              _review_guard=None) -> dict[str, Any]:
         with self._lock:
-            self._ensure_init()
-            if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            ok = self._storage.set_proposal_status(
-                proposal_id, "rejected", decided_by=decided_by,
-                decided_at=_t.time())
+            return self._graph_reject_proposal_locked(proposal_id, decided_by=decided_by, _review_guard=_review_guard)
+
+    def _graph_reject_proposal_locked(self, proposal_id: int, *,
+                              decided_by: str | None = None,
+                              _review_guard=None) -> dict[str, Any]:
+        import time as _t
+        self._ensure_init()
+        if self._storage is None:
+            return dict(self._GRAPH_UNAVAILABLE)
+        if decided_by != "dream-judge":
+            from pseudolife_memory.memory.review_decisions import confirm_human_proposal
+            confirm_human_proposal(self._storage, "link", proposal_id)
+        if _review_guard is not None and not _review_guard():
+            return {"rejected": False, "reason": "stale_review",
+                    "id": proposal_id}
+        ok = self._storage.set_proposal_status(
+            proposal_id, "rejected", decided_by=decided_by,
+            decided_at=_t.time())
         return {"rejected": ok, "id": proposal_id}
 
-    def graph_accept_entity_merge(self, proposal_id: int, *,
-                                  decided_by: str = "human") -> dict[str, Any]:
-        import time as _t
+    def reconcile_analyzer_proposals(self, *, limit: int = 100) -> dict[str, int]:
+        """Backfill source-pair closure for analyzer rows settled before it.
+
+        The storage cursor makes this idempotent across service restarts while
+        preserving a later explicit removal of the pair dismissal.
+        """
         with self._lock:
             self._ensure_init()
             if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            prop = self._storage.get_entity_proposal(proposal_id)
-            if prop is None or prop["status"] != "pending" or prop["kind"] != "merge":
-                return {"accepted": False, "reason": "not_pending", "id": proposal_id}
-            from pseudolife_memory.graph import degree_counts
-            g = self._storage.load_graph()
-            disp = {e["id"]: e["display"] for e in g["entities"]}
-            deg = degree_counts(g["edges"])
-            facts = self._storage.entity_fact_counts()
-            # Same current-evidence rule the enrich payload presented with —
-            # the stored direction can be stale (see _enrich_merge_proposals).
-            frm, into = self._fold_direction(
-                prop["entity_id"], prop["into_id"],
-                lambda eid: deg.get(eid, 0) + facts.get(eid, 0))
-            now = _t.time()
-            # Audit BEFORE the merge: the accepted proposal row CASCADEs away
-            # with the folded entity, so merge_decisions is the durable record.
-            self._storage.record_merge_decision(
-                proposal_id, disp.get(frm, "?"),
-                disp.get(into, "?"), "accepted", prop.get("score"),
-                prop.get("reason"), decided_by, now)
-            ok = self._storage.merge_entity(frm, into)
-            self._storage.set_entity_proposal_status(
-                proposal_id, "accepted", decided_by=decided_by, decided_at=now)
+                return {"considered": 0, "closed": 0, "remaining": 0}
+            return self._storage.reconcile_analyzer_proposals(limit=limit)
+
+    def graph_accept_entity_merge(self, proposal_id: int, *,
+                                  decided_by: str = "human", _review_guard=None) -> dict[str, Any]:
+        with self._lock:
+            return self._graph_accept_entity_merge_locked(proposal_id, decided_by=decided_by, _review_guard=_review_guard)
+
+    def _graph_accept_entity_merge_locked(self, proposal_id: int, *,
+                                  decided_by: str = "human", _review_guard=None) -> dict[str, Any]:
+        import time as _t
+        self._ensure_init()
+        if _review_guard is not None and not _review_guard():
+            return {"accepted": False, "reason": "stale_review", "id": proposal_id}
+        if self._storage is None:
+            return dict(self._GRAPH_UNAVAILABLE)
+        prop = self._storage.get_entity_proposal(proposal_id)
+        if prop is None or prop["status"] != "pending" or prop["kind"] != "merge":
+            return {"accepted": False, "reason": "not_pending", "id": proposal_id}
+        from pseudolife_memory.graph import degree_counts
+        g = self._storage.load_graph()
+        disp = {e["id"]: e["display"] for e in g["entities"]}
+        deg = degree_counts(g["edges"])
+        facts = self._storage.entity_fact_counts()
+        # Same current-evidence rule the enrich payload presented with —
+        # the stored direction can be stale (see _enrich_merge_proposals).
+        frm, into = self._fold_direction(
+            prop["entity_id"], prop["into_id"],
+            lambda eid: deg.get(eid, 0) + facts.get(eid, 0))
+        now = _t.time()
+        # Audit BEFORE the merge: the accepted proposal row CASCADEs away
+        # with the folded entity, so merge_decisions is the durable record.
+        self._storage.record_merge_decision(
+            proposal_id, disp.get(frm, "?"),
+            disp.get(into, "?"), "accepted", prop.get("score"),
+            prop.get("reason"), decided_by, now)
+        ok = self._storage.merge_entity(frm, into)
+        self._storage.set_entity_proposal_status(
+            proposal_id, "accepted", decided_by=decided_by, decided_at=now)
         return {"accepted": ok, "from": disp.get(frm),
                 "into": disp.get(into)}
 
     def graph_accept_entity_junk(self, proposal_id: int, *,
-                                 decided_by: str = "human") -> dict[str, Any]:
-        import time as _t
+                                 decided_by: str = "human", _review_guard=None) -> dict[str, Any]:
         with self._lock:
-            self._ensure_init()
-            if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            prop = self._storage.get_entity_proposal(proposal_id)
-            if prop is None or prop["status"] != "pending" or prop["kind"] != "junk":
-                return {"accepted": False, "reason": "not_pending", "id": proposal_id}
-            disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
-            # Audit BEFORE the delete, like the merge path: the proposal row
-            # CASCADEs away with the entity, so the merge_decisions row
-            # (into_display NULL = junk) is the only durable record — and the
-            # TOMBSTONE that lets the deep dream auto-suppress a re-mint of
-            # the same name instead of re-queueing it for a second verdict.
-            self._storage.record_merge_decision(
-                proposal_id, disp.get(prop["entity_id"], "?"), None,
-                "accepted", prop.get("score"),
-                f"junk: {prop.get('reason')}", decided_by, _t.time())
-            ok = self._storage.delete_entity(prop["entity_id"])
-            self._storage.set_entity_proposal_status(
-                proposal_id, "accepted", decided_by=decided_by,
-                decided_at=_t.time())
+            return self._graph_accept_entity_junk_locked(proposal_id, decided_by=decided_by, _review_guard=_review_guard)
+
+    def _graph_accept_entity_junk_locked(self, proposal_id: int, *,
+                                 decided_by: str = "human", _review_guard=None) -> dict[str, Any]:
+        import time as _t
+        self._ensure_init()
+        if _review_guard is not None and not _review_guard():
+            return {"accepted": False, "reason": "stale_review", "id": proposal_id}
+        if self._storage is None:
+            return dict(self._GRAPH_UNAVAILABLE)
+        prop = self._storage.get_entity_proposal(proposal_id)
+        if prop is None or prop["status"] != "pending" or prop["kind"] != "junk":
+            return {"accepted": False, "reason": "not_pending", "id": proposal_id}
+        disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
+        # Audit BEFORE the delete, like the merge path: the proposal row
+        # CASCADEs away with the entity, so the merge_decisions row
+        # (into_display NULL = junk) is the only durable record — and the
+        # TOMBSTONE that lets the deep dream auto-suppress a re-mint of
+        # the same name instead of re-queueing it for a second verdict.
+        self._storage.record_merge_decision(
+            proposal_id, disp.get(prop["entity_id"], "?"), None,
+            "accepted", prop.get("score"),
+            f"junk: {prop.get('reason')}", decided_by, _t.time())
+        ok = self._storage.delete_entity(prop["entity_id"])
+        self._storage.set_entity_proposal_status(
+            proposal_id, "accepted", decided_by=decided_by,
+            decided_at=_t.time())
         return {"accepted": ok, "entity": disp.get(prop["entity_id"])}
 
     def graph_reject_entity_proposal(self, proposal_id: int, *,
-                                     decided_by: str = "human") -> dict[str, Any]:
-        import time as _t
+                                     decided_by: str = "human", _review_guard=None) -> dict[str, Any]:
         with self._lock:
-            self._ensure_init()
-            if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            now = _t.time()
-            prop = self._storage.get_entity_proposal(proposal_id)
+            return self._graph_reject_entity_proposal_locked(proposal_id, decided_by=decided_by, _review_guard=_review_guard)
+
+    def _graph_reject_entity_proposal_locked(self, proposal_id: int, *,
+                                     decided_by: str = "human", _review_guard=None) -> dict[str, Any]:
+        import time as _t
+        self._ensure_init()
+        if _review_guard is not None and not _review_guard():
+            return {"rejected": False, "reason": "stale_review", "id": proposal_id}
+        if self._storage is None:
+            return dict(self._GRAPH_UNAVAILABLE)
+        now = _t.time()
+        prop = self._storage.get_entity_proposal(proposal_id)
+        if prop and decided_by != "dream-judge":
+            from pseudolife_memory.memory.review_decisions import confirm_human_proposal
+            confirm_human_proposal(self._storage, prop["kind"], proposal_id)
+        if prop is None or prop.get("status") != "pending":
+            return {"rejected": False, "reason": "not_pending", "id": proposal_id}
+        with self._storage.transaction():
             ok = self._storage.set_entity_proposal_status(
                 proposal_id, "rejected", decided_by=decided_by, decided_at=now)
-            if ok and prop is not None:
+            if ok:
                 g = self._storage.load_graph()
                 disp = {e["id"]: e["display"] for e in g["entities"]}
                 canon = {e["id"]: e["canonical"] for e in g["entities"]}
-                # The verdict outlives the row: entity_proposals CASCADEs
-                # with its entity, so the durable record is the FK-free
-                # merge_decisions row plus a TEXT-keyed tombstone in
-                # dismissed_pairs (stored canonicals, the key every filing
-                # gate consults) — a merge reject means "distinct", a junk
-                # reject means "keep", and neither is re-filed after the
-                # entity churns and re-mints.
+                # Status, audit and pair closure are one durable decision.
                 if prop.get("kind") == "merge":
                     self._storage.record_merge_decision(
                         proposal_id, disp.get(prop["entity_id"], "?"),

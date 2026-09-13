@@ -205,6 +205,19 @@ def test_graph_review_route(svc):
     assert any(f["action"] == "merge" for f in out["findings"])
 
 
+def test_review_rejudge_route_preserves_queue_and_bound(svc, monkeypatch):
+    calls = []
+    def rejudge(queue, *, limit):
+        calls.append((queue, limit))
+        return {"requeued": limit, "queues": {queue: limit}, "limit": limit}
+    monkeypatch.setattr(svc, 'review_rejudge', rejudge, raising=False)
+    routes = ConsoleRoutes(svc)
+    result = routes.dispatch('POST', '/api/graph/rejudge', {}, {'queue': 'link', 'limit': 2})
+    assert calls == [('link', 2)] and result['requeued'] == 2
+    routes.dispatch('POST', '/api/graph/rejudge', {}, {})
+    assert calls[-1] == ('all', 32)
+
+
 @pytest.mark.parametrize("path,body,expected", [
     ("/api/graph/bless-edge", {"src": "a", "relation": "uses", "dst": "b"},
      {"blessed": True}),

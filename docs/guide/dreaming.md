@@ -734,16 +734,27 @@ because the first ladder scored the judge's relation choice at 0/1; edges
 are reversible, which is why this queue may run auto), the **junk judge**
 (`junk_judge_mode`; `auto` deletes only under an evidence bar), the
 **store-curation judge** (`curation_judge_mode`; `auto-distinct` applies
-the reversible dismissal, `auto` also retires — never deletes — the losing
-duplicate slot after folding its carry-over into the survivor), and the
-**Step-C candidate judge** (`candidate_judge_mode`, defaulting to `off`;
-after each deep apply, works through that apply's candidates one
+the reversible dismissal, `auto` also retires — never deletes — a losing
+duplicate slot only when conservative content and metadata checks pass).
+Lessons must have matching guidance categories and case-sensitive text, ignoring
+outer whitespace. Substring
+containment is not enough because a condition, negation or correction can change
+the meaning. Model-invented rewrites stay in review. The survivor stays unchanged;
+the loser's support and provenance remain in its retired row and audit, so an undo
+restores the exact pair. Both records are checked again after inference;
+the retirement and audit commit atomically before the resident state changes.
+The **Step-C candidate judge** (`candidate_judge_mode`, defaulting to `off`)
+works through a deep apply's candidates one
 `judge_batch` slice per sweep tick — `propose` files an edge proposal and
 `dismiss` marks the pair distinct, and every judged pair is memoised for
-`candidate_rejudge_days`). Two mechanical additions stop the queues
-refilling: each apply files the Console's live analyzer duplicate findings
-into the merge and link queues (`analyzer_file_duplicates`, on by default)
-and — once you switch it on — deletes week-old entities that carry no
+`candidate_rejudge_days`. Two mechanical additions stop the queues
+refilling: ordinary sweeps file a bounded slice of the Console's analyzer
+duplicate findings into the merge and link queues (`analyzer_file_duplicates`,
+on by default); a deep apply still performs its full pass. Settling an analyzer
+link also closes its duplicate finding, with bounded reconciliation for earlier
+terminal decisions. `judges_enabled=false` also stops this ordinary-sweep
+filing and reconciliation; explicit deep apply retains its separate switches.
+The optional orphan sweep, once enabled, deletes week-old entities that carry no
 evidence and no mention at all (`orphan_sweep`, off by default, at most
 `orphan_max_per_apply` per pass: it is the one destructive switch that
 would fire on the first apply after an upgrade). Which models
@@ -752,6 +763,38 @@ merge judge against ratified triage verdicts
 (`evals/results/judge-ladder-20260816.json`) and `evals/queue_judge_ladder.py`
 scores every queue's judge against the 2026-09-02 blind-panel set
 (`evals/results/queue-judge-panel-20260902.json`), simulating each auto gate.
+
+Pending judgments are bound to the evidence and policy that produced them.
+Changing the model, prompt, mode or supplied evidence invalidates an old opinion;
+an in-flight reply cannot authorize an action on changed evidence. This does not
+reopen a completed human decision. The Console's **Re-evaluate pending opinions**
+button queues up to 32 opinions for the next sweep. Operators can use
+`POST /api/graph/rejudge` with `{"queue":"all","limit":32}`; supported queues
+are `merge`, `link`, `junk`, `curation` and `candidate`, with a total limit of
+1–100. It queues work without changing automation modes or immediately calling
+a model.
+
+New automatic rejections and pair dismissals also retain the evidence and policy
+behind the decision. A bounded sweep can reopen them when those inputs change;
+candidate dismissals follow their endpoint evidence, so unrelated memory traffic
+does not refill the queue. A human confirmation keeps the decision closed.
+Legacy decisions without this provenance remain closed, and completed merges or
+deletions are never undone automatically. The Console shows the latest 20
+graph automatic decisions and reconsiderations; older records remain in the durable
+audit. Judge results include reconsideration counts even when no new model call
+is needed. An unverified model identity defers a candidate or curation action
+without repeatedly calling the model; explicit re-evaluation can retry it.
+
+A duplicate retirement can be undone through the existing lesson/world restore
+action. If an entity has both curated and other retired slots, restore a specific
+attribute so each curated undo can validate and commit its complete pre-image.
+
+Each graph finding reports whether it is unfiled, pending, already decided,
+gated or requires manual review. These counts are mutually exclusive. A weak
+connection, a test-like name or low edge confidence is not
+by itself authorization to remove information. Those cases retain their reason
+for review unless an existing, separately guarded maintenance path applies.
+
 The same need signal rides `memory_dream(action="status")` as the
 `deep_dream: {recommended, reason, ...}` block — a harness-agnostic
 nudge any MCP client can surface to its user when a triage session is
