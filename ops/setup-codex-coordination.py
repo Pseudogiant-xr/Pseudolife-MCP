@@ -48,7 +48,7 @@ def probe(url, token):
                 return False  # Disabled coordination returns 200 without checking identity.
         except HTTPError as error:
             with error:
-                return (error.code == 400 and json.loads(error.read(4096)).get("error")
+                return (error.code == 401 and json.loads(error.read(4096)).get("error")
                         == "instance_authentication_required")
     except Exception:
         return False  # Never expose a credential-bearing URL or transport exception.
