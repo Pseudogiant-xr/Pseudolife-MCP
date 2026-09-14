@@ -499,8 +499,8 @@ class DeepDreamConfig:
     # at mean >= judge_reject_min_confidence_2); "auto" = additionally
     # fold a pair on two agreeing accepts from DIFFERENT models on
     # non-low-differential evidence (the only path that applies an
-    # accept). Note a wrong auto-reject also writes dismissed_pairs, which
-    # has no expiry. Mode gates per the judge ladders
+    # accept). Automatic rejections are bound to their evidence and policy;
+    # human decisions remain closed. Mode gates per the judge ladders
     # (evals/judge_ladder.py, evals/queue_judge_ladder.py).
     judge_mode: str = "shadow"           # off | shadow | auto-reject | auto
     judge_batch: int = 8                 # proposals judged per sweep (one model call)
@@ -522,10 +522,9 @@ class DeepDreamConfig:
     judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)
     # One switch for every judge stage below (merge, link, junk, curation,
     # candidates): False makes each return {"skipped": "judges_disabled"}
-    # without reading a queue — the documented "turn it all off" for an
-    # operator who wants the mechanical tick but no model verdicts. The
-    # two apply-time mechanics have their own switches
-    # (analyzer_file_duplicates, orphan_sweep).
+    # without reading a queue. Also stops ordinary-sweep analyzer filing
+    # and terminal reconciliation. Explicit deep apply mechanics retain
+    # their own switches (analyzer_file_duplicates, orphan_sweep).
     judges_enabled: bool = True
     # Review-queue autonomy (2026-09-02 design, docs/superpowers/specs/
     # 2026-09-02-review-queue-autonomy-design.md). Every gate below is

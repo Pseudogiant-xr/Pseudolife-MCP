@@ -324,10 +324,10 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Review-queue judges (all)", "type": "bool", "default": True,
      "restart": False,
      "help": "The one switch for every judge stage (merge, link, junk, "
-             "store-curation, candidates): off = no model verdicts at all, "
-             "the mechanical tick keeps running. The two apply-time "
-             "mechanics keep their own switches (analyzer_file_duplicates, "
-             "orphan_sweep)."},
+             "store-curation, candidates): off stops model verdicts and "
+             "ordinary-sweep analyzer filing and decision reconciliation. "
+             "Explicit deep apply mechanics retain their own switches "
+             "(analyzer_file_duplicates, orphan_sweep)."},
     {"path": "memory.deep_dream.judge_snippet_max_chars", "group": "Deep dream",
      "label": "Merge-judge snippet chars", "type": "int", "default": 240,
      "min": 0, "max": 20000, "step": 100, "restart": False,
@@ -389,9 +389,10 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Autonomous verdicts on the lesson/world duplicate listings: "
              "\"auto-distinct\" applies distinct verdicts (a reversible "
              "dismissal) at/above curation_distinct_min_confidence (0.8); "
-             "\"auto\" additionally forgets the losing slot of a duplicate "
+             "\"auto\" additionally retires the losing slot of a duplicate "
              "verdict at/above curation_forget_min_confidence (0.9) after "
-             "folding the judge's carry-over into the survivor (lessons)."},
+             "verifying matching metadata and exact normalized guidance. "
+             "The survivor is unchanged; free-form rewrites stay for review."},
     {"path": "memory.deep_dream.candidate_judge_mode", "group": "Deep dream",
      "label": "Step-C candidate judge", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "off",
@@ -406,10 +407,10 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.deep_dream.analyzer_file_duplicates", "group": "Deep dream",
      "label": "File analyzer duplicates", "type": "bool", "default": True,
      "restart": False,
-     "help": "Each deep apply files the Console's live duplicate findings "
-             "into the merge queue (file/concept pairs into the link queue as "
-             "implements), so the judges see them; they were never filed "
-             "anywhere before 2026-09-02."},
+     "help": "Ordinary sweeps file a bounded slice of the Console's duplicate "
+             "findings into the merge queue (file/concept pairs into the link "
+             "queue as implements). Deep apply still scans the full graph. "
+             "Disabling filing does not disable repair of earlier decisions."},
     {"path": "memory.deep_dream.orphan_sweep", "group": "Deep dream",
      "label": "Unreachable-orphan sweep", "type": "bool", "default": False,
      "restart": False,

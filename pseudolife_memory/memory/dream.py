@@ -2234,6 +2234,15 @@ def run_sweep_once(service) -> dict:
         return _done({"fired": False, "reason": "disabled",
                       "compacted": compacted, "runs_pruned": runs_pruned,
                       "retrieval_pruned": retrieval_pruned})
+    # The analyzer's regular bounded filing pass is independent of the deep
+    # apply threshold. Run it before the judges so proposals discovered on
+    # this tick are eligible for the same tick's bounded review.
+    analyzer_tick = getattr(service, "analyzer_duplicate_tick", None)
+    analyzer = _timed(
+        "analyzer_tick",
+        lambda: analyzer_tick() if analyzer_tick is not None else None)
+    if analyzer and (analyzer.get("filed") or analyzer.get("error")):
+        logger.info("analyzer duplicate tick: %s", analyzer)
     # Need-based deep-dream tick (mechanical Steps A/B only) rides the same
     # timer, independent of the shallow trigger — a quiet bank can still be
     # overdue for consolidation. getattr-guarded for older fakes/tests.
@@ -2243,6 +2252,8 @@ def run_sweep_once(service) -> dict:
     if deep and deep.get("fired"):
         logger.info("deep-dream tick fired: %s", deep)
     extra = {"deep_tick": deep} if deep is not None else {}
+    if analyzer is not None:
+        extra["analyzer_tick"] = analyzer
     # Autonomous Step-C judge rides the same timer (2026-08-16 design):
     # shadow-judges a bounded batch of unjudged pending merge proposals,
     # auto-applying only what the configured mode allows. getattr-guarded
@@ -2250,7 +2261,8 @@ def run_sweep_once(service) -> dict:
     judge = getattr(service, "deep_dream_judge", None)
     judged = _timed("judge",
                     lambda: judge() if judge is not None else None)
-    if judged and judged.get("judged"):
+    if judged and (judged.get("judged")
+                   or (judged.get("reconsideration") or {}).get("reopened")):
         logger.info("deep-dream judge: %s", judged)
     if judged is not None:
         extra["deep_judge"] = judged
@@ -2264,7 +2276,8 @@ def run_sweep_once(service) -> dict:
         fn = getattr(service, name, None)
         res = _timed(key, lambda fn=fn: fn() if fn is not None else None)
         if res and (res.get("judged") or res.get("applied")
-                    or res.get("proposed") or res.get("error")):
+                    or res.get("proposed") or res.get("error")
+                    or (res.get("reconsideration") or {}).get("reopened")):
             logger.info("deep-dream %s: %s", key, res)
         if res is not None:
             extra[f"deep_{key}"] = res

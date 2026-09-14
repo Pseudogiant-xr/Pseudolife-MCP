@@ -198,6 +198,8 @@ class ConsoleRoutes:
         g("/api/graph/path", lambda q, b: svc.graph_path(
             _s(q, "source"), _s(q, "target"), max_hops=_i(q, "max_hops", 8)))
         g("/api/graph/review", lambda q, b: svc.graph_review(scope=_s(q, "scope")))
+        p("/api/graph/rejudge", lambda q, b: svc.review_rejudge(
+            b.get("queue", "all"), limit=b.get("limit", 32)))
         g("/api/wiki", lambda q, b: svc.wiki_page(_s(q, "entity")))
         g("/api/graph/entity-provenance", lambda q, b: svc.entity_provenance(
             _s(q, "entity"), limit=_i(q, "limit", 20)))

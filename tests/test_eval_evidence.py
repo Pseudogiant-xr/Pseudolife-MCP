@@ -3139,6 +3139,17 @@ def test_claim_text_still_appears_in_its_doc(claim: Claim):
 # accept precision they replace; all three come from the scrubbed panel
 # artifact (labels + votes), never from the private evidence pack.
 PANEL_0902 = "evals/results/queue-judge-panel-20260902.json"
+LADDER_0914 = "evals/results/queue-judge-terra-high-20260914.json"
+for _cid, _val, _stated in [
+    ("queue-terra-0914-calls", lambda d: d["calls_completed"], 54),
+    ("queue-terra-0914-categories", lambda d: len(d["queues"]), 5),
+    ("queue-terra-0914-failures", lambda d: d["calls_failed"], 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG,
+        needle="54 calls across five review categories",
+        artifacts=(LADDER_0914,), value=_val, stated=_stated, places=0))
+
 for _cid, _needle, _val, _stated, _places in [
     ("queue-judge-two-vote-reject-n", "two-vote rejects 8/8",
      lambda d: d["merge_gate_table"]["R2_two_vote_reject_mean_ge0.7"]["n"], 8, 0),

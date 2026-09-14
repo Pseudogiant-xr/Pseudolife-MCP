@@ -149,6 +149,7 @@ class PostgresStorage:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
+        self._transaction_connection = None
         self._lesson_transaction_connection = None
         self._entry_import_connection = None
         self._conn = self._connect()
@@ -188,6 +189,8 @@ class PostgresStorage:
         per-connection and must be re-registered."""
         # A lesson batch must not silently reconnect halfway through its
         # transaction: later helpers would then commit outside that batch.
+        if self._transaction_connection is not None:
+            return self._transaction_connection
         if self._entry_import_connection is not None:
             return self._entry_import_connection
         if self._lesson_transaction_connection is not None:
@@ -251,6 +254,27 @@ class PostgresStorage:
             raise psycopg.OperationalError(
                 f"transaction did not commit (status={tx.status.name}); "
                 "connection lost during the block")
+
+    @contextmanager
+    def transaction(self):
+        """One pinned-connection transaction for a multi-method mutation.
+
+        Storage helpers normally own one short transaction each. Callers that
+        must commit several statements as one decision use this context so a
+        broken connection cannot reconnect between statements and split the
+        decision across two transactions. Nested helper ``_txn`` blocks become
+        savepoints on the same pinned connection.
+        """
+        if self._transaction_connection is not None:
+            with self._txn():
+                yield
+            return
+        self._transaction_connection = self.conn
+        try:
+            with self._txn():
+                yield
+        finally:
+            self._transaction_connection = None
 
     @contextmanager
     def entry_import_transaction(self):
@@ -2284,13 +2308,115 @@ class PostgresStorage:
     def set_proposal_status(self, proposal_id: int, status: str, *,
                             decided_by: str | None = None,
                             decided_at: float | None = None) -> bool:
-        with self._txn():
+        with self.transaction():
+            proposal = self.conn.execute(
+                "SELECT p.source, s.canonical, d.canonical "
+                "FROM edge_proposals p "
+                "JOIN entities s ON s.id = p.src_id "
+                "JOIN entities d ON d.id = p.dst_id "
+                "WHERE p.id = %s FOR UPDATE", (proposal_id,)).fetchone()
+            if proposal is None:
+                return False
             cur = self.conn.execute(
                 "UPDATE edge_proposals SET status = %s, "
                 "decided_by = COALESCE(%s, decided_by), "
-                "decided_at = COALESCE(%s, decided_at) WHERE id = %s",
+                "decided_at = COALESCE(%s, decided_at) WHERE id = %s AND status = 'pending'",
                 (status, decided_by, decided_at, proposal_id))
+            if (cur.rowcount > 0 and proposal[0] == "analyzer"
+                    and status in ("accepted", "rejected", "retyped")
+                    and proposal[1] and proposal[2]
+                    and proposal[1] != proposal[2]):
+                a, b = sorted((proposal[1], proposal[2]))
+                self.conn.execute(
+                    "INSERT INTO dismissed_pairs "
+                    "(a_norm, b_norm, dismissed_at) VALUES (%s, %s, %s) "
+                    "ON CONFLICT DO NOTHING",
+                    (a, b, decided_at if decided_at is not None else time.time()))
         return cur.rowcount > 0
+
+    def reconcile_analyzer_proposals(self, *, limit: int = 100) -> dict[str, int]:
+        """Close legacy terminal analyzer pairs once, in decision order.
+
+        The cursor is a high-water mark rather than a query for every missing
+        dismissal. That distinction preserves an explicit later removal of a
+        pair: a restart does not reinterpret an old proposal and resurrect it.
+        Pair insertion and cursor advancement commit together.
+        """
+        cap = max(1, int(limit))
+        key = "analyzer_pair_reconcile_cursor"
+        with self.transaction():
+            row = self.conn.execute(
+                "SELECT value FROM meta WHERE key = %s FOR UPDATE", (key,)
+            ).fetchone()
+            mark = row[0] if row and isinstance(row[0], dict) else {}
+            mark_at = float(mark.get("at", 0.0))
+            mark_id = int(mark.get("id", 0))
+            rows = self.conn.execute(
+                "SELECT p.id, COALESCE(p.decided_at, p.created_at), "
+                "s.canonical, d.canonical "
+                "FROM edge_proposals p "
+                "JOIN entities s ON s.id = p.src_id "
+                "JOIN entities d ON d.id = p.dst_id "
+                "WHERE p.source = 'analyzer' "
+                "AND p.status IN ('accepted', 'rejected', 'retyped') "
+                "AND (COALESCE(p.decided_at, p.created_at), p.id) > (%s, %s) "
+                "ORDER BY COALESCE(p.decided_at, p.created_at), p.id "
+                "LIMIT %s", (mark_at, mark_id, cap)).fetchall()
+            closed = 0
+            for _pid, at, left, right in rows:
+                if left and right and left != right:
+                    a, b = sorted((left, right))
+                    inserted = self.conn.execute(
+                        "INSERT INTO dismissed_pairs "
+                        "(a_norm, b_norm, dismissed_at) VALUES (%s, %s, %s) "
+                        "ON CONFLICT DO NOTHING RETURNING a_norm",
+                        (a, b, at)).fetchone()
+                    closed += inserted is not None
+            if rows:
+                last_id, last_at = rows[-1][0], rows[-1][1]
+                self.conn.execute(
+                    "INSERT INTO meta (key, value) VALUES (%s, %s::jsonb) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                    (key, json.dumps({"at": float(last_at), "id": int(last_id)})))
+                mark_at, mark_id = float(last_at), int(last_id)
+            remaining = self.conn.execute(
+                "SELECT count(*) FROM edge_proposals p "
+                "WHERE p.source = 'analyzer' "
+                "AND p.status IN ('accepted', 'rejected', 'retyped') "
+                "AND (COALESCE(p.decided_at, p.created_at), p.id) > (%s, %s)",
+                (mark_at, mark_id)).fetchone()[0]
+        # Entity analyzer rejections predate atomic pair closure too. Keep
+        # their own cursor so upgrades preserve the already-reconciled edge
+        # decisions, sharing the caller's single work budget.
+        entity_key = "analyzer_entity_reconcile_cursor"
+        with self.transaction():
+            mark = self.get_meta(entity_key) or {}
+            entity_at, entity_id = float(mark.get("at", 0)), int(mark.get("id", 0))
+            entity_rows = self.conn.execute(
+                "SELECT p.id, COALESCE(p.decided_at, p.created_at), s.canonical, d.canonical "
+                "FROM entity_proposals p JOIN entities s ON s.id=p.entity_id "
+                "JOIN entities d ON d.id=p.into_id "
+                "WHERE p.kind='merge' AND p.status='rejected' "
+                "AND p.reason LIKE 'analyzer-duplicate%%' "
+                "AND (COALESCE(p.decided_at,p.created_at),p.id)>(%s,%s) "
+                "ORDER BY COALESCE(p.decided_at,p.created_at),p.id LIMIT %s",
+                (entity_at, entity_id, max(0, cap-len(rows)))).fetchall()
+            for pid, at, left, right in entity_rows:
+                a, b = sorted((left, right))
+                closed += self.conn.execute(
+                    "INSERT INTO dismissed_pairs (a_norm,b_norm,dismissed_at) "
+                    "VALUES (%s,%s,%s) ON CONFLICT DO NOTHING RETURNING a_norm",
+                    (a, b, at)).fetchone() is not None
+                entity_at, entity_id = float(at), int(pid)
+            if entity_rows:
+                self.set_meta(entity_key, {"at": entity_at, "id": entity_id})
+            remaining += self.conn.execute(
+                "SELECT count(*) FROM entity_proposals p WHERE p.kind='merge' "
+                "AND p.status='rejected' AND p.reason LIKE 'analyzer-duplicate%%' "
+                "AND (COALESCE(p.decided_at,p.created_at),p.id)>(%s,%s)",
+                (entity_at, entity_id)).fetchone()[0]
+        return {"considered": len(rows) + len(entity_rows), "closed": closed,
+                "remaining": int(remaining)}
 
     def insert_entity_proposal(self, kind: str, entity_id: int, into_id: int | None,
                                score: float | None, reason: str | None, now: float) -> int | None:
@@ -2321,6 +2447,26 @@ class PostgresStorage:
             else:
                 out.add((kind, eid))
         return out
+
+    def review_proposal_states(self) -> dict[str, dict[tuple, str]]:
+        """All-status proposal keys for read-only queue accounting."""
+        links = {
+            (int(src), relation, int(dst)): status
+            for src, relation, dst, status in self.conn.execute(
+                "SELECT src_id, relation, dst_id, status FROM edge_proposals"
+            ).fetchall()
+        }
+        entities: dict[tuple, str] = {}
+        for kind, entity_id, into_id, status in self.conn.execute(
+                "SELECT kind, entity_id, into_id, status FROM entity_proposals"
+        ).fetchall():
+            if kind == "merge" and into_id is not None:
+                key = ("merge", min(int(entity_id), int(into_id)),
+                       max(int(entity_id), int(into_id)))
+            else:
+                key = (kind, int(entity_id))
+            entities[key] = status
+        return {"links": links, "entities": entities}
 
     def dump_graph_tables(self) -> dict[str, list[dict]]:
         """Plain-dict dump of the five graph tables the deep dream mutates —
