@@ -103,6 +103,9 @@ def test_opted_in_shim_injects_private_instance_identity(monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_AGENT_WAKE", "1")
     asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "session", channel=True))
     assert seen["options"]["wake_enabled"] is True
+    assert seen["options"]["provider"] is seen["proxy"]["provider"]
+    assert (seen["options"]["initial_snapshot"].generation
+            == seen["options"]["provider"].snapshot().generation)
     assert seen["proxy"]["agent_headers"] == Adapter.instance_headers
     assert seen["proxy"]["channel_inbox"] is not None
 
@@ -124,6 +127,8 @@ def test_slow_adapter_startup_falls_back_after_cancellation(monkeypatch):
     monkeypatch.setattr(shim, "_ADAPTER_STARTUP_SECONDS", 0.01, raising=False)
     monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", "1")
     asyncio.run(asyncio.wait_for(shim._run_session_proxy("http://fixture", "token", "s"), 0.2))
+    assert len(called) == 1
+    assert repr(called[0].pop("provider")) == "CredentialProvider(source='static')"
     assert called == [{}]
 
 
@@ -164,11 +169,13 @@ def test_codex_tool_metadata_overrides_session_and_attaches_lazily(monkeypatch):
         instance_headers = {
             "X-PL-Agent": "fixture-agent",
             "X-PL-Agent-Key": "private-fixture",
+            "X-PL-Bank": "fixture-bank",
+            "X-PL-Principal": "fixture-principal",
         }
         unread_hint = None
 
     class Registry:
-        async def get(self, thread_id):
+        async def get(self, thread_id, *, snapshot):
             requested.append(thread_id)
             return Adapter()
         def unread_hint(self, thread_id, adapter):
@@ -194,6 +201,8 @@ def test_codex_tool_metadata_overrides_session_and_attaches_lazily(monkeypatch):
     assert headers[1]["X-PL-Session"] == THREAD_ID
     assert headers[1]["X-PL-Agent"] == "fixture-agent"
     assert headers[1]["X-PL-Agent-Key"] == "private-fixture"
+    assert headers[1]["X-PL-Bank"] == "fixture-bank"
+    assert headers[1]["X-PL-Principal"] == "fixture-principal"
 
 
 def test_invalid_codex_metadata_never_uses_coordination_identity(monkeypatch):
@@ -244,6 +253,129 @@ def test_invalid_codex_metadata_never_uses_coordination_identity(monkeypatch):
     assert "X-PL-Agent" not in headers[1]
 
 
+def test_coordination_tool_fails_closed_when_thread_identity_is_unavailable(monkeypatch):
+    from mcp import types
+    from mcp.client import session, streamable_http
+    from mcp.server import Server, stdio
+
+    seen = {"clients": 0, "calls": 0}
+
+    @asynccontextmanager
+    async def http_client(**kwargs):
+        seen["clients"] += 1
+        yield object()
+
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        yield object(), object()
+
+    class Remote:
+        def __init__(self, *args): self._tool_output_schemas = {}
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def initialize(self): return SimpleNamespace(instructions="fixture")
+        async def call_tool(self, name, arguments):
+            seen["calls"] += 1
+            return types.CallToolResult(content=[], is_error=False)
+
+    class Registry:
+        async def get(self, thread_id, *, snapshot): return None
+        def unread_hint(self, thread_id, adapter):
+            return "Coordination state needs to be reattached."
+
+    async def serve(server, *args, **kwargs):
+        handler = server.get_request_handler("tools/call")
+        with pytest.raises(Exception) as caught:
+            await handler.handler(None, types.CallToolRequestParams(
+                name="memory_message", arguments={"action": "receive"},
+                _meta={"threadId": THREAD_ID}))
+        assert caught.value.data == {
+            "classification": "coordination_unavailable",
+            "phase": "initialize",
+            "operation_outcome": "not_dispatched",
+            "hint": "Coordination state needs to be reattached.",
+        }
+
+    monkeypatch.setattr(streamable_http, "create_mcp_http_client", http_client)
+    monkeypatch.setattr(streamable_http, "streamable_http_client", transport)
+    monkeypatch.setattr(session, "ClientSession", Remote)
+    monkeypatch.setattr(stdio, "stdio_server", transport)
+    monkeypatch.setattr(Server, "run", serve)
+
+    asyncio.run(shim._proxy(
+        "http://fixture.invalid", "fixture-token", "process-session",
+        codex_metadata=True, coordination_registry=Registry()))
+    assert seen == {"clients": 1, "calls": 0}
+
+
+def test_channel_context_mismatch_omits_identity_and_blocks_coordination_tool(monkeypatch):
+    from mcp import types
+    from mcp.client import session, streamable_http
+    from mcp.server import Server, stdio
+
+    seen = {"headers": [], "calls": []}
+
+    @asynccontextmanager
+    async def http_client(**kwargs):
+        seen["headers"].append(dict(kwargs["headers"]))
+        yield object()
+
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        yield object(), object()
+
+    class Remote:
+        def __init__(self, *args): self._tool_output_schemas = {}
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def initialize(self): return SimpleNamespace(instructions="fixture")
+        async def call_tool(self, name, arguments):
+            seen["calls"].append(name)
+            return types.CallToolResult(content=[], is_error=False)
+
+    class Adapter:
+        instance_headers = {
+            "X-PL-Agent": "fixture-agent",
+            "X-PL-Agent-Key": "private-key",
+            "X-PL-Bank": "old-bank",
+            "X-PL-Principal": "old-principal",
+        }
+        async def validate_snapshot(self, snapshot):
+            raise RuntimeError("private wrong-bank detail")
+
+    async def serve(server, *args, **kwargs):
+        handler = server.get_request_handler("tools/call")
+        ordinary = await handler.handler(None, types.CallToolRequestParams(
+            name="memory_stats", arguments={}))
+        assert ordinary.is_error is False
+        with pytest.raises(Exception) as caught:
+            await handler.handler(None, types.CallToolRequestParams(
+                name="memory_message", arguments={"action": "receive"}))
+        assert caught.value.data == {
+            "classification": "coordination_unavailable",
+            "phase": "initialize",
+            "operation_outcome": "not_dispatched",
+            "hint": "Coordination context changed; reattach it.",
+        }
+        assert "wrong-bank" not in repr(caught.value)
+
+    monkeypatch.setattr(streamable_http, "create_mcp_http_client", http_client)
+    monkeypatch.setattr(streamable_http, "streamable_http_client", transport)
+    monkeypatch.setattr(session, "ClientSession", Remote)
+    monkeypatch.setattr(stdio, "stdio_server", transport)
+    monkeypatch.setattr(Server, "run", serve)
+
+    adapter = Adapter()
+    asyncio.run(shim._proxy(
+        "http://fixture.invalid", "fixture-token", "process-session",
+        coordination_adapter=adapter,
+        coordination_hint=lambda: "Coordination context changed; reattach it."))
+    assert seen["calls"] == ["memory_stats"]
+    assert len(seen["headers"]) == 2  # instructions + ordinary call
+    assert all(not any(name in headers for name in Adapter.instance_headers)
+               for headers in seen["headers"])
+
+
 def test_codex_pull_mode_builds_lazy_registry_and_closes_it(monkeypatch):
     from pseudolife_memory import codex_coordination, coordination_adapter
 
@@ -278,6 +410,7 @@ def test_codex_pull_mode_builds_lazy_registry_and_closes_it(monkeypatch):
     registry = seen["proxy"]["coordination_registry"]
     assert seen["proxy"]["codex_metadata"] is True
     assert seen["registry_args"] == ("http://fixture.invalid", "fixture-token")
+    assert seen["registry_options"]["provider"] is seen["proxy"]["provider"]
     assert registry.closed is True
 
 
@@ -371,7 +504,9 @@ def test_codex_session_metadata_is_used_without_coordination_opt_in(monkeypatch)
     monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION", raising=False)
     asyncio.run(shim._run_session_proxy("http://fixture", None, "process-session"))
 
-    assert seen == {"codex_metadata": True}
+    assert seen.pop("codex_metadata") is True
+    assert repr(seen.pop("provider")) == "CredentialProvider(source='static')"
+    assert seen == {}
 
 
 def test_codex_automatic_mode_rejects_one_fixed_state_file(monkeypatch, capsys):
@@ -394,7 +529,9 @@ def test_codex_automatic_mode_rejects_one_fixed_state_file(monkeypatch, capsys):
 
     asyncio.run(shim._run_session_proxy("http://fixture", "token", "process-session"))
 
-    assert seen == {"codex_metadata": True}
+    assert seen.pop("codex_metadata") is True
+    assert repr(seen.pop("provider")) == "CredentialProvider(source='static')"
+    assert seen == {}
     assert "PSEUDOLIFE_AGENT_STATE_DIR" in capsys.readouterr().err
 
 

@@ -12,7 +12,9 @@ app-server delivery bridge. No mailbox schema change is needed.
   derive it from a process environment, project path, title or conversation root.
 - Attribute each call to that task. When coordination is enabled, serialize the
   first attachment per task and reuse its private state on resume. Forks use a
-  different task UUID and state file. Scope state by bank URL and bearer token.
+  different task UUID and state file. Scope state by bank URL and task UUID;
+  pin the authenticated bank identity and principal inside each private record.
+  Bearer rotation must preserve the address without accepting another authority.
 - Bound failed attachment retries and registry capacity. An unavailable optional
   adapter must not prevent an ordinary memory call. Never overwrite a live lease
   or replace a saved identity merely because attachment failed.

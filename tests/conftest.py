@@ -24,6 +24,15 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Isolate client configuration before test-module imports can snapshot it.
+# Model caches and ordinary home-directory lookup stay intact; only the Codex
+# connection and its credentials/state are redirected to this owned temp home.
+import tempfile
+from tests.client_environment import isolate_client_environment
+
+_client_test_home = tempfile.TemporaryDirectory(prefix="pseudolife-test-codex-")
+isolate_client_environment(os.environ, _client_test_home.name)
+
 # Bench-DB isolation: evals' reset_bench() reaps every backend on its
 # database before truncating, so concurrent suite runs must not share one
 # bench DB (same crossfire as pg_fixtures' per-run test DB — see its module

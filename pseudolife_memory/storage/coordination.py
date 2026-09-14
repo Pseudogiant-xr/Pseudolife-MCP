@@ -1,7 +1,8 @@
 """Durable instance identities and addressed mail, separate from retrieval.
 
-Mutation paths: register, update, attach, heartbeat, detach, send, acknowledge,
-attempt, prune, restore recovery and operator rebind. There is no derived cache.
+Mutation paths: bank identity establishment, register, update, attach, heartbeat,
+detach, send, acknowledge, attempt, prune, restore recovery and operator rebind.
+There is no derived cache.
 Callers serialize access to the storage connection with the service lock. SQL
 row locks also protect independent connections; send locks both agents in ID
 order to avoid reciprocal-send deadlocks. Recovery/rebind are operator-only
@@ -47,6 +48,7 @@ MAX_ATTEMPTS = 3
 ATTACHMENT_LEASE = 60
 SEND_RATE = 60
 HLC_META_KEY = "coordination_hlc_highwater"
+BANK_ID_META_KEY = "coordination_bank_id"
 # Every message a recipient reads is agent-origin collaboration, never the
 # operator's authority; the label rides on the row so no consumer infers it.
 MESSAGE_ORIGIN = "agent"
@@ -88,6 +90,56 @@ class CoordinationStore:
         with self.storage.conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             return cur.fetchall()
+
+    @staticmethod
+    def _bank_id(value):
+        if not isinstance(value, str):
+            raise CoordinationError("invalid_bank_identity")
+        try:
+            parsed = uuid.UUID(value)
+        except (AttributeError, ValueError):
+            raise CoordinationError("invalid_bank_identity") from None
+        if str(parsed) != value:
+            raise CoordinationError("invalid_bank_identity")
+        return value
+
+    def context(self, principal, *, agent_id=None, nonce=None):
+        """Return this logical bank's durable identity and optional mailbox proof."""
+        if (agent_id is None) != (nonce is None):
+            raise CoordinationError("missing_parameter")
+        for value, field in ((agent_id, "agent_id"), (nonce, "nonce")):
+            if value is not None and (
+                    not isinstance(value, str) or len(value) != 32
+                    or value != value.lower()
+                    or any(c not in "0123456789abcdef" for c in value)):
+                raise CoordinationError(f"invalid_{field}")
+        candidate = str(uuid.uuid4())
+        with self.storage._txn():
+            self.storage.conn.execute(
+                "INSERT INTO meta (key,value) VALUES (%s,%s) "
+                "ON CONFLICT (key) DO NOTHING",
+                (BANK_ID_META_KEY, Jsonb(candidate)))
+            bank_id = self._bank_id(self._one(
+                "SELECT value FROM meta WHERE key=%s", (BANK_ID_META_KEY,))["value"])
+            result = {"bank_id": bank_id, "principal": principal}
+            if agent_id is None:
+                return result
+            row = self._one(
+                "SELECT principal,credential_hash FROM coordination_agents "
+                "WHERE agent_id=%s", (agent_id,))
+            credential_hash = row and row["credential_hash"]
+            if (row is None or row["principal"] != principal
+                    or not isinstance(credential_hash, str)
+                    or len(credential_hash) != 64
+                    or credential_hash != credential_hash.lower()
+                    or any(c not in "0123456789abcdef" for c in credential_hash)):
+                raise CoordinationError("invalid_credential")
+            message = json.dumps(
+                ["pseudolife-context-v1", bank_id, principal, agent_id, nonce],
+                separators=(",", ":"), ensure_ascii=True).encode("ascii")
+            result["proof"] = hmac.new(
+                bytes.fromhex(credential_hash), message, hashlib.sha256).hexdigest()
+            return result
 
     def _auth(self, principal, agent_id, credential, *, lock=False):
         if not isinstance(credential, str) or not credential or len(credential) > 256:

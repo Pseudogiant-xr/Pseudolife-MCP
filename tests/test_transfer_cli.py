@@ -463,7 +463,8 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         conn.execute(
             "INSERT INTO meta (key, value) VALUES "
             "('dream_ack_secret_v1', '\"bank-local-secret\"'::jsonb), "
-            "('coordination_hlc_highwater', '[10000, 1]'::jsonb) "
+            "('coordination_hlc_highwater', '[10000, 1]'::jsonb), "
+            "('coordination_bank_id', '\"11111111-1111-4111-8111-111111111111\"'::jsonb) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
         conn.commit()
@@ -484,6 +485,7 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert "active_session_pointer" not in meta_keys
         assert "dream_ack_secret_v1" not in meta_keys
         assert "coordination_hlc_highwater" not in meta_keys
+        assert "coordination_bank_id" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["format_version"] == 1
@@ -493,10 +495,14 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert set(manifest["excluded_tables"]) == set(EXCLUDED_TABLES)
 
 
-def test_import_skips_extension_markers_injected_into_the_archive(pg_url, tmp_path):
+@pytest.mark.parametrize("key,value", [
+    ("sampleext_schema_version", "v34-sampleext"),
+    ("coordination_bank_id", "11111111-1111-4111-8111-111111111111"),
+])
+def test_import_skips_bank_local_meta_injected_into_the_archive(pg_url, tmp_path, key, value):
     """The import-side guard is load-bearing on its own: an archive carrying
-    a build-owned extension marker (hand-edited, or exported by a build that
-    predates the suffix rule) must not plant it in the target bank."""
+    build-owned or bank-local metadata (hand-edited, or exported by an older
+    build) must not replace the target bank's authority."""
     with _bank(pg_url) as conn:
         _seed_bank(conn)
     out = tmp_path / "bank.zip"
@@ -505,22 +511,23 @@ def test_import_skips_extension_markers_injected_into_the_archive(pg_url, tmp_pa
     hacked = tmp_path / "hacked.zip"
 
     def add_marker(blobs):
-        row = json.dumps(
-            {"key": "sampleext_schema_version", "value": "v34-sampleext"})
+        row = json.dumps({"key": key, "value": value})
         blobs["meta.jsonl"] = blobs["meta.jsonl"] + (row + "\n").encode()
 
     _rewrite_zip(out, hacked, add_marker)
 
-    with _bank(pg_url):
-        pass  # truncate back to empty, then release the connection
+    with _bank(pg_url) as conn:
+        if key == "coordination_bank_id":
+            conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb)",
+                         (key, json.dumps("22222222-2222-4222-8222-222222222222")))
 
     perform_import(pg_url, hacked)
 
     with psycopg.connect(pg_url) as conn:
         conn.execute("SET search_path TO public")
-        cur = conn.execute(
-            "SELECT count(*) FROM meta WHERE key = 'sampleext_schema_version'")
-        assert cur.fetchone()[0] == 0
+        row = conn.execute("SELECT value FROM meta WHERE key = %s", (key,)).fetchone()
+        assert row == (("22222222-2222-4222-8222-222222222222",)
+                       if key == "coordination_bank_id" else None)
 
 
 def test_import_refuses_a_nonempty_bank(pg_url, tmp_path):

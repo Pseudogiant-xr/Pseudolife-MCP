@@ -11,6 +11,12 @@ lease. A raw database restore cannot be detected automatically.
 
 ## Restore procedure
 
+The authenticated bank identity is stored in the existing `meta` table and is
+preserved by database backup and restore. A restored clone therefore represents
+the same logical bank; it is not automatically a new independent mailbox
+authority. The restore procedure below still revokes restored instance
+credentials and requires deliberate rebinds.
+
 1. Take a backup before replacing the database. Stop the daemon and all attached
    adapters. Keep them stopped through recovery; editing configuration cannot
    disable a daemon that already loaded its configuration.
@@ -104,8 +110,9 @@ an older backup alone does not cover writes made after that backup.
    wall clock moved backward. Verify initialization succeeds before restarting
    the adapters. Retain the backup and repair evidence.
 
-Portable knowledge exports exclude agent mailboxes, credentials and operational
-metadata. Full database backups retain them. See
+Portable knowledge exports exclude agent mailboxes, credentials, bank identity
+and operational metadata. Import also ignores any bank identity in an archive,
+preserving the destination's identity. Full database backups retain it. See
 [configuration](configuration.md#experimental-agent-coordination) for the
 default-off feature and [the experimental design](../specs/2026-09-11-agent-coordination-design.md)
 for delivery and acknowledgment semantics.

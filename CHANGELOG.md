@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-14 — Windows credential ownership)
+- Newly created credential and coordination state files belong to the current user even
+  when Windows defaults elevated processes to group ownership. Existing files
+  still require private permissions and current-user ownership before rotation.
+
+### Fixed (2026-09-13 — client authentication recovery)
+- Codex setup connects the shim and lifecycle hooks to one private credential
+  file. Running clients reload changes without replaying failed tool calls;
+  transport failures report sanitized diagnostics and uncertain write outcomes.
+  Tokenless setup pins the intended endpoint, and shared Bash hooks use Codex
+  connection state only when invoked for Codex.
+- Agent mailboxes retain their address across bearer rotation for the same
+  authenticated bank and principal. Legacy state is adopted only after mailbox
+  ownership is verified; mismatched authority preserves the saved state.
+  Saved identities must remain private and owned by the current user.
+- Portable knowledge transfers preserve the destination bank's identity rather
+  than copying the source mailbox authority.
+- Daemon updates honor explicit authentication settings in `ops/.env`
+  without inherited client credentials overriding them or changing the caller's
+  environment.
+
 ### Fixed (2026-09-13 — Codex coordination readiness)
 - The Codex coordination setup helper now recognizes the daemon's authenticated
   instance-credential challenge as readiness, so an enabled and allowed bearer

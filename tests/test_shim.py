@@ -452,10 +452,11 @@ def test_session_headers_include_writer_and_session(monkeypatch):
 def test_post_episode_is_best_effort(monkeypatch):
     from pseudolife_memory import shim
 
-    def boom(*a, **k):
-        raise OSError("daemon down")
+    class BrokenOpener:
+        def open(self, *a, **k):
+            raise OSError("daemon down")
 
-    monkeypatch.setattr(shim.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(shim.urllib.request, "build_opener", lambda *a: BrokenOpener())
     # Must NOT raise — episode bookkeeping can never break a session.
     shim._post_episode("http://127.0.0.1:8765", None, "/api/episode/start",
                        {"session_key": "x", "title": "t"})

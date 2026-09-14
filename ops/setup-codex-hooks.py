@@ -7,6 +7,7 @@ third-party Python packages, external model requests, or hook-trust bypass are n
 from __future__ import annotations
 
 import argparse
+import base64
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -22,7 +23,15 @@ import sys
 import tempfile
 import threading
 import time
-from urllib.request import Request, urlopen
+import uuid
+from urllib.parse import urlsplit, urlunsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from pseudolife_memory.credentials import (
+    CredentialError,
+    CredentialProvider,
+    _write_token_file,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +40,14 @@ EVENTS = {"sessionStart": "SessionStart", "userPromptSubmit": "UserPromptSubmit"
           "sessionEnd": "SessionEnd"}
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
 RECOVERY = "Open Codex /hooks to review PseudoLife hooks; rerun setup after correcting the reported problem."
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+urlopen = build_opener(_NoRedirect).open
 
 
 class SetupError(Exception):
@@ -44,6 +61,113 @@ def backup(path: Path) -> str | None:
     target = path.with_name(path.name + ".bak-pseudolife-" + stamp)
     shutil.copy2(path, target)
     return str(target)
+
+
+def private_backup(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    from pseudolife_memory.coordination_adapter import _open_state
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    target = path.with_name(path.name + ".bak-pseudolife-credentials-" + stamp)
+    fd = _open_state(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(path.read_bytes())
+    return str(target)
+
+
+def _private_json(path: Path, updates):
+    from pseudolife_memory.coordination_adapter import _open_state
+
+    current = {}
+    if path.exists() or path.is_symlink():
+        try:
+            fd = _open_state(path, os.O_RDONLY)
+            with os.fdopen(fd, "rb") as stream:
+                data = stream.read(16385)
+            if len(data) > 16384:
+                raise ValueError
+            current = json.loads(data)
+            if not isinstance(current, dict):
+                raise ValueError
+        except (OSError, ValueError, UnicodeError) as error:
+            raise SetupError(
+                "The managed Codex connection file is unsafe or malformed; "
+                "repair or remove it before retrying.") from error
+    updated = dict(updates)
+    data = (json.dumps(updated, indent=2) + "\n").encode()
+    if updated == current:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    saved = private_backup(path)
+    temporary = path.with_name(".connection-" + uuid.uuid4().hex + ".tmp")
+    fd = _open_state(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    return saved
+
+
+def _validated_daemon_url(url):
+    if not isinstance(url, str):
+        raise SetupError("The configured memory daemon URL is invalid.")
+    try:
+        parsed = urlsplit(url)
+        parsed.port
+    except (TypeError, ValueError) as error:
+        raise SetupError("The configured memory daemon URL is invalid.") from error
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or parsed.path not in {"", "/"}
+            or any(character.isspace() or ord(character) < 0x20 for character in url)):
+        raise SetupError("The configured memory daemon URL is invalid.")
+    return urlunsplit((parsed.scheme, parsed.netloc.rstrip("/"), "", "", ""))
+
+
+def _daemon_url(server):
+    env = server.get("env") or {}
+    forwarded = set(server.get("env_vars") or ())
+    if "PSEUDOLIFE_MCP_DAEMON_URL" in env:
+        url = env["PSEUDOLIFE_MCP_DAEMON_URL"]
+    elif ("PSEUDOLIFE_MCP_DAEMON_URL" in forwarded
+          and "PSEUDOLIFE_MCP_DAEMON_URL" in os.environ):
+        url = os.environ["PSEUDOLIFE_MCP_DAEMON_URL"]
+    elif not server:
+        url = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL")
+    else:
+        url = None
+    if url is None:
+        url = "http://127.0.0.1:8765"
+    return _validated_daemon_url(url)
+
+
+def installer_credential_valid(url, token):
+    """Authenticate a one-shot installer credential without exposing details."""
+    try:
+        token = CredentialProvider(token=token).snapshot().token
+        request = Request(
+            url + "/api/episodes?limit=1",
+            headers={"Authorization": "Bearer " + token})
+        with urlopen(request, timeout=3) as response:
+            response.read(1)
+            return getattr(response, "status", 200) == 200
+    except Exception:
+        return False
+
+
+def _connection_values(url, target=None):
+    def encoded(value):
+        text = "" if value is None else str(value)
+        return base64.b64encode(text.encode("utf-8")).decode("ascii")
+    return {"version": 1, "daemon_url": encoded(url), "token_file": encoded(target)}
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -197,12 +321,13 @@ def bundle_digest(files):
     return digest.hexdigest()[:20]
 
 
-def manual_definitions(directory):
+def manual_definitions(directory, codex_marker=True):
     mapping = {"SessionStart": "session-start.sh", "UserPromptSubmit": "user-prompt-submit.sh",
                "SessionEnd": "session-end.sh"}
     # Literal single quotes protect $, backticks, and spaces in native paths.
     ps = str(directory / "lifecycle.ps1").replace("'", "''")
-    return {event: {"type": "command", "command": "bash " + shlex.quote(str(directory / script)),
+    bash_prefix = "env PSEUDOLIFE_CODEX_HOOK=1 bash " if codex_marker else "bash "
+    return {event: {"type": "command", "command": bash_prefix + shlex.quote(str(directory / script)),
                     "commandWindows": f"pwsh -NoProfile -File '{ps}' -Event {event}",
                     "timeout": {"SessionStart": 15, "UserPromptSubmit": 5, "SessionEnd": 3}[event]}
             for event, script in mapping.items()}
@@ -219,9 +344,11 @@ def owned_manual(hook, home):
         if not re.fullmatch(r"[a-f0-9]{20}", directory.name):
             continue
         definitions = manual_definitions(directory)
+        legacy_definitions = manual_definitions(directory, codex_marker=False)
         command = hook.get("command")
         event = EVENTS.get(hook.get("eventName"))
-        if event and command in (definitions[event]["command"], definitions[event]["commandWindows"]):
+        if event and command in (definitions[event]["command"], definitions[event]["commandWindows"],
+                                 legacy_definitions[event]["command"]):
             return True
     return False
 
@@ -279,9 +406,12 @@ def vet_manual(hooks, home, complete=True):
         raise SetupError("The manual PseudoLife hook set is incomplete; rerun setup with approval to repair it.")
     directories = []
     for directory in (home / "pseudolife/hooks").glob("*"):
-        definitions = manual_definitions(directory)
-        if all(h.get("command") in (definitions[EVENTS[h["eventName"]]]["command"],
-                                     definitions[EVENTS[h["eventName"]]]["commandWindows"]) for h in hooks):
+        current = manual_definitions(directory)
+        legacy = manual_definitions(directory, codex_marker=False)
+        if all(h.get("command") in (current[EVENTS[h["eventName"]]]["command"],
+                                     current[EVENTS[h["eventName"]]]["commandWindows"],
+                                     legacy[EVENTS[h["eventName"]]]["command"])
+               for h in hooks):
             directories.append(directory)
     if len(directories) != 1:
         raise SetupError("Manual PseudoLife hooks reference mixed or unknown script bundles; review /hooks.")
@@ -301,8 +431,9 @@ def install_manual(home, report, plugin=False):
     known = legacy_commands()
     for directory in (home / "pseudolife/hooks").glob("*"):
         if re.fullmatch(r"[a-f0-9]{20}", directory.name):
-            for d in manual_definitions(directory).values():
-                known.update((d["command"], d["commandWindows"]))
+            for marker in (True, False):
+                for d in manual_definitions(directory, codex_marker=marker).values():
+                    known.update((d["command"], d["commandWindows"]))
     for groups in hooks.values():
         if not isinstance(groups, list):
             continue
@@ -373,11 +504,194 @@ def trust_hooks(client, config, hooks, home, report):
                                     "expectedVersion": layers[0]["version"]})
 
 
+def _user_config_layer(config, home):
+    path = (home / "config.toml").resolve()
+    layers = [layer for layer in config.get("layers", [])
+              if layer.get("name", {}).get("type") == "user"
+              and not layer["name"].get("profile")
+              and Path(layer["name"].get("file", "")).resolve() == path]
+    if len(layers) != 1 or not layers[0].get("version"):
+        raise SetupError("Codex did not expose a versioned user configuration; credential settings were not changed.")
+    return path, layers[0]["version"], layers[0].get("config") or {}
+
+
+def configure_credential_file(client, home, cwd, config=None,
+                              installer_connection=None):
+    """Bootstrap a private token file and migrate an existing Codex MCP env."""
+    config = config or client.rpc("config/read", {"includeLayers": True, "cwd": str(cwd)})
+    effective_server = config.get("config", {}).get("mcp_servers", {}).get(
+        "pseudolife-memory") or {}
+    user_layers = [layer for layer in config.get("layers", [])
+                   if layer.get("name", {}).get("type") == "user"
+                   and not layer["name"].get("profile")
+                   and Path(layer["name"].get("file", "")).resolve()
+                   == (home / "config.toml").resolve()]
+    user_config = user_layers[0].get("config") if len(user_layers) == 1 else {}
+    server = (user_config or {}).get("mcp_servers", {}).get(
+        "pseudolife-memory") or {}
+    env = dict(server.get("env") or {})
+    forwarded = set(server.get("env_vars") or ())
+    effective_env = dict(effective_server.get("env") or {})
+    effective_forwarded = set(effective_server.get("env_vars") or ())
+    source_path = None
+    literal = None
+    selected_daemon_url = None
+    if "PSEUDOLIFE_MCP_TOKEN_FILE" in env:
+        source_path = env["PSEUDOLIFE_MCP_TOKEN_FILE"]
+    elif "PSEUDOLIFE_MCP_TOKEN" in env:
+        literal = env["PSEUDOLIFE_MCP_TOKEN"]
+    elif ("PSEUDOLIFE_MCP_TOKEN_FILE" in forwarded
+          and "PSEUDOLIFE_MCP_TOKEN_FILE" in os.environ):
+        source_path = os.environ["PSEUDOLIFE_MCP_TOKEN_FILE"]
+    elif ("PSEUDOLIFE_MCP_TOKEN" in forwarded
+          and "PSEUDOLIFE_MCP_TOKEN" in os.environ):
+        literal = os.environ["PSEUDOLIFE_MCP_TOKEN"]
+    if source_path is None and not literal and installer_connection is not None:
+        if (any(key in effective_env for key in (
+                "PSEUDOLIFE_MCP_TOKEN_FILE", "PSEUDOLIFE_MCP_TOKEN"))
+                or any(key in effective_forwarded for key in (
+                    "PSEUDOLIFE_MCP_TOKEN_FILE", "PSEUDOLIFE_MCP_TOKEN"))):
+            raise SetupError(
+                "Credential settings come from another Codex configuration layer; "
+                "the installer did not replace them.")
+        try:
+            installer_url, installer_token = installer_connection
+            installer_url = _validated_daemon_url(installer_url)
+            if installer_token is not None:
+                CredentialProvider(token=installer_token).snapshot()
+        except (CredentialError, SetupError, TypeError, ValueError) as error:
+            raise SetupError(
+                "The installer-provided daemon credential is invalid.") from error
+        if effective_server:
+            user_url = _daemon_url(server)
+            effective_url = _daemon_url(effective_server)
+            if installer_url != user_url or installer_url != effective_url:
+                raise SetupError(
+                    "The installer daemon URL does not match the configured Codex server.")
+        if (installer_token is not None
+                and not installer_credential_valid(installer_url, installer_token)):
+            raise SetupError(
+                "The installer credential was not accepted by the configured daemon.")
+        literal = installer_token or None
+        selected_daemon_url = installer_url
+    try:
+        if source_path is not None:
+            snapshot = CredentialProvider(path=source_path).snapshot()
+            target = Path(os.path.abspath(Path(source_path).expanduser()))
+        else:
+            token = literal or None
+            if token is None:
+                result = {"credential_file_configured": False,
+                          "credential_file_path": "",
+                          "daemon_url": selected_daemon_url,
+                          "connection_configured": selected_daemon_url is not None,
+                          "migrated_literal": False, "backup": None,
+                          "connection_backup": None}
+                if selected_daemon_url is not None:
+                    result["connection_backup"] = _private_json(
+                        home / "pseudolife" / "connection.json",
+                        _connection_values(selected_daemon_url))
+                return result
+            target = (home / "pseudolife" / "token").resolve()
+            if target.exists() or target.is_symlink():
+                current = CredentialProvider(path=target).snapshot()
+                if current.token != token:
+                    _write_token_file(target, token)
+            else:
+                _write_token_file(target, token)
+            snapshot = CredentialProvider(path=target).snapshot()
+            if snapshot.token != token:
+                raise CredentialError("credential file validation failed")
+    except (CredentialError, OSError, UnicodeError) as error:
+        raise SetupError(
+            "The configured credential file is missing, unsafe, or malformed; "
+            "repair it or remove PSEUDOLIFE_MCP_TOKEN_FILE before retrying.") from error
+
+    result = {"credential_file_configured": True,
+              "credential_file_path": str(target),
+              "daemon_url": selected_daemon_url or _daemon_url(
+                  server if effective_server else {}),
+              "connection_configured": True,
+              "migrated_literal": ("PSEUDOLIFE_MCP_TOKEN" in env
+                                    or selected_daemon_url is not None),
+              "backup": None,
+              "connection_backup": None}
+    if not effective_server:
+        result["connection_backup"] = _private_json(
+            home / "pseudolife" / "connection.json",
+            _connection_values(result["daemon_url"], target))
+        return result
+    new_env = dict(env)
+    new_env["PSEUDOLIFE_MCP_TOKEN_FILE"] = str(target)
+    new_env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+    if new_env == env:
+        result["connection_backup"] = _private_json(
+            home / "pseudolife" / "connection.json",
+            _connection_values(result["daemon_url"], target))
+        return result
+    path, version, _ = _user_config_layer(config, home)
+    result["backup"] = private_backup(path)
+    client.rpc("config/batchWrite", {
+        "edits": [{"keyPath": dotted("mcp_servers", "pseudolife-memory", "env"),
+                   "value": new_env, "mergeStrategy": "replace"}],
+        "filePath": str(path),
+        "expectedVersion": version,
+    })
+    current = client.rpc("config/read", {"includeLayers": True, "cwd": str(cwd)})
+    actual = current.get("config", {}).get("mcp_servers", {}).get(
+        "pseudolife-memory", {}).get("env", {})
+    if (actual.get("PSEUDOLIFE_MCP_TOKEN_FILE") != str(target)
+            or "PSEUDOLIFE_MCP_TOKEN" in actual
+            or any(actual.get(key) != value for key, value in new_env.items())):
+        raise SetupError(
+            "Codex saved credential settings but its effective configuration differs; "
+            "check project or managed overrides before reconnecting.")
+    result["connection_backup"] = _private_json(
+        home / "pseudolife" / "connection.json",
+        _connection_values(result["daemon_url"], target))
+    return result
+
+
+@contextmanager
+def credential_environment(path, daemon_url):
+    before_file = os.environ.get("PSEUDOLIFE_MCP_TOKEN_FILE")
+    before_token = os.environ.get("PSEUDOLIFE_MCP_TOKEN")
+    before_url = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL")
+    try:
+        if path is not None:
+            if path:
+                os.environ["PSEUDOLIFE_MCP_TOKEN_FILE"] = path
+            else:
+                os.environ.pop("PSEUDOLIFE_MCP_TOKEN_FILE", None)
+            os.environ.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        if daemon_url:
+            os.environ["PSEUDOLIFE_MCP_DAEMON_URL"] = daemon_url
+        yield
+    finally:
+        if before_file is None:
+            os.environ.pop("PSEUDOLIFE_MCP_TOKEN_FILE", None)
+        else:
+            os.environ["PSEUDOLIFE_MCP_TOKEN_FILE"] = before_file
+        if before_token is None:
+            os.environ.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        else:
+            os.environ["PSEUDOLIFE_MCP_TOKEN"] = before_token
+        if before_url is None:
+            os.environ.pop("PSEUDOLIFE_MCP_DAEMON_URL", None)
+        else:
+            os.environ["PSEUDOLIFE_MCP_DAEMON_URL"] = before_url
+
+
 def daemon_request(path):
     url = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:8765").rstrip("/")
     headers = {}
-    if os.environ.get("PSEUDOLIFE_MCP_TOKEN"):
-        headers["Authorization"] = "Bearer " + os.environ["PSEUDOLIFE_MCP_TOKEN"]
+    try:
+        token = CredentialProvider.from_environment().snapshot().token
+    except CredentialError as error:
+        raise SetupError(
+            "The configured credential file is missing, unsafe, or malformed.") from error
+    if token:
+        headers["Authorization"] = "Bearer " + token
     with urlopen(Request(url + path, headers=headers), timeout=3) as response:
         return json.load(response)
 
@@ -527,6 +841,15 @@ def setup(args):
                 cwd = Path(temporary)
                 with codex(executable, home, cwd) as client:
                     config, hooks = inventory(client, cwd)
+                    credential = configure_credential_file(client, home, cwd, config)
+                    report.update({key: value for key, value in credential.items()
+                                   if key not in {"backup", "connection_backup"}})
+                    if credential["backup"]:
+                        report["backups"].append(credential["backup"])
+                    if credential.get("connection_backup"):
+                        report["backups"].append(credential["connection_backup"])
+                    if credential["credential_file_configured"]:
+                        config, hooks = inventory(client, cwd)
                 if config["config"].get("features", {}).get("hooks") is False:
                     raise SetupError("Codex hooks are disabled in configuration; setup preserves that choice.")
                 if args.source == "auto" and config["config"].get("plugins", {}).get(PLUGIN_ID, {}).get("enabled") is False:
@@ -565,7 +888,11 @@ def setup(args):
                     if any(h["trustStatus"] != "trusted" for h in selected):
                         report["recovery"] = "PseudoLife hooks await approval. Rerun setup interactively or review them in Codex /hooks."
                     else:
-                        report["verified"] = verify(executable, home, cwd, config, hooks, selected)
+                        with credential_environment(
+                                report.get("credential_file_path"),
+                                report.get("daemon_url")):
+                            report["verified"] = verify(
+                                executable, home, cwd, config, hooks, selected)
                         report["status"] = "ready"
         except SetupError as exc:
             report.update(status="unavailable", recovery=str(exc))

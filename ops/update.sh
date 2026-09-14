@@ -160,7 +160,14 @@ fi
 # 3. Rebuild + recreate ONLY the daemon. `--no-deps` is what keeps Postgres and
 #    the extractor untouched (without it, `up --build <svc>` recreates all three).
 step "Rebuilding the daemon only (Postgres + extractor untouched)..."
-docker compose "${compose[@]}" up -d --no-deps --build pseudolife-daemon
+(
+    # An explicit file authentication setting owns the whole auth pair.
+    # The subshell keeps the caller's environment intact on every exit path.
+    if [ -f "$env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?PSEUDOLIFE_MCP_TOKENS?[[:space:]]*=' "$env_file"; then
+        unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS
+    fi
+    docker compose "${compose[@]}" up -d --no-deps --build pseudolife-daemon
+)
 
 # 4. Wait for health.
 step "Waiting for the daemon to report healthy..."

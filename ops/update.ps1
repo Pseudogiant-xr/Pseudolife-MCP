@@ -158,8 +158,27 @@ try {
 # 3. Rebuild + recreate ONLY the daemon. `--no-deps` is what keeps Postgres and
 #    the extractor untouched (without it, `up --build <svc>` recreates all three).
 Step "Rebuilding the daemon only (Postgres + extractor untouched)..."
-docker compose @compose up -d --no-deps --build pseudolife-daemon
-if ($LASTEXITCODE -ne 0) { throw "daemon rebuild failed" }
+# Explicit machine-local authentication must not be shadowed by credentials
+# inherited from a client process. Restore that process environment even if
+# Compose fails; only this deployment invocation uses the file's authority.
+$savedAuthEnvironment = @{}
+try {
+    if (Test-Path -LiteralPath $envFile) {
+        $authLines = [IO.File]::ReadAllLines($envFile)
+        if ($authLines -match '^\s*(?:export\s+)?PSEUDOLIFE_MCP_TOKENS?\s*=') {
+            foreach ($name in @('PSEUDOLIFE_MCP_TOKEN', 'PSEUDOLIFE_MCP_TOKENS')) {
+                $savedAuthEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+                [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+            }
+        }
+    }
+    docker compose @compose up -d --no-deps --build pseudolife-daemon
+    if ($LASTEXITCODE -ne 0) { throw "daemon rebuild failed" }
+} finally {
+    foreach ($name in $savedAuthEnvironment.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $savedAuthEnvironment[$name], 'Process')
+    }
+}
 
 # 4. Wait for health.
 Step "Waiting for the daemon to report healthy..."
