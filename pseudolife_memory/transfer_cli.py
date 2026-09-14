@@ -100,6 +100,8 @@ _META_SKIP_KEYS = {
     "dream_ack_secret_v1",
     # Monotonic coordination clock state belongs to the target bank.
     "coordination_hlc_highwater",
+    # Mailbox authority belongs to the destination, not imported knowledge.
+    "coordination_bank_id",
 }
 
 

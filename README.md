@@ -103,11 +103,12 @@ codex mcp add pseudolife-memory --env PSEUDOLIFE_WRITER_ID=codex -- pseudolife-m
 
 For Codex, finish setup before starting a fresh task. In the existing
 `[mcp_servers.pseudolife-memory]` table in `~/.codex/config.toml`, add
-`startup_timeout_sec = 240`, `tool_timeout_sec = 180`, and `required = true`.
+`startup_timeout_sec = 240`, `tool_timeout_sec = 240`, and `required = true`.
 The shim can wait up to 180 seconds for a cold daemon; Codex's default
 startup budget is 10 seconds. `required` makes missing memory visible at
 startup and waits for its initial catalog. These are starting budgets,
-not a promise that a first model download fits; prewarm with
+not a promise that a first model download fits. The tool budget leaves time for
+the shim's 180-second deadline to report a failure before the host cancels it; prewarm with
 `pseudolife-mcp serve` in a terminal if needed.
 
 The MCP handshake delivers compact recall/capture/reflection instructions.

@@ -10,10 +10,12 @@ backups. Part of the [user guide](../../README.md#documentation).
 |----------|---------|--------|
 | `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v40). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
-| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
+| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host (a `PSEUDOLIFE_MCP_TOKENS` map also satisfies this). Maps to the reserved principal `default`, which keeps the `X-PL-Writer`/`PSEUDOLIFE_WRITER_ID` writer path. |
+| `PSEUDOLIFE_MCP_TOKEN_FILE` | _(unset)_ | Client-side private file containing the bearer token. The shim reloads it for each operation, so replacing its contents does not require a client restart. An explicitly configured file takes precedence over a literal token; an unavailable, unsafe or malformed file fails closed. The daemon continues to use its own token configuration. |
+| `PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS` | `180` | Total deadline for one upstream shim operation, including connection and initialization. Accepts finite positive seconds; invalid values use the default. Set the client's tool timeout above this value to leave time for the shim's sanitized failure response. An uncertain write is never automatically replayed. |
 | `PSEUDOLIFE_MCP_TOKENS` | _(unset)_ | Per-principal bearer tokens: `token:principal,token:principal`. A matched token's principal **is** the writer id and keys the toolset tier (the identity axis that survives the MCP 2026-07-28 stateless core). Malformed entries are logged and skipped — a skipped token does not authenticate, and a map that parses to zero entries with no singular token refuses startup rather than running open. May be set alongside `PSEUDOLIFE_MCP_TOKEN`; the map wins for its tokens. Note the singular-token holder is fully trusted and may still assert any writer via `X-PL-Writer` — mint per-principal tokens when that distinction matters. |
 | `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. When the `[lite]` embedded Postgres engages, the default moves to a stable per-user dir instead (`%LOCALAPPDATA%\pseudolife-mcp`, `~/.local/share/pseudolife-mcp`, or `~/Library/Application Support/pseudolife-mcp`) — a per-launch-directory Postgres bank would be a data-scattering footgun. Windows lite note: must be ASCII-only (the daemon refuses otherwise, with the remedy in the message). |
@@ -29,6 +31,11 @@ For the Docker stack, set these in `ops/.env`
 every value is commented, a missing file runs entirely on defaults). The
 dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 [Dreaming](dreaming.md).
+
+When deploying with `ops/update.ps1` or `ops/update.sh`, an explicit assignment
+to either authentication variable in `ops/.env` makes that file authoritative
+for both. Inherited client token variables cannot add an unintended fallback;
+the launching shell's environment is preserved after the deployment command.
 
 ## Experimental agent coordination
 
@@ -87,6 +94,7 @@ For an existing Codex stdio registration, run the following from a checkout usin
 the Python environment where Pseudolife is installed:
 
 ```sh
+python ops/setup-codex-coordination.py --credentials
 python ops/setup-codex-coordination.py --check
 python ops/setup-codex-coordination.py --enable
 ```
@@ -98,13 +106,39 @@ forwarded through `env_vars`. Setup preserves the command and unrelated settings
 backs up the configuration privately, and uses Codex's versioned configuration
 writer. Reconnect the MCP server after changing its environment.
 
+For authenticated connections, the normal installer prepares a private
+credential file and connects both the stdio shim and lifecycle hooks to it.
+Tokenless installations save their intended endpoint and explicit no-auth state,
+so unrelated credentials in the app environment cannot select another bank.
+For an existing installation,
+`--credentials` performs that setup from the configured bearer. A non-secret
+`pseudolife/connection.json` beneath the selected Codex home records the daemon
+URL and token-file path for hooks, which do not inherit the MCP server's
+environment. The setup refuses conflicting endpoints and follows no redirects.
+Upgrading an already running shim requires one reconnect to load the new code
+and file setting. Subsequent token-file replacements are read automatically;
+the replacement token must resolve to the same bank and principal.
+
 Setup pins `PSEUDOLIFE_AGENT_STATE_DIR` under the selected Codex home's
 `pseudolife/agents` directory unless an explicit directory is already configured.
-Files are scoped by bank URL, bearer token and task ID, with credentials stored
-privately. Token rotation changes that namespace; retaining an address across a
-rotation requires deliberate state migration. Do not set `PSEUDOLIFE_AGENT_STATE`
+Files are scoped by bank URL and task ID, with credentials stored privately.
+Existing state must be a private regular file owned by the current user;
+the adapter preserves and rejects unsafe state rather than changing its
+permissions and trusting potentially modified contents.
+Each file pins the authenticated bank identity and principal, so bearer rotation
+preserves the mailbox while a different bank or principal is refused. The first
+upgrade can adopt the exact legacy file for the currently configured bearer
+after the daemon proves possession of that mailbox's credential hash. The old
+file is retained. Files belonging to previously retired bearers are not searched
+or merged automatically. Do not set `PSEUDOLIFE_AGENT_STATE`
 to one shared file in Codex: automatic attachment refuses that configuration.
 `--disable` stops registration on subsequent connections and preserves saved mail.
+
+Transport failures report a sanitized category, operation phase and whether the
+operation outcome is known. The shim never automatically replays a tool call:
+a write may have committed even when its response was lost or returned a service
+error. Retry reads normally; verify uncertain writes before sending another one,
+and reuse the original request ID when retrying an addressed message.
 
 An active task should use `memory_agents` before shared-resource work and
 `memory_message(action="receive")` on resume and when a pending-count hint
@@ -185,13 +219,15 @@ address that has been idle for seven days, holds no lease and is referenced by n
 retained message, so launches without a state path do not accumulate addresses,
 and peers with a live adapter lease are listed ahead of idle ones. Idle means no
 register, update, attach, heartbeat, send or acknowledgment: a client that only
-reads must acknowledge what it reads, or hold a lease, to stay registered. An
-adapter registers a fresh address on its next start only when the authenticated
+reads must acknowledge what it reads, or hold a lease, to stay registered. A
+legacy adapter registers a fresh address on its next start only when the authenticated
 daemon explicitly confirms that the saved address no longer exists. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance
 credential preserves the saved address and requires corrected authentication
 or the deliberate restore/rebind procedure; an HTTP status alone never proves
 that an address should be replaced.
+Bank-bound clients preserve their address even when it is missing on the server;
+use deliberate recovery rather than silently registering a replacement.
 
 `pseudolife-mcp channel` is the optional Claude Code preview transport. Host
 delivery requires explicit preview opt-in and recipient wake configuration;
@@ -225,8 +261,10 @@ and prints a restored notice. Recovery waits for the next retry after the daemon
 becomes reachable. A generation change invalidates an older receive page even
 when it happens between yielded messages; the old page cannot advance the new
 generation's replay cursor. An explicit authentication or identity rejection
-stops automatic reattachment, preserves state, and reports that authentication
-or operator recovery must be corrected before restarting the adapter. Do not
+preserves state and stops retries with the rejected credential. File-backed
+clients observe the credential source and resume after a replacement authenticates
+to the saved bank and principal. An authority mismatch remains closed until the
+credential again matches the saved authority; it never creates a replacement address. Do not
 infer live delivery from a queued or attempted send result.
 
 If initial registration fails, or the shim's startup budget cancels it before

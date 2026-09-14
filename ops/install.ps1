@@ -510,6 +510,12 @@ $hookState = @{}
 $instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
 $codexSetup = $null
 $codexSetupValid = $false
+$codexCredentialFile = $null
+$codexCredentialUrl = $null
+$codexConnectionConfigured = $false
+$codexCredentialBootstrapFailed = $false
+$codexRuntimeDefaults = $null
+$codexRuntimeRecovery = $null
 $briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 foreach ($selectedClient in $clients) {
     if ($selectedClient -notin "claude", "codex") { continue }
@@ -534,23 +540,88 @@ foreach ($selectedClient in $clients) {
             } catch { continue }
         }
         if ($codexPython) {
-            $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
-                "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
-            if (-not $interactive) { $setupArgs += "--non-interactive" }
+            $savedCredentialToken = [Environment]::GetEnvironmentVariable(
+                "PSEUDOLIFE_MCP_TOKEN", "Process")
+            $savedCredentialFile = [Environment]::GetEnvironmentVariable(
+                "PSEUDOLIFE_MCP_TOKEN_FILE", "Process")
+            $savedCredentialUrl = [Environment]::GetEnvironmentVariable(
+                "PSEUDOLIFE_MCP_DAEMON_URL", "Process")
+            $installerToken = Get-EnvValue "PSEUDOLIFE_MCP_TOKEN"
+            $installerUrl = Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL"
+            if (-not $installerUrl) { $installerUrl = "http://127.0.0.1:8765" }
             try {
-                $setupOutput = & $codexPython @setupArgs
-                $setupExit = $LASTEXITCODE
-                $result = ($setupOutput -join "`n") | ConvertFrom-Json
-                if (($setupExit -notin 0, 1) -or
-                    ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
-                    ($result.source -notin "manual", "plugin", "skip") -or
-                    ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
-                    throw "Invalid Codex setup result"
+                $credentialArgs = @((Join-Path $repo "ops/setup-codex-coordination.py"),
+                    "--credentials")
+                if ($installerToken) {
+                    $credentialArgs += "--installer-token-stdin"
                 }
-                $codexSetup = $result
-                $codexSetupValid = $true
+                $credentialArgs += @("--installer-daemon-url", $installerUrl)
+                $credentialOutput = if ($installerToken) {
+                    $installerToken | & $codexPython @credentialArgs
+                } else {
+                    & $codexPython @credentialArgs
+                }
+                $credentialExit = $LASTEXITCODE
+                $credentialResult = ($credentialOutput -join "`n") | ConvertFrom-Json
+                if (($credentialExit -eq 0) -and
+                    ($credentialResult.status -in "ready", "tokenless") -and
+                    ($credentialResult.credential_file_configured -in $true, $false) -and
+                    ($credentialResult.connection_configured -in $true, $false) -and
+                    (-not $credentialResult.connection_configured -or
+                     $credentialResult.daemon_url -is [string]) -and
+                    (-not $credentialResult.credential_file_configured -or
+                     $credentialResult.credential_file_path -is [string])) {
+                    $codexConnectionConfigured = [bool]$credentialResult.connection_configured
+                    if ($codexConnectionConfigured) {
+                        $codexCredentialUrl = [string]$credentialResult.daemon_url
+                        $env:PSEUDOLIFE_MCP_DAEMON_URL = $codexCredentialUrl
+                        $env:PSEUDOLIFE_MCP_TOKEN = $null
+                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $null
+                    }
+                    if ($credentialResult.credential_file_configured) {
+                        $codexCredentialFile = [string]$credentialResult.credential_file_path
+                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $codexCredentialFile
+                        Step "Codex credential file ready; future rotations are picked up by new requests."
+                    }
+                } else {
+                    throw "Invalid credential setup result"
+                }
             } catch {
-                $codexSetup.recovery = "Codex setup did not return a valid result. Run python ops/setup-codex-hooks.py to retry."
+                $codexCredentialBootstrapFailed = $true
+                $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+            }
+            if (-not $codexCredentialBootstrapFailed) {
+                $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
+                    "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
+                if (-not $interactive) { $setupArgs += "--non-interactive" }
+                $setupLaunchFailed = $false
+                try {
+                    $setupOutput = & $codexPython @setupArgs
+                    $setupExit = $LASTEXITCODE
+                } catch {
+                    $setupLaunchFailed = $true
+                } finally {
+                    [Environment]::SetEnvironmentVariable(
+                        "PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
+                    [Environment]::SetEnvironmentVariable(
+                        "PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
+                    [Environment]::SetEnvironmentVariable(
+                        "PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
+                }
+                try {
+                    if ($setupLaunchFailed) { throw "Codex setup launch failed" }
+                    $result = ($setupOutput -join "`n") | ConvertFrom-Json
+                    if (($setupExit -notin 0, 1) -or
+                        ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
+                        ($result.source -notin "manual", "plugin", "skip") -or
+                        ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
+                        throw "Invalid Codex setup result"
+                    }
+                    $codexSetup = $result
+                    $codexSetupValid = $true
+                } catch {
+                    $codexSetup.recovery = "Codex setup did not return a valid result. Run python ops/setup-codex-hooks.py to retry."
+                }
             }
         }
         $hookState["codex"] = $codexSetup.status
@@ -760,6 +831,31 @@ function Register-Result($provider, $okState, $okMessage) {
         $mcpState[$provider] = "failed"
     }
 }
+function Set-CodexRuntimeDefaults {
+    if (-not $codexPython) {
+        $mcpState["codex"] = "failed"
+        $script:codexRuntimeDefaults = "failed"
+        $script:codexRuntimeRecovery = "Install Python 3.10 or newer, then run python ops/setup-codex-coordination.py --runtime-defaults."
+        Write-Warning "Codex was registered, but its runtime defaults could not be configured because Python 3.10 or newer was not found."
+        return
+    }
+    try {
+        $runtimeOutput = & $codexPython (Join-Path $repo "ops/setup-codex-coordination.py") --runtime-defaults
+        $runtimeExit = $LASTEXITCODE
+        $runtimeResult = ($runtimeOutput -join "`n") | ConvertFrom-Json
+        if (($runtimeExit -ne 0) -or ($runtimeResult.status -ne "ready") -or
+            ($runtimeResult.runtime_defaults -notin "configured", "preserved")) {
+            throw "Invalid runtime-default setup result"
+        }
+        $script:codexRuntimeDefaults = [string]$runtimeResult.runtime_defaults
+        Step "Codex runtime defaults ready (startup 240s, tools 240s, required)."
+    } catch {
+        $mcpState["codex"] = "failed"
+        $script:codexRuntimeDefaults = "failed"
+        $script:codexRuntimeRecovery = "Run python ops/setup-codex-coordination.py --runtime-defaults, then retry the Codex task."
+        Write-Warning "Codex was registered, but its runtime defaults were not confirmed. $script:codexRuntimeRecovery"
+    }
+}
 foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "generic") {
         Write-Host ""
@@ -770,6 +866,11 @@ foreach ($selectedClient in $clients) {
         continue
     }
     if ($selectedClient -eq "codex") {
+        if ($codexCredentialBootstrapFailed) {
+            $mcpState["codex"] = "failed"
+            Write-Warning "Codex MCP registration was skipped because credential setup failed. Rerun the installer after repairing the reported credential problem."
+            continue
+        }
         $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
             if (($Transport -eq "shim") -and ($existingCodex -notmatch "PSEUDOLIFE_MCP_NO_SPAWN")) {
@@ -780,6 +881,7 @@ foreach ($selectedClient in $clients) {
             }
             Step "MCP server already wired into Codex - skipping."
             $mcpState["codex"] = "present"
+            $codexRuntimeDefaults = "preserved"
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
             $envFlag = Get-EnvFlag "codex"
             if ($envFlag) {
@@ -792,23 +894,46 @@ foreach ($selectedClient in $clients) {
                 # a still-booting Docker Desktop and shadow the real bank
                 # (2026-08-29 incident). Flag repeated per pair: codex's
                 # --env takes one KEY=VALUE per occurrence.
-                codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                if ($codexConnectionConfigured -and $codexCredentialFile) {
+                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 $envFlag "PSEUDOLIFE_MCP_DAEMON_URL=$codexCredentialUrl" $envFlag "PSEUDOLIFE_MCP_TOKEN_FILE=$codexCredentialFile" -- pseudolife-mcp
+                } elseif ($codexConnectionConfigured) {
+                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 $envFlag "PSEUDOLIFE_MCP_DAEMON_URL=$codexCredentialUrl" -- pseudolife-mcp
+                } else {
+                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                }
                 Register-Result "codex" "shim-env" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+                if ($mcpState["codex"] -eq "shim-env") { Set-CodexRuntimeDefaults }
+            } elseif ($codexConnectionConfigured) {
+                Write-Warning "This Codex CLI cannot pin the managed connection because its MCP command has no env flag; registration was skipped."
+                $mcpState["codex"] = "failed"
             } else {
                 codex mcp add pseudolife-memory -- pseudolife-mcp
                 Write-Host "  (this codex CLI takes no env flag - for per-provider write attribution"
                 Write-Host "   and the Docker-tier no-spawn guard, add to the server's entry in"
                 Write-Host "   ~/.codex/config.toml:"
-                Write-Host "     env = { PSEUDOLIFE_WRITER_ID = `"codex`", PSEUDOLIFE_MCP_NO_SPAWN = `"1`" })"
+                Write-Host "     env = { PSEUDOLIFE_WRITER_ID = `"codex`", PSEUDOLIFE_MCP_NO_SPAWN = `"1`","
+                Write-Host "       PSEUDOLIFE_MCP_TOKEN_FILE = `"<the validated credential file, when configured>`" })"
                 Register-Result "codex" "shim" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+                if ($mcpState["codex"] -eq "shim") { Set-CodexRuntimeDefaults }
             }
         } else {
             if ($Transport -eq "shim") {
                 Write-Warning "Shim unavailable for Codex (see warnings above) - falling back to HTTP."
                 Write-Host "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity."
             }
-            codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-            Register-Result "codex" "http" "Wired into Codex (codex mcp add, HTTP)."
+            if ($codexCredentialFile) {
+                Write-Warning "Codex authentication requires the stdio shim; HTTP fallback was not registered."
+                $mcpState["codex"] = "failed"
+            } else {
+                $codexHttpUrl = if ($codexCredentialUrl) {
+                    "$codexCredentialUrl/mcp"
+                } else {
+                    "http://127.0.0.1:8765/mcp"
+                }
+                codex mcp add pseudolife-memory --url $codexHttpUrl
+                Register-Result "codex" "http" "Wired into Codex (codex mcp add, HTTP)."
+                if ($mcpState["codex"] -eq "http") { Set-CodexRuntimeDefaults }
+            }
         }
     } elseif ($selectedClient -eq "gemini") {
         $geminiList = gemini mcp list 2>$null
@@ -975,7 +1100,12 @@ foreach ($selectedClient in $clients) {
                 if ($codexSetup.recovery) { Write-Host "    $($codexSetup.recovery)" }
             }
             Write-Host "    Verify runtime: codex mcp get pseudolife-memory; run doctor from that command's environment."
-            Write-Host "    In its existing config.toml table set startup_timeout_sec = 240, tool_timeout_sec = 180, required = true."
+            switch ($codexRuntimeDefaults) {
+                "configured" { Write-Host "    [x] Runtime defaults     startup 240s; tools 240s; required" }
+                "preserved" { Write-Host "    [-] Runtime settings     existing registration unchanged" }
+                "failed" { Write-Host "    [!] Runtime defaults     not confirmed - $codexRuntimeRecovery" }
+                default { Write-Host "    [!] Runtime defaults     unavailable" }
+            }
             Write-Host "    $(Describe-Instr $instrState['codex'])"
         }
         "gemini" {

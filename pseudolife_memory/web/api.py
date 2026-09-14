@@ -114,8 +114,10 @@ async def _send_coordination_error(send, exc):
                              "instance_authentication_required"}
               else 403 if code in {"principal_not_allowed", "invalid_credential"}
               else 404 if code == "instance_not_found"
+              else 409 if code == "bank_identity_mismatch"
               else 429 if code in {"wait_capacity_exceeded", "rate_limited", "queue_full"}
-              else 500 if code == "coordination_unavailable" else 400)
+              else 500 if code in {"coordination_unavailable", "invalid_bank_identity"}
+              else 400)
     if status == 500:
         # Database errors can include complete rows. Neither exception messages
         # nor tracebacks are appropriate diagnostics for private mail failures.
@@ -459,6 +461,30 @@ def build_console_app(
                 "error": "unauthorized",
                 "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
             return
+        if path == "/mcp" or path.startswith("/mcp/"):
+            from pseudolife_memory.coordination import (
+                bound_identity, dispatch as coordination_dispatch,
+                enforce_bound_identity,
+            )
+            headers = {k.decode().lower(): v.decode("latin-1")
+                       for k, v in scope.get("headers", [])}
+            try:
+                binding = bound_identity(headers)
+                if binding is not None:
+                    principal = resolve_principal(
+                        headers.get("authorization"), token_map, token)
+
+                    def validate_binding():
+                        context = coordination_dispatch(
+                            service, "context", {}, headers=headers,
+                            principal=principal)
+                        enforce_bound_identity(binding, context)
+
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, validate_binding)
+            except Exception as exc:  # noqa: BLE001
+                await _send_coordination_error(send, exc)
+                return
         await mcp_app(scope, receive, send)
 
     return app

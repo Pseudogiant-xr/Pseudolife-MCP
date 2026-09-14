@@ -82,9 +82,10 @@ class CodexCoordinationRegistry:
                  adapter_factory=None, startup_seconds: float = 3.0,
                  retry_seconds: float = 5.0,
                  max_threads: int = 128, clock=None, delivery_url=None,
-                 delivery_token=None, delivery_factory=None):
+                 delivery_token=None, delivery_factory=None, provider=None):
         self.url = url
-        self.token = token
+        self.token = token if provider is None else None
+        self.provider = provider
         self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
         self._adapter_factory = adapter_factory
         self._startup_seconds = startup_seconds
@@ -97,6 +98,9 @@ class CodexCoordinationRegistry:
         self._adapters: dict[str, object] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._retry_after: dict[str, float] = {}
+        self._retry_generations: dict[str, object] = {}
+        self._failure_hints: dict[str, str] = {}
+        self._provider_unavailable = False
         self._deliveries: dict[str, object] = {}
         self._delivery_tasks: dict[str, asyncio.Task] = {}
         self._delivery_failed: set[str] = set()
@@ -186,6 +190,10 @@ class CodexCoordinationRegistry:
             return ("Coordination: live Codex delivery stopped; use memory_message "
                     "receive for pull delivery.")
         if adapter is None:
+            if self._provider_unavailable:
+                return "Coordination: credential source is unavailable; saved identity was preserved."
+            if thread_id in self._failure_hints:
+                return self._failure_hints[thread_id]
             if thread_id not in self._locks and len(self._locks) >= self._max_threads:
                 return ("Coordination: registry capacity reached; ordinary memory "
                         "remains available.")
@@ -193,31 +201,60 @@ class CodexCoordinationRegistry:
                     "remains available.")
         return adapter.unread_hint
 
-    async def get(self, thread_id: str):
+    async def get(self, thread_id: str, *, snapshot=None):
         canonical = thread_id_from_meta({"threadId": thread_id})
         if canonical is None:
             return None
+        if self.provider is not None and snapshot is None:
+            try:
+                snapshot = self.provider.snapshot()
+            except Exception:
+                self._provider_unavailable = True
+                return None
+            self._provider_unavailable = False
         startup = asyncio.current_task()
         async with self._entry_lock:
             if self._closing:
                 return None
             self._startups.add(startup)
         try:
-            return await self._get_started(canonical)
+            return await self._get_started(canonical, snapshot)
         finally:
             async with self._entry_lock:
                 self._startups.discard(startup)
 
-    async def _get_started(self, thread_id: str):
+    async def _verified_existing(self, thread_id, adapter, snapshot):
+        if self.provider is None:
+            return adapter
+        try:
+            await asyncio.wait_for(adapter.validate_snapshot(snapshot), self._startup_seconds)
+            self._failure_hints.pop(thread_id, None)
+            return adapter
+        except Exception as error:
+            self._note_failure(thread_id, error)
+            return None
+
+    def _note_failure(self, thread_id, error):
+        if getattr(error, "code", None) == "bank_identity_mismatch":
+            hint = "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential."
+        elif getattr(error, "code", None) in {"credential_unavailable", "credential_changed"}:
+            hint = "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes."
+        else:
+            hint = "Coordination: identity attachment unavailable; saved state was preserved. Check bank access or wait for the prior attachment lease to expire."
+        self._failure_hints[thread_id] = hint
+
+    async def _get_started(self, thread_id: str, snapshot=None):
+        if snapshot is not None and self._retry_generations.get(thread_id) != snapshot.generation:
+            self._retry_after.pop(thread_id, None)
         existing = self._adapters.get(thread_id)
         if existing is not None:
-            return existing
+            return await self._verified_existing(thread_id, existing, snapshot)
         if self._clock() < self._retry_after.get(thread_id, 0):
             return None
         async with self._entry_lock:
             existing = self._adapters.get(thread_id)
             if existing is not None:
-                return existing
+                return await self._verified_existing(thread_id, existing, snapshot)
             if self._clock() < self._retry_after.get(thread_id, 0):
                 return None
             lock = self._locks.get(thread_id)
@@ -232,18 +269,27 @@ class CodexCoordinationRegistry:
         async with lock:
             existing = self._adapters.get(thread_id)
             if existing is not None:
-                return existing
+                return await self._verified_existing(thread_id, existing, snapshot)
             if self._clock() < self._retry_after.get(thread_id, 0):
                 return None
             delivery = None
             candidate_adapter = None
             try:
-                path = state_path_for_thread(
-                    self.state_dir, self.url, self.token, thread_id)
+                token = snapshot.token if self.provider is not None else self.token
+                options = {}
+                if self.provider is not None:
+                    from .coordination_identity import bound_state_path
+
+                    path = bound_state_path(self.state_dir, self.url, thread_id)
+                    options = {"provider": self.provider, "initial_snapshot": snapshot,
+                               "legacy_state_path": state_path_for_thread(
+                                   self.state_dir, self.url, token, thread_id)}
+                else:
+                    path = state_path_for_thread(self.state_dir, self.url, token, thread_id)
                 _prepare_private_dir(self.state_dir, path.parent)
                 delivery = await self._verified_delivery(thread_id)
                 candidate_adapter = self._factory()(
-                    self.url, self.token, state_path=path,
+                    self.url, token, state_path=path, **options,
                     wake_enabled=delivery is not None,
                     delivery_transport="codex",
                     label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "codex"),
@@ -264,7 +310,7 @@ class CodexCoordinationRegistry:
                     except Exception:  # noqa: BLE001 - preserve cancellation
                         pass
                 raise
-            except Exception:  # noqa: BLE001 - memory must survive optional coordination
+            except Exception as error:  # noqa: BLE001 - memory must survive optional coordination
                 if candidate_adapter is not None:
                     try:
                         await candidate_adapter.__aexit__(None, None, None)
@@ -276,6 +322,9 @@ class CodexCoordinationRegistry:
                     except Exception:  # noqa: BLE001 - best-effort failed attach cleanup
                         pass
                 self._retry_after[thread_id] = self._clock() + self._retry_seconds
+                if snapshot is not None:
+                    self._retry_generations[thread_id] = snapshot.generation
+                self._note_failure(thread_id, error)
                 if not self._failure_reported:
                     print("pseudolife-mcp: coordination unavailable; memory proxy remains "
                           "active. Check daemon opt-in, authentication and private adapter "
@@ -288,6 +337,8 @@ class CodexCoordinationRegistry:
                 self._delivery_tasks[thread_id] = asyncio.create_task(
                     self._pump_delivery(thread_id, adapter, delivery))
             self._retry_after.pop(thread_id, None)
+            self._retry_generations.pop(thread_id, None)
+            self._failure_hints.pop(thread_id, None)
             self._failure_reported = False
             return adapter
 
@@ -321,6 +372,8 @@ class CodexCoordinationRegistry:
             self._adapters.clear()
             self._locks.clear()
             self._retry_after.clear()
+            self._retry_generations.clear()
+            self._failure_hints.clear()
             self._delivery_failed.clear()
             for adapter in reversed(adapters):
                 try:

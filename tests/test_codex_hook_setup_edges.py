@@ -53,6 +53,8 @@ def mock_runtime(monkeypatch, home, config, hooks):
         yield Client()
 
     monkeypatch.setenv("CODEX_HOME", str(home))
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
     monkeypatch.setattr(setup, "resolve_codex", lambda: "fixture-codex")
     monkeypatch.setattr(setup, "codex", codex)
     monkeypatch.setattr(setup, "verify", lambda *a, **kw: pytest.fail("Unapproved verification"))

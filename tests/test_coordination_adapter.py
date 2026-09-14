@@ -43,6 +43,17 @@ def adapter(daemon, **kwargs):
                                        client=client, **kwargs)
 
 
+def _secure_state(path):
+    """Match the private permissions of a state file created by an adapter."""
+    from pseudolife_memory.coordination_adapter import _private_fd
+
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        _private_fd(fd, path)
+    finally:
+        os.close(fd)
+
+
 def test_codex_delivery_does_not_advertise_a_claude_channel():
     async def drive():
         daemon = FakeDaemon()
@@ -594,6 +605,7 @@ def test_saved_address_unknown_to_the_bank_is_retired_and_replaced(tmp_path, cap
         state.write_text(json.dumps({"bank_url": "http://127.0.0.1:8099",
                                      "agent_id": "agent-old", "credential": "old-key"}),
                          encoding="utf-8")
+        _secure_state(state)
         daemon = FakeDaemon()
 
         def hook(action, body):
@@ -625,6 +637,7 @@ def test_auth_rejection_does_not_retire_a_saved_address(tmp_path, status, code):
         saved = {"bank_url": "http://127.0.0.1:8099",
                  "agent_id": "agent-old", "credential": "old-key"}
         state.write_text(json.dumps(saved), encoding="utf-8")
+        _secure_state(state)
         original = state.read_bytes()
         daemon = FakeDaemon()
         daemon.hook = lambda action, body: httpx.Response(
@@ -648,6 +661,7 @@ def test_malformed_error_code_keeps_sanitized_http_classification(tmp_path):
         state.write_text(json.dumps({"bank_url": "http://127.0.0.1:8099",
                                      "agent_id": "agent-old", "credential": "old-key"}),
                          encoding="utf-8")
+        _secure_state(state)
         original = state.read_bytes()
         daemon = FakeDaemon()
         daemon.hook = lambda action, body: httpx.Response(401, json={"error": []})
@@ -671,6 +685,7 @@ def test_empty_state_file_from_a_crash_is_taken_over(tmp_path):
         from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
         state = tmp_path / "agent.json"
         state.write_bytes(b"")
+        _secure_state(state)
         daemon = FakeDaemon()
         client, instance = adapter(daemon, state_path=state)
         async with client:
@@ -700,6 +715,7 @@ def test_stale_reservation_has_one_atomic_claimant(tmp_path):
         from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
         state = tmp_path / "agent.json"
         state.write_bytes(b"")
+        _secure_state(state)
         old = time.time() - CoordinationAdapter.STALE_RESERVATION_SECONDS - 1
         os.utime(state, (old, old))
         daemon = FakeDaemon()
@@ -739,6 +755,7 @@ def test_stale_reservation_lock_releases_after_cancelled_registration(tmp_path):
         from pseudolife_memory.coordination_adapter import CoordinationAdapter
         state = tmp_path / "agent.json"
         state.write_bytes(b"")
+        _secure_state(state)
         old = time.time() - CoordinationAdapter.STALE_RESERVATION_SECONDS - 1
         os.utime(state, (old, old))
 
@@ -755,6 +772,7 @@ def test_stale_reservation_lock_releases_after_cancelled_registration(tmp_path):
         assert not state.exists()
 
         state.write_bytes(b"")
+        _secure_state(state)
         os.utime(state, (old, old))
         daemon = FakeDaemon()
         client, recovered = adapter(daemon, state_path=state)
@@ -770,6 +788,7 @@ def test_stale_reservation_lock_hardlink_is_refused(tmp_path):
         from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
         state = tmp_path / "agent.json"
         state.write_bytes(b"")
+        _secure_state(state)
         old = time.time() - CoordinationAdapter.STALE_RESERVATION_SECONDS - 1
         os.utime(state, (old, old))
         lock = state.with_name(state.name + ".lock")
@@ -792,6 +811,7 @@ def test_stale_reservation_lock_symlink_is_refused(tmp_path):
         from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
         state = tmp_path / "agent.json"
         state.write_bytes(b"")
+        _secure_state(state)
         old = time.time() - CoordinationAdapter.STALE_RESERVATION_SECONDS - 1
         os.utime(state, (old, old))
         lock = state.with_name(state.name + ".lock")

@@ -114,6 +114,20 @@ incomplete or unrecognized plugin bundle requires review rather than
 automatically granting trust. Disabled hooks and intentional feature or
 policy restrictions remain in place.
 
+For authenticated stdio connections, setup prepares a private bearer file and
+records the same daemon URL and file path for the shim and lifecycle hooks.
+Updating that file changes the credential used by subsequent operations; users
+do not need to copy the bearer into each hook or restart a file-backed shim.
+An already running older shim needs one reconnect after upgrading. See
+[credential configuration and mailbox continuity](configuration.md#codex-cli-and-desktop)
+for existing installations and rotation behavior.
+
+After a successful fresh Codex registration, the installer supplies missing
+startup and tool budgets of 240 seconds and marks memory as required. Explicit
+settings and existing registrations are preserved. If saving these defaults
+fails, setup reports the remaining step; retry with
+`python ops/setup-codex-coordination.py --runtime-defaults`.
+
 | Setting | Docker installer | Standalone helper |
 |---|---|---|
 | Hook source; default `auto` | `--codex-hooks auto\|manual\|plugin\|skip` | `--source auto\|manual\|plugin\|skip` |
@@ -221,9 +235,10 @@ run, or keep both when a standing copy is useful for subagents.
    Store a truthful decision and verify it from another task when testing writes.
 
 For a cold lite daemon, add `startup_timeout_sec = 240`,
-`tool_timeout_sec = 180`, and `required = true` to the existing MCP server
+`tool_timeout_sec = 240`, and `required = true` to the existing MCP server
 table. This allows the shim's 180-second startup wait plus handshake margin;
-the tool budget allows first-call model loading. Prewarm the daemon if the
+the tool budget allows first-call model loading and leaves a margin beyond the
+shim's 180-second operation deadline. Prewarm the daemon if the
 initial model download takes longer. `required` waits for memory's initial
 catalog and makes startup failure explicit. Codex otherwise has a 10-second
 startup timeout and may assemble an optional catalog earlier. See

@@ -356,6 +356,34 @@ def test_installers_pass_writer_id_on_registration_with_a_flagless_fallback() ->
         assert "codex mcp add pseudolife-memory -- pseudolife-mcp" in text
 
 
+def test_codex_installers_bootstrap_and_register_rotatable_credentials() -> None:
+    for rel in ("ops/install.sh", "ops/install.ps1"):
+        text = _read(rel)
+        assert "setup-codex-coordination.py" in text, rel
+        assert "--credentials" in text, rel
+        assert "PSEUDOLIFE_MCP_TOKEN_FILE" in text, rel
+
+
+def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration() -> None:
+    sh = _read("ops/install.sh")
+    ps = _read("ops/install.ps1")
+    for rel, text in (("ops/install.sh", sh), ("ops/install.ps1", ps)):
+        assert "--runtime-defaults" in text, rel
+        assert "startup_timeout_sec = 240" not in text, rel
+        assert "tool_timeout_sec = 180" not in text, rel
+        assert "runtime defaults were not confirmed" in text, rel
+    assert sh.count("configure_codex_runtime_defaults") == 4
+    assert ps.count("Set-CodexRuntimeDefaults") == 4
+    assert "configure_codex_runtime_defaults" not in sh.split(
+        'if existing_codex=$(codex mcp get pseudolife-memory', 1)[1].split(
+            'elif [ "$TRANSPORT" = "shim" ]', 1)[0]
+    assert "Set-CodexRuntimeDefaults" not in ps.split(
+        '$existingCodex = codex mcp get pseudolife-memory', 1)[1].split(
+            '} elseif (($Transport -eq "shim")', 1)[0]
+    assert "MCP_CODEX=failed" in sh
+    assert '$mcpState["codex"] = "failed"' in ps
+
+
 def test_installers_support_codex_hook_on_windows() -> None:
     """Current runtimes support Windows; the installer must say so."""
     ps = _read("ops/install.ps1")
