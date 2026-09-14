@@ -167,8 +167,15 @@ try {
         $authLines = [IO.File]::ReadAllLines($envFile)
         if ($authLines -match '^\s*(?:export\s+)?PSEUDOLIFE_MCP_TOKENS?\s*=') {
             foreach ($name in @('PSEUDOLIFE_MCP_TOKEN', 'PSEUDOLIFE_MCP_TOKENS')) {
-                $savedAuthEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
-                [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+                $originalVariable = Get-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+                $savedAuthEnvironment[$name] = @{
+                    Present = $null -ne $originalVariable
+                    Name = if ($null -ne $originalVariable) { $originalVariable.Name } else { $name }
+                    Value = [Environment]::GetEnvironmentVariable($name, 'Process')
+                }
+                # Passing $null to SetEnvironmentVariable can leave an empty
+                # native-child value, which still overrides Compose's env file.
+                Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
             }
         }
     }
@@ -176,7 +183,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "daemon rebuild failed" }
 } finally {
     foreach ($name in $savedAuthEnvironment.Keys) {
-        [Environment]::SetEnvironmentVariable($name, $savedAuthEnvironment[$name], 'Process')
+        $original = $savedAuthEnvironment[$name]
+        if ($original.Present) {
+            [Environment]::SetEnvironmentVariable($original.Name, $original.Value, 'Process')
+        } else {
+            Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+        }
     }
 }
 

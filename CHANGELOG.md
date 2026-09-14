@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-14 — Windows deployment authentication)
+- The Windows updater now removes inherited authentication variables before
+  launching Compose, rather than passing empty values that override the
+  configured credentials. It restores the caller's exact absent, empty or
+  populated environment state after both successful and failed deployments.
+
 ### Fixed (2026-09-14 — review queue resolution)
 - Settled analyzer link proposals close their matching duplicate findings in
   the same transaction. Bounded reconciliation covers earlier decisions, and

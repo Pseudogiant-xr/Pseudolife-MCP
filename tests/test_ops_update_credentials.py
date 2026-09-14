@@ -4,6 +4,7 @@ import json
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,124 @@ AUTH_FILES = {
     "map": "PSEUDOLIFE_MCP_TOKENS=fixture:replacement\n",
     "none": "# PSEUDOLIFE_MCP_TOKEN=ignored\n",
 }
+
+
+@pytest.mark.skipif(PWSH is None or sys.platform != "win32",
+                   reason="Windows native command environment regression")
+@pytest.mark.parametrize("parent_state", ["absent", "empty", "value", "mixed-empty", "mixed-value"])
+@pytest.mark.parametrize("compose_fails", [True, False])
+def test_update_ps1_native_child_gets_absent_auth_and_parent_state_is_restored(
+        tmp_path, parent_state, compose_fails):
+    ops = tmp_path / "ops"
+    ops.mkdir()
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "ops/update.ps1", ops / "update.ps1")
+    (ops / "docker-compose.yml").write_text("image: pseudolife-daemon:0.1.0\n")
+    (ops / "prune-rollbacks.ps1").write_text("param($Keep, $Repository)\n")
+    (ops / ".env").write_text(AUTH_FILES["map"])
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    observation = tmp_path / "native-child.json"
+    helper = fake_bin / "docker_helper.py"
+    helper.write_text('''
+import json
+import os
+import sys
+
+if sys.argv[1:2] == ["compose"]:
+    names = ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS")
+    observed = {name: {"present": name in os.environ, "value": os.environ.get(name)}
+                for name in names}
+    with open(os.environ["FIXTURE_OBSERVATION"], "w", encoding="utf-8") as handle:
+        json.dump(observed, handle)
+    raise SystemExit(int(os.environ["FIXTURE_COMPOSE_FAILS"]))
+
+print("same-image")
+''', encoding="utf-8")
+    (fake_bin / "docker.cmd").write_text(
+        f'@"{sys.executable}" "{helper}" %*\n', encoding="utf-8")
+
+    result = tmp_path / "result.json"
+    driver = tmp_path / "driver.ps1"
+    if parent_state == "absent":
+        establish_parent = """
+Remove-Item -LiteralPath Env:\\PSEUDOLIFE_MCP_TOKEN -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath Env:\\PSEUDOLIFE_MCP_TOKENS -ErrorAction SilentlyContinue
+"""
+    elif parent_state == "empty":
+        establish_parent = """
+[Environment]::SetEnvironmentVariable('PSEUDOLIFE_MCP_TOKEN', '', 'Process')
+[Environment]::SetEnvironmentVariable('PSEUDOLIFE_MCP_TOKENS', '', 'Process')
+"""
+    elif parent_state.startswith("mixed-"):
+        fixture_token = "" if parent_state == "mixed-empty" else "fixture-old"
+        fixture_map = "" if parent_state == "mixed-empty" else "fixture:old-map"
+        establish_parent = f"""
+[Environment]::SetEnvironmentVariable('pseudolife_mcp_token', '{fixture_token}', 'Process')
+[Environment]::SetEnvironmentVariable('PseudoLife_Mcp_Tokens', '{fixture_map}', 'Process')
+"""
+    else:
+        establish_parent = """
+$env:PSEUDOLIFE_MCP_TOKEN = 'fixture-old'
+$env:PSEUDOLIFE_MCP_TOKENS = 'fixture:old-map'
+"""
+    driver.write_text(f'''
+$env:PATH = '{fake_bin};' + $env:PATH
+$env:FIXTURE_OBSERVATION = '{observation}'
+$env:FIXTURE_COMPOSE_FAILS = '{int(compose_fails)}'
+{establish_parent}
+$failed = $false
+$global:healthObserved = $false
+function global:Invoke-RestMethod {{
+    $global:healthObserved = $true
+    @{{status='ok';schema=40;persist_errors=0}}
+}}
+try {{ & '{ops / "update.ps1"}' -NoBackup -NoCachePrune -Tag fixture }}
+catch {{ $failed = $true }}
+@{{
+    failed = $failed
+    healthObserved = $global:healthObserved
+    tokenPresent = Test-Path -LiteralPath Env:\\PSEUDOLIFE_MCP_TOKEN
+    tokenName = (Get-Item -LiteralPath Env:\\PSEUDOLIFE_MCP_TOKEN -ErrorAction SilentlyContinue).Name
+    token = [Environment]::GetEnvironmentVariable('PSEUDOLIFE_MCP_TOKEN', 'Process')
+    mapPresent = Test-Path -LiteralPath Env:\\PSEUDOLIFE_MCP_TOKENS
+    mapName = (Get-Item -LiteralPath Env:\\PSEUDOLIFE_MCP_TOKENS -ErrorAction SilentlyContinue).Name
+    map = [Environment]::GetEnvironmentVariable('PSEUDOLIFE_MCP_TOKENS', 'Process')
+}} | ConvertTo-Json | Set-Content -LiteralPath '{result}' -Encoding utf8
+''', encoding="utf-8")
+
+    client_home = tmp_path / "client-home"
+    client_home.mkdir()
+    env = hermetic_env(
+        CODEX_HOME=client_home,
+        PSEUDOLIFE_MCP_TOKEN=None,
+        PSEUDOLIFE_MCP_TOKENS=None,
+    )
+    completed = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(driver)],
+        env=env, capture_output=True, timeout=30,
+    )
+    assert completed.returncode == 0
+    assert json.loads(observation.read_text(encoding="utf-8")) == {
+        "PSEUDOLIFE_MCP_TOKEN": {"present": False, "value": None},
+        "PSEUDOLIFE_MCP_TOKENS": {"present": False, "value": None},
+    }
+    restored = json.loads(result.read_text(encoding="utf-8-sig"))
+    expected_present = parent_state != "absent"
+    assert restored == {
+        "failed": compose_fails,
+        "healthObserved": not compose_fails,
+        "tokenPresent": expected_present,
+        "tokenName": ("pseudolife_mcp_token" if parent_state.startswith("mixed-")
+                      else "PSEUDOLIFE_MCP_TOKEN") if expected_present else None,
+        "token": {"absent": None, "empty": "", "value": "fixture-old",
+                  "mixed-empty": "", "mixed-value": "fixture-old"}[parent_state],
+        "mapPresent": expected_present,
+        "mapName": ("PseudoLife_Mcp_Tokens" if parent_state.startswith("mixed-")
+                    else "PSEUDOLIFE_MCP_TOKENS") if expected_present else None,
+        "map": {"absent": None, "empty": "", "value": "fixture:old-map",
+                "mixed-empty": "", "mixed-value": "fixture:old-map"}[parent_state],
+    }
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
