@@ -25,6 +25,7 @@ import pytest
 
 from tests.helpers import pg_reachable as _pg_reachable
 from tests.helpers import reload_mcp_filemode
+from tests.pg_defaults import default_admin_url
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 QUERY = "what is the payments-db host"
@@ -187,7 +188,8 @@ def recall_svc(tmp_path_factory):
     """One PG-backed service with a small graph: payments-db (seed) runs-on
     host-a (hop 1). Both carry six facts with the constraint written LAST,
     so record order alone would drop it behind the per-entity cap (5)."""
-    if not _pg_reachable("postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres"):
+    import os
+    if not _pg_reachable(os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()):
         pytest.skip("bench Postgres not reachable")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service

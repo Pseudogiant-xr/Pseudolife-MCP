@@ -177,10 +177,9 @@ def test_aggregate_buckets_by_hops_and_overall():
     assert agg["by_hops"][2]["mean_tokens"] == 25.0
 
 
-_BENCH_PG = os.environ.get(
-    "PSEUDOLIFE_BENCH_ADMIN_URL",
-    "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
-)
+from tests.pg_defaults import default_admin_url
+
+_BENCH_PG = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()
 
 
 # Memoized, and probed lazily: as a ``skipif`` argument this ran at import
@@ -194,12 +193,12 @@ _PG_REACHABLE: bool | None = None
 def _pg_reachable() -> bool:
     global _PG_REACHABLE
     if _PG_REACHABLE is None:
-        try:
-            import psycopg
-            with psycopg.connect(_BENCH_PG, connect_timeout=1):
-                _PG_REACHABLE = True
-        except Exception:
-            _PG_REACHABLE = False
+        # Auth-aware (tests.helpers.pg_reachable): a reachable server that
+        # rejects the password raises instead of reading as "not reachable".
+        # The 1s timeout above is preserved by passing it explicitly.
+        from tests.helpers import pg_reachable
+
+        _PG_REACHABLE = pg_reachable(_BENCH_PG, timeout=1)
     return _PG_REACHABLE
 
 
