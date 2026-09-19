@@ -997,14 +997,74 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
         await _proxy(url, token, session_uid, provider=provider, **kwargs)
 
 
+def _require_credential_for_auth(url: str, health: dict, provider) -> None:
+    """Exit at startup when the daemon needs a bearer and this shim holds none.
+
+    ``/health`` reports ``auth: true`` whenever the daemon was started with
+    ``PSEUDOLIFE_MCP_TOKEN`` or a ``PSEUDOLIFE_MCP_TOKENS`` map. Without a
+    credential every upstream ``initialize`` then 401s, and the client sees
+    only the SDK's ExceptionGroup wrapper ("unhandled errors in a TaskGroup
+    (1 sub-exception)") on every ``tools/list`` — the 2026-09-19 incident,
+    where Claude Desktop sessions failed for four days. Desktop launches MCP
+    servers with a sanitized environment, so a token exported in the OS
+    environment never reaches the shim; that is the case the message names.
+
+    A configured token FILE is read once here too: the per-call path does
+    fail closed on a missing or unsafe file, but that error reaches Claude
+    Desktop as the same opaque wrapper the incident showed, so the one
+    place a human can read the fault is this stderr line at startup.
+    """
+    from pseudolife_memory.credentials import CredentialError
+
+    if not health.get("auth"):
+        return
+    if provider.path is not None:
+        try:
+            provider.snapshot()
+        except CredentialError as exc:
+            print(
+                f"[shim] the daemon at {url} requires bearer authentication "
+                f"(/health reports auth=true) and the configured credential "
+                f"file cannot be used: {exc}\n"
+                f"  PSEUDOLIFE_MCP_TOKEN_FILE={provider.path}\n"
+                f"  The file must exist, be owner-only, and hold only the "
+                f"token. Re-run ops/install.* --client <client> with "
+                f"PSEUDOLIFE_MCP_TOKEN set in the environment so the "
+                f"installer (re)writes it, or fix the file by hand.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return
+    if provider.snapshot().token:
+        return
+    print(
+        f"[shim] the daemon at {url} requires bearer authentication "
+        f"(/health reports auth=true) and this shim has no credential "
+        f"configured — every call would be rejected with 401.\n"
+        f"  Give the MCP registration one of these in its env block:\n"
+        f"    PSEUDOLIFE_MCP_TOKEN_FILE=<absolute path to a private file "
+        f"holding the token>   (preferred; reloaded per call)\n"
+        f"    PSEUDOLIFE_MCP_TOKEN=<the token>\n"
+        f"  Claude Desktop launches MCP servers with a sanitized "
+        f"environment, so a token exported in the OS env (setx / shell "
+        f"profile) does NOT reach it — the entry in "
+        f"claude_desktop_config.json must carry the setting itself "
+        f"(ops/install.* --client claude-desktop writes it; then fully "
+        f"quit and relaunch Desktop).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def run_shim(*, channel: bool = False) -> None:
     import asyncio
     from pseudolife_memory.credentials import CredentialProvider
 
     _require_mcp_sdk_v2()
     url = _daemon_url()
-    ensure_daemon(url)
+    health = ensure_daemon(url)
     provider = CredentialProvider.from_environment()
+    _require_credential_for_auth(url, health, provider)
     # One shim == one Claude session. This uid keys BOTH the session episode
     # (opened/closed here) and per-store stamping (rides every call as
     # X-PL-Session), so lifecycle and attribution always agree — no dependency

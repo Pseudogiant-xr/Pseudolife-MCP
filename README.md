@@ -618,6 +618,51 @@ a `.mcp.json` at a project root for project scope:
 For a token-protected daemon, add a `headers` key to that Claude JSON entry:
 `"headers": { "Authorization": "Bearer <your-token>" }`.
 
+**Claude Desktop** (the app, including its Cowork and Code sessions) — the
+installer writes the entry for you:
+
+```bash
+ops/install.sh --client claude-desktop      # Windows: ops\install.ps1 -Client claude-desktop
+```
+
+Desktop has no `mcp add`; its servers live in `claude_desktop_config.json`
+(macOS `~/Library/Application Support/Claude/`, Linux `~/.config/Claude/`,
+Windows `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file
+is under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`; the
+installer prefers that path when it exists). The equivalent entry by hand:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "command": "/absolute/path/to/pseudolife-mcp",
+      "env": {
+        "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+        "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"
+      }
+    }
+  }
+}
+```
+
+Two things differ from the CLI clients. Desktop launches MCP servers with a
+**sanitized environment** — PATH plus a few system variables, none of your
+shell's exports — so `command` must be the shim's absolute path (`which
+pseudolife-mcp` / `Get-Command pseudolife-mcp`), and a token-protected
+daemon needs `"PSEUDOLIFE_MCP_TOKEN_FILE": "/absolute/path/to/a/private/file"`
+in that `env` block: a bearer exported in your OS environment never reaches
+the shim. The symptom of forgetting it is every session failing with
+*"Couldn't start for Cowork and Code sessions. Error: unhandled errors in a
+TaskGroup (1 sub-exception)"* — a 401 under the SDK's wrapper, which the
+shim now names plainly on stderr at startup. When the daemon is
+token-gated the installer writes that file (owner-only) from
+`PSEUDOLIFE_MCP_TOKEN` in its environment or `ops/.env`, or migrates a
+literal token already in the entry into it; with no token to write it
+says so and exits 3. After any edit, fully quit Desktop from the tray or
+menu-bar icon and relaunch — closing the window does not reload the
+config.
+
 Codex — the installer's default (shim mode) wires the same stdio shim, so a
 Codex session gets its own tier-1 identity instead of inheriting a
 concurrent Claude session's episode:
@@ -1001,6 +1046,18 @@ pseudolife-mcp-daemon`).
   prints the interpreter path and the exact fix on stderr: `pip install -U
   "mcp>=2.1,<3"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
+- **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
+  unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
+  is at the bottom of `mcp-server-pseudolife-memory.log` in the app's log
+  folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
+  on macOS). If it is a 401, the daemon is token-gated and the
+  Desktop-launched shim holds no credential: Desktop sanitizes the
+  environment, so put `PSEUDOLIFE_MCP_TOKEN_FILE` in the entry's `env` (see
+  Claude Desktop under [Wire into your coding
+  agent](#wire-into-your-coding-agent)) or re-run `ops/install.* --client
+  claude-desktop`, then fully quit and relaunch. On the Windows Store build
+  the file lives under
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —

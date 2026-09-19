@@ -14,6 +14,7 @@
 #
 # Providers (--client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
+#   claude-desktop  Claude Desktop - MCP via claude_desktop_config.json (no hooks)
 #   codex     OpenAI Codex   - MCP + hooks selected with --codex-hooks
 #   gemini    Gemini CLI     - MCP + standing instructions (no hook system)
 #   generic   any MCP agent  - prints paste-ready config + standing block
@@ -175,12 +176,13 @@ PL_BANNER
 # >>> capability-matrix >>>
 show_matrix() {
     cat <<'PL_MATRIX'
-  Agent         MCP          Briefing        Per-turn  Standing file
-  ------------  -----------  --------------  --------  ---------------------
-  Claude Code   shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
-  OpenAI Codex  shim / HTTP  hook (see *)    yes       ~/.codex/AGENTS.md
-  Gemini CLI    shim / HTTP  none            no        ~/.gemini/GEMINI.md
-  Other agent   stdio/HTTP   none            no        AGENTS.md (your path)
+  Agent           MCP          Briefing        Per-turn  Standing file
+  --------------  -----------  --------------  --------  ---------------------
+  Claude Code     shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
+  Claude Desktop  shim         none            no        none
+  OpenAI Codex    shim / HTTP  hook (see *)    yes       ~/.codex/AGENTS.md
+  Gemini CLI      shim / HTTP  none            no        ~/.gemini/GEMINI.md
+  Other agent     stdio/HTTP   none            no        AGENTS.md (your path)
 
   Every agent also gets, with no files touched: the memory tools, and the
   MCP server `instructions` field - the memory loop delivered by the
@@ -226,13 +228,13 @@ normalize_clients() {
         case "$tok" in
             both) expanded="$expanded claude codex" ;;
             all) expanded="$expanded claude codex gemini" ;;
-            claude|codex|gemini|generic) expanded="$expanded $tok" ;;
-            *) echo "invalid --client '$tok' (claude|codex|gemini|generic|both|all)" >&2
+            claude|claude-desktop|codex|gemini|generic) expanded="$expanded $tok" ;;
+            *) echo "invalid --client '$tok' (claude|claude-desktop|codex|gemini|generic|both|all)" >&2
                exit 2 ;;
         esac
     done
     canon=""
-    for tok in claude codex gemini generic; do
+    for tok in claude claude-desktop codex gemini generic; do
         case " $expanded " in *" $tok "*) canon="$canon $tok" ;; esac
     done
     printf '%s' "${canon# }"
@@ -253,6 +255,7 @@ if [ -z "$CLIENT" ]; then
         echo "  3) Gemini CLI     MCP + standing instructions (Gemini CLI has no hook system)"
         echo "  4) Other MCP agent  Cursor / Windsurf / Zed / Copilot CLI / anything else:"
         echo "                      prints ready-to-paste config, offers the standing block"
+        echo "  5) Claude Desktop   MCP entry written to claude_desktop_config.json (no hook system)"
         echo ""
         while [ -z "$CLIENT" ]; do
             printf 'Select one or more - e.g. "1 2" or "1,3" (Enter = 1): '
@@ -266,11 +269,12 @@ if [ -z "$CLIENT" ]; then
                     2) picked="$picked codex" ;;
                     3) picked="$picked gemini" ;;
                     4) picked="$picked generic" ;;
+                    5) picked="$picked claude-desktop" ;;
                     *) bad=1 ;;
                 esac
             done
             if [ -n "$bad" ] || [ -z "$picked" ]; then
-                echo "  please answer with numbers 1-4 (e.g. \"1 3\")"
+                echo "  please answer with numbers 1-5 (e.g. \"1 3\")"
             else
                 CLIENT="$(printf '%s' "$picked" | tr ' ' ',')"
             fi
@@ -417,6 +421,7 @@ step "Volumes ready: $bank_vol, $state_vol"
 # per-provider ids then ride each MCP registration's env instead (stage 10).
 case "$CLIENTS" in
     claude) WRITER_ID=claude-code ;;
+    claude-desktop) WRITER_ID=claude-desktop ;;
     codex)  WRITER_ID=codex ;;
     gemini) WRITER_ID=gemini ;;
     *)      WRITER_ID=mcp-client ;;
@@ -734,6 +739,11 @@ for selected_client in $CLIENTS; do
         fi
         continue
     fi
+    if [ "$selected_client" = claude-desktop ]; then
+        # Desktop reads no standing file; the MCP instructions field is its
+        # only briefing channel.
+        continue
+    fi
     if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
         record_instr claude "covered-by-plugin"
         continue
@@ -840,8 +850,48 @@ cli_env_flag() {  # $1 = cli; echoes the supported env flag, or nothing
 }
 
 MCP_CLAUDE=""
+MCP_CLAUDE_DESKTOP=""
 MCP_CODEX=""
 MCP_GEMINI=""
+
+installer_python() {  # echoes an interpreter >= 3.10, or nothing
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 0
+}
+# Claude Desktop launches MCP servers with a sanitized environment, so a
+# token-gated daemon needs a token FILE path on the entry — never the value,
+# and never an OS env var, which Desktop cannot see (2026-09-19 incident).
+# Honour an explicit PSEUDOLIFE_MCP_TOKEN_FILE; otherwise, when any token is
+# configured for the daemon, use a private default path. The registrar
+# WRITES that file (owner-only) from the token source below, or migrates a
+# literal already in the entry, and never points the entry at a file it did
+# not write or validate.
+desktop_token_file() {
+    if [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
+        echo "$PSEUDOLIFE_MCP_TOKEN_FILE"
+        return 0
+    fi
+    if [ -z "${PSEUDOLIFE_MCP_TOKEN:-}" ] && [ -z "${PSEUDOLIFE_MCP_TOKENS:-}" ] &&
+        [ -z "$(get_env PSEUDOLIFE_MCP_TOKEN)" ] && [ -z "$(get_env PSEUDOLIFE_MCP_TOKENS)" ]; then
+        return 0
+    fi
+    echo "$HOME/.pseudolife-mcp/claude-desktop.token"
+}
+# The singular daemon token, from the installer's environment or ops/.env
+# (a per-principal PSEUDOLIFE_MCP_TOKENS map names no single value to copy).
+desktop_token_source() {
+    if [ -n "${PSEUDOLIFE_MCP_TOKEN:-}" ]; then
+        echo "$PSEUDOLIFE_MCP_TOKEN"
+        return 0
+    fi
+    get_env PSEUDOLIFE_MCP_TOKEN
+}
 configure_codex_runtime_defaults() {
     if [ -z "$codex_python" ]; then
         MCP_CODEX=failed
@@ -870,6 +920,53 @@ print(r["runtime_defaults"])
     return 0
 }
 for selected_client in $CLIENTS; do
+    if [ "$selected_client" = claude-desktop ]; then
+        # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
+        # by ops/register_claude_desktop.py (absolute shim path — Desktop's
+        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated).
+        if [ "$TRANSPORT" != "shim" ]; then
+            echo "WARNING: Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) — ignoring --transport http for it." >&2
+        fi
+        ensure_shim
+        shim_path="$(command -v pseudolife-mcp 2>/dev/null || true)"
+        desktop_py="$(installer_python)"
+        if [ -z "$SHIM_OK" ] || [ -z "$shim_path" ]; then
+            echo "WARNING: pseudolife-mcp shim not installed or not on PATH in this shell — Claude Desktop not wired. Open a new shell and re-run, or register by hand: python3 ops/register_claude_desktop.py --command <absolute path to pseudolife-mcp>" >&2
+            MCP_CLAUDE_DESKTOP=failed
+            continue
+        fi
+        if [ -z "$desktop_py" ]; then
+            echo "WARNING: no python >= 3.10 found to write claude_desktop_config.json — Claude Desktop not wired." >&2
+            MCP_CLAUDE_DESKTOP=failed
+            continue
+        fi
+        token_file="$(desktop_token_file)"
+        token_source=""
+        desktop_args=(--command "$shim_path" --writer-id claude-desktop)
+        if [ -n "$token_file" ]; then
+            desktop_args+=(--token-file "$token_file")
+            # The token value rides a process-scoped env var the registrar
+            # reads by NAME — never a command-line argument, never printed.
+            token_source="$(desktop_token_source)"
+            if [ -n "$token_source" ]; then
+                desktop_args+=(--token-from-env PSEUDOLIFE_DESKTOP_TOKEN_SOURCE)
+            else
+                echo "WARNING: the daemon is token-gated but no singular PSEUDOLIFE_MCP_TOKEN is set (environment or ops/.env) — the registrar can only reuse a token already in the Desktop entry or an existing file at $token_file. If it reports exit 3, re-run with PSEUDOLIFE_MCP_TOKEN set so it writes the owner-only file." >&2
+            fi
+        fi
+        if PSEUDOLIFE_DESKTOP_TOKEN_SOURCE="$token_source" \
+                "$desktop_py" "$repo/ops/register_claude_desktop.py" "${desktop_args[@]}"; then
+            MCP_CLAUDE_DESKTOP=shim-env
+        else
+            MCP_CLAUDE_DESKTOP=failed
+        fi
+        if [ "$MCP_CLAUDE_DESKTOP" = shim-env ]; then
+            step "Wired into Claude Desktop via the pseudolife-mcp shim (claude_desktop_config.json) — fully quit and relaunch Desktop to load it."
+        else
+            echo "WARNING: Claude Desktop registration failed — see the error above and re-run." >&2
+        fi
+        continue
+    fi
     if [ "$selected_client" = generic ]; then
         echo ""
         step "Other MCP-capable agents — paste-ready config:"
@@ -1107,6 +1204,18 @@ for selected_client in $CLIENTS; do
                 echo "    [x] Per-turn discipline  UserPromptSubmit hook"
             fi
             describe_instr "$INSTR_CLAUDE" | sed 's/^/    /' ;;
+        claude-desktop)
+            echo "  Claude Desktop"
+            if [ "$MCP_CLAUDE_DESKTOP" = shim-env ]; then
+                echo "    [x] MCP transport        $(describe_mcp "$MCP_CLAUDE_DESKTOP")"
+            else
+                echo "    [!] MCP transport        registration FAILED - see the warning above and re-run"
+            fi
+            echo "    [x] Server instructions  automatic (MCP instructions field)"
+            echo "    [!] Session briefing     unavailable - Claude Desktop has no hook system"
+            echo "    [!] Per-turn discipline  unavailable"
+            echo "    [-] Standing file        none - Desktop reads no CLAUDE.md"
+            echo "    Restart: fully quit Claude Desktop (tray / menu-bar icon) and relaunch to load the entry." ;;
         codex)
             echo "  OpenAI Codex"
             echo "    [x] MCP transport        $(describe_mcp "$MCP_CODEX")"

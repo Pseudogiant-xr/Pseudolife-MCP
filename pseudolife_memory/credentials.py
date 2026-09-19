@@ -381,6 +381,11 @@ class CredentialProvider:
         token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
         return cls(token=token)
 
+    @property
+    def path(self) -> Path | None:
+        """The configured credential file, or ``None`` for a static token."""
+        return self._path
+
     def snapshot(self) -> CredentialSnapshot:
         with self._lock:
             if self._path is None:

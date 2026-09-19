@@ -624,6 +624,51 @@ a `.mcp.json` at a project root for project scope:
 For a token-protected daemon, add a `headers` key to that Claude JSON entry:
 `"headers": { "Authorization": "Bearer <your-token>" }`.
 
+**Claude Desktop** (the app, including its Cowork and Code sessions) — the
+installer writes the entry for you:
+
+```bash
+ops/install.sh --client claude-desktop      # Windows: ops\install.ps1 -Client claude-desktop
+```
+
+Desktop has no `mcp add`; its servers live in `claude_desktop_config.json`
+(macOS `~/Library/Application Support/Claude/`, Linux `~/.config/Claude/`,
+Windows `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file
+is under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`; the
+installer prefers that path when it exists). The equivalent entry by hand:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "command": "/absolute/path/to/pseudolife-mcp",
+      "env": {
+        "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+        "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"
+      }
+    }
+  }
+}
+```
+
+Two things differ from the CLI clients. Desktop launches MCP servers with a
+**sanitized environment** — PATH plus a few system variables, none of your
+shell's exports — so `command` must be the shim's absolute path (`which
+pseudolife-mcp` / `Get-Command pseudolife-mcp`), and a token-protected
+daemon needs `"PSEUDOLIFE_MCP_TOKEN_FILE": "/absolute/path/to/a/private/file"`
+in that `env` block: a bearer exported in your OS environment never reaches
+the shim. The symptom of forgetting it is every session failing with
+*"Couldn't start for Cowork and Code sessions. Error: unhandled errors in a
+TaskGroup (1 sub-exception)"* — a 401 under the SDK's wrapper, which the
+shim now names plainly on stderr at startup. When the daemon is
+token-gated the installer writes that file (owner-only) from
+`PSEUDOLIFE_MCP_TOKEN` in its environment or `ops/.env`, or migrates a
+literal token already in the entry into it; with no token to write it
+says so and exits 3. After any edit, fully quit Desktop from the tray or
+menu-bar icon and relaunch — closing the window does not reload the
+config.
+
 Codex — the installer's default (shim mode) wires the same stdio shim, so a
 Codex session gets its own tier-1 identity instead of inheriting a
 concurrent Claude session's episode:
@@ -1007,6 +1052,18 @@ pseudolife-mcp-daemon`).
   prints the interpreter path and the exact fix on stderr: `pip install -U
   "mcp>=2.1,<3"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
+- **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
+  unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
+  is at the bottom of `mcp-server-pseudolife-memory.log` in the app's log
+  folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
+  on macOS). If it is a 401, the daemon is token-gated and the
+  Desktop-launched shim holds no credential: Desktop sanitizes the
+  environment, so put `PSEUDOLIFE_MCP_TOKEN_FILE` in the entry's `env` (see
+  Claude Desktop under [Wire into your coding
+  agent](#wire-into-your-coding-agent)) or re-run `ops/install.* --client
+  claude-desktop`, then fully quit and relaunch. On the Windows Store build
+  the file lives under
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —
@@ -3417,7 +3474,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. When the `[lite]` embedded Postgres engages, the default moves to a stable per-user dir instead (`%LOCALAPPDATA%\pseudolife-mcp`, `~/.local/share/pseudolife-mcp`, or `~/Library/Application Support/pseudolife-mcp`) — a per-launch-directory Postgres bank would be a data-scattering footgun. Windows lite note: must be ASCII-only (the daemon refuses otherwise, with the remedy in the message). |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
-| `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `codex` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
+| `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `claude-desktop` / `codex` / `gemini` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
 | `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` | _(unset)_ | Set `1` to restore the retired `mcp-session-id` transport-session fallback for one release (rollback hatch; logs a warning on first use). The header names the HTTP *connection*, not the session — concurrent sessions share it — and the MCP 2026-07-28 revision removes it from the protocol. Session identity rides the hook-registered episode handle and `X-PL-Session` instead — see [Episodes](episodes.md). |
@@ -4607,6 +4664,7 @@ run.
 | Agent | MCP transport | Session briefing | Per-turn discipline | Standing file |
 |---|---|---|---|---|
 | Claude Code | stdio shim / HTTP | SessionStart hook or plugin | UserPromptSubmit hook | `~/.claude/CLAUDE.md` |
+| Claude Desktop | stdio shim (entry written to `claude_desktop_config.json`) | — | — | — (server `instructions` only) |
 | OpenAI Codex | stdio shim / HTTP | SessionStart hook (trust required\*) | UserPromptSubmit hook | `~/.codex/AGENTS.md` |
 | Gemini CLI | stdio shim / HTTP | — | — | `~/.gemini/GEMINI.md` |
 | Other MCP agent | stdio / HTTP (pasted config) | — | — | `AGENTS.md` (your path) |
@@ -4673,6 +4731,45 @@ attributed per provider.
 
 Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 [the AGENTS.md standard](#the-agentsmd-standard) for the one-line bridge.
+
+## Claude Desktop
+
+`--client claude-desktop` writes the stdio-shim entry into
+`claude_desktop_config.json` — Desktop has no `mcp add`. The merge lives in
+`ops/register_claude_desktop.py` (standard library only), which both
+installers call and which you can run by hand with
+`--command <absolute shim path>` (`--dry-run` prints the resolved path and
+entry). What Desktop does differently, and what the entry carries because
+of it:
+
+- **Sanitized launch environment.** Desktop starts MCP servers with PATH
+  plus a few system variables — none of your shell's exports. So `command`
+  is the shim's absolute path (a bare `pseudolife-mcp` would not resolve),
+  and a token-gated daemon gets `PSEUDOLIFE_MCP_TOKEN_FILE` — the path of a
+  private file holding the bearer, reloaded per call — in the entry's
+  `env`. A token exported in the OS environment never arrives. When the
+  daemon is token-gated the installer *writes* that file (owner-only) from
+  `PSEUDOLIFE_MCP_TOKEN` in its own environment or `ops/.env`, or migrates
+  a literal token already in the entry into it — the shim reads the file
+  first and unconditionally, so the registrar never points at a file it
+  did not write or validate. With no token to write it registers without
+  a credential and says so (exit 3): re-run with `PSEUDOLIFE_MCP_TOKEN`
+  set. Without a usable credential every session fails as *"Couldn't start
+  for Cowork and Code sessions … unhandled errors in a TaskGroup"*, a 401
+  (or an unusable token file) the shim now names on stderr at startup.
+- **Config location.** macOS `~/Library/Application Support/Claude/`, Linux
+  `~/.config/Claude/` (or `$XDG_CONFIG_HOME/Claude/`), Windows
+  `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file is
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json`
+  (an unpackaged shell's `%APPDATA%\Claude` may not even exist). The
+  registrar prefers the package cache when it exists and prints the path
+  it wrote.
+- **No hook layer, no standing file.** Desktop reads no `CLAUDE.md`; the
+  MCP server `instructions` field is its whole briefing. Writes carry the
+  `claude-desktop` writer id, so a shared bank can tell Desktop sessions
+  from Claude Code ones and tier them separately.
+- **Reload.** Fully quit Desktop (tray / menu-bar icon) and relaunch after
+  any config change — closing the window does not reload the file.
 
 ## Codex specifics
 
@@ -4969,7 +5066,8 @@ holdout — it reads `CLAUDE.md` — but a `CLAUDE.md` whose **first line is
 ## Writer ids
 
 Each first-class provider's shim registration carries its own
-`PSEUDOLIFE_WRITER_ID` (`claude-code` / `codex` / `gemini`), which the shim
+`PSEUDOLIFE_WRITER_ID` (`claude-code` / `claude-desktop` / `codex` /
+`gemini`), which the shim
 forwards as the `X-PL-Writer` header — so a shared bank can tell which
 agent wrote what, and toolset tiers can be keyed per client. HTTP
 registrations cannot carry env; there the daemon-side default in `ops/.env`

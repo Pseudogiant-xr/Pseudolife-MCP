@@ -15,6 +15,7 @@ run.
 | Agent | MCP transport | Session briefing | Per-turn discipline | Standing file |
 |---|---|---|---|---|
 | Claude Code | stdio shim / HTTP | SessionStart hook or plugin | UserPromptSubmit hook | `~/.claude/CLAUDE.md` |
+| Claude Desktop | stdio shim (entry written to `claude_desktop_config.json`) | — | — | — (server `instructions` only) |
 | OpenAI Codex | stdio shim / HTTP | SessionStart hook (trust required\*) | UserPromptSubmit hook | `~/.codex/AGENTS.md` |
 | Gemini CLI | stdio shim / HTTP | — | — | `~/.gemini/GEMINI.md` |
 | Other MCP agent | stdio / HTTP (pasted config) | — | — | `AGENTS.md` (your path) |
@@ -81,6 +82,45 @@ attributed per provider.
 
 Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 [the AGENTS.md standard](#the-agentsmd-standard) for the one-line bridge.
+
+## Claude Desktop
+
+`--client claude-desktop` writes the stdio-shim entry into
+`claude_desktop_config.json` — Desktop has no `mcp add`. The merge lives in
+`ops/register_claude_desktop.py` (standard library only), which both
+installers call and which you can run by hand with
+`--command <absolute shim path>` (`--dry-run` prints the resolved path and
+entry). What Desktop does differently, and what the entry carries because
+of it:
+
+- **Sanitized launch environment.** Desktop starts MCP servers with PATH
+  plus a few system variables — none of your shell's exports. So `command`
+  is the shim's absolute path (a bare `pseudolife-mcp` would not resolve),
+  and a token-gated daemon gets `PSEUDOLIFE_MCP_TOKEN_FILE` — the path of a
+  private file holding the bearer, reloaded per call — in the entry's
+  `env`. A token exported in the OS environment never arrives. When the
+  daemon is token-gated the installer *writes* that file (owner-only) from
+  `PSEUDOLIFE_MCP_TOKEN` in its own environment or `ops/.env`, or migrates
+  a literal token already in the entry into it — the shim reads the file
+  first and unconditionally, so the registrar never points at a file it
+  did not write or validate. With no token to write it registers without
+  a credential and says so (exit 3): re-run with `PSEUDOLIFE_MCP_TOKEN`
+  set. Without a usable credential every session fails as *"Couldn't start
+  for Cowork and Code sessions … unhandled errors in a TaskGroup"*, a 401
+  (or an unusable token file) the shim now names on stderr at startup.
+- **Config location.** macOS `~/Library/Application Support/Claude/`, Linux
+  `~/.config/Claude/` (or `$XDG_CONFIG_HOME/Claude/`), Windows
+  `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file is
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json`
+  (an unpackaged shell's `%APPDATA%\Claude` may not even exist). The
+  registrar prefers the package cache when it exists and prints the path
+  it wrote.
+- **No hook layer, no standing file.** Desktop reads no `CLAUDE.md`; the
+  MCP server `instructions` field is its whole briefing. Writes carry the
+  `claude-desktop` writer id, so a shared bank can tell Desktop sessions
+  from Claude Code ones and tier them separately.
+- **Reload.** Fully quit Desktop (tray / menu-bar icon) and relaunch after
+  any config change — closing the window does not reload the file.
 
 ## Codex specifics
 
@@ -377,7 +417,8 @@ holdout — it reads `CLAUDE.md` — but a `CLAUDE.md` whose **first line is
 ## Writer ids
 
 Each first-class provider's shim registration carries its own
-`PSEUDOLIFE_WRITER_ID` (`claude-code` / `codex` / `gemini`), which the shim
+`PSEUDOLIFE_WRITER_ID` (`claude-code` / `claude-desktop` / `codex` /
+`gemini`), which the shim
 forwards as the `X-PL-Writer` header — so a shared bank can tell which
 agent wrote what, and toolset tiers can be keyed per client. HTTP
 registrations cannot carry env; there the daemon-side default in `ops/.env`

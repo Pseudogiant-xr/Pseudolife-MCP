@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-20 — Claude Desktop client)
+- `ops/install.sh --client claude-desktop` / `ops\install.ps1 -Client
+  claude-desktop` register the stdio shim in `claude_desktop_config.json`
+  through the new standard-library-only `ops/register_claude_desktop.py`,
+  which both installers call: absolute shim path (Desktop's sanitized PATH
+  omits pipx/venv bin dirs), the `claude-desktop` writer id, the Docker-tier
+  no-spawn guard, and — when the daemon is token-gated — a
+  `PSEUDOLIFE_MCP_TOKEN_FILE` path, never a token value. Because the shim
+  reads that file first and unconditionally, the registrar never points
+  the entry at a file it did not write or validate: it writes the file
+  (owner-only, via the package's credential writer) from the installer's
+  `PSEUDOLIFE_MCP_TOKEN` (environment or `ops/.env`), or migrates a literal
+  token already in the entry into it and drops the literal from the config;
+  with nothing to write and no usable file it registers without a
+  credential and exits 3 so the installer reports it. It resolves the
+  config location per OS, including the Windows Store/MSIX package cache
+  (naming the other copy when both exist), backs the file up before
+  changing it, preserves every other key and any hand-added env var, and
+  is idempotent. Menu option 5, preflight (which now checks for python
+  3.10+ for this client), the capability matrix, the writer-id default and
+  the wiring ladder know the new client.
+
+### Fixed (2026-09-20 — shim startup against a token-gated daemon)
+- The shim exits at startup with a one-line explanation when `/health`
+  reports `auth: true` and it holds neither `PSEUDOLIFE_MCP_TOKEN` nor
+  `PSEUDOLIFE_MCP_TOKEN_FILE`, instead of 401-ing on every call — which
+  Claude Desktop surfaced only as "Couldn't start for Cowork and Code
+  sessions. Error: unhandled errors in a TaskGroup (1 sub-exception)" for
+  four days after the 2026-09-14 credential activation. Desktop launches
+  MCP servers with a sanitized environment, so an OS-level token export
+  never reaches the shim; the message says so and names the config fix.
+  A configured token file that is missing or not owner-only is reported
+  the same way at startup — the per-call `credential_unavailable` error
+  reaches Desktop as the same opaque wrapper.
+
 ### Fixed (2026-09-14 — Windows deployment authentication)
 - The Windows updater now removes inherited authentication variables before
   launching Compose, rather than passing empty values that override the
