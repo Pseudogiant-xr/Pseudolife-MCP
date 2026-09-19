@@ -16,6 +16,7 @@
 #
 # Providers (-Client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
+#   claude-desktop  Claude Desktop - MCP via claude_desktop_config.json (no hooks)
 #   codex     OpenAI Codex   - MCP + hooks selected with -CodexHooks
 #   gemini    Gemini CLI     - MCP + standing instructions (no hook system)
 #   generic   any MCP agent  - prints paste-ready config + standing block
@@ -36,9 +37,9 @@ param(
                  "claude-fable-5", "gpt-5.6-sol", "gpt-5.6-terra",
                  "gpt-5.6-luna")]
     [string]$Model = "",
-    # Comma/space-separated provider list (claude|codex|gemini|generic, plus
-    # the both/all aliases) — validated by Get-ProviderList, not ValidateSet,
-    # which cannot express a list.
+    # Comma/space-separated provider list (claude|claude-desktop|codex|gemini|
+    # generic, plus the both/all aliases) — validated by Get-ProviderList, not
+    # ValidateSet, which cannot express a list.
     [string]$Client = "",
     # Explicit ownership avoids duplicating hooks from an installed Codex plugin.
     [ValidateSet("auto", "manual", "plugin", "skip")]
@@ -135,12 +136,13 @@ function Show-Banner {
 # >>> capability-matrix >>>
 function Show-Matrix {
     Write-Host @'
-  Agent         MCP          Briefing        Per-turn  Standing file
-  ------------  -----------  --------------  --------  ---------------------
-  Claude Code   shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
-  OpenAI Codex  shim / HTTP  hook (see *)    yes       ~/.codex/AGENTS.md
-  Gemini CLI    shim / HTTP  none            no        ~/.gemini/GEMINI.md
-  Other agent   stdio/HTTP   none            no        AGENTS.md (your path)
+  Agent           MCP          Briefing        Per-turn  Standing file
+  --------------  -----------  --------------  --------  ---------------------
+  Claude Code     shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
+  Claude Desktop  shim         none            no        none
+  OpenAI Codex    shim / HTTP  hook (see *)    yes       ~/.codex/AGENTS.md
+  Gemini CLI      shim / HTTP  none            no        ~/.gemini/GEMINI.md
+  Other agent     stdio/HTTP   none            no        AGENTS.md (your path)
 
   Every agent also gets, with no files touched: the memory tools, and the
   MCP server `instructions` field - the memory loop delivered by the
@@ -185,14 +187,14 @@ function Get-ProviderList([string]$Spec) {
         switch ($tok) {
             "both" { $expanded += @("claude", "codex") }
             "all" { $expanded += @("claude", "codex", "gemini") }
-            { $_ -in "claude", "codex", "gemini", "generic" } { $expanded += $_ }
+            { $_ -in "claude", "claude-desktop", "codex", "gemini", "generic" } { $expanded += $_ }
             default {
-                Write-Host "invalid -Client '$tok' (claude|codex|gemini|generic|both|all)"
+                Write-Host "invalid -Client '$tok' (claude|claude-desktop|codex|gemini|generic|both|all)"
                 exit 2
             }
         }
     }
-    return @(@("claude", "codex", "gemini", "generic") |
+    return @(@("claude", "claude-desktop", "codex", "gemini", "generic") |
         Where-Object { $expanded -contains $_ })
 }
 
@@ -211,6 +213,7 @@ if (-not $Client) {
         Write-Host "  3) Gemini CLI     MCP + standing instructions (Gemini CLI has no hook system)"
         Write-Host "  4) Other MCP agent  Cursor / Windsurf / Zed / Copilot CLI / anything else:"
         Write-Host "                      prints ready-to-paste config, offers the standing block"
+        Write-Host "  5) Claude Desktop   MCP entry written to claude_desktop_config.json (no hook system)"
         Write-Host ""
         while (-not $Client) {
             $selection = Read-Host 'Select one or more - e.g. "1 2" or "1,3" (Enter = 1)'
@@ -223,11 +226,12 @@ if (-not $Client) {
                     "2" { $picked += "codex" }
                     "3" { $picked += "gemini" }
                     "4" { $picked += "generic" }
+                    "5" { $picked += "claude-desktop" }
                     default { $bad = $true }
                 }
             }
             if ($bad -or -not $picked) {
-                Write-Host '  please answer with numbers 1-4 (e.g. "1 3")'
+                Write-Host '  please answer with numbers 1-5 (e.g. "1 3")'
             } else {
                 $Client = $picked -join ","
             }
@@ -372,6 +376,7 @@ Step "Volumes ready: $bankVol, $stateVol"
 $writerId = if ($clients.Count -eq 1) {
     switch ($clients[0]) {
         "claude" { "claude-code" }
+        "claude-desktop" { "claude-desktop" }
         "codex" { "codex" }
         "gemini" { "gemini" }
         default { "mcp-client" }
@@ -691,6 +696,11 @@ foreach ($selectedClient in $clients) {
         $instrState["codex"] = $codexSetup.instructions
         continue
     }
+    if ($selectedClient -eq "claude-desktop") {
+        # Desktop reads no standing file; the MCP instructions field is its
+        # only briefing channel.
+        continue
+    }
     if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
         $instrState["claude"] = "covered-by-plugin"
         continue
@@ -817,6 +827,43 @@ function Get-EnvFlag($cli) {
     if ("$help" -match '--env') { return "--env" }
     return $null
 }
+function Get-InstallerPython {
+    # A python >= 3.10 for the stdlib-only ops helpers. Probe candidates
+    # independently: Store aliases and stale launchers must not block the
+    # next one. Never alters the user's PATH.
+    foreach ($candidate in @("python", "python3", "py")) {
+        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+        $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+        try {
+            $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
+            if (($LASTEXITCODE -eq 0) -and $probe) { return "$probe".Trim() }
+        } catch { continue }
+    }
+    return $null
+}
+# Claude Desktop launches MCP servers with a sanitized environment, so a
+# token-gated daemon needs a token FILE path on the entry - never the value,
+# and never an OS env var, which Desktop cannot see (2026-09-19 incident).
+# Honour an explicit PSEUDOLIFE_MCP_TOKEN_FILE; otherwise, when any token is
+# configured for the daemon, use a private default path. The registrar
+# WRITES that file (owner-only) from the token source below, or migrates a
+# literal already in the entry, and never points the entry at a file it did
+# not write or validate.
+function Get-DesktopTokenFile {
+    if ($env:PSEUDOLIFE_MCP_TOKEN_FILE) { return $env:PSEUDOLIFE_MCP_TOKEN_FILE }
+    $gated = $env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS -or
+        (Get-EnvValue "PSEUDOLIFE_MCP_TOKEN") -or (Get-EnvValue "PSEUDOLIFE_MCP_TOKENS")
+    if (-not $gated) { return $null }
+    return (Join-Path $env:USERPROFILE ".pseudolife-mcp\claude-desktop.token")
+}
+# The singular daemon token, from the installer's environment or ops/.env
+# (a per-principal PSEUDOLIFE_MCP_TOKENS map names no single value to copy).
+function Get-DesktopTokenSource {
+    if ($env:PSEUDOLIFE_MCP_TOKEN) { return $env:PSEUDOLIFE_MCP_TOKEN }
+    $fromEnvFile = Get-EnvValue "PSEUDOLIFE_MCP_TOKEN"
+    if ($fromEnvFile) { return $fromEnvFile }
+    return $null
+}
 
 $mcpState = @{}
 # EAP=Stop does not trap native exit codes: every `mcp add` must be
@@ -857,6 +904,43 @@ function Set-CodexRuntimeDefaults {
     }
 }
 foreach ($selectedClient in $clients) {
+    if ($selectedClient -eq "claude-desktop") {
+        # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
+        # by ops/register_claude_desktop.py (absolute shim path - Desktop's
+        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated).
+        if ($Transport -ne "shim") {
+            Write-Warning "Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) - ignoring -Transport http for it."
+        }
+        $shimCmd = if (Install-ShimOnce) { Get-Command pseudolife-mcp -ErrorAction SilentlyContinue } else { $null }
+        $desktopPython = Get-InstallerPython
+        if (-not $shimCmd) {
+            Write-Warning "pseudolife-mcp shim not installed or not on PATH in this shell - Claude Desktop not wired. Open a new shell and re-run, or register by hand: python ops\register_claude_desktop.py --command <full path to pseudolife-mcp.exe>"
+            $mcpState["claude-desktop"] = "failed"
+            continue
+        }
+        if (-not $desktopPython) {
+            Write-Warning "No python >= 3.10 found to write claude_desktop_config.json - Claude Desktop not wired."
+            $mcpState["claude-desktop"] = "failed"
+            continue
+        }
+        $desktopArgs = @("--command", $shimCmd.Source, "--writer-id", "claude-desktop")
+        $desktopTokenFile = Get-DesktopTokenFile
+        if ($desktopTokenFile) {
+            $desktopArgs += @("--token-file", $desktopTokenFile)
+            # The token value rides a process-scoped env var the registrar
+            # reads by NAME - never a command-line argument, never printed.
+            $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = Get-DesktopTokenSource
+            if ($env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE) {
+                $desktopArgs += @("--token-from-env", "PSEUDOLIFE_DESKTOP_TOKEN_SOURCE")
+            } else {
+                Write-Warning "The daemon is token-gated but no singular PSEUDOLIFE_MCP_TOKEN is set (environment or ops\.env) - the registrar can only reuse a token already in the Desktop entry or an existing file at $desktopTokenFile. If it reports exit 3, re-run with PSEUDOLIFE_MCP_TOKEN set so it writes the owner-only file."
+            }
+        }
+        & $desktopPython (Join-Path $repo "ops\register_claude_desktop.py") @desktopArgs 2>&1 | Out-Host
+        $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = $null
+        Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
+        continue
+    }
     if ($selectedClient -eq "generic") {
         Write-Host ""
         Step "Other MCP-capable agents - paste-ready config:"
@@ -1088,6 +1172,15 @@ foreach ($selectedClient in $clients) {
                 Write-Host "    [x] Per-turn discipline  UserPromptSubmit hook"
             }
             Write-Host "    $(Describe-Instr $instrState['claude'])"
+        }
+        "claude-desktop" {
+            Write-Host "  Claude Desktop"
+            Write-Host "    $(Get-McpMarker $mcpState['claude-desktop']) MCP transport        $(Describe-Mcp $mcpState['claude-desktop'])"
+            Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
+            Write-Host "    [!] Session briefing     unavailable - Claude Desktop has no hook system"
+            Write-Host "    [!] Per-turn discipline  unavailable"
+            Write-Host "    [-] Standing file        none - Desktop reads no CLAUDE.md"
+            Write-Host "    Restart: fully quit Claude Desktop (tray / menu-bar icon) and relaunch to load the entry."
         }
         "codex" {
             Write-Host "  OpenAI Codex"

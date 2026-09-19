@@ -846,3 +846,120 @@ def test_sdk_guard_survives_a_fully_absent_mcp(monkeypatch, capsys):
         shim._require_mcp_sdk_v2()
     assert exc.value.code == 1
     assert "mcp>=2.1" in capsys.readouterr().err
+
+
+# -- startup credential check ------------------------------------------------
+# 2026-09-19 incident: the daemon had bearer auth on, the token lived only in
+# the Windows User environment, and Claude Desktop launches MCP servers with a
+# sanitized env — so every Desktop session 401'd on tools/list for four days
+# behind "unhandled errors in a TaskGroup (1 sub-exception)". /health already
+# says ``auth: true``; the shim can tell at startup that it holds no
+# credential and say so in one line instead of failing every call.
+
+def _no_credential(monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE", raising=False)
+
+
+def test_startup_exits_when_the_daemon_needs_a_credential_and_none_is_set(
+        monkeypatch, capsys):
+    from pseudolife_memory import shim
+    from pseudolife_memory.credentials import CredentialProvider
+
+    _no_credential(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        shim._require_credential_for_auth(
+            "http://127.0.0.1:8765", {"status": "ok", "auth": True},
+            CredentialProvider.from_environment())
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in err
+    assert "PSEUDOLIFE_MCP_TOKEN" in err
+    # The gotcha that made the incident opaque: OS-level env is not enough.
+    assert "Claude Desktop" in err and "env" in err
+    # Never a token value — there is none, and the message must not invite one.
+    assert "Bearer " not in err
+
+
+@pytest.mark.parametrize("health", [
+    {"status": "ok", "auth": False},
+    {"status": "ok"},            # a daemon predating the field
+    {"status": "degraded", "auth": False, "db": "error"},
+])
+def test_startup_credential_check_is_silent_when_auth_is_off(
+        monkeypatch, capsys, health):
+    from pseudolife_memory import shim
+    from pseudolife_memory.credentials import CredentialProvider
+
+    _no_credential(monkeypatch)
+    assert shim._require_credential_for_auth(
+        "http://127.0.0.1:8765", health,
+        CredentialProvider.from_environment()) is None
+    assert capsys.readouterr().err == ""
+
+
+def test_startup_credential_check_passes_with_a_token_or_a_usable_token_file(
+        monkeypatch, tmp_path):
+    from pseudolife_memory import shim
+    from pseudolife_memory.credentials import (CredentialProvider,
+                                               _write_token_file)
+
+    health = {"status": "ok", "auth": True}
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "x" * 32)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE", raising=False)
+    assert shim._require_credential_for_auth(
+        "http://127.0.0.1:8765", health,
+        CredentialProvider.from_environment()) is None
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+    token_file = tmp_path / "claude-desktop.token"
+    _write_token_file(token_file, "y" * 32)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(token_file))
+    assert shim._require_credential_for_auth(
+        "http://127.0.0.1:8765", health,
+        CredentialProvider.from_environment()) is None
+
+
+def test_startup_exits_when_the_configured_token_file_is_unusable(
+        monkeypatch, tmp_path, capsys):
+    """A token file that is set but missing (or not owner-only) would fail
+    every call with credential_unavailable — which Claude Desktop renders
+    as the same opaque TaskGroup wrapper. Name the file and the fault once,
+    at startup, and exit (review finding, 2026-09-20)."""
+    from pseudolife_memory import shim
+    from pseudolife_memory.credentials import CredentialProvider
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    missing = tmp_path / "missing.token"
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(missing))
+    with pytest.raises(SystemExit) as exc:
+        shim._require_credential_for_auth(
+            "http://127.0.0.1:8765", {"status": "ok", "auth": True},
+            CredentialProvider.from_environment())
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert str(missing) in err
+    assert "missing" in err
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in err
+    # Auth off: the file is not even read.
+    assert shim._require_credential_for_auth(
+        "http://127.0.0.1:8765", {"status": "ok", "auth": False},
+        CredentialProvider.from_environment()) is None
+
+
+def test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential(
+        monkeypatch, capsys):
+    """The check is load-bearing in run_shim: it fires after ensure_daemon
+    and before the episode-start POST (which would be the first 401)."""
+    from pseudolife_memory import shim
+
+    _no_credential(monkeypatch)
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "ensure_daemon",
+                        lambda url: {"status": "ok", "auth": True})
+    monkeypatch.setattr(
+        shim, "_post_episode",
+        lambda *a, **k: pytest.fail("must exit before any daemon traffic"))
+    with pytest.raises(SystemExit) as exc:
+        shim.run_shim()
+    assert exc.value.code == 1
+    assert "auth" in capsys.readouterr().err.lower()

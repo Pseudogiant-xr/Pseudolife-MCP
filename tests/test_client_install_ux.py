@@ -447,9 +447,9 @@ def test_providers_guide_matches_installer_matrix() -> None:
     matrix on the provider set and the writer ids (loose agreement — the
     markdown table is formatted differently on purpose)."""
     guide = _read("docs/guide/providers.md")
-    for label in ("Claude Code", "OpenAI Codex", "Gemini CLI"):
+    for label in ("Claude Code", "Claude Desktop", "OpenAI Codex", "Gemini CLI"):
         assert label in guide, f"providers guide missing: {label}"
-    for writer in ("claude-code", "codex", "gemini", "mcp-client"):
+    for writer in ("claude-code", "claude-desktop", "codex", "gemini", "mcp-client"):
         assert writer in guide, f"providers guide missing writer id: {writer}"
     assert "commandWindows" in guide
     assert "@AGENTS.md" in guide
@@ -641,3 +641,40 @@ def test_shim_autostart_installer_replaces_the_running_tree_and_verifies_the_bin
     assert "serving" in after
     assert "throw" in after
     assert after.index("throw") < after.index("Registered + started")
+
+
+def test_installers_wire_claude_desktop_through_the_shared_register_script() -> None:
+    """Claude Desktop has no `mcp add` CLI and launches MCP servers with a
+    sanitized environment (no PATH extras, no user env vars), so its entry
+    is merged into claude_desktop_config.json by ops/register_claude_desktop.py
+    — one implementation both installers call — with the shim's ABSOLUTE
+    path and, for a token-gated daemon, a token FILE path: never a token
+    value, never a reliance on the OS environment (2026-09-19 incident:
+    four days of 401s behind "unhandled errors in a TaskGroup")."""
+    sh = _read("ops/install.sh")
+    ps = _read("ops/install.ps1")
+    for text, rel in ((sh, "install.sh"), (ps, "install.ps1")):
+        assert "register_claude_desktop.py" in text, rel
+        assert "--writer-id" in text and "--token-file" in text, rel
+        assert "Claude Desktop" in text, rel          # menu + ladder
+        assert "fully quit" in text, rel              # the relaunch step
+        assert "sanitized environment" in text, rel   # the why, in the script
+        # The token VALUE reaches the registrar only by env-var NAME, so it
+        # never appears on a command line or in the config file.
+        assert "--token-from-env PSEUDOLIFE_DESKTOP_TOKEN_SOURCE" in text.replace(
+            '", "', " ").replace('"', ""), rel
+        assert "--token " not in text and '"--token"' not in text, rel
+        assert "PSEUDOLIFE_MCP_TOKEN=" not in text.split("claude-desktop", 1)[1].split(
+            "generic", 1)[0].replace("PSEUDOLIFE_MCP_TOKEN=<token>", ""), rel
+    # Provider validation admits it, in both spellings of the list.
+    assert 'claude|claude-desktop|codex|gemini|generic) expanded="$expanded $tok"' in sh
+    assert '{ $_ -in "claude", "claude-desktop", "codex", "gemini", "generic" }' in ps
+    # Preflight accepts it (install.* passes the list straight through).
+    for rel in ("ops/preflight.sh", "ops/preflight.ps1"):
+        assert "claude-desktop" in _read(rel), rel
+    # The synced capability matrix names it.
+    matrix = "\n".join(_heredoc_payload(_marker_block(sh, "capability-matrix")))
+    assert "Claude Desktop" in matrix
+    # A single-client Desktop install gets its own daemon-side writer id.
+    assert "claude-desktop) WRITER_ID=claude-desktop" in sh
+    assert '"claude-desktop" { "claude-desktop" }' in ps

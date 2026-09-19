@@ -4,8 +4,8 @@
 # each prerequisite and prints the exact remediation for anything missing;
 # never installs or changes anything. Exit 0 = ready to install.
 #
-#   ops/preflight.sh --client claude|codex|gemini|generic (comma/space list;
-#   aliases: both = claude,codex — all = claude,codex,gemini)
+#   ops/preflight.sh --client claude|claude-desktop|codex|gemini|generic
+#   (comma/space list; aliases: both = claude,codex — all = claude,codex,gemini)
 set -u
 
 CLIENT=claude
@@ -20,7 +20,8 @@ for tok in $(printf '%s' "$CLIENT" | tr ',' ' '); do
         all) CHECKS="$CHECKS claude codex gemini" ;;
         claude|codex|gemini) CHECKS="$CHECKS $tok" ;;
         generic) ;;  # no CLI to probe — its MCP config is pasted by hand
-        *) echo "invalid --client '$tok' (claude|codex|gemini|generic|both|all)" >&2
+        claude-desktop) CHECKS="$CHECKS claude-desktop" ;;  # no CLI; needs python >= 3.10 (config writer)
+        *) echo "invalid --client '$tok' (claude|claude-desktop|codex|gemini|generic|both|all)" >&2
            exit 2 ;;
     esac
 done
@@ -119,6 +120,17 @@ else
 fi
 
 # ── selected MCP client CLI(s) ─────────────────────────────────────────────
+case " $CHECKS " in *" claude-desktop "*)
+    # Claude Desktop has no CLI; its config is written by
+    # ops/register_claude_desktop.py, which needs python >= 3.10.
+    if python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1 \
+        || python -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+        ok "python >= 3.10 (writes claude_desktop_config.json)"
+    else
+        fail "python >= 3.10 not found — the Claude Desktop registration runs ops/register_claude_desktop.py" \
+             "https://www.python.org/downloads/ (Arch: sudo pacman -S python)"
+    fi ;;
+esac
 case " $CHECKS " in *" claude "*)
     if ! command -v claude >/dev/null 2>&1; then
         fail "claude CLI not found" \

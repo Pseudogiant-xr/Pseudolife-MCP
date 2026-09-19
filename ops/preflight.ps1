@@ -4,8 +4,8 @@
 # each prerequisite and prints the exact remediation for anything missing;
 # never installs or changes anything. Exit 0 = ready to install.
 #
-#   ops\preflight.ps1 -Client claude|codex|gemini|generic (comma/space list;
-#   aliases: both = claude,codex — all = claude,codex,gemini)
+#   ops\preflight.ps1 -Client claude|claude-desktop|codex|gemini|generic
+#   (comma/space list; aliases: both = claude,codex — all = claude,codex,gemini)
 
 param(
     # Comma/space-separated provider list — validated below, not by
@@ -21,8 +21,9 @@ foreach ($tok in ($Client -split '[,\s]+' | Where-Object { $_ })) {
         "all" { $checks += @("claude", "codex", "gemini") }
         { $_ -in "claude", "codex", "gemini" } { $checks += $_ }
         "generic" { }  # no CLI to probe — its MCP config is pasted by hand
+        "claude-desktop" { $checks += $_ }  # no CLI; needs python >= 3.10 (config writer)
         default {
-            Write-Host "invalid -Client '$tok' (claude|codex|gemini|generic|both|all)"
+            Write-Host "invalid -Client '$tok' (claude|claude-desktop|codex|gemini|generic|both|all)"
             exit 2
         }
     }
@@ -102,6 +103,26 @@ if (Get-Command pipx -ErrorAction SilentlyContinue) {
 }
 
 # -- selected MCP client CLI(s) -------------------------------------------------
+if ($checks -contains "claude-desktop") {
+    # Claude Desktop has no CLI; its config is written by
+    # ops\register_claude_desktop.py, which needs python >= 3.10. Probe each
+    # candidate independently: the Microsoft Store alias stub answers to
+    # Get-Command but is not an interpreter.
+    $desktopPythonOk = $false
+    foreach ($candidate in @("python", "python3", "py")) {
+        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+        $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+        try {
+            & $candidate @probeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { $desktopPythonOk = $true; break }
+        } catch { continue }
+    }
+    if ($desktopPythonOk) { Ok "python >= 3.10 (writes claude_desktop_config.json)" }
+    else {
+        Fail "python >= 3.10 not found - the Claude Desktop registration runs ops\register_claude_desktop.py" `
+             "https://www.python.org/downloads/ or: winget install Python.Python.3.12"
+    }
+}
 if ($checks -contains "claude") {
     if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "claude CLI" }
     else {
