@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-21 — corrections commit as one decision)
+- Explicit supersede and consolidate operations now stage source retirement,
+  trace invalidation, replacement storage, and any capacity movement together.
+  Encoding, admission, or write-through failures leave the original entries
+  active; ambiguous commit responses reconcile from durable state before the
+  bank can be read or saved again. File-backed banks persist complete Before
+  and After snapshots before publishing the replacement in memory.
+
 ### Fixed (2026-09-21 — avoid slow CPU embedding precision drift)
 - CPU torch embeddings explicitly retain float32 inference when newer
   Transformers versions default to the checkpoint's lower precision. This

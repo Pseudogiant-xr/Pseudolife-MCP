@@ -28,6 +28,7 @@ outside the MIRAS spectrum (no gradient updates, documents not memories).
 
 from __future__ import annotations
 
+import copy
 import heapq
 import logging
 import math
@@ -344,6 +345,10 @@ class ContinuumMemorySystem:
         # module-global generator would perturb any consumer that seeds
         # ``random`` globally for reproducibility (PR #145 review note).
         self._shadow_rng = random.Random()
+        # Correction staging makes write-through failures fatal while the
+        # disposable clone is being built. Ordinary stores retain their
+        # historical best-effort relocation/eviction behavior.
+        self._strict_storage = False
 
     @property
     def total_memories(self) -> int:
@@ -352,11 +357,70 @@ class ContinuumMemorySystem:
             total += self.reference.size
         return total
 
+    def clone_for_staged_store(self) -> "ContinuumMemorySystem":
+        """Clone resident bank state while sharing immutable collaborators.
+
+        The clone is a transaction candidate: entries, tensors, indexes,
+        counters, episodes, and telemetry are isolated, while configuration,
+        model/runtime collaborators, and the storage connection remain shared.
+        """
+        shared = (
+            self.config,
+            self.storage,
+            self.reference,
+            self._nli_scorer,
+            self._reranker,
+        )
+        memo = {id(value): value for value in shared if value is not None}
+        staged = copy.deepcopy(self, memo)
+        for index, band in enumerate(staged.bands):
+            band.on_evict = partial(staged._on_band_evict, band_idx=index)
+        named = {band.name: band for band in staged.bands}
+        staged.instant = named.get("instant", staged.bands[0])
+        staged.short_term = named.get(
+            "short_term",
+            staged.bands[1] if len(staged.bands) > 1 else staged.bands[0],
+        )
+        staged.long_term = named.get("long_term", staged.bands[-1])
+        return staged
+
     # ------------------------------------------------------------------
     # Store path
     # ------------------------------------------------------------------
 
     def store(
+        self,
+        text: str,
+        embedding: torch.Tensor,
+        source: str = "",
+        tags: list[str] | None = None,
+        session_key: str | None = None,
+        attribution_episode_id: str | None = None,
+        authority: str | None = None,
+        distortion_tolerance: str | None = None,
+        *,
+        bypass_surprise_gate: bool = False,
+        strict_storage: bool = False,
+    ) -> tuple[bool, float]:
+        """Store a memory, optionally making every write-through step strict."""
+        previous = self._strict_storage
+        self._strict_storage = previous or strict_storage
+        try:
+            return self._store(
+                text,
+                embedding,
+                source=source,
+                tags=tags,
+                session_key=session_key,
+                attribution_episode_id=attribution_episode_id,
+                authority=authority,
+                distortion_tolerance=distortion_tolerance,
+                bypass_surprise_gate=bypass_surprise_gate,
+            )
+        finally:
+            self._strict_storage = previous
+
+    def _store(
         self,
         text: str,
         embedding: torch.Tensor,
@@ -2054,6 +2118,8 @@ class ContinuumMemorySystem:
                     access_count=entry.access_count,
                 )
             except Exception as exc:  # noqa: BLE001
+                if self._strict_storage:
+                    raise
                 logger.warning(
                     "band relocation write-through failed (%s -> %s): %s",
                     entry.bank, destination.name, exc,
@@ -2590,6 +2656,8 @@ class ContinuumMemorySystem:
             try:
                 self.storage.delete_entry_ids([entry.db_id])
             except Exception as exc:  # noqa: BLE001
+                if self._strict_storage:
+                    raise
                 logger.warning("evict write-through failed: %s", exc)
 
     def stats(self) -> dict:

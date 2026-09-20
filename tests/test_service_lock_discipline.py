@@ -101,6 +101,11 @@ CALLER_HOLDS_LOCK = {
     "_derived_from_entries_locked",
     "_resolve_correction_targets_locked",
     "_retire_entries_locked",
+    "_correction_trace_state",
+    "_hydrate_correction_rows",
+    "_recover_correction_locked",
+    "_stage_correction_locked",
+    "_apply_correction_locked",
     # Constraint pinning (schema v35) — cortex_search's per-fact dict builder
     # and the TypeRetrieve pin step, both reached only from inside
     # cortex_search's lock (the fixpoint verifies the callers).
