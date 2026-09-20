@@ -14,7 +14,7 @@
 #                       Postgres coverage possible there; the FULL suite on
 #                       Windows stays future work (embedder wall-time).
 # Kept lean: master-push + PR triggers only, cancel-in-progress,
-# pip + HuggingFace caches, no artifacts (pass/fail is the product).
+# pip + HuggingFace caches, diagnostic artifacts for the full Linux lanes.
 name: CI
 
 on:
@@ -137,7 +137,17 @@ jobs:
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
           OMP_NUM_THREADS: "2"
-        run: python -m pytest -q -n 2 --dist loadfile
+          PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
+        run: bash ops/ci_tests.sh
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: ci-results/
+          retention-days: 14
+          if-no-files-found: warn
 
   test-lite-linux:
     runs-on: ubuntu-latest
@@ -215,7 +225,17 @@ jobs:
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
           OMP_NUM_THREADS: "2"
-        run: python -m pytest -q -n 2 --dist loadfile
+          PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
+        run: bash ops/ci_tests.sh
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-lite-linux-diagnostics
+          path: ci-results/
+          retention-days: 14
+          if-no-files-found: warn
 
   test-lite-windows:
     runs-on: windows-latest

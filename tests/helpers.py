@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import socket
 
 import torch
@@ -49,7 +50,8 @@ def free_port() -> int:
 def pg_reachable(url: str, timeout: float = 3.0) -> bool:
     """Whether the bench Postgres answers — the PG suites' skip gate.
 
-    Returns ``False`` for an absent server; RAISES ``PostgresAuthError``
+    Returns ``False`` for an absent server unless
+    ``PSEUDOLIFE_REQUIRE_TEST_POSTGRES=1``; RAISES ``PostgresAuthError``
     for a server that answered but rejected the credentials (that is a
     misconfiguration, never a skip). ``psycopg`` is imported here rather
     than at module scope so a machine without it can still import this
@@ -61,6 +63,7 @@ def pg_reachable(url: str, timeout: float = 3.0) -> bool:
     from tests.pg_defaults import (
         PostgresAuthError,
         PostgresSetupError,
+        PostgresUnavailableError,
         RedactedUrl,
         auth_failure_message,
         is_auth_failure,
@@ -84,6 +87,12 @@ def pg_reachable(url: str, timeout: float = 3.0) -> bool:
                 auth_failure_message(url.host, exc, url)
             ) from None
         if is_server_unavailable(exc):
+            if os.environ.get("PSEUDOLIFE_REQUIRE_TEST_POSTGRES") == "1":
+                # Do not include the raw connection error or DSN: drivers
+                # may include credentials in either.
+                raise PostgresUnavailableError(
+                    "Test PostgreSQL is required but unavailable"
+                ) from None
             return False
         raise PostgresSetupError(
             setup_failure_message(url.host, exc, url)
