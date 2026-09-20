@@ -1647,29 +1647,28 @@ def memory_graph_review(
                     "dismiss_slot_pair", "restore_slot", "accept_link", "reject_link",
                     "accept_merge", "accept_junk", "reject_entity"] = "list",
     proposal_id: Annotated[int | None, Field(
-        description="Id actions: the one proposal to settle.")] = None,
+        description="Id actions: the proposal to settle.")] = None,
     proposal_ids: Annotated[list[int] | None, Field(
-        description="Id actions: settle many proposals in one call, "
-                    "instead of ``proposal_id``.")] = None,
+        description="Id actions: many proposals at once.")] = None,
     proposals: Annotated[list[dict] | None, Field(
         description="propose: ``[{src, relation, dst, similarity?, "
                     "rationale?}]``.")] = None,
     scope: Annotated[str | None, Field(
-        description="list: keep only findings of this kind.")] = None,
+        description="list: keep only analyzer findings whose entities "
+                    "carry this memory source (Atlas project); queued "
+                    'proposals always list; omit or "all" for '
+                    "everything. Not a finding kind.")] = None,
     src: Annotated[str | None, Field(
         description="relate/dismiss_pair: the first entity. "
                     'dismiss_slot_pair: an "entity|attribute" key from the '
                     "deep response; restore_slot: retired key or entity.")] = None,
     dst: Annotated[str | None, Field(
-        description="relate/dismiss_pair: the second entity. "
-                    'dismiss_slot_pair: an "entity|attribute" key from the '
-                    "deep response.")] = None,
+        description="relate/dismiss_pair/dismiss_slot_pair: the second "
+                    "entity or key.")] = None,
     relation: Annotated[str | None, Field(
-        description="relate: the edge relation to write, from the graph "
-                    "vocabulary.")] = None,
+        description="relate: edge relation to write (graph vocabulary).")] = None,
     store: Annotated[str | None, Field(
-        description='dismiss_slot_pair / restore_slot: which store the key '
-                    'belongs to — "lesson" or "world".')] = None,
+        description='dismiss_slot_pair/restore_slot: "lesson" or "world".')] = None,
 ) -> dict[str, Any]:
     """Work the graph review queue — deep-dream proposals that need a
     verdict before they touch the graph.

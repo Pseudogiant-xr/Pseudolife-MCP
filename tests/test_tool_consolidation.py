@@ -213,6 +213,27 @@ def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:
                    {"action": "dismiss_pair", "src": "a"}).get("error") == "src_dst_required"
 
 
+def test_graph_review_scope_is_served_as_a_source_filter(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """``list``'s ``scope`` keeps the entities that carry that memory
+    SOURCE (the Atlas project switcher's value) — it is not a finding-kind
+    filter. The served description said "keep only findings of this kind"
+    until the 2026-09-20 review of PR #316, which had briefly told agents to
+    page with ``scope=<finding kind>`` (an empty entity set, so an empty
+    analyzer listing). Pin the served text to the real contract; the
+    service side is pinned by tests/test_graph.py::
+    test_graph_review_scope_filters_by_memory_source_not_finding_kind."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    tools = asyncio.run(mod.mcp.list_tools())
+    desc = {t.name: t for t in tools}["memory_graph_review"].input_schema[
+        "properties"]["scope"].get("description") or ""
+    assert "source" in desc, desc
+    assert "of this kind" not in desc, desc
+    assert "all" in desc, desc  # the documented "everything" spelling
+
+
 def test_graph_review_dismiss_pair_routes_to_service(tmp_path: Path, monkeypatch) -> None:
     # Step-C driver verb: an agent working deep-dream candidates must be able
     # to record "these are distinct" so the pair stops resurfacing.
@@ -371,6 +392,11 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # were listed by trimming memory_outcome's own docstring, not by
     # moving a cap. 2026-09-08: a seventh key (used_ids_served_elsewhere)
     # and the window invariant on the param were paid for the same way.
+    # 2026-09-20: memory_graph_review's corrected `scope` contract (a
+    # memory-source filter, not a finding kind — full tier only) was paid
+    # for by trimming the same tool's dst / store / proposal_id /
+    # proposal_ids / relation wording;
+    # full stood at 8398 before the fix.
     param_budgets = {"minimal": 2600, "core": 5250, "full": 8400}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
