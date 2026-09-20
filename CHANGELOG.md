@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-20 — `memory_graph_review` scope description)
+- `memory_graph_review(action="list", scope=...)` described `scope` as
+  "keep only findings of this kind". It has always been a memory-source
+  filter — the same project scope the Console's Atlas switcher sends to
+  `/api/graph/review?scope=` — keeping only analyzer findings (duplicate,
+  orphan, dubious edge, test artifact, unattributed) whose entities carry
+  that source, while queued proposals (`proposed_link` / `merge_candidate`
+  / `junk_candidate`) always list (omit or `"all"` for everything).
+  Passing a finding kind such as `merge_candidate` matched no entity and
+  returned an empty analyzer listing, which the PR #316 review caught after
+  a draft hint had told agents to page that way. The served description and
+  the README tool row now state the real contract; no behavior change. Two
+  tests pin it: the served text (`tests/test_tool_consolidation.py`) and
+  the service semantics — a source keeps its entities' findings, a
+  finding-kind string yields none (`tests/test_graph.py`).
+
 ### Fixed (2026-09-20 — deep dream results lost between daemon and shim)
 - `memory_dream(action="deep")` through the stdio shim failed after a few
   seconds as "The memory daemon returned an invalid MCP response" while the
