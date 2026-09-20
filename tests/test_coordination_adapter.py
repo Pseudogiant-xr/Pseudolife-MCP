@@ -60,7 +60,8 @@ def test_codex_delivery_does_not_advertise_a_claude_channel():
         client, instance = adapter(daemon, wake_enabled=True, delivery_transport="codex")
         async with client, instance:
             capabilities = daemon.calls[0][1]["capabilities"]
-            assert capabilities == {"pull": True, "channel": False, "codex": True}
+            assert capabilities == {"pull": True, "channel": False, "codex": True,
+                                    "resumable": False}
     asyncio.run(drive())
 
 

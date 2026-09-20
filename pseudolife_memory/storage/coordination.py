@@ -107,10 +107,25 @@ MAX_PENDING = 256
 MESSAGE_TTL = 86400
 DEDUPE_RETENTION = 7 * 86400
 # An address that has been idle this long, holds no lease and is referenced
-# by no retained message is removed by the same prune pass. A shim without a
-# state path registers a new address per launch, so without this the peer
-# list fills with addresses nobody will ever read again.
+# by no retained message is removed by the same prune pass; idle means no
+# activity, and a lease renewal counts only when the shim saw a turn.
 AGENT_RETENTION = DEDUPE_RETENTION
+# Peers the default list shows: holding a lease, or active this recently.
+# Measured 2026-09-20 on the live bank: 90 registered addresses, 11 leased,
+# 67 of them Codex threads whose shim had been killed with the row still
+# marked attached, 5 to 160 hours idle, no task, no mail; and every parked shim
+# looked as busy as a working one because its heartbeat bumped
+# last_activity. An hour keeps a session that just ended visible for a
+# handover and hides the rest; they are still counted.
+ACTIVE_WINDOW = 3600
+# An address whose adapter registered ``resumable: false`` has no state file
+# behind it, so nothing can attach to it again once its lease lapses; it is
+# removed after this much idleness instead of AGENT_RETENTION. Same
+# measurement: the Claude shims without a state path left one new address
+# per launch. An address that did not declare either way predates the flag
+# and keeps the long window, so nothing an older adapter can still resume
+# is removed early.
+EPHEMERAL_AGENT_RETENTION = ACTIVE_WINDOW
 # Live delivery attempts per message across attachments. Each attachment
 # may attempt a pending message once; past this total the message is left
 # for explicit receive so one unacknowledged message cannot wake the host on
@@ -300,12 +315,22 @@ class CoordinationStore:
                 _string(value, MAX_SCOPE, key)
                 clauses.append(f"{key}=%s")
                 values.append(value)
-        # Reachable adapters first: a burst of idle addresses must not push
-        # the peers that can actually receive live mail off a bounded page.
-        rows = self._all("SELECT * FROM coordination_agents WHERE " + " AND ".join(clauses)
-                         + " ORDER BY (attachment_id IS NOT NULL AND coalesce(lease_until,0)>%s) DESC,"
-                         "last_activity DESC,agent_id LIMIT %s", (*values, self.clock(), limit))
-        return {"agents": [self._public(row) for row in rows]}
+        now = self.clock()
+        scope = "SELECT * FROM coordination_agents WHERE " + " AND ".join(clauses)
+        leased = "(attachment_id IS NOT NULL AND coalesce(lease_until,0)>%s)"
+        # Only peers holding a lease or active within ACTIVE_WINDOW, reachable
+        # adapters first: a burst of idle addresses must not push the peers
+        # that can actually receive live mail off a bounded page. The rest
+        # are counted, not listed; one extra row tells whether the page cut
+        # active peers too.
+        rows = self._all(scope + f" AND ({leased} OR last_activity>%s) ORDER BY {leased} DESC,"
+                         "last_activity DESC,agent_id LIMIT %s",
+                         (*values, now, now - ACTIVE_WINDOW, now, limit + 1))
+        idle = self._one("SELECT count(*) AS n FROM coordination_agents WHERE " + " AND ".join(clauses)
+                         + f" AND NOT {leased} AND last_activity<=%s",
+                         (*values, now, now - ACTIVE_WINDOW))["n"]
+        return {"agents": [self._public(row) for row in rows[:limit]],
+                "truncated": len(rows) > limit, "idle_omitted": idle}
 
     def _pending_count(self, agent_id):
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
@@ -340,14 +365,23 @@ class CoordinationStore:
         return {"agent_id": agent_id, "generation": generation,
                 "lease_until": row["lease_until"], "wake_enabled": row["wake_enabled"]}
 
-    def heartbeat(self, principal, agent_id, credential, *, attachment_id, generation):
+    def heartbeat(self, principal, agent_id, credential, *, attachment_id, generation,
+                  active=False):
+        """Renew the lease. ``active`` says the shim forwarded a tool call
+        since its previous heartbeat; only then does the renewal count as
+        activity, so a parked shim is not ranked or retained as a working
+        one."""
+        if not isinstance(active, bool):
+            raise CoordinationError("invalid_active")
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             self._attachment(row, attachment_id, generation)
-            until = self.clock() + ATTACHMENT_LEASE
+            now = self.clock()
+            until = now + ATTACHMENT_LEASE
             self.storage.conn.execute(
-                "UPDATE coordination_agents SET lease_until=%s,last_activity=%s WHERE agent_id=%s",
-                (until, self.clock(), agent_id))
+                "UPDATE coordination_agents SET lease_until=%s,"
+                "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
+                (until, active, now, agent_id))
             pending = self._pending_count(agent_id)
         return {"agent_id": agent_id, "generation": generation, "lease_until": until,
                 "pending_count": pending}
@@ -517,18 +551,28 @@ class CoordinationStore:
         """Expire bodies, discard terminal retry metadata after seven days, and
         remove addresses that are idle, unleased and referenced by no retained
         message (the message rows go first, so a referenced address outlives
-        its mail by the retention window)."""
+        its mail by the retention window). An address registered as not
+        resumable goes once both its lease and its last activity are
+        EPHEMERAL_AGENT_RETENTION old: a parked shim whose lease lapsed
+        during a daemon restart keeps its address, because the first
+        heartbeat after the restart prunes before it is served and the
+        adapter re-attaches within a minute. Any other address goes after
+        AGENT_RETENTION of inactivity."""
         now = self.clock()
+        ephemeral = "a.capabilities->>'resumable'='false'"
         with self.storage._txn():
             bodies = self.storage.conn.execute("UPDATE coordination_messages SET text=NULL "
                 "WHERE expires_at<=%s AND text IS NOT NULL", (now,)).rowcount
             removed = self.storage.conn.execute("DELETE FROM coordination_messages WHERE created_at<=%s "
                 "AND expires_at<=%s", (now - DEDUPE_RETENTION, now)).rowcount
             agents = self.storage.conn.execute(
-                "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR a.lease_until<=%s) "
-                "AND a.last_activity<=%s AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
+                "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR "
+                f"a.lease_until<=CASE WHEN {ephemeral} THEN %s ELSE %s END) "
+                f"AND a.last_activity<=CASE WHEN {ephemeral} THEN %s ELSE %s END "
+                "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
                 "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id)",
-                (now, now - AGENT_RETENTION)).rowcount
+                (now - EPHEMERAL_AGENT_RETENTION, now,
+                 now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION)).rowcount
         return {"bodies_expired": bodies, "removed": removed, "agents_removed": agents}
 
     def recover(self):

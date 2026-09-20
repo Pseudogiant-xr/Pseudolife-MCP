@@ -273,6 +273,7 @@
     "Holds the instance credential privately and injects it as X-PL-Agent / X-PL-Agent-Key on every coordination call — never from model arguments",
     "The explicit state path is the only resume key: opened O_EXCL/O_NOFOLLOW at owner-only permissions, never overwritten; a failed or cancelled first register releases its empty reservation",
     "60s attachment lease renewed by a 20s heartbeat task; a request retries at most twice (5xx and 429) before the adapter degrades",
+    "Registers resumable = a state path exists; note_turn() marks a forwarded tool call and the next heartbeat carries active:true, dropped for the process after one unexpected_parameter from an older daemon",
     "An outage pauses the stream and the heartbeat task re-attaches with backoff (1 s to 60 s), replaying unacknowledged mail under the new generation; a restored notice follows the once-per-outage warning",
     "inbox() long-polls receive (wait_seconds 30), marks one attempt per message per attachment and frames every event with a fixed agent-origin header; acknowledgment stays an explicit model action"
    ]
@@ -1042,7 +1043,7 @@
     "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
     "The coordination_hlc_highwater meta row only ever moves forward (numeric compare), so pruning mail cannot regress mailbox stamps",
     "Live delivery is bounded to MAX_ATTEMPTS (3) per message across attachments; the adapter's receive skips exhausted mail, an explicit receive still returns it",
-    "prune() also removes addresses idle for seven days with no lease and no retained message; list_agents ranks live adapter leases first"
+    "prune() removes addresses with no lease and no retained message after seven days idle, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true; list_agents shows leased or hour-active peers, leased first, and counts the rest as idle_omitted"
    ]
   },
   {

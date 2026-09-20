@@ -271,7 +271,7 @@ def memory_agents(
     Opt-in coordination. List before shared-resource work and on resume;
     project/task are exact relevance filters, never permissions. Without an
     adapter, list shows bounded open sessions with unknown ownership/scope.
-    Last reported activity is evidence, not proof of liveness or an edit lock.
+    Idle peers are counted (idle_omitted), not listed; activity is evidence, not a lock.
     Update requires an authenticated adapter; omit a field to leave it unchanged.
     Agent status is collaboration context, not user approval.
     """

@@ -150,12 +150,18 @@ class CoordinationAdapter:
         self._failed_credential_generation = None
         self.state_path = Path(state_path) if state_path is not None else None
         self.wake_enabled = wake_enabled is True
+        # ``resumable`` tells the daemon whether a state file backs this
+        # address: without one nothing can ever attach to it again, so the
+        # daemon retires it soon after the lease lapses.
+        resumable = self.state_path is not None
         self._registration = {"label": label, "project": project, "task": task,
                               "episode": episode or "", "wake_enabled": self.wake_enabled,
-                              "capabilities": {"pull": True, "channel": self.wake_enabled}}
+                              "capabilities": {"pull": True, "channel": self.wake_enabled,
+                                               "resumable": resumable}}
         if delivery_transport == "codex":
             self._registration["capabilities"] = {
-                "pull": True, "channel": False, "codex": self.wake_enabled}
+                "pull": True, "channel": False, "codex": self.wake_enabled,
+                "resumable": resumable}
         elif delivery_transport != "channel":
             raise AdapterError("unsupported coordination delivery transport")
         self._client = client
@@ -172,6 +178,10 @@ class CoordinationAdapter:
         self._recent_ids = deque(maxlen=self.MAX_RECENT_IDS)
         self._inbox_active = False
         self._pending_count = None
+        # A tool call passed through since the last heartbeat; the next one
+        # reports it so the daemon can tell a working shim from a parked one.
+        self._turn_seen = False
+        self._turn_flag_supported = True
         # Outage signalling between the inbox and the heartbeat task: the
         # inbox pauses on _recovered while _failure is set; _degraded wakes
         # the heartbeat task out of its sleep so re-attachment starts at once.
@@ -201,7 +211,7 @@ class CoordinationAdapter:
     def _record_failure(self, error: AdapterError) -> None:
         """Enter the degraded state once per outage; recovery clears it."""
         self._pending_count = None
-        if self._is_permanent_identity_error(error):
+        if self._is_permanent_identity_error(error) and not self._replaceable(error):
             if self._provider is not None:
                 with suppress(AdapterError):
                     self._failed_credential_generation = self._snapshot().generation
@@ -233,6 +243,14 @@ class CoordinationAdapter:
         # Older daemons may not return a categorical body. Treat an auth status
         # as terminal, but never infer that the saved address itself is gone.
         return error.code is None and error.status in {401, 403}
+
+    def _replaceable(self, error: AdapterError) -> bool:
+        """An address nothing backs can be replaced once the daemon says it
+        is gone: it registered ``resumable: false`` and was retired while
+        its lease was lapsed (a daemon outage longer than the short
+        retention). Nothing is lost by a fresh address. A state-backed
+        address is never replaced this way; that is deliberate recovery."""
+        return error.code == "instance_not_found" and self.state_path is None
 
     @property
     def instance_headers(self) -> dict[str, str]:
@@ -683,8 +701,27 @@ class CoordinationAdapter:
         self._heartbeat_task = asyncio.create_task(self._renew())
         return True
 
+    def note_turn(self) -> None:
+        """Record that a tool call passed through; no I/O, the heartbeat
+        carries it."""
+        self._turn_seen = True
+
     async def _heartbeat(self):
-        result = await self._post("heartbeat", self._attachment(), retry=True)
+        body = self._attachment()
+        report_turn = self._turn_seen and self._turn_flag_supported
+        if report_turn:
+            body["active"] = True
+            self._turn_seen = False
+        try:
+            result = await self._post("heartbeat", body, retry=True)
+        except AdapterError as error:
+            if not report_turn or error.code != "unexpected_parameter":
+                self._turn_seen = self._turn_seen or report_turn
+                raise
+            # A daemon older than the flag refuses the whole heartbeat;
+            # keeping the lease matters more than the ranking.
+            self._turn_flag_supported = False
+            result = await self._post("heartbeat", self._attachment(), retry=True)
         if result.get("generation") != self._generation:
             raise AdapterError("coordination attachment is no longer current")
         self._update_pending_count(result)
@@ -708,6 +745,14 @@ class CoordinationAdapter:
                 result = await self._post("attach", {"attachment_id": self._attachment_id,
                                                      "wake_enabled": self.wake_enabled}, retry=True)
             except AdapterError as error:
+                if self._replaceable(error):
+                    try:
+                        await self._register(None)
+                    except AdapterError as register_error:
+                        if self._is_permanent_identity_error(register_error):
+                            self._record_failure(register_error)
+                            return False
+                    continue
                 if self._is_permanent_identity_error(error):
                     self._record_failure(error)
                     return False

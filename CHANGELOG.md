@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-20 — the coordination roster shows who is working)
+- `memory_agents(action="list")` returned every registered address. On the
+  live bank that was 90 rows, 11 of them leased and 67 Codex threads whose
+  shim had been killed with the row still marked attached, 5 to 160 hours
+  idle, no task, no mail; and a parked shim looked as busy as a working one because the
+  20 s lease heartbeat bumped `last_activity`. The list now shows peers
+  holding a lease or active within the last hour
+  (`storage.coordination.ACTIVE_WINDOW`), leased first, reports the
+  number of other matching peers as `idle_omitted` and sets `truncated`
+  when the page cut listed peers. A peer's public agent ID stays
+  addressable while its row exists.
+- Lease renewal is no longer activity. The shim notes every tool call it
+  forwards (`CoordinationAdapter.note_turn`) and the next heartbeat carries
+  `active: true`; only then does the daemon move `last_activity`. A shim
+  upgraded ahead of its daemon drops the flag for the process after one
+  `unexpected_parameter` refusal, so the lease survives either upgrade
+  order; deploy the daemon first all the same.
+- Addresses nothing can resume are retired sooner. The adapter registers
+  `capabilities.resumable` (true when a state file backs the address); an
+  address registered `resumable: false` is removed once both its lease and
+  its last activity are an hour old and no retained message references it
+  (`EPHEMERAL_AGENT_RETENTION`), instead of seven days. The lease
+  condition matters: the first heartbeat after a daemon restart prunes
+  before it is served, so a parked shim whose lease lapsed during the
+  restart must not lose its address. If a state-less address is retired
+  all the same, the adapter registers a fresh one instead of stopping with
+  advice to restore a saved identity it never had; state-backed addresses
+  keep the deliberate-recovery rule. Addresses that declared themselves
+  resumable, or that predate the flag, keep the seven-day rule, so nothing
+  an older adapter can still resume goes early.
+- A Claude Code session keeps its coordination address across resume: with
+  `PSEUDOLIFE_AGENT_STATE_DIR` set, the shim keys a private state file by
+  the `CLAUDE_CODE_SESSION_ID` the host exports to it
+  (`shim._session_state_path`). An explicit `PSEUDOLIFE_AGENT_STATE` still
+  wins; without either, each launch gets a new address as before. The
+  shim's comment that MCP servers never receive the session id was wrong
+  (checked 2026-09-20 in a running shim's environment).
+
 ### Fixed (2026-09-20 — `memory_graph_review` scope description)
 - `memory_graph_review(action="list", scope=...)` described `scope` as
   "keep only findings of this kind". It has always been a memory-source

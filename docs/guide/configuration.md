@@ -76,7 +76,12 @@ provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a
 private file outside the repository for deliberate mailbox resume. Each concurrent
 adapter needs its own state file; sharing one does not create a second identity.
-Without a state path, each launch gets a new address. Never infer recovery from a
+Claude Code sessions can instead set `PSEUDOLIFE_AGENT_STATE_DIR` to a private
+directory: the shim keys one state file per session under it by the
+`CLAUDE_CODE_SESSION_ID` the host exports, so a resumed session keeps its
+address and concurrent sessions never share one. Without either, each launch
+gets a new address, registered as not resumable and retired an hour after it
+goes quiet. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
 private file and adapter headers, not model arguments or memory entries.
 
@@ -215,11 +220,22 @@ to trigger physical cleanup. Full queues and rate limits return explicit errors.
 Live delivery attempts a message at most three times in total across
 attachments; past that it is left for explicit receive, so one unacknowledged
 message cannot wake the host on every restart. The same prune pass removes an
-address that has been idle for seven days, holds no lease and is referenced by no
-retained message, so launches without a state path do not accumulate addresses,
-and peers with a live adapter lease are listed ahead of idle ones. Idle means no
-register, update, attach, heartbeat, send or acknowledgment: a client that only
-reads must acknowledge what it reads, or hold a lease, to stay registered. A
+address that holds no lease, is referenced by no retained message and has been
+idle for seven days, or for one hour when its adapter registered without a
+state file (`capabilities.resumable: false`), since nothing can attach to that
+address again; for those the lease too must have been gone for the hour, so a
+daemon restart cannot retire a parked shim's address, and if it ever is
+retired the state-less adapter registers a fresh one instead of stopping.
+Addresses that predate the flag keep the seven-day rule. Idle
+means no register, update, attach, send, acknowledgment or forwarded tool call:
+the adapter's lease heartbeat counts as activity only when the shim forwarded a
+tool call since the previous one, so a parked shim is neither ranked nor
+retained as a working one. A client that only reads must acknowledge what it
+reads, or hold a lease, to stay registered. `memory_agents(action="list")`
+shows peers that hold a lease or were active within the last hour, leased
+first, reports the number of other matching peers as `idle_omitted` and sets
+`truncated` when the page cut listed peers; a peer's public agent ID stays
+addressable while its row exists. A
 legacy adapter registers a fresh address on its next start only when the authenticated
 daemon explicitly confirms that the saved address no longer exists. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance
