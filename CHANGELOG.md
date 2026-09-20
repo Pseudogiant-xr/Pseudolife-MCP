@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-21 — avoid slow CPU embedding precision drift)
+- CPU torch embeddings explicitly retain float32 inference when newer
+  Transformers versions default to the checkpoint's lower precision. This
+  avoids slow bfloat16 inference on older CI CPUs while preserving the
+  previously validated CPU precision, real models and full test coverage.
+  GPU inference and the optional ONNX backend keep their existing precision.
+
 ### Fixed (2026-09-20 — CI requires its database coverage)
 - Both full Linux CI lanes now fail when their test PostgreSQL is unavailable,
   including before collection and at shared fixture/reachability checks.
