@@ -17,10 +17,56 @@ import sys
 from pathlib import Path
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
 import ladder_sweep as ladder  # noqa: E402
+
+
+@pytest.mark.parametrize("admin", [
+    ("postgresql://bench-user:bench-pass@bench.invalid:6543/postgres"
+     "?sslmode=require&application_name=fixture"),
+    ("host=bench.invalid port=6543 user=bench-user password=bench-pass "
+     "dbname=postgres sslmode=require application_name=fixture"),
+])
+def test_bench_url_preserves_conninfo_options_for_uri_and_keyword_dsn(
+        monkeypatch, admin):
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_ADMIN_URL", admin)
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_DB", "isolated_bench")
+    assert conninfo_to_dict(ladder.bench_url()) == {
+        "user": "bench-user", "password": "bench-pass",
+        "dbname": "isolated_bench", "host": "bench.invalid",
+        "port": "6543", "application_name": "fixture",
+        "sslmode": "require",
+    }
+
+
+def test_reset_bench_preserves_admin_options_for_keyword_dsn(monkeypatch):
+    import psycopg
+
+    admin = (
+        "host=bench.invalid port=6543 user=bench-user password=bench-pass "
+        "dbname=wrong sslmode=verify-full connect_timeout=9")
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_ADMIN_URL", admin)
+
+    class StopBeforeNetwork(Exception):
+        pass
+
+    captured = []
+
+    def connect(conninfo, **kwargs):
+        captured.append(conninfo)
+        raise StopBeforeNetwork
+
+    monkeypatch.setattr(psycopg, "connect", connect)
+    with pytest.raises(StopBeforeNetwork):
+        ladder.reset_bench()
+    assert conninfo_to_dict(captured[0]) == {
+        "user": "bench-user", "password": "bench-pass", "dbname": "postgres",
+        "host": "bench.invalid", "port": "6543", "connect_timeout": "9",
+        "sslmode": "verify-full",
+    }
 
 
 class TestResolveOutPath:

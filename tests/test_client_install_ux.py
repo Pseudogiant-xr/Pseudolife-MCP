@@ -61,8 +61,9 @@ def test_installers_wire_codex_via_shim_by_default() -> None:
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        assert ("codex mcp add pseudolife-memory "
-                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
+        assert any("codex mcp add pseudolife-memory" in line
+                   and "PSEUDOLIFE_MCP_NO_SPAWN=1" in line
+                   for line in text.splitlines())
         assert "codex mcp add pseudolife-memory --url" in text
 
 
@@ -74,37 +75,31 @@ def test_docker_tier_shim_registrations_disable_the_spawn_fallback() -> None:
     shadow the real bank with a stale one. Every provider, both platforms:
     fresh registrations carry the guard through the probed env flag, the
     generic snippet embeds it, and pre-existing registrations get an
-    upgrade warning with paste-ready commands."""
+    in-place repair guidance that preserves custom configuration."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        # Upgrade commands for pre-existing registrations (paste-ready).
-        # NB flag order: claude's --env is variadic — placed before the
-        # server name it swallows it and the whole registration fails
-        # (verified against the live CLI 2026-08-29). Name first, then
-        # --env, then the `--` separator.
-        assert ("claude mcp add --scope user pseudolife-memory "
-                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
-        assert ("codex mcp add pseudolife-memory "
-                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
+        assert "Edit the existing registration in place" in text
+        assert "preserve its command, arguments, daemon URL, token file" in text
+        assert "mcp remove pseudolife-memory" not in text
         # Gemini registrations and the generic snippet carry the guard too.
         assert ("gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini "
-                "-e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp") in text
+                "-e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory ") in text
         assert '"PSEUDOLIFE_MCP_NO_SPAWN": "1"' in text
     # Fresh registrations set the guard through the probed env flag — the
     # spellings differ per script (the .sh quotes its variable).
     assert ('claude mcp add --scope user pseudolife-memory "$env_flag" '
             "PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 "
-            "-- pseudolife-mcp") in sh
+            '-- "$SHIM_PATH"') in sh
     assert ('codex mcp add pseudolife-memory "$env_flag" '
             'PSEUDOLIFE_WRITER_ID=codex "$env_flag" '
-            "PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in sh
+            'PSEUDOLIFE_MCP_NO_SPAWN=1 -- "$SHIM_PATH"') in sh
     assert ("claude mcp add --scope user pseudolife-memory $envFlag "
             "PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 "
-            "-- pseudolife-mcp") in ps
+            "-- $script:shimInstallPath") in ps
     assert ("codex mcp add pseudolife-memory $envFlag "
             "PSEUDOLIFE_WRITER_ID=codex $envFlag "
-            "PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in ps
+            "PSEUDOLIFE_MCP_NO_SPAWN=1 -- $script:shimInstallPath") in ps
 
 
 def test_compose_writer_default_is_client_neutral() -> None:
@@ -333,16 +328,16 @@ def test_installers_wire_gemini_via_shim_and_http() -> None:
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
     for text in (sh, ps):
-        assert "gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp" in text
+        assert "gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory " in text
         assert "gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp" in text
         assert "gemini mcp list" in text  # idempotency: there is no `gemini mcp get`
 
 
-def test_installers_pass_writer_id_on_registration_with_a_flagless_fallback() -> None:
+def test_installers_pass_writer_id_and_refuse_flagless_registration() -> None:
     """Per-provider writer ids ride each shim registration's env (the shim
     forwards PSEUDOLIFE_WRITER_ID as X-PL-Writer). Env-flag support is
-    probed, never assumed: the flagless forms must survive verbatim as the
-    fallback, or a CLI without the flag turns into a failed install."""
+    probed, never assumed: without the flag, Docker-tier stdio setup must
+    refuse registration rather than omit the no-spawn guard."""
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
     for text in (sh, ps):
@@ -350,10 +345,14 @@ def test_installers_pass_writer_id_on_registration_with_a_flagless_fallback() ->
                        "PSEUDOLIFE_WRITER_ID=codex",
                        "PSEUDOLIFE_WRITER_ID=gemini"):
             assert writer in text, writer
-        # The probed-flag pattern and its flagless fallbacks.
+        # The probed-flag pattern and its explicit refusal.
         assert "mcp add --help" in text
-        assert "claude mcp add --scope user pseudolife-memory -- pseudolife-mcp" in text
-        assert "codex mcp add pseudolife-memory -- pseudolife-mcp" in text
+        assert "has no env flag; the stdio registration was skipped" in text
+    assert 'claude mcp add --scope user pseudolife-memory -- "$SHIM_PATH"' not in sh
+    assert 'codex mcp add pseudolife-memory -- "$SHIM_PATH"' not in sh
+    assert ("claude mcp add --scope user pseudolife-memory -- "
+            "$script:shimInstallPath") not in ps
+    assert "codex mcp add pseudolife-memory -- $script:shimInstallPath" not in ps
 
 
 def test_codex_installers_bootstrap_and_register_rotatable_credentials() -> None:
@@ -372,8 +371,8 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
         assert "startup_timeout_sec = 240" not in text, rel
         assert "tool_timeout_sec = 180" not in text, rel
         assert "runtime defaults were not confirmed" in text, rel
-    assert sh.count("configure_codex_runtime_defaults") == 4
-    assert ps.count("Set-CodexRuntimeDefaults") == 4
+    assert sh.count("configure_codex_runtime_defaults") == 3
+    assert ps.count("Set-CodexRuntimeDefaults") == 3
     assert "configure_codex_runtime_defaults" not in sh.split(
         'if existing_codex=$(codex mcp get pseudolife-memory', 1)[1].split(
             'elif [ "$TRANSPORT" = "shim" ]', 1)[0]
@@ -556,10 +555,9 @@ def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
     sh = _read("ops/install.sh")
     # Every install command is the condition of an `if`, so errexit is
     # suspended and failure reaches the fallback branch instead of aborting.
-    assert "if pipx install pseudolife-mcp; then" in sh
-    assert "if pipx upgrade pseudolife-mcp; then" in sh
-    assert "if python3 -m pip install --user pseudolife-mcp; then" in sh
-    assert "if python -m pip install --user pseudolife-mcp; then" in sh
+    assert 'if pipx install --force "$repo"; then' in sh
+    assert 'if python3 -m pip install --user --upgrade "$repo"; then' in sh
+    assert 'if python -m pip install --user --upgrade "$repo"; then' in sh
     # The failure-mode hint names the PEP 668 cause and the recovery paths.
     assert "externally-managed" in sh
     assert "pipx" in _read("ops/preflight.sh")

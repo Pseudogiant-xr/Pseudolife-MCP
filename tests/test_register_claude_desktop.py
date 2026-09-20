@@ -17,11 +17,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+import stat
+import subprocess
+import sys
 
 import pytest
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
+from pseudolife_memory.cli import _USAGE as CHECKOUT_USAGE
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location(
@@ -31,6 +36,29 @@ SPEC.loader.exec_module(reg)
 
 TOKEN = "t0k3n-" + "x" * 40
 OTHER_TOKEN = "0th3r-" + "y" * 40
+
+
+@pytest.mark.parametrize("source", ["token", "tokens"])
+def test_checkout_import_wins_over_old_package_with_root_already_on_path(tmp_path, source):
+    site = tmp_path / "old-site"
+    package = site / "pseudolife_memory"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([str(site), str(ROOT)])
+    env["PL_TEST_SOURCE"] = TOKEN if source == "token" else TOKEN + ":claude-desktop"
+    cfg = tmp_path / "config.json"
+    token_file = tmp_path / "private.token"
+    proc = subprocess.run(
+        [sys.executable, "-S", str(ROOT / "ops/register_claude_desktop.py"),
+         "--command", str(tmp_path / "pseudolife-mcp"), "--config", str(cfg),
+         "--default-token-file", str(token_file),
+         f"--{source}-from-env", "PL_TEST_SOURCE"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert CredentialProvider(path=token_file).snapshot().token == TOKEN
+    assert TOKEN not in proc.stdout + proc.stderr
 
 
 # -- config path resolution ---------------------------------------------------
@@ -271,7 +299,7 @@ def test_main_refuses_a_non_utf8_config_with_the_designed_message(tmp_path, caps
 
 def test_main_dry_run_prints_the_entry_and_writes_nothing(tmp_path, capsys):
     cfg, rc = _run(tmp_path, "--dry-run",
-                   "--token-file", str(tmp_path / "claude-desktop.token"),
+                   "--default-token-file", str(tmp_path / "claude-desktop.token"),
                    "--token-from-env", "PL_TEST_DESKTOP_TOKEN")
     assert rc == 3  # no token in the env, no file: registration would lack a credential
     assert not cfg.exists()
@@ -383,7 +411,7 @@ def test_no_token_anywhere_registers_without_a_credential_and_exits_3(tmp_path, 
     (one less step for the user) but it carries NO token-file path, and
     the exit code + warning say the daemon will refuse it."""
     token_file = tmp_path / "claude-desktop.token"
-    cfg, rc = _run(tmp_path, "--token-file", str(token_file))
+    cfg, rc = _run(tmp_path, "--default-token-file", str(token_file))
     assert rc == 3
     env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["env"]
     assert "PSEUDOLIFE_MCP_TOKEN_FILE" not in env
@@ -407,7 +435,237 @@ def test_token_from_env_without_a_token_file_is_refused(tmp_path, monkeypatch, c
     assert "--token-file" in capsys.readouterr().err
 
 
-def test_script_loads_without_the_package_and_imports_it_only_for_the_file_writer():
+def test_default_token_file_preserves_and_validates_existing_custom_file(
+    tmp_path, capsys,
+):
+    custom = tmp_path / "custom" / "desktop.token"
+    default = tmp_path / "default" / "desktop.token"
+    _write_token_file(custom, TOKEN)
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+        "command": "/old/pseudolife-mcp",
+        "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(custom)},
+    }}}), encoding="utf-8")
+
+    _, rc = _run(tmp_path, "--default-token-file", str(default), config=cfg)
+
+    assert rc == 0
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
+        "pseudolife-memory"]["env"]
+    assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(custom)
+    assert not default.exists()
+    assert "using the existing" in capsys.readouterr().out
+
+
+def test_missing_explicit_replacement_refuses_without_rewriting_working_config(
+    tmp_path, capsys,
+):
+    old_file = tmp_path / "old.token"
+    replacement = tmp_path / "missing.token"
+    _write_token_file(old_file, TOKEN)
+    cfg = tmp_path / "claude_desktop_config.json"
+    original = {"mcpServers": {"pseudolife-memory": {
+        "command": "/old/pseudolife-mcp",
+        "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(old_file)},
+    }}}
+    cfg.write_text(json.dumps(original), encoding="utf-8")
+
+    _, rc = _run(tmp_path, "--token-file", str(replacement), config=cfg)
+
+    assert rc == reg.EXIT_REFUSED
+    assert json.loads(cfg.read_text(encoding="utf-8")) == original
+    assert "explicit token file" in capsys.readouterr().err
+
+
+def test_missing_existing_custom_file_is_refused_on_ordinary_rerun(
+    tmp_path, capsys,
+):
+    missing = tmp_path / "missing-custom.token"
+    cfg = tmp_path / "claude_desktop_config.json"
+    original = {"mcpServers": {"pseudolife-memory": {
+        "command": "/old/pseudolife-mcp",
+        "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(missing)},
+    }}}
+    cfg.write_text(json.dumps(original), encoding="utf-8")
+
+    _, rc = _run(
+        tmp_path, "--default-token-file", str(tmp_path / "default.token"),
+        config=cfg,
+    )
+
+    assert rc == reg.EXIT_REFUSED
+    assert json.loads(cfg.read_text(encoding="utf-8")) == original
+    assert "configured token file" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("source_kind", ["singular", "ambiguous-map"])
+def test_existing_custom_file_is_not_rotated_by_installer_sources(
+    tmp_path, monkeypatch, capsys, source_kind,
+):
+    custom = tmp_path / "custom.token"
+    _write_token_file(custom, TOKEN)
+    before = custom.read_bytes()
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+        "command": "/old/pseudolife-mcp",
+        "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(custom)},
+    }}}), encoding="utf-8")
+    if source_kind == "singular":
+        monkeypatch.setenv("PL_TEST_TOKEN", OTHER_TOKEN)
+        source_args = ("--token-from-env", "PL_TEST_TOKEN")
+    else:
+        token_map = f"{OTHER_TOKEN}:claude-desktop,{TOKEN}:claude-desktop"
+        monkeypatch.setenv("PL_TEST_TOKEN_MAP", token_map)
+        source_args = ("--tokens-from-env", "PL_TEST_TOKEN_MAP")
+
+    _, rc = _run(
+        tmp_path, "--default-token-file", str(tmp_path / "default.token"),
+        *source_args, config=cfg,
+    )
+
+    assert rc == 0
+    assert custom.read_bytes() == before
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
+        "pseudolife-memory"]["env"]
+    assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(custom)
+    captured = capsys.readouterr()
+    assert TOKEN not in captured.out and TOKEN not in captured.err
+    assert OTHER_TOKEN not in captured.out and OTHER_TOKEN not in captured.err
+
+
+def test_explicit_existing_file_is_validated_not_overwritten_by_auto_source(
+    tmp_path, monkeypatch,
+):
+    old_file = tmp_path / "old.token"
+    chosen = tmp_path / "chosen.token"
+    _write_token_file(old_file, TOKEN)
+    _write_token_file(chosen, OTHER_TOKEN)
+    before = chosen.read_bytes()
+    monkeypatch.setenv("PL_TEST_TOKEN", TOKEN)
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+        "command": "/old/pseudolife-mcp",
+        "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(old_file)},
+    }}}), encoding="utf-8")
+
+    _, rc = _run(
+        tmp_path, "--token-file", str(chosen),
+        "--token-from-env", "PL_TEST_TOKEN", config=cfg,
+    )
+
+    assert rc == 0
+    assert chosen.read_bytes() == before
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
+        "pseudolife-memory"]["env"]
+    assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(chosen)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_validated_existing_file_removes_superseded_literal(tmp_path, capsys, explicit):
+    token_file = tmp_path / "private.token"
+    _write_token_file(token_file, TOKEN)
+    before = token_file.read_bytes()
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+        "command": "/old/pseudolife-mcp",
+        "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(token_file),
+                "PSEUDOLIFE_MCP_TOKEN": OTHER_TOKEN},
+    }}}), encoding="utf-8")
+    args = ["--token-file", str(token_file)] if explicit else []
+    _, rc = _run(tmp_path, *args, config=cfg)
+    assert rc == 0
+    assert token_file.read_bytes() == before
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
+        "pseudolife-memory"]["env"]
+    assert "PSEUDOLIFE_MCP_TOKEN" not in env
+    captured = capsys.readouterr()
+    assert TOKEN not in captured.out + captured.err
+    assert OTHER_TOKEN not in captured.out + captured.err
+
+
+def test_map_only_auth_writes_unique_desktop_principal_without_printing_secret(
+    tmp_path, monkeypatch, capsys,
+):
+    desktop_token = "desktop-secret-" + "d" * 32
+    monkeypatch.setenv(
+        "PL_TEST_TOKEN_MAP",
+        f"other-secret:codex,{desktop_token}:claude-desktop",
+    )
+    token_file = tmp_path / "desktop.token"
+
+    cfg, rc = _run(
+        tmp_path, "--default-token-file", str(token_file),
+        "--tokens-from-env", "PL_TEST_TOKEN_MAP",
+    )
+
+    assert rc == 0
+    assert CredentialProvider(path=token_file).snapshot().token == desktop_token
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
+        "pseudolife-memory"]["env"]
+    assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(token_file)
+    captured = capsys.readouterr()
+    assert desktop_token not in captured.out and desktop_token not in captured.err
+    assert "other-secret" not in captured.out and "other-secret" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "token_map",
+    [
+        "codex-secret:codex",
+        "first-secret:claude-desktop,second-secret:claude-desktop",
+        "malformed",
+    ],
+)
+def test_map_without_one_desktop_credential_refuses_without_config_rewrite(
+    tmp_path, monkeypatch, capsys, token_map,
+):
+    monkeypatch.setenv("PL_TEST_TOKEN_MAP", token_map)
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text('{"keep": true}', encoding="utf-8")
+
+    _, rc = _run(
+        tmp_path, "--default-token-file", str(tmp_path / "desktop.token"),
+        "--tokens-from-env", "PL_TEST_TOKEN_MAP", config=cfg,
+    )
+
+    assert rc == reg.EXIT_REFUSED
+    assert json.loads(cfg.read_text(encoding="utf-8")) == {"keep": True}
+    captured = capsys.readouterr()
+    for secret in ("codex-secret", "first-secret", "second-secret"):
+        assert secret not in captured.out and secret not in captured.err
+
+
+def test_map_dry_run_selects_path_but_writes_nothing_and_hides_secret(
+    tmp_path, monkeypatch, capsys,
+):
+    secret = "dry-run-secret-" + "z" * 32
+    monkeypatch.setenv("PL_TEST_TOKEN_MAP", f"{secret}:claude-desktop")
+    token_file = tmp_path / "desktop.token"
+
+    cfg, rc = _run(
+        tmp_path, "--dry-run", "--default-token-file", str(token_file),
+        "--tokens-from-env", "PL_TEST_TOKEN_MAP",
+    )
+
+    assert rc == 0
+    assert not cfg.exists() and not token_file.exists()
+    captured = capsys.readouterr()
+    assert str(token_file) in captured.out
+    assert secret not in captured.out and secret not in captured.err
+
+
+def test_installers_pass_default_and_map_sources_by_environment_name_only():
+    sh = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "ops" / "install.ps1").read_text(encoding="utf-8")
+    for text in (sh, ps):
+        assert "--default-token-file" in text
+        assert "--tokens-from-env" in text
+        assert "PSEUDOLIFE_DESKTOP_TOKENS_SOURCE" in text
+    assert 'PSEUDOLIFE_DESKTOP_TOKENS_SOURCE="$tokens_source"' in sh
+    assert '$env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = Get-DesktopTokensSource' in ps
+
+
+def test_script_loads_without_package_and_imports_only_for_credentials():
     """Both installers run it with whatever python they find; the package
     (standard-library only itself) is imported lazily, from the checkout,
     only when a token file must be written or validated."""
@@ -415,8 +673,12 @@ def test_script_loads_without_the_package_and_imports_it_only_for_the_file_write
 
     text = (ROOT / "ops" / "register_claude_desktop.py").read_text(encoding="utf-8")
     statements = re.findall(r"^\s*(?:from|import)\s+pseudolife_memory\b.*$", text, re.M)
-    assert statements == ["        from pseudolife_memory import credentials"]
+    assert statements == [
+        "        from pseudolife_memory import credentials",
+        "        from pseudolife_memory.principals import parse_token_map",
+    ]
     assert text.index(statements[0]) > text.index("def _credentials(")
+    assert text.index(statements[1]) > text.index("def _desktop_token_from_map(")
 
 
 # -- the shim must be able to READ the file the entry points at ---------------
@@ -429,13 +691,6 @@ def test_script_loads_without_the_package_and_imports_it_only_for_the_file_write
 # refusal needs positive evidence (a help text that answers and lacks it, or
 # the "unknown mode" of a shim from before --help existed), while a probe
 # that yields no evidence is noted and not blocking.
-
-import os
-import stat
-import subprocess
-import sys
-
-from pseudolife_memory.cli import _USAGE as CHECKOUT_USAGE
 
 # The real thing: `pseudolife-mcp --help` from pseudolife-mcp==0.15.0 as
 # published on PyPI, captured 2026-09-20. The negative direction of the
@@ -499,6 +754,45 @@ def test_registrar_refuses_the_released_shim_before_writing_anything(tmp_path, m
     assert TOKEN not in captured.out and TOKEN not in captured.err
 
 
+def test_registrar_probes_preserved_configured_token_path_before_writing(
+    tmp_path, monkeypatch,
+):
+    custom = tmp_path / "custom.token"
+    default = tmp_path / "default.token"
+    _write_token_file(custom, TOKEN)
+    cfg = tmp_path / "claude_desktop_config.json"
+    original = {"mcpServers": {"pseudolife-memory": {
+        "command": "/old/pseudolife-mcp",
+        "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(custom)},
+    }}}
+    cfg.write_text(json.dumps(original), encoding="utf-8")
+    _probe_returning(monkeypatch, RELEASED_HELP)
+
+    _, rc = _run(
+        tmp_path, "--default-token-file", str(default), config=cfg,
+    )
+
+    assert rc == reg.EXIT_OLD_SHIM
+    assert json.loads(cfg.read_text(encoding="utf-8")) == original
+    assert custom.exists() and not default.exists()
+
+
+def test_registrar_probes_fresh_default_token_path_before_writing(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("PL_TEST_DESKTOP_TOKEN", TOKEN)
+    token_file = tmp_path / "default.token"
+    _probe_returning(monkeypatch, RELEASED_HELP)
+
+    cfg, rc = _run(
+        tmp_path, "--default-token-file", str(token_file),
+        "--token-from-env", "PL_TEST_DESKTOP_TOKEN",
+    )
+
+    assert rc == reg.EXIT_OLD_SHIM
+    assert not cfg.exists() and not token_file.exists()
+
+
 def test_registrar_refuses_a_help_that_mentions_everything_but_the_file(tmp_path, monkeypatch):
     _probe_returning(monkeypatch, STRIPPED_USAGE)
     cfg, token_file, rc = _gated_run(tmp_path, monkeypatch)
@@ -553,6 +847,46 @@ def test_the_probe_gets_no_stdin_and_not_the_token_variable(tmp_path, monkeypatc
     assert kwargs["env"]["PL_UNRELATED"] == "kept"
     assert kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
     assert os.environ["PL_TEST_DESKTOP_TOKEN"] == TOKEN, "the registrar's own environment is untouched"
+
+
+def test_probe_scrubs_canonical_credentials_and_installer_source(
+    tmp_path, monkeypatch, capsys,
+):
+    canonical_token = "canonical-" + "c" * 40
+    mapped_token = "mapped-" + "m" * 40
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", canonical_token)
+    monkeypatch.setenv(
+        "PSEUDOLIFE_MCP_TOKENS", f"{mapped_token}:claude-desktop",
+    )
+    monkeypatch.setenv(
+        "PSEUDOLIFE_MCP_TOKEN_FILE", str(tmp_path / "canonical.token"),
+    )
+    monkeypatch.setenv("PSEUDOLIFE_DESKTOP_TOKEN_SOURCE", TOKEN)
+    monkeypatch.setenv("PL_UNRELATED", "kept")
+    probe = _probe_returning(monkeypatch, CHECKOUT_USAGE)
+    selected_file = tmp_path / "selected.token"
+
+    cfg, rc = _run(
+        tmp_path, "--default-token-file", str(selected_file),
+        "--token-from-env", "PSEUDOLIFE_DESKTOP_TOKEN_SOURCE",
+    )
+
+    assert rc == 0 and cfg.exists()
+    assert CredentialProvider(path=selected_file).snapshot().token == TOKEN
+    sensitive_names = {
+        "PSEUDOLIFE_MCP_TOKEN",
+        "PSEUDOLIFE_MCP_TOKENS",
+        "PSEUDOLIFE_MCP_TOKEN_FILE",
+        "PSEUDOLIFE_DESKTOP_TOKEN_SOURCE",
+    }
+    inherited_sensitive_names = sensitive_names.intersection(
+        probe.kwargs[0]["env"]
+    )
+    assert inherited_sensitive_names == set()
+    assert probe.kwargs[0]["env"]["PL_UNRELATED"] == "kept"
+    captured = capsys.readouterr()
+    for secret in (TOKEN, canonical_token, mapped_token):
+        assert secret not in captured.out and secret not in captured.err
 
 
 @pytest.mark.parametrize("failure", [

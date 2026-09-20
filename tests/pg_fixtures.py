@@ -32,8 +32,10 @@ import pytest
 psycopg = pytest.importorskip("psycopg")
 
 from tests.pg_defaults import (  # noqa: E402
-    PostgresAuthError, RedactedUrl, auth_failure_message, default_admin_url,
-    is_auth_failure,
+    PostgresAuthError, PostgresSetupError, PostgresUnavailableError, RedactedUrl,
+    auth_failure_message, conninfo_dbname, conninfo_with_dbname,
+    default_admin_url, is_auth_failure, is_server_unavailable,
+    redacted_error_text, setup_failure_message,
 )
 
 # Per-run private database — see module docstring. A fixed name here would
@@ -54,10 +56,11 @@ from pseudolife_memory.storage.schema import (  # noqa: E402
 def _admin_url() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        # Point at the server's postgres db for admin ops.
-        base, _, _db = url.rpartition("/")
-        return base + "/postgres"
-    return default_admin_url()
+        url = RedactedUrl(url)
+        # Point at the server's postgres db for admin ops. psycopg parses both
+        # URI and keyword DSNs; only dbname changes, so TLS/options survive.
+        return RedactedUrl(conninfo_with_dbname(url, "postgres"))
+    return RedactedUrl(default_admin_url())
 
 
 def _with_worker_suffix(db: str) -> str:
@@ -79,20 +82,22 @@ def _with_worker_suffix(db: str) -> str:
 def _target_db_name() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        return _with_worker_suffix(url.rsplit("/", 1)[1].split("?")[0])
+        url = RedactedUrl(url)
+        return _with_worker_suffix(conninfo_dbname(url))
     return _TEST_DB
 
 
 def resolve_test_db_url() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        # Explicit override: returned verbatim (single-process) and
-        # provisioning stays pg_url's job (CI relies on that) — no
-        # connection attempts from a mere resolve. Under an xdist worker
-        # the database name gets the worker id appended; see
-        # _with_worker_suffix for why.
-        base, _, db = url.rpartition("/")
-        return RedactedUrl(f"{base}/{_with_worker_suffix(db)}")
+        url = RedactedUrl(url)
+        # Explicit override: its endpoint, credentials and options stay
+        # unchanged in a single process, and provisioning stays pg_url's job
+        # (CI relies on that) — no connection attempts from a mere resolve.
+        # Under an xdist worker the database name gets the worker id appended;
+        # see _with_worker_suffix for why.
+        db = _with_worker_suffix(conninfo_dbname(url))
+        return RedactedUrl(conninfo_with_dbname(url, db))
     # Best-effort creation so direct consumers (daemon/shim fixtures,
     # single-file runs) get an existing per-run database without depending
     # on pg_url having run first; their own reachability probes handle the
@@ -103,7 +108,7 @@ def resolve_test_db_url() -> str:
         pass
     # RedactedUrl: dozens of tests take pg_url as a parameter, and pytest
     # prints every frame's arguments in a failure report (2026-09-20 review).
-    return RedactedUrl(default_admin_url().rsplit("/", 1)[0] + f"/{_TEST_DB}")
+    return RedactedUrl(conninfo_with_dbname(default_admin_url(), _TEST_DB))
 
 
 def _pid_alive(pid: int) -> bool:
@@ -160,19 +165,20 @@ def _drop_run_db() -> None:
 
 
 # Memo per (admin url, db name): None = created OK, else (exception class,
-# message) to raise afresh (RuntimeError = no server, PostgresAuthError =
-# wrong credentials). Keyed, not a plain flag, so a test that toggles the
-# env override cannot poison provisioning of the other target for the rest
-# of the process.
+# message) to raise afresh. PostgresUnavailableError is the sole skip signal;
+# auth and every reachable setup failure error. Keyed, not a plain flag, so a
+# test that toggles the env override cannot poison provisioning of the other
+# target for the rest of the process. The RedactedUrl key keeps --showlocals
+# and cached failures from rendering credentials.
 _ensure_state: dict[tuple[str, str], tuple[type[RuntimeError], str] | None] = {}
 
 
 def ensure_test_db() -> None:
     """Create the run's test database if missing (memoized per target).
 
-    Raises ``RuntimeError`` on an unreachable server — callers translate
-    that into a skip — and ``PostgresAuthError`` when the server answered
-    but rejected the credentials, which callers must NOT turn into a skip.
+    Raises ``PostgresUnavailableError`` only when no server answered — callers
+    translate that into a skip. Authentication and reachable setup failures
+    are errors, because skipping either would make the run falsely green.
     ``resolve_test_db_url()`` calls this too (default-URL path), so
     single-file runs work on a fresh server without depending on
     ``pg_url`` having run first.
@@ -180,7 +186,7 @@ def ensure_test_db() -> None:
     overridden = bool(os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL"))
     db_name = _target_db_name()
     admin = RedactedUrl(_admin_url())
-    key = (str(admin), db_name)
+    key = (admin, db_name)
     if key in _ensure_state:
         memo = _ensure_state[key]
         if memo is not None:
@@ -202,9 +208,21 @@ def ensure_test_db() -> None:
                 atexit.register(_drop_run_db)
     except Exception as exc:  # noqa: BLE001
         if is_auth_failure(exc):
-            memo = (PostgresAuthError, auth_failure_message(admin.host, exc))
+            memo = (
+                PostgresAuthError,
+                auth_failure_message(admin.host, exc, admin),
+            )
+        elif is_server_unavailable(exc):
+            detail = redacted_error_text(exc, admin)
+            memo = (
+                PostgresUnavailableError,
+                f"no test Postgres reachable at {admin.host}: {detail}",
+            )
         else:
-            memo = (RuntimeError, f"no test Postgres reachable: {exc}")
+            memo = (
+                PostgresSetupError,
+                setup_failure_message(admin.host, exc, admin),
+            )
         _ensure_state[key] = memo
         # `from None`: psycopg's frames carry the full conninfo (password
         # included) as a rendered argument; the FATAL text is in the message.
@@ -215,9 +233,9 @@ def ensure_test_db() -> None:
 def _skip_or_raise(exc: BaseException) -> None:
     """The one branch every PG fixture takes on a failed probe: an absent
     server skips, a server that rejected the credentials errors."""
-    if isinstance(exc, PostgresAuthError):
-        raise exc
-    pytest.skip(str(exc))
+    if isinstance(exc, PostgresUnavailableError):
+        pytest.skip(str(exc))
+    raise exc
 
 
 @pytest.fixture(scope="session")

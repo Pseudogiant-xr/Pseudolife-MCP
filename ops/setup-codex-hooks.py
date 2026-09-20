@@ -27,6 +27,11 @@ import uuid
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+# Setup runs before the host shim is installed or upgraded. Prefer this
+# checkout's standard-library credential helper over an older installed copy.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 from pseudolife_memory.credentials import (
     CredentialError,
     CredentialProvider,
@@ -34,7 +39,6 @@ from pseudolife_memory.credentials import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
 EVENTS = {"sessionStart": "SessionStart", "userPromptSubmit": "UserPromptSubmit",
           "sessionEnd": "SessionEnd"}

@@ -542,14 +542,15 @@ weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
 The updater rebuilds the daemon from the checkout; the **shim** your
-clients launch is a separate install (pipx / pip, from PyPI) and does not
-move with it. Upgrade it alongside — `pipx upgrade pseudolife-mcp` or
-`pip install -U pseudolife-mcp` — or, for a change that is on `master` but
-not yet released, install the checkout itself: `pipx install .` /
-`pip install .`. A daemon-side credential change with an old shim leaves
-the two out of step: the Claude Desktop registrar refuses a shim that
-cannot read the token file it is being pointed at (exit 4), and names the
-upgrade.
+clients launch is a separate install and does not move with it. Re-run the
+source installer for the selected client to install the matching checkout
+and upgrade recognized installer-managed registrations. Custom commands
+are preserved and require an upgrade in their own interpreter. For a
+manual pipx install, use `pipx install --force .` from the checkout; for
+pip, run `python -m pip install .` in the registered interpreter. A
+daemon-side credential change with an old shim leaves the two out of step:
+the Claude Desktop registrar refuses a shim that cannot read the selected
+token file (exit 4), and names the upgrade.
 
 > **Two upgrades are not automatic**, because neither can be done safely
 > in place. Both have a step-by-step runbook — backup, dry run, apply,
@@ -674,7 +675,7 @@ releases through 0.15.0 only read the literal `PSEUDOLIFE_MCP_TOKEN`, so
 the registrar probes `<command> --help` for the file form first and
 refuses an older shim (exit 4, nothing written) rather than register an
 entry that would fail with the same TaskGroup error — upgrade the shim
-(`pipx upgrade pseudolife-mcp`, or `pipx install .` from the checkout) and
+(`pipx upgrade pseudolife-mcp`, or `pipx install --force .` from the checkout) and
 re-run. After any edit, fully quit Desktop from the tray or
 menu-bar icon and relaunch — closing the window does not reload the
 config.

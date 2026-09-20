@@ -100,21 +100,22 @@ of it:
   private file holding the bearer, reloaded per call — in the entry's
   `env`. A token exported in the OS environment never arrives. When the
   daemon is token-gated the installer *writes* that file (owner-only) from
-  `PSEUDOLIFE_MCP_TOKEN` in its own environment or `ops/.env`, or migrates
-  a literal token already in the entry into it — the shim reads the file
+  `PSEUDOLIFE_MCP_TOKEN` in its own environment or `ops/.env`, a unique
+  `claude-desktop` principal in `PSEUDOLIFE_MCP_TOKENS`, or a literal token
+  already in the entry — the shim reads the file
   first and unconditionally, so the registrar never points at a file it
   did not write or validate. With no token to write it registers without
   a credential and says so (exit 3): re-run with `PSEUDOLIFE_MCP_TOKEN`
   set. Without a usable credential every session fails as *"Couldn't start
   for Cowork and Code sessions … unhandled errors in a TaskGroup"*, a 401
   (or an unusable token file) the shim now names on stderr at startup.
-- **The shim must be able to read that file.** The installers take the
-  shim from PyPI, and releases through 0.15.0 read only the literal
+- **The shim must be able to read that file.** Source installers now use
+  the matching checkout, but PyPI releases through 0.15.0 read only the literal
   `PSEUDOLIFE_MCP_TOKEN`, which Desktop never delivers. Before writing
   anything the registrar runs `<command> --help` and looks for the
   `PSEUDOLIFE_MCP_TOKEN_FILE` line a capable shim prints; a shim that
   answers without it is refused (exit 4, nothing written) with the
-  upgrade named — `pipx upgrade pseudolife-mcp`, or `pipx install .` from
+  upgrade named — `pipx upgrade pseudolife-mcp`, or `pipx install --force .` from
   the checkout for a change not yet released — and so is a shim from
   before `--help` existed (it answers "unknown mode"). A probe that yields
   no evidence (missing, not executable, timeout, any other non-zero exit,
@@ -123,6 +124,14 @@ of it:
   when it printed `shim check: … reads PSEUDOLIFE_MCP_TOKEN_FILE`. The
   probe gets no stdin and not the token variable. `--skip-shim-check`
   bypasses it for a wrapper the probe cannot see through.
+- **Credential preservation on updates.** An ordinary rerun reuses and
+  validates the entry's existing private token-file path, even if it differs
+  from the installer's default. `PSEUDOLIFE_MCP_TOKEN_FILE` explicitly selects
+  a replacement; an unusable replacement leaves the existing configuration
+  intact. If a token map has no unique `claude-desktop` credential for a fresh
+  setup, registration refuses to guess: provide an explicit private token
+  file for that client. Credential values are never command-line arguments
+  or printed configuration.
 - **Config location.** macOS `~/Library/Application Support/Claude/`, Linux
   `~/.config/Claude/` (or `$XDG_CONFIG_HOME/Claude/`), Windows
   `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file is
@@ -264,6 +273,34 @@ hooks as the primary integration and standing instructions when hooks cannot
 run, or keep both when a standing copy is useful for subagents.
 
 ### Verify the registered runtime
+
+The source installers install the host shim from their checkout, including
+when an older installation has the same version number. This keeps the shim's
+credential handling aligned with the daemon built from that checkout. The
+Codex setup helpers can run before package installation; no `PYTHONPATH`
+setting or preinstalled Pseudolife package is required.
+
+Fresh registrations use the executable produced by the selected package
+manager. A competing older executable on `PATH` must not be mistaken for the
+new installation. For an existing bare command, a reported path mismatch
+needs to be resolved before the installer can confirm the upgrade.
+
+For an update, use the intended checkout and rerun its installer with the
+same client selection. `ops/update.ps1` / `ops/update.sh` update the daemon;
+they do not upgrade host shims or client plugin caches. Existing custom MCP
+registrations are preserved. If one points at a separate virtual environment,
+upgrade that exact environment as described below. Update the Pseudolife
+plugin through the client's plugin manager when its scripts differ from the
+checkout, then rerun hook setup and approve the changed scripts. Editing a
+plugin cache directly does not survive plugin updates.
+
+Docker-tier stdio registrations must set `PSEUDOLIFE_MCP_NO_SPAWN=1` so a
+client waits for the Docker daemon instead of starting a fallback over a
+different bank. A missing, disabled, or unverified setting leaves setup
+incomplete. Add the setting to the existing registration while preserving
+its command, arguments, daemon URL, credential path, and other environment
+entries. If a client's registration command cannot set environment variables,
+upgrade the client or configure that entry manually before using the shim.
 
 1. Inspect `codex mcp list` and `codex mcp get pseudolife-memory` (or the
    plugin's MCP configuration). Keep one registration. Identify the exact

@@ -58,8 +58,15 @@ def pg_reachable(url: str, timeout: float = 3.0) -> bool:
     """
     import psycopg
 
-    from tests.pg_defaults import (PostgresAuthError, RedactedUrl,
-                                   auth_failure_message, is_auth_failure)
+    from tests.pg_defaults import (
+        PostgresAuthError,
+        PostgresSetupError,
+        RedactedUrl,
+        auth_failure_message,
+        is_auth_failure,
+        is_server_unavailable,
+        setup_failure_message,
+    )
 
     # pytest prints this frame's arguments in the report when the error
     # below escapes; the redacting repr keeps the password out of it.
@@ -73,8 +80,14 @@ def pg_reachable(url: str, timeout: float = 3.0) -> bool:
             # misconfiguration, never "not reachable" — surface it. `from
             # None`: psycopg's own frames carry the full conninfo (password
             # included) as an argument, and the FATAL text is in our message.
-            raise PostgresAuthError(auth_failure_message(url.host, exc)) from None
-        return False
+            raise PostgresAuthError(
+                auth_failure_message(url.host, exc, url)
+            ) from None
+        if is_server_unavailable(exc):
+            return False
+        raise PostgresSetupError(
+            setup_failure_message(url.host, exc, url)
+        ) from None
 
 
 def spawn_serve(port: int, data_dir, database_url: str, *,

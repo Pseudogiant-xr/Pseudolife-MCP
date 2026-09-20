@@ -6,12 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-20 — fresh and upgraded client setup)
+- Desktop shim compatibility probes exclude inherited token, token-map, and
+  token-file variables, including temporary installer credential sources.
+- Benchmark database selection preserves PostgreSQL URI options and accepts
+  keyword connection strings when changing the isolated database name.
+- Docker-tier setup validates the no-spawn guard's effective value, reports
+  incomplete existing registrations, and refuses a fresh stdio registration
+  when the client cannot set the guard. Repair guidance preserves custom
+  commands, arguments, connection settings, and credentials.
+- Codex setup helpers load the checkout's credential implementation before
+  consulting installed packages. Fresh installs and upgrades from older host
+  packages no longer fail before hook setup and MCP registration; subprocess
+  regressions cover both without installed dependencies or a repository
+  `PYTHONPATH`.
+- Source installers install the host shim from the same checkout as the
+  Docker daemon, replacing an older or same-version installation instead of
+  mixing new client configuration with an older PyPI shim. Existing custom
+  MCP registrations remain preserved; their registered interpreter must be
+  upgraded separately when it differs from the installer-managed executable.
+  Fresh registrations pin the installed executable; reruns upgrade recognized
+  installer-managed commands and report a failure if a bare command still
+  resolves to a competing shim on `PATH`.
+- Claude Desktop setup preserves an existing private credential file on
+  ordinary reruns and refuses an unusable explicit replacement before changing
+  its configuration. Fresh setup can select a unique `claude-desktop`
+  credential from the daemon's per-principal token map; ambiguous maps require
+  an explicit credential file instead of producing a broken registration.
+
 ### Fixed (2026-09-20 — Desktop registrar refuses a shim that cannot read the token file)
 - `ops/register_claude_desktop.py` probes `<command> --help` for the
   `PSEUDOLIFE_MCP_TOKEN_FILE` marker before writing anything when a token
   file is requested, and refuses (exit 4, config and credential file
   untouched, upgrade named) a shim whose help answers without it. The
-  installers take the shim from PyPI, and every release through 0.15.0
+  installers previously took the shim from PyPI, and every release through 0.15.0
   reads only the literal `PSEUDOLIFE_MCP_TOKEN` — which Desktop never
   delivers — so the Claude Desktop client shipped above would have
   registered an entry those shims silently ignore, reproducing the

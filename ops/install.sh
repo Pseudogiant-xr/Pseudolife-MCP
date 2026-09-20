@@ -819,36 +819,95 @@ done
 # install.ps1 has always exit-checked these same paths).
 SHIM_TRIED=""
 SHIM_OK=""
+SHIM_PATH=""
+resolve_installed_shim() {  # optional $1 = pipx, python3, or python
+    shim_manager="${1:-}"
+    if [ -z "$shim_manager" ]; then
+        if command -v pipx >/dev/null 2>&1; then
+            shim_manager=pipx
+        elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+            shim_manager=python3
+        elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+            shim_manager=python
+        else
+            return 1
+        fi
+    fi
+    if [ "$shim_manager" = pipx ]; then
+        shim_bin_dir="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || true)"
+    else
+        shim_bin_dir="$("$shim_manager" -c "import sysconfig; print(sysconfig.get_path('scripts', scheme=sysconfig.get_preferred_scheme('user')))" 2>/dev/null || true)"
+    fi
+    if [ -n "$shim_bin_dir" ] && command -v cygpath >/dev/null 2>&1; then
+        case "$shim_bin_dir" in [A-Za-z]:\\*) shim_bin_dir="$(cygpath -u "$shim_bin_dir")" ;; esac
+    fi
+    for shim_candidate in "$shim_bin_dir/pseudolife-mcp" "$shim_bin_dir/pseudolife-mcp.exe"; do
+        if [ -n "$shim_bin_dir" ] && [ -f "$shim_candidate" ] && [ -x "$shim_candidate" ]; then
+            SHIM_PATH="$shim_candidate"
+            return 0
+        fi
+    done
+    return 1
+}
 ensure_shim() {
     if [ -n "$SHIM_TRIED" ]; then return 0; fi
     SHIM_TRIED=1
+    shim_install_succeeded=""
+    shim_manager=""
     if command -v pipx >/dev/null 2>&1; then
-        if pipx list 2>/dev/null | grep -q "package pseudolife-mcp "; then
-            if pipx upgrade pseudolife-mcp; then SHIM_OK=1; fi
-        else
-            if pipx install pseudolife-mcp; then SHIM_OK=1; fi
+        # --force replaces a stale same-version environment as well as
+        # installing fresh, and the local path keeps shim and daemon aligned.
+        if pipx install --force "$repo"; then
+            shim_install_succeeded=1
+            shim_manager=pipx
         fi
     elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        if python3 -m pip install --user pseudolife-mcp; then SHIM_OK=1; fi
+        if python3 -m pip install --user --upgrade "$repo"; then
+            shim_install_succeeded=1
+            shim_manager=python3
+        fi
     elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        if python -m pip install --user pseudolife-mcp; then SHIM_OK=1; fi
+        if python -m pip install --user --upgrade "$repo"; then
+            shim_install_succeeded=1
+            shim_manager=python
+        fi
+    fi
+    if [ -n "$shim_install_succeeded" ] && resolve_installed_shim "$shim_manager"; then
+        SHIM_OK=1
+    elif [ -n "$shim_install_succeeded" ]; then
+        echo "WARNING: shim installation completed, but its installed executable was not found in the manager's scripts directory." >&2
     fi
     return 0
+}
+
+cli_env_flag() {  # $1 = cli; echoes the supported env flag, or nothing
+    if "$1" mcp add --help 2>/dev/null | grep -q -- '--env'; then
+        echo "--env"
+    fi
+}
+registration_is_http() {
+    printf '%s\n' "$1" | grep -Eqi '(^|[[:space:]])"?(transport|type)"?[[:space:]]*:[[:space:]]*"?(streamable_)?http"?([,}]|[[:space:]]|$)|\(http\)'
+}
+no_spawn_guard_is_enabled() {
+    printf '%s\n' "$1" | grep -Eqi '(^|[,{}])[[:space:]]*"?PSEUDOLIFE_MCP_NO_SPAWN"?[[:space:]]*[:=][[:space:]]*"?(1|true|yes|on)"?[[:space:]]*([,}]|$)'
+}
+registered_stdio_command() {
+    printf '%s\n' "$1" | sed -nE \
+        -e 's/^[[:space:]]*"?[Cc]ommand"?[[:space:]]*:[[:space:]]*"([^"]+)"[,]?[[:space:]]*$/\1/p' \
+        -e 's/^[[:space:]]*[Cc]ommand:[[:space:]]*(.+)[[:space:]]*$/\1/p' | sed -n '1p'
+}
+warn_unverified_no_spawn_guard() {
+    echo "WARNING: the existing $1 stdio registration's no-spawn guard is missing or cannot be verified; the registration was preserved and Docker-tier setup is incomplete." >&2
+    echo "  Edit the existing registration in place and set PSEUDOLIFE_MCP_NO_SPAWN=1; preserve its command, arguments, daemon URL, token file, and all other environment values." >&2
+    echo "  Re-run this installer after verifying the effective value with $2." >&2
 }
 
 # Two env pairs ride each shim registration: PSEUDOLIFE_WRITER_ID (the shim
 # forwards it as the X-PL-Writer header — per-provider write attribution)
 # and PSEUDOLIFE_MCP_NO_SPAWN=1 (Docker-tier no-spawn guard, 2026-08-29
 # incident). CLI env-flag support is probed, never assumed: a missing flag
-# degrades to the flagless form plus a printed manual config edit — never
-# to a failed install. HTTP transport cannot carry env, so there the daemon
-# default (ops/.env) applies and no shim exists to spawn anything.
-cli_env_flag() {  # $1 = cli; echoes the supported env flag, or nothing
-    if "$1" mcp add --help 2>/dev/null | grep -q -- '--env'; then
-        echo "--env"
-    fi
-}
-
+# fails closed before registration. HTTP transport cannot carry env, so there
+# the daemon default (ops/.env) applies and no shim exists to spawn anything.
 MCP_CLAUDE=""
 MCP_CLAUDE_DESKTOP=""
 MCP_CODEX=""
@@ -892,6 +951,13 @@ desktop_token_source() {
     fi
     get_env PSEUDOLIFE_MCP_TOKEN
 }
+desktop_tokens_source() {
+    if [ -n "${PSEUDOLIFE_MCP_TOKENS:-}" ]; then
+        echo "$PSEUDOLIFE_MCP_TOKENS"
+        return 0
+    fi
+    get_env PSEUDOLIFE_MCP_TOKENS
+}
 configure_codex_runtime_defaults() {
     if [ -z "$codex_python" ]; then
         MCP_CODEX=failed
@@ -928,10 +994,9 @@ for selected_client in $CLIENTS; do
             echo "WARNING: Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) — ignoring --transport http for it." >&2
         fi
         ensure_shim
-        shim_path="$(command -v pseudolife-mcp 2>/dev/null || true)"
         desktop_py="$(installer_python)"
-        if [ -z "$SHIM_OK" ] || [ -z "$shim_path" ]; then
-            echo "WARNING: pseudolife-mcp shim not installed or not on PATH in this shell — Claude Desktop not wired. Open a new shell and re-run, or register by hand: python3 ops/register_claude_desktop.py --command <absolute path to pseudolife-mcp>" >&2
+        if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+            echo "WARNING: pseudolife-mcp shim installation did not yield a usable executable — Claude Desktop not wired. Re-run after fixing pipx/Python, or register by hand: python3 ops/register_claude_desktop.py --command <absolute path to pseudolife-mcp>" >&2
             MCP_CLAUDE_DESKTOP=failed
             continue
         fi
@@ -942,19 +1007,28 @@ for selected_client in $CLIENTS; do
         fi
         token_file="$(desktop_token_file)"
         token_source=""
-        desktop_args=(--command "$shim_path" --writer-id claude-desktop)
+        tokens_source=""
+        desktop_args=(--command "$SHIM_PATH" --writer-id claude-desktop)
         if [ -n "$token_file" ]; then
-            desktop_args+=(--token-file "$token_file")
+            if [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
+                desktop_args+=(--token-file "$token_file")
+            else
+                desktop_args+=(--default-token-file "$token_file")
+            fi
             # The token value rides a process-scoped env var the registrar
             # reads by NAME — never a command-line argument, never printed.
             token_source="$(desktop_token_source)"
+            tokens_source="$(desktop_tokens_source)"
             if [ -n "$token_source" ]; then
                 desktop_args+=(--token-from-env PSEUDOLIFE_DESKTOP_TOKEN_SOURCE)
+            elif [ -n "$tokens_source" ]; then
+                desktop_args+=(--tokens-from-env PSEUDOLIFE_DESKTOP_TOKENS_SOURCE)
             else
-                echo "WARNING: the daemon is token-gated but no singular PSEUDOLIFE_MCP_TOKEN is set (environment or ops/.env) — the registrar can only reuse a token already in the Desktop entry or an existing file at $token_file. If it reports exit 3, re-run with PSEUDOLIFE_MCP_TOKEN set so it writes the owner-only file." >&2
+                echo "WARNING: the daemon is token-gated but no token source is set (environment or ops/.env) — the registrar can only reuse a credential already in the Desktop entry. If registration fails, configure a singular token or exactly one claude-desktop principal in PSEUDOLIFE_MCP_TOKENS." >&2
             fi
         fi
         if PSEUDOLIFE_DESKTOP_TOKEN_SOURCE="$token_source" \
+                PSEUDOLIFE_DESKTOP_TOKENS_SOURCE="$tokens_source" \
                 "$desktop_py" "$repo/ops/register_claude_desktop.py" "${desktop_args[@]}"; then
             MCP_CLAUDE_DESKTOP=shim-env
         else
@@ -981,14 +1055,64 @@ for selected_client in $CLIENTS; do
             echo "WARNING: Codex MCP registration was skipped because credential setup failed. Rerun the installer after repairing the reported credential problem." >&2
             continue
         elif existing_codex=$(codex mcp get pseudolife-memory 2>/dev/null); then
-            if [ "$TRANSPORT" = "shim" ] && ! printf '%s' "$existing_codex" | grep -q PSEUDOLIFE_MCP_NO_SPAWN; then
-                echo "WARNING: the existing Codex registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 — its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot." >&2
-                echo "  Upgrade it (re-check any custom command first: codex mcp get pseudolife-memory):" >&2
-                echo "    codex mcp remove pseudolife-memory" >&2
-                echo "    codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp" >&2
+            existing_codex_guard=$(codex mcp get pseudolife-memory --json 2>/dev/null || printf '%s' "$existing_codex")
+            codex_guard_unverified=""
+            if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$existing_codex_guard" && ! registration_is_http "$existing_codex"; then
+                if ! no_spawn_guard_is_enabled "$existing_codex_guard"; then
+                    warn_unverified_no_spawn_guard "Codex" "codex mcp get pseudolife-memory --json"
+                    codex_guard_unverified=1
+                fi
+                managed_registered_shim=""
+                bare_registered_shim=""
+                registered_shim=$(registered_stdio_command "$existing_codex")
+                if printf '%s' "$registered_shim" | grep -Eqi '^pseudolife-mcp(\.exe)?$'; then
+                    managed_registered_shim=1; bare_registered_shim=1
+                elif resolve_installed_shim; then
+                    if [ -n "$registered_shim" ] && command -v cygpath >/dev/null 2>&1; then
+                        registered_shim=$(cygpath -aw "$registered_shim" 2>/dev/null || printf '%s' "$registered_shim")
+                        managed_shim=$(cygpath -aw "$SHIM_PATH" 2>/dev/null || printf '%s' "$SHIM_PATH")
+                    else
+                        managed_shim="$SHIM_PATH"
+                    fi
+                    if [ -n "$registered_shim" ] && [ "$registered_shim" = "$managed_shim" ]; then managed_registered_shim=1; fi
+                fi
+                if [ -n "$managed_registered_shim" ]; then
+                    ensure_shim
+                    if [ -n "$SHIM_OK" ]; then
+                        if [ -z "$bare_registered_shim" ]; then
+                            step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            MCP_CODEX=present-upgraded
+                        else
+                        resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
+                        installed_shim="$SHIM_PATH"
+                        if command -v cygpath >/dev/null 2>&1; then
+                            resolved_shim=$(cygpath -aw "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                            installed_shim=$(cygpath -aw "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                        elif command -v readlink >/dev/null 2>&1; then
+                            resolved_shim=$(readlink -f "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                            installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                        fi
+                        if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
+                            step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            MCP_CODEX=present-upgraded
+                        else
+                            echo "WARNING: the existing Codex registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
+                            MCP_CODEX=failed
+                        fi
+                        fi
+                    else
+                        echo "WARNING: the existing Codex registration was preserved, but its pseudolife-mcp shim upgrade failed — see the pip/pipx output above and re-run." >&2
+                        MCP_CODEX=failed
+                    fi
+                else
+                    echo "WARNING: the existing Codex stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update." >&2
+                    MCP_CODEX=present-custom
+                fi
+                if [ -n "$codex_guard_unverified" ]; then MCP_CODEX=failed; fi
+            else
+                step "MCP server already wired into Codex — registration preserved."
+                MCP_CODEX=present
             fi
-            step "MCP server already wired into Codex — skipping."
-            MCP_CODEX=present
             CODEX_RUNTIME_DEFAULTS=preserved
         elif [ "$TRANSPORT" = "shim" ]; then
             ensure_shim
@@ -1005,28 +1129,21 @@ for selected_client in $CLIENTS; do
                     # bank (2026-08-29 incident). Flag repeated per pair:
                     # codex's --env takes one KEY=VALUE per occurrence.
                     if [ -n "$CODEX_CONNECTION_CONFIGURED" ] && [ -n "$CODEX_CREDENTIAL_FILE" ]; then
-                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 "$env_flag" "PSEUDOLIFE_MCP_DAEMON_URL=$CODEX_CREDENTIAL_URL" "$env_flag" "PSEUDOLIFE_MCP_TOKEN_FILE=$CODEX_CREDENTIAL_FILE" -- pseudolife-mcp
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 "$env_flag" "PSEUDOLIFE_MCP_DAEMON_URL=$CODEX_CREDENTIAL_URL" "$env_flag" "PSEUDOLIFE_MCP_TOKEN_FILE=$CODEX_CREDENTIAL_FILE" -- "$SHIM_PATH"
                     elif [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
-                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 "$env_flag" "PSEUDOLIFE_MCP_DAEMON_URL=$CODEX_CREDENTIAL_URL" -- pseudolife-mcp
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 "$env_flag" "PSEUDOLIFE_MCP_DAEMON_URL=$CODEX_CREDENTIAL_URL" -- "$SHIM_PATH"
                     else
-                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 -- "$SHIM_PATH"
                     fi
                     MCP_CODEX=shim-env
                     configure_codex_runtime_defaults
-                elif [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
-                    echo "WARNING: this Codex CLI cannot pin the managed connection because its MCP command has no env flag; registration was skipped." >&2
-                    MCP_CODEX=failed
                 else
-                    codex mcp add pseudolife-memory -- pseudolife-mcp
-                    echo "  (this codex CLI takes no env flag — for per-provider write attribution"
-                    echo "   and the Docker-tier no-spawn guard, add to the server's entry in"
-                    echo "   ~/.codex/config.toml:"
-                    echo "     env = { PSEUDOLIFE_WRITER_ID = \"codex\", PSEUDOLIFE_MCP_NO_SPAWN = \"1\","
-                    echo "       PSEUDOLIFE_MCP_TOKEN_FILE = \"<the validated credential file, when configured>\" })"
-                    MCP_CODEX=shim
-                    configure_codex_runtime_defaults
+                    echo "WARNING: this Codex CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed." >&2
+                    MCP_CODEX=failed
                 fi
-                step "Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+                if [ "$MCP_CODEX" = shim-env ]; then
+                    step "Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+                fi
             else
                 echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
                 echo "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity." >&2
@@ -1052,17 +1169,58 @@ for selected_client in $CLIENTS; do
             fi
         fi
     elif [ "$selected_client" = gemini ]; then
-        if gemini mcp list 2>/dev/null | grep -q pseudolife-memory; then
-            if [ "$TRANSPORT" = "shim" ]; then
-                # `gemini mcp list` cannot show env, so unlike claude/codex
-                # there is no way to detect a registration that predates the
-                # no-spawn guard — say so instead of staying silent.
-                echo "  (if this Gemini registration predates the Docker-tier no-spawn guard, re-add it:" >&2
-                echo "   gemini mcp remove pseudolife-memory, then" >&2
-                echo "   gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp)" >&2
+        if existing_gemini=$(gemini mcp list 2>/dev/null) && printf '%s' "$existing_gemini" | grep -q pseudolife-memory; then
+            gemini_registration=$(printf '%s\n' "$existing_gemini" | grep -E 'pseudolife-memory:' | sed -n '1p')
+            gemini_guard_unverified=""
+            if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$gemini_registration"; then
+                # `gemini mcp list` does not expose env values, so an existing
+                # stdio guard cannot be verified without inspecting settings.
+                warn_unverified_no_spawn_guard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
+                gemini_guard_unverified=1
+                managed_registered_shim=""
+                bare_registered_shim=""
+                if printf '%s' "$gemini_registration" | grep -Eqi 'pseudolife-memory:[[:space:]]*pseudolife-mcp(\.exe)?[[:space:]]*\(stdio\)'; then
+                    managed_registered_shim=1; bare_registered_shim=1
+                elif resolve_installed_shim && printf '%s' "$gemini_registration" | grep -Fq "pseudolife-memory: $SHIM_PATH (stdio)"; then
+                    managed_registered_shim=1
+                fi
+                if [ -n "$managed_registered_shim" ]; then
+                    ensure_shim
+                    if [ -n "$SHIM_OK" ]; then
+                        if [ -z "$bare_registered_shim" ]; then
+                            step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            MCP_GEMINI=present-upgraded
+                        else
+                        resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
+                        installed_shim="$SHIM_PATH"
+                        if command -v cygpath >/dev/null 2>&1; then
+                            resolved_shim=$(cygpath -aw "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                            installed_shim=$(cygpath -aw "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                        elif command -v readlink >/dev/null 2>&1; then
+                            resolved_shim=$(readlink -f "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                            installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                        fi
+                        if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
+                            step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            MCP_GEMINI=present-upgraded
+                        else
+                            echo "WARNING: the existing Gemini CLI registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
+                            MCP_GEMINI=failed
+                        fi
+                        fi
+                    else
+                        echo "WARNING: the existing Gemini CLI registration was preserved, but its pseudolife-mcp shim upgrade failed — see the pip/pipx output above and re-run." >&2
+                        MCP_GEMINI=failed
+                    fi
+                else
+                    echo "WARNING: the existing Gemini CLI stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update." >&2
+                    MCP_GEMINI=present-custom
+                fi
+                if [ -n "$gemini_guard_unverified" ]; then MCP_GEMINI=failed; fi
+            else
+                step "MCP server already wired into Gemini CLI — registration preserved."
+                MCP_GEMINI=present
             fi
-            step "MCP server already wired into Gemini CLI — skipping."
-            MCP_GEMINI=present
         elif [ "$TRANSPORT" = "shim" ]; then
             ensure_shim
             if [ -n "$SHIM_OK" ]; then
@@ -1079,17 +1237,15 @@ for selected_client in $CLIENTS; do
                     # gemini CLI 0.57.0); PSEUDOLIFE_MCP_NO_SPAWN carries
                     # the same Docker-tier no-spawn guard as the claude and
                     # codex registrations (2026-08-29 incident).
-                    gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp
+                    gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory "$SHIM_PATH"
                     MCP_GEMINI=shim-env
                 else
-                    gemini mcp add -s user pseudolife-memory pseudolife-mcp
-                    echo "  (this gemini CLI takes no env flag — for per-provider write attribution"
-                    echo "   and the Docker-tier no-spawn guard, add \"env\": {\"PSEUDOLIFE_WRITER_ID\":"
-                    echo "   \"gemini\", \"PSEUDOLIFE_MCP_NO_SPAWN\": \"1\"} to the server's entry in"
-                    echo "   ~/.gemini/settings.json)"
-                    MCP_GEMINI=shim
+                    echo "WARNING: this Gemini CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed." >&2
+                    MCP_GEMINI=failed
                 fi
-                step "Wired into Gemini CLI via the pseudolife-mcp shim — per-session identity."
+                if [ "$MCP_GEMINI" = shim-env ]; then
+                    step "Wired into Gemini CLI via the pseudolife-mcp shim — per-session identity."
+                fi
             else
                 echo "WARNING: shim unavailable for Gemini CLI (see warnings above) — falling back to HTTP." >&2
                 gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
@@ -1102,18 +1258,66 @@ for selected_client in $CLIENTS; do
             MCP_GEMINI=http
         fi
     elif existing_claude=$(claude mcp get pseudolife-memory 2>/dev/null); then
-        if [ "$TRANSPORT" = "shim" ] && ! printf '%s' "$existing_claude" | grep -q PSEUDOLIFE_MCP_NO_SPAWN; then
-            echo "WARNING: the existing Claude Code registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 — its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot (2026-08-29 incident)." >&2
-            echo "  Upgrade it (re-check any custom command first: claude mcp get pseudolife-memory):" >&2
-            echo "    claude mcp remove pseudolife-memory" >&2
-            echo "    claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp" >&2
+        claude_guard_unverified=""
+        if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$existing_claude"; then
+            if ! no_spawn_guard_is_enabled "$existing_claude"; then
+                warn_unverified_no_spawn_guard "Claude Code" "claude mcp get pseudolife-memory"
+                claude_guard_unverified=1
+            fi
+            managed_registered_shim=""
+            bare_registered_shim=""
+            registered_shim=$(registered_stdio_command "$existing_claude")
+            if printf '%s' "$registered_shim" | grep -Eqi '^pseudolife-mcp(\.exe)?$'; then
+                managed_registered_shim=1; bare_registered_shim=1
+            elif resolve_installed_shim; then
+                if [ -n "$registered_shim" ] && command -v cygpath >/dev/null 2>&1; then
+                    registered_shim=$(cygpath -aw "$registered_shim" 2>/dev/null || printf '%s' "$registered_shim")
+                    managed_shim=$(cygpath -aw "$SHIM_PATH" 2>/dev/null || printf '%s' "$SHIM_PATH")
+                else
+                    managed_shim="$SHIM_PATH"
+                fi
+                if [ -n "$registered_shim" ] && [ "$registered_shim" = "$managed_shim" ]; then managed_registered_shim=1; fi
+            fi
+            if [ -n "$managed_registered_shim" ]; then
+                ensure_shim
+                if [ -n "$SHIM_OK" ]; then
+                    if [ -z "$bare_registered_shim" ]; then
+                        step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                        MCP_CLAUDE=present-upgraded
+                    else
+                    resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
+                    installed_shim="$SHIM_PATH"
+                    if command -v cygpath >/dev/null 2>&1; then
+                        resolved_shim=$(cygpath -aw "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                        installed_shim=$(cygpath -aw "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                    elif command -v readlink >/dev/null 2>&1; then
+                        resolved_shim=$(readlink -f "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                        installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                    fi
+                    if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
+                        step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                        MCP_CLAUDE=present-upgraded
+                    else
+                        echo "WARNING: the existing Claude Code registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
+                        MCP_CLAUDE=failed
+                    fi
+                    fi
+                else
+                    echo "WARNING: the existing Claude Code registration was preserved, but its pseudolife-mcp shim upgrade failed — see the pip/pipx output above and re-run." >&2
+                    MCP_CLAUDE=failed
+                fi
+            else
+                echo "WARNING: the existing Claude Code stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update." >&2
+                MCP_CLAUDE=present-custom
+            fi
+            if [ -n "$claude_guard_unverified" ]; then MCP_CLAUDE=failed; fi
+        else
+            step "MCP server already wired into Claude Code — registration preserved."
+            MCP_CLAUDE=present
         fi
-        step "MCP server already wired into Claude Code — skipping."
-        MCP_CLAUDE=present
     elif [ "$TRANSPORT" = "shim" ]; then
         ensure_shim
         if [ -n "$SHIM_OK" ]; then
-            claude mcp remove pseudolife-memory 2>/dev/null || true
             env_flag="$(cli_env_flag claude)"
             if [ -n "$env_flag" ]; then
                 # --env is variadic and must come AFTER the server name:
@@ -1123,17 +1327,15 @@ for selected_client in $CLIENTS; do
                 # PSEUDOLIFE_MCP_NO_SPAWN: Docker-tier shims wait for the
                 # compose daemon instead of spawning a fallback that can
                 # shadow the real bank (see the Codex registration above).
-                claude mcp add --scope user pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                claude mcp add --scope user pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- "$SHIM_PATH"
                 MCP_CLAUDE=shim-env
             else
-                claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-                echo "  (this claude CLI takes no env flag — for per-provider write attribution"
-                echo "   and the Docker-tier no-spawn guard, add \"env\": {\"PSEUDOLIFE_WRITER_ID\":"
-                echo "   \"claude-code\", \"PSEUDOLIFE_MCP_NO_SPAWN\": \"1\"} to the server's entry"
-                echo "   in ~/.claude.json)"
-                MCP_CLAUDE=shim
+                echo "WARNING: this Claude CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed." >&2
+                MCP_CLAUDE=failed
             fi
-            step "Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
+            if [ "$MCP_CLAUDE" = shim-env ]; then
+                step "Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
+            fi
         else
             echo "WARNING: the pseudolife-mcp shim is unavailable — tooling missing (pipx / python3 >=3.10) or the install failed (see the pip/pipx output above; on PEP 668 distros 'pip install --user' refuses with externally-managed-environment)." >&2
             echo "  Without the shim, concurrent Claude Code sessions share one episode identity." >&2
@@ -1167,12 +1369,18 @@ step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)
 
 # ── 13. per-provider wiring ladder + per-mode verify hints ─────────────────
 # [x] wired · [-] deliberately skipped · [!] unavailable, with remediation.
+mcp_marker() {  # $1 = state
+    if [ "$1" = failed ]; then echo "[!]"; else echo "[x]"; fi
+}
 describe_mcp() {  # $1 = state
     case "$1" in
         shim-env) echo "stdio shim (per-provider writer id set)" ;;
         shim)     echo "stdio shim (writer id: daemon default in ops/.env)" ;;
         http)     echo "HTTP (writer id: daemon default in ops/.env)" ;;
         present)  echo "already wired (unchanged)" ;;
+        present-upgraded) echo "already wired; checkout shim upgraded" ;;
+        present-custom) echo "already wired with custom command (unchanged)" ;;
+        failed)   echo "registration or shim upgrade FAILED - see warning above and re-run" ;;
         *)        echo "not wired" ;;
     esac
 }
@@ -1194,7 +1402,7 @@ for selected_client in $CLIENTS; do
     case "$selected_client" in
         claude)
             echo "  Claude Code"
-            echo "    [x] MCP transport        $(describe_mcp "$MCP_CLAUDE")"
+            echo "    $(mcp_marker "$MCP_CLAUDE") MCP transport        $(describe_mcp "$MCP_CLAUDE")"
             echo "    [x] Server instructions  automatic (MCP instructions field)"
             if [ "$HOOK_CLAUDE" = plugin ]; then
                 echo "    [x] Session briefing     Claude Code plugin"
@@ -1218,7 +1426,7 @@ for selected_client in $CLIENTS; do
             echo "    Restart: fully quit Claude Desktop (tray / menu-bar icon) and relaunch to load the entry." ;;
         codex)
             echo "  OpenAI Codex"
-            echo "    [x] MCP transport        $(describe_mcp "$MCP_CODEX")"
+            echo "    $(mcp_marker "$MCP_CODEX") MCP transport        $(describe_mcp "$MCP_CODEX")"
             echo "    [x] Server instructions  automatic (MCP instructions field)"
             if [ "$HOOK_CODEX" = ready ]; then
                 echo "    [x] Memory hooks         trusted and verified ($CODEX_HOOK_SOURCE)"
@@ -1236,7 +1444,7 @@ for selected_client in $CLIENTS; do
             describe_instr "$INSTR_CODEX" | sed 's/^/    /' ;;
         gemini)
             echo "  Gemini CLI"
-            echo "    [x] MCP transport        $(describe_mcp "$MCP_GEMINI")"
+            echo "    $(mcp_marker "$MCP_GEMINI") MCP transport        $(describe_mcp "$MCP_GEMINI")"
             echo "    [x] Server instructions  automatic (MCP instructions field)"
             echo "    [!] Session briefing     unavailable - Gemini CLI has no hook system"
             echo "    [!] Per-turn discipline  unavailable"

@@ -16,9 +16,10 @@ Plain module (no pytest import) so ``conftest.py``, ``pg_fixtures.py`` and
 """
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 COMPOSE_DEFAULT_PASSWORD = "pseudolife"
 DEV_HOST_PORT = "127.0.0.1:5433"
@@ -31,23 +32,126 @@ _AUTH_FAILURE_MARKERS = ("password authentication failed",
                          "no password supplied",
                          "no pg_hba.conf entry",
                          "does not exist")  # FATAL: role "x" does not exist
+_UNAVAILABLE_MARKERS = (
+    "connection refused",
+    "connection timed out",
+    "could not translate host name",
+    "host is unknown",
+    "name or service not known",
+    "network is unreachable",
+    "no route to host",
+    "nodename nor servname provided",
+    "temporary failure in name resolution",
+    "timeout expired",
+    "timed out",
+)
+_UNAVAILABLE_ERRNOS = {
+    errno.ECONNREFUSED,
+    errno.EHOSTUNREACH,
+    errno.ENETUNREACH,
+    errno.ETIMEDOUT,
+    10060,  # WSAETIMEDOUT
+    10061,  # WSAECONNREFUSED
+    10065,  # WSAEHOSTUNREACH
+}
+
+
+def _compose_value(raw: str, line_number: int) -> str:
+    """Parse the Compose ``.env`` value forms needed for a password.
+
+    Single-quoted values are literal. Unquoted and double-quoted values use
+    Compose variable expansion; rather than reimplement that language here,
+    reject ``$`` clearly and direct the operator to the explicit test override.
+    The exception never includes the value.
+    """
+    raw = raw.strip()
+    if not raw:
+        return ""
+
+    quote_char = raw[0] if raw[0] in "'\"" else None
+    if quote_char is None:
+        for index, char in enumerate(raw):
+            if char == "#" and index > 0 and raw[index - 1].isspace():
+                raw = raw[:index].rstrip()
+                break
+        if "$" in raw:
+            raise ValueError(
+                f"ops env line {line_number}: unsupported Compose variable "
+                "expansion in POSTGRES_PASSWORD; use a single-quoted literal "
+                "or PSEUDOLIFE_TEST_PG_PASSWORD"
+            )
+        return raw
+
+    chars: list[str] = []
+    escaped = False
+    closing = None
+    escape_map = {"n": "\n", "r": "\r", "t": "\t", "\\": "\\", '"': '"'}
+    for index, char in enumerate(raw[1:], start=1):
+        if quote_char == '"' and escaped:
+            chars.append(escape_map.get(char, char))
+            escaped = False
+            continue
+        if quote_char == '"' and char == "\\":
+            escaped = True
+            continue
+        if quote_char == "'" and char == "\\" and index + 1 < len(raw) \
+                and raw[index + 1] == "'":
+            chars.append("'")
+            escaped = True
+            continue
+        if quote_char == "'" and escaped:
+            escaped = False
+            continue
+        if char == quote_char:
+            closing = index
+            break
+        chars.append(char)
+    if closing is None:
+        raise ValueError(
+            f"ops env line {line_number}: unterminated quoted POSTGRES_PASSWORD"
+        )
+    tail = raw[closing + 1:].strip()
+    if tail and not tail.startswith("#"):
+        raise ValueError(
+            f"ops env line {line_number}: unexpected text after POSTGRES_PASSWORD"
+        )
+    value = "".join(chars)
+    if quote_char == '"' and "$" in value:
+        raise ValueError(
+            f"ops env line {line_number}: unsupported Compose variable "
+            "expansion in POSTGRES_PASSWORD; use a single-quoted literal "
+            "or PSEUDOLIFE_TEST_PG_PASSWORD"
+        )
+    return value
 
 
 def env_file_password(path: Path | None = None) -> str | None:
     """``POSTGRES_PASSWORD`` from the compose env file, or ``None``."""
+    try:
+        return _read_env_file_password(path)
+    except ValueError as exc:
+        # Parser frames contain the file's credentials. Preserve only their
+        # value-free diagnosis, including under pytest --showlocals.
+        raise ValueError(str(exc)) from None
+
+
+def _read_env_file_password(path: Path | None) -> str | None:
     path = ENV_FILE if path is None else path
     try:
         text = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None
     value = None
-    for line in text.splitlines():
+    for line_number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if line.startswith("#") or "=" not in line:
             continue
         key, _, raw = line.partition("=")
-        if key.strip() == "POSTGRES_PASSWORD":
-            value = raw.strip().strip("'\"")  # last assignment wins, like compose
+        key = key.strip()
+        if key.startswith("export "):
+            key = key.removeprefix("export ").strip()
+        if key == "POSTGRES_PASSWORD":
+            value = _compose_value(raw, line_number)
     return value or None
 
 
@@ -72,6 +176,72 @@ def default_admin_url(env: os._Environ | dict | None = None,
     return f"postgresql://{DEV_ROLE}:{password}@{DEV_HOST_PORT}/postgres"
 
 
+def conninfo_with_dbname(conninfo: str, dbname: str) -> str:
+    """Replace only ``dbname`` in a libpq URI or keyword DSN.
+
+    psycopg validates and parses both forms. URI input stays a URI so existing
+    test-run isolation callers keep their public shape; keyword input stays a
+    keyword DSN. Query/options are preserved in both cases.
+    """
+    conninfo = RedactedUrl(conninfo)
+    try:
+        from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+        conninfo_to_dict(conninfo)
+        if conninfo.lstrip().lower().startswith(("postgresql://", "postgres://")):
+            parts = urlsplit(conninfo)
+            query = urlencode([(key, value) for key, value in
+                               parse_qsl(parts.query, keep_blank_values=True)
+                               if key != "dbname"])
+            return urlunsplit(parts._replace(path="/" + quote(dbname, safe=""),
+                                            query=query))
+        return make_conninfo(conninfo, dbname=dbname)
+    except Exception:  # noqa: BLE001 - normalize without echoing the DSN
+        raise ValueError("invalid PostgreSQL test connection string; value withheld") \
+            from None
+
+
+def conninfo_dbname(conninfo: str) -> str:
+    """Return a test connection's database name without string-splitting it."""
+    conninfo = RedactedUrl(conninfo)
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        dbname = conninfo_to_dict(conninfo).get("dbname")
+    except Exception:  # noqa: BLE001 - never echo a credential-bearing value
+        raise ValueError("invalid PostgreSQL test connection string; value withheld") \
+            from None
+    if not dbname:
+        raise ValueError(
+            "PSEUDOLIFE_TEST_DATABASE_URL must name a database; value withheld"
+        )
+    return dbname
+
+
+def bench_admin_url(env: os._Environ | dict | None = None,
+                    env_file: Path | None = None) -> str:
+    """Resolve the eval-backed suites' admin DSN.
+
+    An explicit bench value wins. Otherwise the ordinary test override's
+    endpoint, credentials and options are reused with only ``dbname`` changed
+    to ``postgres``; the local compose default is the final fallback.
+    """
+    source = os.environ if env is None else env
+    explicit = source.get("PSEUDOLIFE_BENCH_ADMIN_URL")
+    test_url = source.get("PSEUDOLIFE_TEST_DATABASE_URL")
+    fallback_env = {
+        "PSEUDOLIFE_TEST_PG_PASSWORD": source["PSEUDOLIFE_TEST_PG_PASSWORD"]
+    } if source.get("PSEUDOLIFE_TEST_PG_PASSWORD") else {}
+    env = None
+    del source
+    if explicit:
+        return RedactedUrl(explicit)
+    if test_url:
+        test_url = RedactedUrl(test_url)
+        return RedactedUrl(conninfo_with_dbname(test_url, "postgres"))
+    return RedactedUrl(default_admin_url(fallback_env, env_file))
+
+
 class RedactedUrl(str):
     """A connection URL whose ``repr`` hides the password.
 
@@ -86,13 +256,19 @@ class RedactedUrl(str):
 
     @property
     def host(self) -> str:
-        """The part after the credentials — safe to put in messages. A DSN
-        without an ``@`` (keyword form) cannot be split safely, so it is
-        withheld entirely: the safe direction."""
+        """Show only simple URI targets; withhold keyword/query DSNs entirely.
+
+        Query parameters can themselves hold a password, and an ``@`` in a
+        keyword-form password must not be mistaken for a URI delimiter.
+        """
+        if not self.startswith(("postgresql://", "postgres://")) or "?" in self or "#" in self:
+            return "<redacted dsn>"
         head, sep, tail = self.rpartition("@")
         return tail if sep else "<redacted dsn>"
 
     def __repr__(self) -> str:
+        if self.host == "<redacted dsn>":
+            return "'<redacted dsn>'"
         head, sep, tail = self.rpartition("@")
         if not sep:
             return "'<redacted dsn>'"
@@ -107,6 +283,14 @@ class PostgresAuthError(RuntimeError):
     Raised instead of the "no server" RuntimeError so fixtures ERROR the
     PG-backed tests rather than skipping them: the server is there, the
     configuration is wrong, and a green run would be a lie."""
+
+
+class PostgresUnavailableError(RuntimeError):
+    """No PostgreSQL server answered; this is the fixture's sole skip signal."""
+
+
+class PostgresSetupError(RuntimeError):
+    """PostgreSQL answered, but the requested test operation failed."""
 
 
 def is_auth_failure(exc: BaseException) -> bool:
@@ -125,11 +309,54 @@ def is_auth_failure(exc: BaseException) -> bool:
     return any(marker in text for marker in _AUTH_FAILURE_MARKERS)
 
 
-def auth_failure_message(url_hint: str, exc: BaseException) -> str:
+def is_server_unavailable(exc: BaseException) -> bool:
+    """True only for definite transport absence, never server-side failures."""
+    if getattr(exc, "sqlstate", None):
+        return False
+    text = str(exc).lower()
+    if "fatal:" in text or "panic:" in text:
+        return False  # one answering host defeats a mixed-host absence report
+    if isinstance(exc, (ConnectionRefusedError, TimeoutError)):
+        return True
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) in _UNAVAILABLE_ERRNOS:
+        return True
+    return any(marker in text for marker in _UNAVAILABLE_MARKERS)
+
+
+def redacted_error_text(exc: BaseException, conninfo: str) -> str:
+    """Error detail with DSN/password/passfile values removed."""
+    text = str(exc) or type(exc).__name__
+    raw_conninfo = str(conninfo)
+    if raw_conninfo:
+        text = text.replace(raw_conninfo, "<redacted dsn>")
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        parsed = conninfo_to_dict(raw_conninfo)
+    except Exception:  # noqa: BLE001 - malformed input still gets fixed messages
+        parsed = {}
+    for field in ("password", "passfile"):
+        secret = parsed.get(field)
+        if not secret:
+            continue
+        text = text.replace(secret, "***")
+        text = text.replace(quote(secret, safe=""), "***")
+    return text
+
+
+def auth_failure_message(url_hint: str, exc: BaseException,
+                         conninfo: str = "") -> str:
+    detail = redacted_error_text(exc, conninfo)
     return (
         f"test Postgres at {url_hint} is reachable but rejected the "
-        f"credentials ({exc}). This is a misconfiguration, not a missing "
+        f"credentials ({detail}). This is a misconfiguration, not a missing "
         f"server, so PG-backed tests ERROR instead of skipping. Fix: set "
         f"PSEUDOLIFE_TEST_DATABASE_URL, or PSEUDOLIFE_TEST_PG_PASSWORD, or "
         f"check POSTGRES_PASSWORD in ops/.env"
     )
+
+
+def setup_failure_message(url_hint: str, exc: BaseException,
+                          conninfo: str = "") -> str:
+    detail = redacted_error_text(exc, conninfo)
+    return f"test Postgres at {url_hint} answered but setup failed ({detail})"

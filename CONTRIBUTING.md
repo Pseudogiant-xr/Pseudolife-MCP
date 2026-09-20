@@ -34,6 +34,17 @@ server with `PSEUDOLIFE_TEST_DATABASE_URL` (it wins whenever set):
 export PSEUDOLIFE_TEST_DATABASE_URL="postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test"
 ```
 
+URI query options and keyword connection strings are preserved when selecting
+isolated test databases. Eval-backed tests use the same server unless
+`PSEUDOLIFE_BENCH_ADMIN_URL` explicitly selects another one. Reachable
+permission or setup failures also error instead of skipping.
+
+The local password reader accepts quoted literals and inline comments.
+Compose variable expansion in `POSTGRES_PASSWORD` is refused with a safe
+diagnosis; use a single-quoted literal or `PSEUDOLIFE_TEST_PG_PASSWORD` for
+that case. Credential-bearing parser frames are omitted from error reports,
+including reports with local variables enabled.
+
 Without that override each pytest process provisions its own private
 `pseudolife_memory_test_<pid>` database and drops it at interpreter exit, so
 concurrent runs never terminate each other — and no live bank is ever touched.
