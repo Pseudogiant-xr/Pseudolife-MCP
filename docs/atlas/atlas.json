@@ -1039,7 +1039,7 @@
    "d": [
     "send locks both agent rows FOR UPDATE in agent-ID order, so reciprocal sends cannot deadlock each other",
     "(sender, request_id) is the idempotency key: a repeat with the same fingerprint returns the first receipt, a different one is request_conflict",
-    "receive is cursor-based and non-destructive — ordered by per-recipient sequence, nothing is consumed until ack or expiry",
+    "receive is cursor-based and non-destructive — ordered by per-recipient sequence, nothing is consumed until ack or expiry", "ack takes one message_id or several comma-separated (MAX_PAGE): a batch returns receipts in order plus the ids that were not this mailbox's, under the agent row lock so overlapping batches serialize",
     "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
     "The coordination_hlc_highwater meta row only ever moves forward (numeric compare), so pruning mail cannot regress mailbox stamps",
     "Live delivery is bounded to MAX_ATTEMPTS (3) per message across attachments; the adapter's receive skips exhausted mail, an explicit receive still returns it",
