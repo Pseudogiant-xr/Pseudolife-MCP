@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-20 — Desktop registrar refuses a shim that cannot read the token file)
+- `ops/register_claude_desktop.py` probes `<command> --help` for the
+  `PSEUDOLIFE_MCP_TOKEN_FILE` marker before writing anything when a token
+  file is requested, and refuses (exit 4, config and credential file
+  untouched, upgrade named) a shim whose help answers without it. The
+  installers take the shim from PyPI, and every release through 0.15.0
+  reads only the literal `PSEUDOLIFE_MCP_TOKEN` — which Desktop never
+  delivers — so the Claude Desktop client shipped above would have
+  registered an entry those shims silently ignore, reproducing the
+  2026-09-19 "unhandled errors in a TaskGroup" failure with no hint. A
+  shim from before `--help` existed (it answers "unknown mode") is refused
+  the same way; a probe that yields no evidence (missing, not executable,
+  timeout, any other non-zero exit, exit 0 with no output) is noted and
+  not blocking. The probe runs with no stdin and without the token
+  variable, so a wrapper that drops its arguments cannot start a real
+  shim holding the bearer. `--skip-shim-check` bypasses it. A frozen copy
+  of the real 0.15.0 help (`tests/fixtures/`) is driven through a real
+  subprocess in the tests, so "refuses the released shim" is reproducible
+  rather than a hand-run. The shim's
+  `--help` now carries a credentials paragraph naming both env forms and
+  their precedence (the file wins), which is the marker the probe reads;
+  a test pins the two together and proves the check is load-bearing.
+  README's Updating section says the shim is a separate install that does
+  not move with `ops/update.*`.
+
 ### Added (2026-09-20 — Claude Desktop client)
 - `ops/install.sh --client claude-desktop` / `ops\install.ps1 -Client
   claude-desktop` register the stdio shim in `claude_desktop_config.json`

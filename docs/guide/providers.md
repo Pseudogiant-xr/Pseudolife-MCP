@@ -108,6 +108,21 @@ of it:
   set. Without a usable credential every session fails as *"Couldn't start
   for Cowork and Code sessions … unhandled errors in a TaskGroup"*, a 401
   (or an unusable token file) the shim now names on stderr at startup.
+- **The shim must be able to read that file.** The installers take the
+  shim from PyPI, and releases through 0.15.0 read only the literal
+  `PSEUDOLIFE_MCP_TOKEN`, which Desktop never delivers. Before writing
+  anything the registrar runs `<command> --help` and looks for the
+  `PSEUDOLIFE_MCP_TOKEN_FILE` line a capable shim prints; a shim that
+  answers without it is refused (exit 4, nothing written) with the
+  upgrade named — `pipx upgrade pseudolife-mcp`, or `pipx install .` from
+  the checkout for a change not yet released — and so is a shim from
+  before `--help` existed (it answers "unknown mode"). A probe that yields
+  no evidence (missing, not executable, timeout, any other non-zero exit,
+  exit 0 with no output) is not blocking: the run proceeds and says the
+  check did not happen, so a clean exit 0 from the registrar is proof only
+  when it printed `shim check: … reads PSEUDOLIFE_MCP_TOKEN_FILE`. The
+  probe gets no stdin and not the token variable. `--skip-shim-check`
+  bypasses it for a wrapper the probe cannot see through.
 - **Config location.** macOS `~/Library/Application Support/Claude/`, Linux
   `~/.config/Claude/` (or `$XDG_CONFIG_HOME/Claude/`), Windows
   `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file is

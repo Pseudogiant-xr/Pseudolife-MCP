@@ -1,0 +1,20 @@
+pseudolife-mcp — persistent long-term memory for coding agents over MCP
+
+usage: pseudolife-mcp [mode]
+
+modes:
+  (no arg)       stdio shim: find/start the daemon and proxy to it
+  serve          run the HTTP memory daemon (deployment mode)
+  embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
+  briefing       print the session-start briefing (for a SessionStart hook;
+                 --hook-json emits Claude Code/Codex hook JSON)
+  backup         back up the bank: pg_dump + state archive with rotation
+                 (pip tiers; the Docker tier keeps ops/backup.ps1)
+  export         write a portable logical export of the bank (ZIP of JSONL
+                 tables + manifest; tier- and PG-version-independent)
+  import         load a logical export into a fresh, empty bank
+  episode-start  open a session episode (legacy hook helper)
+  episode-end    close it
+  help           show this message (also -h / --help)
+
+docs: https://github.com/Pseudogiant-xr/Pseudolife-MCP

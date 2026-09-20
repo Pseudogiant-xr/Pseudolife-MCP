@@ -9,7 +9,7 @@ third-party packages; the one package import (the credential-file writer
 in ``pseudolife_memory/credentials.py``, itself standard-library only) is
 taken lazily from this checkout when a token file has to be written.
 
-Three things make Desktop different from the CLI clients, and each shapes
+Four things make Desktop different from the CLI clients, and each shapes
 the entry this writes:
 
 * Desktop launches MCP servers with a SANITIZED environment (PATH plus a
@@ -25,6 +25,22 @@ the entry this writes:
   the literal is removed from the config; with no token to write and no
   usable file, the entry is written WITHOUT a credential and the exit code
   says so (3), rather than silently disabling a token that worked.
+* The shim must be able to READ that file. The installers take the shim
+  from PyPI, and every release through 0.15.0 reads only the literal
+  ``PSEUDOLIFE_MCP_TOKEN`` — which Desktop never delivers — so an entry
+  pointing such a shim at a token file fails exactly like the incident
+  above, with no hint. Before writing anything this script runs
+  ``<command> --help`` and looks for the ``PSEUDOLIFE_MCP_TOKEN_FILE``
+  marker the capable shim prints; a help text that answers without it is
+  refused (exit 4, nothing written, the upgrade named), and so is a shim
+  with no help mode at all (releases before 2026-07-16 answer "unknown
+  mode"). A probe that yields no evidence (missing, not executable,
+  timeout, any other non-zero exit, or exit 0 with no output) is not
+  blocking: the run proceeds and says the check did not happen. The probe
+  gets no stdin and not the token variable, so a wrapper that drops its
+  arguments cannot start a real shim holding the bearer.
+  ``--skip-shim-check`` bypasses it for a wrapper the probe cannot see
+  through.
 * That sanitized PATH omits pipx/venv bin dirs, so ``command`` must be the
   shim's absolute path.
 * On Windows the Desktop app is an MSIX package: its Roaming AppData lives
@@ -38,16 +54,19 @@ Usage:
         [--writer-id claude-desktop] [--daemon-url http://127.0.0.1:8765]
         [--token-file /abs/path/claude-desktop.token]
         [--token-from-env VAR_NAME] [--config PATH] [--dry-run]
+        [--skip-shim-check]
 
 Exit codes: 0 registered · 2 refused (bad input, unreadable or malformed
 config, unusable token file) · 3 registered but WITHOUT a credential the
-daemon needs.
+daemon needs · 4 refused because the shim at ``--command`` cannot read a
+token file (upgrade it, then re-run).
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -66,6 +85,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXIT_OK = 0
 EXIT_REFUSED = 2
 EXIT_NO_CREDENTIAL = 3
+EXIT_OLD_SHIM = 4
+# The capable shim names the file form in its --help; releases through
+# 0.15.0 mention it nowhere. tests/test_register_claude_desktop.py pins the
+# checkout's help text to this marker.
+TOKEN_FILE_MARKER = "PSEUDOLIFE_MCP_TOKEN_FILE"
+SHIM_PROBE_TIMEOUT = 30.0
 
 
 class ConfigError(RuntimeError):
@@ -169,6 +194,60 @@ def current_entry(existing: dict) -> dict:
     servers = existing.get("mcpServers")
     entry = servers.get(SERVER) if isinstance(servers, dict) else None
     return entry if isinstance(entry, dict) else {}
+
+
+# -- can the shim read a token file? ------------------------------------------
+
+def help_shows_token_file_support(help_text: str) -> bool:
+    return TOKEN_FILE_MARKER in help_text
+
+
+def shim_reads_token_file(command: str, *, timeout: float = SHIM_PROBE_TIMEOUT,
+                          scrub_env: tuple[str, ...] = ()) -> bool | None:
+    """``True``/``False`` when ``<command> --help`` gave evidence: exit 0
+    with output that does / does not name the token file, or the "unknown
+    mode" answer of a shim from before help existed (``False``). ``None``
+    when it could not be asked (missing, not executable, timed out, any
+    other non-zero exit, or exit 0 with no output at all) — no evidence.
+
+    The child gets no stdin, so a wrapper that drops its arguments and
+    starts the real stdio shim exits on EOF instead of holding the
+    installer's terminal; ``scrub_env`` names variables (the token source)
+    it must not inherit; the UTF-8 pin keeps the em dashes in the usage
+    text from failing the child on a narrow console code page."""
+    env = {key: value for key, value in os.environ.items() if key not in scrub_env}
+    env["PYTHONIOENCODING"] = "utf-8"
+    try:
+        done = subprocess.run([command, "--help"], capture_output=True, text=True,
+                              timeout=timeout, encoding="utf-8", errors="replace",
+                              stdin=subprocess.DEVNULL, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    output = (done.stdout or "") + (done.stderr or "")
+    if done.returncode != 0:
+        return False if "unknown mode" in output else None
+    if not output.strip():
+        return None
+    return help_shows_token_file_support(output)
+
+
+def _refuse_old_shim(command: str) -> int:
+    print(
+        f"error: the shim at {command} cannot read a token file: its --help "
+        f"does not list {TOKEN_FILE_MARKER} (no PyPI release through 0.15.0 "
+        f"does, and one that answers \"unknown mode\" predates --help itself). "
+        f"Claude Desktop cannot pass the literal PSEUDOLIFE_MCP_TOKEN, "
+        f"so registering this shim against a token-gated daemon would leave "
+        f"every Desktop session refused (401) behind \"unhandled errors in a "
+        f"TaskGroup\". Nothing was written. Upgrade the shim first — "
+        f"`pipx upgrade pseudolife-mcp` / `pip install -U pseudolife-mcp` "
+        f"once a release carries it, or install this checkout: "
+        f"`pipx install {REPO_ROOT}` (or `pip install {REPO_ROOT}`) — then "
+        f"re-run. --skip-shim-check bypasses this check for a wrapper the "
+        f"probe cannot see through.",
+        file=sys.stderr,
+    )
+    return EXIT_OLD_SHIM
 
 
 # -- the credential file ------------------------------------------------------
@@ -282,6 +361,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="claude_desktop_config.json to edit (default: this OS's)")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the resolved path and entry; write nothing")
+    parser.add_argument("--skip-shim-check", action="store_true",
+                        help="do not probe --command --help for token-file support "
+                             "(only for a wrapper the probe cannot see through)")
     args = parser.parse_args(argv)
 
     if args.token_file and not _is_absolute(args.token_file):
@@ -301,6 +383,25 @@ def main(argv: list[str] | None = None) -> int:
             print("error: --token-from-env needs --token-file to write into",
                   file=sys.stderr)
             return EXIT_REFUSED
+
+    # Only a token-gated daemon needs the shim to read a file; an open one
+    # gets no probe (and no extra process spawn per registration).
+    if args.token_file:
+        if args.skip_shim_check:
+            print("shim check: skipped (--skip-shim-check); the entry assumes "
+                  f"{args.command} reads {TOKEN_FILE_MARKER}")
+        else:
+            scrub = (args.token_from_env,) if args.token_from_env else ()
+            capable = shim_reads_token_file(args.command, scrub_env=scrub)
+            if capable is False:
+                return _refuse_old_shim(args.command)
+            if capable is None:
+                print(f"note: could not verify that {args.command} reads "
+                      f"{TOKEN_FILE_MARKER} (its --help did not answer); "
+                      f"proceeding. If Desktop sessions fail with a 401, the "
+                      f"shim predates token-file support — upgrade it and re-run.")
+            else:
+                print(f"shim check: {args.command} reads {TOKEN_FILE_MARKER}")
 
     if args.config:
         path = Path(args.config)

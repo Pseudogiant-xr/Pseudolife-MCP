@@ -417,3 +417,285 @@ def test_script_loads_without_the_package_and_imports_it_only_for_the_file_write
     statements = re.findall(r"^\s*(?:from|import)\s+pseudolife_memory\b.*$", text, re.M)
     assert statements == ["        from pseudolife_memory import credentials"]
     assert text.index(statements[0]) > text.index("def _credentials(")
+
+
+# -- the shim must be able to READ the file the entry points at ---------------
+#
+# The installers take the shim from PyPI, and every release through 0.15.0
+# reads only the literal PSEUDOLIFE_MCP_TOKEN — Desktop never delivers that,
+# so an entry carrying PSEUDOLIFE_MCP_TOKEN_FILE against such a shim fails
+# exactly like the 2026-09-19 incident, with no hint. The registrar probes
+# `<command> --help` for the capability marker before it writes anything;
+# refusal needs positive evidence (a help text that answers and lacks it, or
+# the "unknown mode" of a shim from before --help existed), while a probe
+# that yields no evidence is noted and not blocking.
+
+import os
+import stat
+import subprocess
+import sys
+
+from pseudolife_memory.cli import _USAGE as CHECKOUT_USAGE
+
+# The real thing: `pseudolife-mcp --help` from pseudolife-mcp==0.15.0 as
+# published on PyPI, captured 2026-09-20. The negative direction of the
+# guard is pinned to this, not to a stripped copy of today's text.
+RELEASED_HELP = (ROOT / "tests" / "fixtures" / "pseudolife-mcp-0.15.0-help.txt").read_text(encoding="utf-8")
+# The most confusable text there is: today's usage with only the marker
+# line removed (the rest of the credentials paragraph survives).
+STRIPPED_USAGE = "\n".join(
+    line for line in CHECKOUT_USAGE.splitlines()
+    if "PSEUDOLIFE_MCP_TOKEN_FILE" not in line) + "\n"
+PRE_HELP_ANSWER = "unknown mode '--help'; see: pseudolife-mcp --help\n"
+
+
+class _Probe:
+    """Records every subprocess.run the registrar makes."""
+
+    def __init__(self):
+        self.argv: list[list[str]] = []
+        self.kwargs: list[dict] = []
+
+
+def _probe_returning(monkeypatch, stdout: str, returncode: int = 0, stderr: str = ""):
+    probe = _Probe()
+
+    def fake_run(argv, **kwargs):
+        probe.argv.append(list(argv))
+        probe.kwargs.append(kwargs)
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(reg.subprocess, "run", fake_run)
+    return probe
+
+
+def _probe_raising(monkeypatch, exc: BaseException):
+    def fake_run(argv, **kwargs):
+        raise exc
+
+    monkeypatch.setattr(reg.subprocess, "run", fake_run)
+
+
+def _gated_run(tmp_path, monkeypatch, *extra):
+    monkeypatch.setenv("PL_TEST_DESKTOP_TOKEN", TOKEN)
+    token_file = tmp_path / "private" / "claude-desktop.token"
+    cfg, rc = _run(tmp_path, "--token-file", str(token_file),
+                   "--token-from-env", "PL_TEST_DESKTOP_TOKEN", *extra)
+    return cfg, token_file, rc
+
+
+def test_registrar_refuses_the_released_shim_before_writing_anything(tmp_path, monkeypatch, capsys):
+    probe = _probe_returning(monkeypatch, RELEASED_HELP)
+    cfg, token_file, rc = _gated_run(tmp_path, monkeypatch)
+    assert rc == 4
+    assert probe.argv == [["/abs/pseudolife-mcp", "--help"]]
+    assert not cfg.exists(), "config must be untouched"
+    assert not token_file.exists(), "the credential file must not be written for a shim that cannot read it"
+    captured = capsys.readouterr()
+    assert "/abs/pseudolife-mcp" in captured.err
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in captured.err
+    assert "upgrade" in captured.err.lower()
+    assert "--skip-shim-check" in captured.err
+    assert TOKEN not in captured.out and TOKEN not in captured.err
+
+
+def test_registrar_refuses_a_help_that_mentions_everything_but_the_file(tmp_path, monkeypatch):
+    _probe_returning(monkeypatch, STRIPPED_USAGE)
+    cfg, token_file, rc = _gated_run(tmp_path, monkeypatch)
+    assert rc == 4
+    assert not cfg.exists() and not token_file.exists()
+
+
+def test_registrar_refuses_a_shim_from_before_help_existed(tmp_path, monkeypatch, capsys):
+    """Releases before 2026-07-16 answer --help with "unknown mode" and
+    exit 2: positive evidence of a shim that cannot read a token file."""
+    _probe_returning(monkeypatch, "", returncode=2, stderr=PRE_HELP_ANSWER)
+    cfg, token_file, rc = _gated_run(tmp_path, monkeypatch)
+    assert rc == 4
+    assert not cfg.exists() and not token_file.exists()
+    assert "unknown mode" in capsys.readouterr().err
+
+
+def test_registrar_accepts_a_shim_whose_help_lists_the_token_file(tmp_path, monkeypatch, capsys):
+    probe = _probe_returning(monkeypatch, CHECKOUT_USAGE)
+    cfg, token_file, rc = _gated_run(tmp_path, monkeypatch)
+    assert rc == 0
+    assert probe.argv == [["/abs/pseudolife-mcp", "--help"]]
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["env"]
+    assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(token_file)
+    assert CredentialProvider(path=token_file).snapshot().token == TOKEN
+    out = capsys.readouterr().out
+    assert "shim check: /abs/pseudolife-mcp reads PSEUDOLIFE_MCP_TOKEN_FILE" in out
+    assert "could not verify" not in out
+
+
+def test_a_marker_printed_on_stderr_counts(tmp_path, monkeypatch):
+    """A wrapper that prints its help on stderr is still a capable shim."""
+    _probe_returning(monkeypatch, "", stderr=CHECKOUT_USAGE)
+    cfg, _, rc = _gated_run(tmp_path, monkeypatch)
+    assert rc == 0 and cfg.exists()
+
+
+def test_the_probe_gets_no_stdin_and_not_the_token_variable(tmp_path, monkeypatch):
+    """A wrapper that drops its arguments would start the real stdio shim:
+    with no stdin it exits on EOF instead of holding the installer's
+    terminal, and it must not inherit the bearer the registrar is about
+    to write. The UTF-8 pin keeps the usage text's em dashes from failing
+    the child on a narrow console code page."""
+    monkeypatch.setenv("PL_UNRELATED", "kept")
+    probe = _probe_returning(monkeypatch, CHECKOUT_USAGE)
+    _, _, rc = _gated_run(tmp_path, monkeypatch)
+    assert rc == 0
+    (kwargs,) = probe.kwargs
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["timeout"] == reg.SHIM_PROBE_TIMEOUT
+    assert "PL_TEST_DESKTOP_TOKEN" not in kwargs["env"]
+    assert kwargs["env"]["PL_UNRELATED"] == "kept"
+    assert kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert os.environ["PL_TEST_DESKTOP_TOKEN"] == TOKEN, "the registrar's own environment is untouched"
+
+
+@pytest.mark.parametrize("failure", [
+    pytest.param(("raise", FileNotFoundError(2, "no such file")), id="not-found"),
+    pytest.param(("raise", subprocess.TimeoutExpired(["x"], 30)), id="timeout"),
+    pytest.param(("raise", PermissionError(13, "not executable")), id="not-executable"),
+    pytest.param(("return", 1, "", "Traceback: something else broke"), id="nonzero-exit"),
+    pytest.param(("return", 0, "", ""), id="exit-zero-no-output"),
+    pytest.param(("return", 0, "  \n", ""), id="exit-zero-blank-output"),
+])
+def test_registrar_proceeds_with_a_note_when_the_probe_yields_no_evidence(tmp_path, monkeypatch, capsys, failure):
+    """No positive evidence either way: keep the pre-guard behaviour (the
+    installer already verified the command exists) and say the check did
+    not run, rather than block a wrapper script or a slow disk. A wrong
+    None costs a note; a wrong False would block the install."""
+    if failure[0] == "raise":
+        _probe_raising(monkeypatch, failure[1])
+    else:
+        _, rc_, out_, err_ = failure
+        _probe_returning(monkeypatch, out_, returncode=rc_, stderr=err_)
+    cfg, _, rc = _gated_run(tmp_path, monkeypatch)
+    assert rc == 0
+    assert cfg.exists()
+    out = capsys.readouterr().out
+    assert "could not verify" in out
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in out
+
+
+def test_shim_probe_is_skipped_without_a_token_file(tmp_path, monkeypatch):
+    """An open daemon needs no credential, so there is nothing to verify —
+    and the probe must not add a process spawn to every registration."""
+    def never(argv, **kwargs):
+        raise AssertionError(f"probe ran without a token file: {argv}")
+
+    monkeypatch.setattr(reg.subprocess, "run", never)
+    cfg, rc = _run(tmp_path)
+    assert rc == 0
+    assert cfg.exists()
+
+
+def test_skip_shim_check_flag_bypasses_the_probe(tmp_path, monkeypatch, capsys):
+    probe = _probe_returning(monkeypatch, RELEASED_HELP)
+    cfg, _, rc = _gated_run(tmp_path, monkeypatch, "--skip-shim-check")
+    assert rc == 0
+    assert probe.argv == []
+    assert cfg.exists()
+    assert "skipped" in capsys.readouterr().out
+
+
+def test_dry_run_still_reports_an_old_shim(tmp_path, monkeypatch, capsys):
+    """A dry run exists to show what a real run would do; an old shim is
+    the most useful thing it can report."""
+    _probe_returning(monkeypatch, RELEASED_HELP)
+    cfg, token_file, rc = _gated_run(tmp_path, monkeypatch, "--dry-run")
+    assert rc == 4
+    assert not cfg.exists() and not token_file.exists()
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in capsys.readouterr().err
+
+
+def test_the_checkout_cli_advertises_token_file_support_in_its_help():
+    """The marker the registrar looks for and the help the shim prints are
+    two files; this pins them together, and pins the marker to the exact
+    variable the credential provider reads, so a capable-looking shim is
+    a capable one. The released and stripped texts prove the classifier
+    is load-bearing: the same function rejects a help without it."""
+    assert reg.TOKEN_FILE_MARKER == "PSEUDOLIFE_MCP_TOKEN_FILE"
+    assert reg.help_shows_token_file_support(CHECKOUT_USAGE) is True
+    assert reg.help_shows_token_file_support(RELEASED_HELP) is False
+    assert reg.help_shows_token_file_support(STRIPPED_USAGE) is False
+    assert reg.help_shows_token_file_support("") is False
+
+
+def test_the_marker_is_the_variable_the_credential_provider_reads(tmp_path, monkeypatch):
+    token_file = tmp_path / "claude-desktop.token"
+    _write_token_file(str(token_file), TOKEN)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.setenv(reg.TOKEN_FILE_MARKER, str(token_file))
+    provider = CredentialProvider.from_environment()
+    assert provider.path == token_file
+    assert provider.snapshot().token == TOKEN
+
+
+def test_the_released_help_fixture_is_the_real_thing():
+    """Guards the fixture itself: a real usage text (so the negative tests
+    exercise the same substring search the positive one does), from a
+    release with no token-file support anywhere in it."""
+    assert RELEASED_HELP.startswith("pseudolife-mcp — persistent long-term memory")
+    assert "usage: pseudolife-mcp [mode]" in RELEASED_HELP
+    assert "help           show this message" in RELEASED_HELP
+    assert "PSEUDOLIFE_MCP_TOKEN" not in RELEASED_HELP
+
+
+# -- through a real process ---------------------------------------------------
+
+def _launcher(tmp_path, name: str, body: str) -> str:
+    """An executable that forwards its arguments to a python snippet —
+    the shape of a forwarding wrapper script — on either OS."""
+    script = tmp_path / f"{name}.py"
+    script.write_text(body, encoding="utf-8")
+    if os.name == "nt":
+        command = tmp_path / f"{name}.cmd"
+        command.write_text(f'@"{sys.executable}" "{script}" %*\r\n', encoding="utf-8")
+    else:
+        command = tmp_path / name
+        command.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+        command.chmod(command.stat().st_mode | stat.S_IXUSR)
+    return str(command)
+
+
+def test_a_real_subprocess_probe_of_this_checkout_s_cli_passes(tmp_path):
+    """The console script beside the interpreter is deliberately not used:
+    an editable install may point it at a different checkout."""
+    command = _launcher(tmp_path, "capable", (
+        "import sys\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        "from pseudolife_memory.cli import main\n"
+        "sys.argv = ['pseudolife-mcp'] + sys.argv[1:]\n"
+        "main()\n"))
+    assert reg.shim_reads_token_file(command) is True
+
+
+def test_a_real_subprocess_probe_of_the_released_help_is_refused(tmp_path):
+    fixture = ROOT / "tests" / "fixtures" / "pseudolife-mcp-0.15.0-help.txt"
+    command = _launcher(tmp_path, "released", (
+        "import sys\n"
+        f"sys.stdout.write(open({str(fixture)!r}, encoding='utf-8').read())\n"))
+    assert reg.shim_reads_token_file(command) is False
+
+
+def test_a_real_subprocess_probe_of_a_pre_help_shim_is_refused(tmp_path):
+    command = _launcher(tmp_path, "prehelp", (
+        "import sys\n"
+        f"sys.stderr.write({PRE_HELP_ANSWER!r})\n"
+        "sys.exit(2)\n"))
+    assert reg.shim_reads_token_file(command) is False
+
+
+def test_a_real_subprocess_probe_that_swallows_its_arguments_does_not_hang(tmp_path):
+    """A wrapper that drops its arguments and reads stdin (what the real
+    stdio shim would do) must see EOF at once, not the installer's
+    terminal — and yields no evidence."""
+    command = _launcher(tmp_path, "swallow", (
+        "import sys\n"
+        "data = sys.stdin.read()\n"
+        "sys.exit(0 if data == '' else 9)\n"))
+    assert reg.shim_reads_token_file(command, timeout=20) is None
