@@ -73,7 +73,15 @@ each judge is `evals/queue_judge_ladder.py` over
 `auto` where that artifact supports it (see the CHANGELOG entry).
 
 ## 1. Preview (no writes)
-Call `memory_dream(action="deep")` (dry-run by default). Review:
+Call `memory_dream(action="deep")` (dry-run by default). Over MCP the
+response is bounded: when the JSON text would exceed ~250 KB, each list is
+cut to its leading 40 items (fewer if still over) and `truncated` maps each
+cut key to its full length, with a `hint`. Cut candidates and duplicate
+listings resurface on the next pass; the pending merge proposals are always
+listed in full by `memory_graph_review(action="list")`. A 316-proposal queue
+with snippets was 1.12 MB on the wire on 2026-09-20, past the 1 MiB event
+limit in the SDK client, and failed as a phantom disconnect. The Console
+and the sweep tick read the unbounded service result. Review:
 - `rescored` — agent edges whose confidence will change.
 - `would_supersede` — hard type-violation edges to be auto-superseded.
 - `would_merge` — exact-duplicate entity pairs to be merged.

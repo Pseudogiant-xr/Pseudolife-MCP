@@ -61,7 +61,29 @@ class _Fixture:
                 except (BrokenPipeError, ConnectionResetError):
                     pass
 
+            def _reply_sse(self, events: list[dict] | None) -> None:
+                """A streamable-HTTP reply as the daemon sends it: one
+                server-sent event per JSON-RPC message, then the stream ends.
+                ``None`` closes the stream without any event."""
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                try:
+                    for body in events or ():
+                        raw = json.dumps(body)
+                        self.wfile.write(f"event: message\ndata: {raw}\n\n".encode())
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
             def do_GET(self) -> None:
+                if self.path.startswith("/bulk"):
+                    # A listen-stream style GET carrying one large event.
+                    size = int(self.path.partition("=")[2] or 0)
+                    self._reply_sse([{"jsonrpc": "2.0", "method": "notifications/message",
+                                      "params": {"data": "b" * size}}])
+                    return
                 self._reply(405, {})
 
             def do_POST(self) -> None:
@@ -104,6 +126,7 @@ class _Fixture:
                     result = {"tools": [
                         {"name": "read", "inputSchema": {"type": "object"}},
                         {"name": "write", "inputSchema": {"type": "object"}},
+                        {"name": "bulk", "inputSchema": {"type": "object"}},
                     ]}
                 elif method == "tools/call":
                     if request["params"]["name"] == "write":
@@ -117,6 +140,20 @@ class _Fixture:
                         return
                     if fault == "commit_401":
                         self._reply(401, {"error": BODY_MARKER})
+                        return
+                    if fault == "sse_cut":
+                        # Headers went out, the tool ran, no result event
+                        # arrived: what an oversized event or a dropped
+                        # connection looks like from the client side.
+                        self._reply_sse(None)
+                        return
+                    if request["params"]["name"] == "bulk":
+                        size = int(request["params"].get("arguments", {}).get("bytes", 0))
+                        self._reply_sse([{
+                            "jsonrpc": "2.0", "id": request["id"], "result": {
+                                "content": [{"type": "text", "text": "b" * size}],
+                                "isError": False,
+                            }}])
                         return
                     result = {
                         "content": [{"type": "text", "text": json.dumps({
@@ -590,6 +627,101 @@ def test_protocol_code_is_preserved_only_from_the_sdk_error_type():
     assert forged.code == -32603
     assert BODY_MARKER not in repr(forged)
     assert OLD_TOKEN not in repr(forged)
+
+
+def test_large_tool_results_survive_the_client_sse_event_cap(tmp_path, upstream):
+    """The SDK client's SSE decoder drops any event over 1 MiB (httpx2
+    DEFAULT_MAX_EVENT_SIZE_BYTES) and the SDK reports it as a closed
+    connection. A deep dream over a 300-proposal review queue is 1.12 MB on
+    the wire (2026-09-20); the shim must raise the limit, not lose the
+    result."""
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+    stderr = tmp_path / "stderr.log"
+    size = 1_400_000
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, stderr,
+                                 operation_timeout=10.0) as client:
+            got = await client.call_tool("bulk", {"bytes": size})
+            assert got.is_error is False
+            assert len(got.content[0].text) == size
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=40))
+
+
+def test_listen_and_resume_streams_get_the_wider_event_limit(upstream):
+    """The SDK opens its listen stream and resumes a cut response through the
+    http client's own ``sse`` method, which passes the 1 MiB default
+    explicitly, so rebinding the module's EventSource alone leaves those
+    paths capped. The shim wraps the client too."""
+    from mcp.client import streamable_http
+
+    size = 1_400_000
+    url = f"{upstream.url}/bulk?bytes={size}"
+
+    async def drive():
+        # The cap is real: an unwrapped client refuses the event.
+        async with streamable_http.create_mcp_http_client() as plain:
+            with pytest.raises(Exception) as caught:
+                async with plain.sse(url) as source:
+                    [event async for event in source]
+            assert "byte limit" in str(caught.value)
+        async with streamable_http.create_mcp_http_client() as http:
+            shim._widen_client_sse_limit(http)
+            async with http.sse(url) as source:
+                events = [event async for event in source]
+        assert len(events) == 1
+        assert len(json.loads(events[0].data)["params"]["data"]) == size
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=40))
+
+
+def test_stream_cut_after_dispatch_is_reported_as_a_lost_response(tmp_path, upstream):
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+    stderr = tmp_path / "stderr.log"
+    upstream.fault_method = "tools/call"
+    upstream.fault = "sse_cut"
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, stderr) as client:
+            with pytest.raises(Exception) as caught:
+                await client.call_tool("read", {})
+            assert _error_data(caught.value) == {
+                "classification": "response_lost",
+                "phase": "call",
+                "operation_outcome": "unknown",
+            }
+            assert "response stream closed before a result arrived" in str(caught.value)
+            assert BODY_MARKER not in str(caught.value)
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+
+
+def test_closed_connection_code_maps_to_response_lost():
+    from mcp.shared.exceptions import MCPError
+    from mcp.types import CONNECTION_CLOSED
+
+    lost = shim._transport_error(
+        MCPError(CONNECTION_CLOSED, "SSE stream ended without a response"),
+        shim._UpstreamAttempt(phase="call", dispatched=True), "call")
+    assert lost.code == -32603
+    assert lost.data == {
+        "classification": "response_lost",
+        "phase": "call",
+        "operation_outcome": "unknown",
+    }
+    assert lost.message.startswith(
+        "The memory daemon's response stream closed before a result arrived")
+    assert "may have completed" in lost.message
+
+    early = shim._transport_error(
+        MCPError(CONNECTION_CLOSED, "SSE stream ended without a response"),
+        shim._UpstreamAttempt(phase="initialize"), "call")
+    assert early.data["classification"] == "response_lost"
+    assert early.data["operation_outcome"] == "not_dispatched"
+    assert "may have completed" not in early.message
 
 
 def test_cancellation_remains_cancellation():
