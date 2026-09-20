@@ -24,6 +24,18 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# The eval-backed suites (test_recall, test_memcot_bench,
+# test_constraint_pinning) and evals/ladder_sweep.py read the bench admin
+# URL from PSEUDOLIFE_BENCH_ADMIN_URL. Seed it once, here, from the same
+# resolver pg_fixtures uses (password from ops/.env), so a rotated dev
+# password cannot turn those files into silent skips. An operator's own
+# value is left alone.
+from tests.pg_defaults import default_admin_url  # noqa: E402
+
+if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
+    os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = default_admin_url()
+    os.environ["_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"] = "1"
+
 # Isolate client configuration before test-module imports can snapshot it.
 # Model caches and ordinary home-directory lookup stay intact; only the Codex
 # connection and its credentials/state are redirected to this owned temp home.
@@ -64,10 +76,7 @@ if _bench_pin is not None:
         try:
             import psycopg
 
-            admin = os.environ.get(
-                "PSEUDOLIFE_BENCH_ADMIN_URL",
-                "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
-            )
+            admin = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()
             admin = admin.rsplit("/", 1)[0] + "/postgres"
             db = os.environ["PSEUDOLIFE_BENCH_DB"]
             with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:

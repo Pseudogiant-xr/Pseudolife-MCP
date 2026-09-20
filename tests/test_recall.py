@@ -159,23 +159,32 @@ def test_parse_name_list_tolerates_noise():
 # PG-backed integration tests (require bench Postgres on 127.0.0.1:5433)
 # ---------------------------------------------------------------------------
 
-_ADMIN = os.environ.get(
-    "PSEUDOLIFE_BENCH_ADMIN_URL",
-    "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
-)
+from tests.helpers import pg_reachable as _pg_reachable
+from tests.pg_defaults import default_admin_url
+
+_ADMIN = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()
+
+# Probed lazily and once, behind a fixture, rather than in a collection-time
+# skipif: the probe is auth-aware now (a reachable server that rejects the
+# password raises), and an import-time raise would take the pure-logic tests
+# above down with it. Same shape as test_memcot_bench.
+_PG_REACHABLE: bool | None = None
 
 
 def _pg_up() -> bool:
-    try:
-        import psycopg
-        with psycopg.connect(_ADMIN, connect_timeout=3):
-            return True
-    except Exception:
-        return False
+    global _PG_REACHABLE
+    if _PG_REACHABLE is None:
+        _PG_REACHABLE = _pg_reachable(_ADMIN)
+    return _PG_REACHABLE
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_recall_bridges_two_hop_on_real_service(tmp_path):
+@pytest.fixture()
+def bench_pg() -> None:
+    if not _pg_up():
+        pytest.skip("bench Postgres not reachable")
+
+
+def test_recall_bridges_two_hop_on_real_service(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service  # reuse isolated bench DB
     svc = build_service(tmp_path)
@@ -192,8 +201,7 @@ def test_recall_bridges_two_hop_on_real_service(tmp_path):
     assert any(e["dst"] == "jdk-21" for e in out["edges"])
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_recall_low_confidence_when_query_names_no_entity(tmp_path):
+def test_recall_low_confidence_when_query_names_no_entity(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -291,8 +299,7 @@ def _seed_two_communities(svc):
     svc.graph_relate("alpha-cache", "relates-to", "beta-svc")
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_refresh_graph_insight_persists_and_is_stable(tmp_path):
+def test_refresh_graph_insight_persists_and_is_stable(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -311,8 +318,7 @@ def test_refresh_graph_insight_persists_and_is_stable(tmp_path):
     assert before == after
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_graph_neighborhood_carries_community(tmp_path):
+def test_graph_neighborhood_carries_community(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -341,8 +347,7 @@ def test_recall_config_hub_defaults():
     assert c.expand_budget == 0
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_graph_relation_filter(tmp_path, monkeypatch):
+def test_memory_graph_relation_filter(bench_pg, tmp_path, monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     import pseudolife_memory.mcp_server as srv
@@ -355,8 +360,7 @@ def test_memory_graph_relation_filter(tmp_path, monkeypatch):
     assert rels == {"depends-on"}                 # runs-on filtered out
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_graph_path_service_shortest_path(tmp_path):
+def test_graph_path_service_shortest_path(bench_pg, tmp_path):
     # The memory_path MCP tool was folded into memory_graph(to=...); the
     # Console still reaches this via /api/graph/path -> service.graph_path.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
@@ -368,8 +372,7 @@ def test_graph_path_service_shortest_path(tmp_path):
     assert out["path"] == ["mp-a", "mp-b", "mp-c"] and out["hops"] == 2
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
+def test_memory_recall_tool_delegates(bench_pg, monkeypatch, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     import pseudolife_memory.mcp_server as srv
@@ -452,8 +455,7 @@ def _seed_hub_graph(svc):
         svc.graph_relate(head, "depends-on", "shared-config")
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_recall_hub_gating_keeps_gold_drops_blast_radius(tmp_path):
+def test_recall_hub_gating_keeps_gold_drops_blast_radius(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -466,8 +468,7 @@ def test_recall_hub_gating_keeps_gold_drops_blast_radius(tmp_path):
     assert "order-service" not in names           # hub not expanded through
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_recall_no_gating_pulls_in_hub_siblings(tmp_path):
+def test_recall_no_gating_pulls_in_hub_siblings(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -482,8 +483,7 @@ def test_recall_no_gating_pulls_in_hub_siblings(tmp_path):
 # MCP tool tests: memory_digest / memory_communities (Task 7)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_graph_digest_service(tmp_path):
+def test_graph_digest_service(bench_pg, tmp_path):
     # digest left the MCP surface (Console-only via /api/graph/digest).
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
@@ -494,8 +494,7 @@ def test_graph_digest_service(tmp_path):
     assert out["available"] is True and "god_nodes" in out["digest"]
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_communities_service(tmp_path):
+def test_communities_service(bench_pg, tmp_path):
     # communities left the MCP surface (Console-only via /api/graph/communities).
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
@@ -508,8 +507,7 @@ def test_communities_service(tmp_path):
     assert "members" in members
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_dream_run_refreshes_digest_with_no_backlog(tmp_path):
+def test_dream_run_refreshes_digest_with_no_backlog(bench_pg, tmp_path):
     # A dream with no memory backlog must still recompute the graph digest, so
     # manual graph edits (cleanup / direct graph_relate) are reflected promptly.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
@@ -523,8 +521,7 @@ def test_dream_run_refreshes_digest_with_no_backlog(tmp_path):
     assert svc._storage.load_communities()["assignment"]  # communities persisted
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_dream_writes_fact_traces(tmp_path):
+def test_dream_writes_fact_traces(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     from pseudolife_memory.memory.dream import RegexExtractor
@@ -546,8 +543,7 @@ def test_dream_writes_fact_traces(tmp_path):
     assert st.facts_for_entry(eid)
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_get_and_reinforce_roundtrip(tmp_path, monkeypatch):
+def test_memory_get_and_reinforce_roundtrip(bench_pg, tmp_path, monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     from pseudolife_memory.memory.dream import RegexExtractor
@@ -575,8 +571,7 @@ def test_memory_get_and_reinforce_roundtrip(tmp_path, monkeypatch):
     assert srv.memory_get(9_000_001) == {"found": False, "faded": True}
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_reinforcements_loads_into_entry(tmp_path):
+def test_reinforcements_loads_into_entry(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     from pseudolife_memory.storage.sync import row_to_entry
@@ -590,8 +585,7 @@ def test_reinforcements_loads_into_entry(tmp_path):
     assert row_to_entry(row).reinforcements == 3
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_get_surfaces_reinforcements(tmp_path):
+def test_memory_get_surfaces_reinforcements(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -604,8 +598,7 @@ def test_memory_get_surfaces_reinforcements(tmp_path):
     assert "access_count" in got
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_get_syncs_access_count_no_clobber(tmp_path):
+def test_memory_get_syncs_access_count_no_clobber(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -630,8 +623,7 @@ def test_memory_get_syncs_access_count_no_clobber(tmp_path):
     assert st.conn.execute("SELECT access_count FROM entries WHERE id=%s", (eid,)).fetchone()[0] == db_before + 1
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_reinforce_syncs_in_memory(tmp_path):
+def test_reinforce_syncs_in_memory(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -682,8 +674,7 @@ def recall_cap_service(tmp_path_factory):
     return svc, base_query
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_caps_payload_non_verbose(monkeypatch,
+def test_memory_recall_caps_payload_non_verbose(bench_pg, monkeypatch,
                                                 recall_cap_service):
     import pseudolife_memory.mcp_server as srv
     svc, base_query = recall_cap_service
@@ -721,8 +712,7 @@ def test_memory_recall_caps_payload_non_verbose(monkeypatch,
     assert len(json.dumps(out)) < len(json.dumps(raw)) // 2
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_verbose_keeps_full_texts(monkeypatch,
+def test_memory_recall_verbose_keeps_full_texts(bench_pg, monkeypatch,
                                                 recall_cap_service):
     # verbose=True is the escape hatch: entity/edge counts still cap the
     # payload, but supporting text content must NOT be truncated.
@@ -992,8 +982,7 @@ def test_fanout_caps_are_exposed_in_the_console_config_registry():
         assert row["group"] == "Recall"
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_service_recall_passes_the_caps_through(tmp_path, monkeypatch):
+def test_service_recall_passes_the_caps_through(bench_pg, tmp_path, monkeypatch):
     """The knobs are useless if ``service.recall`` doesn't hand them to the
     walk — the seam every other recall config item is wired through."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))

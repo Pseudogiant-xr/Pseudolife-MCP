@@ -23,8 +23,12 @@ pip install -e .[dev]
 
 Tests need a Postgres to talk to. Easiest is the bundled stack's instance
 (`docker compose -f ops/docker-compose.yml up -d pseudolife-pg`) — the suite
-finds it at `127.0.0.1:5433` on its own. Point at a different server with
-`PSEUDOLIFE_TEST_DATABASE_URL` (it wins whenever set):
+finds it at `127.0.0.1:5433` on its own, reading the role password from
+`ops/.env` (`POSTGRES_PASSWORD`; `PSEUDOLIFE_TEST_PG_PASSWORD` overrides it).
+A server that answers but rejects the credentials makes the PG-backed tests
+**error**, not skip — only an absent server skips them — so a rotated
+password can never produce a green run by accident. Point at a different
+server with `PSEUDOLIFE_TEST_DATABASE_URL` (it wins whenever set):
 
 ```bash
 export PSEUDOLIFE_TEST_DATABASE_URL="postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test"
