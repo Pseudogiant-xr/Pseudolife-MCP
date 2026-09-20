@@ -506,6 +506,13 @@ def test_prompt_hook_prints_a_new_digest_once_then_only_the_static_line(shell, t
     # (verified 2026-09-21 on both Codex runtimes).
     '{"cwd": "x", "prompt": "paste: {\\"session_id\\": \\"other-session\\"}", "session_id": "fixture-session"}',
     '{"prompt":"{\\"session_id\\":\\"other-session\\"}","session_id":"fixture-session"}',
+    # Escaped backslashes and quotes: JSON escaping means a quote can never
+    # directly follow {, , or whitespace inside the prompt string, so the
+    # boundary rule cannot be fooled by any user text.
+    json.dumps({"prompt": 'x {\\"session_id\\": \\"other-session\\"} , "session_id": "other-session"',
+                "session_id": "fixture-session"}),
+    json.dumps({"prompt": '{"outer": {"session_id": "other-session"}}', "session_id": "fixture-session"}),
+    json.dumps({"prompt": "\\\\", "session_id": "fixture-session", "turn_id": "t"}),
 ])
 def test_bash_prompt_hook_takes_the_top_level_session_id(tmp_path, payload):
     """The prompt payload carries the user's text, which can quote the
