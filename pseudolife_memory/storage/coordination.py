@@ -3,26 +3,97 @@
 Mutation paths: bank identity establishment, register, update, attach, heartbeat,
 detach, send, acknowledge, attempt, prune, restore recovery and operator rebind.
 There is no derived cache.
-Callers serialize access to the storage connection with the service lock. SQL
-row locks also protect independent connections; send locks both agents in ID
-order to avoid reciprocal-send deadlocks. Recovery/rebind are operator-only
+Callers serialize access to the mailbox connection with the coordination lock,
+never the service lock (``CoordinationConnection`` below). SQL row locks also
+protect independent connections; send locks both agents in ID order to avoid
+reciprocal-send deadlocks. Recovery/rebind are operator-only
 entry points: the HTTP/service layer must never expose them as agent tools.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import hmac
 import json
+import logging
 import math
 import secrets
 import time
 import uuid
 from typing import Any
 
+import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+
+logger = logging.getLogger("pseudolife-mcp")
+
+
+class CoordinationConnection:
+    """Dedicated autocommit connection for the mailbox, never the shared
+    service connection.
+
+    Mailbox calls must not queue behind the service lock: a heartbeat or
+    identity check that waits on a consolidation pass expires the adapter's
+    lease and fails its 5s context check (2026-09-20 daemon log: dispatch
+    waited 8.6s, autosave 47s). The rows are guarded by their own SQL row
+    locks, so a second connection is safe; callers still serialize this
+    one with the coordination lock, because psycopg transaction blocks on
+    one connection must never interleave across threads.
+
+    Session setup mirrors ``PostgresStorage._connect`` and the commit check
+    mirrors ``PostgresStorage._txn``: same lock timeout, same public
+    search_path, same refusal to report a transaction the server rolled
+    back when the connection broke mid-block. No schema work happens here;
+    the shared connection ensures the schema before this one is opened.
+    """
+
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+        self._in_txn = False
+        self._conn = self._connect()
+
+    def _connect(self) -> psycopg.Connection:
+        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True)
+        conn.execute("SET lock_timeout = '5s'")
+        conn.execute("SET search_path TO public")
+        return conn
+
+    @property
+    def conn(self) -> psycopg.Connection:
+        """Heal on next use after a Postgres restart, like the shared one.
+
+        Never mid-block: a statement after the connection broke inside a
+        ``_txn`` must fail with the block, not commit alone on a fresh
+        connection (the shared connection pins the same way)."""
+        c = self._conn
+        if not self._in_txn and (c.closed or c.broken):
+            logger.warning("coordination connection lost (closed=%s broken=%s); "
+                           "reconnecting", c.closed, c.broken)
+            self._conn = self._connect()
+        return self._conn
+
+    def close(self) -> None:
+        try:
+            self._conn.close()
+        except Exception:  # noqa: BLE001 — never fail a shutdown on close
+            pass
+
+    @contextmanager
+    def _txn(self):
+        conn = self.conn
+        self._in_txn = True
+        try:
+            with conn.transaction() as tx:
+                yield
+        finally:
+            self._in_txn = False
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
 
 
 # Conservative initial bounds for the experiment, not measured throughput

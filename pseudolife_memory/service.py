@@ -6695,6 +6695,15 @@ class MemoryService(DreamOps):
         except ValueError:
             return None
 
+    def coordination_tier_ready(self) -> bool:
+        """Lock-free: has a prior call fully initialized this service, with
+        the HLC reseeded from the stored high-water mark? Read by
+        ``coordination.dispatch`` so mailbox calls never queue behind the
+        service lock on a served daemon. Both flags are written once during
+        initialization; a stale ``False`` only sends the caller to the
+        locked path, never past it."""
+        return self._cms is not None and not self._hlc_reseed_pending
+
     def coordination_awareness(
         self, *, session_id: str | None = None, limit: int | None = None,
         principal: str | None = None,
