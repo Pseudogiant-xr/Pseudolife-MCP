@@ -771,6 +771,42 @@ foreach ($selectedClient in $clients) {
 # The shim install itself is client-agnostic; memoize one attempt so
 # multi-provider runs don't run pipx/pip twice.
 $script:shimInstallResult = $null
+$script:shimInstallPath = $null
+function Resolve-InstalledShimPath($Manager = $null) {
+    $shimBinDir = $null
+    if (-not $Manager) {
+        if (Get-Command pipx -ErrorAction SilentlyContinue) {
+            $Manager = @{ Cmd = "pipx"; Args = @() }
+        } else {
+            foreach ($candidate in @(
+                @{ Cmd = "py"; Args = @("-3") },
+                @{ Cmd = "python"; Args = @() }
+            )) {
+                if (-not (Get-Command $candidate.Cmd -ErrorAction SilentlyContinue)) { continue }
+                $candidateCmd = $candidate.Cmd
+                $candidateArgs = $candidate.Args
+                & $candidateCmd @candidateArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 0) { $Manager = $candidate; break }
+            }
+        }
+    }
+    if (-not $Manager) { return $null }
+    if ($Manager.Cmd -eq "pipx") {
+        $shimBinDir = (& pipx environment --value PIPX_BIN_DIR 2>$null | Select-Object -Last 1)
+    } else {
+        $managerCmd = $Manager.Cmd
+        $managerArgs = $Manager.Args
+        $shimBinDir = (& $managerCmd @managerArgs -c "import sysconfig; print(sysconfig.get_path('scripts', scheme=sysconfig.get_preferred_scheme('user')))" 2>$null | Select-Object -Last 1)
+    }
+    if (-not $shimBinDir) { return $null }
+    foreach ($shimName in @("pseudolife-mcp.exe", "pseudolife-mcp")) {
+        $candidatePath = Join-Path "$shimBinDir" $shimName
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidatePath).Path
+        }
+    }
+    return $null
+}
 function Install-ShimOnce {
     if ($null -ne $script:shimInstallResult) { return $script:shimInstallResult }
     # NOTE: every native command in here pipes to Out-Host — a PS function
@@ -778,17 +814,16 @@ function Install-ShimOnce {
     # the boolean return and make failures read as success at the call site
     # (the 2026-07-19 Invoke-WithRetry lesson; $LASTEXITCODE survives the pipe).
     $shimInstalled = $false
+    $shimManager = $null
     if (Get-Command pipx -ErrorAction SilentlyContinue) {
-        $pipxList = pipx list 2>$null
-        if ($pipxList -match "package pseudolife-mcp ") {
-            pipx upgrade pseudolife-mcp 2>&1 | Out-Host
-        } else {
-            pipx install pseudolife-mcp 2>&1 | Out-Host
-        }
+        # --force also replaces an existing environment when the checkout's
+        # version matches the installed one, so a stale same-version PyPI shim
+        # cannot survive an installer rerun.
+        pipx install --force $repo 2>&1 | Out-Host
         if ($LASTEXITCODE -eq 0) {
-            $shimInstalled = $true
+            $shimManager = @{ Cmd = "pipx"; Args = @() }
         } else {
-            Write-Warning "pipx install/upgrade pseudolife-mcp failed (exit $LASTEXITCODE)."
+            Write-Warning "pipx install --force from the checkout failed (exit $LASTEXITCODE)."
         }
     } else {
         # Probe every candidate interpreter independently - a stale/broken
@@ -802,31 +837,57 @@ function Install-ShimOnce {
             $exeArgs = $candidate.Args
             & $exe @exeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>&1 | Out-Host
             if ($LASTEXITCODE -ne 0) { continue }
-            & $exe @exeArgs -m pip install --user pseudolife-mcp 2>&1 | Out-Host
+            # A direct local requirement is rebuilt and reinstalled even at
+            # the same version; --upgrade also refreshes changed requirements.
+            & $exe @exeArgs -m pip install --user --upgrade $repo 2>&1 | Out-Host
             if ($LASTEXITCODE -eq 0) {
-                $shimInstalled = $true
+                $shimManager = @{ Cmd = $exe; Args = $exeArgs }
                 break
             } else {
-                Write-Warning "$($candidate.Label) -m pip install --user pseudolife-mcp failed (exit $LASTEXITCODE)."
+                Write-Warning "$($candidate.Label) -m pip install from the checkout failed (exit $LASTEXITCODE)."
             }
+        }
+    }
+    if ($shimManager) {
+        $script:shimInstallPath = Resolve-InstalledShimPath $shimManager
+        $shimInstalled = [bool]$script:shimInstallPath
+        if (-not $shimInstalled) {
+            Write-Warning "Shim installation completed, but its installed executable was not found in the manager's scripts directory."
         }
     }
     $script:shimInstallResult = $shimInstalled
     return $shimInstalled
 }
 
-# Two env pairs ride each shim registration: PSEUDOLIFE_WRITER_ID (the shim
-# forwards it as the X-PL-Writer header — per-provider write attribution)
-# and PSEUDOLIFE_MCP_NO_SPAWN=1 (Docker-tier no-spawn guard, 2026-08-29
-# incident). CLI env-flag support is probed, never assumed: a missing flag
-# degrades to the flagless form plus a printed manual config edit — never
-# to a failed install. HTTP transport cannot carry env, so there the daemon
-# default (ops/.env) applies and no shim exists to spawn anything.
 function Get-EnvFlag($cli) {
     $help = & $cli mcp add --help 2>$null
     if ("$help" -match '--env') { return "--env" }
     return $null
 }
+function Test-McpHttpRegistration([string]$config) {
+    return $config -match '(?im)(?:^|\s)"?(?:transport|type)"?\s*:\s*"?(?:streamable_)?http"?(?:[,}\s]|$)|\(http\)'
+}
+function Test-NoSpawnGuardEnabled([string]$config) {
+    return $config -match '(?im)(?:^|[,{}])[ \t]*"?PSEUDOLIFE_MCP_NO_SPAWN"?[ \t]*[:=][ \t]*"?(?:1|true|yes|on)"?[ \t]*(?:[,}]|\r?$)'
+}
+function Get-RegisteredStdioCommand([string]$config) {
+    if ($config -match '(?mi)^\s*"?command"?\s*:\s*"?([^"\r\n]+?)"?[,]?\s*$') {
+        return $Matches[1].Trim()
+    }
+    return $null
+}
+function Write-UnverifiedNoSpawnGuard([string]$client, [string]$verification) {
+    Write-Warning "The existing $client stdio registration's no-spawn guard is missing or cannot be verified; the registration was preserved and Docker-tier setup is incomplete."
+    Write-Host "  Edit the existing registration in place and set PSEUDOLIFE_MCP_NO_SPAWN=1; preserve its command, arguments, daemon URL, token file, and all other environment values."
+    Write-Host "  Re-run this installer after verifying the effective value with $verification."
+}
+
+# Two env pairs ride each shim registration: PSEUDOLIFE_WRITER_ID (the shim
+# forwards it as the X-PL-Writer header — per-provider write attribution)
+# and PSEUDOLIFE_MCP_NO_SPAWN=1 (Docker-tier no-spawn guard, 2026-08-29
+# incident). CLI env-flag support is probed, never assumed: a missing flag
+# fails closed before registration. HTTP transport cannot carry env, so there
+# the daemon default (ops/.env) applies and no shim exists to spawn anything.
 function Get-InstallerPython {
     # A python >= 3.10 for the stdlib-only ops helpers. Probe candidates
     # independently: Store aliases and stale launchers must not block the
@@ -861,6 +922,12 @@ function Get-DesktopTokenFile {
 function Get-DesktopTokenSource {
     if ($env:PSEUDOLIFE_MCP_TOKEN) { return $env:PSEUDOLIFE_MCP_TOKEN }
     $fromEnvFile = Get-EnvValue "PSEUDOLIFE_MCP_TOKEN"
+    if ($fromEnvFile) { return $fromEnvFile }
+    return $null
+}
+function Get-DesktopTokensSource {
+    if ($env:PSEUDOLIFE_MCP_TOKENS) { return $env:PSEUDOLIFE_MCP_TOKENS }
+    $fromEnvFile = Get-EnvValue "PSEUDOLIFE_MCP_TOKENS"
     if ($fromEnvFile) { return $fromEnvFile }
     return $null
 }
@@ -911,10 +978,10 @@ foreach ($selectedClient in $clients) {
         if ($Transport -ne "shim") {
             Write-Warning "Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) - ignoring -Transport http for it."
         }
-        $shimCmd = if (Install-ShimOnce) { Get-Command pseudolife-mcp -ErrorAction SilentlyContinue } else { $null }
+        $shimReady = Install-ShimOnce
         $desktopPython = Get-InstallerPython
-        if (-not $shimCmd) {
-            Write-Warning "pseudolife-mcp shim not installed or not on PATH in this shell - Claude Desktop not wired. Open a new shell and re-run, or register by hand: python ops\register_claude_desktop.py --command <full path to pseudolife-mcp.exe>"
+        if ((-not $shimReady) -or (-not $script:shimInstallPath)) {
+            Write-Warning "pseudolife-mcp shim installation did not yield a usable executable - Claude Desktop not wired. Re-run after fixing pipx/Python, or register by hand: python ops\register_claude_desktop.py --command <full path to pseudolife-mcp.exe>"
             $mcpState["claude-desktop"] = "failed"
             continue
         }
@@ -923,21 +990,29 @@ foreach ($selectedClient in $clients) {
             $mcpState["claude-desktop"] = "failed"
             continue
         }
-        $desktopArgs = @("--command", $shimCmd.Source, "--writer-id", "claude-desktop")
+        $desktopArgs = @("--command", $script:shimInstallPath, "--writer-id", "claude-desktop")
         $desktopTokenFile = Get-DesktopTokenFile
         if ($desktopTokenFile) {
-            $desktopArgs += @("--token-file", $desktopTokenFile)
+            if ($env:PSEUDOLIFE_MCP_TOKEN_FILE) {
+                $desktopArgs += @("--token-file", $desktopTokenFile)
+            } else {
+                $desktopArgs += @("--default-token-file", $desktopTokenFile)
+            }
             # The token value rides a process-scoped env var the registrar
             # reads by NAME - never a command-line argument, never printed.
             $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = Get-DesktopTokenSource
+            $env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = Get-DesktopTokensSource
             if ($env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE) {
                 $desktopArgs += @("--token-from-env", "PSEUDOLIFE_DESKTOP_TOKEN_SOURCE")
+            } elseif ($env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE) {
+                $desktopArgs += @("--tokens-from-env", "PSEUDOLIFE_DESKTOP_TOKENS_SOURCE")
             } else {
-                Write-Warning "The daemon is token-gated but no singular PSEUDOLIFE_MCP_TOKEN is set (environment or ops\.env) - the registrar can only reuse a token already in the Desktop entry or an existing file at $desktopTokenFile. If it reports exit 3, re-run with PSEUDOLIFE_MCP_TOKEN set so it writes the owner-only file."
+                Write-Warning "The daemon is token-gated but no token source is set (environment or ops\.env) - the registrar can only reuse a credential already in the Desktop entry. If registration fails, configure a singular token or exactly one claude-desktop principal in PSEUDOLIFE_MCP_TOKENS."
             }
         }
         & $desktopPython (Join-Path $repo "ops\register_claude_desktop.py") @desktopArgs 2>&1 | Out-Host
         $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = $null
+        $env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = $null
         Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
         continue
     }
@@ -957,14 +1032,55 @@ foreach ($selectedClient in $clients) {
         }
         $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
-            if (($Transport -eq "shim") -and ($existingCodex -notmatch "PSEUDOLIFE_MCP_NO_SPAWN")) {
-                Write-Warning "The existing Codex registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 - its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot."
-                Write-Host "  Upgrade it (re-check any custom command first: codex mcp get pseudolife-memory):"
-                Write-Host "    codex mcp remove pseudolife-memory"
-                Write-Host "    codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp"
+            $existingCodexGuard = codex mcp get pseudolife-memory --json 2>$null | Out-String
+            if ($LASTEXITCODE -ne 0) { $existingCodexGuard = $existingCodex }
+            $codexGuardUnverified = $false
+            if (($Transport -eq "shim") -and -not (Test-McpHttpRegistration $existingCodexGuard) -and -not (Test-McpHttpRegistration $existingCodex)) {
+                if (-not (Test-NoSpawnGuardEnabled $existingCodexGuard)) {
+                    Write-UnverifiedNoSpawnGuard "Codex" "codex mcp get pseudolife-memory --json"
+                    $codexGuardUnverified = $true
+                }
+                $registeredShim = Get-RegisteredStdioCommand $existingCodex
+                $bareRegisteredShim = $registeredShim -match '(?i)^pseudolife-mcp(?:\.exe)?$'
+                $managedRegisteredShim = $bareRegisteredShim
+                if (-not $managedRegisteredShim) {
+                    $knownInstalledShim = Resolve-InstalledShimPath
+                    if ($knownInstalledShim -and $registeredShim) {
+                        $registeredShim = if (Test-Path -LiteralPath $registeredShim -PathType Leaf) { (Resolve-Path -LiteralPath $registeredShim).Path } else { $null }
+                        $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+                        $managedRegisteredShim = $registeredShim -and [string]::Equals($registeredShim, $knownInstalledShim, $pathComparison)
+                    }
+                }
+                if ($managedRegisteredShim) {
+                    if (Install-ShimOnce) {
+                        if (-not $bareRegisteredShim) {
+                            Step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            $mcpState["codex"] = "present-upgraded"
+                        } else {
+                        $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+                        $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
+                        $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+                        if ($resolvedShimPath -and [string]::Equals($resolvedShimPath, $script:shimInstallPath, $pathComparison)) {
+                            Step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            $mcpState["codex"] = "present-upgraded"
+                        } else {
+                            Write-Warning "The existing Codex registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
+                            $mcpState["codex"] = "failed"
+                        }
+                        }
+                    } else {
+                        Write-Warning "The existing Codex registration was preserved, but its pseudolife-mcp shim upgrade failed - see the pip/pipx output above and re-run."
+                        $mcpState["codex"] = "failed"
+                    }
+                } else {
+                    Write-Warning "The existing Codex stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update."
+                    $mcpState["codex"] = "present-custom"
+                }
+                if ($codexGuardUnverified) { $mcpState["codex"] = "failed" }
+            } else {
+                Step "MCP server already wired into Codex - registration preserved."
+                $mcpState["codex"] = "present"
             }
-            Step "MCP server already wired into Codex - skipping."
-            $mcpState["codex"] = "present"
             $codexRuntimeDefaults = "preserved"
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
             $envFlag = Get-EnvFlag "codex"
@@ -979,26 +1095,17 @@ foreach ($selectedClient in $clients) {
                 # (2026-08-29 incident). Flag repeated per pair: codex's
                 # --env takes one KEY=VALUE per occurrence.
                 if ($codexConnectionConfigured -and $codexCredentialFile) {
-                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 $envFlag "PSEUDOLIFE_MCP_DAEMON_URL=$codexCredentialUrl" $envFlag "PSEUDOLIFE_MCP_TOKEN_FILE=$codexCredentialFile" -- pseudolife-mcp
+                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 $envFlag "PSEUDOLIFE_MCP_DAEMON_URL=$codexCredentialUrl" $envFlag "PSEUDOLIFE_MCP_TOKEN_FILE=$codexCredentialFile" -- $script:shimInstallPath
                 } elseif ($codexConnectionConfigured) {
-                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 $envFlag "PSEUDOLIFE_MCP_DAEMON_URL=$codexCredentialUrl" -- pseudolife-mcp
+                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 $envFlag "PSEUDOLIFE_MCP_DAEMON_URL=$codexCredentialUrl" -- $script:shimInstallPath
                 } else {
-                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                    codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 -- $script:shimInstallPath
                 }
                 Register-Result "codex" "shim-env" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
                 if ($mcpState["codex"] -eq "shim-env") { Set-CodexRuntimeDefaults }
-            } elseif ($codexConnectionConfigured) {
-                Write-Warning "This Codex CLI cannot pin the managed connection because its MCP command has no env flag; registration was skipped."
-                $mcpState["codex"] = "failed"
             } else {
-                codex mcp add pseudolife-memory -- pseudolife-mcp
-                Write-Host "  (this codex CLI takes no env flag - for per-provider write attribution"
-                Write-Host "   and the Docker-tier no-spawn guard, add to the server's entry in"
-                Write-Host "   ~/.codex/config.toml:"
-                Write-Host "     env = { PSEUDOLIFE_WRITER_ID = `"codex`", PSEUDOLIFE_MCP_NO_SPAWN = `"1`","
-                Write-Host "       PSEUDOLIFE_MCP_TOKEN_FILE = `"<the validated credential file, when configured>`" })"
-                Register-Result "codex" "shim" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
-                if ($mcpState["codex"] -eq "shim") { Set-CodexRuntimeDefaults }
+                Write-Warning "This Codex CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
+                $mcpState["codex"] = "failed"
             }
         } else {
             if ($Transport -eq "shim") {
@@ -1022,16 +1129,53 @@ foreach ($selectedClient in $clients) {
     } elseif ($selectedClient -eq "gemini") {
         $geminiList = gemini mcp list 2>$null
         if ("$geminiList" -match "pseudolife-memory") {
-            if ($Transport -eq "shim") {
-                # `gemini mcp list` cannot show env, so unlike claude/codex
-                # there is no way to detect a registration that predates the
-                # no-spawn guard - say so instead of staying silent.
-                Write-Host "  (if this Gemini registration predates the Docker-tier no-spawn guard, re-add it:"
-                Write-Host "   gemini mcp remove pseudolife-memory, then"
-                Write-Host "   gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp)"
+            $geminiRegistration = ("$geminiList" -split "`r?`n" | Where-Object { $_ -match 'pseudolife-memory:' } | Select-Object -First 1)
+            $geminiGuardUnverified = $false
+            if (($Transport -eq "shim") -and -not (Test-McpHttpRegistration "$geminiRegistration")) {
+                # `gemini mcp list` does not expose env values, so an existing
+                # stdio guard cannot be verified without inspecting settings.
+                Write-UnverifiedNoSpawnGuard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
+                $geminiGuardUnverified = $true
+                $bareRegisteredShim = "$geminiRegistration" -match '(?i)pseudolife-memory:\s*pseudolife-mcp(?:\.exe)?\s*\(stdio\)'
+                $managedRegisteredShim = $bareRegisteredShim
+                if (-not $managedRegisteredShim) {
+                    $knownInstalledShim = Resolve-InstalledShimPath
+                    if ($knownInstalledShim -and ("$geminiRegistration" -match '(?i)pseudolife-memory:\s*(.+?)\s*\(stdio\)')) {
+                        $registeredShim = if (Test-Path -LiteralPath $Matches[1] -PathType Leaf) { (Resolve-Path -LiteralPath $Matches[1]).Path } else { $null }
+                        $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+                        $managedRegisteredShim = $registeredShim -and [string]::Equals($registeredShim, $knownInstalledShim, $pathComparison)
+                    }
+                }
+                if ($managedRegisteredShim) {
+                    if (Install-ShimOnce) {
+                        if (-not $bareRegisteredShim) {
+                            Step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            $mcpState["gemini"] = "present-upgraded"
+                        } else {
+                        $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+                        $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
+                        $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+                        if ($resolvedShimPath -and [string]::Equals($resolvedShimPath, $script:shimInstallPath, $pathComparison)) {
+                            Step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            $mcpState["gemini"] = "present-upgraded"
+                        } else {
+                            Write-Warning "The existing Gemini CLI registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
+                            $mcpState["gemini"] = "failed"
+                        }
+                        }
+                    } else {
+                        Write-Warning "The existing Gemini CLI registration was preserved, but its pseudolife-mcp shim upgrade failed - see the pip/pipx output above and re-run."
+                        $mcpState["gemini"] = "failed"
+                    }
+                } else {
+                    Write-Warning "The existing Gemini CLI stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update."
+                    $mcpState["gemini"] = "present-custom"
+                }
+                if ($geminiGuardUnverified) { $mcpState["gemini"] = "failed" }
+            } else {
+                Step "MCP server already wired into Gemini CLI - registration preserved."
+                $mcpState["gemini"] = "present"
             }
-            Step "MCP server already wired into Gemini CLI - skipping."
-            $mcpState["gemini"] = "present"
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
             # Probe gemini's own spelling (`-e, --env`): the command below
             # emits the short form, so a help listing only `-e` must still
@@ -1044,15 +1188,11 @@ foreach ($selectedClient in $clients) {
                 # gemini CLI 0.57.0); PSEUDOLIFE_MCP_NO_SPAWN carries the
                 # same Docker-tier no-spawn guard as the claude and codex
                 # registrations (2026-08-29 incident).
-                gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp
+                gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory $script:shimInstallPath
                 Register-Result "gemini" "shim-env" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
             } else {
-                gemini mcp add -s user pseudolife-memory pseudolife-mcp
-                Write-Host "  (this gemini CLI takes no env flag - for per-provider write attribution"
-                Write-Host "   and the Docker-tier no-spawn guard, add `"env`": {`"PSEUDOLIFE_WRITER_ID`":"
-                Write-Host "   `"gemini`", `"PSEUDOLIFE_MCP_NO_SPAWN`": `"1`"} to the server's entry in"
-                Write-Host "   ~/.gemini/settings.json)"
-                Register-Result "gemini" "shim" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
+                Write-Warning "This Gemini CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
+                $mcpState["gemini"] = "failed"
             }
         } else {
             if ($Transport -eq "shim") {
@@ -1064,17 +1204,55 @@ foreach ($selectedClient in $clients) {
     } else {
         $existingClaude = claude mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
-            if (($Transport -eq "shim") -and ($existingClaude -notmatch "PSEUDOLIFE_MCP_NO_SPAWN")) {
-                Write-Warning "The existing Claude Code registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 - its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot (2026-08-29 incident)."
-                Write-Host "  Upgrade it (re-check any custom command first: claude mcp get pseudolife-memory):"
-                Write-Host "    claude mcp remove pseudolife-memory"
-                Write-Host "    claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp"
+            $claudeGuardUnverified = $false
+            if (($Transport -eq "shim") -and -not (Test-McpHttpRegistration $existingClaude)) {
+                if (-not (Test-NoSpawnGuardEnabled $existingClaude)) {
+                    Write-UnverifiedNoSpawnGuard "Claude Code" "claude mcp get pseudolife-memory"
+                    $claudeGuardUnverified = $true
+                }
+                $registeredShim = Get-RegisteredStdioCommand $existingClaude
+                $bareRegisteredShim = $registeredShim -match '(?i)^pseudolife-mcp(?:\.exe)?$'
+                $managedRegisteredShim = $bareRegisteredShim
+                if (-not $managedRegisteredShim) {
+                    $knownInstalledShim = Resolve-InstalledShimPath
+                    if ($knownInstalledShim -and $registeredShim) {
+                        $registeredShim = if (Test-Path -LiteralPath $registeredShim -PathType Leaf) { (Resolve-Path -LiteralPath $registeredShim).Path } else { $null }
+                        $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+                        $managedRegisteredShim = $registeredShim -and [string]::Equals($registeredShim, $knownInstalledShim, $pathComparison)
+                    }
+                }
+                if ($managedRegisteredShim) {
+                    if (Install-ShimOnce) {
+                        if (-not $bareRegisteredShim) {
+                            Step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            $mcpState["claude"] = "present-upgraded"
+                        } else {
+                        $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+                        $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
+                        $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+                        if ($resolvedShimPath -and [string]::Equals($resolvedShimPath, $script:shimInstallPath, $pathComparison)) {
+                            Step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            $mcpState["claude"] = "present-upgraded"
+                        } else {
+                            Write-Warning "The existing Claude Code registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
+                            $mcpState["claude"] = "failed"
+                        }
+                        }
+                    } else {
+                        Write-Warning "The existing Claude Code registration was preserved, but its pseudolife-mcp shim upgrade failed - see the pip/pipx output above and re-run."
+                        $mcpState["claude"] = "failed"
+                    }
+                } else {
+                    Write-Warning "The existing Claude Code stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update."
+                    $mcpState["claude"] = "present-custom"
+                }
+                if ($claudeGuardUnverified) { $mcpState["claude"] = "failed" }
+            } else {
+                Step "MCP server already wired into Claude Code - registration preserved."
+                $mcpState["claude"] = "present"
             }
-            Step "MCP server already wired into Claude Code - skipping."
-            $mcpState["claude"] = "present"
         } elseif ($Transport -eq "shim") {
             if (Install-ShimOnce) {
-                claude mcp remove pseudolife-memory *> $null
                 $envFlag = Get-EnvFlag "claude"
                 if ($envFlag) {
                     # --env is variadic and must come AFTER the server name:
@@ -1086,15 +1264,11 @@ foreach ($selectedClient in $clients) {
                     # the compose daemon instead of spawning a fallback that
                     # can shadow the real bank (see the Codex registration
                     # above).
-                    claude mcp add --scope user pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                    claude mcp add --scope user pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- $script:shimInstallPath
                     Register-Result "claude" "shim-env" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
                 } else {
-                    claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-                    Write-Host "  (this claude CLI takes no env flag - for per-provider write attribution"
-                    Write-Host "   and the Docker-tier no-spawn guard, add `"env`": {`"PSEUDOLIFE_WRITER_ID`":"
-                    Write-Host "   `"claude-code`", `"PSEUDOLIFE_MCP_NO_SPAWN`": `"1`"} to the server's entry"
-                    Write-Host "   in ~/.claude.json)"
-                    Register-Result "claude" "shim" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
+                    Write-Warning "This Claude CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
+                    $mcpState["claude"] = "failed"
                 }
             } else {
                 Write-Warning "Could not install the pseudolife-mcp shim - no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above)."
@@ -1134,12 +1308,14 @@ function Describe-Mcp($state) {
         "shim" { "stdio shim (writer id: daemon default in ops/.env)" }
         "http" { "HTTP (writer id: daemon default in ops/.env)" }
         "present" { "already wired (unchanged)" }
-        "failed" { "registration FAILED - see the warning above and re-run" }
+        "present-upgraded" { "already wired; checkout shim upgraded" }
+        "present-custom" { "already wired with custom command (unchanged)" }
+        "failed" { "registration or shim upgrade FAILED - see the warning above and re-run" }
         default { "not wired" }
     }
 }
 function Get-McpMarker($state) {
-    if ($state -in "shim-env", "shim", "http", "present") { "[x]" } else { "[!]" }
+    if ($state -in "shim-env", "shim", "http", "present", "present-upgraded", "present-custom") { "[x]" } else { "[!]" }
 }
 function Describe-Instr($state) {
     if (-not $state) { return "[-] Standing file        skipped" }

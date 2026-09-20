@@ -22,6 +22,10 @@ def test_powershell_fresh_install_keeps_connection_across_stages(tmp_path, shim_
     if not pwsh:
         pytest.skip("PowerShell 7 unavailable")
     repo = tmp_path / "repo"
+    shim_bin = tmp_path / "shim-bin"
+    shim_bin.mkdir()
+    shim_executable = shim_bin / "pseudolife-mcp.exe"
+    shim_executable.write_text("fake", encoding="utf-8")
     (repo / "ops").mkdir(parents=True)
     (repo / "examples").mkdir()
     shutil.copyfile(ROOT / "examples/CLAUDE.memory.md", repo / "examples/CLAUDE.memory.md")
@@ -80,7 +84,7 @@ function Read-Host {{ throw 'unexpected prompt' }}
 function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 function pipx {{
     $global:LASTEXITCODE={0 if shim_available else 1}
-    if ($args[0] -eq 'list') {{ return 'package pseudolife-mcp 1' }}
+    if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
 }}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -101,6 +105,7 @@ function codex {{
     environment = os.environ.copy()
     environment.update(CODEX_HOME=home.as_posix(), HOME=home.as_posix(), USERPROFILE=home.as_posix(),
         PYTHONPATH=str(ROOT), FIXTURE_HOOK=str(marker), FIXTURE_RUNTIME=str(runtime),
+        FIXTURE_SHIM_BIN=str(shim_bin),
         PSEUDOLIFE_MCP_TOKEN="fixture-literal",
         PSEUDOLIFE_MCP_TOKEN_FILE=ambient.as_posix(), PSEUDOLIFE_MCP_DAEMON_URL="http://127.0.0.1:4321")
     completed = subprocess.run([pwsh, "-NoProfile", "-File", str(driver)], env=environment,
@@ -114,6 +119,7 @@ function codex {{
     if shim_available:
         assert runtime.read_text() == "verified"
         arguments = json.loads(calls.read_text(encoding="utf-8-sig"))
+        assert str(shim_executable) in arguments
         assert "PSEUDOLIFE_MCP_TOKEN_FILE=" + str(managed) in arguments
         assert "PSEUDOLIFE_MCP_DAEMON_URL=http://127.0.0.1:9876" in arguments
         assert not any("fixture-literal" in value or "ambient-file" in value or

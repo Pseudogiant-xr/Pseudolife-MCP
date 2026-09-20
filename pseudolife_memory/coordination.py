@@ -123,16 +123,16 @@ _SETUP = threading.Lock()
 def _tier_ready(service, *, full: bool) -> bool:
     """Lock-free readiness read. ``full`` means the whole service, which only
     ``send`` needs (the reseeded HLC); everything else needs the durable
-    tier. The flags are set once during initialization, so a stale read
-    only sends the caller to the locked path, never past it."""
+    tier. A real service owns its readiness probe; the cached fallback is
+    only for implementations without one and cannot override a failed reseed."""
     if service._storage is None:
         return False
     if not full:
         return True
-    if getattr(service, "_coordination_ready", False):
-        return True
     probe = getattr(service, "coordination_tier_ready", None)
-    return bool(probe()) if callable(probe) else False
+    if callable(probe):
+        return bool(probe())
+    return bool(getattr(service, "_coordination_ready", False))
 
 
 def _ensure_tier(service, *, full: bool) -> None:

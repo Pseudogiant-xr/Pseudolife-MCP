@@ -6,8 +6,9 @@ concurrent ``pytest tests/`` invocations sharing one database terminate
 each other's live connections (AdminShutdown, a different victim set
 every run). The contract pinned here is that each pytest process gets
 its own private database, so the reaper can only ever hit this run's
-leaked backends. An explicit ``PSEUDOLIFE_TEST_DATABASE_URL`` still wins
-verbatim (CI's isolated service container uses a fixed name).
+leaked backends. An explicit ``PSEUDOLIFE_TEST_DATABASE_URL`` keeps its
+connection settings and database name (CI's isolated service container uses a
+fixed name).
 """
 
 from __future__ import annotations
@@ -82,7 +83,7 @@ def test_bench_db_is_private_to_this_run():
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     import ladder_sweep
+    from psycopg.conninfo import conninfo_to_dict
 
-    assert ladder_sweep.bench_url().endswith(
-        f"/pseudolife_memory_bench_{os.getpid()}"
-    )
+    assert conninfo_to_dict(ladder_sweep.bench_url())["dbname"] == (
+        f"pseudolife_memory_bench_{os.getpid()}")

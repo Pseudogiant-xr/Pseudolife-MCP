@@ -27,13 +27,13 @@ sys.path.insert(0, str(ROOT))
 # The eval-backed suites (test_recall, test_memcot_bench,
 # test_constraint_pinning) and evals/ladder_sweep.py read the bench admin
 # URL from PSEUDOLIFE_BENCH_ADMIN_URL. Seed it once, here, from the same
-# resolver pg_fixtures uses (password from ops/.env), so a rotated dev
-# password cannot turn those files into silent skips. An operator's own
-# value is left alone.
-from tests.pg_defaults import default_admin_url  # noqa: E402
+# resolver pg_fixtures uses (explicit test DSN, then password from ops/.env),
+# so a rotated dev password or alternate test server cannot turn those files
+# into silent skips. An operator's own bench value is left alone.
+from tests.pg_defaults import bench_admin_url, conninfo_with_dbname  # noqa: E402
 
 if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
-    os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = default_admin_url()
+    os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = bench_admin_url()
     os.environ["_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"] = "1"
 
 # Isolate client configuration before test-module imports can snapshot it.
@@ -76,8 +76,8 @@ if _bench_pin is not None:
         try:
             import psycopg
 
-            admin = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()
-            admin = admin.rsplit("/", 1)[0] + "/postgres"
+            admin = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or bench_admin_url()
+            admin = conninfo_with_dbname(admin, "postgres")
             db = os.environ["PSEUDOLIFE_BENCH_DB"]
             with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:
                 conn.execute(f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')

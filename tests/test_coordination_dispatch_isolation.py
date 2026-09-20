@@ -151,3 +151,73 @@ def test_cold_service_pays_full_init_only_for_send(pg_service, tmp_path, monkeyp
             mailbox.close()
         if cold._storage is not None:
             cold._storage.close()
+
+
+def test_send_during_initial_hydration_waits_for_clock_history(
+    pg_service, tmp_path, monkeypatch,
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from pseudolife_memory.memory.hlc import HybridLogicalClock
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.storage import sync
+    from pseudolife_memory.storage.coordination import HLC_META_KEY
+
+    cold = MemoryService(data_dir=tmp_path / "clock-startup")
+    cold.config.coordination.enabled = True
+    cold.config.coordination.allowed_principals = [PRINCIPAL]
+    cold._hlc = HybridLogicalClock(now_ms=lambda: 100)
+    agent = dispatch(cold, "register", {}, headers={}, principal=PRINCIPAL)
+    creds = {"x-pl-agent": agent["agent_id"], "x-pl-agent-key": agent["credential"]}
+    cold._storage.set_meta(HLC_META_KEY, [10000, 7])
+    hydration_started = threading.Event()
+    release_hydration = threading.Event()
+    send_started = threading.Event()
+    original_hydrate = sync.hydrate_cms
+
+    def paused_hydrate(*args, **kwargs):
+        hydration_started.set()
+        assert release_hydration.wait(10), "hydration was not released"
+        return original_hydrate(*args, **kwargs)
+
+    monkeypatch.setattr(sync, "hydrate_cms", paused_hydrate)
+
+    def initialize():
+        with cold._lock:
+            cold._ensure_init()
+
+    def send():
+        send_started.set()
+        return dispatch(cold, "send", {
+            "to": agent["agent_id"], "text": "startup message",
+            "request_id": "startup-clock",
+        }, headers=creds, principal=PRINCIPAL)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            initializing = pool.submit(initialize)
+            try:
+                assert hydration_started.wait(10), "initialization did not reach hydration"
+                sending = pool.submit(send)
+                assert send_started.wait(2), "sender did not start"
+                # The send is concurrent with an already-published CMS, but
+                # it must not stamp a message until stored history is loaded.
+                from concurrent.futures import TimeoutError
+                with pytest.raises(TimeoutError):
+                    sending.result(timeout=0.2)
+            finally:
+                release_hydration.set()
+            initializing.result(timeout=10)
+            assert sending.result(timeout=10)["state"] == "queued"
+        row = cold._storage.conn.execute(
+            "SELECT hlc FROM coordination_messages WHERE request_id=%s",
+            ("startup-clock",),
+        ).fetchone()
+        assert tuple(map(int, row[0].split(":"))) > (10000, 7)
+    finally:
+        release_hydration.set()
+        mailbox = getattr(cold, "_coordination_storage", None)
+        if mailbox is not None:
+            mailbox.close()
+        if cold._storage is not None:
+            cold._storage.close()

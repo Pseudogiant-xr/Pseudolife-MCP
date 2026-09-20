@@ -19,6 +19,16 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _fake_shim_bin(tmp_path: Path) -> Path:
+    shim_bin = tmp_path / "shim-bin"
+    shim_bin.mkdir()
+    for name in ("pseudolife-mcp", "pseudolife-mcp.exe"):
+        executable = shim_bin / name
+        executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        executable.chmod(0o755)
+    return shim_bin
+
+
 def connection_payload(url, token_file):
     encode = lambda value: base64.b64encode(str(value).encode()).decode()
     return {"version": 1, "daemon_url": encode(url), "token_file": encode(token_file)}
@@ -627,6 +637,7 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
     if not bash:
         pytest.skip("Bash is not installed")
     repo = tmp_path / "repo"
+    shim_bin = _fake_shim_bin(tmp_path)
     (repo / "ops").mkdir(parents=True)
     (repo / "examples").mkdir()
     shutil.copyfile(ROOT / "examples/CLAUDE.memory.md", repo / "examples/CLAUDE.memory.md")
@@ -687,7 +698,7 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
         "step() { :; }\n"
         "get_env() { case \"$1\" in PSEUDOLIFE_MCP_TOKEN) printf installer-file-token ;; "
         "PSEUDOLIFE_MCP_DAEMON_URL) printf http://127.0.0.1:9876 ;; esac; }\n"
-        + ("pipx() { if [ \"$1\" = list ]; then echo 'package pseudolife-mcp 1'; fi; return 0; }\n"
+        + ("pipx() { if [ \"$1\" = environment ]; then printf '%s\\n' \"$FIXTURE_SHIM_BIN\"; fi; return 0; }\n"
            if shim_available else "pipx() { return 1; }\n")
         +
         "codex() {\n"
@@ -722,6 +733,7 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
         "FIXTURE_RUNTIME_SUCCESS": "1" if runtime_success else "0",
         "FIXTURE_CREDENTIAL_SUCCESS": "1" if bootstrap_success else "0",
         "FIXTURE_AMBIENT_FILE": ambient.as_posix(),
+        "FIXTURE_SHIM_BIN": shim_bin.as_posix(),
         "PYTHONPATH": str(ROOT),
     })
     result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,
@@ -745,6 +757,7 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
     if shim_available:
         assert runtime_marker.read_text() == "called"
         call = codex_call.read_text()
+        assert shim_bin.joinpath("pseudolife-mcp").as_posix() in call
         assert "PSEUDOLIFE_MCP_TOKEN_FILE=" + managed.as_posix() in call
         assert "PSEUDOLIFE_MCP_DAEMON_URL=http://127.0.0.1:9876" in call
         assert all(token not in call for token in (
@@ -768,6 +781,7 @@ def test_powershell_explicit_installer_connection_isolated_and_recoverable(
     if not pwsh:
         pytest.skip("PowerShell 7 unavailable")
     repo = tmp_path / "repo"
+    shim_bin = _fake_shim_bin(tmp_path)
     (repo / "ops").mkdir(parents=True)
     (repo / "examples").mkdir()
     shutil.copyfile(ROOT / "examples/CLAUDE.memory.md", repo / "examples/CLAUDE.memory.md")
@@ -845,7 +859,7 @@ function Read-Host {{ throw 'unexpected prompt' }}
 function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 function pipx {{
     $global:LASTEXITCODE=0
-    if ($args[0] -eq 'list') {{ return 'package pseudolife-mcp 1' }}
+    if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
 }}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -871,6 +885,7 @@ function codex {{
         "FIXTURE_RUNTIME_SUCCESS": "1" if runtime_success else "0",
         "FIXTURE_CREDENTIAL_SUCCESS": "1" if bootstrap_success else "0",
         "FIXTURE_CODEX_CALL": str(codex_call),
+        "FIXTURE_SHIM_BIN": shim_bin.as_posix(),
         "PSEUDOLIFE_MCP_TOKEN": "ambient-static-token",
         "PSEUDOLIFE_MCP_TOKEN_FILE": ambient.as_posix(),
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:4321",
@@ -891,6 +906,7 @@ function codex {{
     assert all(json.loads(hook_marker.read_text()).values())
     assert runtime_marker.read_text() == "called"
     arguments = json.loads(codex_call.read_text(encoding="utf-8-sig"))
+    assert str(shim_bin / "pseudolife-mcp.exe") in arguments
     assert not any(token in value for value in arguments for token in (
         "installer-file-token", "ambient-file-token", "ambient-static-token"))
     if not runtime_success:
@@ -913,6 +929,7 @@ def test_fresh_tokenless_install_ignores_unforwarded_ambient_connection(
         pytest.skip(f"{shell} is not installed")
 
     repo = tmp_path / "repo"
+    shim_bin = _fake_shim_bin(tmp_path)
     (repo / "ops").mkdir(parents=True)
     (repo / "examples").mkdir()
     shutil.copyfile(ROOT / "examples/CLAUDE.memory.md", repo / "examples/CLAUDE.memory.md")
@@ -970,7 +987,7 @@ print(json.dumps(result))
             "INSTRUCTIONS=auto\nCLAUDE_MD=''\nAGENTS_FILE=''\nTRANSPORT=shim\n"
             "step() { :; }\n"
             "get_env() { if [ \"$1\" = PSEUDOLIFE_MCP_DAEMON_URL ]; then printf '%s' \"$FIXTURE_INSTALLER_URL\"; fi; }\n"
-            "pipx() { if [ \"$1\" = list ]; then echo 'package pseudolife-mcp 1'; fi; return 0; }\n"
+            "pipx() { if [ \"$1\" = environment ]; then printf '%s\\n' \"$FIXTURE_SHIM_BIN\"; fi; return 0; }\n"
             "codex() {\n"
             " if [ \"$1 $2\" = 'mcp get' ]; then return 1; fi\n"
             " if [ \"$1 $2 $3\" = 'mcp add --help' ]; then [ \"$FIXTURE_ENV_SUPPORTED\" = 1 ] && echo --env; return 0; fi\n"
@@ -998,7 +1015,7 @@ function Read-Host {{ throw 'unexpected prompt' }}
 function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 function pipx {{
     $global:LASTEXITCODE=0
-    if ($args[0] -eq 'list') {{ return 'package pseudolife-mcp 1' }}
+    if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
 }}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -1059,6 +1076,7 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
         "FIXTURE_AMBIENT_FILE": ambient.as_posix(),
         "FIXTURE_AMBIENT_URL": wrong_url,
         "FIXTURE_ENV_SUPPORTED": "1" if env_supported else "0",
+        "FIXTURE_SHIM_BIN": shim_bin.as_posix(),
         "PSEUDOLIFE_MCP_TOKEN": "ambient-static-token",
         "PSEUDOLIFE_MCP_TOKEN_FILE": ambient.as_posix(),
         "PSEUDOLIFE_MCP_DAEMON_URL": wrong_url,
@@ -1082,6 +1100,12 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
         if env_supported:
             assert runtime_marker.read_text() == "called"
             arguments = codex_call.read_text(encoding="utf-8-sig")
+            expected_shim = shim_bin / (
+                "pseudolife-mcp" if shell == "bash" else "pseudolife-mcp.exe")
+            if shell == "bash":
+                assert expected_shim.as_posix() in arguments.splitlines()
+            else:
+                assert str(expected_shim) in json.loads(arguments)
             assert ambient.as_posix() not in arguments
             assert wrong_url not in arguments
             assert "PSEUDOLIFE_MCP_DAEMON_URL=" + intended_url in arguments
@@ -1131,6 +1155,7 @@ def test_installer_preserves_existing_forwarded_user_credential(
         pytest.skip(f"{shell} is not installed")
 
     repo = tmp_path / "repo"
+    shim_bin = _fake_shim_bin(tmp_path)
     (repo / "ops").mkdir(parents=True)
     (repo / "examples").mkdir()
     shutil.copyfile(ROOT / "examples/CLAUDE.memory.md", repo / "examples/CLAUDE.memory.md")
@@ -1200,7 +1225,7 @@ print(json.dumps(result))
             " [ \"$1\" = PSEUDOLIFE_MCP_DAEMON_URL ] && printf '%s' \"$FIXTURE_INSTALLER_URL\"\n"
             " [ \"$1\" = PSEUDOLIFE_MCP_TOKEN ] && printf '%s' \"$FIXTURE_INSTALLER_TOKEN\"\n"
             " return 0\n}\n"
-            "pipx() { [ \"$1\" = list ] && echo 'package pseudolife-mcp 1'; return 0; }\n"
+            "pipx() { [ \"$1\" = environment ] && printf '%s\\n' \"$FIXTURE_SHIM_BIN\"; return 0; }\n"
             "codex() {\n"
             " if [ \"$1 $2\" = 'mcp get' ]; then return 1; fi\n"
             " if [ \"$1 $2 $3\" = 'mcp add --help' ]; then echo --env; return 0; fi\n"
@@ -1229,7 +1254,7 @@ function Read-Host {{ throw 'unexpected prompt' }}
 function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 function pipx {{
     $global:LASTEXITCODE=0
-    if ($args[0] -eq 'list') {{ return 'package pseudolife-mcp 1' }}
+    if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
 }}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -1258,6 +1283,7 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
         "FIXTURE_FORWARDED_URL": "http://127.0.0.1:9876",
         "FIXTURE_INSTALLER_URL": "http://127.0.0.1:4321",
         "FIXTURE_INSTALLER_TOKEN": "installer-fixture" if installer_token else "",
+        "FIXTURE_SHIM_BIN": shim_bin.as_posix(),
         "PSEUDOLIFE_MCP_TOKEN": "unforwarded-literal",
         "PSEUDOLIFE_MCP_TOKEN_FILE": forwarded.as_posix(),
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9876",
@@ -1271,6 +1297,12 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
         "preserved_env_vars": True,
     }
     arguments = codex_call.read_text(encoding="utf-8-sig")
+    expected_shim = shim_bin / (
+        "pseudolife-mcp" if shell == "bash" else "pseudolife-mcp.exe")
+    if shell == "bash":
+        assert expected_shim.as_posix() in arguments.splitlines()
+    else:
+        assert str(expected_shim) in json.loads(arguments)
     assert "PSEUDOLIFE_MCP_TOKEN_FILE=" in arguments
     assert forwarded.name in arguments
     assert "PSEUDOLIFE_MCP_DAEMON_URL=http://127.0.0.1:9876" in arguments

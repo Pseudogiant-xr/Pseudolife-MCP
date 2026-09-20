@@ -763,7 +763,7 @@
    "d": [
     "Bearer principal must be listed in coordination.allowed_principals; every action except register also needs the adapter's X-PL-Agent / X-PL-Agent-Key headers",
     "Per-action parameter allow-lists reject unexpected or missing parameters before any database work",
-    "Runs the store on a dedicated mailbox connection under the coordination lock; the service lock is taken once per process for the tier check and never again, so a dream holding it cannot expire an adapter lease; send stamps the message with the service HLC on the way in",
+    "Runs the store on a dedicated mailbox connection under the coordination lock; the service lock is used for cold durable-tier initialization and for full initialization before send, including clock-reseed retries; initialized mailbox calls avoid it, so a dream holding it cannot expire an adapter lease; send waits for clock history before stamping the message",
     "Failures re-raise through public_error, so callers see a stable code and never a supplied value",
     "Disabled configuration answers {enabled: false} rather than an error, so a disabled bank stays quiet"
    ]

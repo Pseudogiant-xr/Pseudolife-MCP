@@ -32,6 +32,34 @@ def test_env_file_password_is_none_when_missing_or_unset(tmp_path):
     assert pg_defaults.env_file_password(env_file) is None
 
 
+@pytest.mark.parametrize(("assignment", "expected"), [
+    ("POSTGRES_PASSWORD=plain-value # operator note", "plain-value"),
+    ("POSTGRES_PASSWORD='single # and $ stay literal' # note",
+     "single # and $ stay literal"),
+    ('POSTGRES_PASSWORD="double # stays literal" # note',
+     "double # stays literal"),
+])
+def test_env_file_password_follows_compose_comments_and_quotes(
+        tmp_path, assignment, expected):
+    env_file = tmp_path / ".env"
+    env_file.write_text(assignment + "\n", encoding="utf-8")
+    assert pg_defaults.env_file_password(env_file) == expected
+
+
+@pytest.mark.parametrize("assignment", [
+    "POSTGRES_PASSWORD=$UNSUPPORTED_SECRET_VALUE",
+    'POSTGRES_PASSWORD="${UNSUPPORTED_SECRET_VALUE}"',
+])
+def test_env_file_password_rejects_unsupported_compose_expansion_without_value(
+        tmp_path, assignment):
+    env_file = tmp_path / ".env"
+    env_file.write_text(assignment + "\n", encoding="utf-8")
+    with pytest.raises(ValueError) as exc:
+        pg_defaults.env_file_password(env_file)
+    assert "Compose variable expansion" in str(exc.value)
+    assert "UNSUPPORTED_SECRET_VALUE" not in str(exc.value)
+
+
 def test_default_password_precedence(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=from-env-file\n", encoding="utf-8")
@@ -39,6 +67,24 @@ def test_default_password_precedence(tmp_path):
     assert pg_defaults.default_password(
         {"PSEUDOLIFE_TEST_PG_PASSWORD": "explicit"}, env_file) == "explicit"
     assert pg_defaults.default_password({}, tmp_path / "absent") == "pseudolife"
+
+
+@pytest.mark.parametrize("prefix", ['"', '$'])
+def test_invalid_env_file_reports_hide_values_with_locals(tmp_path, prefix):
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=" + prefix + SECRET + "\n", encoding="utf-8")
+    with pytest.raises(ValueError) as failure:
+        pg_defaults.env_file_password(env_file)
+    assert SECRET not in _rendered(failure, showlocals=True)
+
+
+def test_env_parser_traceback_redaction_is_load_bearing(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=$" + SECRET + "\n", encoding="utf-8")
+    monkeypatch.setattr(pg_defaults, "env_file_password", pg_defaults._read_env_file_password)
+    with pytest.raises(ValueError) as failure:
+        pg_defaults.env_file_password(env_file)
+    assert SECRET in _rendered(failure, showlocals=True)
 
 
 def test_default_admin_url_embeds_the_resolved_password(tmp_path):
@@ -67,7 +113,69 @@ def test_fixture_default_admin_follows_the_env_file(monkeypatch, tmp_path):
     assert pg_fixtures.resolve_test_db_url.__doc__ or True  # exists
     # An explicit override is still returned verbatim.
     monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL", "postgresql://u:p@h:1/db")
-    assert pg_fixtures._admin_url() == "postgresql://u:p@h:1/postgres"
+    parsed = psycopg.conninfo.conninfo_to_dict(pg_fixtures._admin_url())
+    assert parsed["host"] == "h" and parsed["port"] == "1"
+    assert parsed["user"] == "u" and parsed["password"] == "p"
+    assert parsed["dbname"] == "postgres"
+
+
+def test_bench_admin_resolution_prefers_explicit_then_test_uri_and_keyword_dsn():
+    explicit = "host=bench.invalid port=6001 user=bench password=explicit dbname=postgres"
+    test_url = (
+        "postgresql://test-user:test-pass@test.invalid:6002/test_db"
+        "?sslmode=require&application_name=fixture")
+    assert pg_defaults.bench_admin_url({
+        "PSEUDOLIFE_BENCH_ADMIN_URL": explicit,
+        "PSEUDOLIFE_TEST_DATABASE_URL": test_url,
+    }) == explicit
+
+    from_uri = psycopg.conninfo.conninfo_to_dict(pg_defaults.bench_admin_url({
+        "PSEUDOLIFE_TEST_DATABASE_URL": test_url,
+    }))
+    assert from_uri == {
+        "user": "test-user", "password": "test-pass", "dbname": "postgres",
+        "host": "test.invalid", "port": "6002", "application_name": "fixture",
+        "sslmode": "require",
+    }
+
+    keyword = (
+        "host=keyword.invalid port=6003 user=kw password=kw-pass "
+        "dbname=target sslmode=verify-full connect_timeout=9")
+    from_keyword = psycopg.conninfo.conninfo_to_dict(
+        pg_defaults.bench_admin_url({"PSEUDOLIFE_TEST_DATABASE_URL": keyword}))
+    assert from_keyword == {
+        "user": "kw", "password": "kw-pass", "dbname": "postgres",
+        "host": "keyword.invalid", "port": "6003", "connect_timeout": "9",
+        "sslmode": "verify-full",
+    }
+
+
+def test_bench_admin_fallback_keeps_explicit_test_password(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=file-value\n", encoding="utf-8")
+    resolved = pg_defaults.bench_admin_url(
+        {"PSEUDOLIFE_TEST_PG_PASSWORD": "explicit-value"}, env_file)
+    parsed = psycopg.conninfo.conninfo_to_dict(resolved)
+    assert parsed["password"] == "explicit-value"
+
+
+@pytest.mark.parametrize("override", [
+    ("postgresql://worker:worker-pass@worker.invalid:6004/base_db"
+     "?sslmode=require&application_name=xdist"),
+    ("host=worker.invalid port=6004 user=worker password=worker-pass "
+     "dbname=base_db sslmode=require application_name=xdist"),
+])
+def test_resolve_test_db_url_preserves_options_and_applies_xdist_suffix(
+        monkeypatch, override):
+    monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL", override)
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw2")
+    parsed = psycopg.conninfo.conninfo_to_dict(
+        pg_fixtures.resolve_test_db_url())
+    assert parsed == {
+        "user": "worker", "password": "worker-pass", "dbname": "base_db_gw2",
+        "host": "worker.invalid", "port": "6004",
+        "application_name": "xdist", "sslmode": "require",
+    }
 
 
 # -- auth failure vs no server ------------------------------------------------
@@ -129,13 +237,41 @@ def test_ensure_test_db_keeps_the_skip_path_for_an_absent_server(monkeypatch):
     assert "no test Postgres reachable" in str(exc.value)
 
 
+def test_ensure_test_db_errors_on_reachable_setup_failure(monkeypatch):
+    class Connected:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, *args, **kwargs):
+            raise psycopg.errors.InsufficientPrivilege(
+                "permission denied to create database")
+
+    monkeypatch.setattr(pg_fixtures.psycopg, "connect",
+                        lambda *args, **kwargs: Connected())
+    monkeypatch.setenv(
+        "PSEUDOLIFE_TEST_DATABASE_URL",
+        "postgresql://u:p@setup-fail.invalid:1/db_setup_failure",
+    )
+    with pytest.raises(pg_defaults.PostgresSetupError) as first:
+        pg_fixtures.ensure_test_db()
+    with pytest.raises(pg_defaults.PostgresSetupError) as cached:
+        pg_fixtures.ensure_test_db()
+    with pytest.raises(pg_defaults.PostgresSetupError):
+        pg_fixtures._skip_or_raise(first.value)
+    assert first.value is not cached.value
+
+
 def test_pg_url_outcome_skips_only_for_an_absent_server():
     """The fixture's branch, isolated: auth failure propagates (ERROR),
     anything else becomes a skip."""
     with pytest.raises(pg_defaults.PostgresAuthError):
         pg_fixtures._skip_or_raise(pg_defaults.PostgresAuthError("bad password"))
     with pytest.raises(pytest.skip.Exception):
-        pg_fixtures._skip_or_raise(RuntimeError("no test Postgres reachable"))
+        pg_fixtures._skip_or_raise(
+            pg_defaults.PostgresUnavailableError("no test Postgres reachable"))
 
 
 def test_helpers_pg_reachable_raises_on_auth_failure_and_false_when_absent(monkeypatch):
@@ -146,6 +282,27 @@ def test_helpers_pg_reachable_raises_on_auth_failure_and_false_when_absent(monke
     connect, _ = _fake_connect(psycopg.OperationalError(REFUSED_MSG))
     monkeypatch.setattr(psycopg, "connect", connect)
     assert helpers.pg_reachable("postgresql://u:p@h:1/db") is False
+
+    connect, _ = _fake_connect(
+        psycopg.errors.InvalidCatalogName("database does not exist"))
+    monkeypatch.setattr(psycopg, "connect", connect)
+    with pytest.raises(pg_defaults.PostgresSetupError):
+        helpers.pg_reachable("postgresql://u:p@h:1/db")
+
+
+@pytest.mark.parametrize("failure", [
+    psycopg.errors.InsufficientPrivilege("connection refused by policy"),
+    psycopg.OperationalError("host a: connection refused; host b: FATAL: database x does not exist"),
+])
+def test_server_response_defeats_transport_skip_markers(monkeypatch, failure):
+    connect, _ = _fake_connect(failure)
+    monkeypatch.setattr(psycopg, "connect", connect)
+    monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL", "postgresql://u:p@mixed.invalid:1/db")
+    pg_fixtures._ensure_state.clear()
+    with pytest.raises(pg_defaults.PostgresSetupError):
+        pg_fixtures.ensure_test_db()
+    with pytest.raises(pg_defaults.PostgresSetupError):
+        helpers.pg_reachable("postgresql://u:p@mixed.invalid:1/db")
 
 
 # -- the password never reaches the test report --------------------------------
@@ -175,12 +332,32 @@ def test_pg_url_and_resolve_test_db_url_hand_tests_a_redacting_string(monkeypatc
     assert SECRET in got and SECRET not in repr(got)
 
 
-def _rendered(excinfo) -> str:
+@pytest.mark.parametrize("dsn", [
+    "postgresql://example@127.0.0.1/db?password=query-secret",
+    "host=127.0.0.1 dbname=db password=prefix@query-secret",
+])
+def test_redacted_conninfo_hides_query_and_keyword_passwords(dsn):
+    safe = pg_defaults.RedactedUrl(dsn)
+    assert "query-secret" not in repr(safe)
+    assert "query-secret" not in safe.host
+
+
+def test_conninfo_database_replacement_overrides_query_database():
+    from psycopg.conninfo import conninfo_to_dict
+
+    dsn = "postgresql://example:synthetic@127.0.0.1/old?dbname=override&sslmode=require"
+    actual = conninfo_to_dict(pg_defaults.conninfo_with_dbname(dsn, "postgres"))
+    assert actual["dbname"] == "postgres"
+    assert actual["sslmode"] == "require"
+
+
+def _rendered(excinfo, *, showlocals: bool = False) -> str:
     """What pytest prints for this exception. ``funcargs=True`` is what the
     real report path passes (``_pytest.nodes.Node._repr_failure_py``) and
     is the channel the password leaked through: without it, frame
     arguments are not rendered and this helper would prove nothing."""
-    return str(excinfo.getrepr(style="long", showlocals=False, funcargs=True, chain=True))
+    return str(excinfo.getrepr(
+        style="long", showlocals=showlocals, funcargs=True, chain=True))
 
 
 def _reachable_report(monkeypatch) -> str:
@@ -224,12 +401,39 @@ def test_ensure_test_db_auth_error_report_carries_no_password(monkeypatch):
     with pytest.raises(pg_defaults.PostgresAuthError) as second:
         pg_fixtures.ensure_test_db()
     for excinfo in (first, second):
-        report = _rendered(excinfo)
+        report = _rendered(excinfo, showlocals=True)
         assert SECRET not in report
         assert "leak-check.invalid" in report
+    matching_cache_keys = [
+        key for key in pg_fixtures._ensure_state
+        if "leak-check.invalid" in str(key[0])
+    ]
+    assert matching_cache_keys
+    assert SECRET not in repr(matching_cache_keys)
     # Memoized hits raise a fresh object, so tracebacks do not accumulate.
     assert first.value is not second.value
     assert len(second.traceback) <= len(first.traceback)
+
+
+def test_ensure_test_db_showlocals_guard_is_load_bearing(monkeypatch):
+    class _Unredacted(str):
+        @property
+        def host(self):
+            return self.rpartition("@")[2]
+
+    def connect(conninfo, **kwargs):
+        raise psycopg.OperationalError(AUTH_MSG)
+
+    monkeypatch.setattr(pg_fixtures, "RedactedUrl", _Unredacted)
+    monkeypatch.setattr(pg_defaults, "RedactedUrl", _Unredacted)
+    monkeypatch.setattr(pg_fixtures.psycopg, "connect", connect)
+    monkeypatch.setenv(
+        "PSEUDOLIFE_TEST_DATABASE_URL",
+        f"postgresql://pseudolife:{SECRET}@load-bearing.invalid:1/db_leak",
+    )
+    with pytest.raises(pg_defaults.PostgresAuthError) as excinfo:
+        pg_fixtures.ensure_test_db()
+    assert SECRET in _rendered(excinfo, showlocals=True)
 
 
 # -- no more scattered literals ----------------------------------------------
@@ -258,5 +462,5 @@ def test_conftest_defaults_the_bench_admin_url_for_the_eval_backed_tests():
     # Compared as a boolean on purpose: an assertion on the strings would
     # render the live URL, password included, into the report on failure.
     seeded_matches_resolver = (
-        os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] == pg_defaults.default_admin_url())
+        os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] == pg_defaults.bench_admin_url())
     assert seeded_matches_resolver
