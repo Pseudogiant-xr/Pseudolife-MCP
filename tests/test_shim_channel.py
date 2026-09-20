@@ -173,6 +173,7 @@ def test_codex_tool_metadata_overrides_session_and_attaches_lazily(monkeypatch):
             "X-PL-Principal": "fixture-principal",
         }
         unread_hint = None
+        def note_turn(self): pass
 
     class Registry:
         async def get(self, thread_id, *, snapshot):

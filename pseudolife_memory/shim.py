@@ -807,6 +807,8 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                             for name in _COORDINATION_HEADERS
                             if name in coordination_adapter.instance_headers
                         })
+                        # Real traffic, as opposed to the lease heartbeat.
+                        coordination_adapter.note_turn()
                 if codex_metadata:
                     from pseudolife_memory.codex_coordination import thread_id_from_meta
                     thread_id = thread_id_from_meta(params.meta)
@@ -823,6 +825,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                                     for name in _COORDINATION_HEADERS
                                     if name in adapter.instance_headers
                                 })
+                                adapter.note_turn()
                             call_hint = lambda: coordination_registry.unread_hint(
                                 thread_id, adapter)
                             if (adapter is None and _requires_coordination_identity(
@@ -969,6 +972,40 @@ def _require_mcp_sdk_v2() -> None:
     sys.exit(1)
 
 
+def _session_state_path(url: str):
+    """Key the adapter's state file by the host session, so a resumed Claude
+    Code session keeps its address instead of minting one per launch.
+
+    Claude Code exports ``CLAUDE_CODE_SESSION_ID`` to the MCP servers it
+    launches and keeps it across resume (seen 2026-09-20 in a running
+    shim's environment). It applies only with ``PSEUDOLIFE_AGENT_STATE_DIR``
+    configured and a canonical UUID; anything else means a fresh address
+    per launch, as before. An unusable directory is reported and falls
+    back the same way rather than taking the memory proxy down."""
+    root = os.environ.get("PSEUDOLIFE_AGENT_STATE_DIR")
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not root or not session:
+        return None
+    try:
+        canonical = str(uuid.UUID(session))
+    except ValueError:
+        return None
+    if canonical != session:
+        return None
+    from pathlib import Path
+    from pseudolife_memory.codex_coordination import _prepare_private_dir
+    from pseudolife_memory.coordination_identity import bound_state_path
+    try:
+        root_path = Path(root).expanduser()
+        path = bound_state_path(root_path, url, canonical)
+        _prepare_private_dir(root_path, path.parent)
+    except (OSError, ValueError, RuntimeError):
+        print("pseudolife-mcp: PSEUDOLIFE_AGENT_STATE_DIR is not a usable private "
+              "directory; this session gets a new coordination address.", file=sys.stderr)
+        return None
+    return path
+
+
 async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                              channel: bool = False, provider=None) -> None:
     import asyncio
@@ -1039,19 +1076,21 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             from pseudolife_memory.credentials import CredentialError
             wake = channel and os.environ.get("PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {
                 "1", "true", "yes", "on"}
+            state_path = os.environ.get("PSEUDOLIFE_AGENT_STATE") or _session_state_path(url)
             try:
                 startup_snapshot = provider.snapshot()
                 adapter = await asyncio.wait_for(stack.enter_async_context(CoordinationAdapter(
                     url, startup_snapshot.token, provider=provider,
-                    initial_snapshot=startup_snapshot,
-                    state_path=os.environ.get("PSEUDOLIFE_AGENT_STATE") or None,
+                    initial_snapshot=startup_snapshot, state_path=state_path,
                     wake_enabled=wake, label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "agent"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
                     task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid)),
                     timeout=_ADAPTER_STARTUP_SECONDS)
             except (AdapterError, CredentialError, TimeoutError):
+                where = f" ({state_path})" if state_path else ""
                 print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
-                      "Check daemon opt-in, authentication and private adapter state.", file=sys.stderr)
+                      f"Check daemon opt-in, authentication and private adapter state{where}.",
+                      file=sys.stderr)
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_adapter"] = adapter
@@ -1131,8 +1170,10 @@ def run_shim(*, channel: bool = False) -> None:
     _require_credential_for_auth(url, health, provider)
     # One shim == one Claude session. This uid keys BOTH the session episode
     # (opened/closed here) and per-store stamping (rides every call as
-    # X-PL-Session), so lifecycle and attribution always agree — no dependency
-    # on Claude's session_id (which MCP servers don't receive).
+    # X-PL-Session), so lifecycle and attribution always agree. It stays the
+    # shim's own: Claude Code does export CLAUDE_CODE_SESSION_ID, which keys
+    # only the coordination state file (_session_state_path); other hosts
+    # export nothing comparable.
     session_uid = uuid.uuid4().hex
     _post_episode(url, None, "/api/episode/start", {
         "session_key": session_uid,
