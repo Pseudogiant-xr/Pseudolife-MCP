@@ -94,6 +94,28 @@ if TYPE_CHECKING:
     from pseudolife_memory.service import MemoryService
 
 
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Required CI database coverage must fail before collection can skip it."""
+    if os.environ.get("PSEUDOLIFE_REQUIRE_TEST_POSTGRES") != "1":
+        return
+    try:
+        import psycopg  # noqa: F401 — cannot use importorskip in a required lane
+    except ImportError:
+        raise pytest.UsageError("Required test PostgreSQL needs psycopg") from None
+
+    from tests.helpers import pg_reachable
+    from tests.pg_defaults import (
+        PostgresAuthError, PostgresSetupError, PostgresUnavailableError,
+    )
+    from tests.pg_fixtures import ensure_test_db, resolve_test_db_url
+
+    try:
+        ensure_test_db()
+        pg_reachable(resolve_test_db_url())
+    except (PostgresAuthError, PostgresSetupError, PostgresUnavailableError) as exc:
+        raise pytest.UsageError(str(exc)) from None
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Load each distinct embedding model once per session, not per module.
 

@@ -6,8 +6,9 @@ Resolution order for the test server:
 2. The repo's dev container at ``127.0.0.1:5433`` (ops/docker-compose.yml).
 
 If neither is reachable, PG-backed tests skip cleanly so the pure-logic
-suites stay runnable anywhere. A server that IS reachable but rejects the
-credentials is different: that is a misconfiguration, and the PG-backed
+suites stay runnable anywhere, unless PSEUDOLIFE_REQUIRE_TEST_POSTGRES=1
+requires database coverage (as in the full CI lanes). A server that IS reachable
+but rejects the credentials is different: that is a misconfiguration, and the PG-backed
 tests ERROR instead of skipping (``tests/pg_defaults.py``) — after the
 2026-09-14 password rotation the suite skipped ~1000 tests with exit 0.
 The dev container's password itself is read from ``ops/.env``.
@@ -232,8 +233,9 @@ def ensure_test_db() -> None:
 
 def _skip_or_raise(exc: BaseException) -> None:
     """The one branch every PG fixture takes on a failed probe: an absent
-    server skips, a server that rejected the credentials errors."""
-    if isinstance(exc, PostgresUnavailableError):
+    server skips only when database coverage is optional."""
+    if (isinstance(exc, PostgresUnavailableError)
+            and os.environ.get("PSEUDOLIFE_REQUIRE_TEST_POSTGRES") != "1"):
         pytest.skip(str(exc))
     raise exc
 

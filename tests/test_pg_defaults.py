@@ -264,9 +264,10 @@ def test_ensure_test_db_errors_on_reachable_setup_failure(monkeypatch):
     assert first.value is not cached.value
 
 
-def test_pg_url_outcome_skips_only_for_an_absent_server():
+def test_pg_url_outcome_skips_only_for_an_absent_server(monkeypatch):
     """The fixture's branch, isolated: auth failure propagates (ERROR),
     anything else becomes a skip."""
+    monkeypatch.delenv("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", raising=False)
     with pytest.raises(pg_defaults.PostgresAuthError):
         pg_fixtures._skip_or_raise(pg_defaults.PostgresAuthError("bad password"))
     with pytest.raises(pytest.skip.Exception):
@@ -275,6 +276,7 @@ def test_pg_url_outcome_skips_only_for_an_absent_server():
 
 
 def test_helpers_pg_reachable_raises_on_auth_failure_and_false_when_absent(monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", raising=False)
     connect, _ = _fake_connect(psycopg.OperationalError(AUTH_MSG))
     monkeypatch.setattr(psycopg, "connect", connect)
     with pytest.raises(pg_defaults.PostgresAuthError):
@@ -288,6 +290,66 @@ def test_helpers_pg_reachable_raises_on_auth_failure_and_false_when_absent(monke
     monkeypatch.setattr(psycopg, "connect", connect)
     with pytest.raises(pg_defaults.PostgresSetupError):
         helpers.pg_reachable("postgresql://u:p@h:1/db")
+
+
+def test_required_pg_fixture_errors_instead_of_skipping(monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", "1")
+    try:
+        with pytest.raises(pg_defaults.PostgresUnavailableError):
+            pg_fixtures._skip_or_raise(
+                pg_defaults.PostgresUnavailableError("no test Postgres reachable"))
+    except pytest.skip.Exception:
+        pytest.fail("Required PostgreSQL must error rather than skip")
+
+
+def test_required_pg_reachability_errors_without_exposing_credentials(monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", "1")
+    connect, _ = _fake_connect(psycopg.OperationalError(REFUSED_MSG))
+    monkeypatch.setattr(psycopg, "connect", connect)
+    with pytest.raises(pg_defaults.PostgresUnavailableError) as exc:
+        helpers.pg_reachable("postgresql://u:private-test-value@h:1/db")
+    assert "required" in str(exc.value)
+    assert "private-test-value" not in str(exc.value)
+
+
+def test_required_pg_reachable_server_still_runs(monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", "1")
+
+    class Connected:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(psycopg, "connect", lambda *args, **kwargs: Connected())
+    assert helpers.pg_reachable("postgresql://u:p@h:1/db") is True
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_session_pg_preflight_is_required_only_when_requested(monkeypatch, required):
+    from tests import conftest
+
+    monkeypatch.setenv("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", "1" if required else "0")
+    calls = []
+    monkeypatch.setattr(pg_fixtures, "ensure_test_db", lambda: calls.append("ensure"))
+    monkeypatch.setattr(pg_fixtures, "resolve_test_db_url", lambda: "fixture-url")
+    monkeypatch.setattr(helpers, "pg_reachable", lambda url: calls.append(url) or True)
+    conftest.pytest_sessionstart(None)
+    assert calls == (["ensure", "fixture-url"] if required else [])
+
+
+def test_required_pg_session_cannot_start_without_the_database(monkeypatch):
+    from tests import conftest
+
+    monkeypatch.setenv("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", "1")
+
+    def unavailable():
+        raise pg_defaults.PostgresUnavailableError("no test Postgres reachable")
+
+    monkeypatch.setattr(pg_fixtures, "ensure_test_db", unavailable)
+    with pytest.raises(pytest.UsageError, match="no test Postgres reachable"):
+        conftest.pytest_sessionstart(None)
 
 
 @pytest.mark.parametrize("failure", [

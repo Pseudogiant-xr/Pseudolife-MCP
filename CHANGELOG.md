@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-20 — CI requires its database coverage)
+- Both full Linux CI lanes now fail when their test PostgreSQL is unavailable,
+  including before collection and at shared fixture/reachability checks.
+  Local runs can still skip database tests when PostgreSQL is optional.
+- The same full suites and two-worker file scheduling now record slow-test
+  timings, skip reasons, JUnit results and runner CPU/memory/I/O diagnostics
+  for investigating variable CI runtime. Test failures retain their exit code.
+
 ### Changed (2026-09-20 — the coordination roster shows who is working)
 - `memory_agents(action="list")` returned every registered address. On the
   live bank that was 90 rows, 11 of them leased and 67 Codex threads whose
