@@ -85,6 +85,21 @@ goes quiet. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
 private file and adapter headers, not model arguments or memory entries.
 
+The adapter also keeps a per-turn digest: the daemon's `attach` and
+`heartbeat` answers preview the five oldest pending messages (sender label,
+one-line excerpt) beside the pending count, and the adapter renders them once
+behind a watermark that moves only when the text changes. With a host session
+id — `CLAUDE_CODE_SESSION_ID` for Claude Code, the thread id for Codex — the
+digest is written to `~/.pseudolife-mcp/digests/<sha256(id)>.txt`
+(`PSEUDOLIFE_DIGEST_DIR` overrides the directory; set it identically for the
+hook's environment, which cannot see the MCP env block). The plugin's
+UserPromptSubmit hook prints the digest only when the watermark passed the
+shared `.seen` marker; the tool-result hint uses the same marker, so a change
+is delivered once and a quiet turn adds nothing. While mail stays pending and
+unchanged, a one-line reminder rides every tenth tool result. The file is
+removed when the shim exits; a session id without an adapter (or a host that
+exports none, such as Claude Desktop) gets hints only.
+
 ### Codex CLI and desktop
 
 Use the ordinary stdio shim with `PSEUDOLIFE_WRITER_ID=codex`. Codex supplies
@@ -146,8 +161,9 @@ error. Retry reads normally; verify uncertain writes before sending another one,
 and reuse the original request ID when retrying an addressed message.
 
 An active task should use `memory_agents` before shared-resource work and
-`memory_message(action="receive")` on resume and when a pending-count hint
-appears. Receive does not acknowledge; use `action="ack"` after reading.
+`memory_message(action="receive")` on resume and when the coordination digest
+(in the prompt hook or a tool result) shows pending mail. Receive does not
+acknowledge; use `action="ack"` after reading.
 These calls work in the CLI and desktop without live wake support.
 Setup leaves Codex tool approvals unchanged. A recipient running with approval
 policy `never` cannot execute a tool that still requires approval. To authorize
@@ -198,9 +214,10 @@ See the [Codex validation record](../specs/2026-09-12-codex-coordination.md) and
 
 Use ordinary `pseudolife-mcp` for authenticated pull messaging. The optional
 `pseudolife-mcp channel` mode also requires `PSEUDOLIFE_AGENT_WAKE=1` to emit live
-events, plus the host's preview launch opt-in. A cached pending-count hint can
-appear in tool responses; fetching the hint adds no network request to the tool
-path and never acknowledges mail. Optional adapter startup requests cancellation after three seconds, then waits
+events, plus the host's preview launch opt-in. The cached coordination digest
+can appear in tool responses (once per change, then a one-line reminder every
+tenth call); attaching it adds no network request to the tool path and never
+acknowledges mail. Optional adapter startup requests cancellation after three seconds, then waits
 for bounded in-flight request cleanup before falling back to ordinary memory
 service. This is not a three-second ceiling on total shim startup time.
 

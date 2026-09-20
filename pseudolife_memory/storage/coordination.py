@@ -19,6 +19,7 @@ import logging
 import math
 import secrets
 import time
+import unicodedata
 import uuid
 from typing import Any
 
@@ -126,6 +127,13 @@ ACTIVE_WINDOW = 3600
 # and keeps the long window, so nothing an older adapter can still resume
 # is removed early.
 EPHEMERAL_AGENT_RETENTION = ACTIVE_WINDOW
+# The attach/heartbeat answer previews this many of the oldest pending
+# messages, each cut to this many characters, so the shim can show a turn
+# digest without a receive call. Five lines of a hundred characters plus
+# the header fit the 200-300 token budget the per-turn check-in design set
+# for a routine change (2026-09-20); the count says what the preview omits.
+PREVIEW_LIMIT = 5
+PREVIEW_EXCERPT = 100
 # Live delivery attempts per message across attachments. Each attachment
 # may attempt a pending message once; past this total the message is left
 # for explicit receive so one unacknowledged message cannot wake the host on
@@ -156,6 +164,17 @@ def _string(value: Any, limit: int, field: str, *, empty: bool = True) -> str:
     if any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
         raise CoordinationError(f"invalid_{field}")
     return value
+
+
+def _excerpt(text: Any) -> str:
+    """One line of a message body for a digest: whitespace and every
+    control or format character (C0, C1, bidi overrides, zero-width marks)
+    collapse to single spaces, then a hard cut."""
+    if not isinstance(text, str):
+        return ""
+    cleaned = " ".join("".join(" " if unicodedata.category(c)[0] == "C" else c
+                               for c in text).split())
+    return cleaned if len(cleaned) <= PREVIEW_EXCERPT else cleaned[:PREVIEW_EXCERPT] + "..."
 
 
 def _hash(credential: str) -> str:
@@ -336,6 +355,25 @@ class CoordinationStore:
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
                          "AND acknowledged_at IS NULL AND expires_at>%s", (agent_id, self.clock()))["n"]
 
+    def _pending_preview(self, agent_id):
+        """The oldest pending messages, bounded, for the shim's per-turn digest.
+
+        Oldest first so a backlog shows what has waited longest; the count
+        beside it says how much the preview omits. Reading is not delivery:
+        nothing here touches attempts or acknowledgements."""
+        rows = self._all(
+            "SELECT m.message_id,m.sender_agent_id,m.created_at,m.text,a.label AS sender_label "
+            "FROM coordination_messages m LEFT JOIN coordination_agents a ON a.agent_id=m.sender_agent_id "
+            "WHERE m.recipient_agent_id=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "ORDER BY m.recipient_sequence LIMIT %s", (agent_id, self.clock(), PREVIEW_LIMIT))
+        return [{"message_id": r["message_id"], "sender_agent_id": r["sender_agent_id"],
+                 "sender_label": r["sender_label"] or "", "created_at": r["created_at"],
+                 "excerpt": _excerpt(r["text"])} for r in rows]
+
+    def _mailbox_state(self, agent_id):
+        return {"pending_count": self._pending_count(agent_id),
+                "pending_preview": self._pending_preview(agent_id)}
+
     def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False):
         _string(attachment_id, 120, "attachment_id", empty=False)
         self._fields(wake_enabled=wake_enabled)
@@ -350,9 +388,9 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET attachment_id=%s,generation=%s,lease_until=%s,"
                 "last_activity=%s,wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
                 (attachment_id, generation, now + ATTACHMENT_LEASE, now, wake_enabled, agent_id))
-            pending = self._pending_count(agent_id)
+            mailbox = self._mailbox_state(agent_id)
         return {"agent_id": agent_id, "generation": generation, "lease_until": now + ATTACHMENT_LEASE,
-                "pending_count": pending}
+                **mailbox}
 
     def _attachment(self, row, attachment_id, generation):
         if (row["attachment_id"] != attachment_id or row["generation"] != generation
@@ -382,9 +420,9 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET lease_until=%s,"
                 "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
                 (until, active, now, agent_id))
-            pending = self._pending_count(agent_id)
+            mailbox = self._mailbox_state(agent_id)
         return {"agent_id": agent_id, "generation": generation, "lease_until": until,
-                "pending_count": pending}
+                **mailbox}
 
     def detach(self, principal, agent_id, credential, *, attachment_id, generation):
         with self.storage._txn():

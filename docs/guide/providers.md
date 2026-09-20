@@ -80,6 +80,12 @@ transport comes from the installer either way (stdio shim by default),
 registered with `PSEUDOLIFE_WRITER_ID=claude-code` so writes are
 attributed per provider.
 
+With the coordination adapter enabled, the same UserPromptSubmit hook also
+prints the session's coordination digest — pending addressed mail, rendered
+by the shim into a per-session file — but only on the turn after it changed;
+see [Configuration](configuration.md#experimental-agent-coordination) for the file layout
+and `PSEUDOLIFE_DIGEST_DIR`.
+
 Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 [the AGENTS.md standard](#the-agentsmd-standard) for the one-line bridge.
 

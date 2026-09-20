@@ -11,6 +11,25 @@ import uuid
 import httpx
 
 
+def default_digest_dir() -> Path:
+    """Where per-session turn digests live. The prompt hooks compute the same
+    default from their own environment, so a host's MCP env block and its
+    hook env must agree if ``PSEUDOLIFE_DIGEST_DIR`` overrides it."""
+    configured = os.environ.get("PSEUDOLIFE_DIGEST_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".pseudolife-mcp" / "digests"
+
+
+def digest_path_for(session_id: str, root: Path | None = None) -> Path | None:
+    """The digest file for a host session id, or None without one. The file
+    name is the id's SHA-256 so the id itself never lands on disk."""
+    if not session_id:
+        return None
+    root = default_digest_dir() if root is None else Path(root)
+    return root / (hashlib.sha256(session_id.encode("utf-8")).hexdigest() + ".txt")
+
+
 def bound_state_path(root: Path, url: str, thread_id: str) -> Path:
     # Authority is pinned inside the record, rather than selecting a new file
     # when the caller changes principal or the endpoint serves another bank.
