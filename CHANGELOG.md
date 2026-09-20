@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-20 — deep dream results lost between daemon and shim)
+- `memory_dream(action="deep")` through the stdio shim failed after a few
+  seconds as "The memory daemon returned an invalid MCP response" while the
+  daemon logged nothing and answered a raw HTTP probe correctly. The SDK
+  client's SSE decoder refuses any server-sent event over 1 MiB (httpx2
+  `DEFAULT_MAX_EVENT_SIZE_BYTES`) and the SDK reports that as a closed
+  connection; a 316-proposal review queue with snippets made a 597 KB tool
+  result that was 1,124,250 bytes on the wire once escaped into the JSON-RPC
+  envelope and duplicated as `structuredContent`. Latent since the SDK v2
+  port (2026-08-25); it surfaced as the queue grew.
+- The MCP tool now bounds the deep response: when the JSON text exceeds
+  250 KB, each top-level list is cut to its leading 40 items, halving that
+  head until the text fits, and `truncated` maps each cut key to its full
+  length with a `hint`. A response that fits is returned untouched. The
+  service method, the Console and the sweep tick are unchanged.
+- The shim widens the SDK client's event limit to 16 MiB at both places it
+  builds an event source (the module `EventSource` for a POST's response
+  stream, and the http client's `sse` method for the listen stream and for
+  resuming a cut response), so any other large tool result arrives instead
+  of vanishing.
+- A response stream that closes after dispatch is now classified
+  `response_lost` ("response stream closed before a result arrived") instead
+  of `protocol`, so the next diagnosis starts at the transport, not the daemon.
+
 ### Fixed (2026-09-20 — fresh and upgraded client setup)
 - Coordination sends wait for the initial clock reseed even while memory
   hydration has already published its CMS, preserving ordering against stored

@@ -147,10 +147,62 @@ def _require_current_credential(provider, snapshot) -> None:
         raise _CredentialChangedError
 
 
+_RESPONSE_LOST_MESSAGE = (
+    "The memory daemon's response stream closed before a result arrived "
+    "(a dropped connection, or a result larger than the client's event limit).")
+
+# The SDK client reads each JSON-RPC message as one server-sent event through
+# httpx2's EventSource, whose decoder refuses any event over 1 MiB by default
+# (DEFAULT_MAX_EVENT_SIZE_BYTES); the SDK swallows that at debug level and
+# resolves the request as a closed connection. A deep dream over a
+# 300-proposal review queue was 1,124,250 bytes on the wire (2026-09-20) and
+# every such call through the shim died as a phantom disconnect. The SDK does
+# not expose the limit, so the shim widens it at both places the SDK builds an
+# event source: the module-level ``EventSource`` used for a POST's response
+# stream, and the http client's ``sse`` method used for the listen stream and
+# for resuming a cut response. 16 MiB is far above any tool result the daemon
+# emits and still bounds a runaway stream.
+_SSE_EVENT_LIMIT_BYTES = 16 * 1024 * 1024
+
+
+def _widen_sse_event_limit(streamable_http) -> None:
+    """Rebind the SDK client module's ``EventSource`` so every response
+    stream it reads carries ``_SSE_EVENT_LIMIT_BYTES``. Idempotent; a no-op
+    when the module has no EventSource to rebind."""
+    source = getattr(streamable_http, "EventSource", None)
+    if source is None or getattr(source, "_pseudolife_event_limit", None) == _SSE_EVENT_LIMIT_BYTES:
+        return
+
+    def event_source(response, *args, **kwargs):
+        kwargs.setdefault("max_event_size", _SSE_EVENT_LIMIT_BYTES)
+        return source(response, *args, **kwargs)
+
+    event_source._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
+    event_source._pseudolife_original = source
+    streamable_http.EventSource = event_source
+
+
+def _widen_client_sse_limit(http) -> None:
+    """Wrap one http client's ``sse`` method (the SDK's listen-stream and
+    resumption path) so its event sources carry ``_SSE_EVENT_LIMIT_BYTES``
+    unless the caller chose a limit. Idempotent per client."""
+    original = getattr(http, "sse", None)
+    if original is None or getattr(original, "_pseudolife_event_limit", None) == _SSE_EVENT_LIMIT_BYTES:
+        return
+
+    def sse(*args, **kwargs):
+        kwargs.setdefault("max_event_size", _SSE_EVENT_LIMIT_BYTES)
+        return original(*args, **kwargs)
+
+    sse._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
+    http.sse = sse
+
+
 def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
                      requested_phase: str):
     """Map an upstream failure to a stable, non-sensitive MCP error."""
     from mcp.shared.exceptions import MCPError
+    from mcp.types import CONNECTION_CLOSED
 
     leaves = tuple(_exception_leaves(exc))
     names = {type(leaf).__name__ for leaf in leaves}
@@ -194,6 +246,14 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         classification = "connection_failure"
         message = "The memory daemon connection failed; check the daemon and retry."
         outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif sdk_error is not None and sdk_error.code == CONNECTION_CLOSED:
+        # The SDK resolves a request this way when the response stream ends
+        # before a result event: a dropped connection, or an event its SSE
+        # decoder refused (over max_event_size). Before 2026-09-20 this read
+        # as "invalid MCP response", which sent the diagnosis to the daemon.
+        classification = "response_lost"
+        message = _RESPONSE_LOST_MESSAGE
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
     else:
         classification = "protocol"
         message = "The memory daemon returned an invalid MCP response."
@@ -204,6 +264,8 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
             "The memory operation may have completed before the response failed. "
             "Check its result before retrying; reuse the same request_id when available."
         )
+        if classification == "response_lost":
+            message = f"{_RESPONSE_LOST_MESSAGE} {message}"
 
     data = {
         "classification": classification,
@@ -597,6 +659,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
 
     from mcp.client import streamable_http
     from mcp.client.session import ClientSession
+    _widen_sse_event_limit(streamable_http)
     from mcp.server import Server
     from mcp.server.lowlevel.server import NotificationOptions
     from mcp.server.stdio import stdio_server
@@ -643,6 +706,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             # redirect could disclose an instance key or bank binding.
             if hasattr(http, "follow_redirects"):
                 http.follow_redirects = False
+            _widen_client_sse_limit(http)
             hooks = getattr(http, "event_hooks", None)
             if hooks is not None:
                 hooks.setdefault("response", []).append(attempt.observe_response)
