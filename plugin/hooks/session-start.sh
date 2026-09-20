@@ -121,7 +121,7 @@ SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"
 # afresh (see user-prompt-submit.sh for the file layout).
 case "$SRC" in
     resume|compact)
-        DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME}/.pseudolife-mcp/digests}"
+        DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
         if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
             KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
             [ -n "$KEY" ] && rm -f "$DIGEST_DIR/$KEY.seen" 2>/dev/null

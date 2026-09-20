@@ -435,6 +435,24 @@ def _digest_env(tmp_path, session_id="fixture-session"):
     return env, hashlib.sha256(session_id.encode()).hexdigest()
 
 
+def test_bash_prompt_hook_survives_a_missing_home(tmp_path):
+    """Codex desktop can start hooks without HOME (verified 2026-09-21); the
+    default digest directory then comes from USERPROFILE, and the hook still
+    prints the static line either way."""
+    env, key = _digest_env(tmp_path)
+    env.pop("PSEUDOLIFE_DIGEST_DIR")
+    for name in ("HOME", "HOMEDRIVE", "HOMEPATH"):
+        env.pop(name, None)
+    env["USERPROFILE"] = str(tmp_path / "profile")
+    directory = tmp_path / "profile" / ".pseudolife-mcp" / "digests"
+    directory.mkdir(parents=True)
+    (directory / f"{key}.txt").write_text(f"2\n{BODY}\n", encoding="utf-8")
+    out = bash_run(ROOT / "plugin/hooks/user-prompt-submit.sh",
+                   input=json.dumps({"session_id": "fixture-session"}), env=env).stdout
+    assert out.startswith(STATIC_LINE)
+    assert out.rstrip("\n").endswith(BODY)
+
+
 def _write_digest(tmp_path, key, watermark, body):
     directory = tmp_path / "digests"
     directory.mkdir(exist_ok=True)
@@ -481,15 +499,29 @@ def test_prompt_hook_prints_a_new_digest_once_then_only_the_static_line(shell, t
     assert [int(line.split("\t")[4]) for line in lines] == [len(BODY) + 1, 0, 0]
 
 
-def test_bash_prompt_hook_takes_the_first_session_id_and_rejects_odd_shapes(tmp_path):
-    """The prompt payload carries the user's text, which can contain the
-    literal "session_id"; only the first, well-formed value counts."""
+@pytest.mark.parametrize("payload", [
+    # Claude Code: session_id first.
+    '{"session_id": "fixture-session", "prompt": "paste: {\\"session_id\\": \\"other-session\\"}"}',
+    # Codex serialises fields alphabetically, so the prompt comes first
+    # (verified 2026-09-21 on both Codex runtimes).
+    '{"cwd": "x", "prompt": "paste: {\\"session_id\\": \\"other-session\\"}", "session_id": "fixture-session"}',
+    '{"prompt":"{\\"session_id\\":\\"other-session\\"}","session_id":"fixture-session"}',
+])
+def test_bash_prompt_hook_takes_the_top_level_session_id(tmp_path, payload):
+    """The prompt payload carries the user's text, which can quote the
+    literal "session_id"; only the top-level key counts, whatever the
+    field order."""
     env, key = _digest_env(tmp_path)
     _write_digest(tmp_path, key, 3, BODY)
-    payload = json.dumps({"session_id": "fixture-session",
-                          "user_prompt": 'paste: {"session_id": "other-session"}'})
+    other = hashlib.sha256(b"other-session").hexdigest()
+    _write_digest(tmp_path, other, 3, "Coordination: the other session's mail")
     out = bash_run(ROOT / "plugin/hooks/user-prompt-submit.sh", input=payload, env=env).stdout
     assert out.rstrip("\n").endswith(BODY)
+    assert not (tmp_path / "digests" / f"{other}.seen").exists()
+
+
+def test_bash_prompt_hook_rejects_odd_session_id_shapes(tmp_path):
+    env, key = _digest_env(tmp_path)
     odd = "fixture session/../x"
     _write_digest(tmp_path, hashlib.sha256(odd.encode()).hexdigest(), 3, BODY)
     out = bash_run(ROOT / "plugin/hooks/user-prompt-submit.sh",

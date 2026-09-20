@@ -19,12 +19,16 @@ echo "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, o
 
 INPUT=$(cat 2>/dev/null)
 # The payload also carries the user's prompt, which may quote the literal
-# "session_id": take the first occurrence and accept only an id-shaped value.
-SID=$(printf '%s' "$INPUT" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' 2>/dev/null |
+# "session_id" — and Codex serialises the prompt field before session_id.
+# Only a top-level key counts: preceded by { or , (plus whitespace), never
+# by a backslash, which is how the same characters look inside the escaped
+# prompt string. Then accept only an id-shaped value.
+SID=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' 2>/dev/null |
       head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
 case "$SID" in ''|*[!A-Za-z0-9._-]*) SID="" ;; esac
 [ "${#SID}" -le 128 ] || SID=""
-DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME}/.pseudolife-mcp/digests}"
+# Codex desktop can start hooks without HOME in the environment.
+DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
 if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
     # A pipeline's status is its last command's, so the fallback lives
     # inside the group, not after it.
