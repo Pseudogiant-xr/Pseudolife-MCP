@@ -37,6 +37,11 @@ modes:
   episode-end    close it
   help           show this message (also -h / --help)
 
+credentials (token-gated daemon): PSEUDOLIFE_MCP_TOKEN=<bearer>, or
+  PSEUDOLIFE_MCP_TOKEN_FILE=<owner-only file holding it> for hosts that
+  sanitize the launch environment (Claude Desktop); the file wins when both
+  are set. ops/register_claude_desktop.py probes this text for the file form.
+
 docs: https://github.com/Pseudogiant-xr/Pseudolife-MCP
 """
 

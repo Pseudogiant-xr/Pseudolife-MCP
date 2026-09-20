@@ -541,6 +541,16 @@ every healthy deploy; see
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
+The updater rebuilds the daemon from the checkout; the **shim** your
+clients launch is a separate install (pipx / pip, from PyPI) and does not
+move with it. Upgrade it alongside — `pipx upgrade pseudolife-mcp` or
+`pip install -U pseudolife-mcp` — or, for a change that is on `master` but
+not yet released, install the checkout itself: `pipx install .` /
+`pip install .`. A daemon-side credential change with an old shim leaves
+the two out of step: the Claude Desktop registrar refuses a shim that
+cannot read the token file it is being pointed at (exit 4), and names the
+upgrade.
+
 > **Two upgrades are not automatic**, because neither can be done safely
 > in place. Both have a step-by-step runbook — backup, dry run, apply,
 > verify, roll back — and a fresh install needs neither:
@@ -659,7 +669,13 @@ shim now names plainly on stderr at startup. When the daemon is
 token-gated the installer writes that file (owner-only) from
 `PSEUDOLIFE_MCP_TOKEN` in its environment or `ops/.env`, or migrates a
 literal token already in the entry into it; with no token to write it
-says so and exits 3. After any edit, fully quit Desktop from the tray or
+says so and exits 3. The shim must also be able to *read* that file:
+releases through 0.15.0 only read the literal `PSEUDOLIFE_MCP_TOKEN`, so
+the registrar probes `<command> --help` for the file form first and
+refuses an older shim (exit 4, nothing written) rather than register an
+entry that would fail with the same TaskGroup error — upgrade the shim
+(`pipx upgrade pseudolife-mcp`, or `pipx install .` from the checkout) and
+re-run. After any edit, fully quit Desktop from the tray or
 menu-bar icon and relaunch — closing the window does not reload the
 config.
 
@@ -1057,7 +1073,12 @@ pseudolife-mcp-daemon`).
   agent](#wire-into-your-coding-agent)) or re-run `ops/install.* --client
   claude-desktop`, then fully quit and relaunch. On the Windows Store build
   the file lives under
-  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`.
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`. If the
+  entry already carries `PSEUDOLIFE_MCP_TOKEN_FILE` and still 401s, the
+  shim predates token-file support (PyPI releases through 0.15.0 read only
+  the literal token): `pseudolife-mcp --help` from a capable shim lists
+  `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim and re-run the installer,
+  which now refuses to register an older one against a token file.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —
