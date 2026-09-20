@@ -643,7 +643,9 @@ class MemoryService(DreamOps):
         self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
         # A late reseed failure leaves the resident stores initialized, but no
         # write may tick until the durable coordination clock is read.
-        self._hlc_reseed_pending = False
+        # The CMS is published before hydration completes. Coordination may
+        # read readiness concurrently, so stay unready until reseeding succeeds.
+        self._hlc_reseed_pending = True
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._last_saved_fingerprint = None
@@ -6694,6 +6696,15 @@ class MemoryService(DreamOps):
             return authenticated_principal({k.lower(): v for k, v in headers.items()})
         except ValueError:
             return None
+
+    def coordination_tier_ready(self) -> bool:
+        """Lock-free: has a prior call fully initialized this service, with
+        the HLC reseeded from the stored high-water mark? Read by
+        ``coordination.dispatch`` so mailbox calls never queue behind the
+        service lock on a served daemon. Clock readiness stays false through
+        initial hydration and failed reseeds; the locked initialization path
+        completes or retries the reseed before a send may tick."""
+        return self._cms is not None and not self._hlc_reseed_pending
 
     def coordination_awareness(
         self, *, session_id: str | None = None, limit: int | None = None,

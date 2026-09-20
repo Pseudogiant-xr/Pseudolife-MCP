@@ -22,6 +22,41 @@ TRUTHY_NO_SPAWN = ("1", "true", "yes", "on")
 FALSEY_NO_SPAWN = ("0", "false", "", "*****")
 
 
+def _fixture_env(tmp_path: Path) -> dict[str, str]:
+    """Build a credential-free environment for the disposable client harness."""
+    env = {
+        name: os.environ[name]
+        for name in (
+            "COMSPEC", "LANG", "LC_ALL", "PATHEXT", "SystemRoot", "TEMP",
+            "TERM", "TMP", "TMPDIR", "WINDIR",
+        )
+        if name in os.environ
+    }
+    fixture_home = tmp_path / "home"
+    fixture_home.mkdir(parents=True, exist_ok=True)
+    env.update({
+        "CODEX_HOME": str(fixture_home / "codex"),
+        "HOME": str(fixture_home),
+        "USERPROFILE": str(fixture_home),
+        "XDG_CONFIG_HOME": str(fixture_home / "config"),
+    })
+    return env
+
+
+def _bash_fixture_path(
+    bash: str, path: Path, env: dict[str, str],
+) -> str:
+    """Return the path spelling understood by the selected Bash runtime."""
+    if os.name != "nt":
+        return str(path)
+    converted = subprocess.run(
+        [bash, "-c", 'cygpath -u -- "$1"', "fixture", str(path)],
+        capture_output=True, check=True, text=True, timeout=5,
+        env=env,
+    )
+    return converted.stdout.strip()
+
+
 def _managed_config(client: str, no_spawn: str = "1") -> str:
     if client == "gemini":
         return "pseudolife-memory: pseudolife-mcp (stdio) - Connected"
@@ -146,10 +181,11 @@ def _run_bash_existing(
     )
     pipx.chmod(0o755)
     repo = str(ROOT).replace("'", "'\\''")
-    fake_bin_shell = str(fake_bin).replace("'", "'\\''")
-    installed_bin_shell = str(installed_bin).replace("'", "'\\''")
-    installed_shim_shell = str(installed_shim).replace("'", "'\\''")
-    call_log_shell = str(call_log).replace("'", "'\\''")
+    fixture_env = _fixture_env(tmp_path / "bash-env")
+    fake_bin_shell = _bash_fixture_path(bash, fake_bin, fixture_env).replace("'", "'\\''")
+    installed_bin_shell = _bash_fixture_path(bash, installed_bin, fixture_env).replace("'", "'\\''")
+    installed_shim_shell = _bash_fixture_path(bash, installed_shim, fixture_env).replace("'", "'\\''")
+    call_log_shell = _bash_fixture_path(bash, call_log, fixture_env).replace("'", "'\\''")
     config_shell = ("pseudolife-memory\n" + config).replace("'", "'\\''")
     path_prefix = f"{fake_bin_shell}:{installed_bin_shell}" if shadowed_path else f"{installed_bin_shell}:{fake_bin_shell}"
     script = f"""set -u
@@ -185,6 +221,7 @@ printf 'STATUS=%s %s\\n' "$(mcp_marker "$state")" "$(describe_mcp "$state")"
 """
     return subprocess.run(
         [bash], input=script.encode(), capture_output=True, check=False, timeout=15,
+        env=fixture_env,
     )
 
 
@@ -397,12 +434,16 @@ def _run_powershell_existing(
     log = tmp_path / "calls.txt"
     installed_bin = tmp_path / "installed-bin"
     installed_bin.mkdir()
-    installed_shim = installed_bin / "pseudolife-mcp.exe"
-    installed_shim.write_bytes(b"fixture")
+    shim_name = "pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp"
+    installed_shim = installed_bin / shim_name
+    installed_shim.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    installed_shim.chmod(0o755)
     old_bin = tmp_path / "old-bin"
     old_bin.mkdir()
     if shadowed_path:
-        (old_bin / "pseudolife-mcp.exe").write_bytes(b"fixture")
+        old_shim = old_bin / shim_name
+        old_shim.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        old_shim.chmod(0o755)
     escaped_log = str(log).replace("'", "''")
     escaped_repo = str(ROOT).replace("'", "''")
     escaped_config = ("pseudolife-memory\n" + config.replace("__INSTALLED_SHIM__", str(installed_shim))).replace("'", "''")
@@ -437,7 +478,7 @@ $codexRuntimeDefaults = $null
 $mcpState = @{{}}
 $script:shimInstallResult = $null
 $script:shimInstallPath = '{escaped_installed_shim}'
-$env:PATH = '{escaped_path_bin};' + $env:PATH
+$env:PATH = '{escaped_path_bin}' + [IO.Path]::PathSeparator + $env:PATH
 $env:FAKE_CONFIG = '{escaped_config}'
 $env:FAKE_EXISTING = '{"yes" if existing else "no"}'
 $env:FAKE_MANAGER_EXIT = '{manager_exit}'
@@ -463,6 +504,7 @@ Write-Output ("STATUS=" + (Get-McpMarker $state) + " " + (Describe-Mcp $state))
     return subprocess.run(
         [pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner)],
         capture_output=True, check=False, timeout=15,
+        env=_fixture_env(tmp_path / "powershell-env"),
     )
 
 

@@ -78,3 +78,29 @@ def test_malformed_highwater_stays_fail_closed_until_corrected(tmp_path):
 
     service._ensure_init()
     assert stored["reads"] == 3
+
+
+def test_coordination_waits_for_initial_clock_reseed(tmp_path):
+    from pseudolife_memory.coordination import _ensure_tier
+
+    service = MemoryService(data_dir=tmp_path)
+    service._hlc = HybridLogicalClock(now_ms=lambda: 100)
+    service._storage = SimpleNamespace(get_meta=lambda key: [10000, 7])
+    # _ensure_init publishes the CMS before migration and hydration finish.
+    # A concurrent send must still enter the locked initialization path.
+    service._cms = object()
+    _ensure_tier(service, full=True)
+    assert service._hlc.tick() > (10000, 7)
+
+
+def test_coordination_rechecks_failed_reseed_after_prior_readiness(tmp_path):
+    from pseudolife_memory.coordination import _ensure_tier
+
+    service = MemoryService(data_dir=tmp_path)
+    service._hlc = HybridLogicalClock(now_ms=lambda: 100)
+    service._storage = SimpleNamespace(get_meta=lambda key: [10000, 7])
+    service._cms = object()
+    service._coordination_ready = True
+    service._hlc_reseed_pending = True
+    _ensure_tier(service, full=True)
+    assert service._hlc.tick() > (10000, 7)

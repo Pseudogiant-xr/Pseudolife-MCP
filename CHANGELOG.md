@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed (2026-09-20 — fresh and upgraded client setup)
+- Coordination sends wait for the initial clock reseed even while memory
+  hydration has already published its CMS, preserving ordering against stored
+  history during concurrent startup. Failed reseeds cannot be bypassed by a
+  previously cached readiness result.
 - Desktop shim compatibility probes exclude inherited token, token-map, and
   token-file variables, including temporary installer credential sources.
 - Benchmark database selection preserves PostgreSQL URI options and accepts
@@ -33,6 +37,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its configuration. Fresh setup can select a unique `claude-desktop`
   credential from the daemon's per-principal token map; ambiguous maps require
   an explicit credential file instead of producing a broken registration.
+
+### Fixed (2026-09-20 — coordination no longer waits behind the dream)
+- Every adapter-authenticated mailbox operation (`context`, `register`,
+  `attach`, `heartbeat`, `receive`, `send`, `ack`, `agents`, `update`) used
+  to run under the service lock on the shared storage connection, so it
+  queued behind whatever else held that lock. On the live daemon the idle dream and the
+  session reaper hold it for seconds at a time (2026-09-20 log: `_dispatch
+  waited 8.6s`, `autosave_if_changed waited 47s`); the adapter's per-call
+  identity check has a 5s timeout, so tool calls failed with "Coordination
+  identity is unavailable", heartbeats missed and 60s leases expired, and a
+  shim whose adapter timed out at startup ran memory-only for its whole
+  life ("instance_authentication_required" on every later mailbox call).
+  `coordination.dispatch` no longer takes the service lock: the store runs
+  on a dedicated autocommit connection
+  (`storage.coordination.CoordinationConnection`, same session setup and
+  commit check as the shared one, heal-on-next-use after a Postgres restart
+  but never mid-transaction) serialized by its own
+  `MonitoredLock("coordination")`. Mailbox rows were already guarded by SQL
+  row locks, so a second connection is safe. Only `send` needs the fully
+  initialized service (its HLC stamp must outrank stored ones), and it pays
+  that once per process unless a memory call already did; every other
+  action, including a cold daemon's first `attach`/`heartbeat`, needs only
+  the durable tier. A bound-identity request from the wrong bank is still
+  refused before any embedder load. The no-adapter `memory_agents` awareness
+  view is unchanged and still reads episodes under the service lock.
+  `HybridLogicalClock` gained an internal lock because `send` now ticks it
+  outside the service lock. `tests/test_coordination_dispatch_isolation.py`
+  holds the service lock for 3s and asserts
+  `context`/`register`/`attach`/`receive`/`send` each complete in under 1s
+  (watched red at 3.01s), that the mailbox connection is distinct,
+  autocommit and committed as seen from the service connection, that it
+  reconnects after loss, that an initialized service is never re-locked by
+  a mailbox call, and that a cold service pays full init only for `send`
+  and only once.
 
 ### Fixed (2026-09-20 — Desktop registrar refuses a shim that cannot read the token file)
 - `ops/register_claude_desktop.py` probes `<command> --help` for the
