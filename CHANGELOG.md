@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-22 — bounded reranking keeps one score domain)
+- Optional cross-encoder reranking now scores the entire combined candidate
+  pool only when it fits `top_n`. Larger pools retain their original ranking
+  and report `candidate_budget_exceeded`, instead of returning a scored head
+  followed by an unscored tail. Reference reservations and the disabled default
+  are preserved; query parameters record the pool size and scored count.
+
 ### Fixed (2026-09-21 — the client-side updater never pip-upgrades an editable shim)
 - `ops/update_clients.py` decided "editable" by checking whether the
   registered launcher lay under `<--repo>/.venv`; run from a deploy

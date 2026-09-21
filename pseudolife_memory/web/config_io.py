@@ -72,8 +72,9 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.reranker.enabled", "group": "Reranker",
      "label": "Cross-encoder reranker", "type": "bool", "default": False,
      "restart": False,
-     "help": "Re-score top-N candidates with ms-marco-MiniLM. ~80MB model "
-             "lazy-loaded on first use; ~200ms per search."},
+     "help": "Re-score the complete combined pool when it fits top-N; "
+             "larger pools keep their original order and scores. The ~80MB "
+             "ms-marco-MiniLM model loads on first scoring use."},
     {"path": "memory.reranker.fusion_weight", "group": "Reranker",
      "label": "Reranker fusion weight", "type": "float", "default": 0.7,
      "min": 0.0, "max": 1.0, "step": 0.05, "restart": True,
@@ -81,7 +82,8 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.reranker.top_n", "group": "Reranker",
      "label": "Reranker top-N", "type": "int", "default": 20, "min": 1,
      "max": 100, "step": 1, "restart": True,
-     "help": "How many candidates to rerank. Baked at init."},
+     "help": "Maximum combined memory/reference pool for reranking. Larger "
+             "pools keep their original ranking. Baked at init."},
     {"path": "memory.bm25.enabled", "group": "Reranker",
      "label": "BM25 hybrid pool", "type": "bool", "default": True,
      "restart": False,

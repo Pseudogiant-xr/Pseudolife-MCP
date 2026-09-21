@@ -11,7 +11,7 @@ generally outperforms bi-encoder scoring on standard IR benchmarks
 We use ``cross-encoder/ms-marco-MiniLM-L-6-v2`` — a 22M-parameter
 distilled MiniLM trained on MS MARCO passage ranking. ~80MB, fetched
 from the HuggingFace Hub on first use. Reasonably fast on CPU
-(~10ms / pair on a modern x86) so reranking the top-20 candidates
+(~10ms / pair on a modern x86) so reranking a 20-candidate pool
 costs ~200ms wall-clock added to a search.
 
 Design notes
@@ -51,7 +51,7 @@ def _sigmoid(x: float) -> float:
 
 
 class CrossEncoderReranker:
-    """Optional cross-encoder reranker for the top-N retrieval candidates.
+    """Optional cross-encoder scorer for a bounded complete candidate pool.
 
     Parameters
     ----------
@@ -63,9 +63,9 @@ class CrossEncoderReranker:
         (1 - fusion_weight) * original``. 0.0 disables the reranker;
         1.0 ignores the bi-encoder score entirely.
     top_n:
-        Number of candidates to rerank. Candidates beyond top_n keep
-        their bi-encoder score (so they can still appear in the result
-        set if the reranker downranks the top-N below them).
+        Maximum combined candidate count for CMS reranking. CMS skips
+        the pass when the pool exceeds this budget, preserving the
+        original ranking rather than mixing scored and unscored entries.
 
     Lifecycle
     ---------

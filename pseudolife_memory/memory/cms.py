@@ -1425,7 +1425,10 @@ class ContinuumMemorySystem:
 
         # ── Pool 3: optional cross-encoder reranking ─────────────────────────
         # Tier B. When enabled (via config.reranker.enabled or rerank=True
-        # per call), re-score the top-N combined candidates with a
+        # per call), re-score the entire combined pool when it fits the
+        # configured top-N budget. Otherwise preserve the original ranking:
+        # fused CE scores and unscored originals have no calibrated common
+        # scale. Never mix the two domains in one served result. Use a
         # cross-encoder and fuse with the bi-encoder score. Only fires when
         # we have query_text — without it the cross-encoder has nothing to
         # attend over. Falls through silently if the reranker is unavailable
@@ -1436,20 +1439,24 @@ class ContinuumMemorySystem:
         #
         # Knob snapshot for the retrieval log. ``fired``/``skip_reason``
         # explain the per-entry ``ce: None`` a reader will meet below.
+        top_n = getattr(getattr(self.config, "reranker", None), "top_n", 20)
         rerank_log: dict = {
             "enabled": bool(rerank_enabled), "fired": False,
             "skip_reason": None,
+            "top_n": top_n,
+            "candidate_count": len(combined),
+            "scored_candidates": 0,
+            "scoring_policy": "complete_pool_or_skip",
         }
         if (
             rerank_enabled
             and self._reranker is not None
             and query_text
             and combined
+            and len(combined) <= top_n
             and self._reranker.is_available()
         ):
-            top_n = getattr(self.config.reranker, "top_n", 20)
-            head = combined[:top_n]
-            tail = combined[top_n:]
+            head = combined
             head_texts = [e.text for e, _, _ in head]
             head_orig_scores = [float(s) for _, s, _ in head]
             # Margin gate: when the two best bi-encoder scores are already
@@ -1501,7 +1508,6 @@ class ContinuumMemorySystem:
             # pass ran, an explicit None when the margin gate (or an
             # unavailable model) skipped it — "the bi-encoder order was
             # served unrefined" is training signal, not a missing value.
-            # Tail entries beyond top_n never had a ce score and get no key.
             for i, (entry, _, _) in enumerate(head):
                 c = comps.get(entry.text)
                 if c is not None:
@@ -1509,13 +1515,14 @@ class ContinuumMemorySystem:
                                if i < len(ce_scores) else None)
             if ce_scores:
                 rerank_log["fired"] = True
+                rerank_log["scored_candidates"] = len(ce_scores)
                 fused = self._reranker.fuse(head_orig_scores, ce_scores)
                 reranked = [
                     (entry, fused_s, surprise)
                     for (entry, _, surprise), fused_s in zip(head, fused)
                 ]
                 reranked.sort(key=lambda x: x[1], reverse=True)
-                combined = reranked + tail
+                combined = reranked
                 if _trace is not None:
                     _trace["reranker"] = {
                         "fired": True,
@@ -1548,9 +1555,17 @@ class ContinuumMemorySystem:
                         "reason": "rerank_failed_or_unavailable",
                     }
         elif rerank_enabled:
-            # Enabled but the gate above never opened: no model, no query
-            # text, or nothing to rerank.
-            rerank_log["skip_reason"] = "unavailable"
+            over_budget = (
+                self._reranker is not None and bool(query_text)
+                and len(combined) > top_n
+            )
+            reason = "candidate_budget_exceeded" if over_budget else "unavailable"
+            rerank_log["skip_reason"] = reason
+            if _trace is not None:
+                _trace["reranker"] = {
+                    "fired": False, "reason": reason,
+                    "top_n": top_n, "candidate_count": len(combined),
+                }
 
         if rerank_before_cut:
             # Deferred cut: the reranker — not the bi-encoder — chooses which

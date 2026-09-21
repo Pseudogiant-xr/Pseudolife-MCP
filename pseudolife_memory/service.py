@@ -1452,8 +1452,9 @@ class MemoryService(DreamOps):
         ``rerank`` overrides ``config.memory.reranker.enabled``:
 
         * ``None`` (default) — follow the config flag.
-        * ``True`` — apply the cross-encoder reranker on the top-N
-          candidates even if config disables it. First call lazy-loads
+        * ``True`` — enable cross-encoder reranking even if config disables
+          it. Score the entire combined pool when it fits ``top_n``; otherwise
+          retain the original order and scores. First scoring call lazy-loads
           ``cross-encoder/ms-marco-MiniLM-L-6-v2`` (~80MB).
         * ``False`` — skip reranking even if config enables it.
 

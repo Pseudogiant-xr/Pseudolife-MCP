@@ -54,9 +54,19 @@ memory:
   reranker:
     enabled: true
     model_name: cross-encoder/ms-marco-MiniLM-L-6-v2
-    top_n: 20            # rerank the top-N candidates only
+    top_n: 20            # maximum combined pool size for reranking
     fusion_weight: 0.7   # 1.0 = pure CE, 0.0 = pure bi-encoder
 ```
+
+Reranking scores the whole combined memory/reference pool or skips it.
+If the pool exceeds `top_n`, search preserves its original scores and order
+and reports `candidate_budget_exceeded` in the reranker parameters and trace.
+This bounds model work without treating fused scores and unscored originals
+as comparable. A widened candidate pool or large `top_k` can trigger this
+fallback; increase `top_n` deliberately if that additional work is wanted.
+Reserved reference slots remain available in either case. The parameters
+also record `candidate_count`, `scored_candidates`, and the
+`complete_pool_or_skip` scoring policy.
 
 First call lazy-loads the ~80 MB model from the HuggingFace Hub; later
 calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
