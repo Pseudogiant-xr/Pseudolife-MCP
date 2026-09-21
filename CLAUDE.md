@@ -32,6 +32,12 @@ exactly; they exist because each one was violated at least once.
 4. **Deploy only via `ops/update.ps1`** (backup → rollback tag → daemon-only
    `--no-deps` rebuild → health). Never `docker compose down -v` — the bank
    volumes are external precisely so that this is survivable, but don't test it.
+   **A change under `plugin/` or to the shim needs `-All`** (or
+   `ops/update_clients.py` afterwards): the plugin cache and the shim are
+   separate installs that a daemon deploy never touches, and the plugin's
+   version string cannot move between releases, so `/plugin update` says
+   "already latest" — the 2026-09-21 deploy ran an hour on the old hooks.
+   Then restart the clients.
 5. **After deploy, verify live**, not just `/health`: exercise the changed path
    through the daemon (an MCP call, a psql check of new DDL).
 

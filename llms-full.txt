@@ -547,32 +547,43 @@ every healthy deploy; see
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
-The updater rebuilds the daemon from the checkout; the **shim** your
-clients launch is a separate install and does not move with it. Re-run the
-source installer for the selected client to install the matching checkout
-and upgrade recognized installer-managed registrations. Custom commands
-are preserved and require an upgrade in their own interpreter. For a
-manual pipx install, use `pipx install --force .` from the checkout; for
-pip, run `python -m pip install .` in the registered interpreter. A
-daemon-side credential change with an old shim leaves the two out of step:
-the Claude Desktop registrar refuses a shim that cannot read the selected
-token file (exit 4), and names the upgrade.
+**Everything at once:** the daemon is one of three installs. The **shim**
+your clients launch and the **Claude Code plugin** are separate and do not
+move with it. `-All` / `--all` moves them in the same run, after the
+daemon is healthy:
 
-The **Claude Code plugin** is a third install that does not move with the
-daemon either: Claude Code runs it from a cache that only changes when you
-ask. After a daemon update, refresh it inside Claude Code and start a new
-session:
-
+```powershell
+.\ops\update.ps1 -All   # Windows
 ```
-/plugin marketplace update pseudolife-mcp
-/plugin update pseudolife-memory@pseudolife-mcp
+```bash
+./ops/update.sh --all   # Linux / macOS
 ```
 
-The three tell on each other: `/health` reports the daemon's
-`version`, the session briefing opens with a one-line notice when the
-plugin's version differs from it (naming the command above or the daemon
-redeploy, whichever side is behind), the shim says so on stderr and ahead
-of its instructions, and `pseudolife-mcp doctor` reports `version_mismatch`.
+It reinstalls the shim behind each Claude Code / Codex registration where
+that is safe (pipx, or the registered interpreter's pip; a shim running
+straight from this checkout is already live and is named instead, since
+its metadata refresh needs every session closed), refreshes the plugin
+cache by comparing bytes against the marketplace clone (the plugin's
+version string only moves with a release, so `/plugin update` alone would
+say "already latest"), and reports whether Codex's hook copy matches the
+checkout (that refresh is a consent step: `python ops/setup-codex-hooks.py`).
+It ends with a ladder of what moved and which clients need a restart; a
+client-side step that fails is reported, never a failed deploy. The same
+helper runs on its own: `python ops/update_clients.py`. Custom
+registrations are preserved and named; upgrade those in their own
+interpreter. A daemon-side credential change with an old shim leaves the
+two out of step: the Claude Desktop registrar refuses a shim that cannot
+read the selected token file (exit 4), and names the upgrade.
+
+The three tell on each other: `/health` reports the daemon's `version`
+and a digest of the hook scripts it shipped with; the session briefing
+opens with a one-line notice when the plugin's version differs from the
+daemon's (naming `/plugin marketplace update pseudolife-mcp` then
+`/plugin update pseudolife-memory@pseudolife-mcp`, or the daemon redeploy,
+whichever side is behind), or when the version matches but the hooks do
+not (naming the `--all` command above); the shim says so on stderr and
+ahead of its instructions; and `pseudolife-mcp doctor` reports
+`version_mismatch`.
 
 > **Two upgrades are not automatic**, because neither can be done safely
 > in place. Both have a step-by-step runbook — backup, dry run, apply,
@@ -3592,7 +3603,9 @@ behind a watermark that moves only when the text changes. With a host session
 id — `CLAUDE_CODE_SESSION_ID` for Claude Code, the thread id for Codex — the
 digest is written to `~/.pseudolife-mcp/digests/<sha256(id)>.txt`
 (`PSEUDOLIFE_DIGEST_DIR` overrides the directory; set it identically for the
-hook's environment, which cannot see the MCP env block). The plugin's
+hook's environment, which cannot see the MCP env block; `PSEUDOLIFE_PLUGIN_DIR`
+is the daemon-side counterpart, naming the plugin tree whose hook scripts
+`/health` digests — the image sets it to its own copy). The plugin's
 UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and

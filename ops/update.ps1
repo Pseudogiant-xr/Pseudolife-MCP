@@ -12,6 +12,8 @@
 #   ops\update.ps1 -HealthRetries 30 -HealthDelayMs 1500  # health-wait budget
 #   ops\update.ps1 -ForceRollbackTag # tag the rollback even when the version
 #                                    # tag is not the running daemon's image
+#   ops\update.ps1 -All              # after the daemon: shim, plugin cache,
+#                                    # Codex hooks (ops/update_clients.py)
 #
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
@@ -31,7 +33,11 @@ param(
     # driven in a test without spending 45 seconds per scenario; there is no
     # reason to lower them on a real deploy.
     [int]$HealthRetries = 30,
-    [int]$HealthDelayMs = 1500
+    [int]$HealthDelayMs = 1500,
+    # Also move the client side once the daemon is healthy: the shim behind
+    # each registration, the Claude Code plugin cache (compared by bytes
+    # against the marketplace clone) and Codex's hook copy — ops/update_clients.py.
+    [switch]$All
 )
 
 $ErrorActionPreference = "Stop"
@@ -211,6 +217,26 @@ if ($h) {
     Write-Warning "To roll back:"
     $rollbackLines | ForEach-Object { Write-Warning $_ }
     exit 1
+}
+
+# 4b. -All: the client side. The daemon is deployed either way; a client
+#     step that fails is reported, never a failed deploy.
+if ($All) {
+    Step "Updating the client side (shim, plugin cache, Codex hooks)..."
+    $python = $null
+    foreach ($candidate in @("python", "python3", "py")) {
+        if (Get-Command $candidate -ErrorAction SilentlyContinue) { $python = $candidate; break }
+    }
+    if (-not $python) {
+        Write-Warning "No python on PATH; run it yourself: python ops/update_clients.py"
+    } else {
+        $pyArgs = @()
+        if ($python -eq "py") { $pyArgs = @("-3") }
+        & $python @pyArgs (Join-Path $PSScriptRoot "update_clients.py") --repo $repo
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "A client-side step needs attention (see the ladder above); the daemon deploy itself succeeded."
+        }
+    }
 }
 
 # 5. Build-cache retention. Deliberately LAST, for two reasons: before the

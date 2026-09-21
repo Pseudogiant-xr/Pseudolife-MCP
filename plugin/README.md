@@ -123,17 +123,24 @@ don't double up:
 ## Updating
 
 The plugin lives in a cache Claude Code refreshes only on request, so it
-does not move when the daemon is redeployed. After a daemon update:
+does not move when the daemon is redeployed. The repo's updater moves it
+with the daemon: `ops\update.ps1 -All` / `ops/update.sh --all` (or
+`python ops/update_clients.py` on its own) refreshes the marketplace
+clone, compares the plugin tree byte for byte against the cache, and
+reinstalls the plugin only when they differ — the plugin's version string
+is pinned to the package version, so `/plugin update` alone says "already
+latest" after a plugin-only change. By hand, when the version did change:
 
 ```
 /plugin marketplace update pseudolife-mcp
 /plugin update pseudolife-memory@pseudolife-mcp
 ```
 
-then start a new session. The SessionStart hook sends the plugin's version
-to the daemon; when the two differ, the session briefing opens with a
-one-line notice naming the side that is behind and the command that moves
-it, so a stale cache no longer runs silently.
+Either way, start a new session afterwards. The SessionStart hook sends
+the plugin's version and a digest of its hook scripts to the daemon; when
+the version differs, or the version matches but the hooks do not, the
+session briefing opens with a one-line notice naming the command that
+moves it, so a stale cache no longer runs silently.
 
 ## Non-default setups
 

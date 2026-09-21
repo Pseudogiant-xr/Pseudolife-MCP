@@ -300,6 +300,7 @@ def build_console_app(
             # unauthorized hook still learns it is out of date; the value
             # is shape-checked before it can reach the model's context.
             plugin_version = params.get("plugin_version")
+            plugin_hooks_digest = params.get("plugin_hooks_digest")
 
             def start_hook():
                 # Bind the request headers so the briefing's awareness
@@ -312,7 +313,8 @@ def build_console_app(
                 binding = bind_request_headers(headers)
                 try:
                     return hook_session_start(service, session_id, source, authorized,
-                                              plugin_version=plugin_version)
+                                              plugin_version=plugin_version,
+                                              plugin_hooks_digest=plugin_hooks_digest)
                 finally:
                     unbind_request_headers(binding)
             text = await asyncio.get_running_loop().run_in_executor(None, start_hook)
