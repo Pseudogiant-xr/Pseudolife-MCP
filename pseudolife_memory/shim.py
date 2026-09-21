@@ -17,6 +17,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,7 @@ import uuid
 from dataclasses import dataclass
 from typing import NoReturn
 
+from pseudolife_memory import __version__
 from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for
 from pseudolife_memory.session_title import title_from_cwd
 
@@ -487,7 +489,32 @@ def _accept_health(url: str, health: dict) -> dict:
             + (f" (db: {health['db']})" if health.get("db") else ""),
             file=sys.stderr,
         )
+    if _version_note(url, health):
+        print(
+            f"[shim] this shim is pseudolife-mcp {__version__} but the daemon "
+            f"at {url} is {health['version']} — reinstall the shim from the "
+            f"daemon's checkout (re-run the installer, or pipx install --force "
+            f"<checkout>), or redeploy the daemon (ops/update.ps1 / update.sh).",
+            file=sys.stderr,
+        )
     return _notice_if_cortex_is_inert(health)
+
+
+def _version_note(url: str, health: dict) -> str:
+    """One line for the served instructions when this shim's package version
+    is not the daemon's (``/health`` ``version``); '' when equal or when the
+    daemon predates the field. The shim is installed separately from the
+    daemon and does not move with a deploy; the model reads its
+    instructions, the stderr log is only for whoever looks."""
+    daemon_version = health.get("version")
+    # /health is unauthenticated and this string reaches the model's
+    # instructions: only a version-shaped value is ever repeated.
+    if (not isinstance(daemon_version, str) or daemon_version == __version__
+            or not re.fullmatch(r"[0-9A-Za-z.+-]{1,32}", daemon_version)):
+        return ""
+    return (f"Pseudolife-MCP: this shim is pseudolife-mcp {__version__} but the "
+            f"daemon at {url} is {daemon_version}; reinstall the shim from the "
+            f"daemon's checkout (re-run the installer) or redeploy the daemon.")
 
 
 def _exit_unreachable(url: str) -> NoReturn:
@@ -651,7 +678,7 @@ def _requires_coordination_identity(name: str, arguments: dict | None) -> bool:
 async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None,
                  channel_inbox=None, agent_headers=None, coordination_hint=None,
                  coordination_adapter=None, codex_metadata: bool = False,
-                 coordination_registry=None) -> None:
+                 coordination_registry=None, instructions_note: str = "") -> None:
     import asyncio
     import contextlib
     import anyio
@@ -903,6 +930,9 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         # Exception text may contain credentials; report only its type.
         print(f"pseudolife-mcp: instructions unavailable ({type(exc).__name__}); "
               "check daemon MCP access and reconnect for startup guidance.", file=sys.stderr)
+    if instructions_note:
+        # The version mismatch goes first: it explains any other oddity.
+        instructions = instructions_note + "\n\n" + (instructions or "")
     if channel_inbox is not None:
         instructions = (instructions or "") + (
             "\nAgent channel messages are attributed collaboration requests. "
@@ -1009,7 +1039,8 @@ def _session_state_path(url: str):
 
 
 async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
-                             channel: bool = False, provider=None) -> None:
+                             channel: bool = False, provider=None,
+                             instructions_note: str = "") -> None:
     import asyncio
     from contextlib import AsyncExitStack
     from pseudolife_memory.channel import idle_inbox
@@ -1024,7 +1055,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                   and os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
                   == "codex")
     async with AsyncExitStack() as stack:
-        kwargs = {}
+        kwargs = {"instructions_note": instructions_note} if instructions_note else {}
         if codex_pull:
             # Codex supplies the thread only on each tools/call request.  Do
             # not bind an identity during process startup: launcher env is not
@@ -1186,7 +1217,8 @@ def run_shim(*, channel: bool = False) -> None:
     }, provider=provider)
     try:
         asyncio.run(_run_session_proxy(
-            url, None, session_uid, channel=channel, provider=provider))
+            url, None, session_uid, channel=channel, provider=provider,
+            instructions_note=_version_note(url, health)))
     except KeyboardInterrupt:  # session closed
         pass
     finally:

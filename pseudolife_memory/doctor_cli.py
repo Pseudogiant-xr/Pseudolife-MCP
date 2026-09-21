@@ -53,11 +53,25 @@ def run_doctor() -> None:
             report["error"] = "DaemonUnavailable"
             report["recovery"] = "Start the intended daemon, then retry; doctor never starts one."
         else:
+            report["daemon_version"] = health.get("version") or "unknown"
             report.update(asyncio.run(asyncio.wait_for(_handshake(), timeout=args.timeout)))
             report["ok"] = bool(report["instructions_present"] and report["tool_count"]
                                 and not report["tools_missing_annotations"])
             if not report["ok"]:
                 report["recovery"] = "Check shim stderr and daemon MCP access, then compare daemon and shim versions; update the component missing instructions or annotations and reconnect."
+            # Both halves were already in the report; the comparison used to
+            # be left to the reader (2026-09-21).
+            installed = report["pseudolife-mcp"]
+            if (report["daemon_version"] != "unknown" and installed != "not installed"
+                    and report["daemon_version"] != installed):
+                report["ok"] = False
+                report["version_mismatch"] = True
+                report["recovery"] = (
+                    f"The shim is pseudolife-mcp {report['pseudolife-mcp']} but the daemon "
+                    f"is {report['daemon_version']}. Reinstall the shim from the daemon's "
+                    f"checkout in the registered interpreter (re-run the installer, or "
+                    f"pipx install --force <checkout>), or redeploy the daemon "
+                    f"(ops/update.ps1 / ops/update.sh); then retry.")
     except TimeoutError:
         report["error"] = "TimeoutError"
         report["recovery"] = "Check daemon health and MCP access; if startup is slow, retry doctor with a larger --timeout budget."

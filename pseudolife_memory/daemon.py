@@ -77,10 +77,15 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     constructs anything (storage stays lazily-unbuilt until the first real
     tool call, exactly as before).
     """
+    from pseudolife_memory import __version__
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
     payload = {
         "status": "ok",
+        # The package version, so the shim, the plugin hooks and `doctor`
+        # can tell when they are not the daemon's release (2026-09-21: a
+        # stale plugin cache ran an hour against a newer daemon unnoticed).
+        "version": __version__,
         "schema": SCHEMA_META_VERSION,
         "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
         "auth": token_present,

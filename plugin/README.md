@@ -114,6 +114,21 @@ don't double up:
 - **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)
 - **`/memory-status`** — daemon health + bank stats readout
 
+## Updating
+
+The plugin lives in a cache Claude Code refreshes only on request, so it
+does not move when the daemon is redeployed. After a daemon update:
+
+```
+/plugin marketplace update pseudolife-mcp
+/plugin update pseudolife-memory@pseudolife-mcp
+```
+
+then start a new session. The SessionStart hook sends the plugin's version
+to the daemon; when the two differ, the session briefing opens with a
+one-line notice naming the side that is behind and the command that moves
+it, so a stale cache no longer runs silently.
+
 ## Non-default setups
 
 The hooks read the same two environment variables — no file editing (a

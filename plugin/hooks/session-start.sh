@@ -128,8 +128,19 @@ case "$SRC" in
         fi
         ;;
 esac
+# The plugin release this hook runs from, read beside the script so the
+# daemon can open the briefing with a notice when the two differ (a cached
+# plugin moves only on /plugin update; the daemon on every deploy). A copy
+# without a manifest beside it (Codex's content-addressed hooks) sends
+# nothing. Only a version-shaped value goes on the wire.
+PLUGIN_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9A-Za-z.+-]*\)".*/\1/p' \
+    "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/.claude-plugin/plugin.json" 2>/dev/null | head -1)
 QS=""
 [ -n "$SID" ] && QS="?session_id=${SID}&source=${SRC}"
+if [ -n "$PLUGIN_VERSION" ]; then
+    # `+` (a local version label) would decode to a space server-side.
+    QS="${QS:-?}${QS:+&}plugin_version=${PLUGIN_VERSION//+/%2B}"
+fi
 # One retry bridges the daemon's short maintenance stalls (CMS autosave
 # ~1.5s, dream-sweep tick; measured 2026-09-01 against a 1,123-entry bank)
 # that can hold the service lock past a single attempt's timeout — a

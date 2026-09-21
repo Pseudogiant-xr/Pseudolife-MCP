@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-21 — the plugin, the shim and the daemon say when they are not the same release)
+- `/health` carries `version`, the daemon's package version. The plugin's
+  hooks run from a cache that moves only on `/plugin update` and the shim is
+  installed separately, so a deploy left both behind with nothing to say so
+  (an hour of it on 2026-09-21).
+- The SessionStart hooks (`session-start.sh`, `lifecycle.ps1`) send the
+  plugin's version from `.claude-plugin/plugin.json` as `plugin_version`.
+  When it differs from the daemon's, the briefing opens with one line naming
+  the side that is behind and the command that moves it (`/plugin
+  marketplace update pseudolife-mcp` then `/plugin update
+  pseudolife-memory@pseudolife-mcp`, or `ops/update.ps1` / `ops/update.sh`).
+  Only a version-shaped value is ever echoed; a hook copy without a manifest
+  beside it (Codex's content-addressed hooks) sends nothing. The line serves
+  unauthorized hooks too, since it carries no memory content.
+- The shim prints one stderr line and puts the same notice ahead of the
+  instructions it serves when its package version is not the daemon's.
+- `pseudolife-mcp doctor` reports `daemon_version` and, on a difference,
+  `version_mismatch: true` with the recovery, instead of leaving the
+  comparison to the reader.
+
 ### Security (2026-09-21 — anyio 4.14.2, Dependabot alerts 16–18)
 - **`anyio` bumped 4.14.0 → 4.14.2 in `ops/requirements.lock.txt`**
   (CVE-2026-63374 / GHSA-82r6-8w77-94w6, critical: `TLSStream` encoded
