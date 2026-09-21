@@ -49,6 +49,7 @@ class FakeCli:
         self.clone_plugin: Path | None = None
         self.cache_plugin: Path | None = None
         self.user_scripts: Path | None = None  # what a fake python reports as its --user scripts dir
+        self.install_kinds: dict[str, str] = {}   # interpreter path -> editable | site | missing
         self.run_kwargs: list[dict] = []
 
     def __call__(self, argv, **kw):
@@ -57,6 +58,21 @@ class FakeCli:
         self.run_kwargs.append(kw)
         name = Path(argv[0]).name.lower().removesuffix(".exe")
         rest = argv[1:]
+        if name.startswith("python") and rest[:1] == ["-c"] and "package_dir" in rest[1]:
+            kind = self.install_kinds.get(argv[0].lower(), "site")
+            lib = str(Path(argv[0]).parent.parent / "Lib" / "site-packages")
+            if kind == "crashed":
+                return 1, "Traceback (most recent call last):\n  File \"<string>\", line 1\nRuntimeError: boom"
+            if kind == "missing":
+                return 0, json.dumps({"package_dir": None, "libs": [lib]})
+            if kind in ("editable", "noisy-editable"):
+                report = json.dumps({"package_dir": str(self.home / "src" / "pseudolife_memory"), "libs": [lib]})
+                if kind == "noisy-editable":
+                    # run_cli appends stderr after stdout: a warning printed by
+                    # a .pth or sitecustomize lands after the JSON line.
+                    report += "\n<string>:1: DeprecationWarning: something in a .pth\n"
+                return 0, report
+            return 0, json.dumps({"package_dir": str(Path(lib) / "pseudolife_memory"), "libs": [lib]})
         if name.startswith("python") and rest[:1] == ["-c"] and "sysconfig" in rest[1]:
             return (0, str(self.user_scripts)) if self.user_scripts else (1, "no user scheme")
         if name == "claude" and rest[:3] == ["mcp", "get", "pseudolife-memory"]:
@@ -120,6 +136,7 @@ def cli(tmp_path, monkeypatch):
     fake = FakeCli(home)
     monkeypatch.setattr(uc, "run_cli", fake)
     monkeypatch.setattr(uc, "home", lambda: home)
+    monkeypatch.setattr(uc, "_install_kinds", {})  # one probe memo per test, as per run
     tools = {"claude": str(tmp_path / f"claude{EXE}"), "codex": str(tmp_path / f"codex{EXE}"),
              "pipx": str(tmp_path / f"pipx{EXE}")}
     fake.tools = tools
@@ -216,6 +233,122 @@ def test_two_registrations_of_one_shim_upgrade_it_once(cli, tmp_path):
 
 def test_no_registration_anywhere_is_reported(cli):
     assert uc.update_shim(ROOT)["state"] == "not-registered"
+
+
+def test_an_editable_install_anywhere_is_named_never_pip_upgraded(cli, tmp_path):
+    """The first real -All run (2026-09-21) pip-upgraded the maintainer's
+    checkout venv because --repo pointed at a deploy worktree, so the
+    launcher was not under <repo>/.venv. Editable-ness is asked of the
+    interpreter, not inferred from a path."""
+    scripts = tmp_path / "elsewhere" / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    python = scripts / f"python{EXE}"
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = "editable"
+    cli.claude_get = (0, _claude_stdio(str(scripts / f"pseudolife-mcp{EXE}")))
+    result = uc.update_shim(tmp_path / "some-deploy-worktree")
+    assert result["state"] == "editable"
+    assert "never pip-upgraded" in result["detail"] and "pip install -e" in result["detail"]
+    assert not any(c[1:3] == ["-m", "pip"] for c in cli.calls)
+
+
+def test_an_editable_codex_runtime_is_named_too(cli, tmp_path):
+    python = tmp_path / "rt" / "Scripts" / f"python{EXE}"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = "editable"
+    cli.codex_get = (0, _codex_stdio(str(python), "-m pseudolife_memory.cli"))
+    assert uc.update_shim(ROOT)["state"] == "editable"
+    assert not any(c[1:3] == ["-m", "pip"] for c in cli.calls)
+
+
+def test_a_missing_package_in_a_venv_is_installed_fresh(cli, tmp_path):
+    python = tmp_path / "rt" / "Scripts" / f"python{EXE}"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = "missing"
+    cli.codex_get = (0, _codex_stdio(str(python), "-m pseudolife_memory.cli"))
+    assert uc.update_shim(ROOT)["state"] == "reinstalled:pip"
+
+
+def test_a_noisy_probe_answer_still_reads_as_editable(cli, tmp_path):
+    """``run_cli`` appends stderr after stdout, so a warning emitted by a
+    .pth or sitecustomize lands after the JSON line. Taking the last line
+    made that parse fail and fall through to the pip upgrade the guard
+    exists to prevent (reviewer finding, 2026-09-21)."""
+    python = tmp_path / "rt" / "Scripts" / f"python{EXE}"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = "noisy-editable"
+    cli.codex_get = (0, _codex_stdio(str(python), "-m pseudolife_memory.cli"))
+    assert uc.install_kind(python)[0] == "editable"
+    assert uc.update_shim(ROOT)["state"] == "editable"
+    assert not any(c[1:3] == ["-m", "pip"] for c in cli.calls)
+
+
+def test_a_probe_that_did_not_answer_is_left_alone_not_pip_upgraded(cli, tmp_path):
+    """"The probe failed" and "the package is absent" are different facts;
+    only the second licenses a pip install. An interpreter the helper
+    cannot classify is named for the maintainer, never upgraded."""
+    python = tmp_path / "rt" / "Scripts" / f"python{EXE}"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = "crashed"
+    cli.codex_get = (0, _codex_stdio(str(python), "-m pseudolife_memory.cli"))
+    kind, reason = uc.install_kind(python)
+    assert kind == "unknown" and "RuntimeError: boom" in reason
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "unknown"
+    assert str(python) in result["detail"] and "RuntimeError: boom" in result["detail"]
+    assert not any(c[1:3] == ["-m", "pip"] for c in cli.calls)
+
+
+def test_the_install_kind_probe_runs_under_a_real_interpreter():
+    """The fakes hand-copy the probe's output contract; this pins the
+    probe itself, so a typo or a scheme lookup that raises on some
+    platform cannot ship green and degrade live to "unknown"."""
+    proc = subprocess.run([sys.executable, "-c", uc._INSTALL_KIND_PROBE], capture_output=True,
+                          text=True, timeout=60, cwd=str(Path(uc.tempfile.gettempdir())))
+    assert proc.returncode == 0, proc.stderr
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    assert len(lines) == 1
+    report = json.loads(lines[0])
+    # The interpreter's own purelib comes first and exists; the user-site
+    # entry that follows is reported even when nothing was ever installed there.
+    assert report["libs"] and Path(report["libs"][0]).is_dir()
+    assert all(Path(lib).is_absolute() for lib in report["libs"])
+    # The suite imports pseudolife_memory, so this interpreter has it: the
+    # answer is a real classification, never the fall-through.
+    kind, detail = uc.install_kind(Path(sys.executable))
+    assert kind in ("editable", "site"), (kind, detail)
+
+
+def test_install_kind_probe_runs_from_a_neutral_directory(cli, tmp_path):
+    """`python -c` puts the working directory first on sys.path; run from
+    the checkout, every interpreter would import the checkout's package
+    and read as editable (seen live, 2026-09-21)."""
+    python = tmp_path / "rt" / "Scripts" / f"python{EXE}"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    uc.install_kind(python)
+    probe_kwargs = [kw for call, kw in zip(cli.calls, cli.run_kwargs) if "package_dir" in " ".join(call)]
+    assert probe_kwargs and probe_kwargs[0].get("cwd")
+    assert not Path(probe_kwargs[0]["cwd"]).resolve().is_relative_to(ROOT.resolve())
+
+
+def test_failure_detail_quotes_pips_error_line_not_its_notice(cli, tmp_path):
+    scripts = tmp_path / "venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    (scripts / f"python{EXE}").write_text("", encoding="utf-8")
+    cli.claude_get = (0, _claude_stdio(str(scripts / f"pseudolife-mcp{EXE}")))
+    cli.pip_install = (1, "Collecting x\nWARNING: Error parsing dependencies of some-pkg: bad version\n"
+                          "ERROR: Could not install packages due to an OSError: "
+                          "[WinError 32] in use\n\n[notice] A new release of pip is available\n"
+                          "[notice] To update, run: pip install --upgrade pip")
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "failed"
+    assert "WinError 32" in result["detail"] and "[notice]" not in result["detail"]
+    assert "Error parsing" not in result["detail"]
 
 
 def test_pip_user_launcher_is_upgraded_through_its_owning_interpreter(cli, tmp_path):
