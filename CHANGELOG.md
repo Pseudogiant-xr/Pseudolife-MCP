@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-22 — a cancelled Codex delivery start-up no longer runs on into its rpc timeout on Python 3.10/3.11)
+- `pseudolife_memory/codex_delivery.py` bounded its connect, send and reply
+  waits with `asyncio.wait_for`, which before Python 3.12 returns the inner
+  result instead of re-raising when the cancellation lands in the same loop
+  tick as the inner task's completion (bpo-42130). A caller cancelling
+  `__aenter__` at that instant — `codex_coordination._verified_delivery`'s
+  start-up deadline is one — saw the bridge carry on into its five-second
+  rpc timeout and raise `DeliveryError` instead of the cancellation. The
+  connect, send, reply and close waits now go through one `_bounded`
+  helper built on `asyncio.wait`, which propagates the cancellation after
+  cancelling and reaping the inner task (retrieving its exception, so
+  nothing unsanitized is logged at garbage collection); timeouts still
+  surface as `asyncio.TimeoutError`, so every `DeliveryError` message is
+  unchanged. The daemon image runs 3.12 and was never affected; the shim
+  runs on the host interpreter and was. Surfaced as a CI flake of
+  `tests/test_codex_delivery.py` on the 3.11 lane (2026-09-21, runs
+  35597200621 and 35603265565); the cancellation test now delivers its
+  cancel explicitly and a second test forces the interleaving.
+- Test-only, no hook behaviour change: `tests/test_codex_hooks.py` measures
+  the Codex SessionEnd three-second cap at the fixture daemon (each attempt
+  is held without a reply and timed until curl hangs up, and the attempts
+  are counted) instead of on the subprocess wall-clock, and the hang guard
+  on every hook and installer process the file runs is one 180s constant
+  instead of 20–40s literals. On the loaded windows-latest runner of run
+  35603265565 process creation under Git Bash cost seconds per spawn:
+  session-end.sh took 19s wall-clock around a curl that honoured its
+  two-second budget, and session-start.sh, with roughly four times the
+  spawns, hit its 30s guard. Neither script stalls on stdin, DNS or a
+  proxy; the budget was honoured in the failing run. The live cap
+  assertion was mutation-checked (blanking the script's Codex-context flag
+  makes curl wait out the Claude budget and fails it).
+
 ### Added (2026-09-21 — one command moves the shim and the plugin with the daemon; same-version hook drift is detected)
 - `ops/update.ps1 -All` / `ops/update.sh --all` run `ops/update_clients.py`
   once the daemon is healthy: the shim behind each Claude Code / Codex
