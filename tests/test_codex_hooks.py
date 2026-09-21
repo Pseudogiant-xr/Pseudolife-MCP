@@ -64,9 +64,13 @@ def pwsh_run(*args, input=None, env=None, raw=False):
 def bash_run(script, *, input, env):
     bash = shutil.which("bash")
     if os.name == "nt":
+        # Git for Windows puts git.exe under cmd/, bin/ or mingw64/bin/
+        # depending on which directory PATH lists first; bash.exe is always
+        # <install>/bin/bash.exe, one or two levels up from it.
         git = shutil.which("git")
-        candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-        bash = str(candidate) if candidate and candidate.is_file() else None
+        candidates = ([Path(git).parents[1] / "bin/bash.exe",
+                       Path(git).parents[2] / "bin/bash.exe"] if git else [])
+        bash = next((str(c) for c in candidates if c.is_file()), None)
     if not bash:
         pytest.skip("Bash is not installed")
     return subprocess.run([bash, str(script)], input=input, env=env,
@@ -631,9 +635,13 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
         tmp_path, bootstrap_success, shim_available, runtime_success, expected_state):
     bash = shutil.which("bash")
     if os.name == "nt":
+        # Git for Windows puts git.exe under cmd/, bin/ or mingw64/bin/
+        # depending on which directory PATH lists first; bash.exe is always
+        # <install>/bin/bash.exe, one or two levels up from it.
         git = shutil.which("git")
-        candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-        bash = str(candidate) if candidate and candidate.is_file() else None
+        candidates = ([Path(git).parents[1] / "bin/bash.exe",
+                       Path(git).parents[2] / "bin/bash.exe"] if git else [])
+        bash = next((str(c) for c in candidates if c.is_file()), None)
     if not bash:
         pytest.skip("Bash is not installed")
     repo = tmp_path / "repo"

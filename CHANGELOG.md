@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-21 — coordination mail reaches the model once per turn, for free when quiet)
+- The daemon's `attach` and `heartbeat` answers carry `pending_preview`
+  beside `pending_count`: the five oldest pending messages with sender
+  label and a one-line excerpt (`PREVIEW_LIMIT`, `PREVIEW_EXCERPT`). Reading
+  the preview is not delivery; attempts and acknowledgements are untouched.
+- The shim's adapter renders a per-turn digest from that preview and keeps a
+  watermark that moves only when the rendered text changes. With a host
+  session id (`CLAUDE_CODE_SESSION_ID` for Claude Code, `_meta.threadId` per
+  Codex thread) it writes the digest to
+  `~/.pseudolife-mcp/digests/<sha256(id)>.txt` (`PSEUDOLIFE_DIGEST_DIR`
+  overrides the directory; the file goes on clean exit).
+- The UserPromptSubmit hooks (`user-prompt-submit.sh`, `lifecycle.ps1`) read
+  that file by the `session_id` they receive and print the digest only when
+  the watermark passed the shared `.seen` marker, then advance it. A quiet
+  turn adds no text. SessionStart on `resume` or `compact` clears the marker
+  so the next prompt prints the current digest afresh. Every firing that
+  finds a digest appends one line to `ledger.log` beside it (time, session
+  prefix, watermark, bytes added) for cost measurement.
+- The tool-result hint carries the same digest under the same marker, so a
+  change is delivered once whichever of the hook or the hint sees it first,
+  and hosts without hooks (Desktop Chat) still get it. While mail stays
+  pending and unchanged, a one-line reminder rides every tenth tool result
+  (`CoordinationAdapter.HINT_REPEAT_CALLS`). The count-only hint text is
+  replaced by the digest header.
+- Test helper: `tests/test_codex_hooks.py` now finds Git Bash when `git` on
+  PATH is `mingw64/bin/git.exe`, so the bash hook tests run on Windows
+  instead of silently skipping.
+
 ### Fixed (2026-09-21 — avoid slow CPU embedding precision drift)
 - CPU torch embeddings explicitly retain float32 inference when newer
   Transformers versions default to the checkpoint's lower precision. This

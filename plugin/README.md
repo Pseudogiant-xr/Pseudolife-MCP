@@ -48,6 +48,22 @@ checks for known duplicates. Keep a single MCP transport registration, and follo
 [Codex setup and verification guide](../docs/guide/providers.md#codex-specifics)
 for startup budgets, standing instructions and runtime diagnostics.
 
+## Per-turn coordination digest
+
+When the shim's coordination adapter is enabled (`PSEUDOLIFE_AGENT_COORDINATION=1`
+in the MCP server's env block), it keeps a small digest file per session under
+`~/.pseudolife-mcp/digests/` — the pending addressed messages, rendered once,
+behind a watermark that moves only when they change. The UserPromptSubmit hook
+reads that file by the `session_id` it receives and prints the digest only when
+the watermark passed the `.seen` marker, so a quiet turn adds nothing to the
+context and a change appears once. The same marker gates the hint the shim
+appends to tool results, so the two paths never repeat each other. SessionStart
+on `resume` or `compact` clears the marker so the current digest prints afresh.
+Override the directory with `PSEUDOLIFE_DIGEST_DIR` in *both* the MCP env block
+and the hook's environment; they must agree. `ledger.log` in that directory
+records one line per hook firing (time, session prefix, watermark, bytes added)
+for measuring the cost.
+
 ## Why no bundled MCP server?
 
 Earlier versions shipped an HTTP server entry in the plugin. Claude Code

@@ -10,6 +10,59 @@ function Write-Context([string]$text) {
         ConvertTo-Json -Depth 4 -Compress -EscapeHandling EscapeNonAscii
 }
 
+# Per-session coordination digest written by the shim's adapter; the same
+# path derivation as user-prompt-submit.sh (SHA-256 of the session id under
+# PSEUDOLIFE_DIGEST_DIR, default ~/.pseudolife-mcp/digests).
+function Get-DigestDir {
+    if ($env:PSEUDOLIFE_DIGEST_DIR) { return $env:PSEUDOLIFE_DIGEST_DIR }
+    return Join-Path $HOME '.pseudolife-mcp/digests'
+}
+
+function Get-DigestKey([string]$SessionId) {
+    $bytes = [Text.Encoding]::UTF8.GetBytes($SessionId)
+    $hash = [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    return ([BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+}
+
+# Returns the digest text to print this turn ('' when nothing changed) and
+# advances the shared .seen marker; appends one ledger line per call.
+function Read-TurnDigest([string]$SessionId) {
+    $digestDir = Get-DigestDir
+    if (-not $SessionId -or -not (Test-Path -LiteralPath $digestDir -PathType Container)) { return '' }
+    $key = Get-DigestKey $SessionId
+    $file = Join-Path $digestDir "$key.txt"
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return '' }
+    $seen = Join-Path $digestDir "$key.seen"
+    $lines = [IO.File]::ReadAllText($file, [Text.Encoding]::UTF8) -split "`r?`n"
+    [int64]$watermark = 0
+    [int64]$last = 0
+    $valid = [int64]::TryParse($lines[0].Trim(), [ref]$watermark)
+    if (Test-Path -LiteralPath $seen -PathType Leaf) {
+        [void][int64]::TryParse([IO.File]::ReadAllText($seen).Trim(), [ref]$last)
+    }
+    $body = ''
+    $printed = 0
+    if ($valid -and $watermark -gt $last) {
+        $body = (($lines | Select-Object -Skip 1) -join "`n").TrimEnd("`n", "`r")
+        if ($body) { $printed = $body.Length + 1 }
+        [IO.File]::WriteAllText($seen, "$watermark`n")
+    }
+    # The marker is already advanced: a ledger problem (the shim appends to
+    # the same file and Windows refuses a concurrent open) must not lose
+    # the body, so the ledger is best effort.
+    try {
+        $ledger = Join-Path $digestDir 'ledger.log'
+        if ((Test-Path -LiteralPath $ledger -PathType Leaf) -and (Get-Item -LiteralPath $ledger).Length -gt 1048576) {
+            $kept = Get-Content -LiteralPath $ledger -Tail 2000
+            [IO.File]::WriteAllText($ledger, (($kept -join "`n") + "`n"))
+        }
+        $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        $shown = if ($valid) { $watermark } else { 0 }
+        [IO.File]::AppendAllText($ledger, "$stamp`thook`t$($key.Substring(0, 8))`t$shown`t$printed`n")
+    } catch {}
+    return $body
+}
+
 function Get-PseudolifeToken([string]$TokenFile) {
     if (-not $TokenFile) {
         return [string]$env:PSEUDOLIFE_MCP_TOKEN
@@ -100,10 +153,34 @@ function Get-PseudolifeConnection {
     }
 }
 
+$rawInput = [Console]::In.ReadToEnd()
+$sessionId = ''
+$startReason = ''
+try {
+    $parsedInput = $rawInput | ConvertFrom-Json
+    $sessionId = [string]$parsedInput.session_id
+    $startReason = [string]$parsedInput.source
+    if (-not $startReason) { $startReason = [string]$parsedInput.session_start_reason }
+} catch {}
+
 if ($Event -eq 'UserPromptSubmit') {
     $disciplineLine = "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
-    Write-Context $disciplineLine
+    $text = $disciplineLine
+    try {
+        $digest = Read-TurnDigest $sessionId
+        if ($digest) { $text = $disciplineLine + "`n" + $digest }
+    } catch {}
+    Write-Context $text
     exit 0
+}
+
+if ($Event -eq 'SessionStart' -and $startReason -in 'resume', 'compact' -and $sessionId) {
+    # A resumed or compacted session lost the digest it saw; clearing the
+    # marker makes the next prompt print the current one afresh.
+    try {
+        $seenPath = Join-Path (Get-DigestDir) ((Get-DigestKey $sessionId) + '.seen')
+        if (Test-Path -LiteralPath $seenPath -PathType Leaf) { Remove-Item -LiteralPath $seenPath -Force }
+    } catch {}
 }
 
 $headers = @{}
@@ -149,7 +226,7 @@ try {
     } else { $null }
     $token = if ($managedTokenless) { '' } else { Get-PseudolifeToken $tokenFile }
     if ($token) { $headers.Authorization = "Bearer $token" }
-    $payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+    $payload = $rawInput | ConvertFrom-Json
     $sid = [string]$payload.session_id
     if ($Event -eq 'SessionStart') {
         $query = if ($sid) { '?session_id=' + [Uri]::EscapeDataString($sid) + '&source=' + [Uri]::EscapeDataString([string]$payload.source) } else { '' }
