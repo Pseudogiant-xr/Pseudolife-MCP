@@ -215,7 +215,11 @@ def test_a_copy_of_the_scripts_sends_the_same_digest_in_either_line_ending(tmp_p
     copy.mkdir()
     for name in SCRIPTS:
         text = (ROOT / "plugin/hooks" / name).read_bytes().replace(b"\r\n", b"\n")
-        (copy / name).write_bytes(text.replace(b"\n", newline.encode()))
+        # POSIX bash will not run a CRLF script at all (exit 2 on Linux CI),
+        # which is bash's concern, not the digest's: the script that runs
+        # stays LF in the bash variant; the other three carry the CRLF case.
+        keep_lf = hook == "bash" and name == "session-start.sh"
+        (copy / name).write_bytes(text if keep_lf else text.replace(b"\n", newline.encode()))
     server, worker, paths = _recording_daemon()
     try:
         env = _hook_env(tmp_path, server.server_port)
