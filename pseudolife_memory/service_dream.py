@@ -34,6 +34,12 @@ from pseudolife_memory.memory.labels import (INHERIT, contains_verbatim,
 
 logger = logging.getLogger(__name__)
 
+# Name of the daemon thread ``_fire_and_forget_dream`` starts. Pinned here
+# because the PG test fixtures wait for live threads of this name before
+# reaping backends (tests/pg_fixtures.py): a dream that outlives its test
+# reconnects after the reap and can deadlock the next test's TRUNCATE.
+SESSION_END_DREAM_THREAD_NAME = "session-end-dream"
+
 
 @contextmanager
 def _staged_slot(lessons, task: str, aspect: str):
@@ -2335,7 +2341,7 @@ class DreamOps:
             except Exception:  # noqa: BLE001 — background best-effort
                 logger.warning("session-end dream failed", exc_info=True)
 
-        threading.Thread(target=_run, name="session-end-dream",
+        threading.Thread(target=_run, name=SESSION_END_DREAM_THREAD_NAME,
                          daemon=True).start()
 
     def _load_infer_cursor(self) -> dict:

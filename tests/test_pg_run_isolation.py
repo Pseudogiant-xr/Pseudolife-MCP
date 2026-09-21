@@ -87,3 +87,106 @@ def test_bench_db_is_private_to_this_run():
 
     assert conninfo_to_dict(ladder_sweep.bench_url())["dbname"] == (
         f"pseudolife_memory_bench_{os.getpid()}")
+
+
+# ── In-process reaper victim: the end-of-session dream thread ───────────────
+# pg_conn's reaper also hits THIS process's own live dream thread (fired by
+# episode_end_session / reap_idle_sessions, outliving its test). The storage
+# layer reconnects it after the kill and the fresh transaction can deadlock
+# the fixture's TRUNCATE (CI run 35556355319, 2026-09-21). The fixture waits
+# for those threads first; these pin the helper it waits with.
+
+
+def test_wait_for_background_dreams_joins_only_dream_threads():
+    """A live dream-named thread is joined to completion; a thread with any
+    other name is not the fixture's business and is left running."""
+    import threading
+
+    from pseudolife_memory.service_dream import SESSION_END_DREAM_THREAD_NAME
+
+    finished = threading.Event()
+    release_other = threading.Event()
+
+    def _dream():
+        import time
+        time.sleep(0.3)
+        finished.set()
+
+    dream = threading.Thread(target=_dream, name=SESSION_END_DREAM_THREAD_NAME,
+                             daemon=True)
+    other = threading.Thread(target=release_other.wait, name="not-a-dream",
+                             daemon=True)
+    dream.start()
+    other.start()
+    try:
+        stragglers = pg_fixtures.wait_for_background_dreams(timeout=10.0)
+        assert stragglers == []
+        assert finished.is_set() and not dream.is_alive()
+        assert other.is_alive(), "a thread not named as a dream must be ignored"
+    finally:
+        release_other.set()
+        other.join(5.0)
+
+
+def test_wait_for_background_dreams_returns_stragglers_past_the_budget():
+    """A dream that does not finish inside the budget comes back to the
+    caller — the fixture fails loudly on it rather than racing it."""
+    import threading
+    import time
+
+    from pseudolife_memory.service_dream import SESSION_END_DREAM_THREAD_NAME
+
+    release = threading.Event()
+    stuck = threading.Thread(target=release.wait, name=SESSION_END_DREAM_THREAD_NAME,
+                             daemon=True)
+    stuck.start()
+    try:
+        stragglers = pg_fixtures.wait_for_background_dreams(timeout=0.05)
+        # `in`, not `==`: a real dream left by an earlier file on this
+        # worker would share the budget and land in the list too.
+        assert stuck in stragglers
+        # Reported once, a straggler is returned again WITHOUT a second
+        # wait — otherwise one hung dream costs the budget on every later
+        # PG test. Well under the 5 s budget proves no join happened.
+        started = time.monotonic()
+        assert stuck in pg_fixtures.wait_for_background_dreams(timeout=5.0)
+        assert time.monotonic() - started < 1.0
+    finally:
+        release.set()
+        stuck.join(5.0)
+        pg_fixtures._reported_stragglers.discard(stuck.ident)
+
+
+def test_fire_and_forget_dream_starts_the_thread_the_fixture_waits_for():
+    """The service's fire-and-forget thread carries the pinned name — if it
+    were renamed, the fixture's wait would silently match nothing."""
+    import threading
+    from types import SimpleNamespace
+
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.service_dream import SESSION_END_DREAM_THREAD_NAME
+
+    seen: list[str] = []
+    fake = SimpleNamespace(
+        dream_run_auto=lambda: seen.append(threading.current_thread().name))
+    MemoryService._fire_and_forget_dream(fake)
+    assert pg_fixtures.wait_for_background_dreams(timeout=10.0) == []
+    assert seen == [SESSION_END_DREAM_THREAD_NAME]
+
+
+def test_suite_scrubs_the_extractor_endpoint_from_the_environment():
+    """conftest drops the PSEUDOLIFE_DREAM_* endpoint selection at import, so
+    a shell with the ops values exported cannot send the dreams tests fire to
+    a live extractor — the no-op extractor is what keeps the fixture's dream
+    wait in the milliseconds. Timeout/token budgets are left alone."""
+    from tests.conftest import (
+        EXTRACTOR_ENDPOINT_ENV, scrub_extractor_endpoint_env,
+    )
+
+    env = {name: "x" for name in EXTRACTOR_ENDPOINT_ENV}
+    env["PSEUDOLIFE_DREAM_TIMEOUT_SECONDS"] = "30"
+    assert sorted(scrub_extractor_endpoint_env(env)) == sorted(EXTRACTOR_ENDPOINT_ENV)
+    assert env == {"PSEUDOLIFE_DREAM_TIMEOUT_SECONDS": "30"}
+    assert scrub_extractor_endpoint_env(env) == []          # idempotent
+    # And the live process really was scrubbed at conftest import.
+    assert not any(name in os.environ for name in EXTRACTOR_ENDPOINT_ENV)
