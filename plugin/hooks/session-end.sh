@@ -112,7 +112,14 @@ if [ -n "$SID" ] && [ -z "$CONNECTION_ERROR" ]; then
     # transient; --retry-all-errors would break curl < 7.71 outright.
     # Worst case 3+1+3=7s, inside the hook's 10s budget (guard-tested in
     # tests/test_plugin_packaging.py). The idle reaper backstops a miss.
-    curl -L --max-redirs 0 -sf --max-time 3 --retry 1 --retry-delay 1 \
+    CURL_BUDGET=(--max-time 3 --retry 1 --retry-delay 1)
+    if [ -n "$CODEX_HOOK_CONTEXT" ]; then
+        # Codex caps SessionEnd at three seconds (ops/setup-codex-hooks.py):
+        # one two-second attempt and no retry, as lifecycle.ps1 does; the
+        # idle reaper backstops a miss (guard-tested in tests/test_codex_hooks.py).
+        CURL_BUDGET=(--max-time 2)
+    fi
+    curl -L --max-redirs 0 -sf "${CURL_BUDGET[@]}" \
         "${AUTH[@]}" -X POST \
         -H "content-type: application/json" \
         -d "{\"session_id\":\"${SID}\"}" \

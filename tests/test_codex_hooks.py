@@ -64,9 +64,13 @@ def pwsh_run(*args, input=None, env=None, raw=False):
 def bash_run(script, *, input, env):
     bash = shutil.which("bash")
     if os.name == "nt":
+        # Git for Windows puts git.exe under cmd/, bin/ or mingw64/bin/
+        # depending on which directory PATH lists first; bash.exe is always
+        # <install>/bin/bash.exe, one or two levels up from it.
         git = shutil.which("git")
-        candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-        bash = str(candidate) if candidate and candidate.is_file() else None
+        candidates = ([Path(git).parents[1] / "bin/bash.exe",
+                       Path(git).parents[2] / "bin/bash.exe"] if git else [])
+        bash = next((str(c) for c in candidates if c.is_file()), None)
     if not bash:
         pytest.skip("Bash is not installed")
     return subprocess.run([bash, str(script)], input=input, env=env,
@@ -499,6 +503,39 @@ def test_posix_hooks_use_managed_rotatable_credential(tmp_path, event):
         worker.join(timeout=2)
 
 
+def test_codex_session_end_fits_the_three_second_cap(tmp_path):
+    """Codex caps SessionEnd at three seconds (ops/setup-codex-hooks.py),
+    while Claude's hooks.json allows ten. The bash script's Codex branch
+    must finish inside the cap: one attempt, no retry, like lifecycle.ps1."""
+    script = (ROOT / "plugin/hooks/session-end.sh").read_text(encoding="utf-8")
+    codex = re.search(r'CODEX_HOOK_CONTEXT"\s*\];?\s*then\s*(?:#[^\n]*\n\s*)*CURL_BUDGET=\(([^)]*)\)', script)
+    assert codex, "session-end.sh needs a Codex-context curl budget"
+    assert "--retry" not in codex.group(1)
+    max_time = int(re.search(r"--max-time\s+(\d+)", codex.group(1)).group(1))
+    setup = (ROOT / "ops/setup-codex-hooks.py").read_text(encoding="utf-8")
+    cap = int(re.search(r'"SessionEnd":\s*(\d+)\}\[event\]', setup).group(1))
+    assert max_time + 1 <= cap
+    # Live: a daemon that never answers must not hold the hook past the cap.
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_POST(self):
+            time.sleep(6)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    env = isolated_env(tmp_path / "codex-home")
+    env["PSEUDOLIFE_CODEX_HOOK"] = "1"
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = f"http://127.0.0.1:{server.server_port}"
+    try:
+        started = time.monotonic()
+        bash_run(ROOT / "plugin/hooks/session-end.sh", input='{"session_id":"fixture"}', env=env)
+        assert time.monotonic() - started < cap
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_native_prompt_reminder_matches_claude_script():
     import re
     ps = (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8")
@@ -631,9 +668,13 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
         tmp_path, bootstrap_success, shim_available, runtime_success, expected_state):
     bash = shutil.which("bash")
     if os.name == "nt":
+        # Git for Windows puts git.exe under cmd/, bin/ or mingw64/bin/
+        # depending on which directory PATH lists first; bash.exe is always
+        # <install>/bin/bash.exe, one or two levels up from it.
         git = shutil.which("git")
-        candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-        bash = str(candidate) if candidate and candidate.is_file() else None
+        candidates = ([Path(git).parents[1] / "bin/bash.exe",
+                       Path(git).parents[2] / "bin/bash.exe"] if git else [])
+        bash = next((str(c) for c in candidates if c.is_file()), None)
     if not bash:
         pytest.skip("Bash is not installed")
     repo = tmp_path / "repo"
