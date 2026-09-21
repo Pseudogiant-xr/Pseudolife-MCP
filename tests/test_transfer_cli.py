@@ -39,7 +39,7 @@ from pseudolife_memory.transfer_cli import (
     perform_export,
     perform_import,
 )
-from tests.pg_fixtures import pg_url  # noqa: F401  (fixture)
+from tests.pg_fixtures import await_background_dreams, pg_url  # noqa: F401  (fixture)
 
 _DIM = 1024
 # Messy leading components on purpose: all-0/1 vectors round-trip exactly
@@ -56,8 +56,11 @@ def _bank(pg_url):
     truncated, and leaked backends from other suites reaped — managed
     explicitly (NOT the pg_conn fixture) so tests can CLOSE it before
     import runs: perform_import refuses a database other connections hold,
-    and the fixture connection would trip that guard.
+    and the fixture connection would trip that guard. Same order as
+    ``pg_conn``: wait for this process's dream threads, THEN reap — a
+    dream killed mid-flight reconnects and can deadlock the truncate.
     """
+    await_background_dreams()
     with psycopg.connect(pg_url) as conn:
         conn.execute("SET search_path TO public")
         conn.execute(

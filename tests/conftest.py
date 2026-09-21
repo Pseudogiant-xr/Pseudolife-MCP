@@ -45,6 +45,32 @@ from tests.client_environment import isolate_client_environment
 _client_test_home = tempfile.TemporaryDirectory(prefix="pseudolife-test-codex-")
 isolate_client_environment(os.environ, _client_test_home.name)
 
+# The suite never talks to a real dream extractor. The endpoint selection
+# reads PSEUDOLIFE_DREAM_* from the ambient environment (memory/dream.py,
+# resolve_endpoints), so a shell with the ops values exported would send
+# every end-of-session dream a test fires to a live model — and pg_conn now
+# waits for those dream threads before it reaps (tests/pg_fixtures.py), so a
+# real call could hold the next PG test for the extractor timeout (240 s
+# default) instead of the no-op extractor's milliseconds. Tests that need an
+# endpoint set it with monkeypatch; none read the ambient value.
+EXTRACTOR_ENDPOINT_ENV = (
+    "PSEUDOLIFE_DREAM_BASE_URL", "PSEUDOLIFE_DREAM_MODEL",
+    "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL", "PSEUDOLIFE_DREAM_FALLBACK_MODEL",
+    "PSEUDOLIFE_DREAM_EXTRACTOR_MODE", "PSEUDOLIFE_DREAM_API_KEY",
+)
+
+
+def scrub_extractor_endpoint_env(environ) -> list[str]:
+    """Drop the extractor endpoint selection from ``environ``; returns the
+    names that were set. Only the selection variables — timeout and token
+    budgets are harmless without an endpoint and stay as the operator left
+    them."""
+    return [name for name in EXTRACTOR_ENDPOINT_ENV
+            if environ.pop(name, None) is not None]
+
+
+scrub_extractor_endpoint_env(os.environ)
+
 # Bench-DB isolation: evals' reset_bench() reaps every backend on its
 # database before truncating, so concurrent suite runs must not share one
 # bench DB (same crossfire as pg_fixtures' per-run test DB — see its module

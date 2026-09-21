@@ -20,6 +20,17 @@ backend on its database before truncating, so two concurrent suite runs
 sharing one database would terminate each other's live connections
 (AdminShutdown on a different victim set every run). A private database
 scopes the reaper to this run's own leaked backends.
+
+The reaper has a second, in-process victim: the daemon thread
+``episode_end_session`` / ``reap_idle_sessions`` fire for the
+end-of-session dream. It outlives the test that fired it, so the next
+test's ``pg_conn`` terminates it mid-dream; ``PostgresStorage.conn`` then
+reconnects on the thread's next query and its reads interleave with the
+fixture's TRUNCATE lock order (CI run 35556355319, 2026-09-21: deadlock
+between the TRUNCATE and the reconnected dream backend on ONE worker's
+private database). ``pg_conn`` therefore waits for every live dream
+thread in this process before it reaps — see
+``wait_for_background_dreams``.
 """
 
 from __future__ import annotations
@@ -27,6 +38,8 @@ from __future__ import annotations
 import atexit
 import os
 import sys
+import threading
+import time as _time
 
 import pytest
 
@@ -51,6 +64,9 @@ _TEST_DB = f"pseudolife_memory_test_{os.getpid()}"
 # tests/test_bench_reset_tables.py.
 from pseudolife_memory.storage.schema import (  # noqa: E402
     BENCH_RESET_TABLES as _ALL_TABLES,
+)
+from pseudolife_memory.service_dream import (  # noqa: E402
+    SESSION_END_DREAM_THREAD_NAME,
 )
 
 
@@ -231,6 +247,63 @@ def ensure_test_db() -> None:
     _ensure_state[key] = None
 
 
+# Join budget for a live dream thread. A hang detector, not a wait: with no
+# extractor endpoint in the environment (conftest scrubs the PSEUDOLIFE_DREAM_*
+# selection variables, so the dream takes the no-op extractor) one cycle ran
+# in 26 ms locally and well under a second on the CI runner (2026-09-21,
+# CI run 35556355319). Anything near this budget is a hung dream.
+DREAM_WAIT_BUDGET_SECONDS = 60.0
+
+# Thread idents already reported as stragglers. A thread stuck past the
+# budget once is not re-joined on every later PG test — that would turn one
+# hung dream into a full budget plus a failure per remaining test.
+_reported_stragglers: set[int] = set()
+
+
+def wait_for_background_dreams(
+    timeout: float = DREAM_WAIT_BUDGET_SECONDS,
+) -> list[threading.Thread]:
+    """Join every live end-of-session dream thread in this process.
+
+    ``episode_end_session`` / ``reap_idle_sessions`` start a daemon thread
+    per fired dream (``_fire_and_forget_dream``) and return at once, so
+    the thread routinely outlives the test that fired it. Reaping backends
+    while it runs terminates its connection mid-dream; the storage layer
+    reconnects on the next query and that fresh transaction can deadlock
+    the fixture's TRUNCATE (see the module docstring). Threads are matched
+    by the name the service pins, so every ``MemoryService`` instance in
+    the process is covered, whichever fixture built it. The join budget
+    is shared across threads; whatever is still alive when it runs out is
+    returned so the caller can fail loudly instead of racing it. A thread
+    reported once is returned again without a second wait.
+    """
+    deadline = _time.monotonic() + timeout
+    stragglers: list[threading.Thread] = []
+    for thread in threading.enumerate():
+        if (thread.name != SESSION_END_DREAM_THREAD_NAME
+                or thread is threading.current_thread()):
+            continue
+        if thread.ident not in _reported_stragglers:
+            thread.join(max(0.0, deadline - _time.monotonic()))
+        if thread.is_alive():
+            _reported_stragglers.add(thread.ident)
+            stragglers.append(thread)
+    return stragglers
+
+
+def await_background_dreams() -> None:
+    """The wait every reap-then-truncate setup runs first: block until this
+    process's dream threads finish, and fail the test on a hung one rather
+    than race it. Shared by ``pg_conn`` and tests/test_transfer_cli.py's
+    hand-managed bank connection."""
+    stragglers = wait_for_background_dreams()
+    if stragglers:
+        pytest.fail(
+            f"{len(stragglers)} end-of-session dream thread(s) still running "
+            f"after {DREAM_WAIT_BUDGET_SECONDS:g}s; reaping them would race "
+            "this setup's TRUNCATE")
+
+
 def _skip_or_raise(exc: BaseException) -> None:
     """The one branch every PG fixture takes on a failed probe: an absent
     server skips only when database coverage is optional."""
@@ -279,10 +352,25 @@ def pg_service(pg_url, pg_conn, tmp_path, monkeypatch):
 @pytest.fixture()
 def pg_conn(pg_url):
     """Per-test connection with schema ensured and all tables truncated."""
+    yield from _pg_conn_session(pg_url)
+
+
+def _pg_conn_session(pg_url):
+    """The ``pg_conn`` body as a plain generator: wait for this process's
+    background dreams, reap leaked backends, ensure the schema, truncate,
+    re-seed the schema_version row, yield the connection. Separate from the
+    fixture so tests/test_pg_fixture_dream_wait.py can run one setup pass
+    on demand and pin that the wait happens BEFORE the first connection."""
     from pseudolife_memory.storage.schema import (
         SCHEMA_META_VERSION,
         ensure_schema,
     )
+
+    # BEFORE the reap: a dream thread the previous test fired is this
+    # process's own live backend. Killing it mid-dream makes the storage
+    # layer reconnect, and that fresh transaction can deadlock the TRUNCATE
+    # below (module docstring).
+    await_background_dreams()
 
     with psycopg.connect(pg_url) as conn:
         # Pin to public BEFORE any schema/truncate work — mirrors
@@ -294,8 +382,9 @@ def pg_conn(pg_url):
         conn.commit()
         # Reap leaked backends from tests that built a MemoryService /
         # PostgresStorage and never closed it. Such a connection holds locks on
-        # the public tables, so the TRUNCATE below would block and hit
-        # lock_timeout. Safe: this database is private to this pytest process
+        # the public tables, so the TRUNCATE below would block indefinitely
+        # (this connection sets no lock_timeout; only PostgresStorage does).
+        # Safe: this database is private to this pytest process
         # (see module docstring), so only this run's own leftovers die here.
         with conn.cursor() as cur:
             cur.execute(

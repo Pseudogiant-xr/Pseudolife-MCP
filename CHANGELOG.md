@@ -26,6 +26,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `version_mismatch: true` with the recovery, instead of leaving the
   comparison to the reader.
 
+### Security (2026-09-21 — anyio 4.14.2, Dependabot alerts 16–18)
+- **`anyio` bumped 4.14.0 → 4.14.2 in `ops/requirements.lock.txt`**
+  (CVE-2026-63374 / GHSA-82r6-8w77-94w6, critical: `TLSStream` encoded
+  internationalized host names with IDNA 2003, so a certificate issued for
+  the IDNA 2003 form validated on a hijacked connection; CVE-2026-63349 /
+  GHSA-3w57-8xmc-8v26, high: `open_process` forwarded `group` where
+  `extra_groups` was meant, so child processes kept the parent's
+  supplementary groups; CVE-2026-64847 / GHSA-5p39-cfhj-2xmp, medium:
+  process-pool workers could block forever on an undrained stderr pipe).
+  None of the three paths is reachable: nothing in the tree calls
+  `run_process`, `open_process`, or the process pool, and the only anyio TLS
+  path is httpcore's async backend under the coordination adapter and the
+  shim's streamable-HTTP client, both of which talk to the daemon URL (plain
+  HTTP on loopback by default). Taken anyway as a clean patch bump: 4.14.2
+  declares the same dependencies as 4.14.0, every lockfile consumer
+  (httpcore, mcp, starlette) already accepts it, and a dry-run resolve
+  against the bumped lock installs anyio alone. CI installs from
+  `pyproject.toml`, not the lock, so the daemon image build is what
+  exercises the pin.
+
 ### Fixed (2026-09-21 — corrections commit as one decision)
 - Explicit supersede and consolidate operations now stage source retirement,
   trace invalidation, replacement storage, and any capacity movement together.
