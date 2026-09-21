@@ -146,7 +146,7 @@
    "d": [
     "GET /api/hook/session-start → stdout becomes session context",
     "Fail-open: daemon down → friendly fallback, still exit 0",
-    "Payload capped at 9,500 chars (client caps stdout at 10k)"
+    "Payload capped at 9,500 chars (client caps stdout at 10k)", "On resume or compact clears the coordination digest's .seen marker so the next prompt prints the current digest afresh"
    ]
   },
   {
@@ -160,7 +160,7 @@
    "d": [
     "One-line memory discipline injected on every user turn",
     "Recall-before-review: search the bank, then compare to the files",
-    "No daemon call — offline-safe, always exit 0"
+    "No daemon call — offline-safe, always exit 0", "Coordination digest: reads the shim's per-session digest file (SHA-256 of the stdin session_id under PSEUDOLIFE_DIGEST_DIR) and prints it only when its watermark passed the shared .seen marker, then advances it; quiet turns add nothing; one ledger line per firing"
    ]
   },
   {
@@ -273,7 +273,7 @@
     "Holds the instance credential privately and injects it as X-PL-Agent / X-PL-Agent-Key on every coordination call — never from model arguments",
     "The explicit state path is the only resume key: opened O_EXCL/O_NOFOLLOW at owner-only permissions, never overwritten; a failed or cancelled first register releases its empty reservation",
     "60s attachment lease renewed by a 20s heartbeat task; a request retries at most twice (5xx and 429) before the adapter degrades",
-    "Registers resumable = a state path exists; note_turn() marks a forwarded tool call and the next heartbeat carries active:true, dropped for the process after one unexpected_parameter from an older daemon",
+    "Registers resumable = a state path exists; note_turn() marks a forwarded tool call and the next heartbeat carries active:true, dropped for the process after one unexpected_parameter from an older daemon", "Renders a per-turn digest from the pending_preview that attach/heartbeat return; the watermark moves only when the text changes; with a digest_path (host session id) the file and its .seen marker are what the prompt hooks read, and deliver_hint() hands each change to a tool result once plus a one-line reminder every HINT_REPEAT_CALLS while mail stays pending",
     "An outage pauses the stream and the heartbeat task re-attaches with backoff (1 s to 60 s), replaying unacknowledged mail under the new generation; a restored notice follows the once-per-outage warning",
     "inbox() long-polls receive (wait_seconds 30), marks one attempt per message per attachment and frames every event with a fixed agent-origin header; acknowledgment stays an explicit model action"
    ]
@@ -1039,11 +1039,11 @@
    "d": [
     "send locks both agent rows FOR UPDATE in agent-ID order, so reciprocal sends cannot deadlock each other",
     "(sender, request_id) is the idempotency key: a repeat with the same fingerprint returns the first receipt, a different one is request_conflict",
-    "receive is cursor-based and non-destructive — ordered by per-recipient sequence, nothing is consumed until ack or expiry",
+    "receive is cursor-based and non-destructive — ordered by per-recipient sequence, nothing is consumed until ack or expiry", "ack takes one message_id or several comma-separated (MAX_PAGE): a batch returns receipts in order plus the ids that were not this mailbox's, under the agent row lock so overlapping batches serialize",
     "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
     "The coordination_hlc_highwater meta row only ever moves forward (numeric compare), so pruning mail cannot regress mailbox stamps",
     "Live delivery is bounded to MAX_ATTEMPTS (3) per message across attachments; the adapter's receive skips exhausted mail, an explicit receive still returns it",
-    "prune() removes addresses with no lease and no retained message after seven days idle, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true; list_agents shows leased or hour-active peers, leased first, and counts the rest as idle_omitted"
+    "prune() removes addresses with no lease and no retained message after seven days idle, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true; list_agents shows leased or hour-active peers, leased first, and counts the rest as idle_omitted", "attach and heartbeat return pending_preview beside pending_count: the PREVIEW_LIMIT (5) oldest pending messages with sender label and a PREVIEW_EXCERPT (100-char) excerpt, read-only, for the shim's turn digest"
    ]
   },
   {

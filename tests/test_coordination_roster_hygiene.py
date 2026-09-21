@@ -383,6 +383,7 @@ def _session_proxy(monkeypatch, env, tmp_path):
         async def __aexit__(self, *args): pass
         instance_headers = {"X-PL-Agent": "a", "X-PL-Agent-Key": "k"}
         unread_hint = None
+        def deliver_hint(self): return None
 
     async def proxy(*args, **kwargs):
         seen["proxy"] = kwargs

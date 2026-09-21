@@ -93,6 +93,7 @@ def test_opted_in_shim_injects_private_instance_identity(monkeypatch):
             pass
         instance_headers = {"X-PL-Agent": "a1", "X-PL-Agent-Key": "private-fixture"}
         unread_hint = None
+        def deliver_hint(self): return None
         async def inbox(self):
             yield
     async def proxy(*args, **kwargs):
@@ -173,6 +174,7 @@ def test_codex_tool_metadata_overrides_session_and_attaches_lazily(monkeypatch):
             "X-PL-Principal": "fixture-principal",
         }
         unread_hint = None
+        def deliver_hint(self): return None
         def note_turn(self): pass
 
     class Registry:
@@ -547,6 +549,7 @@ def test_codex_channel_keeps_eager_channel_adapter(monkeypatch):
         async def __aexit__(self, *args): pass
         instance_headers = {"X-PL-Agent": "a", "X-PL-Agent-Key": "k"}
         unread_hint = None
+        def deliver_hint(self): return None
         async def inbox(self): yield
 
     async def proxy(*args, **kwargs):

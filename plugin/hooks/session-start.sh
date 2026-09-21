@@ -115,6 +115,19 @@ fi
 INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+[ -n "$SRC" ] || SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"session_start_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+# A resumed or compacted session lost the coordination digest it saw;
+# clearing the marker makes the next prompt hook print the current one
+# afresh (see user-prompt-submit.sh for the file layout).
+case "$SRC" in
+    resume|compact)
+        DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
+        if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
+            KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+            [ -n "$KEY" ] && rm -f "$DIGEST_DIR/$KEY.seen" 2>/dev/null
+        fi
+        ;;
+esac
 QS=""
 [ -n "$SID" ] && QS="?session_id=${SID}&source=${SRC}"
 # One retry bridges the daemon's short maintenance stalls (CMS autosave

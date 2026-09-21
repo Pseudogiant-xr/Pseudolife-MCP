@@ -19,6 +19,7 @@ import logging
 import math
 import secrets
 import time
+import unicodedata
 import uuid
 from typing import Any
 
@@ -126,6 +127,13 @@ ACTIVE_WINDOW = 3600
 # and keeps the long window, so nothing an older adapter can still resume
 # is removed early.
 EPHEMERAL_AGENT_RETENTION = ACTIVE_WINDOW
+# The attach/heartbeat answer previews this many of the oldest pending
+# messages, each cut to this many characters, so the shim can show a turn
+# digest without a receive call. Five lines of a hundred characters plus
+# the header fit the 200-300 token budget the per-turn check-in design set
+# for a routine change (2026-09-20); the count says what the preview omits.
+PREVIEW_LIMIT = 5
+PREVIEW_EXCERPT = 100
 # Live delivery attempts per message across attachments. Each attachment
 # may attempt a pending message once; past this total the message is left
 # for explicit receive so one unacknowledged message cannot wake the host on
@@ -156,6 +164,52 @@ def _string(value: Any, limit: int, field: str, *, empty: bool = True) -> str:
     if any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
         raise CoordinationError(f"invalid_{field}")
     return value
+
+
+def _excerpt(text: Any) -> str:
+    """One line of a message body for a digest: whitespace and every
+    control or format character (C0, C1, bidi overrides, zero-width marks)
+    collapse to single spaces, then a hard cut."""
+    if not isinstance(text, str):
+        return ""
+    cleaned = " ".join("".join(" " if unicodedata.category(c)[0] == "C" else c
+                               for c in text).split())
+    return cleaned if len(cleaned) <= PREVIEW_EXCERPT else cleaned[:PREVIEW_EXCERPT] + "..."
+
+
+_ID_CHARS = frozenset("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_")
+
+
+def _message_ids(value: Any) -> tuple[list[str], bool]:
+    """One id, or several: comma-separated, or a JSON array of strings, which
+    is how a host that stringifies list parameters sends a list. Items are
+    id-shaped only, so a bracketed fragment fails loudly instead of landing
+    in ``missing``; duplicates drop in order; at most MAX_PAGE. Returns the
+    ids and whether the caller used list syntax. The 8192-character bound on
+    the whole string is incidental; MAX_PAGE is the limit."""
+    _string(value, 8192, "message_id", empty=False)
+    text = value.strip()
+    if text.startswith("["):
+        try:
+            items = json.loads(text)
+        except ValueError:
+            raise CoordinationError("invalid_message_id") from None
+        if not isinstance(items, list) or not items or not all(isinstance(i, str) for i in items):
+            raise CoordinationError("invalid_message_id")
+        batch = True
+    else:
+        items = text.split(",")
+        batch = "," in text
+    ids: list[str] = []
+    for item in items:
+        item = item.strip()
+        if not item or len(item) > 120 or any(c not in _ID_CHARS for c in item):
+            raise CoordinationError("invalid_message_id")
+        if item not in ids:
+            ids.append(item)
+    if len(ids) > MAX_PAGE:
+        raise CoordinationError("invalid_message_id")
+    return ids, batch
 
 
 def _hash(credential: str) -> str:
@@ -336,6 +390,25 @@ class CoordinationStore:
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
                          "AND acknowledged_at IS NULL AND expires_at>%s", (agent_id, self.clock()))["n"]
 
+    def _pending_preview(self, agent_id):
+        """The oldest pending messages, bounded, for the shim's per-turn digest.
+
+        Oldest first so a backlog shows what has waited longest; the count
+        beside it says how much the preview omits. Reading is not delivery:
+        nothing here touches attempts or acknowledgements."""
+        rows = self._all(
+            "SELECT m.message_id,m.sender_agent_id,m.created_at,m.text,a.label AS sender_label "
+            "FROM coordination_messages m LEFT JOIN coordination_agents a ON a.agent_id=m.sender_agent_id "
+            "WHERE m.recipient_agent_id=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "ORDER BY m.recipient_sequence LIMIT %s", (agent_id, self.clock(), PREVIEW_LIMIT))
+        return [{"message_id": r["message_id"], "sender_agent_id": r["sender_agent_id"],
+                 "sender_label": r["sender_label"] or "", "created_at": r["created_at"],
+                 "excerpt": _excerpt(r["text"])} for r in rows]
+
+    def _mailbox_state(self, agent_id):
+        return {"pending_count": self._pending_count(agent_id),
+                "pending_preview": self._pending_preview(agent_id)}
+
     def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False):
         _string(attachment_id, 120, "attachment_id", empty=False)
         self._fields(wake_enabled=wake_enabled)
@@ -350,9 +423,9 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET attachment_id=%s,generation=%s,lease_until=%s,"
                 "last_activity=%s,wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
                 (attachment_id, generation, now + ATTACHMENT_LEASE, now, wake_enabled, agent_id))
-            pending = self._pending_count(agent_id)
+            mailbox = self._mailbox_state(agent_id)
         return {"agent_id": agent_id, "generation": generation, "lease_until": now + ATTACHMENT_LEASE,
-                "pending_count": pending}
+                **mailbox}
 
     def _attachment(self, row, attachment_id, generation):
         if (row["attachment_id"] != attachment_id or row["generation"] != generation
@@ -382,9 +455,9 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET lease_until=%s,"
                 "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
                 (until, active, now, agent_id))
-            pending = self._pending_count(agent_id)
+            mailbox = self._mailbox_state(agent_id)
         return {"agent_id": agent_id, "generation": generation, "lease_until": until,
-                "pending_count": pending}
+                **mailbox}
 
     def detach(self, principal, agent_id, credential, *, attachment_id, generation):
         with self.storage._txn():
@@ -513,20 +586,37 @@ class CoordinationStore:
                 "after": f"{agent_id}:{rows[-1]['recipient_sequence'] if rows else seq}"}
 
     def ack(self, principal, agent_id, credential, *, message_id):
+        """Acknowledge one message, or several comma-separated (at most
+        MAX_PAGE). One id returns its receipt or message_not_found; several
+        return the receipts in the order given plus the ids that were not this
+        mailbox's to acknowledge, so a batch never fails because one id went
+        stale. The list is a string because some hosts stringify list
+        parameters. Acknowledging is not completion; a cursor is never an
+        acknowledgement."""
+        ids, batch = _message_ids(message_id)
         with self.storage._txn():
+            # The agent row lock serializes acknowledgements per mailbox, so
+            # two overlapping batches cannot deadlock on message rows.
             self._auth(principal, agent_id, credential, lock=True)
             # An acknowledgment is activity for retention: a client that only
             # reads and acknowledges, holding no lease, must not count as idle.
             self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
                                       "WHERE agent_id=%s", (self.clock(), agent_id))
-            row = self._one("SELECT * FROM coordination_messages WHERE message_id=%s "
-                            "AND recipient_agent_id=%s FOR UPDATE", (message_id, agent_id))
-            if row is None:
-                raise CoordinationError("message_not_found")
-            if row["acknowledged_at"] is None:
-                row = self._one("UPDATE coordination_messages SET acknowledged_at=%s "
-                                "WHERE message_id=%s RETURNING *", (self.clock(), message_id))
-            return self._receipt(row)
+            # Two statements for the whole batch: the calls run under the
+            # coordination lock, which heartbeats wait on.
+            found = {row["message_id"]: row for row in self._all(
+                "SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
+                "AND message_id = ANY(%s) FOR UPDATE", (agent_id, ids))}
+            pending = [one for one in ids if one in found and found[one]["acknowledged_at"] is None]
+            if pending:
+                for row in self._all("UPDATE coordination_messages SET acknowledged_at=%s "
+                                     "WHERE message_id = ANY(%s) RETURNING *", (self.clock(), pending)):
+                    found[row["message_id"]] = row
+            missing = [one for one in ids if one not in found]
+            if not batch and missing:
+                raise CoordinationError("message_not_found")  # rolls the activity bump back
+        receipts = [self._receipt(found[one]) for one in ids if one in found]
+        return {"receipts": receipts, "missing": missing} if batch else receipts[0]
 
     def mark_attempt(self, principal, agent_id, credential, *, message_id, attachment_id, generation):
         with self.storage._txn():

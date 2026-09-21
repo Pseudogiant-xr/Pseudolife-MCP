@@ -28,6 +28,7 @@ import uuid
 from dataclasses import dataclass
 from typing import NoReturn
 
+from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for
 from pseudolife_memory.session_title import title_from_cwd
 
 try:
@@ -817,8 +818,6 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                         if coordination_registry is not None:
                             adapter = await coordination_registry.get(
                                 thread_id, snapshot=snapshot)
-                            failure_hint = coordination_registry.unread_hint(
-                                thread_id, adapter)
                             if adapter is not None:
                                 call_headers.update({
                                     name: adapter.instance_headers[name]
@@ -826,11 +825,14 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                                     if name in adapter.instance_headers
                                 })
                                 adapter.note_turn()
+                            # Fetched once, at result time: the adapter's hint
+                            # marks the digest delivered when read.
                             call_hint = lambda: coordination_registry.unread_hint(
                                 thread_id, adapter)
                             if (adapter is None and _requires_coordination_identity(
                                     params.name, params.arguments)):
-                                raise _CoordinationUnavailableError(failure_hint)
+                                raise _CoordinationUnavailableError(
+                                    coordination_registry.unread_hint(thread_id, None))
                 _require_current_credential(provider, snapshot)
                 async with _upstream(snapshot, attempt, call_headers) as (remote, _):
                     _require_current_credential(provider, snapshot)
@@ -1084,7 +1086,10 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                     initial_snapshot=startup_snapshot, state_path=state_path,
                     wake_enabled=wake, label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "agent"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
-                    task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid)),
+                    task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid,
+                    # The prompt hook reads this file by the same session id
+                    # it receives on stdin; a host without one gets hints only.
+                    digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")))),
                     timeout=_ADAPTER_STARTUP_SECONDS)
             except (AdapterError, CredentialError, TimeoutError):
                 where = f" ({state_path})" if state_path else ""
@@ -1094,7 +1099,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_adapter"] = adapter
-            kwargs["coordination_hint"] = lambda: adapter.unread_hint
+            kwargs["coordination_hint"] = adapter.deliver_hint
         if channel:
             kwargs["channel_inbox"] = adapter.inbox if adapter is not None else idle_inbox
         await _proxy(url, token, session_uid, provider=provider, **kwargs)

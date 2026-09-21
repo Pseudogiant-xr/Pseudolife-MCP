@@ -11,6 +11,8 @@ import sys
 import time
 import uuid
 
+from .coordination_identity import default_digest_dir, digest_path_for
+
 
 def thread_id_from_meta(meta) -> str | None:
     """Return an authoritative-looking canonical Codex thread UUID.
@@ -82,11 +84,13 @@ class CodexCoordinationRegistry:
                  adapter_factory=None, startup_seconds: float = 3.0,
                  retry_seconds: float = 5.0,
                  max_threads: int = 128, clock=None, delivery_url=None,
-                 delivery_token=None, delivery_factory=None, provider=None):
+                 delivery_token=None, delivery_factory=None, provider=None,
+                 digest_dir=None):
         self.url = url
         self.token = token if provider is None else None
         self.provider = provider
         self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
+        self.digest_dir = Path(digest_dir) if digest_dir is not None else default_digest_dir()
         self._adapter_factory = adapter_factory
         self._startup_seconds = startup_seconds
         self._retry_seconds = retry_seconds
@@ -199,7 +203,10 @@ class CodexCoordinationRegistry:
                         "remains available.")
             return ("Coordination: identity attachment unavailable; ordinary memory "
                     "remains available.")
-        return adapter.unread_hint
+        # adapter_factory is an injection seam; an adapter without the gated
+        # form falls back to the raw digest.
+        deliver = getattr(adapter, "deliver_hint", None)
+        return deliver() if deliver is not None else adapter.unread_hint
 
     async def get(self, thread_id: str, *, snapshot=None):
         canonical = thread_id_from_meta({"threadId": thread_id})
@@ -292,6 +299,9 @@ class CodexCoordinationRegistry:
                     self.url, token, state_path=path, **options,
                     wake_enabled=delivery is not None,
                     delivery_transport="codex",
+                    # The Codex prompt hook receives the thread id as its
+                    # session_id and reads the digest under the same name.
+                    digest_path=digest_path_for(thread_id, self.digest_dir),
                     label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "codex"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
                     task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""),
