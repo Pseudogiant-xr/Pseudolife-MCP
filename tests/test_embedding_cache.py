@@ -32,6 +32,9 @@ from pseudolife_memory.utils.config import EmbeddingConfig
 class _CountingST:
     """Deterministic stub that records every text the model encodes."""
 
+    def float(self):
+        return self
+
     def __init__(self, model_name: str, device: str | None = None, **kwargs) -> None:
         self.encoded: list[list[str]] = []
 

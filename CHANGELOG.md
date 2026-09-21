@@ -6,6 +6,282 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-21 — corrections commit as one decision)
+- Explicit supersede and consolidate operations now stage source retirement,
+  trace invalidation, replacement storage, and any capacity movement together.
+  Encoding, admission, or write-through failures leave the original entries
+  active; ambiguous commit responses reconcile from durable state before the
+  bank can be read or saved again. File-backed banks persist complete Before
+  and After snapshots before publishing the replacement in memory.
+
+### Fixed (2026-09-21 — the Codex SessionEnd hook fits its three-second cap)
+- `plugin/hooks/session-end.sh` under a Codex runtime makes one two-second
+  request with no retry, matching `lifecycle.ps1`; the previous 3+1+3 s
+  worst case overran the 3 s cap `ops/setup-codex-hooks.py` sets, so a busy
+  daemon could turn the episode close into a hook timeout. Claude's budget
+  (10 s in `hooks.json`) and its retry are unchanged.
+- Docs: the coordination recovery guide's rebind example named port 8099
+  where the daemon serves 8765, and did not say that a state path under any
+  Git repository is refused.
+### Added (2026-09-21 — acknowledge several messages in one call)
+- `memory_message(action="ack")` takes one `message_id` or several
+  comma-separated (at most 50). The parameter stays a string because some
+  hosts stringify list parameters, and the form that produces — a JSON
+  array of strings — is read as that list. A batch returns `receipts` in
+  the order given and `missing` for ids that were not this mailbox's to
+  acknowledge, instead of failing whole; a single id keeps its receipt and
+  `message_not_found`. Items must be id-shaped (letters, digits, `-`, `_`);
+  anything else, empty items, or more than 50 ids is `invalid_message_id`,
+  never a silent `missing`. The batch is two statements under the agent row
+  lock, so overlapping batches serialize.
+
+### Added (2026-09-21 — coordination mail reaches the model once per turn, for free when quiet)
+- The daemon's `attach` and `heartbeat` answers carry `pending_preview`
+  beside `pending_count`: the five oldest pending messages with sender
+  label and a one-line excerpt (`PREVIEW_LIMIT`, `PREVIEW_EXCERPT`). Reading
+  the preview is not delivery; attempts and acknowledgements are untouched.
+- The shim's adapter renders a per-turn digest from that preview and keeps a
+  watermark that moves only when the rendered text changes. With a host
+  session id (`CLAUDE_CODE_SESSION_ID` for Claude Code, `_meta.threadId` per
+  Codex thread) it writes the digest to
+  `~/.pseudolife-mcp/digests/<sha256(id)>.txt` (`PSEUDOLIFE_DIGEST_DIR`
+  overrides the directory; the file goes on clean exit).
+- The UserPromptSubmit hooks (`user-prompt-submit.sh`, `lifecycle.ps1`) read
+  that file by the `session_id` they receive and print the digest only when
+  the watermark passed the shared `.seen` marker, then advance it. A quiet
+  turn adds no text. SessionStart on `resume` or `compact` clears the marker
+  so the next prompt prints the current digest afresh. Every firing that
+  finds a digest appends one line to `ledger.log` beside it (time, session
+  prefix, watermark, bytes added) for cost measurement.
+- The tool-result hint carries the same digest under the same marker, so a
+  change is delivered once whichever of the hook or the hint sees it first,
+  and hosts without hooks (Desktop Chat) still get it. While mail stays
+  pending and unchanged, a one-line reminder rides every tenth tool result
+  (`CoordinationAdapter.HINT_REPEAT_CALLS`). The count-only hint text is
+  replaced by the digest header.
+- Test helper: `tests/test_codex_hooks.py` now finds Git Bash when `git` on
+  PATH is `mingw64/bin/git.exe`, so the bash hook tests run on Windows
+  instead of silently skipping.
+
+### Fixed (2026-09-21 — avoid slow CPU embedding precision drift)
+- CPU torch embeddings explicitly retain float32 inference when newer
+  Transformers versions default to the checkpoint's lower precision. This
+  avoids slow bfloat16 inference on older CI CPUs while preserving the
+  previously validated CPU precision, real models and full test coverage.
+  GPU inference and the optional ONNX backend keep their existing precision.
+
+### Fixed (2026-09-20 — CI requires its database coverage)
+- Both full Linux CI lanes now fail when their test PostgreSQL is unavailable,
+  including before collection and at shared fixture/reachability checks.
+  Local runs can still skip database tests when PostgreSQL is optional.
+- The same full suites and two-worker file scheduling now record slow-test
+  timings, skip reasons, JUnit results and runner CPU/memory/I/O diagnostics
+  for investigating variable CI runtime. Test failures retain their exit code.
+
+### Changed (2026-09-20 — the coordination roster shows who is working)
+- `memory_agents(action="list")` returned every registered address. On the
+  live bank that was 90 rows, 11 of them leased and 67 Codex threads whose
+  shim had been killed with the row still marked attached, 5 to 160 hours
+  idle, no task, no mail; and a parked shim looked as busy as a working one because the
+  20 s lease heartbeat bumped `last_activity`. The list now shows peers
+  holding a lease or active within the last hour
+  (`storage.coordination.ACTIVE_WINDOW`), leased first, reports the
+  number of other matching peers as `idle_omitted` and sets `truncated`
+  when the page cut listed peers. A peer's public agent ID stays
+  addressable while its row exists.
+- Lease renewal is no longer activity. The shim notes every tool call it
+  forwards (`CoordinationAdapter.note_turn`) and the next heartbeat carries
+  `active: true`; only then does the daemon move `last_activity`. A shim
+  upgraded ahead of its daemon drops the flag for the process after one
+  `unexpected_parameter` refusal, so the lease survives either upgrade
+  order; deploy the daemon first all the same.
+- Addresses nothing can resume are retired sooner. The adapter registers
+  `capabilities.resumable` (true when a state file backs the address); an
+  address registered `resumable: false` is removed once both its lease and
+  its last activity are an hour old and no retained message references it
+  (`EPHEMERAL_AGENT_RETENTION`), instead of seven days. The lease
+  condition matters: the first heartbeat after a daemon restart prunes
+  before it is served, so a parked shim whose lease lapsed during the
+  restart must not lose its address. If a state-less address is retired
+  all the same, the adapter registers a fresh one instead of stopping with
+  advice to restore a saved identity it never had; state-backed addresses
+  keep the deliberate-recovery rule. Addresses that declared themselves
+  resumable, or that predate the flag, keep the seven-day rule, so nothing
+  an older adapter can still resume goes early.
+- A Claude Code session keeps its coordination address across resume: with
+  `PSEUDOLIFE_AGENT_STATE_DIR` set, the shim keys a private state file by
+  the `CLAUDE_CODE_SESSION_ID` the host exports to it
+  (`shim._session_state_path`). An explicit `PSEUDOLIFE_AGENT_STATE` still
+  wins; without either, each launch gets a new address as before. The
+  shim's comment that MCP servers never receive the session id was wrong
+  (checked 2026-09-20 in a running shim's environment).
+
+### Fixed (2026-09-20 — `memory_graph_review` scope description)
+- `memory_graph_review(action="list", scope=...)` described `scope` as
+  "keep only findings of this kind". It has always been a memory-source
+  filter — the same project scope the Console's Atlas switcher sends to
+  `/api/graph/review?scope=` — keeping only analyzer findings (duplicate,
+  orphan, dubious edge, test artifact, unattributed) whose entities carry
+  that source, while queued proposals (`proposed_link` / `merge_candidate`
+  / `junk_candidate`) always list (omit or `"all"` for everything).
+  Passing a finding kind such as `merge_candidate` matched no entity and
+  returned an empty analyzer listing, which the PR #316 review caught after
+  a draft hint had told agents to page that way. The served description and
+  the README tool row now state the real contract; no behavior change. Two
+  tests pin it: the served text (`tests/test_tool_consolidation.py`) and
+  the service semantics — a source keeps its entities' findings, a
+  finding-kind string yields none (`tests/test_graph.py`).
+
+### Fixed (2026-09-20 — deep dream results lost between daemon and shim)
+- `memory_dream(action="deep")` through the stdio shim failed after a few
+  seconds as "The memory daemon returned an invalid MCP response" while the
+  daemon logged nothing and answered a raw HTTP probe correctly. The SDK
+  client's SSE decoder refuses any server-sent event over 1 MiB (httpx2
+  `DEFAULT_MAX_EVENT_SIZE_BYTES`) and the SDK reports that as a closed
+  connection; a 316-proposal review queue with snippets made a 597 KB tool
+  result that was 1,124,250 bytes on the wire once escaped into the JSON-RPC
+  envelope and duplicated as `structuredContent`. Latent since the SDK v2
+  port (2026-08-25); it surfaced as the queue grew.
+- The MCP tool now bounds the deep response: when the JSON text exceeds
+  250 KB, each top-level list is cut to its leading 40 items, halving that
+  head until the text fits, and `truncated` maps each cut key to its full
+  length with a `hint`. A response that fits is returned untouched. The
+  service method, the Console and the sweep tick are unchanged.
+- The shim widens the SDK client's event limit to 16 MiB at both places it
+  builds an event source (the module `EventSource` for a POST's response
+  stream, and the http client's `sse` method for the listen stream and for
+  resuming a cut response), so any other large tool result arrives instead
+  of vanishing.
+- A response stream that closes after dispatch is now classified
+  `response_lost` ("response stream closed before a result arrived") instead
+  of `protocol`, so the next diagnosis starts at the transport, not the daemon.
+
+### Fixed (2026-09-20 — fresh and upgraded client setup)
+- Coordination sends wait for the initial clock reseed even while memory
+  hydration has already published its CMS, preserving ordering against stored
+  history during concurrent startup. Failed reseeds cannot be bypassed by a
+  previously cached readiness result.
+- Desktop shim compatibility probes exclude inherited token, token-map, and
+  token-file variables, including temporary installer credential sources.
+- Benchmark database selection preserves PostgreSQL URI options and accepts
+  keyword connection strings when changing the isolated database name.
+- Docker-tier setup validates the no-spawn guard's effective value, reports
+  incomplete existing registrations, and refuses a fresh stdio registration
+  when the client cannot set the guard. Repair guidance preserves custom
+  commands, arguments, connection settings, and credentials.
+- Codex setup helpers load the checkout's credential implementation before
+  consulting installed packages. Fresh installs and upgrades from older host
+  packages no longer fail before hook setup and MCP registration; subprocess
+  regressions cover both without installed dependencies or a repository
+  `PYTHONPATH`.
+- Source installers install the host shim from the same checkout as the
+  Docker daemon, replacing an older or same-version installation instead of
+  mixing new client configuration with an older PyPI shim. Existing custom
+  MCP registrations remain preserved; their registered interpreter must be
+  upgraded separately when it differs from the installer-managed executable.
+  Fresh registrations pin the installed executable; reruns upgrade recognized
+  installer-managed commands and report a failure if a bare command still
+  resolves to a competing shim on `PATH`.
+- Claude Desktop setup preserves an existing private credential file on
+  ordinary reruns and refuses an unusable explicit replacement before changing
+  its configuration. Fresh setup can select a unique `claude-desktop`
+  credential from the daemon's per-principal token map; ambiguous maps require
+  an explicit credential file instead of producing a broken registration.
+
+### Fixed (2026-09-20 — coordination no longer waits behind the dream)
+- Every adapter-authenticated mailbox operation (`context`, `register`,
+  `attach`, `heartbeat`, `receive`, `send`, `ack`, `agents`, `update`) used
+  to run under the service lock on the shared storage connection, so it
+  queued behind whatever else held that lock. On the live daemon the idle dream and the
+  session reaper hold it for seconds at a time (2026-09-20 log: `_dispatch
+  waited 8.6s`, `autosave_if_changed waited 47s`); the adapter's per-call
+  identity check has a 5s timeout, so tool calls failed with "Coordination
+  identity is unavailable", heartbeats missed and 60s leases expired, and a
+  shim whose adapter timed out at startup ran memory-only for its whole
+  life ("instance_authentication_required" on every later mailbox call).
+  `coordination.dispatch` no longer takes the service lock: the store runs
+  on a dedicated autocommit connection
+  (`storage.coordination.CoordinationConnection`, same session setup and
+  commit check as the shared one, heal-on-next-use after a Postgres restart
+  but never mid-transaction) serialized by its own
+  `MonitoredLock("coordination")`. Mailbox rows were already guarded by SQL
+  row locks, so a second connection is safe. Only `send` needs the fully
+  initialized service (its HLC stamp must outrank stored ones), and it pays
+  that once per process unless a memory call already did; every other
+  action, including a cold daemon's first `attach`/`heartbeat`, needs only
+  the durable tier. A bound-identity request from the wrong bank is still
+  refused before any embedder load. The no-adapter `memory_agents` awareness
+  view is unchanged and still reads episodes under the service lock.
+  `HybridLogicalClock` gained an internal lock because `send` now ticks it
+  outside the service lock. `tests/test_coordination_dispatch_isolation.py`
+  holds the service lock for 3s and asserts
+  `context`/`register`/`attach`/`receive`/`send` each complete in under 1s
+  (watched red at 3.01s), that the mailbox connection is distinct,
+  autocommit and committed as seen from the service connection, that it
+  reconnects after loss, that an initialized service is never re-locked by
+  a mailbox call, and that a cold service pays full init only for `send`
+  and only once.
+
+### Fixed (2026-09-20 — Desktop registrar refuses a shim that cannot read the token file)
+- `ops/register_claude_desktop.py` probes `<command> --help` for the
+  `PSEUDOLIFE_MCP_TOKEN_FILE` marker before writing anything when a token
+  file is requested, and refuses (exit 4, config and credential file
+  untouched, upgrade named) a shim whose help answers without it. The
+  installers previously took the shim from PyPI, and every release through 0.15.0
+  reads only the literal `PSEUDOLIFE_MCP_TOKEN` — which Desktop never
+  delivers — so the Claude Desktop client shipped above would have
+  registered an entry those shims silently ignore, reproducing the
+  2026-09-19 "unhandled errors in a TaskGroup" failure with no hint. A
+  shim from before `--help` existed (it answers "unknown mode") is refused
+  the same way; a probe that yields no evidence (missing, not executable,
+  timeout, any other non-zero exit, exit 0 with no output) is noted and
+  not blocking. The probe runs with no stdin and without the token
+  variable, so a wrapper that drops its arguments cannot start a real
+  shim holding the bearer. `--skip-shim-check` bypasses it. A frozen copy
+  of the real 0.15.0 help (`tests/fixtures/`) is driven through a real
+  subprocess in the tests, so "refuses the released shim" is reproducible
+  rather than a hand-run. The shim's
+  `--help` now carries a credentials paragraph naming both env forms and
+  their precedence (the file wins), which is the marker the probe reads;
+  a test pins the two together and proves the check is load-bearing.
+  README's Updating section says the shim is a separate install that does
+  not move with `ops/update.*`.
+
+### Added (2026-09-20 — Claude Desktop client)
+- `ops/install.sh --client claude-desktop` / `ops\install.ps1 -Client
+  claude-desktop` register the stdio shim in `claude_desktop_config.json`
+  through the new standard-library-only `ops/register_claude_desktop.py`,
+  which both installers call: absolute shim path (Desktop's sanitized PATH
+  omits pipx/venv bin dirs), the `claude-desktop` writer id, the Docker-tier
+  no-spawn guard, and — when the daemon is token-gated — a
+  `PSEUDOLIFE_MCP_TOKEN_FILE` path, never a token value. Because the shim
+  reads that file first and unconditionally, the registrar never points
+  the entry at a file it did not write or validate: it writes the file
+  (owner-only, via the package's credential writer) from the installer's
+  `PSEUDOLIFE_MCP_TOKEN` (environment or `ops/.env`), or migrates a literal
+  token already in the entry into it and drops the literal from the config;
+  with nothing to write and no usable file it registers without a
+  credential and exits 3 so the installer reports it. It resolves the
+  config location per OS, including the Windows Store/MSIX package cache
+  (naming the other copy when both exist), backs the file up before
+  changing it, preserves every other key and any hand-added env var, and
+  is idempotent. Menu option 5, preflight (which now checks for python
+  3.10+ for this client), the capability matrix, the writer-id default and
+  the wiring ladder know the new client.
+
+### Fixed (2026-09-20 — shim startup against a token-gated daemon)
+- The shim exits at startup with a one-line explanation when `/health`
+  reports `auth: true` and it holds neither `PSEUDOLIFE_MCP_TOKEN` nor
+  `PSEUDOLIFE_MCP_TOKEN_FILE`, instead of 401-ing on every call — which
+  Claude Desktop surfaced only as "Couldn't start for Cowork and Code
+  sessions. Error: unhandled errors in a TaskGroup (1 sub-exception)" for
+  four days after the 2026-09-14 credential activation. Desktop launches
+  MCP servers with a sanitized environment, so an OS-level token export
+  never reaches the shim; the message says so and names the config fix.
+  A configured token file that is missing or not owner-only is reported
+  the same way at startup — the per-call `credential_unavailable` error
+  reaches Desktop as the same opaque wrapper.
+
 ### Fixed (2026-09-14 — Windows deployment authentication)
 - The Windows updater now removes inherited authentication variables before
   launching Compose, rather than passing empty values that override the

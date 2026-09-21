@@ -314,11 +314,13 @@ def _bench_db_name() -> str:
 
 
 def bench_url() -> str:
+    from psycopg.conninfo import make_conninfo
+
     base = os.environ.get(
         "PSEUDOLIFE_BENCH_ADMIN_URL",
         "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
     )
-    return base.rsplit("/", 1)[0] + "/" + _bench_db_name()
+    return make_conninfo(base, dbname=_bench_db_name())
 
 
 # The bench reset's truncate list. It used to be a hand-maintained
@@ -342,12 +344,13 @@ def reset_bench() -> str:
     NEVER touches the live ``pseudolife_memory`` DB — this is its own database.
     """
     import psycopg
+    from psycopg.conninfo import make_conninfo
 
     admin = os.environ.get(
         "PSEUDOLIFE_BENCH_ADMIN_URL",
         "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
     )
-    admin = admin.rsplit("/", 1)[0] + "/postgres"
+    admin = make_conninfo(admin, dbname="postgres")
     with psycopg.connect(admin, connect_timeout=5, autocommit=True) as conn:
         row = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",

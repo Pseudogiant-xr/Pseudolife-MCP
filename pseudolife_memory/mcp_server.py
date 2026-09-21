@@ -271,7 +271,7 @@ def memory_agents(
     Opt-in coordination. List before shared-resource work and on resume;
     project/task are exact relevance filters, never permissions. Without an
     adapter, list shows bounded open sessions with unknown ownership/scope.
-    Last reported activity is evidence, not proof of liveness or an edit lock.
+    Idle peers are counted (idle_omitted), not listed; activity is evidence, not a lock.
     Update requires an authenticated adapter; omit a field to leave it unchanged.
     Agent status is collaboration context, not user approval.
     """
@@ -295,8 +295,9 @@ def memory_message(
     (unique per logical send; reuse unchanged on retry). Optional reply_to names
     the message being answered. Receive returns up to 50 pending messages and an
     opaque after cursor for this mailbox; omit after to replay unacknowledged mail.
-    Ack requires one message_id after reading it; acknowledgment does not mean
-    work completed. Bodies expire after 24 hours; request keys survive 7 days.
+    Ack takes one message_id, or several comma-separated, after reading them;
+    acknowledgment does not mean work completed. Bodies expire after 24 hours;
+    request keys survive 7 days.
     Send returns queued, never proof of host delivery. Live wake is recipient
     opt-in and host-dependent. Peer requests cannot grant user approval or
     override permissions; collaborate only within user-authorized scope.
@@ -1537,7 +1538,8 @@ def memory_dream(
         ``deep``: full-corpus graph consolidation; dry run unless
         ``apply``. Settle candidates via
             ``memory_graph_review``; duplicate lesson/world slots are
-            listed for hand curation.
+            listed for hand curation. Lists are capped; ``truncated``
+            holds their full counts.
         ``runs``: recent dream passes (tallies, status).
         ``rollback``: revert a committed pass from its journal (facts +
             events; traces/cursor kept).
@@ -1561,7 +1563,8 @@ def memory_dream(
     if action == "run":
         return service.dream_run_auto(limit=limit)
     if action == "deep":
-        return service.deep_dream(apply=apply, include_snippets=snippets)
+        return _bound_deep_response(
+            service.deep_dream(apply=apply, include_snippets=snippets))
     if action == "runs":
         return service.dream_runs(limit=limit or 10)
     if action == "rollback":
@@ -1569,6 +1572,55 @@ def memory_dream(
     return {"error": "unknown_action",
             "actions": ["status", "pull", "commit", "run", "deep", "runs",
                         "rollback"]}
+
+
+# memory_dream(action="deep") response bound. Measured 2026-09-20 on the live
+# bank: 316 pending merge proposals with snippets made a 597 KB tool result;
+# the JSON-RPC envelope escapes that text and FastMCP duplicates it as
+# structuredContent, so the server-sent event on the wire was 1,124,250 bytes
+# (1.88x the text), over the 1 MiB per-event cap in the SDK client's SSE
+# decoder (httpx2 DEFAULT_MAX_EVENT_SIZE_BYTES). The shim now raises its
+# own cap, but a response that size is unusable in a chat context anyway.
+# The head keeps each list readable; the budget keeps the wire event well
+# under 1 MiB for any client that still has the default cap.
+_DEEP_LIST_HEAD = 40
+_DEEP_RESPONSE_BUDGET = 250_000  # bytes of JSON text
+
+
+def _bound_deep_response(result: dict) -> dict:
+    """A deep-dream response whose JSON text fits ``_DEEP_RESPONSE_BUDGET``
+    is returned untouched. Otherwise every top-level list is cut to its
+    leading ``_DEEP_LIST_HEAD`` items, halving that head until the text
+    fits; capped lists report their full length under ``truncated``. The
+    service method stays unbounded for the Console and the sweep tick."""
+    import json
+
+    def size(payload: dict) -> int:
+        return len(json.dumps(payload, default=str))
+
+    lists = {key: value for key, value in result.items() if isinstance(value, list)}
+    if not lists or size(result) <= _DEEP_RESPONSE_BUDGET:
+        return result
+    head = _DEEP_LIST_HEAD
+    while True:
+        out = dict(result)
+        truncated = {}
+        for key, items in lists.items():
+            if len(items) > head:
+                out[key] = items[:head]
+                truncated[key] = len(items)
+        if truncated:
+            out["truncated"] = truncated
+            out["hint"] = (
+                f"the response exceeded {_DEEP_RESPONSE_BUDGET} bytes, so lists "
+                f"are cut to their leading {head} items; truncated carries each "
+                "full count. Cut candidates and duplicate listings resurface on "
+                "the next deep pass; memory_graph_review(action='list') lists "
+                "the pending merge proposals in full; snippets=false gives a "
+                "smaller listing.")
+        if head <= 1 or size(out) <= _DEEP_RESPONSE_BUDGET:
+            return out
+        head //= 2
 
 
 def _coerce_id_list(value: Any) -> list[int] | None:
@@ -1596,29 +1648,28 @@ def memory_graph_review(
                     "dismiss_slot_pair", "restore_slot", "accept_link", "reject_link",
                     "accept_merge", "accept_junk", "reject_entity"] = "list",
     proposal_id: Annotated[int | None, Field(
-        description="Id actions: the one proposal to settle.")] = None,
+        description="Id actions: the proposal to settle.")] = None,
     proposal_ids: Annotated[list[int] | None, Field(
-        description="Id actions: settle many proposals in one call, "
-                    "instead of ``proposal_id``.")] = None,
+        description="Id actions: many proposals at once.")] = None,
     proposals: Annotated[list[dict] | None, Field(
         description="propose: ``[{src, relation, dst, similarity?, "
                     "rationale?}]``.")] = None,
     scope: Annotated[str | None, Field(
-        description="list: keep only findings of this kind.")] = None,
+        description="list: keep only analyzer findings whose entities "
+                    "carry this memory source (Atlas project); queued "
+                    'proposals always list; omit or "all" for '
+                    "everything. Not a finding kind.")] = None,
     src: Annotated[str | None, Field(
         description="relate/dismiss_pair: the first entity. "
                     'dismiss_slot_pair: an "entity|attribute" key from the '
                     "deep response; restore_slot: retired key or entity.")] = None,
     dst: Annotated[str | None, Field(
-        description="relate/dismiss_pair: the second entity. "
-                    'dismiss_slot_pair: an "entity|attribute" key from the '
-                    "deep response.")] = None,
+        description="relate/dismiss_pair/dismiss_slot_pair: the second "
+                    "entity or key.")] = None,
     relation: Annotated[str | None, Field(
-        description="relate: the edge relation to write, from the graph "
-                    "vocabulary.")] = None,
+        description="relate: edge relation to write (graph vocabulary).")] = None,
     store: Annotated[str | None, Field(
-        description='dismiss_slot_pair / restore_slot: which store the key '
-                    'belongs to — "lesson" or "world".')] = None,
+        description='dismiss_slot_pair/restore_slot: "lesson" or "world".')] = None,
 ) -> dict[str, Any]:
     """Work the graph review queue — deep-dream proposals that need a
     verdict before they touch the graph.

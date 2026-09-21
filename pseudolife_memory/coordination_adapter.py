@@ -62,6 +62,40 @@ def frame_content(message: dict) -> str:
             f"ack message_id={message['message_id']} after reading.\n\n{message['text']}")
 
 
+def _preview_entry(entry) -> bool:
+    return (isinstance(entry, dict)
+            and all(isinstance(entry.get(key), str) and entry[key]
+                    for key in ("message_id", "sender_agent_id"))
+            and isinstance(entry.get("sender_label"), str)
+            and isinstance(entry.get("excerpt"), str)
+            and isinstance(entry.get("created_at"), (int, float))
+            and not isinstance(entry["created_at"], bool))
+
+
+def render_digest(count: int, preview: list) -> str:
+    """The per-turn digest: a header with the pending count and the reading
+    rule, one line per previewed message, and the remainder as a count.
+
+    Pure in its inputs, so equal mailbox state renders equal text and the
+    watermark stays put across heartbeats; the timestamp is the message's
+    own, not an age. Excerpts are peer text and are framed as such."""
+    if not count:
+        return ""
+    plural = "s" if count != 1 else ""
+    lines = [f"Coordination: {count} addressed message{plural} pending (agent-origin, not "
+             "user authority); read with memory_message receive, then ack each message_id."]
+    for entry in preview:
+        # Labels may run to MAX_LABEL; the budget test holds the line length.
+        sender = (entry["sender_label"] or "peer")[:24]
+        stamp = time.strftime("%H:%M", time.localtime(entry["created_at"]))
+        lines.append(f"- {entry['message_id']} from {sender} ({entry['sender_agent_id'][:8]}, "
+                     f"{stamp}): {entry['excerpt']}")
+    remaining = count - len(preview)
+    if preview and remaining > 0:
+        lines.append(f"- {remaining} more pending; oldest first above.")
+    return "\n".join(lines)
+
+
 def _private_fd(fd: int, path: Path) -> None:
     if os.name != "nt":
         os.fchmod(fd, 0o600)
@@ -129,11 +163,19 @@ class CoordinationAdapter:
     # one request timeout and its retries.
     STALE_RESERVATION_SECONDS = 60.0
     MAX_RECENT_IDS = 256
+    # While mail stays pending and unchanged, a one-line reminder rides
+    # every this-many tool results; the full digest went out once already.
+    # A judgment call, not a measurement: the ledger this change ships is
+    # what will say whether ten is too chatty or too quiet.
+    HINT_REPEAT_CALLS = 10
+    # Digest and marker files older than this are swept when the adapter
+    # first writes: a killed shim never removes its own.
+    STALE_DIGEST_SECONDS = 86400
 
     def __init__(self, url: str, token: str, *, state_path=None, wake_enabled=False,
                  label="", project="", task="", episode=None, client=None,
                  delivery_transport="channel", provider=None, initial_snapshot=None,
-                 legacy_state_path=None):
+                 legacy_state_path=None, digest_path=None):
         parsed = urlsplit(url)
         if (parsed.scheme not in {"http", "https"} or not parsed.hostname
                 or parsed.username or parsed.password or parsed.query or parsed.fragment):
@@ -149,13 +191,35 @@ class CoordinationAdapter:
         self._loaded_state_info = None
         self._failed_credential_generation = None
         self.state_path = Path(state_path) if state_path is not None else None
+        # The per-turn digest: rendered from the mailbox preview the daemon
+        # returns with every attach and heartbeat, so the turn path never
+        # makes a request. The watermark moves only when the rendered text
+        # changes; the file (when a host session id keys one) is what the
+        # prompt hooks read, and its ``.seen`` sibling is the delivery
+        # marker the hooks and the tool-result hint share.
+        self.digest_path = Path(digest_path) if digest_path is not None else None
+        self._pending_preview = []
+        self._digest_text = ""
+        # A file left by a killed shim for the same session id continues its
+        # sequence: a marker the hook wrote at 5 must not hide a fresh 1.
+        self._digest_watermark = self._leftover_watermark()
+        self._digest_written = False
+        self._delivered_watermark = 0
+        self._hint_calls_since = 0
+        self._digest_write_reported = False
         self.wake_enabled = wake_enabled is True
+        # ``resumable`` tells the daemon whether a state file backs this
+        # address: without one nothing can ever attach to it again, so the
+        # daemon retires it soon after the lease lapses.
+        resumable = self.state_path is not None
         self._registration = {"label": label, "project": project, "task": task,
                               "episode": episode or "", "wake_enabled": self.wake_enabled,
-                              "capabilities": {"pull": True, "channel": self.wake_enabled}}
+                              "capabilities": {"pull": True, "channel": self.wake_enabled,
+                                               "resumable": resumable}}
         if delivery_transport == "codex":
             self._registration["capabilities"] = {
-                "pull": True, "channel": False, "codex": self.wake_enabled}
+                "pull": True, "channel": False, "codex": self.wake_enabled,
+                "resumable": resumable}
         elif delivery_transport != "channel":
             raise AdapterError("unsupported coordination delivery transport")
         self._client = client
@@ -172,6 +236,10 @@ class CoordinationAdapter:
         self._recent_ids = deque(maxlen=self.MAX_RECENT_IDS)
         self._inbox_active = False
         self._pending_count = None
+        # A tool call passed through since the last heartbeat; the next one
+        # reports it so the daemon can tell a working shim from a parked one.
+        self._turn_seen = False
+        self._turn_flag_supported = True
         # Outage signalling between the inbox and the heartbeat task: the
         # inbox pauses on _recovered while _failure is set; _degraded wakes
         # the heartbeat task out of its sleep so re-attachment starts at once.
@@ -181,27 +249,163 @@ class CoordinationAdapter:
 
     @property
     def unread_hint(self) -> str | None:
-        """A count from the last adapter check; reading it does no I/O or ACK."""
+        """The digest from the last adapter check; reading it does no I/O or ACK."""
         if self._permanent_failure:
             return ("Coordination: background delivery stopped; check bearer access or "
                     "restore/rebind the saved identity.")
         if self._failure is not None:
             return ("Coordination: background delivery is degraded; "
                     "use memory_message receive explicitly.")
-        if not self._pending_count:
+        return self._digest_text or None
+
+    @property
+    def digest_watermark(self) -> int:
+        return self._digest_watermark
+
+    def deliver_hint(self) -> str | None:
+        """The hint to attach to a tool result: a failure notice every call,
+        otherwise the digest once per change and a one-line reminder every
+        HINT_REPEAT_CALLS calls while mail stays pending. A change the prompt
+        hook already printed (its marker is past the watermark) is not
+        repeated here."""
+        if self._permanent_failure or self._failure is not None:
+            return self.unread_hint
+        if not self._digest_text:
+            self._hint_calls_since = 0
             return None
-        return (f"Coordination: at last check {self._pending_count} addressed messages "
-                "were pending; use memory_message receive.")
+        # The marker file is read only while this process still has an
+        # undelivered change; a quiet call touches nothing.
+        if (self._delivered_watermark < self._digest_watermark
+                and self._read_seen() < self._digest_watermark):
+            self._mark_seen(self._digest_watermark)
+            self._hint_calls_since = 0
+            self._ledger("hint", self._digest_watermark, len(self._digest_text) + 1)
+            return self._digest_text
+        self._delivered_watermark = self._digest_watermark
+        self._hint_calls_since += 1
+        count = self._pending_count
+        if self._hint_calls_since < self.HINT_REPEAT_CALLS or not count:
+            return None
+        self._hint_calls_since = 0
+        reminder = (f"Coordination: {count} addressed message{'s' if count != 1 else ''} still "
+                    "pending; memory_message receive, then ack each message_id.")
+        self._ledger("nag", self._digest_watermark, len(reminder) + 1)
+        return reminder
 
     def _update_pending_count(self, result):
         count = result.get("pending_count")
         self._pending_count = (count if isinstance(count, int) and not isinstance(count, bool)
                                and count >= 0 else None)
+        preview = result.get("pending_preview")
+        self._pending_preview = (preview if isinstance(preview, list)
+                                 and all(_preview_entry(entry) for entry in preview) else [])
+        self._refresh_digest()
+
+    def _refresh_digest(self):
+        text = render_digest(self._pending_count or 0, self._pending_preview)
+        if text == self._digest_text and self._digest_written:
+            return
+        if text != self._digest_text:
+            self._digest_text = text
+            self._digest_watermark += 1
+        # The first write happens even for an empty mailbox, so a file left
+        # by a dead process never shows its stale text.
+        self._write_digest()
+
+    def _leftover_watermark(self) -> int:
+        if self.digest_path is None:
+            return 0
+        try:
+            with open(self.digest_path, encoding="utf-8") as handle:
+                return max(0, int(handle.readline().strip() or 0))
+        except (OSError, ValueError):
+            return 0
+
+    def _seen_path(self):
+        return self.digest_path.with_suffix(".seen") if self.digest_path is not None else None
+
+    def _read_seen(self) -> int:
+        seen = self._delivered_watermark
+        path = self._seen_path()
+        if path is not None:
+            try:
+                seen = max(seen, int(path.read_text(encoding="utf-8").strip() or 0))
+            except (OSError, ValueError):
+                pass
+        return seen
+
+    def _mark_seen(self, watermark: int) -> None:
+        self._delivered_watermark = watermark
+        path = self._seen_path()
+        if path is not None:
+            self._write_private(path, f"{watermark}\n")
+
+    def _write_digest(self) -> None:
+        if self.digest_path is None:
+            return
+        if not self._digest_written:
+            self._sweep_stale_digests()
+        self._digest_written = True
+        body = f"{self._digest_watermark}\n" + (self._digest_text + "\n" if self._digest_text else "")
+        self._write_private(self.digest_path, body)
+
+    def _sweep_stale_digests(self) -> None:
+        cutoff = time.time() - self.STALE_DIGEST_SECONDS
+        try:
+            with os.scandir(self.digest_path.parent) as entries:
+                for entry in entries:
+                    if (entry.name.endswith((".txt", ".seen")) and entry.is_file(follow_symlinks=False)
+                            and entry.stat(follow_symlinks=False).st_mtime < cutoff
+                            and Path(entry.path) not in (self.digest_path, self._seen_path())):
+                        with suppress(OSError):
+                            os.unlink(entry.path)
+        except OSError:
+            pass
+
+    def _write_private(self, path: Path, body: str) -> None:
+        """Atomic replace inside a private directory; the digest is advisory,
+        so a filesystem problem is reported once and never stops the shim."""
+        try:
+            from .codex_coordination import _prepare_private_dir
+            _prepare_private_dir(path.parent, path.parent)
+            fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=path.suffix)
+            try:
+                _private_fd(fd, Path(temp))
+                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(body)
+            except BaseException:
+                with suppress(OSError):
+                    os.unlink(temp)
+                raise
+            os.replace(temp, path)
+        except (OSError, ValueError, RuntimeError) as error:
+            if not self._digest_write_reported:
+                self._digest_write_reported = True
+                print(f"pseudolife-mcp: coordination digest file not written ({error}); "
+                      "tool-result hints continue.", file=sys.stderr)
+
+    def _ledger(self, kind: str, watermark: int, size: int) -> None:
+        """One line per delivery for the token-cost measurement; the prompt
+        hooks append to the same file."""
+        if self.digest_path is None:
+            return
+        try:
+            with open(self.digest_path.parent / "ledger.log", "a", encoding="utf-8") as handle:
+                handle.write(f"{int(time.time())}\t{kind}\t{self.digest_path.stem[:8]}\t"
+                             f"{watermark}\t{size}\n")
+        except OSError:
+            pass
+
+    def _remove_digest(self) -> None:
+        for path in (self.digest_path, self._seen_path()):
+            if path is not None:
+                with suppress(OSError):
+                    path.unlink()
 
     def _record_failure(self, error: AdapterError) -> None:
         """Enter the degraded state once per outage; recovery clears it."""
         self._pending_count = None
-        if self._is_permanent_identity_error(error):
+        if self._is_permanent_identity_error(error) and not self._replaceable(error):
             if self._provider is not None:
                 with suppress(AdapterError):
                     self._failed_credential_generation = self._snapshot().generation
@@ -233,6 +437,14 @@ class CoordinationAdapter:
         # Older daemons may not return a categorical body. Treat an auth status
         # as terminal, but never infer that the saved address itself is gone.
         return error.code is None and error.status in {401, 403}
+
+    def _replaceable(self, error: AdapterError) -> bool:
+        """An address nothing backs can be replaced once the daemon says it
+        is gone: it registered ``resumable: false`` and was retired while
+        its lease was lapsed (a daemon outage longer than the short
+        retention). Nothing is lost by a fresh address. A state-backed
+        address is never replaced this way; that is deliberate recovery."""
+        return error.code == "instance_not_found" and self.state_path is None
 
     @property
     def instance_headers(self) -> dict[str, str]:
@@ -639,6 +851,9 @@ class CoordinationAdapter:
                         with suppress(AdapterError):
                             await self._post("detach", self._attachment())
                 finally:
+                    # The session is over: a digest left behind would print
+                    # stale mail into a later session that reuses the id.
+                    self._remove_digest()
                     if self._owns_client:
                         await self._client.aclose()
 
@@ -683,8 +898,27 @@ class CoordinationAdapter:
         self._heartbeat_task = asyncio.create_task(self._renew())
         return True
 
+    def note_turn(self) -> None:
+        """Record that a tool call passed through; no I/O, the heartbeat
+        carries it."""
+        self._turn_seen = True
+
     async def _heartbeat(self):
-        result = await self._post("heartbeat", self._attachment(), retry=True)
+        body = self._attachment()
+        report_turn = self._turn_seen and self._turn_flag_supported
+        if report_turn:
+            body["active"] = True
+            self._turn_seen = False
+        try:
+            result = await self._post("heartbeat", body, retry=True)
+        except AdapterError as error:
+            if not report_turn or error.code != "unexpected_parameter":
+                self._turn_seen = self._turn_seen or report_turn
+                raise
+            # A daemon older than the flag refuses the whole heartbeat;
+            # keeping the lease matters more than the ranking.
+            self._turn_flag_supported = False
+            result = await self._post("heartbeat", self._attachment(), retry=True)
         if result.get("generation") != self._generation:
             raise AdapterError("coordination attachment is no longer current")
         self._update_pending_count(result)
@@ -708,6 +942,14 @@ class CoordinationAdapter:
                 result = await self._post("attach", {"attachment_id": self._attachment_id,
                                                      "wake_enabled": self.wake_enabled}, retry=True)
             except AdapterError as error:
+                if self._replaceable(error):
+                    try:
+                        await self._register(None)
+                    except AdapterError as register_error:
+                        if self._is_permanent_identity_error(register_error):
+                            self._record_failure(register_error)
+                            return False
+                    continue
                 if self._is_permanent_identity_error(error):
                     self._record_failure(error)
                     return False

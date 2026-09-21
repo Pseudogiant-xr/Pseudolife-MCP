@@ -23,12 +23,27 @@ pip install -e .[dev]
 
 Tests need a Postgres to talk to. Easiest is the bundled stack's instance
 (`docker compose -f ops/docker-compose.yml up -d pseudolife-pg`) — the suite
-finds it at `127.0.0.1:5433` on its own. Point at a different server with
-`PSEUDOLIFE_TEST_DATABASE_URL` (it wins whenever set):
+finds it at `127.0.0.1:5433` on its own, reading the role password from
+`ops/.env` (`POSTGRES_PASSWORD`; `PSEUDOLIFE_TEST_PG_PASSWORD` overrides it).
+A server that answers but rejects the credentials makes the PG-backed tests
+**error**, not skip — only an absent server skips them — so a rotated
+password can never produce a green run by accident. Point at a different
+server with `PSEUDOLIFE_TEST_DATABASE_URL` (it wins whenever set):
 
 ```bash
 export PSEUDOLIFE_TEST_DATABASE_URL="postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test"
 ```
+
+URI query options and keyword connection strings are preserved when selecting
+isolated test databases. Eval-backed tests use the same server unless
+`PSEUDOLIFE_BENCH_ADMIN_URL` explicitly selects another one. Reachable
+permission or setup failures also error instead of skipping.
+
+The local password reader accepts quoted literals and inline comments.
+Compose variable expansion in `POSTGRES_PASSWORD` is refused with a safe
+diagnosis; use a single-quoted literal or `PSEUDOLIFE_TEST_PG_PASSWORD` for
+that case. Credential-bearing parser frames are omitted from error reports,
+including reports with local variables enabled.
 
 Without that override each pytest process provisions its own private
 `pseudolife_memory_test_<pid>` database and drops it at interpreter exit, so

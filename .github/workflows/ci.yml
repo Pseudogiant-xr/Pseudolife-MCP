@@ -14,7 +14,7 @@
 #                       Postgres coverage possible there; the FULL suite on
 #                       Windows stays future work (embedder wall-time).
 # Kept lean: master-push + PR triggers only, cancel-in-progress,
-# pip + HuggingFace caches, no artifacts (pass/fail is the product).
+# pip + HuggingFace caches, diagnostic artifacts for the full Linux lanes.
 name: CI
 
 on:
@@ -137,7 +137,17 @@ jobs:
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
           OMP_NUM_THREADS: "2"
-        run: python -m pytest -q -n 2 --dist loadfile
+          PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
+        run: bash ops/ci_tests.sh
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: ci-results/
+          retention-days: 14
+          if-no-files-found: warn
 
   test-lite-linux:
     runs-on: ubuntu-latest
@@ -215,7 +225,17 @@ jobs:
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
           OMP_NUM_THREADS: "2"
-        run: python -m pytest -q -n 2 --dist loadfile
+          PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
+        run: bash ops/ci_tests.sh
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-lite-linux-diagnostics
+          path: ci-results/
+          retention-days: 14
+          if-no-files-found: warn
 
   test-lite-windows:
     runs-on: windows-latest
@@ -242,4 +262,4 @@ jobs:
         # These start their own embedded instances (including the crash /
         # attach / lock paths) — no pre-started server, no service
         # container (unsupported on Windows runners), no HF download.
-        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_ops_update_credentials.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py -q
+        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_ops_update_credentials.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py -q

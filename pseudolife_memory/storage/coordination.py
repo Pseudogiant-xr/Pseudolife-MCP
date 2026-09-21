@@ -3,26 +3,98 @@
 Mutation paths: bank identity establishment, register, update, attach, heartbeat,
 detach, send, acknowledge, attempt, prune, restore recovery and operator rebind.
 There is no derived cache.
-Callers serialize access to the storage connection with the service lock. SQL
-row locks also protect independent connections; send locks both agents in ID
-order to avoid reciprocal-send deadlocks. Recovery/rebind are operator-only
+Callers serialize access to the mailbox connection with the coordination lock,
+never the service lock (``CoordinationConnection`` below). SQL row locks also
+protect independent connections; send locks both agents in ID order to avoid
+reciprocal-send deadlocks. Recovery/rebind are operator-only
 entry points: the HTTP/service layer must never expose them as agent tools.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import hmac
 import json
+import logging
 import math
 import secrets
 import time
+import unicodedata
 import uuid
 from typing import Any
 
+import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+
+logger = logging.getLogger("pseudolife-mcp")
+
+
+class CoordinationConnection:
+    """Dedicated autocommit connection for the mailbox, never the shared
+    service connection.
+
+    Mailbox calls must not queue behind the service lock: a heartbeat or
+    identity check that waits on a consolidation pass expires the adapter's
+    lease and fails its 5s context check (2026-09-20 daemon log: dispatch
+    waited 8.6s, autosave 47s). The rows are guarded by their own SQL row
+    locks, so a second connection is safe; callers still serialize this
+    one with the coordination lock, because psycopg transaction blocks on
+    one connection must never interleave across threads.
+
+    Session setup mirrors ``PostgresStorage._connect`` and the commit check
+    mirrors ``PostgresStorage._txn``: same lock timeout, same public
+    search_path, same refusal to report a transaction the server rolled
+    back when the connection broke mid-block. No schema work happens here;
+    the shared connection ensures the schema before this one is opened.
+    """
+
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+        self._in_txn = False
+        self._conn = self._connect()
+
+    def _connect(self) -> psycopg.Connection:
+        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True)
+        conn.execute("SET lock_timeout = '5s'")
+        conn.execute("SET search_path TO public")
+        return conn
+
+    @property
+    def conn(self) -> psycopg.Connection:
+        """Heal on next use after a Postgres restart, like the shared one.
+
+        Never mid-block: a statement after the connection broke inside a
+        ``_txn`` must fail with the block, not commit alone on a fresh
+        connection (the shared connection pins the same way)."""
+        c = self._conn
+        if not self._in_txn and (c.closed or c.broken):
+            logger.warning("coordination connection lost (closed=%s broken=%s); "
+                           "reconnecting", c.closed, c.broken)
+            self._conn = self._connect()
+        return self._conn
+
+    def close(self) -> None:
+        try:
+            self._conn.close()
+        except Exception:  # noqa: BLE001 — never fail a shutdown on close
+            pass
+
+    @contextmanager
+    def _txn(self):
+        conn = self.conn
+        self._in_txn = True
+        try:
+            with conn.transaction() as tx:
+                yield
+        finally:
+            self._in_txn = False
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
 
 
 # Conservative initial bounds for the experiment, not measured throughput
@@ -36,10 +108,32 @@ MAX_PENDING = 256
 MESSAGE_TTL = 86400
 DEDUPE_RETENTION = 7 * 86400
 # An address that has been idle this long, holds no lease and is referenced
-# by no retained message is removed by the same prune pass. A shim without a
-# state path registers a new address per launch, so without this the peer
-# list fills with addresses nobody will ever read again.
+# by no retained message is removed by the same prune pass; idle means no
+# activity, and a lease renewal counts only when the shim saw a turn.
 AGENT_RETENTION = DEDUPE_RETENTION
+# Peers the default list shows: holding a lease, or active this recently.
+# Measured 2026-09-20 on the live bank: 90 registered addresses, 11 leased,
+# 67 of them Codex threads whose shim had been killed with the row still
+# marked attached, 5 to 160 hours idle, no task, no mail; and every parked shim
+# looked as busy as a working one because its heartbeat bumped
+# last_activity. An hour keeps a session that just ended visible for a
+# handover and hides the rest; they are still counted.
+ACTIVE_WINDOW = 3600
+# An address whose adapter registered ``resumable: false`` has no state file
+# behind it, so nothing can attach to it again once its lease lapses; it is
+# removed after this much idleness instead of AGENT_RETENTION. Same
+# measurement: the Claude shims without a state path left one new address
+# per launch. An address that did not declare either way predates the flag
+# and keeps the long window, so nothing an older adapter can still resume
+# is removed early.
+EPHEMERAL_AGENT_RETENTION = ACTIVE_WINDOW
+# The attach/heartbeat answer previews this many of the oldest pending
+# messages, each cut to this many characters, so the shim can show a turn
+# digest without a receive call. Five lines of a hundred characters plus
+# the header fit the 200-300 token budget the per-turn check-in design set
+# for a routine change (2026-09-20); the count says what the preview omits.
+PREVIEW_LIMIT = 5
+PREVIEW_EXCERPT = 100
 # Live delivery attempts per message across attachments. Each attachment
 # may attempt a pending message once; past this total the message is left
 # for explicit receive so one unacknowledged message cannot wake the host on
@@ -70,6 +164,52 @@ def _string(value: Any, limit: int, field: str, *, empty: bool = True) -> str:
     if any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
         raise CoordinationError(f"invalid_{field}")
     return value
+
+
+def _excerpt(text: Any) -> str:
+    """One line of a message body for a digest: whitespace and every
+    control or format character (C0, C1, bidi overrides, zero-width marks)
+    collapse to single spaces, then a hard cut."""
+    if not isinstance(text, str):
+        return ""
+    cleaned = " ".join("".join(" " if unicodedata.category(c)[0] == "C" else c
+                               for c in text).split())
+    return cleaned if len(cleaned) <= PREVIEW_EXCERPT else cleaned[:PREVIEW_EXCERPT] + "..."
+
+
+_ID_CHARS = frozenset("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_")
+
+
+def _message_ids(value: Any) -> tuple[list[str], bool]:
+    """One id, or several: comma-separated, or a JSON array of strings, which
+    is how a host that stringifies list parameters sends a list. Items are
+    id-shaped only, so a bracketed fragment fails loudly instead of landing
+    in ``missing``; duplicates drop in order; at most MAX_PAGE. Returns the
+    ids and whether the caller used list syntax. The 8192-character bound on
+    the whole string is incidental; MAX_PAGE is the limit."""
+    _string(value, 8192, "message_id", empty=False)
+    text = value.strip()
+    if text.startswith("["):
+        try:
+            items = json.loads(text)
+        except ValueError:
+            raise CoordinationError("invalid_message_id") from None
+        if not isinstance(items, list) or not items or not all(isinstance(i, str) for i in items):
+            raise CoordinationError("invalid_message_id")
+        batch = True
+    else:
+        items = text.split(",")
+        batch = "," in text
+    ids: list[str] = []
+    for item in items:
+        item = item.strip()
+        if not item or len(item) > 120 or any(c not in _ID_CHARS for c in item):
+            raise CoordinationError("invalid_message_id")
+        if item not in ids:
+            ids.append(item)
+    if len(ids) > MAX_PAGE:
+        raise CoordinationError("invalid_message_id")
+    return ids, batch
 
 
 def _hash(credential: str) -> str:
@@ -229,16 +369,45 @@ class CoordinationStore:
                 _string(value, MAX_SCOPE, key)
                 clauses.append(f"{key}=%s")
                 values.append(value)
-        # Reachable adapters first: a burst of idle addresses must not push
-        # the peers that can actually receive live mail off a bounded page.
-        rows = self._all("SELECT * FROM coordination_agents WHERE " + " AND ".join(clauses)
-                         + " ORDER BY (attachment_id IS NOT NULL AND coalesce(lease_until,0)>%s) DESC,"
-                         "last_activity DESC,agent_id LIMIT %s", (*values, self.clock(), limit))
-        return {"agents": [self._public(row) for row in rows]}
+        now = self.clock()
+        scope = "SELECT * FROM coordination_agents WHERE " + " AND ".join(clauses)
+        leased = "(attachment_id IS NOT NULL AND coalesce(lease_until,0)>%s)"
+        # Only peers holding a lease or active within ACTIVE_WINDOW, reachable
+        # adapters first: a burst of idle addresses must not push the peers
+        # that can actually receive live mail off a bounded page. The rest
+        # are counted, not listed; one extra row tells whether the page cut
+        # active peers too.
+        rows = self._all(scope + f" AND ({leased} OR last_activity>%s) ORDER BY {leased} DESC,"
+                         "last_activity DESC,agent_id LIMIT %s",
+                         (*values, now, now - ACTIVE_WINDOW, now, limit + 1))
+        idle = self._one("SELECT count(*) AS n FROM coordination_agents WHERE " + " AND ".join(clauses)
+                         + f" AND NOT {leased} AND last_activity<=%s",
+                         (*values, now, now - ACTIVE_WINDOW))["n"]
+        return {"agents": [self._public(row) for row in rows[:limit]],
+                "truncated": len(rows) > limit, "idle_omitted": idle}
 
     def _pending_count(self, agent_id):
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
                          "AND acknowledged_at IS NULL AND expires_at>%s", (agent_id, self.clock()))["n"]
+
+    def _pending_preview(self, agent_id):
+        """The oldest pending messages, bounded, for the shim's per-turn digest.
+
+        Oldest first so a backlog shows what has waited longest; the count
+        beside it says how much the preview omits. Reading is not delivery:
+        nothing here touches attempts or acknowledgements."""
+        rows = self._all(
+            "SELECT m.message_id,m.sender_agent_id,m.created_at,m.text,a.label AS sender_label "
+            "FROM coordination_messages m LEFT JOIN coordination_agents a ON a.agent_id=m.sender_agent_id "
+            "WHERE m.recipient_agent_id=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "ORDER BY m.recipient_sequence LIMIT %s", (agent_id, self.clock(), PREVIEW_LIMIT))
+        return [{"message_id": r["message_id"], "sender_agent_id": r["sender_agent_id"],
+                 "sender_label": r["sender_label"] or "", "created_at": r["created_at"],
+                 "excerpt": _excerpt(r["text"])} for r in rows]
+
+    def _mailbox_state(self, agent_id):
+        return {"pending_count": self._pending_count(agent_id),
+                "pending_preview": self._pending_preview(agent_id)}
 
     def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False):
         _string(attachment_id, 120, "attachment_id", empty=False)
@@ -254,9 +423,9 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET attachment_id=%s,generation=%s,lease_until=%s,"
                 "last_activity=%s,wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
                 (attachment_id, generation, now + ATTACHMENT_LEASE, now, wake_enabled, agent_id))
-            pending = self._pending_count(agent_id)
+            mailbox = self._mailbox_state(agent_id)
         return {"agent_id": agent_id, "generation": generation, "lease_until": now + ATTACHMENT_LEASE,
-                "pending_count": pending}
+                **mailbox}
 
     def _attachment(self, row, attachment_id, generation):
         if (row["attachment_id"] != attachment_id or row["generation"] != generation
@@ -269,17 +438,26 @@ class CoordinationStore:
         return {"agent_id": agent_id, "generation": generation,
                 "lease_until": row["lease_until"], "wake_enabled": row["wake_enabled"]}
 
-    def heartbeat(self, principal, agent_id, credential, *, attachment_id, generation):
+    def heartbeat(self, principal, agent_id, credential, *, attachment_id, generation,
+                  active=False):
+        """Renew the lease. ``active`` says the shim forwarded a tool call
+        since its previous heartbeat; only then does the renewal count as
+        activity, so a parked shim is not ranked or retained as a working
+        one."""
+        if not isinstance(active, bool):
+            raise CoordinationError("invalid_active")
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             self._attachment(row, attachment_id, generation)
-            until = self.clock() + ATTACHMENT_LEASE
+            now = self.clock()
+            until = now + ATTACHMENT_LEASE
             self.storage.conn.execute(
-                "UPDATE coordination_agents SET lease_until=%s,last_activity=%s WHERE agent_id=%s",
-                (until, self.clock(), agent_id))
-            pending = self._pending_count(agent_id)
+                "UPDATE coordination_agents SET lease_until=%s,"
+                "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
+                (until, active, now, agent_id))
+            mailbox = self._mailbox_state(agent_id)
         return {"agent_id": agent_id, "generation": generation, "lease_until": until,
-                "pending_count": pending}
+                **mailbox}
 
     def detach(self, principal, agent_id, credential, *, attachment_id, generation):
         with self.storage._txn():
@@ -408,20 +586,37 @@ class CoordinationStore:
                 "after": f"{agent_id}:{rows[-1]['recipient_sequence'] if rows else seq}"}
 
     def ack(self, principal, agent_id, credential, *, message_id):
+        """Acknowledge one message, or several comma-separated (at most
+        MAX_PAGE). One id returns its receipt or message_not_found; several
+        return the receipts in the order given plus the ids that were not this
+        mailbox's to acknowledge, so a batch never fails because one id went
+        stale. The list is a string because some hosts stringify list
+        parameters. Acknowledging is not completion; a cursor is never an
+        acknowledgement."""
+        ids, batch = _message_ids(message_id)
         with self.storage._txn():
+            # The agent row lock serializes acknowledgements per mailbox, so
+            # two overlapping batches cannot deadlock on message rows.
             self._auth(principal, agent_id, credential, lock=True)
             # An acknowledgment is activity for retention: a client that only
             # reads and acknowledges, holding no lease, must not count as idle.
             self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
                                       "WHERE agent_id=%s", (self.clock(), agent_id))
-            row = self._one("SELECT * FROM coordination_messages WHERE message_id=%s "
-                            "AND recipient_agent_id=%s FOR UPDATE", (message_id, agent_id))
-            if row is None:
-                raise CoordinationError("message_not_found")
-            if row["acknowledged_at"] is None:
-                row = self._one("UPDATE coordination_messages SET acknowledged_at=%s "
-                                "WHERE message_id=%s RETURNING *", (self.clock(), message_id))
-            return self._receipt(row)
+            # Two statements for the whole batch: the calls run under the
+            # coordination lock, which heartbeats wait on.
+            found = {row["message_id"]: row for row in self._all(
+                "SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
+                "AND message_id = ANY(%s) FOR UPDATE", (agent_id, ids))}
+            pending = [one for one in ids if one in found and found[one]["acknowledged_at"] is None]
+            if pending:
+                for row in self._all("UPDATE coordination_messages SET acknowledged_at=%s "
+                                     "WHERE message_id = ANY(%s) RETURNING *", (self.clock(), pending)):
+                    found[row["message_id"]] = row
+            missing = [one for one in ids if one not in found]
+            if not batch and missing:
+                raise CoordinationError("message_not_found")  # rolls the activity bump back
+        receipts = [self._receipt(found[one]) for one in ids if one in found]
+        return {"receipts": receipts, "missing": missing} if batch else receipts[0]
 
     def mark_attempt(self, principal, agent_id, credential, *, message_id, attachment_id, generation):
         with self.storage._txn():
@@ -446,18 +641,28 @@ class CoordinationStore:
         """Expire bodies, discard terminal retry metadata after seven days, and
         remove addresses that are idle, unleased and referenced by no retained
         message (the message rows go first, so a referenced address outlives
-        its mail by the retention window)."""
+        its mail by the retention window). An address registered as not
+        resumable goes once both its lease and its last activity are
+        EPHEMERAL_AGENT_RETENTION old: a parked shim whose lease lapsed
+        during a daemon restart keeps its address, because the first
+        heartbeat after the restart prunes before it is served and the
+        adapter re-attaches within a minute. Any other address goes after
+        AGENT_RETENTION of inactivity."""
         now = self.clock()
+        ephemeral = "a.capabilities->>'resumable'='false'"
         with self.storage._txn():
             bodies = self.storage.conn.execute("UPDATE coordination_messages SET text=NULL "
                 "WHERE expires_at<=%s AND text IS NOT NULL", (now,)).rowcount
             removed = self.storage.conn.execute("DELETE FROM coordination_messages WHERE created_at<=%s "
                 "AND expires_at<=%s", (now - DEDUPE_RETENTION, now)).rowcount
             agents = self.storage.conn.execute(
-                "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR a.lease_until<=%s) "
-                "AND a.last_activity<=%s AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
+                "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR "
+                f"a.lease_until<=CASE WHEN {ephemeral} THEN %s ELSE %s END) "
+                f"AND a.last_activity<=CASE WHEN {ephemeral} THEN %s ELSE %s END "
+                "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
                 "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id)",
-                (now, now - AGENT_RETENTION)).rowcount
+                (now - EPHEMERAL_AGENT_RETENTION, now,
+                 now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION)).rowcount
         return {"bodies_expired": bodies, "removed": removed, "agents_removed": agents}
 
     def recover(self):

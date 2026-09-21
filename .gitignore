@@ -12,6 +12,7 @@ __pycache__/
 *$py.class
 *.egg-info/
 .pytest_cache/
+ci-results/
 .venv/
 venv/
 build/

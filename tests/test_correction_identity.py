@@ -6,6 +6,7 @@ PostgreSQL cases use the suite's per-process isolated database.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 import math
 
@@ -70,6 +71,22 @@ class Storage:
     def existing_entry_ids(self, ids):
         return set(ids) & self.rows.keys()
 
+    @contextmanager
+    def transaction(self):
+        before = deepcopy((self.rows, self.updates, self.supersessions))
+        try:
+            yield
+        except Exception:
+            self.rows, self.updates, self.supersessions = before
+            raise
+
+    def delete_entry_ids(self, ids):
+        removed = 0
+        for entry_id in ids:
+            if self.rows.pop(entry_id, None) is not None:
+                removed += 1
+        return removed
+
 
 def _config():
     config = MemoryConfig()
@@ -87,6 +104,7 @@ def _config():
 def _service(tmp_path, monkeypatch, storage=None, *, embedding_dim=4):
     svc = MemoryService(data_dir=tmp_path)
     svc.config.memory = _config()
+    svc.config.memory.save_dir = str(tmp_path / "memory_state")
     svc.config.memory.embedding_dim = embedding_dim
     svc._embedder = Embedder(embedding_dim)
     svc._cms = ContinuumMemorySystem(svc.config.memory, storage=storage)
@@ -359,7 +377,10 @@ def test_atomic_retirement_failure_leaves_resident_entries_unchanged(
         _call(svc, operation, ids=[old.db_id])
 
     assert _state(svc) == before
-    assert svc._embedder.calls == []
+    # Replacement encoding is deliberately completed before the transaction
+    # opens; the failed retirement still leaves resident and durable state
+    # unchanged.
+    assert svc._embedder.calls == [("document", NEW_TEXT)]
 
 
 def test_supersede_reports_derivations_only_from_selected_ids(svc, monkeypatch):

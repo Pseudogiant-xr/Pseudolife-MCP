@@ -196,6 +196,15 @@ class EmbeddingPipeline:
                 config.model_name,
                 device=device,
             )
+            if torch.device(device).type == "cpu":
+                # Preserve the FP32 CPU inference used by the validated 4.x
+                # stack. Transformers 5 defaults to the checkpoint dtype;
+                # the 2026-09-20 full-suite CI diagnostics and subsequent
+                # Qwen probe exposed slow BF16 on CPUs lacking native support.
+                # Module.float() also supports the sentence-transformers 2.x
+                # floor, unlike newer constructor model_kwargs. GPU and ONNX
+                # retain their backend's precision.
+                self.model.float()
         # Cap the tokenizer's max sequence length. Applies to both backends:
         # SentenceTransformer.max_seq_length delegates to the underlying
         # Transformer module regardless of which runtime (torch/onnx) does

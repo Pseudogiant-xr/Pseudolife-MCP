@@ -14,10 +14,11 @@ class CoordinationHub:
     # Conservative initial connection budget; no throughput claim is implied.
     MAX_WAITERS = 64
     MAX_WAIT_SECONDS = 30
-    # Coordination calls block on the service lock, which a dream run can
-    # hold for tens of seconds. They run on this small pool of their own so
-    # they cannot occupy the loop's default executor, which every console
-    # route shares; the 16-permit semaphore still bounds admission.
+    # Coordination calls serialize on the coordination lock (never the
+    # service lock since 2026-09-20), but a slow Postgres can still hold a
+    # worker. They run on this small pool of their own so they cannot occupy
+    # the loop's default executor, which every console route shares; the
+    # 16-permit semaphore still bounds admission.
     EXECUTOR_WORKERS = 4
 
     def __init__(self, service):

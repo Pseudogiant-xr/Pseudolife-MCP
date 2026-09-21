@@ -28,6 +28,7 @@ import uuid
 from dataclasses import dataclass
 from typing import NoReturn
 
+from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for
 from pseudolife_memory.session_title import title_from_cwd
 
 try:
@@ -147,10 +148,62 @@ def _require_current_credential(provider, snapshot) -> None:
         raise _CredentialChangedError
 
 
+_RESPONSE_LOST_MESSAGE = (
+    "The memory daemon's response stream closed before a result arrived "
+    "(a dropped connection, or a result larger than the client's event limit).")
+
+# The SDK client reads each JSON-RPC message as one server-sent event through
+# httpx2's EventSource, whose decoder refuses any event over 1 MiB by default
+# (DEFAULT_MAX_EVENT_SIZE_BYTES); the SDK swallows that at debug level and
+# resolves the request as a closed connection. A deep dream over a
+# 300-proposal review queue was 1,124,250 bytes on the wire (2026-09-20) and
+# every such call through the shim died as a phantom disconnect. The SDK does
+# not expose the limit, so the shim widens it at both places the SDK builds an
+# event source: the module-level ``EventSource`` used for a POST's response
+# stream, and the http client's ``sse`` method used for the listen stream and
+# for resuming a cut response. 16 MiB is far above any tool result the daemon
+# emits and still bounds a runaway stream.
+_SSE_EVENT_LIMIT_BYTES = 16 * 1024 * 1024
+
+
+def _widen_sse_event_limit(streamable_http) -> None:
+    """Rebind the SDK client module's ``EventSource`` so every response
+    stream it reads carries ``_SSE_EVENT_LIMIT_BYTES``. Idempotent; a no-op
+    when the module has no EventSource to rebind."""
+    source = getattr(streamable_http, "EventSource", None)
+    if source is None or getattr(source, "_pseudolife_event_limit", None) == _SSE_EVENT_LIMIT_BYTES:
+        return
+
+    def event_source(response, *args, **kwargs):
+        kwargs.setdefault("max_event_size", _SSE_EVENT_LIMIT_BYTES)
+        return source(response, *args, **kwargs)
+
+    event_source._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
+    event_source._pseudolife_original = source
+    streamable_http.EventSource = event_source
+
+
+def _widen_client_sse_limit(http) -> None:
+    """Wrap one http client's ``sse`` method (the SDK's listen-stream and
+    resumption path) so its event sources carry ``_SSE_EVENT_LIMIT_BYTES``
+    unless the caller chose a limit. Idempotent per client."""
+    original = getattr(http, "sse", None)
+    if original is None or getattr(original, "_pseudolife_event_limit", None) == _SSE_EVENT_LIMIT_BYTES:
+        return
+
+    def sse(*args, **kwargs):
+        kwargs.setdefault("max_event_size", _SSE_EVENT_LIMIT_BYTES)
+        return original(*args, **kwargs)
+
+    sse._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
+    http.sse = sse
+
+
 def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
                      requested_phase: str):
     """Map an upstream failure to a stable, non-sensitive MCP error."""
     from mcp.shared.exceptions import MCPError
+    from mcp.types import CONNECTION_CLOSED
 
     leaves = tuple(_exception_leaves(exc))
     names = {type(leaf).__name__ for leaf in leaves}
@@ -194,6 +247,14 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         classification = "connection_failure"
         message = "The memory daemon connection failed; check the daemon and retry."
         outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif sdk_error is not None and sdk_error.code == CONNECTION_CLOSED:
+        # The SDK resolves a request this way when the response stream ends
+        # before a result event: a dropped connection, or an event its SSE
+        # decoder refused (over max_event_size). Before 2026-09-20 this read
+        # as "invalid MCP response", which sent the diagnosis to the daemon.
+        classification = "response_lost"
+        message = _RESPONSE_LOST_MESSAGE
+        outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
     else:
         classification = "protocol"
         message = "The memory daemon returned an invalid MCP response."
@@ -204,6 +265,8 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
             "The memory operation may have completed before the response failed. "
             "Check its result before retrying; reuse the same request_id when available."
         )
+        if classification == "response_lost":
+            message = f"{_RESPONSE_LOST_MESSAGE} {message}"
 
     data = {
         "classification": classification,
@@ -597,6 +660,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
 
     from mcp.client import streamable_http
     from mcp.client.session import ClientSession
+    _widen_sse_event_limit(streamable_http)
     from mcp.server import Server
     from mcp.server.lowlevel.server import NotificationOptions
     from mcp.server.stdio import stdio_server
@@ -643,6 +707,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             # redirect could disclose an instance key or bank binding.
             if hasattr(http, "follow_redirects"):
                 http.follow_redirects = False
+            _widen_client_sse_limit(http)
             hooks = getattr(http, "event_hooks", None)
             if hooks is not None:
                 hooks.setdefault("response", []).append(attempt.observe_response)
@@ -743,6 +808,8 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                             for name in _COORDINATION_HEADERS
                             if name in coordination_adapter.instance_headers
                         })
+                        # Real traffic, as opposed to the lease heartbeat.
+                        coordination_adapter.note_turn()
                 if codex_metadata:
                     from pseudolife_memory.codex_coordination import thread_id_from_meta
                     thread_id = thread_id_from_meta(params.meta)
@@ -751,19 +818,21 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                         if coordination_registry is not None:
                             adapter = await coordination_registry.get(
                                 thread_id, snapshot=snapshot)
-                            failure_hint = coordination_registry.unread_hint(
-                                thread_id, adapter)
                             if adapter is not None:
                                 call_headers.update({
                                     name: adapter.instance_headers[name]
                                     for name in _COORDINATION_HEADERS
                                     if name in adapter.instance_headers
                                 })
+                                adapter.note_turn()
+                            # Fetched once, at result time: the adapter's hint
+                            # marks the digest delivered when read.
                             call_hint = lambda: coordination_registry.unread_hint(
                                 thread_id, adapter)
                             if (adapter is None and _requires_coordination_identity(
                                     params.name, params.arguments)):
-                                raise _CoordinationUnavailableError(failure_hint)
+                                raise _CoordinationUnavailableError(
+                                    coordination_registry.unread_hint(thread_id, None))
                 _require_current_credential(provider, snapshot)
                 async with _upstream(snapshot, attempt, call_headers) as (remote, _):
                     _require_current_credential(provider, snapshot)
@@ -905,6 +974,40 @@ def _require_mcp_sdk_v2() -> None:
     sys.exit(1)
 
 
+def _session_state_path(url: str):
+    """Key the adapter's state file by the host session, so a resumed Claude
+    Code session keeps its address instead of minting one per launch.
+
+    Claude Code exports ``CLAUDE_CODE_SESSION_ID`` to the MCP servers it
+    launches and keeps it across resume (seen 2026-09-20 in a running
+    shim's environment). It applies only with ``PSEUDOLIFE_AGENT_STATE_DIR``
+    configured and a canonical UUID; anything else means a fresh address
+    per launch, as before. An unusable directory is reported and falls
+    back the same way rather than taking the memory proxy down."""
+    root = os.environ.get("PSEUDOLIFE_AGENT_STATE_DIR")
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not root or not session:
+        return None
+    try:
+        canonical = str(uuid.UUID(session))
+    except ValueError:
+        return None
+    if canonical != session:
+        return None
+    from pathlib import Path
+    from pseudolife_memory.codex_coordination import _prepare_private_dir
+    from pseudolife_memory.coordination_identity import bound_state_path
+    try:
+        root_path = Path(root).expanduser()
+        path = bound_state_path(root_path, url, canonical)
+        _prepare_private_dir(root_path, path.parent)
+    except (OSError, ValueError, RuntimeError):
+        print("pseudolife-mcp: PSEUDOLIFE_AGENT_STATE_DIR is not a usable private "
+              "directory; this session gets a new coordination address.", file=sys.stderr)
+        return None
+    return path
+
+
 async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                              channel: bool = False, provider=None) -> None:
     import asyncio
@@ -975,26 +1078,90 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             from pseudolife_memory.credentials import CredentialError
             wake = channel and os.environ.get("PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {
                 "1", "true", "yes", "on"}
+            state_path = os.environ.get("PSEUDOLIFE_AGENT_STATE") or _session_state_path(url)
             try:
                 startup_snapshot = provider.snapshot()
                 adapter = await asyncio.wait_for(stack.enter_async_context(CoordinationAdapter(
                     url, startup_snapshot.token, provider=provider,
-                    initial_snapshot=startup_snapshot,
-                    state_path=os.environ.get("PSEUDOLIFE_AGENT_STATE") or None,
+                    initial_snapshot=startup_snapshot, state_path=state_path,
                     wake_enabled=wake, label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "agent"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
-                    task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid)),
+                    task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid,
+                    # The prompt hook reads this file by the same session id
+                    # it receives on stdin; a host without one gets hints only.
+                    digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")))),
                     timeout=_ADAPTER_STARTUP_SECONDS)
             except (AdapterError, CredentialError, TimeoutError):
+                where = f" ({state_path})" if state_path else ""
                 print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
-                      "Check daemon opt-in, authentication and private adapter state.", file=sys.stderr)
+                      f"Check daemon opt-in, authentication and private adapter state{where}.",
+                      file=sys.stderr)
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_adapter"] = adapter
-            kwargs["coordination_hint"] = lambda: adapter.unread_hint
+            kwargs["coordination_hint"] = adapter.deliver_hint
         if channel:
             kwargs["channel_inbox"] = adapter.inbox if adapter is not None else idle_inbox
         await _proxy(url, token, session_uid, provider=provider, **kwargs)
+
+
+def _require_credential_for_auth(url: str, health: dict, provider) -> None:
+    """Exit at startup when the daemon needs a bearer and this shim holds none.
+
+    ``/health`` reports ``auth: true`` whenever the daemon was started with
+    ``PSEUDOLIFE_MCP_TOKEN`` or a ``PSEUDOLIFE_MCP_TOKENS`` map. Without a
+    credential every upstream ``initialize`` then 401s, and the client sees
+    only the SDK's ExceptionGroup wrapper ("unhandled errors in a TaskGroup
+    (1 sub-exception)") on every ``tools/list`` — the 2026-09-19 incident,
+    where Claude Desktop sessions failed for four days. Desktop launches MCP
+    servers with a sanitized environment, so a token exported in the OS
+    environment never reaches the shim; that is the case the message names.
+
+    A configured token FILE is read once here too: the per-call path does
+    fail closed on a missing or unsafe file, but that error reaches Claude
+    Desktop as the same opaque wrapper the incident showed, so the one
+    place a human can read the fault is this stderr line at startup.
+    """
+    from pseudolife_memory.credentials import CredentialError
+
+    if not health.get("auth"):
+        return
+    if provider.path is not None:
+        try:
+            provider.snapshot()
+        except CredentialError as exc:
+            print(
+                f"[shim] the daemon at {url} requires bearer authentication "
+                f"(/health reports auth=true) and the configured credential "
+                f"file cannot be used: {exc}\n"
+                f"  PSEUDOLIFE_MCP_TOKEN_FILE={provider.path}\n"
+                f"  The file must exist, be owner-only, and hold only the "
+                f"token. Re-run ops/install.* --client <client> with "
+                f"PSEUDOLIFE_MCP_TOKEN set in the environment so the "
+                f"installer (re)writes it, or fix the file by hand.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return
+    if provider.snapshot().token:
+        return
+    print(
+        f"[shim] the daemon at {url} requires bearer authentication "
+        f"(/health reports auth=true) and this shim has no credential "
+        f"configured — every call would be rejected with 401.\n"
+        f"  Give the MCP registration one of these in its env block:\n"
+        f"    PSEUDOLIFE_MCP_TOKEN_FILE=<absolute path to a private file "
+        f"holding the token>   (preferred; reloaded per call)\n"
+        f"    PSEUDOLIFE_MCP_TOKEN=<the token>\n"
+        f"  Claude Desktop launches MCP servers with a sanitized "
+        f"environment, so a token exported in the OS env (setx / shell "
+        f"profile) does NOT reach it — the entry in "
+        f"claude_desktop_config.json must carry the setting itself "
+        f"(ops/install.* --client claude-desktop writes it; then fully "
+        f"quit and relaunch Desktop).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def run_shim(*, channel: bool = False) -> None:
@@ -1003,12 +1170,15 @@ def run_shim(*, channel: bool = False) -> None:
 
     _require_mcp_sdk_v2()
     url = _daemon_url()
-    ensure_daemon(url)
+    health = ensure_daemon(url)
     provider = CredentialProvider.from_environment()
+    _require_credential_for_auth(url, health, provider)
     # One shim == one Claude session. This uid keys BOTH the session episode
     # (opened/closed here) and per-store stamping (rides every call as
-    # X-PL-Session), so lifecycle and attribution always agree — no dependency
-    # on Claude's session_id (which MCP servers don't receive).
+    # X-PL-Session), so lifecycle and attribution always agree. It stays the
+    # shim's own: Claude Code does export CLAUDE_CODE_SESSION_ID, which keys
+    # only the coordination state file (_session_state_path); other hosts
+    # export nothing comparable.
     session_uid = uuid.uuid4().hex
     _post_episode(url, None, "/api/episode/start", {
         "session_key": session_uid,

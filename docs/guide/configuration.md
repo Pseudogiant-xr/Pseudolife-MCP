@@ -20,7 +20,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. When the `[lite]` embedded Postgres engages, the default moves to a stable per-user dir instead (`%LOCALAPPDATA%\pseudolife-mcp`, `~/.local/share/pseudolife-mcp`, or `~/Library/Application Support/pseudolife-mcp`) — a per-launch-directory Postgres bank would be a data-scattering footgun. Windows lite note: must be ASCII-only (the daemon refuses otherwise, with the remedy in the message). |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
-| `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `codex` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
+| `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `claude-desktop` / `codex` / `gemini` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
 | `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` | _(unset)_ | Set `1` to restore the retired `mcp-session-id` transport-session fallback for one release (rollback hatch; logs a warning on first use). The header names the HTTP *connection*, not the session — concurrent sessions share it — and the MCP 2026-07-28 revision removes it from the protocol. Session identity rides the hook-registered episode handle and `X-PL-Session` instead — see [Episodes](episodes.md). |
@@ -76,9 +76,29 @@ provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a
 private file outside the repository for deliberate mailbox resume. Each concurrent
 adapter needs its own state file; sharing one does not create a second identity.
-Without a state path, each launch gets a new address. Never infer recovery from a
+Claude Code sessions can instead set `PSEUDOLIFE_AGENT_STATE_DIR` to a private
+directory: the shim keys one state file per session under it by the
+`CLAUDE_CODE_SESSION_ID` the host exports, so a resumed session keeps its
+address and concurrent sessions never share one. Without either, each launch
+gets a new address, registered as not resumable and retired an hour after it
+goes quiet. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
 private file and adapter headers, not model arguments or memory entries.
+
+The adapter also keeps a per-turn digest: the daemon's `attach` and
+`heartbeat` answers preview the five oldest pending messages (sender label,
+one-line excerpt) beside the pending count, and the adapter renders them once
+behind a watermark that moves only when the text changes. With a host session
+id — `CLAUDE_CODE_SESSION_ID` for Claude Code, the thread id for Codex — the
+digest is written to `~/.pseudolife-mcp/digests/<sha256(id)>.txt`
+(`PSEUDOLIFE_DIGEST_DIR` overrides the directory; set it identically for the
+hook's environment, which cannot see the MCP env block). The plugin's
+UserPromptSubmit hook prints the digest only when the watermark passed the
+shared `.seen` marker; the tool-result hint uses the same marker, so a change
+is delivered once and a quiet turn adds nothing. While mail stays pending and
+unchanged, a one-line reminder rides every tenth tool result. The file is
+removed when the shim exits; a session id without an adapter (or a host that
+exports none, such as Claude Desktop) gets hints only.
 
 ### Codex CLI and desktop
 
@@ -141,8 +161,13 @@ error. Retry reads normally; verify uncertain writes before sending another one,
 and reuse the original request ID when retrying an addressed message.
 
 An active task should use `memory_agents` before shared-resource work and
-`memory_message(action="receive")` on resume and when a pending-count hint
-appears. Receive does not acknowledge; use `action="ack"` after reading.
+`memory_message(action="receive")` on resume and when the coordination digest
+(in the prompt hook or a tool result) shows pending mail. Receive does not
+acknowledge; use `action="ack"` after reading, with one `message_id` or
+several comma-separated (at most 50; a JSON array of strings, the form a
+host that stringifies list parameters sends, is read as that list): a batch
+returns the receipts in the order given and lists the ids that were not this
+mailbox's, instead of failing whole.
 These calls work in the CLI and desktop without live wake support.
 Setup leaves Codex tool approvals unchanged. A recipient running with approval
 policy `never` cannot execute a tool that still requires approval. To authorize
@@ -193,9 +218,10 @@ See the [Codex validation record](../specs/2026-09-12-codex-coordination.md) and
 
 Use ordinary `pseudolife-mcp` for authenticated pull messaging. The optional
 `pseudolife-mcp channel` mode also requires `PSEUDOLIFE_AGENT_WAKE=1` to emit live
-events, plus the host's preview launch opt-in. A cached pending-count hint can
-appear in tool responses; fetching the hint adds no network request to the tool
-path and never acknowledges mail. Optional adapter startup requests cancellation after three seconds, then waits
+events, plus the host's preview launch opt-in. The cached coordination digest
+can appear in tool responses (once per change, then a one-line reminder every
+tenth call); attaching it adds no network request to the tool path and never
+acknowledges mail. Optional adapter startup requests cancellation after three seconds, then waits
 for bounded in-flight request cleanup before falling back to ordinary memory
 service. This is not a three-second ceiling on total shim startup time.
 
@@ -215,11 +241,22 @@ to trigger physical cleanup. Full queues and rate limits return explicit errors.
 Live delivery attempts a message at most three times in total across
 attachments; past that it is left for explicit receive, so one unacknowledged
 message cannot wake the host on every restart. The same prune pass removes an
-address that has been idle for seven days, holds no lease and is referenced by no
-retained message, so launches without a state path do not accumulate addresses,
-and peers with a live adapter lease are listed ahead of idle ones. Idle means no
-register, update, attach, heartbeat, send or acknowledgment: a client that only
-reads must acknowledge what it reads, or hold a lease, to stay registered. A
+address that holds no lease, is referenced by no retained message and has been
+idle for seven days, or for one hour when its adapter registered without a
+state file (`capabilities.resumable: false`), since nothing can attach to that
+address again; for those the lease too must have been gone for the hour, so a
+daemon restart cannot retire a parked shim's address, and if it ever is
+retired the state-less adapter registers a fresh one instead of stopping.
+Addresses that predate the flag keep the seven-day rule. Idle
+means no register, update, attach, send, acknowledgment or forwarded tool call:
+the adapter's lease heartbeat counts as activity only when the shim forwarded a
+tool call since the previous one, so a parked shim is neither ranked nor
+retained as a working one. A client that only reads must acknowledge what it
+reads, or hold a lease, to stay registered. `memory_agents(action="list")`
+shows peers that hold a lease or were active within the last hour, leased
+first, reports the number of other matching peers as `idle_omitted` and sets
+`truncated` when the page cut listed peers; a peer's public agent ID stays
+addressable while its row exists. A
 legacy adapter registers a fresh address on its next start only when the authenticated
 daemon explicitly confirms that the saved address no longer exists. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance

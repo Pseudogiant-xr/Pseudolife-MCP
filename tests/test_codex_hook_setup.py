@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
@@ -18,6 +19,27 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("codex_hook_setup", ROOT / "ops/setup-codex-hooks.py")
 setup = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(setup)
+
+
+@pytest.mark.parametrize("script", ["setup-codex-hooks.py", "setup-codex-coordination.py"])
+@pytest.mark.parametrize("old_package", [False, True], ids=["fresh", "upgrade"])
+def test_setup_entrypoints_bootstrap_checkout_without_installed_package(tmp_path, script, old_package):
+    """Installers run these helpers before installing the matching host shim."""
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    if old_package:
+        site = tmp_path / "old-site"
+        package = site / "pseudolife_memory"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        # A previously released package must not shadow the checkout helper.
+        env["PYTHONPATH"] = str(site)
+    result = subprocess.run(
+        [sys.executable, "-S", str(ROOT / "ops" / script), "--help"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout
 
 
 def options(**kwargs):

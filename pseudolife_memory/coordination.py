@@ -1,12 +1,17 @@
 """Authenticated dispatch for coordination, isolated from memory extraction.
 
 The transport owns bearer validation; instance credentials are supplied by the
-adapter, never by model arguments. Every operation holds the service lock only
-for its database work. Waiting for messages belongs to the async web adapter.
+adapter, never by model arguments. Operations run on a dedicated mailbox
+connection under the coordination lock, never the service lock, so a
+consolidation pass holding that lock for seconds cannot expire an adapter lease
+or fail an identity check (2026-09-20). The one exception is the first ``send``
+on a daemon no memory call has initialized yet, which pays the full service
+initialization once. Waiting for messages belongs to the async web adapter.
 """
 from __future__ import annotations
 
 import os
+import threading
 import time
 from collections.abc import Mapping
 from urllib.parse import quote, unquote
@@ -20,7 +25,7 @@ _PARAMETERS = {
     "update": {"project", "task", "status"},
     "agents": {"project", "task", "limit"},
     "attach": {"attachment_id", "wake_enabled"},
-    "heartbeat": {"attachment_id", "generation"},
+    "heartbeat": {"attachment_id", "generation", "active"},
     "detach": {"attachment_id", "generation"},
     "send": {"to", "text", "request_id", "reply_to"},
     "receive": {"after", "limit", "attachment_id", "generation"},
@@ -44,7 +49,8 @@ PUBLIC_ERROR_CODES = frozenset({
     "attachment_already_waiting", "wait_capacity_exceeded", "invalid_wait_seconds",
     "invalid_capabilities", "invalid_cursor", "invalid_expiry", "invalid_limit",
     "invalid_rebind", "invalid_reply", "invalid_text", "invalid_update",
-    "invalid_wake_enabled", "message_not_found", "message_not_pending",
+    "invalid_wake_enabled", "invalid_active", "invalid_message_id", "message_not_found",
+    "message_not_pending",
     "queue_full", "rate_limited", "recipient_not_found", "request_conflict",
     "attempts_exhausted",
     "wake_disabled", "invalid_principal", "invalid_label", "invalid_project",
@@ -111,9 +117,75 @@ def enforce_bound_identity(binding: tuple[str, str], context: Mapping[str, str])
         raise ValueError("bank_identity_mismatch")
 
 
+# Guards creation of a service's coordination lock; never held during I/O.
+_SETUP = threading.Lock()
+
+
+def _tier_ready(service, *, full: bool) -> bool:
+    """Lock-free readiness read. ``full`` means the whole service, which only
+    ``send`` needs (the reseeded HLC); everything else needs the durable
+    tier. A real service owns its readiness probe; the cached fallback is
+    only for implementations without one and cannot override a failed reseed."""
+    if service._storage is None:
+        return False
+    if not full:
+        return True
+    probe = getattr(service, "coordination_tier_ready", None)
+    if callable(probe):
+        return bool(probe())
+    return bool(getattr(service, "_coordination_ready", False))
+
+
+def _ensure_tier(service, *, full: bool) -> None:
+    """Tier check that takes the service lock only when the tier is not yet
+    initialized.
+
+    The durable tier is connected on the first mailbox call of a cold
+    daemon (no embedder load, no service lock afterwards); the full service
+    is initialized once, for the first ``send``, unless a memory call
+    already did it. No other mailbox call ever touches the service lock.
+    """
+    if getattr(service, "_coordination_lock", None) is None:
+        with _SETUP:
+            if getattr(service, "_coordination_lock", None) is None:
+                from pseudolife_memory.utils.locks import MonitoredLock
+                service._coordination_lock = MonitoredLock("coordination")
+    if _tier_ready(service, full=full):
+        return
+    with service._lock:
+        if service._storage is None:
+            if not full and hasattr(service, "_ensure_postgres_storage"):
+                service._ensure_postgres_storage()
+            else:
+                service._ensure_init()
+                service._coordination_ready = True
+        elif full and not _tier_ready(service, full=True):
+            service._ensure_init()
+            service._coordination_ready = True
+        if service._storage is None:
+            raise ValueError("coordination_requires_postgres")
+
+
+def _mailbox(service):
+    """The dedicated mailbox connection, opened once per process.
+
+    Only called with the coordination lock held, so two first callers cannot
+    open two connections.
+    """
+    storage = getattr(service, "_coordination_storage", None)
+    if storage is None:
+        shared = service._storage
+        if shared is None:
+            raise ValueError("coordination_requires_postgres")
+        from pseudolife_memory.storage.coordination import CoordinationConnection
+        storage = CoordinationConnection(shared.dsn)
+        service._coordination_storage = storage
+    return storage
+
+
 def _store(service):
     from pseudolife_memory.storage.coordination import CoordinationStore
-    return CoordinationStore(service._storage)
+    return CoordinationStore(_mailbox(service))
 
 
 def _dispatch(service, action: str, parameters: dict, *, headers=None,
@@ -159,31 +231,23 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
         credential = headers.get("x-pl-agent-key")
         if not agent_id or not credential:
             raise ValueError("instance_authentication_required")
-    with service._lock:
-        lightweight = action == "context" or binding is not None
-        full_init_done = False
-        if lightweight:
-            if service._storage is None:
-                if hasattr(service, "_ensure_postgres_storage"):
-                    service._ensure_postgres_storage()
-                else:
-                    service._ensure_init()
-                    full_init_done = True
-        else:
-            service._ensure_init()
-            full_init_done = True
-        if service._storage is None:
-            raise ValueError("coordination_requires_postgres")
-        store = _store(service)
-        if action == "context":
-            return store.context(principal, **parameters)
-        if binding is not None:
+    # Only send needs the full service (its HLC stamp must outrank stored
+    # ones, which the reseed in _ensure_init guarantees). Every other action
+    # touches only the coordination tables, which the durable tier creates,
+    # so on a cold daemon whose boot dream holds the service lock a heartbeat
+    # or attach still completes at once.
+    _ensure_tier(service, full=False)
+    if action == "context" or binding is not None:
+        with service._coordination_lock:
+            store = _store(service)
+            if action == "context":
+                return store.context(principal, **parameters)
             enforce_bound_identity(binding, store.context(principal))
-            if not full_init_done:
-                service._ensure_init()
-                if service._storage is None:
-                    raise ValueError("coordination_requires_postgres")
-                store = _store(service)
+    if action == "send":
+        # Paid after the cheap refusals above, once per process.
+        _ensure_tier(service, full=True)
+    with service._coordination_lock:
+        store = _store(service)
         if action in {"register", "send", "heartbeat"}:
             now = time.monotonic()
             if now - getattr(service, "_coordination_pruned_at", float("-inf")) >= 60:

@@ -6,7 +6,12 @@ Resolution order for the test server:
 2. The repo's dev container at ``127.0.0.1:5433`` (ops/docker-compose.yml).
 
 If neither is reachable, PG-backed tests skip cleanly so the pure-logic
-suites stay runnable anywhere.
+suites stay runnable anywhere, unless PSEUDOLIFE_REQUIRE_TEST_POSTGRES=1
+requires database coverage (as in the full CI lanes). A server that IS reachable
+but rejects the credentials is different: that is a misconfiguration, and the PG-backed
+tests ERROR instead of skipping (``tests/pg_defaults.py``) — after the
+2026-09-14 password rotation the suite skipped ~1000 tests with exit 0.
+The dev container's password itself is read from ``ops/.env``.
 
 Without the env override, each pytest process gets its own private
 database (``pseudolife_memory_test_<pid>``), dropped at interpreter
@@ -27,7 +32,13 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-_DEFAULT_ADMIN = "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres"
+from tests.pg_defaults import (  # noqa: E402
+    PostgresAuthError, PostgresSetupError, PostgresUnavailableError, RedactedUrl,
+    auth_failure_message, conninfo_dbname, conninfo_with_dbname,
+    default_admin_url, is_auth_failure, is_server_unavailable,
+    redacted_error_text, setup_failure_message,
+)
+
 # Per-run private database — see module docstring. A fixed name here would
 # reintroduce the concurrent-run reaper crossfire.
 _TEST_DB = f"pseudolife_memory_test_{os.getpid()}"
@@ -46,10 +57,11 @@ from pseudolife_memory.storage.schema import (  # noqa: E402
 def _admin_url() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        # Point at the server's postgres db for admin ops.
-        base, _, _db = url.rpartition("/")
-        return base + "/postgres"
-    return _DEFAULT_ADMIN
+        url = RedactedUrl(url)
+        # Point at the server's postgres db for admin ops. psycopg parses both
+        # URI and keyword DSNs; only dbname changes, so TLS/options survive.
+        return RedactedUrl(conninfo_with_dbname(url, "postgres"))
+    return RedactedUrl(default_admin_url())
 
 
 def _with_worker_suffix(db: str) -> str:
@@ -71,20 +83,22 @@ def _with_worker_suffix(db: str) -> str:
 def _target_db_name() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        return _with_worker_suffix(url.rsplit("/", 1)[1].split("?")[0])
+        url = RedactedUrl(url)
+        return _with_worker_suffix(conninfo_dbname(url))
     return _TEST_DB
 
 
 def resolve_test_db_url() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        # Explicit override: returned verbatim (single-process) and
-        # provisioning stays pg_url's job (CI relies on that) — no
-        # connection attempts from a mere resolve. Under an xdist worker
-        # the database name gets the worker id appended; see
-        # _with_worker_suffix for why.
-        base, _, db = url.rpartition("/")
-        return f"{base}/{_with_worker_suffix(db)}"
+        url = RedactedUrl(url)
+        # Explicit override: its endpoint, credentials and options stay
+        # unchanged in a single process, and provisioning stays pg_url's job
+        # (CI relies on that) — no connection attempts from a mere resolve.
+        # Under an xdist worker the database name gets the worker id appended;
+        # see _with_worker_suffix for why.
+        db = _with_worker_suffix(conninfo_dbname(url))
+        return RedactedUrl(conninfo_with_dbname(url, db))
     # Best-effort creation so direct consumers (daemon/shim fixtures,
     # single-file runs) get an existing per-run database without depending
     # on pg_url having run first; their own reachability probes handle the
@@ -93,7 +107,9 @@ def resolve_test_db_url() -> str:
         ensure_test_db()
     except Exception:  # noqa: BLE001
         pass
-    return _DEFAULT_ADMIN.rsplit("/", 1)[0] + f"/{_TEST_DB}"
+    # RedactedUrl: dozens of tests take pg_url as a parameter, and pytest
+    # prints every frame's arguments in a failure report (2026-09-20 review).
+    return RedactedUrl(conninfo_with_dbname(default_admin_url(), _TEST_DB))
 
 
 def _pid_alive(pid: int) -> bool:
@@ -149,29 +165,39 @@ def _drop_run_db() -> None:
         pass
 
 
-# Memo per (admin url, db name): None = created OK, str = failure message.
-# Keyed, not a plain flag, so a test that toggles the env override cannot
-# poison provisioning of the other target for the rest of the process.
-_ensure_state: dict[tuple[str, str], str | None] = {}
+# Memo per (admin url, db name): None = created OK, else (exception class,
+# message) to raise afresh. PostgresUnavailableError is the sole skip signal;
+# auth and every reachable setup failure error. Keyed, not a plain flag, so a
+# test that toggles the env override cannot poison provisioning of the other
+# target for the rest of the process. The RedactedUrl key keeps --showlocals
+# and cached failures from rendering credentials.
+_ensure_state: dict[tuple[str, str], tuple[type[RuntimeError], str] | None] = {}
 
 
 def ensure_test_db() -> None:
     """Create the run's test database if missing (memoized per target).
 
-    Raises on an unreachable server — callers translate that into a
-    skip. ``resolve_test_db_url()`` calls this too (default-URL path),
-    so single-file runs work on a fresh server without depending on
+    Raises ``PostgresUnavailableError`` only when no server answered — callers
+    translate that into a skip. Authentication and reachable setup failures
+    are errors, because skipping either would make the run falsely green.
+    ``resolve_test_db_url()`` calls this too (default-URL path), so
+    single-file runs work on a fresh server without depending on
     ``pg_url`` having run first.
     """
     overridden = bool(os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL"))
     db_name = _target_db_name()
-    key = (_admin_url(), db_name)
+    admin = RedactedUrl(_admin_url())
+    key = (admin, db_name)
     if key in _ensure_state:
-        if _ensure_state[key] is not None:
-            raise RuntimeError(_ensure_state[key])
+        memo = _ensure_state[key]
+        if memo is not None:
+            # A FRESH exception each time: re-raising one stored object
+            # would append this frame to its traceback on every PG test.
+            cls, message = memo
+            raise cls(message)
         return
     try:
-        with psycopg.connect(_admin_url(), connect_timeout=3, autocommit=True) as conn:
+        with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:
             if not overridden:
                 _prune_dead_run_dbs(conn)
             row = conn.execute(
@@ -182,19 +208,47 @@ def ensure_test_db() -> None:
             if not overridden:
                 atexit.register(_drop_run_db)
     except Exception as exc:  # noqa: BLE001
-        _ensure_state[key] = f"no test Postgres reachable: {exc}"
-        raise RuntimeError(_ensure_state[key]) from exc
+        if is_auth_failure(exc):
+            memo = (
+                PostgresAuthError,
+                auth_failure_message(admin.host, exc, admin),
+            )
+        elif is_server_unavailable(exc):
+            detail = redacted_error_text(exc, admin)
+            memo = (
+                PostgresUnavailableError,
+                f"no test Postgres reachable at {admin.host}: {detail}",
+            )
+        else:
+            memo = (
+                PostgresSetupError,
+                setup_failure_message(admin.host, exc, admin),
+            )
+        _ensure_state[key] = memo
+        # `from None`: psycopg's frames carry the full conninfo (password
+        # included) as a rendered argument; the FATAL text is in the message.
+        raise memo[0](memo[1]) from None
     _ensure_state[key] = None
+
+
+def _skip_or_raise(exc: BaseException) -> None:
+    """The one branch every PG fixture takes on a failed probe: an absent
+    server skips only when database coverage is optional."""
+    if (isinstance(exc, PostgresUnavailableError)
+            and os.environ.get("PSEUDOLIFE_REQUIRE_TEST_POSTGRES") != "1"):
+        pytest.skip(str(exc))
+    raise exc
 
 
 @pytest.fixture(scope="session")
 def pg_url() -> str:
-    """Session fixture: ensure the test database exists; skip if no server."""
+    """Session fixture: ensure the test database exists; skip if no server,
+    ERROR if the server rejected the credentials."""
     try:
         ensure_test_db()
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(str(exc))
-    return resolve_test_db_url()
+        _skip_or_raise(exc)
+    return RedactedUrl(resolve_test_db_url())
 
 
 @pytest.fixture()

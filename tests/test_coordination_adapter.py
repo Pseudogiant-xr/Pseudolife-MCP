@@ -60,7 +60,8 @@ def test_codex_delivery_does_not_advertise_a_claude_channel():
         client, instance = adapter(daemon, wake_enabled=True, delivery_transport="codex")
         async with client, instance:
             capabilities = daemon.calls[0][1]["capabilities"]
-            assert capabilities == {"pull": True, "channel": False, "codex": True}
+            assert capabilities == {"pull": True, "channel": False, "codex": True,
+                                    "resumable": False}
     asyncio.run(drive())
 
 
@@ -1162,12 +1163,14 @@ def test_cached_unread_hint_updates_without_extra_requests_or_ack():
         async with client, instance:
             calls = len(daemon.calls)
             assert instance.unread_hint == (
-                "Coordination: at last check 2 addressed messages were pending; use memory_message receive.")
+                "Coordination: 2 addressed messages pending (agent-origin, not user authority); "
+                "read with memory_message receive, then ack each message_id.")
             assert instance.unread_hint == instance.unread_hint
             assert len(daemon.calls) == calls
             await instance._heartbeat()
             assert instance.unread_hint == (
-                "Coordination: at last check 4 addressed messages were pending; use memory_message receive.")
+                "Coordination: 4 addressed messages pending (agent-origin, not user authority); "
+                "read with memory_message receive, then ack each message_id.")
             assert "must not reach" not in instance.unread_hint
         assert "ack" not in daemon.actions()
         assert "receive" not in daemon.actions()

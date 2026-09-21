@@ -374,8 +374,8 @@ is agent context every session, so it stays lean.
 | `memory_supersede(old_text?, new_text, entry_id?)` | Correct the selected entry by ID, or one unique exact-text match; ambiguous/missing targets fail closed. Keep the old entry as history; `derived_flagged` names canonical facts built on it (flagged, never rewritten) |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
-| `memory_agents(action, project?, task?, status?)` | Experimental, opt-in peer awareness or update of the caller's registered context; unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack`; requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval |
+| `memory_agents(action, project?, task?, status?)` | Experimental, opt-in peer awareness or update of the caller's registered context; lists peers holding a lease or active within the hour and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -386,8 +386,8 @@ is agent context every session, so it stays lean.
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
-| `memory_dream(action, limit?, commit_token?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
-| `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
+| `memory_dream(action, limit?, commit_token?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage, with long lists capped and their full counts under `truncated`) |
+| `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `list` takes `scope=<memory source>` (the Atlas project scope) to keep only analyzer findings whose entities carry that source — queued proposals (`proposed_link` / `merge_candidate` / `junk_candidate`) always list; omit or `"all"` for everything; it is not a finding-kind filter; `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
 | `memory_session_title(title, episode?)` | Name THIS session's auto-opened episode (default titles are generic); `episode` is your session handle from the briefing — concurrent sessions share one HTTP connection, so pass it to land the rename on your own episode |
 | `memory_episode_start(title, hint?, episode?)` / `memory_episode_end(episode?)` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id; `episode` is your session handle so the nest/pop lands in your own tree when several sessions run concurrently |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
@@ -541,6 +541,17 @@ every healthy deploy; see
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
+The updater rebuilds the daemon from the checkout; the **shim** your
+clients launch is a separate install and does not move with it. Re-run the
+source installer for the selected client to install the matching checkout
+and upgrade recognized installer-managed registrations. Custom commands
+are preserved and require an upgrade in their own interpreter. For a
+manual pipx install, use `pipx install --force .` from the checkout; for
+pip, run `python -m pip install .` in the registered interpreter. A
+daemon-side credential change with an old shim leaves the two out of step:
+the Claude Desktop registrar refuses a shim that cannot read the selected
+token file (exit 4), and names the upgrade.
+
 > **Two upgrades are not automatic**, because neither can be done safely
 > in place. Both have a step-by-step runbook — backup, dry run, apply,
 > verify, roll back — and a fresh install needs neither:
@@ -617,6 +628,57 @@ a `.mcp.json` at a project root for project scope:
 
 For a token-protected daemon, add a `headers` key to that Claude JSON entry:
 `"headers": { "Authorization": "Bearer <your-token>" }`.
+
+**Claude Desktop** (the app, including its Cowork and Code sessions) — the
+installer writes the entry for you:
+
+```bash
+ops/install.sh --client claude-desktop      # Windows: ops\install.ps1 -Client claude-desktop
+```
+
+Desktop has no `mcp add`; its servers live in `claude_desktop_config.json`
+(macOS `~/Library/Application Support/Claude/`, Linux `~/.config/Claude/`,
+Windows `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file
+is under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`; the
+installer prefers that path when it exists). The equivalent entry by hand:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "command": "/absolute/path/to/pseudolife-mcp",
+      "env": {
+        "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+        "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"
+      }
+    }
+  }
+}
+```
+
+Two things differ from the CLI clients. Desktop launches MCP servers with a
+**sanitized environment** — PATH plus a few system variables, none of your
+shell's exports — so `command` must be the shim's absolute path (`which
+pseudolife-mcp` / `Get-Command pseudolife-mcp`), and a token-protected
+daemon needs `"PSEUDOLIFE_MCP_TOKEN_FILE": "/absolute/path/to/a/private/file"`
+in that `env` block: a bearer exported in your OS environment never reaches
+the shim. The symptom of forgetting it is every session failing with
+*"Couldn't start for Cowork and Code sessions. Error: unhandled errors in a
+TaskGroup (1 sub-exception)"* — a 401 under the SDK's wrapper, which the
+shim now names plainly on stderr at startup. When the daemon is
+token-gated the installer writes that file (owner-only) from
+`PSEUDOLIFE_MCP_TOKEN` in its environment or `ops/.env`, or migrates a
+literal token already in the entry into it; with no token to write it
+says so and exits 3. The shim must also be able to *read* that file:
+releases through 0.15.0 only read the literal `PSEUDOLIFE_MCP_TOKEN`, so
+the registrar probes `<command> --help` for the file form first and
+refuses an older shim (exit 4, nothing written) rather than register an
+entry that would fail with the same TaskGroup error — upgrade the shim
+(`pipx upgrade pseudolife-mcp`, or `pipx install --force .` from the checkout) and
+re-run. After any edit, fully quit Desktop from the tray or
+menu-bar icon and relaunch — closing the window does not reload the
+config.
 
 Codex — the installer's default (shim mode) wires the same stdio shim, so a
 Codex session gets its own tier-1 identity instead of inheriting a
@@ -1001,6 +1063,23 @@ pseudolife-mcp-daemon`).
   prints the interpreter path and the exact fix on stderr: `pip install -U
   "mcp>=2.1,<3"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
+- **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
+  unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
+  is at the bottom of `mcp-server-pseudolife-memory.log` in the app's log
+  folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
+  on macOS). If it is a 401, the daemon is token-gated and the
+  Desktop-launched shim holds no credential: Desktop sanitizes the
+  environment, so put `PSEUDOLIFE_MCP_TOKEN_FILE` in the entry's `env` (see
+  Claude Desktop under [Wire into your coding
+  agent](#wire-into-your-coding-agent)) or re-run `ops/install.* --client
+  claude-desktop`, then fully quit and relaunch. On the Windows Store build
+  the file lives under
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`. If the
+  entry already carries `PSEUDOLIFE_MCP_TOKEN_FILE` and still 401s, the
+  shim predates token-file support (PyPI releases through 0.15.0 read only
+  the literal token): `pseudolife-mcp --help` from a capable shim lists
+  `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim and re-run the installer,
+  which now refuses to register an older one against a token file.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —
@@ -1045,7 +1124,11 @@ model-heavy pieces are stubbed so it stays fast and offline. The PG-backed
 suites each target a throwaway per-run `pseudolife_memory_test_<pid>`
 database on the bundled dev container (never your real bank; concurrent
 runs can't collide), dropped on exit, and skip cleanly without Postgres.
-Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
+The container's password is read from `ops/.env` (override with
+`PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_TEST_PG_PASSWORD`); a
+server that is reachable but rejects the credentials *errors* the PG-backed
+tests rather than skipping them, so a rotated password can never produce a
+green run by accident. Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
 
 ## What's not built yet
 

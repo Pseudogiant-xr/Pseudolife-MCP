@@ -24,6 +24,18 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# The eval-backed suites (test_recall, test_memcot_bench,
+# test_constraint_pinning) and evals/ladder_sweep.py read the bench admin
+# URL from PSEUDOLIFE_BENCH_ADMIN_URL. Seed it once, here, from the same
+# resolver pg_fixtures uses (explicit test DSN, then password from ops/.env),
+# so a rotated dev password or alternate test server cannot turn those files
+# into silent skips. An operator's own bench value is left alone.
+from tests.pg_defaults import bench_admin_url, conninfo_with_dbname  # noqa: E402
+
+if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
+    os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = bench_admin_url()
+    os.environ["_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"] = "1"
+
 # Isolate client configuration before test-module imports can snapshot it.
 # Model caches and ordinary home-directory lookup stay intact; only the Codex
 # connection and its credentials/state are redirected to this owned temp home.
@@ -64,11 +76,8 @@ if _bench_pin is not None:
         try:
             import psycopg
 
-            admin = os.environ.get(
-                "PSEUDOLIFE_BENCH_ADMIN_URL",
-                "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
-            )
-            admin = admin.rsplit("/", 1)[0] + "/postgres"
+            admin = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or bench_admin_url()
+            admin = conninfo_with_dbname(admin, "postgres")
             db = os.environ["PSEUDOLIFE_BENCH_DB"]
             with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:
                 conn.execute(f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
@@ -83,6 +92,28 @@ import pytest
 
 if TYPE_CHECKING:
     from pseudolife_memory.service import MemoryService
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Required CI database coverage must fail before collection can skip it."""
+    if os.environ.get("PSEUDOLIFE_REQUIRE_TEST_POSTGRES") != "1":
+        return
+    try:
+        import psycopg  # noqa: F401 — cannot use importorskip in a required lane
+    except ImportError:
+        raise pytest.UsageError("Required test PostgreSQL needs psycopg") from None
+
+    from tests.helpers import pg_reachable
+    from tests.pg_defaults import (
+        PostgresAuthError, PostgresSetupError, PostgresUnavailableError,
+    )
+    from tests.pg_fixtures import ensure_test_db, resolve_test_db_url
+
+    try:
+        ensure_test_db()
+        pg_reachable(resolve_test_db_url())
+    except (PostgresAuthError, PostgresSetupError, PostgresUnavailableError) as exc:
+        raise pytest.UsageError(str(exc)) from None
 
 
 def pytest_configure(config: pytest.Config) -> None:

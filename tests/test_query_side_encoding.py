@@ -32,8 +32,8 @@ _SERVICE_FILES = (_PKG / "service.py", _PKG / "service_dream.py")
 # Every (enclosing function, embedder method) pair behind a ``self._embedder.<method>(...)``
 # call in pseudolife_memory/service.py, per the call-site rule in this file's module
 # docstring. Built from the AST walk below (see task-3-report.md for the raw dump) and
-# verified against the spec review's counts: 23 raw call sites (9 encode_query, 14
-# encode_single/encode) collapse to 21 unique pairs here because cortex_write and
+# verified against the source's counts: 22 raw call sites (9 encode_query, 13
+# encode_single/encode) collapse to 20 unique pairs here because cortex_write and
 # _propose_dream_alias_candidates each call the same method twice in the same function.
 #
 # Task 4 (set-valued slots) added ("set_add", "encode_single") -- set_add embeds the
@@ -45,10 +45,10 @@ _SERVICE_FILES = (_PKG / "service.py", _PKG / "service_dream.py")
 # until its author classifies it under the query/document rule and adds a row here.
 EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     ("_dream_hints", "encode_single"),
+    ("_apply_correction_locked", "encode_single"),
     ("_promote_slots", "encode_single"),
     ("_propose_dream_alias_candidates", "encode"),
     ("_resolve_dream_slot", "encode_single"),
-    ("consolidate", "encode_single"),
     ("consolidation_candidates", "encode_query"),
     ("cortex_candidates", "encode_single"),
     ("cortex_dedup", "encode_single"),
@@ -73,7 +73,6 @@ EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     # digest is stored content embedded for later retrieval, the same
     # classification as store()'s entry embedding.
     ("_store_digest", "encode_single"),
-    ("supersede", "encode_single"),
     ("trace", "encode_query"),
     ("world_search", "encode_query"),
     ("world_write", "encode_single"),

@@ -32,6 +32,9 @@ Design notes
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
+from dataclasses import dataclass
+import hashlib
 import heapq
 import logging
 import os
@@ -75,6 +78,30 @@ class PersistenceError(RuntimeError):
     write succeeded but did NOT reach Postgres/disk. Surfaced to the caller and
     counted in ``MemoryService._persist_errors`` (health-visible), never silently
     swallowed: silent save loss is the one failure a memory system must not hide."""
+
+
+class CorrectionReconciliationError(RuntimeError):
+    """Durable correction state cannot yet be classified safely."""
+
+
+class _ReplacementRejected(RuntimeError):
+    """Internal rollback signal for a deliberately refused replacement."""
+
+
+@dataclass(frozen=True)
+class PendingCorrectionRecovery:
+    original: ContinuumMemorySystem
+    staged: ContinuumMemorySystem
+    source_ids: tuple[int, ...]
+    source_dream_ids: tuple[str, ...]
+    source_fingerprints: tuple[tuple, ...]
+    replacement_id: int | None
+    replacement_dream_id: str
+    superseded_at: float
+    superseded_by_text: str
+    before_file_signature: tuple | None
+    after_file_signature: tuple | None
+    response: dict[str, Any]
 
 
 def _entry_to_dict(
@@ -639,11 +666,14 @@ class MemoryService(DreamOps):
         self._lessons = None  # LessonStore | None (procedural / outcome memory, v10)
         self._lesson_synthesis_recovery = None  # uncertain commit: (inputs, handled IDs)
         self._slot_curation_recovery = None  # uncertain atomic lesson/world fold
+        self._correction_recovery: PendingCorrectionRecovery | None = None
         from pseudolife_memory.memory.hlc import HybridLogicalClock
         self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
         # A late reseed failure leaves the resident stores initialized, but no
         # write may tick until the durable coordination clock is read.
-        self._hlc_reseed_pending = False
+        # The CMS is published before hydration completes. Coordination may
+        # read readiness concurrently, so stay unready until reseeding succeeds.
+        self._hlc_reseed_pending = True
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._last_saved_fingerprint = None
@@ -978,6 +1008,7 @@ class MemoryService(DreamOps):
         return self._storage
 
     def _ensure_init(self) -> None:
+        self._recover_correction_locked()
         from pseudolife_memory.curation_safety import recover_slot_curation
         recover_slot_curation(self, locked=True)
         self._recover_lesson_synthesis()
@@ -1748,6 +1779,492 @@ class MemoryService(DreamOps):
             "target_errors": target_errors or [],
         }
 
+    @staticmethod
+    def _correction_entry_fingerprint(entry: MemoryEntry) -> tuple:
+        return (
+            entry.text,
+            entry.bank,
+            entry.source,
+            float(entry.timestamp),
+            entry.episode_id,
+            entry.episode_title,
+            tuple(entry.tags),
+            tuple(tuple(slot) for slot in entry.slots),
+            entry.authority,
+            entry.distortion_tolerance,
+            entry.superseded_at,
+            entry.superseded_by_text,
+        )
+
+    @staticmethod
+    def _correction_row_fingerprint(row: dict[str, Any]) -> tuple:
+        return (
+            row["text"],
+            row["band"],
+            row["source"],
+            float(row["ts"]),
+            row.get("episode_id"),
+            row.get("episode_title"),
+            tuple(row.get("tags") or ()),
+            tuple(tuple(slot) for slot in (row.get("slots") or ())),
+            row.get("authority"),
+            row.get("distortion_tolerance"),
+            row.get("superseded_at"),
+            row.get("superseded_by_text"),
+        )
+
+    @staticmethod
+    def _correction_file_signature(cms: ContinuumMemorySystem) -> tuple:
+        """Exact signature of the fields written by ``CMS.save``.
+
+        File recovery may classify a snapshot only when the complete durable
+        bank matches one candidate. Process-only caches and telemetry are
+        restored separately from that candidate after classification.
+        """
+        bands = []
+        for band in cms.bands:
+            entries = []
+            for entry in band.entries:
+                embedding = entry.embedding.detach().cpu().contiguous()
+                entries.append((
+                    entry.text,
+                    str(embedding.dtype),
+                    tuple(embedding.shape),
+                    hashlib.sha256(embedding.numpy().tobytes()).digest(),
+                    float(entry.surprise_score),
+                    float(entry.timestamp),
+                    int(entry.access_count),
+                    entry.source,
+                    entry.superseded_at,
+                    entry.superseded_by_text,
+                    entry.last_logical_turn,
+                    tuple(tuple(slot) for slot in entry.slots),
+                    entry.episode_id,
+                    entry.episode_title,
+                    tuple(entry.tags),
+                    entry.authority,
+                    entry.distortion_tolerance,
+                    entry.dream_state,
+                    entry.dream_id,
+                ))
+            bands.append((band.name, tuple(entries)))
+        return (
+            tuple(bands),
+            int(cms._interaction_count),
+            int(cms._logical_turn_count),
+            deepcopy(cms._surprise_history),
+            deepcopy(cms._consolidation_events),
+            deepcopy(cms._tier_hits),
+            int(cms._tier_queries),
+            deepcopy(cms.episodes.to_dict()),
+            cms.dream_ack_secret,
+            float(cms.dream_display_cursor),
+        )
+
+    @staticmethod
+    def _correction_replacement(
+        staged: ContinuumMemorySystem, before_dream_ids: set[str],
+    ) -> MemoryEntry:
+        replacements = [
+            entry for band in staged.bands for entry in band.entries
+            if entry.dream_id not in before_dream_ids
+        ]
+        if len(replacements) != 1:
+            raise RuntimeError(
+                "correction staging did not preserve one replacement identity")
+        return replacements[0]
+
+    def _correction_trace_state(
+        self, source_ids: tuple[int, ...], superseded_at: float,
+    ) -> tuple[bool, bool]:
+        """Return (before-clean, after-complete) for correction invalidations."""
+        conn = getattr(self._storage, "conn", None)
+        if conn is None or not source_ids:
+            return True, True
+        before_clean = bool(conn.execute(
+            "SELECT NOT EXISTS (SELECT 1 FROM memory_trace_invalidations "
+            "WHERE source_entry_id = ANY(%s) AND invalidated_at = %s "
+            "AND cause = 'source_superseded')",
+            (list(source_ids), superseded_at),
+        ).fetchone()[0])
+        after_complete = bool(conn.execute(
+            "SELECT NOT EXISTS (SELECT 1 FROM memory_traces t "
+            "WHERE t.entry_id = ANY(%s) AND NOT EXISTS ("
+            "SELECT 1 FROM memory_trace_invalidations i "
+            "WHERE i.entity_norm = t.entity_norm "
+            "AND i.attribute_norm = t.attribute_norm "
+            "AND i.source_entry_id = t.entry_id "
+            "AND i.invalidated_at = %s "
+            "AND i.cause = 'source_superseded'))",
+            (list(source_ids), superseded_at),
+        ).fetchone()[0])
+        return before_clean, after_complete
+
+    @staticmethod
+    def _merge_correction_transients(
+        resident: ContinuumMemorySystem,
+        template: ContinuumMemorySystem,
+        *, by_db_id: bool,
+    ) -> None:
+        def key(entry):
+            return entry.db_id if by_db_id else entry.dream_id
+
+        prior = {
+            key(entry): entry
+            for band in template.bands for entry in band.entries
+            if key(entry) is not None
+        }
+        for band in resident.bands:
+            band._dirty = True
+            template_band = next(
+                (candidate for candidate in template.bands
+                 if candidate.name == band.name),
+                None,
+            )
+            if template_band is not None:
+                band.surprise_ema = template_band.surprise_ema
+            for entry in band.entries:
+                old = prior.get(key(entry))
+                if old is None:
+                    continue
+                entry.seq = old.seq
+                entry.dream_id = old.dream_id
+                entry.cue_flags = old.cue_flags
+                if not by_db_id:
+                    entry.reinforcements = old.reinforcements
+        resident._slot_token_index = {}
+        resident._slot_index_ordinal = 0
+        resident._slot_index_dirty = True
+        resident._true_drops = template._true_drops
+        resident._last_entity_seen = template._last_entity_seen
+        resident._slot_index_shadow_divergences = (
+            template._slot_index_shadow_divergences)
+        resident._shadow_rng.setstate(template._shadow_rng.getstate())
+        resident._in_logical_turn = template._in_logical_turn
+        resident.weights_reset = template.weights_reset
+
+    @staticmethod
+    def _preserve_correction_entry_identity(
+        original: ContinuumMemorySystem,
+        published: ContinuumMemorySystem,
+    ) -> None:
+        """Keep references to pre-existing entries valid after publication."""
+        originals = {
+            entry.dream_id: entry
+            for band in original.bands for entry in band.entries
+        }
+        for band in published.bands:
+            for index, entry in enumerate(band.entries):
+                prior = originals.get(entry.dream_id)
+                if prior is None:
+                    continue
+                prior.__dict__.clear()
+                prior.__dict__.update(deepcopy(entry.__dict__))
+                band.entries[index] = prior
+        published._slot_token_index = {}
+        published._slot_index_ordinal = 0
+        published._slot_index_dirty = True
+
+    def _hydrate_correction_rows(
+        self, rows: list[dict[str, Any]], template: ContinuumMemorySystem,
+    ) -> ContinuumMemorySystem:
+        from pseudolife_memory.memory.episodes import Episode, EpisodeManager
+        from pseudolife_memory.storage.sync import row_to_entry
+
+        resident = template.clone_for_staged_store()
+        named = {band.name: band for band in resident.bands}
+        for band in resident.bands:
+            band.entries = []
+            band._dirty = True
+        for row in rows:
+            band = named.get(row["band"], resident.bands[0])
+            band.entries.append(row_to_entry(row, device=band.device))
+        episodes = EpisodeManager()
+        for episode in self._storage.load_episodes():
+            episodes.episodes[episode["id"]] = Episode(**episode)
+        open_episodes = [
+            episode for episode in episodes.episodes.values()
+            if episode.ended_at is None
+        ]
+        episodes.current_id = open_episodes[-1].id if open_episodes else None
+        resident.episodes = episodes
+        self._merge_correction_transients(resident, template, by_db_id=True)
+        return resident
+
+    def _recover_correction_locked(self) -> str | None:
+        pending = self._correction_recovery
+        if pending is None:
+            return None
+        try:
+            if self._storage is not None:
+                rows = self._storage.load_entries()
+                by_id = {int(row["id"]): row for row in rows}
+                replacement_present = (
+                    pending.replacement_id is not None
+                    and pending.replacement_id in by_id
+                )
+                before_clean, after_complete = self._correction_trace_state(
+                    pending.source_ids, pending.superseded_at)
+                before = (
+                    not replacement_present
+                    and before_clean
+                    and all(
+                        entry_id in by_id
+                        and self._correction_row_fingerprint(by_id[entry_id])
+                        == fingerprint
+                        for entry_id, fingerprint in zip(
+                            pending.source_ids, pending.source_fingerprints)
+                    )
+                )
+                staged_by_id = {
+                    entry.db_id: entry
+                    for band in pending.staged.bands for entry in band.entries
+                    if entry.db_id is not None
+                }
+                after_sources = True
+                for entry_id in pending.source_ids:
+                    expected = staged_by_id.get(entry_id)
+                    actual = by_id.get(entry_id)
+                    if expected is None:
+                        after_sources &= actual is None
+                    else:
+                        after_sources &= (
+                            actual is not None
+                            and actual.get("superseded_at")
+                            == pending.superseded_at
+                            and actual.get("superseded_by_text")
+                            == pending.superseded_by_text
+                        )
+                after = replacement_present and after_sources and after_complete
+                if before == after:
+                    raise CorrectionReconciliationError(
+                        "durable correction state is neither uniquely before nor after")
+                template = pending.staged if after else pending.original
+                resident = self._hydrate_correction_rows(rows, template)
+            else:
+                resident = ContinuumMemorySystem(
+                    pending.original.config,
+                    reference_bank=pending.original.reference,
+                    nli_scorer=pending.original._nli_scorer,
+                    reranker=pending.original._reranker,
+                )
+                resident.load(self.config.memory.save_dir)
+                durable_signature = self._correction_file_signature(resident)
+                before = durable_signature == pending.before_file_signature
+                after = durable_signature == pending.after_file_signature
+                if before == after:
+                    raise CorrectionReconciliationError(
+                        "durable correction snapshot is neither uniquely before nor after")
+                template = pending.staged if after else pending.original
+                self._merge_correction_transients(
+                    resident, template, by_db_id=False)
+            self._preserve_correction_entry_identity(
+                pending.original, resident)
+            self._cms = resident
+            self._correction_recovery = None
+            if self._storage is None:
+                self._last_saved_fingerprint = self._entry_fingerprint()
+            return "committed" if after else "rolled_back"
+        except CorrectionReconciliationError:
+            raise
+        except Exception as exc:
+            raise CorrectionReconciliationError(
+                f"correction commit reconciliation required: {exc}") from exc
+
+    def _stage_correction_locked(
+        self,
+        staged: ContinuumMemorySystem,
+        staged_targets: list[MemoryEntry],
+        *,
+        source_ids: tuple[int, ...],
+        before_dream_ids: set[str],
+        new_text: str,
+        embedding,
+        source: str,
+        tags: list[str] | None,
+        authority: str | None,
+        distortion_tolerance: str | None,
+        report_derivations: bool,
+        superseded_at: float,
+    ) -> tuple[list[dict], MemoryEntry, float]:
+        self._retire_entries_locked(
+            staged_targets,
+            superseded_at=superseded_at,
+            superseded_by_text=new_text,
+        )
+        derived = (
+            self._derived_from_entries_locked(list(source_ids))
+            if report_derivations else []
+        )
+        stored, surprise = staged.store(
+            new_text,
+            embedding,
+            source=source,
+            tags=tags,
+            session_key=self._resolve_writer()[1],
+            authority=authority,
+            distortion_tolerance=distortion_tolerance,
+            bypass_surprise_gate=True,
+            strict_storage=True,
+        )
+        if not stored:
+            raise _ReplacementRejected()
+        replacement = self._correction_replacement(staged, before_dream_ids)
+        if self._storage is not None and replacement.db_id is None:
+            raise RuntimeError("correction replacement has no durable row ID")
+        return derived, replacement, surprise
+
+    def _apply_correction_locked(
+        self,
+        entries: list[MemoryEntry],
+        new_text: str,
+        *,
+        source: str,
+        tags: list[str] | None = None,
+        report_derivations: bool,
+    ) -> dict[str, Any]:
+        assert self._cms is not None and self._embedder is not None
+        original = self._cms
+        auth, distortion = _inherited_labels(entries, new_text)
+        embedding = self._embedder.encode_single(new_text)
+        staged = original.clone_for_staged_store()
+        source_ids = tuple(
+            int(entry.db_id) for entry in entries if entry.db_id is not None)
+        source_dream_ids = tuple(entry.dream_id for entry in entries)
+        source_fingerprints = tuple(
+            self._correction_entry_fingerprint(entry) for entry in entries)
+        staged_entries = [
+            entry for band in staged.bands for entry in band.entries
+        ]
+        if self._storage is not None:
+            wanted = set(source_ids)
+            staged_targets = [entry for entry in staged_entries
+                              if entry.db_id in wanted]
+        else:
+            wanted = set(source_dream_ids)
+            staged_targets = [entry for entry in staged_entries
+                              if entry.dream_id in wanted]
+        if len(staged_targets) != len(entries):
+            raise RuntimeError("correction staging could not map every target")
+
+        stamp = time.time()
+        superseded = [entry.text for entry in entries]
+        before_dream_ids = {
+            entry.dream_id for entry in staged_entries
+        }
+        derived_total: list[dict] = []
+        replacement: MemoryEntry | None = None
+        surprise = 0.0
+
+        try:
+            if self._storage is not None:
+                with self._storage.transaction():
+                    derived_total, replacement, surprise = (
+                        self._stage_correction_locked(
+                            staged,
+                            staged_targets,
+                            source_ids=source_ids,
+                            before_dream_ids=before_dream_ids,
+                            new_text=new_text,
+                            embedding=embedding,
+                            source=source,
+                            tags=tags,
+                            authority=auth,
+                            distortion_tolerance=distortion,
+                            report_derivations=report_derivations,
+                            superseded_at=stamp,
+                        )
+                    )
+            else:
+                derived_total, replacement, surprise = (
+                    self._stage_correction_locked(
+                        staged,
+                        staged_targets,
+                        source_ids=source_ids,
+                        before_dream_ids=before_dream_ids,
+                        new_text=new_text,
+                        embedding=embedding,
+                        source=source,
+                        tags=tags,
+                        authority=auth,
+                        distortion_tolerance=distortion,
+                        report_derivations=report_derivations,
+                        superseded_at=stamp,
+                    )
+                )
+        except _ReplacementRejected:
+            return self._correction_noop(
+                "replacement_rejected",
+                "Replacement was rejected; no source entries were retired.",
+            )
+        except Exception as exc:
+            if replacement is None or (
+                self._storage is not None and replacement.db_id is None
+            ):
+                raise
+            derived = derived_total[:DERIVED_FLAGGED_CAP]
+            response = {
+                "superseded_count": len(superseded),
+                "superseded_texts": superseded,
+                "superseded_ids": list(source_ids),
+                "new_memory_stored": True,
+                "new_memory_surprise": round(float(surprise), 4),
+            }
+            if report_derivations:
+                response.update(
+                    derived_flagged=derived,
+                    derived_flagged_total=len(derived_total),
+                    derived_flagged_truncated=len(derived) < len(derived_total),
+                )
+            self._correction_recovery = PendingCorrectionRecovery(
+                original, staged, source_ids, source_dream_ids,
+                source_fingerprints, replacement.db_id,
+                replacement.dream_id, stamp, new_text, None, None, response)
+            state = self._recover_correction_locked()
+            if state == "committed":
+                return response
+            raise exc
+
+        assert replacement is not None
+        derived = derived_total[:DERIVED_FLAGGED_CAP]
+        response = {
+            "superseded_count": len(superseded),
+            "superseded_texts": superseded,
+            "superseded_ids": list(source_ids),
+            "new_memory_stored": True,
+            "new_memory_surprise": round(float(surprise), 4),
+        }
+        if report_derivations:
+            response.update(
+                derived_flagged=derived,
+                derived_flagged_total=len(derived_total),
+                derived_flagged_truncated=len(derived) < len(derived_total),
+            )
+
+        if self._storage is None:
+            before_file_signature = self._correction_file_signature(original)
+            after_file_signature = self._correction_file_signature(staged)
+            self._correction_recovery = PendingCorrectionRecovery(
+                original, staged, source_ids, source_dream_ids,
+                source_fingerprints, None, replacement.dream_id,
+                stamp, new_text, before_file_signature,
+                after_file_signature, response)
+            try:
+                original.save(self.config.memory.save_dir)
+                staged.save(self.config.memory.save_dir)
+            except Exception as exc:
+                state = self._recover_correction_locked()
+                if state == "committed":
+                    return response
+                raise exc
+
+        self._preserve_correction_entry_identity(original, staged)
+        self._cms = staged
+        self._correction_recovery = None
+        if self._storage is None:
+            self._last_saved_fingerprint = self._entry_fingerprint()
+        return response
+
     def _resolve_correction_targets_locked(
         self, *, texts: list[str] | None, entry_ids: list[int] | None,
     ) -> tuple[list[MemoryEntry], dict[str, Any] | None]:
@@ -1852,7 +2369,8 @@ class MemoryService(DreamOps):
         """Correct one entry selected by durable ID or unique exact text.
 
         Resolve identity before any mutation; missing, ambiguous, or retired
-        targets are no-ops. Replacement storage is not a rollback transaction.
+        targets are no-ops. Source retirement and replacement publication are
+        one staged durable decision.
         """
         with self._lock:
             self._ensure_init()
@@ -1867,44 +2385,12 @@ class MemoryService(DreamOps):
             if error is not None:
                 return error
 
-            now = time.time()
-            superseded = [e.text for e in superseded_entries]
-            self._retire_entries_locked(
-                superseded_entries, superseded_at=now,
-                superseded_by_text=new_text)
-
-            # Retract traversal: what the dream derived from the memories
-            # just corrected. Reported, never cascaded — the caller decides
-            # whether a derivation still holds. The same facts also carry
-            # ``re_verify`` on later reads from a durable slot invalidation
-            # event that survives source-entry eviction. This immediate list
-            # is capped rather than truncated silently.
-            derived_total = self._derived_from_entries_locked(
-                [e.db_id for e in superseded_entries])
-            derived = derived_total[:DERIVED_FLAGGED_CAP]
-
-            # Always store the correction text as a regular memory so future
-            # retrieval surfaces the new state. v35: the correction INHERITS
-            # the superseded entries' labels unless its own text restates
-            # one — a corrected rule is still a rule.
-            auth, dt = _inherited_labels(superseded_entries, new_text)
-            store_emb = self._embedder.encode_single(new_text)
-            stored, surprise = self._cms.store(
-                new_text, store_emb, source="correction",
-                session_key=self._resolve_writer()[1],
-                authority=auth, distortion_tolerance=dt,
-                bypass_surprise_gate=True,
+            return self._apply_correction_locked(
+                superseded_entries,
+                new_text,
+                source="correction",
+                report_derivations=True,
             )
-            return {
-                "superseded_count": len(superseded),
-                "superseded_texts": superseded,
-                "superseded_ids": [e.db_id for e in superseded_entries if e.db_id is not None],
-                "derived_flagged": derived,
-                "derived_flagged_total": len(derived_total),
-                "derived_flagged_truncated": len(derived) < len(derived_total),
-                "new_memory_stored": stored,
-                "new_memory_surprise": round(float(surprise), 4),
-            }
 
     def _retire_entries_locked(self, entries, *, superseded_at: float,
                                superseded_by_text: str) -> None:
@@ -2338,6 +2824,10 @@ class MemoryService(DreamOps):
         lazily-updated access counts and snapshot the cortex.
         File mode: legacy full-bank torch.save (v0.1 behavior).
         """
+        # A correction spans the resident bank itself, so unresolved state
+        # blocks every save arm until authoritative persistence classifies it.
+        self._recover_correction_locked()
+
         # An unresolved lesson commit gates ONLY the lesson arm below. It
         # says nothing about weights, access counts or the cortex/world
         # slots — and the documented recovery for it is a restart, which
@@ -5723,7 +6213,7 @@ class MemoryService(DreamOps):
             "new_memory_stored": bool, "new_memory_surprise": float}``.
 
         Every target is validated before any mutation. Replacement storage
-        and old-row updates are not one rollback transaction.
+        and source retirement publish as one staged durable decision.
         """
         with self._lock:
             self._ensure_init()
@@ -5738,35 +6228,13 @@ class MemoryService(DreamOps):
             if error is not None:
                 return error
 
-            now = time.time()
-            superseded = [e.text for e in superseded_entries]
-            self._retire_entries_locked(
-                superseded_entries, superseded_at=now,
-                superseded_by_text=new_text)
-
-            # Always store the consolidated entry — source defaults to
-            # ``"consolidation"`` for audit / filtering. v35: the note
-            # inherits the STRICTEST label across the cluster unless its
-            # own text restates one (TypeDecompose: an in-scope rule is
-            # replicated into the partition, never summarised away).
-            auth, dt = _inherited_labels(superseded_entries, new_text)
-            store_emb = self._embedder.encode_single(new_text)
-            stored, surprise = self._cms.store(
+            return self._apply_correction_locked(
+                superseded_entries,
                 new_text,
-                store_emb,
                 source=source or "consolidation",
                 tags=tags,
-                session_key=self._resolve_writer()[1],
-                authority=auth, distortion_tolerance=dt,
-                bypass_surprise_gate=True,
+                report_derivations=False,
             )
-            return {
-                "superseded_count": len(superseded),
-                "superseded_texts": superseded,
-                "superseded_ids": [e.db_id for e in superseded_entries if e.db_id is not None],
-                "new_memory_stored": stored,
-                "new_memory_surprise": round(float(surprise), 4),
-            }
 
     def list_tags(self) -> dict[str, Any]:
         """Enumerate every tag in the bank, with occurrence counts.
@@ -6694,6 +7162,15 @@ class MemoryService(DreamOps):
             return authenticated_principal({k.lower(): v for k, v in headers.items()})
         except ValueError:
             return None
+
+    def coordination_tier_ready(self) -> bool:
+        """Lock-free: has a prior call fully initialized this service, with
+        the HLC reseeded from the stored high-water mark? Read by
+        ``coordination.dispatch`` so mailbox calls never queue behind the
+        service lock on a served daemon. Clock readiness stays false through
+        initial hydration and failed reseeds; the locked initialization path
+        completes or retries the reseed before a send may tick."""
+        return self._cms is not None and not self._hlc_reseed_pending
 
     def coordination_awareness(
         self, *, session_id: str | None = None, limit: int | None = None,

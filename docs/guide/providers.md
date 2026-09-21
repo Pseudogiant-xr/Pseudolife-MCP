@@ -15,6 +15,7 @@ run.
 | Agent | MCP transport | Session briefing | Per-turn discipline | Standing file |
 |---|---|---|---|---|
 | Claude Code | stdio shim / HTTP | SessionStart hook or plugin | UserPromptSubmit hook | `~/.claude/CLAUDE.md` |
+| Claude Desktop | stdio shim (entry written to `claude_desktop_config.json`) | — | — | — (server `instructions` only) |
 | OpenAI Codex | stdio shim / HTTP | SessionStart hook (trust required\*) | UserPromptSubmit hook | `~/.codex/AGENTS.md` |
 | Gemini CLI | stdio shim / HTTP | — | — | `~/.gemini/GEMINI.md` |
 | Other MCP agent | stdio / HTTP (pasted config) | — | — | `AGENTS.md` (your path) |
@@ -79,8 +80,77 @@ transport comes from the installer either way (stdio shim by default),
 registered with `PSEUDOLIFE_WRITER_ID=claude-code` so writes are
 attributed per provider.
 
+With the coordination adapter enabled, the same UserPromptSubmit hook also
+prints the session's coordination digest — pending addressed mail, rendered
+by the shim into a per-session file — but only on the turn after it changed;
+see [Configuration](configuration.md#experimental-agent-coordination) for the file layout
+and `PSEUDOLIFE_DIGEST_DIR`.
+
 Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 [the AGENTS.md standard](#the-agentsmd-standard) for the one-line bridge.
+
+## Claude Desktop
+
+`--client claude-desktop` writes the stdio-shim entry into
+`claude_desktop_config.json` — Desktop has no `mcp add`. The merge lives in
+`ops/register_claude_desktop.py` (standard library only), which both
+installers call and which you can run by hand with
+`--command <absolute shim path>` (`--dry-run` prints the resolved path and
+entry). What Desktop does differently, and what the entry carries because
+of it:
+
+- **Sanitized launch environment.** Desktop starts MCP servers with PATH
+  plus a few system variables — none of your shell's exports. So `command`
+  is the shim's absolute path (a bare `pseudolife-mcp` would not resolve),
+  and a token-gated daemon gets `PSEUDOLIFE_MCP_TOKEN_FILE` — the path of a
+  private file holding the bearer, reloaded per call — in the entry's
+  `env`. A token exported in the OS environment never arrives. When the
+  daemon is token-gated the installer *writes* that file (owner-only) from
+  `PSEUDOLIFE_MCP_TOKEN` in its own environment or `ops/.env`, a unique
+  `claude-desktop` principal in `PSEUDOLIFE_MCP_TOKENS`, or a literal token
+  already in the entry — the shim reads the file
+  first and unconditionally, so the registrar never points at a file it
+  did not write or validate. With no token to write it registers without
+  a credential and says so (exit 3): re-run with `PSEUDOLIFE_MCP_TOKEN`
+  set. Without a usable credential every session fails as *"Couldn't start
+  for Cowork and Code sessions … unhandled errors in a TaskGroup"*, a 401
+  (or an unusable token file) the shim now names on stderr at startup.
+- **The shim must be able to read that file.** Source installers now use
+  the matching checkout, but PyPI releases through 0.15.0 read only the literal
+  `PSEUDOLIFE_MCP_TOKEN`, which Desktop never delivers. Before writing
+  anything the registrar runs `<command> --help` and looks for the
+  `PSEUDOLIFE_MCP_TOKEN_FILE` line a capable shim prints; a shim that
+  answers without it is refused (exit 4, nothing written) with the
+  upgrade named — `pipx upgrade pseudolife-mcp`, or `pipx install --force .` from
+  the checkout for a change not yet released — and so is a shim from
+  before `--help` existed (it answers "unknown mode"). A probe that yields
+  no evidence (missing, not executable, timeout, any other non-zero exit,
+  exit 0 with no output) is not blocking: the run proceeds and says the
+  check did not happen, so a clean exit 0 from the registrar is proof only
+  when it printed `shim check: … reads PSEUDOLIFE_MCP_TOKEN_FILE`. The
+  probe gets no stdin and not the token variable. `--skip-shim-check`
+  bypasses it for a wrapper the probe cannot see through.
+- **Credential preservation on updates.** An ordinary rerun reuses and
+  validates the entry's existing private token-file path, even if it differs
+  from the installer's default. `PSEUDOLIFE_MCP_TOKEN_FILE` explicitly selects
+  a replacement; an unusable replacement leaves the existing configuration
+  intact. If a token map has no unique `claude-desktop` credential for a fresh
+  setup, registration refuses to guess: provide an explicit private token
+  file for that client. Credential values are never command-line arguments
+  or printed configuration.
+- **Config location.** macOS `~/Library/Application Support/Claude/`, Linux
+  `~/.config/Claude/` (or `$XDG_CONFIG_HOME/Claude/`), Windows
+  `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file is
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json`
+  (an unpackaged shell's `%APPDATA%\Claude` may not even exist). The
+  registrar prefers the package cache when it exists and prints the path
+  it wrote.
+- **No hook layer, no standing file.** Desktop reads no `CLAUDE.md`; the
+  MCP server `instructions` field is its whole briefing. Writes carry the
+  `claude-desktop` writer id, so a shared bank can tell Desktop sessions
+  from Claude Code ones and tier them separately.
+- **Reload.** Fully quit Desktop (tray / menu-bar icon) and relaunch after
+  any config change — closing the window does not reload the file.
 
 ## Codex specifics
 
@@ -209,6 +279,34 @@ hooks as the primary integration and standing instructions when hooks cannot
 run, or keep both when a standing copy is useful for subagents.
 
 ### Verify the registered runtime
+
+The source installers install the host shim from their checkout, including
+when an older installation has the same version number. This keeps the shim's
+credential handling aligned with the daemon built from that checkout. The
+Codex setup helpers can run before package installation; no `PYTHONPATH`
+setting or preinstalled Pseudolife package is required.
+
+Fresh registrations use the executable produced by the selected package
+manager. A competing older executable on `PATH` must not be mistaken for the
+new installation. For an existing bare command, a reported path mismatch
+needs to be resolved before the installer can confirm the upgrade.
+
+For an update, use the intended checkout and rerun its installer with the
+same client selection. `ops/update.ps1` / `ops/update.sh` update the daemon;
+they do not upgrade host shims or client plugin caches. Existing custom MCP
+registrations are preserved. If one points at a separate virtual environment,
+upgrade that exact environment as described below. Update the Pseudolife
+plugin through the client's plugin manager when its scripts differ from the
+checkout, then rerun hook setup and approve the changed scripts. Editing a
+plugin cache directly does not survive plugin updates.
+
+Docker-tier stdio registrations must set `PSEUDOLIFE_MCP_NO_SPAWN=1` so a
+client waits for the Docker daemon instead of starting a fallback over a
+different bank. A missing, disabled, or unverified setting leaves setup
+incomplete. Add the setting to the existing registration while preserving
+its command, arguments, daemon URL, credential path, and other environment
+entries. If a client's registration command cannot set environment variables,
+upgrade the client or configure that entry manually before using the shim.
 
 1. Inspect `codex mcp list` and `codex mcp get pseudolife-memory` (or the
    plugin's MCP configuration). Keep one registration. Identify the exact
@@ -377,7 +475,8 @@ holdout — it reads `CLAUDE.md` — but a `CLAUDE.md` whose **first line is
 ## Writer ids
 
 Each first-class provider's shim registration carries its own
-`PSEUDOLIFE_WRITER_ID` (`claude-code` / `codex` / `gemini`), which the shim
+`PSEUDOLIFE_WRITER_ID` (`claude-code` / `claude-desktop` / `codex` /
+`gemini`), which the shim
 forwards as the `X-PL-Writer` header — so a shared bank can tell which
 agent wrote what, and toolset tiers can be keyed per client. HTTP
 registrations cannot carry env; there the daemon-side default in `ops/.env`
