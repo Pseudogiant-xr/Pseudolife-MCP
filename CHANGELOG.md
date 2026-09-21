@@ -6,16 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed (2026-09-22 — a cancelled Codex delivery start-up no longer runs on into its rpc timeout on Python 3.10/3.11)
-- `pseudolife_memory/codex_delivery.py` bounded its connect, send and reply
-  waits with `asyncio.wait_for`, which before Python 3.12 returns the inner
-  result instead of re-raising when the cancellation lands in the same loop
-  tick as the inner task's completion (bpo-42130). A caller cancelling
-  `__aenter__` at that instant — `codex_coordination._verified_delivery`'s
+### Fixed (2026-09-22 — a cancelled Codex delivery start-up ran on into its rpc timeout)
+- `pseudolife_memory/codex_delivery.py` bounded its connect, send, reply and
+  close waits with `asyncio.wait_for`, which before Python 3.12 returns the
+  inner result instead of re-raising when the cancellation lands in the
+  same loop tick as the inner task's completion (bpo-42130). A caller
+  cancelling `__aenter__` at that instant — `codex_coordination._verified_delivery`'s
   start-up deadline is one — saw the bridge carry on into its five-second
-  rpc timeout and raise `DeliveryError` instead of the cancellation. The
-  connect, send, reply and close waits now go through one `_bounded`
-  helper built on `asyncio.wait`, which propagates the cancellation after
+  rpc timeout and raise `DeliveryError` instead of the cancellation. All
+  four waits now go through one `_bounded` helper built on
+  `asyncio.wait`, which propagates the cancellation after
   cancelling and reaping the inner task (retrieving its exception, so
   nothing unsanitized is logged at garbage collection); timeouts still
   surface as `asyncio.TimeoutError`, so every `DeliveryError` message is
