@@ -21,14 +21,60 @@ caller.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
+
+from pseudolife_memory import __version__ as DAEMON_VERSION
 
 logger = logging.getLogger("pseudolife-mcp.web")
 
 # Claude Code caps SessionStart hook stdout at 10,000 chars (overflow is
 # spilled to a file + preview, which defeats the point) — stay clear of it.
 HOOK_CONTEXT_MAX_CHARS = 9_500
+
+# A plugin version arrives on the hook's query string. Only a version-shaped
+# value may be echoed into the model's context; anything else is dropped.
+_VERSION_SHAPE = re.compile(r"^[0-9A-Za-z.+-]{1,32}$")
+PLUGIN_UPDATE_COMMANDS = ("/plugin marketplace update pseudolife-mcp, then "
+                          "/plugin update pseudolife-memory@pseudolife-mcp")
+DAEMON_UPDATE_COMMANDS = "git pull, then ops/update.ps1 or ops/update.sh"
+
+
+def _version_key(value: str) -> tuple[int, ...] | None:
+    """The leading dotted-integer part of a version as a sortable tuple
+    (``0.15.0rc1`` → ``(0, 15, 0)``); ``None`` when there is none. No
+    dependency on ``packaging``, which the daemon image does not declare."""
+    match = re.match(r"^(\d+(?:\.\d+)*)", value)
+    return tuple(int(part) for part in match.group(1).split(".")) if match else None
+
+
+def version_notice(plugin_version: str | None, daemon_version: str = DAEMON_VERSION) -> str:
+    """One line when the plugin release differs from the daemon's, else ''.
+
+    The plugin's hooks run from a cache that moves only on an explicit
+    ``/plugin update``; the daemon moves on every deploy. Nothing compared
+    the two until 2026-09-21, when a session ran the previous plugin against
+    a newer daemon for an hour with no sign of it. The notice names which
+    side is behind and the command that moves it. Without ``packaging`` or
+    with a non-PEP-440 value, plain inequality still reports the mismatch,
+    without saying which side is older.
+    """
+    if not plugin_version or not _VERSION_SHAPE.match(plugin_version):
+        return ""
+    if plugin_version == daemon_version:
+        return ""
+    head = f"Pseudolife-MCP: plugin {plugin_version} and daemon {daemon_version} differ"
+    plugin_key, daemon_key = _version_key(plugin_version), _version_key(daemon_version)
+    if plugin_key is not None and daemon_key is not None and plugin_key < daemon_key:
+        return (f"{head} — update the plugin ({PLUGIN_UPDATE_COMMANDS}) and start "
+                f"a new session; until then its hooks may lack what the daemon serves.")
+    if plugin_key is not None and daemon_key is not None and plugin_key > daemon_key:
+        return (f"{head} — redeploy the daemon from the matching checkout "
+                f"({DAEMON_UPDATE_COMMANDS}); until then the plugin may call what "
+                f"the daemon does not serve.")
+    return (f"{head} — update the older one: plugin via {PLUGIN_UPDATE_COMMANDS}; "
+            f"daemon via {DAEMON_UPDATE_COMMANDS}.")
 
 MEMORY_LOOP_BLOCK = """\
 ## Memory — your long-term memory; use it every session (tools: `mcp__pseudolife-memory__*`)
@@ -235,18 +281,23 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
 
 def hook_session_start(
     service: Any, session_id: str | None = None, source: str | None = None,
-    authorized: bool = True,
+    authorized: bool = True, plugin_version: str | None = None,
 ) -> str:
     """``session_start_context`` plus (when ``session_id`` is given) identity
     registration: opens/re-fires the session's episode, sets it as the active
     session (identity tier 3), and prepends the episode-handle advertisement.
-    Without ``session_id`` this is exactly ``session_start_context``'s
-    behaviour. Never raises; the endpoint always answers 200."""
+    A ``plugin_version`` that differs from the daemon's puts
+    :func:`version_notice` first of all. Without ``session_id`` or a
+    mismatch this is exactly ``session_start_context``'s behaviour. Never
+    raises; the endpoint always answers 200."""
     prefix = ""
+    notice = version_notice(plugin_version)
+    if notice:
+        prefix = notice + "\n\n"
     if session_id:
         ad = _episode_advertisement(session_id, source, service)
         if ad:
-            prefix = ad + "\n\n"
+            prefix += ad + "\n\n"
     body = session_start_context(service, authorized, session_id=session_id)
     return (prefix + body)[:HOOK_CONTEXT_MAX_CHARS]
 

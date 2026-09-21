@@ -18,6 +18,19 @@ function Get-DigestDir {
     return Join-Path $HOME '.pseudolife-mcp/digests'
 }
 
+# The plugin release this hook runs from (the manifest beside the script),
+# sent with SessionStart so the daemon can open the briefing with a notice
+# when the two differ. '' without a manifest or for a non-version value.
+function Get-PluginVersion {
+    $root = if ($env:CLAUDE_PLUGIN_ROOT) { $env:CLAUDE_PLUGIN_ROOT } else { Join-Path $PSScriptRoot '..' }
+    try {
+        $manifest = Get-Content -LiteralPath (Join-Path $root '.claude-plugin/plugin.json') -Raw | ConvertFrom-Json
+        $version = [string]$manifest.version
+    } catch { return '' }
+    if ($version -match '^[0-9A-Za-z.+-]{1,32}$') { return $version }
+    return ''
+}
+
 function Get-DigestKey([string]$SessionId) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($SessionId)
     $hash = [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
@@ -229,7 +242,14 @@ try {
     $payload = $rawInput | ConvertFrom-Json
     $sid = [string]$payload.session_id
     if ($Event -eq 'SessionStart') {
-        $query = if ($sid) { '?session_id=' + [Uri]::EscapeDataString($sid) + '&source=' + [Uri]::EscapeDataString([string]$payload.source) } else { '' }
+        $pairs = @()
+        if ($sid) {
+            $pairs += 'session_id=' + [Uri]::EscapeDataString($sid)
+            $pairs += 'source=' + [Uri]::EscapeDataString([string]$payload.source)
+        }
+        $pluginVersion = Get-PluginVersion
+        if ($pluginVersion) { $pairs += 'plugin_version=' + [Uri]::EscapeDataString($pluginVersion) }
+        $query = if ($pairs.Count) { '?' + ($pairs -join '&') } else { '' }
         # Match session-start.sh's maintenance-stall retry: at most 5+1+5
         # seconds of request/delay budget, within the 15-second hook budget.
         # Registration is idempotent per session_id. Do not retry auth errors.

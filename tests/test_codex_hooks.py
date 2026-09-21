@@ -1474,3 +1474,127 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
     result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,
                             timeout=30, check=True)
     return result.stdout.decode("utf-8")
+
+
+def _plugin_version():
+    return json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+
+
+def _recording_daemon():
+    """A fixture daemon that records each GET's path and answers 200."""
+    paths = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            paths.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"fixture")
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    return server, worker, paths
+
+
+def _hook_env(tmp_path, port):
+    env = isolated_env(tmp_path / "codex-home")
+    env.update({"PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
+                "PSEUDOLIFE_MCP_TOKEN": "fixture-token"})
+    return env
+
+
+def test_bash_session_start_sends_the_plugin_version(tmp_path):
+    """The SessionStart hook tells the daemon which plugin release it runs
+    from (read beside the script, in .claude-plugin/plugin.json), with and
+    without a session id, so the briefing can open with a mismatch notice.
+    2026-09-21: a stale plugin cache ran an hour against a newer daemon
+    with nothing to say so."""
+    server, worker, paths = _recording_daemon()
+    try:
+        env = _hook_env(tmp_path, server.server_port)
+        bash_run(ROOT / "plugin/hooks/session-start.sh",
+                 input='{"session_id":"fixture","source":"startup"}', env=env)
+        bash_run(ROOT / "plugin/hooks/session-start.sh", input="{}", env=env)
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+    assert len(paths) == 2
+    with_sid, without_sid = (parse_qs(urlsplit(p).query) for p in paths)
+    assert with_sid["session_id"] == ["fixture"]
+    assert with_sid["plugin_version"] == [_plugin_version()]
+    assert "session_id" not in without_sid
+    assert without_sid["plugin_version"] == [_plugin_version()]
+
+
+def test_bash_session_start_sends_no_version_without_a_manifest(tmp_path):
+    """Codex runs a content-addressed copy of plugin/hooks with no manifest
+    beside it; the hook then simply omits the parameter."""
+    hooks = tmp_path / "hooks"
+    shutil.copytree(ROOT / "plugin/hooks", hooks)
+    server, worker, paths = _recording_daemon()
+    try:
+        bash_run(hooks / "session-start.sh", input='{"session_id":"fixture","source":"startup"}',
+                 env=_hook_env(tmp_path, server.server_port))
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+    assert len(paths) == 1
+    assert "plugin_version" not in parse_qs(urlsplit(paths[0]).query)
+
+
+def test_native_session_start_sends_the_plugin_version(tmp_path):
+    server, worker, paths = _recording_daemon()
+    try:
+        env = _hook_env(tmp_path, server.server_port)
+        command = f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event SessionStart"
+        pwsh_run("-Command", command, input='{"session_id":"fixture","source":"startup"}', env=env)
+        pwsh_run("-Command", command, input="{}", env=env)
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+    assert len(paths) == 2
+    with_sid, without_sid = (parse_qs(urlsplit(p).query) for p in paths)
+    assert with_sid["session_id"] == ["fixture"]
+    assert with_sid["plugin_version"] == [_plugin_version()]
+    assert "session_id" not in without_sid
+    assert without_sid["plugin_version"] == [_plugin_version()]
+
+
+def _plugin_with_version(tmp_path, version):
+    """A plugin tree whose manifest carries ``version``; hooks run from it."""
+    root = tmp_path / "plugin"
+    shutil.copytree(ROOT / "plugin", root)
+    manifest = root / ".claude-plugin/plugin.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["version"] = version
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+def test_session_start_encodes_a_local_version_label(tmp_path, hook):
+    """``0.15.0+local`` must arrive intact: an unencoded ``+`` decodes to a
+    space on the daemon, fails the shape check there, and mutes the notice
+    (reviewer finding, 2026-09-21)."""
+    root = _plugin_with_version(tmp_path, "0.15.0+local")
+    server, worker, paths = _recording_daemon()
+    try:
+        env = _hook_env(tmp_path, server.server_port)
+        if hook == "bash":
+            bash_run(root / "hooks/session-start.sh", input="{}", env=env)
+        else:
+            pwsh_run("-Command", f"& '{root.as_posix()}/hooks/lifecycle.ps1' -Event SessionStart",
+                     input="{}", env=env)
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+    assert len(paths) == 1
+    assert parse_qs(urlsplit(paths[0]).query)["plugin_version"] == ["0.15.0+local"]

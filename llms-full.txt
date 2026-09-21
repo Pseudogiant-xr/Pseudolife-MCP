@@ -558,6 +558,22 @@ daemon-side credential change with an old shim leaves the two out of step:
 the Claude Desktop registrar refuses a shim that cannot read the selected
 token file (exit 4), and names the upgrade.
 
+The **Claude Code plugin** is a third install that does not move with the
+daemon either: Claude Code runs it from a cache that only changes when you
+ask. After a daemon update, refresh it inside Claude Code and start a new
+session:
+
+```
+/plugin marketplace update pseudolife-mcp
+/plugin update pseudolife-memory@pseudolife-mcp
+```
+
+The three tell on each other: `/health` reports the daemon's
+`version`, the session briefing opens with a one-line notice when the
+plugin's version differs from it (naming the command above or the daemon
+redeploy, whichever side is behind), the shim says so on stderr and ahead
+of its instructions, and `pseudolife-mcp doctor` reports `version_mismatch`.
+
 > **Two upgrades are not automatic**, because neither can be done safely
 > in place. Both have a step-by-step runbook — backup, dry run, apply,
 > verify, roll back — and a fresh install needs neither:
@@ -1020,8 +1036,9 @@ bank.
 
 ## Troubleshooting
 
-Start with `curl http://127.0.0.1:8765/health` — it reports the schema
-version, storage backend, auth state, and `persist_errors` (non-zero means
+Start with `curl http://127.0.0.1:8765/health` — it reports the daemon's
+package `version`, the schema version, storage backend, auth state, and
+`persist_errors` (non-zero means
 writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 

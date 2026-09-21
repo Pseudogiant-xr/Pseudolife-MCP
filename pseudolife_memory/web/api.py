@@ -296,6 +296,10 @@ def build_console_app(
             params = _parse_query(scope)
             session_id = params.get("session_id") if authorized else None
             source = params.get("source") if authorized else None
+            # The version comparison touches no memory content, so an
+            # unauthorized hook still learns it is out of date; the value
+            # is shape-checked before it can reach the model's context.
+            plugin_version = params.get("plugin_version")
 
             def start_hook():
                 # Bind the request headers so the briefing's awareness
@@ -307,7 +311,8 @@ def build_console_app(
                            for k, v in scope.get("headers", [])}
                 binding = bind_request_headers(headers)
                 try:
-                    return hook_session_start(service, session_id, source, authorized)
+                    return hook_session_start(service, session_id, source, authorized,
+                                              plugin_version=plugin_version)
                 finally:
                     unbind_request_headers(binding)
             text = await asyncio.get_running_loop().run_in_executor(None, start_hook)
