@@ -584,9 +584,12 @@ of its instructions, and `pseudolife-mcp doctor` reports `version_mismatch`.
 
 ## Wire into your coding agent
 
-**Plugin (hooks + commands).** With the daemon running, two commands inside
-Claude Code wire the session hooks (briefing + episode identity), the
-memory-loop instructions, and the `/dream` + `/memory-status` commands:
+**Plugin (hooks + commands).** The installer adds it whenever Claude Code
+is a selected client (`--claude-plugin skip` / `-ClaudePlugin skip` opts
+out; an installed plugin is left alone). It wires the session hooks
+(briefing + episode identity), the memory-loop instructions, and the
+`/dream` + `/memory-status` commands. By hand, the same two commands inside
+Claude Code do it:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP

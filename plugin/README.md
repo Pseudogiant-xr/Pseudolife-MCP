@@ -8,13 +8,19 @@ separately, and so is the MCP transport; see the
 
 ## Install
 
+The repo installer (`ops/install.sh` / `ops\install.ps1`) installs the
+plugin whenever Claude Code is a selected client, adding the marketplace
+first if needed, and reports the result on its wiring ladder
+(`--claude-plugin skip` / `-ClaudePlugin skip` opts out). By hand, inside
+Claude Code:
+
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
 Then register the MCP transport (the plugin deliberately doesn't bundle one —
-see below). Either re-run the installer, which wires the stdio shim
+see below). Either run the installer, which wires the stdio shim
 (recommended: per-session identity for concurrent sessions):
 
 ```

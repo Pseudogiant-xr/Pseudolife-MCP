@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-21 — the installer installs the Claude Code plugin)
+- `ops/install.sh` and `ops/install.ps1` add the `pseudolife-mcp`
+  marketplace (when it is not yet known) and install
+  `pseudolife-memory@pseudolife-mcp` whenever Claude Code is a selected
+  client, then read the result back from `installed_plugins.json` — the exit
+  code alone is not proof. The plugin was the one install beside the daemon
+  and the shim that still needed two commands typed inside Claude Code. An
+  installed plugin is left alone (its cache moves through `/plugin update`;
+  the session briefing says when it is behind), a missing `claude` CLI or a
+  failed command is reported on the wiring ladder with the manual commands,
+  never fatal, and `--claude-plugin skip` / `-ClaudePlugin skip` opts out.
+  Newer CLIs get `--yes` for the non-interactive install; older ones are
+  called without it. The step runs before hook ownership is decided, so a
+  fresh install's hooks come from the plugin rather than `settings.json`.
+
 ### Added (2026-09-21 — the plugin, the shim and the daemon say when they are not the same release)
 - `/health` carries `version`, the daemon's package version. The plugin's
   hooks run from a cache that moves only on `/plugin update` and the shim is
