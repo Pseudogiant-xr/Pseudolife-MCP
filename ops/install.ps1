@@ -22,6 +22,9 @@
 #   generic   any MCP agent  - prints paste-ready config + standing block
 #   both = claude,codex      all = claude,codex,gemini
 #
+# -ClaudePlugin auto|skip: install the Claude Code plugin (hooks + commands)
+#   when claude is a client (default: auto; an installed plugin is left alone).
+#
 # Extractor modes (spec: docs/superpowers/specs/
 # 2026-07-14-installer-extractor-choice-design.md):
 #   sonnet-only      Claude shim only — the ~11.8 GB sidecar image is never built
@@ -56,6 +59,9 @@ param(
     [int]$ShimPort = 0,
     [ValidateSet("shim", "http")]
     [string]$Transport = "shim",
+    # Install the Claude Code plugin (hooks + commands) when claude is a client.
+    [ValidateSet("auto", "skip")]
+    [string]$ClaudePlugin = "auto",
     [switch]$NoArt
 )
 $ErrorActionPreference = "Stop"
@@ -497,6 +503,98 @@ if ($claudeShimMode) {
         Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
     }
 }
+
+# -- 8b. Claude Code plugin (hooks + commands layer) ------------------------------
+# >>> claude plugin >>>
+# The plugin is the third install beside the daemon and the shim, and the
+# only one that needed two commands typed inside Claude Code. Installing it
+# here gives a fresh machine the session briefing and per-turn hooks from
+# the plugin (section 9 then skips the settings.json hooks). Idempotent: an
+# installed plugin is left alone - its cache moves through /plugin update,
+# and the daemon's session briefing says when it is behind.
+$claudePluginId = "pseudolife-memory@pseudolife-mcp"
+$claudePluginMarketplace = "pseudolife-mcp"
+$claudePluginMarketplaceSource = "Pseudogiant-xr/Pseudolife-MCP"
+$script:pluginClaude = ""
+$script:pluginClaudeRecovery = ""
+function Get-ClaudePluginManual {
+    "inside Claude Code run /plugin marketplace add $claudePluginMarketplaceSource then /plugin install $claudePluginId"
+}
+function Test-ClaudePluginRecorded {
+    $file = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+    return (Test-Path $file) -and ((Get-Content $file -Raw) -match [regex]::Escape("`"$claudePluginId`""))
+}
+function Get-ClaudePluginInstalledVersion {
+    $file = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+    try {
+        $records = @((Get-Content $file -Raw | ConvertFrom-Json).plugins.$claudePluginId)
+        if ($records.Count -gt 0) { return [string]$records[0].version }
+    } catch {}
+    return ""
+}
+function Install-ClaudePlugin {
+    if ($clients -notcontains "claude") { return }
+    # An installed plugin is reported as such even under skip: the ladder
+    # line must agree with the hook-ownership lines section 9 derives from
+    # the same record.
+    if (Test-ClaudePluginRecorded) {
+        $script:pluginClaude = "present:$(Get-ClaudePluginInstalledVersion)"
+        return
+    }
+    if ($ClaudePlugin -eq "skip") { $script:pluginClaude = "skipped"; return }
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        $script:pluginClaude = "no-cli"
+        $script:pluginClaudeRecovery = "the claude CLI is not on PATH; $(Get-ClaudePluginManual)"
+        return
+    }
+    $marketplaces = Join-Path $env:USERPROFILE ".claude\plugins\known_marketplaces.json"
+    $marketplaceKnown = (Test-Path $marketplaces) -and
+        ((Get-Content $marketplaces -Raw) -match [regex]::Escape("`"$claudePluginMarketplace`""))
+    if (-not $marketplaceKnown) {
+        Step "Adding the $claudePluginMarketplace plugin marketplace to Claude Code..."
+        claude plugin marketplace add $claudePluginMarketplaceSource
+        if ($LASTEXITCODE -ne 0) {
+            $script:pluginClaude = "failed"
+            $script:pluginClaudeRecovery = "'claude plugin marketplace add $claudePluginMarketplaceSource' failed (GitHub reachable?); retry it, or $(Get-ClaudePluginManual)"
+            Write-Warning $script:pluginClaudeRecovery
+            return
+        }
+    }
+    Step "Installing the $claudePluginId plugin into Claude Code..."
+    # --yes skips a confirmation newer CLIs require without a TTY; older
+    # ones lack the flag, so probe rather than assume.
+    $yesFlag = @()
+    # Some CLIs print help on stderr; read both streams.
+    $installHelp = [string](claude plugin install --help 2>&1)
+    if ($installHelp -match '--yes') { $yesFlag = @('--yes') }
+    claude plugin install @yesFlag $claudePluginId
+    if ($LASTEXITCODE -ne 0) {
+        $script:pluginClaude = "failed"
+        $script:pluginClaudeRecovery = "'claude plugin install $claudePluginId' failed (see above); retry it, or $(Get-ClaudePluginManual)"
+        Write-Warning $script:pluginClaudeRecovery
+        return
+    }
+    if (Test-ClaudePluginRecorded) {
+        $script:pluginClaude = "installed:$(Get-ClaudePluginInstalledVersion)"
+    } else {
+        $script:pluginClaude = "failed"
+        $script:pluginClaudeRecovery = "'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $claudePluginId; check 'claude plugin list', or $(Get-ClaudePluginManual)"
+        Write-Warning $script:pluginClaudeRecovery
+    }
+}
+function Describe-Plugin($state) {
+    $tail = ($state -split ":", 2)[-1]
+    switch -Wildcard ($state) {
+        "installed:*" { "[x] Plugin               installed (v$tail) - restart Claude Code or /reload-plugins to load it" }
+        "present:*" { "[x] Plugin               already installed (v$tail)" }
+        "skipped" { "[-] Plugin               skipped (-ClaudePlugin skip) - hooks come from settings.json instead" }
+        "no-cli" { "[!] Plugin               not installed - $($script:pluginClaudeRecovery)" }
+        "failed" { "[!] Plugin               not installed - $($script:pluginClaudeRecovery)" }
+        default { "[-] Plugin               not installed" }
+    }
+}
+# <<< claude plugin <<<
+Install-ClaudePlugin
 
 # -- 9. session lifecycle hooks (hook-capable providers only) ---------------------
 # Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
@@ -1347,6 +1445,7 @@ foreach ($selectedClient in $clients) {
                 Write-Host "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
                 Write-Host "    [x] Per-turn discipline  UserPromptSubmit hook"
             }
+            Write-Host "    $(Describe-Plugin $script:pluginClaude)"
             Write-Host "    $(Describe-Instr $instrState['claude'])"
         }
         "claude-desktop" {

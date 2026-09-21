@@ -23,6 +23,8 @@
 # Other flags:
 #   --codex-hooks auto|manual|plugin|skip  hook owner (default: auto)
 #   --codex-hook-trust ask|yes|no     approve PseudoLife hooks (default: ask)
+#   --claude-plugin auto|skip        install the Claude Code plugin (hooks +
+#                                    commands) when claude is a client (default: auto)
 #   --instructions append|skip|auto  standing memory block (default: auto -
 #                                    prompts only where no briefing hook exists)
 #   --claude-md append|skip          compatibility alias for --instructions
@@ -49,6 +51,7 @@ MODEL=""
 CLIENT=""
 CODEX_HOOKS=auto
 CODEX_HOOK_TRUST=ask
+CLAUDE_PLUGIN=auto
 CLAUDE_MD=""
 INSTRUCTIONS=""
 AGENTS_FILE=""
@@ -70,6 +73,7 @@ while [ $# -gt 0 ]; do
         --client) CLIENT="$2"; shift 2 ;;
         --codex-hooks) CODEX_HOOKS="$2"; shift 2 ;;
         --codex-hook-trust) CODEX_HOOK_TRUST="$2"; shift 2 ;;
+        --claude-plugin) CLAUDE_PLUGIN="$2"; shift 2 ;;
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
         --instructions) INSTRUCTIONS="$2"; shift 2 ;;
         --agents-file) AGENTS_FILE="$2"; shift 2 ;;
@@ -100,6 +104,9 @@ case "$CODEX_HOOKS" in auto|manual|plugin|skip) ;; *)
 esac
 case "$CODEX_HOOK_TRUST" in ask|yes|no) ;; *)
     echo "invalid --codex-hook-trust '$CODEX_HOOK_TRUST' (ask|yes|no)" >&2; exit 2 ;;
+esac
+case "$CLAUDE_PLUGIN" in auto|skip) ;; *)
+    echo "invalid --claude-plugin '$CLAUDE_PLUGIN' (auto|skip)" >&2; exit 2 ;;
 esac
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -531,6 +538,89 @@ elif [ -n "$codex_shim_mode" ]; then
         echo "  Or start it manually: python evals/codex_shim.py --port $SHIM_PORT --model $MODEL" >&2
     fi
 fi
+
+# ── 8b. Claude Code plugin (hooks + commands layer) ────────────────────────
+# >>> claude plugin >>>
+# The plugin is the third install beside the daemon and the shim, and the
+# only one that needed two commands typed inside Claude Code. Installing it
+# here gives a fresh machine the session briefing and per-turn hooks from
+# the plugin (section 9 then skips the settings.json hooks). Idempotent: an
+# installed plugin is left alone — its cache moves through /plugin update,
+# and the daemon's session briefing says when it is behind.
+CLAUDE_PLUGIN_ID="pseudolife-memory@pseudolife-mcp"
+CLAUDE_PLUGIN_MARKETPLACE="pseudolife-mcp"
+CLAUDE_PLUGIN_MARKETPLACE_SOURCE="Pseudogiant-xr/Pseudolife-MCP"
+PLUGIN_CLAUDE=""
+PLUGIN_CLAUDE_RECOVERY=""
+claude_plugin_manual() {
+    echo "inside Claude Code run /plugin marketplace add $CLAUDE_PLUGIN_MARKETPLACE_SOURCE then /plugin install $CLAUDE_PLUGIN_ID"
+}
+claude_plugin_recorded() {
+    grep -q "\"$CLAUDE_PLUGIN_ID\"" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null
+}
+claude_plugin_installed_version() {
+    # The record is pretty-printed JSON: the plugin's entry follows its key
+    # within a few lines. curl+sed hosts only — no jq or python assumed.
+    { grep -A 12 "\"$CLAUDE_PLUGIN_ID\"" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null \
+        | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1; } || true
+}
+install_claude_plugin() {
+    case " $CLIENTS " in *" claude "*) ;; *) return 0 ;; esac
+    # An installed plugin is reported as such even under skip: the ladder
+    # line must agree with the hook-ownership lines section 9 derives from
+    # the same record.
+    if claude_plugin_recorded; then
+        PLUGIN_CLAUDE="present:$(claude_plugin_installed_version)"
+        return 0
+    fi
+    if [ "$CLAUDE_PLUGIN" = skip ]; then PLUGIN_CLAUDE=skipped; return 0; fi
+    if ! command -v claude >/dev/null 2>&1; then
+        PLUGIN_CLAUDE=no-cli
+        PLUGIN_CLAUDE_RECOVERY="the claude CLI is not on PATH; $(claude_plugin_manual)"
+        return 0
+    fi
+    if ! grep -q "\"$CLAUDE_PLUGIN_MARKETPLACE\"" "$HOME/.claude/plugins/known_marketplaces.json" 2>/dev/null; then
+        step "Adding the $CLAUDE_PLUGIN_MARKETPLACE plugin marketplace to Claude Code..."
+        if ! claude plugin marketplace add "$CLAUDE_PLUGIN_MARKETPLACE_SOURCE"; then
+            PLUGIN_CLAUDE=failed
+            PLUGIN_CLAUDE_RECOVERY="'claude plugin marketplace add $CLAUDE_PLUGIN_MARKETPLACE_SOURCE' failed (GitHub reachable?); retry it, or $(claude_plugin_manual)"
+            echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
+            return 0
+        fi
+    fi
+    step "Installing the $CLAUDE_PLUGIN_ID plugin into Claude Code..."
+    # --yes skips a confirmation newer CLIs require without a TTY; older
+    # ones lack the flag, so probe rather than assume. Captured, not piped:
+    # under pipefail a `grep -q` that exits early makes the CLI's SIGPIPE
+    # read as "no such flag", and some CLIs print help on stderr.
+    yes_flag=""
+    install_help=$(claude plugin install --help 2>&1 || true)
+    case "$install_help" in *--yes*) yes_flag=--yes ;; esac
+    if ! claude plugin install ${yes_flag:+"$yes_flag"} "$CLAUDE_PLUGIN_ID"; then
+        PLUGIN_CLAUDE=failed
+        PLUGIN_CLAUDE_RECOVERY="'claude plugin install $CLAUDE_PLUGIN_ID' failed (see above); retry it, or $(claude_plugin_manual)"
+        echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
+        return 0
+    fi
+    if claude_plugin_recorded; then
+        PLUGIN_CLAUDE="installed:$(claude_plugin_installed_version)"
+    else
+        PLUGIN_CLAUDE=failed
+        PLUGIN_CLAUDE_RECOVERY="'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $CLAUDE_PLUGIN_ID; check 'claude plugin list', or $(claude_plugin_manual)"
+        echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
+    fi
+}
+describe_plugin() {  # $1 = state
+    case "$1" in
+        installed:*) echo "[x] Plugin               installed (v${1#*:}) - restart Claude Code or /reload-plugins to load it" ;;
+        present:*)   echo "[x] Plugin               already installed (v${1#*:})" ;;
+        skipped)     echo "[-] Plugin               skipped (--claude-plugin skip) - hooks come from settings.json instead" ;;
+        no-cli|failed) echo "[!] Plugin               not installed - $PLUGIN_CLAUDE_RECOVERY" ;;
+        *)           echo "[-] Plugin               not installed" ;;
+    esac
+}
+# <<< claude plugin <<<
+install_claude_plugin
 
 # ── 9. session lifecycle hooks (hook-capable providers only) ───────────────
 # Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
@@ -1411,6 +1501,7 @@ for selected_client in $CLIENTS; do
                 echo "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
                 echo "    [x] Per-turn discipline  UserPromptSubmit hook"
             fi
+            echo "    $(describe_plugin "$PLUGIN_CLAUDE")"
             describe_instr "$INSTR_CLAUDE" | sed 's/^/    /' ;;
         claude-desktop)
             echo "  Claude Desktop"
