@@ -163,7 +163,11 @@ and reuse the original request ID when retrying an addressed message.
 An active task should use `memory_agents` before shared-resource work and
 `memory_message(action="receive")` on resume and when the coordination digest
 (in the prompt hook or a tool result) shows pending mail. Receive does not
-acknowledge; use `action="ack"` after reading.
+acknowledge; use `action="ack"` after reading, with one `message_id` or
+several comma-separated (at most 50; a JSON array of strings, the form a
+host that stringifies list parameters sends, is read as that list): a batch
+returns the receipts in the order given and lists the ids that were not this
+mailbox's, instead of failing whole.
 These calls work in the CLI and desktop without live wake support.
 Setup leaves Codex tool approvals unchanged. A recipient running with approval
 policy `never` cannot execute a tool that still requires approval. To authorize

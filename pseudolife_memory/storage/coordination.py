@@ -177,6 +177,41 @@ def _excerpt(text: Any) -> str:
     return cleaned if len(cleaned) <= PREVIEW_EXCERPT else cleaned[:PREVIEW_EXCERPT] + "..."
 
 
+_ID_CHARS = frozenset("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_")
+
+
+def _message_ids(value: Any) -> tuple[list[str], bool]:
+    """One id, or several: comma-separated, or a JSON array of strings, which
+    is how a host that stringifies list parameters sends a list. Items are
+    id-shaped only, so a bracketed fragment fails loudly instead of landing
+    in ``missing``; duplicates drop in order; at most MAX_PAGE. Returns the
+    ids and whether the caller used list syntax. The 8192-character bound on
+    the whole string is incidental; MAX_PAGE is the limit."""
+    _string(value, 8192, "message_id", empty=False)
+    text = value.strip()
+    if text.startswith("["):
+        try:
+            items = json.loads(text)
+        except ValueError:
+            raise CoordinationError("invalid_message_id") from None
+        if not isinstance(items, list) or not items or not all(isinstance(i, str) for i in items):
+            raise CoordinationError("invalid_message_id")
+        batch = True
+    else:
+        items = text.split(",")
+        batch = "," in text
+    ids: list[str] = []
+    for item in items:
+        item = item.strip()
+        if not item or len(item) > 120 or any(c not in _ID_CHARS for c in item):
+            raise CoordinationError("invalid_message_id")
+        if item not in ids:
+            ids.append(item)
+    if len(ids) > MAX_PAGE:
+        raise CoordinationError("invalid_message_id")
+    return ids, batch
+
+
 def _hash(credential: str) -> str:
     return hashlib.sha256(credential.encode()).hexdigest()
 
@@ -551,20 +586,37 @@ class CoordinationStore:
                 "after": f"{agent_id}:{rows[-1]['recipient_sequence'] if rows else seq}"}
 
     def ack(self, principal, agent_id, credential, *, message_id):
+        """Acknowledge one message, or several comma-separated (at most
+        MAX_PAGE). One id returns its receipt or message_not_found; several
+        return the receipts in the order given plus the ids that were not this
+        mailbox's to acknowledge, so a batch never fails because one id went
+        stale. The list is a string because some hosts stringify list
+        parameters. Acknowledging is not completion; a cursor is never an
+        acknowledgement."""
+        ids, batch = _message_ids(message_id)
         with self.storage._txn():
+            # The agent row lock serializes acknowledgements per mailbox, so
+            # two overlapping batches cannot deadlock on message rows.
             self._auth(principal, agent_id, credential, lock=True)
             # An acknowledgment is activity for retention: a client that only
             # reads and acknowledges, holding no lease, must not count as idle.
             self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
                                       "WHERE agent_id=%s", (self.clock(), agent_id))
-            row = self._one("SELECT * FROM coordination_messages WHERE message_id=%s "
-                            "AND recipient_agent_id=%s FOR UPDATE", (message_id, agent_id))
-            if row is None:
-                raise CoordinationError("message_not_found")
-            if row["acknowledged_at"] is None:
-                row = self._one("UPDATE coordination_messages SET acknowledged_at=%s "
-                                "WHERE message_id=%s RETURNING *", (self.clock(), message_id))
-            return self._receipt(row)
+            # Two statements for the whole batch: the calls run under the
+            # coordination lock, which heartbeats wait on.
+            found = {row["message_id"]: row for row in self._all(
+                "SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
+                "AND message_id = ANY(%s) FOR UPDATE", (agent_id, ids))}
+            pending = [one for one in ids if one in found and found[one]["acknowledged_at"] is None]
+            if pending:
+                for row in self._all("UPDATE coordination_messages SET acknowledged_at=%s "
+                                     "WHERE message_id = ANY(%s) RETURNING *", (self.clock(), pending)):
+                    found[row["message_id"]] = row
+            missing = [one for one in ids if one not in found]
+            if not batch and missing:
+                raise CoordinationError("message_not_found")  # rolls the activity bump back
+        receipts = [self._receipt(found[one]) for one in ids if one in found]
+        return {"receipts": receipts, "missing": missing} if batch else receipts[0]
 
     def mark_attempt(self, principal, agent_id, credential, *, message_id, attachment_id, generation):
         with self.storage._txn():
