@@ -114,26 +114,53 @@ _INSTALL_KIND_PROBE = (
 )
 
 
+_install_kinds: dict[str, tuple[str, str]] = {}
+
+
 def install_kind(interpreter: Path) -> tuple[str, str]:
+    """One probe per interpreter per run (a registration is classified,
+    de-duplicated and then reported, each of which asks)."""
+    key = str(interpreter).lower()
+    if key not in _install_kinds:
+        _install_kinds[key] = _probe_install_kind(interpreter)
+    return _install_kinds[key]
+
+
+def _probe_install_kind(interpreter: Path) -> tuple[str, str]:
     """``("editable", <project dir>)`` when the interpreter imports the
     package from outside its library directories (a PEP 660 editable
     install, a legacy egg-link, or a .pth pointing at a checkout),
-    ``("site", "")`` when it imports from a library directory, and
-    ``("missing", "")`` when it does not import at all. Editable-ness is a
-    property of the install, not of any path this helper knows: on
-    2026-09-21 a path-only check pip-upgraded the maintainer's checkout
-    venv and stripped its editable install."""
+    ``("site", "")`` when it imports from a library directory,
+    ``("missing", "")`` when the probe answered that it does not import at
+    all, and ``("unknown", <reason>)`` when the probe did not answer.
+    "The probe failed" and "the package is absent" are different facts and
+    only the second licenses a pip install. Editable-ness is a property of
+    the install, not of any path this helper knows: on 2026-09-21 a
+    path-only check pip-upgraded the maintainer's checkout venv and
+    stripped its editable install."""
     # From a neutral directory: `python -c` puts the working directory first
     # on sys.path, and this helper runs from a checkout that holds the
     # package, which would make every interpreter look editable.
     code, out = run_cli([str(interpreter), "-c", _INSTALL_KIND_PROBE], timeout=60,
                         cwd=tempfile.gettempdir())
-    if code != 0 or not out.strip():
-        return "missing", ""
-    try:
-        report = json.loads(out.strip().splitlines()[-1])
-    except ValueError:
-        return "missing", ""
+    if code != 0:
+        return "unknown", f"probe exited {code}: {_failure_line(out, code)}"
+    # run_cli appends stderr after stdout, so a warning from a .pth or
+    # sitecustomize can follow the JSON line: find the report, wherever it is.
+    report = None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            candidate = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(candidate, dict) and "libs" in candidate:
+            report = candidate
+            break
+    if report is None:
+        return "unknown", f"probe printed no report: {_failure_line(out, code)}"
     package_dir = report.get("package_dir")
     if not package_dir:
         return "missing", ""
@@ -151,16 +178,24 @@ def _pip_or_editable(kind: str, interpreter: Path) -> tuple[str, Path | None]:
     """Never pip over an editable install: the code is live from its
     source tree and the upgrade would replace it with a frozen copy (or,
     with the launcher in use, roll back and strip the install)."""
-    if install_kind(interpreter)[0] == "editable":
+    probed = install_kind(interpreter)[0]
+    if probed == "editable":
         return "editable", interpreter
+    if probed == "unknown":
+        # Not classifiable is not "safe to upgrade": name it, leave it.
+        return "unknown", interpreter
     return kind, interpreter
 
 
 def _failure_line(out: str, code: int) -> str:
-    """pip's real complaint, not its trailing ``[notice]`` lines."""
+    """pip's real complaint: its last ``ERROR:`` line, ahead of an earlier
+    ``WARNING: Error parsing …`` and of the trailing ``[notice]`` lines."""
     lines = [line.strip() for line in out.strip().splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.upper().startswith("ERROR"):
+            return line
     for line in lines:
-        if line.upper().startswith("ERROR") or "Error" in line:
+        if "Error" in line:
             return line
     return lines[-1] if lines else str(code)
 
@@ -274,6 +309,13 @@ def update_shim(repo: Path) -> dict:
                                       + "; the code is already live and is never pip-upgraded. To refresh "
                                       f"its package metadata, close every session and run: "
                                       f"\"{venv_python}\" -m pip install -e \"{project or repo}\" --no-deps"})
+        elif kind == "unknown":
+            reason = install_kind(interpreter)[1]
+            results.append({"state": "unknown",
+                            "detail": f"{client}: could not tell how \"{interpreter}\" installed the package "
+                                      f"({reason}); left alone rather than pip-upgraded. Once sure it is "
+                                      f"not an editable install: \"{interpreter}\" -m pip install --upgrade "
+                                      f"\"{repo}\""})
         elif kind == "pipx":
             code, out = run_cli([pipx, "install", "--force", str(repo)])
             results.append({"state": "reinstalled:pipx", "detail": f"{client}: pipx install --force {repo}"}
@@ -297,7 +339,8 @@ def update_shim(repo: Path) -> dict:
                                       "helper recognises (checkout .venv, pipx, a virtualenv's launcher or "
                                       "python -m, or pip --user); upgrade it in its own environment, e.g. "
                                       f"<its python> -m pip install --upgrade \"{repo}\""})
-    order = ("failed", "reinstalled:pipx", "reinstalled:pip", "reinstalled:pip-user", "editable", "unmanaged")
+    order = ("failed", "unknown", "reinstalled:pipx", "reinstalled:pip", "reinstalled:pip-user", "editable",
+             "unmanaged")
     results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
     return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
 

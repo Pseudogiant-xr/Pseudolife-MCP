@@ -15,8 +15,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Editable-ness is now asked of the interpreter itself — the package's
   import location against its library directories, probed from a neutral
   working directory so the checkout cannot shadow it — and an editable
-  install anywhere is named, never upgraded. Failure details quote pip's
-  `ERROR` line rather than its trailing `[notice]`.
+  install anywhere is named, never upgraded. A probe that does not answer
+  (crashes, or prints no report) is a distinct `unknown` state that is
+  named and left alone — "the probe failed" and "the package is absent"
+  are different facts and only the second licenses a pip install; a
+  warning printed after the report no longer breaks the parse. One probe
+  per interpreter per run. Failure details quote pip's last `ERROR` line
+  rather than an earlier `WARNING: Error …` or its trailing `[notice]`.
 
 ### Added (2026-09-21 — one command moves the shim and the plugin with the daemon; same-version hook drift is detected)
 - `ops/update.ps1 -All` / `ops/update.sh --all` run `ops/update_clients.py`
