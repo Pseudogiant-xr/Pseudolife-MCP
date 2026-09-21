@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-21 — the client-side updater never pip-upgrades an editable shim)
+- `ops/update_clients.py` decided "editable" by checking whether the
+  registered launcher lay under `<--repo>/.venv`; run from a deploy
+  worktree, the checkout's own `.venv` launcher read as a plain virtualenv
+  and got `pip install --upgrade`, which failed on the in-use launcher,
+  rolled back, and stripped the editable install (first real `-All` run).
+  Editable-ness is now asked of the interpreter itself — the package's
+  import location against its library directories, probed from a neutral
+  working directory so the checkout cannot shadow it — and an editable
+  install anywhere is named, never upgraded. Failure details quote pip's
+  `ERROR` line rather than its trailing `[notice]`.
+
 ### Added (2026-09-21 — one command moves the shim and the plugin with the daemon; same-version hook drift is detected)
 - `ops/update.ps1 -All` / `ops/update.sh --all` run `ops/update_clients.py`
   once the daemon is healthy: the shim behind each Claude Code / Codex

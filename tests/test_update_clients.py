@@ -49,6 +49,7 @@ class FakeCli:
         self.clone_plugin: Path | None = None
         self.cache_plugin: Path | None = None
         self.user_scripts: Path | None = None  # what a fake python reports as its --user scripts dir
+        self.install_kinds: dict[str, str] = {}   # interpreter path -> editable | site | missing
         self.run_kwargs: list[dict] = []
 
     def __call__(self, argv, **kw):
@@ -57,6 +58,14 @@ class FakeCli:
         self.run_kwargs.append(kw)
         name = Path(argv[0]).name.lower().removesuffix(".exe")
         rest = argv[1:]
+        if name.startswith("python") and rest[:1] == ["-c"] and "package_dir" in rest[1]:
+            kind = self.install_kinds.get(argv[0].lower(), "site")
+            lib = str(Path(argv[0]).parent.parent / "Lib" / "site-packages")
+            if kind == "missing":
+                return 0, json.dumps({"package_dir": None, "libs": [lib]})
+            if kind == "editable":
+                return 0, json.dumps({"package_dir": str(self.home / "src" / "pseudolife_memory"), "libs": [lib]})
+            return 0, json.dumps({"package_dir": str(Path(lib) / "pseudolife_memory"), "libs": [lib]})
         if name.startswith("python") and rest[:1] == ["-c"] and "sysconfig" in rest[1]:
             return (0, str(self.user_scripts)) if self.user_scripts else (1, "no user scheme")
         if name == "claude" and rest[:3] == ["mcp", "get", "pseudolife-memory"]:
@@ -216,6 +225,68 @@ def test_two_registrations_of_one_shim_upgrade_it_once(cli, tmp_path):
 
 def test_no_registration_anywhere_is_reported(cli):
     assert uc.update_shim(ROOT)["state"] == "not-registered"
+
+
+def test_an_editable_install_anywhere_is_named_never_pip_upgraded(cli, tmp_path):
+    """The first real -All run (2026-09-21) pip-upgraded the maintainer's
+    checkout venv because --repo pointed at a deploy worktree, so the
+    launcher was not under <repo>/.venv. Editable-ness is asked of the
+    interpreter, not inferred from a path."""
+    scripts = tmp_path / "elsewhere" / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    python = scripts / f"python{EXE}"
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = "editable"
+    cli.claude_get = (0, _claude_stdio(str(scripts / f"pseudolife-mcp{EXE}")))
+    result = uc.update_shim(tmp_path / "some-deploy-worktree")
+    assert result["state"] == "editable"
+    assert "never pip-upgraded" in result["detail"] and "pip install -e" in result["detail"]
+    assert not any(c[1:3] == ["-m", "pip"] for c in cli.calls)
+
+
+def test_an_editable_codex_runtime_is_named_too(cli, tmp_path):
+    python = tmp_path / "rt" / "Scripts" / f"python{EXE}"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = "editable"
+    cli.codex_get = (0, _codex_stdio(str(python), "-m pseudolife_memory.cli"))
+    assert uc.update_shim(ROOT)["state"] == "editable"
+    assert not any(c[1:3] == ["-m", "pip"] for c in cli.calls)
+
+
+def test_a_missing_package_in_a_venv_is_installed_fresh(cli, tmp_path):
+    python = tmp_path / "rt" / "Scripts" / f"python{EXE}"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = "missing"
+    cli.codex_get = (0, _codex_stdio(str(python), "-m pseudolife_memory.cli"))
+    assert uc.update_shim(ROOT)["state"] == "reinstalled:pip"
+
+
+def test_install_kind_probe_runs_from_a_neutral_directory(cli, tmp_path):
+    """`python -c` puts the working directory first on sys.path; run from
+    the checkout, every interpreter would import the checkout's package
+    and read as editable (seen live, 2026-09-21)."""
+    python = tmp_path / "rt" / "Scripts" / f"python{EXE}"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    uc.install_kind(python)
+    probe_kwargs = [kw for call, kw in zip(cli.calls, cli.run_kwargs) if "package_dir" in " ".join(call)]
+    assert probe_kwargs and probe_kwargs[0].get("cwd")
+    assert not Path(probe_kwargs[0]["cwd"]).resolve().is_relative_to(ROOT.resolve())
+
+
+def test_failure_detail_quotes_pips_error_line_not_its_notice(cli, tmp_path):
+    scripts = tmp_path / "venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    (scripts / f"python{EXE}").write_text("", encoding="utf-8")
+    cli.claude_get = (0, _claude_stdio(str(scripts / f"pseudolife-mcp{EXE}")))
+    cli.pip_install = (1, "Collecting x\nERROR: Could not install packages due to an OSError: "
+                          "[WinError 32] in use\n\n[notice] A new release of pip is available\n"
+                          "[notice] To update, run: pip install --upgrade pip")
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "failed"
+    assert "WinError 32" in result["detail"] and "[notice]" not in result["detail"]
 
 
 def test_pip_user_launcher_is_upgraded_through_its_owning_interpreter(cli, tmp_path):
