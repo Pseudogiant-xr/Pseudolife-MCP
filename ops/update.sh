@@ -10,6 +10,8 @@
 #   ops/update.sh --no-cache-prune    # skip build-cache retention entirely
 #   ops/update.sh --force-rollback-tag # tag the rollback even when the version
 #                                      # tag is not the running daemon's image
+#   ops/update.sh --all                # after the daemon: shim, plugin cache,
+#                                      # Codex hooks (ops/update_clients.py)
 #
 # HEALTH_RETRIES / HEALTH_DELAY_MS (environment) size the step-4 health wait.
 #
@@ -23,6 +25,10 @@ NO_BACKUP=0
 KEEP_ROLLBACKS=2
 KEEP_CACHE_HOURS=168
 NO_CACHE_PRUNE=0
+# --all: also move the client side once the daemon is healthy (the shim
+# behind each registration, the Claude Code plugin cache compared by bytes
+# against the marketplace clone, Codex's hook copy) — ops/update_clients.py.
+ALL=0
 # Override for the "a build already ran without a completed deploy" guard in
 # step 2 — see the comment there before reaching for it.
 FORCE_ROLLBACK_TAG=0
@@ -42,6 +48,7 @@ while [ $# -gt 0 ]; do
         --keep-cache-hours) KEEP_CACHE_HOURS="$2"; shift 2 ;;
         --no-cache-prune)   NO_CACHE_PRUNE=1; shift ;;
         --force-rollback-tag) FORCE_ROLLBACK_TAG=1; shift ;;
+        --all)            ALL=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -192,6 +199,21 @@ else
     echo "WARNING: to roll back:" >&2
     print_rollback >&2
     exit 1
+fi
+
+# 4b. --all: the client side. The daemon is deployed either way; a client
+#     step that fails is reported, never a failed deploy.
+if [ "$ALL" = "1" ]; then
+    step "Updating the client side (shim, plugin cache, Codex hooks)..."
+    python_cmd=""
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then python_cmd="$candidate"; break; fi
+    done
+    if [ -z "$python_cmd" ]; then
+        echo "WARNING: no python on PATH; run it yourself: python ops/update_clients.py" >&2
+    elif ! "$python_cmd" "$(dirname "$0")/update_clients.py" --repo "$repo"; then
+        echo "WARNING: a client-side step needs attention (see the ladder above); the daemon deploy itself succeeded." >&2
+    fi
 fi
 
 # 5. Build-cache retention. Deliberately LAST, for two reasons: before the

@@ -135,11 +135,32 @@ esac
 # nothing. Only a version-shaped value goes on the wire.
 PLUGIN_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9A-Za-z.+-]*\)".*/\1/p' \
     "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/.claude-plugin/plugin.json" 2>/dev/null | head -1)
+# A digest of the four hook scripts beside this one, so the daemon can tell
+# a cached plugin at its own version apart from its own hooks (the version
+# only moves with a release). Same function as pseudolife_memory.plugin_hooks
+# and lifecycle.ps1: SHA-256 over `name NUL bytes NUL`, CRLF read as LF.
+hooks_digest() {  # $1 = directory
+    local name
+    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh session-end.sh; do
+        [ -f "$1/$name" ] || return 1
+    done
+    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh session-end.sh; do
+        printf '%s\0' "$name"; tr -d '\r' < "$1/$name"; printf '\0'
+    done | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
+}
+PLUGIN_HOOKS_DIGEST=$(hooks_digest "$(dirname "$0")" 2>/dev/null) || PLUGIN_HOOKS_DIGEST=""
+case "$PLUGIN_HOOKS_DIGEST" in
+    *[!0-9a-f]*) PLUGIN_HOOKS_DIGEST="" ;;
+esac
+[ "${#PLUGIN_HOOKS_DIGEST}" -eq 64 ] || PLUGIN_HOOKS_DIGEST=""
 QS=""
 [ -n "$SID" ] && QS="?session_id=${SID}&source=${SRC}"
 if [ -n "$PLUGIN_VERSION" ]; then
     # `+` (a local version label) would decode to a space server-side.
     QS="${QS:-?}${QS:+&}plugin_version=${PLUGIN_VERSION//+/%2B}"
+fi
+if [ -n "$PLUGIN_HOOKS_DIGEST" ]; then
+    QS="${QS:-?}${QS:+&}plugin_hooks_digest=${PLUGIN_HOOKS_DIGEST}"
 fi
 # One retry bridges the daemon's short maintenance stalls (CMS autosave
 # ~1.5s, dream-sweep tick; measured 2026-09-01 against a 1,123-entry bank)

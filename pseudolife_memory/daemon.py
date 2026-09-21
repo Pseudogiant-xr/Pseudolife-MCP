@@ -78,6 +78,7 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     tool call, exactly as before).
     """
     from pseudolife_memory import __version__
+    from pseudolife_memory.plugin_hooks import daemon_hooks_digest
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
     payload = {
@@ -99,6 +100,12 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     extractor = _extractor_status(svc)
     if extractor is not None:
         payload["extractor"] = extractor
+    # The hook scripts this daemon was built with, so a cached plugin at the
+    # same version but with different hooks can be told apart (2026-09-21).
+    # Absent from a bare pip install, which ships no plugin tree.
+    hooks_digest = daemon_hooks_digest()
+    if hooks_digest:
+        payload["hooks_digest"] = hooks_digest
     # Schema v25's dim-mismatch refusal is otherwise invisible here: it
     # fires lazily on the first tool call, so a daemon whose every memory
     # tool is dead would still report "ok" without this (2026-07-28 review).

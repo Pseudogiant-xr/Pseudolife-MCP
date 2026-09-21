@@ -105,6 +105,11 @@ COPY README.md /app/
 COPY pseudolife_memory /app/pseudolife_memory
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     env -u PIP_NO_CACHE_DIR pip install --no-deps "/app" && pip check
+# The plugin's hook scripts this build ships with: /health publishes their
+# digest so a cached plugin at the same version but with different hooks can
+# be told apart at session start (pseudolife_memory/plugin_hooks.py).
+COPY plugin/hooks /app/plugin/hooks
+ENV PSEUDOLIFE_PLUGIN_DIR=/app/plugin
 
 # Runtime data (neural weights, ChromaDB, cortex snapshot) lives here on a
 # mounted volume so it survives container recreation.

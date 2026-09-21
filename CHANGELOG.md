@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-21 — one command moves the shim and the plugin with the daemon; same-version hook drift is detected)
+- `ops/update.ps1 -All` / `ops/update.sh --all` run `ops/update_clients.py`
+  once the daemon is healthy: the shim behind each Claude Code / Codex
+  registration is reinstalled where that is safe (pipx, or the registered
+  interpreter's pip; a shim running from the checkout's `.venv` is editable
+  and already live, so its metadata refresh is named, not run — it needs
+  every session closed), the Claude Code plugin cache is refreshed only when
+  its bytes differ from the marketplace clone (CRLF read as LF, `.git`
+  ignored), and Codex's content-addressed hook copy is reported current or
+  stale with the consent command. A failed client step is reported on a
+  ladder, never a failed deploy. The helper runs on its own too (`--only
+  shim,plugin,codex`, `--json`).
+- The plugin's version string is pinned to the package version, so a
+  plugin-only change on master left `/plugin update` saying "already
+  latest" and the version handshake seeing two equal strings. `/health`
+  now carries `hooks_digest` (SHA-256 over the four hook scripts the daemon
+  image shipped with, `pseudolife_memory/plugin_hooks.py`; the image copies
+  `plugin/hooks` and sets `PSEUDOLIFE_PLUGIN_DIR`), the SessionStart hooks
+  send `plugin_hooks_digest` computed the same way over the scripts beside
+  them (bash and PowerShell agree with Python byte for byte, LF or CRLF, on
+  a checkout, a cache or Codex's bare copy), and an equal version with a
+  different digest opens the briefing with one line naming the `--all`
+  command. Both shape checks (version, digest) now use full matches, so a
+  trailing newline can no longer ride into the model's context.
+
 ### Added (2026-09-21 — the installer installs the Claude Code plugin)
 - `ops/install.sh` and `ops/install.ps1` add the `pseudolife-mcp`
   marketplace (when it is not yet known) and install

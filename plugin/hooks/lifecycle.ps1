@@ -31,6 +31,27 @@ function Get-PluginVersion {
     return ''
 }
 
+# A digest of the four hook scripts beside this one, so the daemon can tell
+# a cached plugin at its own version apart from its own hooks (the version
+# only moves with a release). Same function as pseudolife_memory.plugin_hooks
+# and session-start.sh: SHA-256 over `name NUL bytes NUL`, CRLF read as LF.
+function Get-PluginHooksDigest {
+    $names = @('lifecycle.ps1', 'session-start.sh', 'user-prompt-submit.sh', 'session-end.sh')
+    $stream = New-Object IO.MemoryStream
+    try {
+        foreach ($name in $names) {
+            $path = Join-Path $PSScriptRoot $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return '' }
+            $body = [IO.File]::ReadAllBytes($path)
+            $text = [Text.Encoding]::Latin1.GetString($body) -replace "`r`n", "`n"
+            $chunk = [Text.Encoding]::UTF8.GetBytes($name) + [byte[]]@(0) + [Text.Encoding]::Latin1.GetBytes($text) + [byte[]]@(0)
+            $stream.Write($chunk, 0, $chunk.Length)
+        }
+        $hash = [Security.Cryptography.SHA256]::Create().ComputeHash($stream.ToArray())
+        return ([BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+    } catch { return '' }
+}
+
 function Get-DigestKey([string]$SessionId) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($SessionId)
     $hash = [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
@@ -249,6 +270,8 @@ try {
         }
         $pluginVersion = Get-PluginVersion
         if ($pluginVersion) { $pairs += 'plugin_version=' + [Uri]::EscapeDataString($pluginVersion) }
+        $hooksDigest = Get-PluginHooksDigest
+        if ($hooksDigest -match '^[0-9a-f]{64}$') { $pairs += 'plugin_hooks_digest=' + $hooksDigest }
         $query = if ($pairs.Count) { '?' + ($pairs -join '&') } else { '' }
         # Match session-start.sh's maintenance-stall retry: at most 5+1+5
         # seconds of request/delay budget, within the 15-second hook budget.

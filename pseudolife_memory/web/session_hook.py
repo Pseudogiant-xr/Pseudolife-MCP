@@ -35,10 +35,48 @@ HOOK_CONTEXT_MAX_CHARS = 9_500
 
 # A plugin version arrives on the hook's query string. Only a version-shaped
 # value may be echoed into the model's context; anything else is dropped.
-_VERSION_SHAPE = re.compile(r"^[0-9A-Za-z.+-]{1,32}$")
+_VERSION_SHAPE = re.compile(r"[0-9A-Za-z.+-]{1,32}")  # used with fullmatch: `$` would admit a trailing newline
 PLUGIN_UPDATE_COMMANDS = ("/plugin marketplace update pseudolife-mcp, then "
                           "/plugin update pseudolife-memory@pseudolife-mcp")
 DAEMON_UPDATE_COMMANDS = "git pull, then ops/update.ps1 or ops/update.sh"
+ALL_UPDATE_COMMANDS = "ops/update.ps1 -All (Windows) or ops/update.sh --all, from the checkout"
+# A hooks digest is 64 lowercase hex characters (pseudolife_memory.plugin_hooks).
+_DIGEST_SHAPE = re.compile(r"[0-9a-f]{64}")
+
+
+_DAEMON_DIGEST_UNSET = object()
+
+
+def hooks_notice(plugin_version: str | None, plugin_digest: str | None,
+                 daemon_version: str | None = None, daemon_digest=_DAEMON_DIGEST_UNSET) -> str:
+    """One line when the plugin is the daemon's version but its hook scripts
+    are not the daemon's, else ''.
+
+    The version string cannot move without a release (it is pinned to the
+    package version), so a plugin-only change on master reaches a user's
+    cache only through a forced refresh; until they run it, the version
+    handshake sees two equal strings. The digests tell the difference. A
+    version difference is left to :func:`version_notice`, so a session
+    never opens with two lines about the same thing. Both digests are
+    shape-checked: the plugin's arrives on a query string and is echoed
+    into the model's context.
+    """
+    if daemon_version is None:
+        daemon_version = DAEMON_VERSION
+    if daemon_digest is _DAEMON_DIGEST_UNSET:
+        from pseudolife_memory.plugin_hooks import daemon_hooks_digest
+        daemon_digest = daemon_hooks_digest()
+    if not plugin_version or plugin_version != daemon_version:
+        return ""
+    if not isinstance(plugin_digest, str) or not isinstance(daemon_digest, str):
+        return ""
+    if not _DIGEST_SHAPE.fullmatch(plugin_digest) or not _DIGEST_SHAPE.fullmatch(daemon_digest):
+        return ""
+    if plugin_digest == daemon_digest:
+        return ""
+    return (f"Pseudolife-MCP: plugin {plugin_version} matches the daemon's version but "
+            f"its hooks differ from the daemon's copy — run {ALL_UPDATE_COMMANDS} to "
+            f"refresh the plugin cache and shim, then start a new session.")
 
 
 def _version_key(value: str) -> tuple[int, ...] | None:
@@ -60,7 +98,7 @@ def version_notice(plugin_version: str | None, daemon_version: str = DAEMON_VERS
     with a non-PEP-440 value, plain inequality still reports the mismatch,
     without saying which side is older.
     """
-    if not plugin_version or not _VERSION_SHAPE.match(plugin_version):
+    if not plugin_version or not _VERSION_SHAPE.fullmatch(plugin_version):
         return ""
     if plugin_version == daemon_version:
         return ""
@@ -282,16 +320,19 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
 def hook_session_start(
     service: Any, session_id: str | None = None, source: str | None = None,
     authorized: bool = True, plugin_version: str | None = None,
+    plugin_hooks_digest: str | None = None,
 ) -> str:
     """``session_start_context`` plus (when ``session_id`` is given) identity
     registration: opens/re-fires the session's episode, sets it as the active
     session (identity tier 3), and prepends the episode-handle advertisement.
     A ``plugin_version`` that differs from the daemon's puts
-    :func:`version_notice` first of all. Without ``session_id`` or a
-    mismatch this is exactly ``session_start_context``'s behaviour. Never
-    raises; the endpoint always answers 200."""
+    :func:`version_notice` first of all; an equal version whose
+    ``plugin_hooks_digest`` differs puts :func:`hooks_notice` there instead.
+    Without ``session_id`` or a mismatch this is exactly
+    ``session_start_context``'s behaviour. Never raises; the endpoint always
+    answers 200."""
     prefix = ""
-    notice = version_notice(plugin_version)
+    notice = version_notice(plugin_version) or hooks_notice(plugin_version, plugin_hooks_digest)
     if notice:
         prefix = notice + "\n\n"
     if session_id:

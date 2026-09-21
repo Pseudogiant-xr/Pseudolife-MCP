@@ -92,7 +92,9 @@ behind a watermark that moves only when the text changes. With a host session
 id — `CLAUDE_CODE_SESSION_ID` for Claude Code, the thread id for Codex — the
 digest is written to `~/.pseudolife-mcp/digests/<sha256(id)>.txt`
 (`PSEUDOLIFE_DIGEST_DIR` overrides the directory; set it identically for the
-hook's environment, which cannot see the MCP env block). The plugin's
+hook's environment, which cannot see the MCP env block; `PSEUDOLIFE_PLUGIN_DIR`
+is the daemon-side counterpart, naming the plugin tree whose hook scripts
+`/health` digests — the image sets it to its own copy). The plugin's
 UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
