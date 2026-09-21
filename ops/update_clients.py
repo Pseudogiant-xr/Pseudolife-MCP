@@ -44,6 +44,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,7 +65,7 @@ def home() -> Path:
     return Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
 
 
-def run_cli(argv, *, timeout: int = 600) -> tuple[int, str]:
+def run_cli(argv, *, timeout: int = 600, cwd: str | None = None) -> tuple[int, str]:
     """Run a CLI and return ``(returncode, combined output)``; a missing or
     hung executable reads as a non-zero code with the reason as output."""
     try:
@@ -72,7 +73,7 @@ def run_cli(argv, *, timeout: int = 600) -> tuple[int, str]:
         # a captured-output deploy for the whole timeout with nothing shown.
         proc = subprocess.run([str(a) for a in argv], capture_output=True, text=True,
                               timeout=timeout, check=False, errors="replace",
-                              stdin=subprocess.DEVNULL)
+                              stdin=subprocess.DEVNULL, cwd=cwd)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, f"{type(exc).__name__}: {exc}"
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
@@ -100,6 +101,103 @@ def _interpreter_beside(launcher: Path) -> Path | None:
 
 _PYTHON_STEM = re.compile(r"python3?(?:\.\d+)?")
 _USER_SCRIPTS_PROBE = "import os, sysconfig; print(sysconfig.get_path('scripts', os.name + '_user'))"
+# Where the interpreter imports the package from, beside its library dirs:
+# a package imported from outside them is an editable / source-tree install.
+_INSTALL_KIND_PROBE = (
+    "import json, os, sysconfig\n"
+    "try:\n    import pseudolife_memory as p; f = os.path.dirname(os.path.abspath(p.__file__))\n"
+    "except Exception:\n    f = None\n"
+    "libs = [sysconfig.get_paths().get('purelib'), sysconfig.get_paths().get('platlib')]\n"
+    "try:\n    libs.append(sysconfig.get_path('purelib', os.name + '_user'))\n"
+    "except Exception:\n    pass\n"
+    "print(json.dumps({'package_dir': f, 'libs': [l for l in libs if l]}))"
+)
+
+
+_install_kinds: dict[str, tuple[str, str]] = {}
+
+
+def install_kind(interpreter: Path) -> tuple[str, str]:
+    """One probe per interpreter per run (a registration is classified,
+    de-duplicated and then reported, each of which asks)."""
+    key = str(interpreter).lower()
+    if key not in _install_kinds:
+        _install_kinds[key] = _probe_install_kind(interpreter)
+    return _install_kinds[key]
+
+
+def _probe_install_kind(interpreter: Path) -> tuple[str, str]:
+    """``("editable", <project dir>)`` when the interpreter imports the
+    package from outside its library directories (a PEP 660 editable
+    install, a legacy egg-link, or a .pth pointing at a checkout),
+    ``("site", "")`` when it imports from a library directory,
+    ``("missing", "")`` when the probe answered that it does not import at
+    all, and ``("unknown", <reason>)`` when the probe did not answer.
+    "The probe failed" and "the package is absent" are different facts and
+    only the second licenses a pip install. Editable-ness is a property of
+    the install, not of any path this helper knows: on 2026-09-21 a
+    path-only check pip-upgraded the maintainer's checkout venv and
+    stripped its editable install."""
+    # From a neutral directory: `python -c` puts the working directory first
+    # on sys.path, and this helper runs from a checkout that holds the
+    # package, which would make every interpreter look editable.
+    code, out = run_cli([str(interpreter), "-c", _INSTALL_KIND_PROBE], timeout=60,
+                        cwd=tempfile.gettempdir())
+    if code != 0:
+        return "unknown", f"probe exited {code}: {_failure_line(out, code)}"
+    # run_cli appends stderr after stdout, so a warning from a .pth or
+    # sitecustomize can follow the JSON line: find the report, wherever it is.
+    report = None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            candidate = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(candidate, dict) and "libs" in candidate:
+            report = candidate
+            break
+    if report is None:
+        return "unknown", f"probe printed no report: {_failure_line(out, code)}"
+    package_dir = report.get("package_dir")
+    if not package_dir:
+        return "missing", ""
+    package = Path(package_dir)
+    for lib in report.get("libs", []):
+        try:
+            if package.resolve().is_relative_to(Path(lib).resolve()):
+                return "site", ""
+        except (OSError, ValueError):
+            continue
+    return "editable", str(package.parent)
+
+
+def _pip_or_editable(kind: str, interpreter: Path) -> tuple[str, Path | None]:
+    """Never pip over an editable install: the code is live from its
+    source tree and the upgrade would replace it with a frozen copy (or,
+    with the launcher in use, roll back and strip the install)."""
+    probed = install_kind(interpreter)[0]
+    if probed == "editable":
+        return "editable", interpreter
+    if probed == "unknown":
+        # Not classifiable is not "safe to upgrade": name it, leave it.
+        return "unknown", interpreter
+    return kind, interpreter
+
+
+def _failure_line(out: str, code: int) -> str:
+    """pip's real complaint: its last ``ERROR:`` line, ahead of an earlier
+    ``WARNING: Error parsing …`` and of the trailing ``[notice]`` lines."""
+    lines = [line.strip() for line in out.strip().splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.upper().startswith("ERROR"):
+            return line
+    for line in lines:
+        if "Error" in line:
+            return line
+    return lines[-1] if lines else str(code)
 
 
 def _same_dir(a: Path, b: Path) -> bool:
@@ -154,16 +252,16 @@ def _classify(command: str, args: str, repo: Path, pipx_listing: dict | None = N
         return "editable", None
     stem = path.name.lower().removesuffix(".exe")
     if _PYTHON_STEM.fullmatch(stem) and "pseudolife_memory" in args and path.is_file():
-        return "pip", path
+        return _pip_or_editable("pip", path)
     if stem == PACKAGE:
         if pipx_listing is not None and _pipx_owns(path, pipx_listing):
             return "pipx", None
         interpreter = _interpreter_beside(path)
         if interpreter is not None:
-            return "pip", interpreter
+            return _pip_or_editable("pip", interpreter)
         owner = _user_scripts_owner(path)
         if owner is not None:
-            return "pip-user", owner
+            return _pip_or_editable("pip-user", owner)
     return "unmanaged", None
 
 
@@ -203,17 +301,27 @@ def update_shim(repo: Path) -> dict:
             continue
         done.add(key)
         if kind == "editable":
-            venv_python = _interpreter_beside(Path(command)) or Path(command).parent / "python"
+            venv_python = interpreter or _interpreter_beside(Path(command)) or Path(command).parent / "python"
+            project = install_kind(venv_python)[1] if Path(venv_python).is_file() else ""
             results.append({"state": "editable",
-                            "detail": f"{client}: {command} runs the checkout directly; the code is already "
-                                      f"live. To refresh its package metadata, close every session and run: "
-                                      f"\"{venv_python}\" -m pip install -e \"{repo}\" --no-deps"})
+                            "detail": f"{client}: {command} runs a source tree directly"
+                                      + (f" ({project})" if project else "")
+                                      + "; the code is already live and is never pip-upgraded. To refresh "
+                                      f"its package metadata, close every session and run: "
+                                      f"\"{venv_python}\" -m pip install -e \"{project or repo}\" --no-deps"})
+        elif kind == "unknown":
+            reason = install_kind(interpreter)[1]
+            results.append({"state": "unknown",
+                            "detail": f"{client}: could not tell how \"{interpreter}\" installed the package "
+                                      f"({reason}); left alone rather than pip-upgraded. Once sure it is "
+                                      f"not an editable install: \"{interpreter}\" -m pip install --upgrade "
+                                      f"\"{repo}\""})
         elif kind == "pipx":
             code, out = run_cli([pipx, "install", "--force", str(repo)])
             results.append({"state": "reinstalled:pipx", "detail": f"{client}: pipx install --force {repo}"}
                            if code == 0 else
                            {"state": "failed", "detail": f"{client}: pipx install --force {repo} failed "
-                                                         f"({out.strip().splitlines()[-1] if out.strip() else code}); "
+                                                         f"({_failure_line(out, code)}); "
                                                          f"close every session using the shim and retry"})
         elif kind in ("pip", "pip-user"):
             scope = ["--user"] if kind == "pip-user" else []
@@ -223,7 +331,7 @@ def update_shim(repo: Path) -> dict:
                            if code == 0 else
                            {"state": "failed",
                             "detail": f"{client}: {shown} failed "
-                                      f"({out.strip().splitlines()[-1] if out.strip() else code}); "
+                                      f"({_failure_line(out, code)}); "
                                       f"close every session using the shim and retry"})
         else:
             results.append({"state": "unmanaged",
@@ -231,7 +339,8 @@ def update_shim(repo: Path) -> dict:
                                       "helper recognises (checkout .venv, pipx, a virtualenv's launcher or "
                                       "python -m, or pip --user); upgrade it in its own environment, e.g. "
                                       f"<its python> -m pip install --upgrade \"{repo}\""})
-    order = ("failed", "reinstalled:pipx", "reinstalled:pip", "reinstalled:pip-user", "editable", "unmanaged")
+    order = ("failed", "unknown", "reinstalled:pipx", "reinstalled:pip", "reinstalled:pip-user", "editable",
+             "unmanaged")
     results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
     return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
 
