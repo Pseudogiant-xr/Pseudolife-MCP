@@ -4630,11 +4630,15 @@ credentials and requires deliberate rebinds.
    original principal, which must appear in `coordination.allowed_principals`:
 
    ```console
-   pseudolife-mcp coordination-recovery rebind --config <config.yaml> --confirm-daemon-stopped --agent <agent-id> --principal <principal> --bank-url http://127.0.0.1:8099 --state <new-private-state.json>
+   pseudolife-mcp coordination-recovery rebind --config <config.yaml> --confirm-daemon-stopped --agent <agent-id> --principal <principal> --bank-url http://127.0.0.1:8765 --state <new-private-state.json>
    ```
 
-   Use an existing private directory outside the repository and a **new** file
-   path for each adapter. Existing files, symlinks and hardlinks are refused.
+   Use an existing private directory outside any Git repository and a **new**
+   file path for each adapter. Existing files, symlinks and hardlinks are
+   refused, and so is a state path under any directory that contains a
+   `.git` entry (the command walks every parent), so a checkout or a worktree
+   cannot end up holding a mailbox credential. `--bank-url` is the daemon's
+   own address (the compose stack serves `8765`).
    The command writes the bank URL, address and fresh credential with owner-only
    file access. It prints no credentials and never overwrites old adapter state.
 6. After the intended addresses are rebound, enable coordination in the daemon

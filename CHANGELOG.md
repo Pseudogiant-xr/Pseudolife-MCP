@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-21 — the Codex SessionEnd hook fits its three-second cap)
+- `plugin/hooks/session-end.sh` under a Codex runtime makes one two-second
+  request with no retry, matching `lifecycle.ps1`; the previous 3+1+3 s
+  worst case overran the 3 s cap `ops/setup-codex-hooks.py` sets, so a busy
+  daemon could turn the episode close into a hook timeout. Claude's budget
+  (10 s in `hooks.json`) and its retry are unchanged.
+- Docs: the coordination recovery guide's rebind example named port 8099
+  where the daemon serves 8765, and did not say that a state path under any
+  Git repository is refused.
 ### Added (2026-09-21 — acknowledge several messages in one call)
 - `memory_message(action="ack")` takes one `message_id` or several
   comma-separated (at most 50). The parameter stays a string because some
