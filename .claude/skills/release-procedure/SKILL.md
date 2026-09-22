@@ -47,7 +47,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    retrieval, dreaming, episodes, memory-model, benchmarks; they carry the
    same drift-prone claims the README used to),
    CONTRIBUTING, SECURITY, evals/README, examples/ (CLAUDE.memory.md is
-   injected into user CLAUDE.mds — its tool surface must match exactly),
+   injected into user CLAUDE.md / AGENTS.md files — its tool surface must match exactly),
    docs/runbooks, ops/.env.example comments. The README is the PyPI
    description, so its fixes only reach PyPI at the next version.
 
