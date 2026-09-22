@@ -359,7 +359,10 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # param descriptions (nothing on the surface used them before), with
     # schema accounting added below so the newly-used space stays metered
     # rather than becoming an unmetered escape hatch.
-    budgets = {"minimal": 5000, "core": 11500, "full": 17000}
+    # Measured 2026-09-22 after adding the full-tier memory_reinstate
+    # contract: full is 17,238 chars across 38 tools. The 17,250 cap leaves
+    # 12 chars and keeps the minimal/core ceilings unchanged.
+    budgets = {"minimal": 5000, "core": 11500, "full": 17250}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
@@ -397,7 +400,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # for by trimming the same tool's dst / store / proposal_id /
     # proposal_ids / relation wording;
     # full stood at 8398 before the fix.
-    param_budgets = {"minimal": 2600, "core": 5250, "full": 8400}
+    # Measured 2026-09-22 after memory_reinstate's nine exact-input
+    # descriptions: full is 8,832 chars. The 8,925 cap leaves 93 chars.
+    param_budgets = {"minimal": 2600, "core": 5250, "full": 8925}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, (

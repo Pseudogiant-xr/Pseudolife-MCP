@@ -20,6 +20,7 @@ the contract:
 from __future__ import annotations
 
 import json
+import hashlib
 import zipfile
 from contextlib import contextmanager
 
@@ -31,6 +32,7 @@ from pseudolife_memory.storage.schema import (
     SCHEMA_META_VERSION,
     ensure_schema,
 )
+from pseudolife_memory.storage.postgres import PostgresStorage
 from pseudolife_memory.transfer_cli import (
     _MUST_BE_EMPTY,
     EXCLUDED_TABLES,
@@ -116,6 +118,44 @@ def _seed_bank(conn) -> None:
         "VALUES ('flat', %s, %s::vector, 160.0, 170.0, "
         "'replaced by entry one')",
         ("seed entry two pasted\u2028line\u0085sep\u2029end", _VEC),
+    )
+    reinstate_request = {
+        "entry_id": 2,
+        "operation_id": "11111111-2222-4333-8444-555555555555",
+        "expected_text_sha256": hashlib.sha256(
+            "seed entry two pasted\u2028line\u0085sep\u2029end".encode()
+        ).hexdigest(),
+        "expected_source_sha256": hashlib.sha256(b"").hexdigest(),
+        "expected_superseded_at": 170.0,
+        "expected_superseded_by_text_sha256": hashlib.sha256(
+            b"replaced by entry one"
+        ).hexdigest(),
+        "evidence_packet_sha256": hashlib.sha256(
+            b"synthetic transfer evidence"
+        ).hexdigest(),
+        "reviewer_ids": ["reviewer-a", "reviewer-b"],
+        "reason": "preserve synthetic replay evidence",
+        "decided_by": "synthetic-principal",
+    }
+    operation_id, request_sha256, request = (
+        PostgresStorage._reinstatement_request(**reinstate_request)
+    )
+    cur.execute(
+        "INSERT INTO entry_reinstatement_decisions "
+        "(operation_id, entry_id, request_sha256, entry_text_sha256, "
+        "entry_source_sha256, prior_superseded_at, "
+        "prior_superseded_by_text, prior_superseded_by_text_sha256, "
+        "evidence_packet_sha256, reviewer_ids, reason, decided_by, "
+        "decided_at) VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, "
+        "%s, %s::jsonb, %s, %s, 171.0)",
+        (operation_id, 2, request_sha256,
+         request["expected_text_sha256"],
+         request["expected_source_sha256"], 170.0,
+         "replaced by entry one",
+         request["expected_superseded_by_text_sha256"],
+         request["evidence_packet_sha256"],
+         json.dumps(request["reviewer_ids"]), request["reason"],
+         request["decided_by"]),
     )
     cur.execute(
         "INSERT INTO entities (canonical, display, etype, created_at) "
@@ -362,6 +402,31 @@ def test_export_import_roundtrip_preserves_every_table(pg_url, tmp_path):
         if table == "meta":
             continue
         assert after[table] == before[table], f"{table} did not roundtrip"
+
+    storage = PostgresStorage(pg_url)
+    try:
+        replay = storage.reinstate_entry(**{
+            "entry_id": 2,
+            "operation_id": "11111111-2222-4333-8444-555555555555",
+            "expected_text_sha256": hashlib.sha256(
+                "seed entry two pasted\u2028line\u0085sep\u2029end".encode()
+            ).hexdigest(),
+            "expected_source_sha256": hashlib.sha256(b"").hexdigest(),
+            "expected_superseded_at": 170.0,
+            "expected_superseded_by_text_sha256": hashlib.sha256(
+                b"replaced by entry one"
+            ).hexdigest(),
+            "evidence_packet_sha256": hashlib.sha256(
+                b"synthetic transfer evidence"
+            ).hexdigest(),
+            "reviewer_ids": ["reviewer-a", "reviewer-b"],
+            "reason": "preserve synthetic replay evidence",
+            "decided_by": "synthetic-principal",
+        })
+        assert replay["idempotent_replay"] is True
+        assert replay["current_state"] == "retired_again"
+    finally:
+        storage.close()
 
 
 def test_import_advances_entry_ids_past_deleted_invalidation_sources(

@@ -45,7 +45,7 @@ _SERVICE_FILES = (_PKG / "service.py", _PKG / "service_dream.py")
 # until its author classifies it under the query/document rule and adds a row here.
 EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     ("_dream_hints", "encode_single"),
-    ("_apply_correction_locked", "encode_single"),
+    ("_apply_correction_under_mutation_lock_locked", "encode_single"),
     ("_promote_slots", "encode_single"),
     ("_propose_dream_alias_candidates", "encode"),
     ("_resolve_dream_slot", "encode_single"),

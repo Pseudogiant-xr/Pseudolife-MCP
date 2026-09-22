@@ -42,6 +42,7 @@ import json
 import os
 import sys
 import time
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Mapping
@@ -64,7 +65,8 @@ FORMAT_VERSION = 1
 # BENCH_RESET_TABLES — the roster test is the forcing function that makes a
 # future table pick a side.
 EXPORTED_TABLES = (
-    "meta", "episodes", "entries", "entities", "entity_aliases",
+    "meta", "episodes", "entries", "entry_reinstatement_decisions",
+    "entities", "entity_aliases",
     "relations", "edges", "edge_proposals", "entity_proposals",
     "entity_kinds", "dismissed_pairs", "facts", "world_facts", "lessons",
     "outcome_signals", "communities", "entity_communities",
@@ -129,6 +131,8 @@ class TransferError(RuntimeError):
 def _json_default(value):
     if isinstance(value, (datetime.datetime, datetime.date)):
         return value.isoformat()
+    if isinstance(value, uuid.UUID):
+        return str(value)
     raise TypeError(f"cannot serialize {type(value).__name__} for export")
 
 

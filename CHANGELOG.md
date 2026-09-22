@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
+- Correction and reinstatement recovery hold the target's mutation protection
+  through resident publication, including reinstatement admission and replay.
+  Losing the PostgreSQL session during publication restores the prior resident
+  objects and retains a pending recovery guard; the next ordinary read reloads
+  committed state under fresh protection before serving it.
+
+### Added (2026-09-22 — retired continuum entries can be reinstated with a durable audit)
+- Schema **v41** adds the FK-free `entry_reinstatement_decisions` audit and
+  the full-tier `memory_reinstate` tool. One named principal can reinstate one
+  independently reviewed retired entry by durable ID using an exact preimage
+  and operation UUID; the decision and retirement-field clear commit together,
+  retries are idempotent even after later retirement or deletion, and uncertain
+  commits reconcile from durable state before resident publication. The first
+  version refuses every target with a trace invalidation and never changes or
+  confirms derived cortex state.
+
 ### Fixed (2026-09-22 — a cancelled Codex delivery start-up ran on into its rpc timeout)
 - `pseudolife_memory/codex_delivery.py` bounded its connect, send, reply and
   close waits with `asyncio.wait_for`, which before Python 3.12 returns the
