@@ -71,17 +71,111 @@ def connector_for(socket, calls):
 
 
 def test_cancelled_initialization_closes_socket_and_reader(monkeypatch):
+    """Cancelling ``__aenter__`` once the initialize request is on the wire
+    closes the socket, reaps the reader and drops the pending reply, and the
+    cancellation itself propagates.
+
+    The cancel is delivered explicitly, not by a racing timer: the earlier
+    ``wait_for(..., 0.03)`` form raced the bridge's own five-second rpc
+    timer, and on Python 3.10/3.11 lost whenever the cancel landed while
+    ``_send`` awaited a ``write()`` that had just completed — that
+    ``wait_for`` returned the result instead of re-raising (bpo-42130), the
+    bridge carried on into the rpc timeout, and CI saw ``DeliveryError:
+    Codex delivery request timed out`` (2026-09-21, runs 35597200621 and
+    35603265565). The cancel now lands at exactly that point on every run,
+    so the test is red on 3.11 without ``_bounded`` in codex_delivery.py."""
     from pseudolife_memory import codex_delivery
 
     async def drive():
         socket = FakeSocket(lambda *args: asyncio.sleep(0))
         monkeypatch.setattr(codex_delivery, "_load_connect", lambda: connector_for(socket, []))
         bridge = codex_delivery.CodexDelivery("ws://127.0.0.1:1234", "secret", THREAD_ID)
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(bridge.__aenter__(), timeout=0.03)
+        opening = asyncio.ensure_future(bridge.__aenter__())
+        while not socket.sent and not opening.done():
+            await asyncio.sleep(0)
+        if opening.done():
+            opening.result()  # surfaces a start-up that failed before sending
+        assert socket.sent[0]["method"] == "initialize"
+        opening.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await opening
         assert socket.closed
         assert bridge._reader is None
         assert not bridge._pending
+    run(drive())
+
+
+def test_startup_deadline_expiring_during_send_still_cancels(monkeypatch):
+    """The production shape (``codex_coordination._verified_delivery`` wraps
+    ``__aenter__`` in ``asyncio.wait_for``) must surface an expired deadline
+    as ``TimeoutError`` even when it expires while the initialize request is
+    being written. The handler blocks the loop past the deadline before
+    ``write()`` completes, which forces the interleaving the 2026-09-21 CI
+    flake hit by chance: on Python 3.10/3.11 the pre-3.12 ``wait_for``
+    then swallowed the cancellation (bpo-42130) and the bridge ran on into
+    its rpc timeout, raising ``DeliveryError`` instead. The ordering is
+    fixed by the loop, not by machine speed, so this is red on 3.11
+    without ``_bounded`` and green on every version with it. The exception
+    type is the whole verdict: no wall-clock bound, which would flake on
+    the same loaded runners; the short rpc timeout only keeps a red run
+    quick. The one timing the interleaving needs is that the deadline has
+    not already expired when the handler starts blocking — a few
+    microseconds of Python after ``wait_for`` begins — so the deadline is
+    0.3s, long enough that a runner stall in that window cannot beat it,
+    and the handler blocks past it."""
+    import time
+    from pseudolife_memory import codex_delivery
+
+    async def handler(socket, message):
+        time.sleep(0.5)
+        await asyncio.sleep(0)
+
+    async def drive():
+        socket = FakeSocket(handler)
+        monkeypatch.setattr(codex_delivery, "_load_connect", lambda: connector_for(socket, []))
+        bridge = codex_delivery.CodexDelivery(
+            "ws://127.0.0.1:1234", "secret", THREAD_ID, rpc_timeout=2.0)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(bridge.__aenter__(), timeout=0.3)
+        assert socket.closed
+        assert bridge._reader is None
+        assert not bridge._pending
+    run(drive())
+
+
+def test_bounded_matches_wait_for_on_timeout_cancel_and_stubborn_tasks():
+    """``_bounded`` keeps ``wait_for``'s contract on the three paths that
+    matter: a timeout cancels the inner task and raises ``TimeoutError``;
+    the caller's cancellation cancels the inner task and propagates; an
+    inner task that outlives its cancellation reports its own result."""
+    from pseudolife_memory.codex_delivery import _bounded
+
+    async def drive():
+        forever = asyncio.Event()
+        with pytest.raises(asyncio.TimeoutError):
+            await _bounded(forever.wait(), 0.01)
+
+        inner_seen = []
+
+        async def watched():
+            try:
+                await forever.wait()
+            except asyncio.CancelledError:
+                inner_seen.append("cancelled")
+                raise
+        outer = asyncio.ensure_future(_bounded(watched(), 60))
+        await asyncio.sleep(0)
+        outer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await outer
+        assert inner_seen == ["cancelled"]
+
+        async def stubborn():
+            try:
+                await forever.wait()
+            except asyncio.CancelledError:
+                return "finished anyway"
+        assert await _bounded(stubborn(), 0.01) == "finished anyway"
     run(drive())
 
 

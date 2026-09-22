@@ -4,6 +4,7 @@ import hmac
 import base64
 import os
 import re
+import select
 import shlex
 from pathlib import Path
 import shutil
@@ -17,6 +18,18 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# A hang guard for every hook and installer process this file runs, not a
+# timing contract: the hooks' real caps (Codex 15/5/3s, Claude 15/5/10s)
+# are asserted separately, at the fixture daemon, in
+# test_codex_session_end_fits_the_three_second_cap and statically in
+# tests/test_plugin_packaging.py. On a loaded windows-latest runner
+# process creation under Git Bash costs seconds per spawn: run 35603265565
+# (2026-09-21) measured 19s wall-clock for session-end.sh, which spawns about
+# seven processes around a two-second curl, and session-start.sh, which
+# spawns roughly four times as many (stdin parse, manifest read, the
+# four-file hooks digest), then hit the previous 30s guard.
+HOOK_PROCESS_TIMEOUT = 180
 
 
 def _fake_shim_bin(tmp_path: Path) -> Path:
@@ -57,8 +70,8 @@ def pwsh_run(*args, input=None, env=None, raw=False):
     if not pwsh:
         pytest.skip("PowerShell 7 is not installed")
     return subprocess.run([pwsh, "-NoProfile", *map(str, args)], input=input,
-                          env=env, capture_output=True, text=not raw, timeout=30,
-                          check=True)
+                          env=env, capture_output=True, text=not raw,
+                          timeout=HOOK_PROCESS_TIMEOUT, check=True)
 
 
 def bash_run(script, *, input, env):
@@ -74,7 +87,8 @@ def bash_run(script, *, input, env):
     if not bash:
         pytest.skip("Bash is not installed")
     return subprocess.run([bash, str(script)], input=input, env=env,
-                          capture_output=True, text=True, timeout=30, check=True)
+                          capture_output=True, text=True,
+                          timeout=HOOK_PROCESS_TIMEOUT, check=True)
 
 
 def test_codex_hook_install_preserves_existing_hooks_and_is_idempotent(tmp_path):
@@ -506,7 +520,17 @@ def test_posix_hooks_use_managed_rotatable_credential(tmp_path, event):
 def test_codex_session_end_fits_the_three_second_cap(tmp_path):
     """Codex caps SessionEnd at three seconds (ops/setup-codex-hooks.py),
     while Claude's hooks.json allows ten. The bash script's Codex branch
-    must finish inside the cap: one attempt, no retry, like lifecycle.ps1."""
+    must finish inside the cap: one attempt, no retry, like lifecycle.ps1.
+
+    The live half is measured at the fixture daemon, not around the
+    subprocess: each attempt is held without a reply and timed until curl
+    hangs up, which is the budget curl actually applied, and the attempts
+    are counted. The outer wall-clock on a loaded runner is dominated by
+    process creation the script does not control — 19s for this hook on
+    windows-latest (run 35603265565, 2026-09-21) around a curl that
+    honoured its two-second budget — and a wrapper ``curl`` on PATH cannot
+    stand in, because Git's ``bin/bash.exe`` launcher prepends
+    ``/mingw64/bin:/usr/bin`` to PATH ahead of anything the test sets."""
     script = (ROOT / "plugin/hooks/session-end.sh").read_text(encoding="utf-8")
     codex = re.search(r'CODEX_HOOK_CONTEXT"\s*\];?\s*then\s*(?:#[^\n]*\n\s*)*CURL_BUDGET=\(([^)]*)\)', script)
     assert codex, "session-end.sh needs a Codex-context curl budget"
@@ -516,11 +540,18 @@ def test_codex_session_end_fits_the_three_second_cap(tmp_path):
     cap = int(re.search(r'"SessionEnd":\s*(\d+)\}\[event\]', setup).group(1))
     assert max_time + 1 <= cap
     # Live: a daemon that never answers must not hold the hook past the cap.
+    attempts = []  # seconds each attempt's connection stayed open
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
         def do_POST(self):
-            time.sleep(6)
+            # Drain the body, then hold the reply and wait for curl to hang
+            # up: the socket turns readable (EOF) the moment curl gives up.
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            started = time.monotonic()
+            select.select([self.connection], [], [], 6)
+            attempts.append(time.monotonic() - started)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     worker = Thread(target=server.serve_forever, daemon=True)
     worker.start()
@@ -528,12 +559,13 @@ def test_codex_session_end_fits_the_three_second_cap(tmp_path):
     env["PSEUDOLIFE_CODEX_HOOK"] = "1"
     env["PSEUDOLIFE_MCP_DAEMON_URL"] = f"http://127.0.0.1:{server.server_port}"
     try:
-        started = time.monotonic()
         bash_run(ROOT / "plugin/hooks/session-end.sh", input='{"session_id":"fixture"}', env=env)
-        assert time.monotonic() - started < cap
     finally:
         server.shutdown()
         server.server_close()
+        worker.join(timeout=8)
+    assert len(attempts) == 1, attempts
+    assert attempts[0] < cap, attempts
 
 
 def test_native_prompt_reminder_matches_claude_script():
@@ -778,7 +810,7 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
         "PYTHONPATH": str(ROOT),
     })
     result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,
-                            timeout=30, check=True)
+                            timeout=HOOK_PROCESS_TIMEOUT, check=True)
     stdout = result.stdout.decode()
     assert f"RESULT:{expected_state}:1" in stdout
     assert hook_marker.exists() == bootstrap_success, (stdout, result.stderr.decode())
@@ -932,7 +964,7 @@ function codex {{
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:4321",
     })
     completed = subprocess.run([pwsh, "-NoProfile", "-File", str(driver)],
-                               env=env, capture_output=True, timeout=40)
+                               env=env, capture_output=True, timeout=HOOK_PROCESS_TIMEOUT)
     assert completed.returncode == 0
     assert json.loads(result_path.read_text(encoding="utf-8-sig")) == {
         "state": expected_state, "restored": True}
@@ -1123,7 +1155,7 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
         "PSEUDOLIFE_MCP_DAEMON_URL": wrong_url,
     })
     try:
-        completed = subprocess.run(command, env=env, capture_output=True, timeout=40)
+        completed = subprocess.run(command, env=env, capture_output=True, timeout=HOOK_PROCESS_TIMEOUT)
         assert completed.returncode == 0, (completed.stdout.decode(), completed.stderr.decode())
         assert result_marker.read_text(encoding="utf-8-sig").strip() == (
             "shim-env" if env_supported else "failed"), (
@@ -1168,7 +1200,7 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
                             str(ROOT / "plugin/hooks/lifecycle.ps1"),
                             "-Event", "SessionStart"]
         hook = subprocess.run(hook_command, input=payload, env=env,
-                              capture_output=True, timeout=20)
+                              capture_output=True, timeout=HOOK_PROCESS_TIMEOUT)
         assert hook.returncode == 0
         assert intended_requests == [{"authorization_present": False}]
         assert wrong_requests == []
@@ -1329,7 +1361,7 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
         "PSEUDOLIFE_MCP_TOKEN_FILE": forwarded.as_posix(),
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9876",
     })
-    completed = subprocess.run(command, env=env, capture_output=True, timeout=40)
+    completed = subprocess.run(command, env=env, capture_output=True, timeout=HOOK_PROCESS_TIMEOUT)
     assert completed.returncode == 0, (completed.stdout.decode(), completed.stderr.decode())
     assert result_marker.read_text(encoding="utf-8-sig").strip() == "shim-env"
     assert json.loads(marker.read_text()) == {
@@ -1403,7 +1435,7 @@ def test_bash_tokenless_connection_is_scoped_to_codex_context(
             [shutil.which("bash"), str(ROOT / "plugin/hooks" / (
                 "session-start.sh" if event == "SessionStart" else "session-end.sh"))],
             input=b'{"session_id":"fixture","source":"startup"}', env=env,
-            capture_output=True, timeout=20)
+            capture_output=True, timeout=HOOK_PROCESS_TIMEOUT)
         assert result.returncode == 0
         if codex_context == "plugin":
             assert managed_requests == [{"authorization_present": False}]
@@ -1472,7 +1504,7 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
         + parts[1] + '\nprintf "RESULT:%s:%s\\n" "$HOOK_CODEX" "$INSTR_CODEX"\n',
         encoding="utf-8")
     result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,
-                            timeout=30, check=True)
+                            timeout=HOOK_PROCESS_TIMEOUT, check=True)
     return result.stdout.decode("utf-8")
 
 
