@@ -194,8 +194,9 @@ class RerankerConfig:
     can have low cosine similarity while a less-relevant one wins on
     surface tokens. A cross-encoder attends over (query, candidate)
     jointly and re-scores them at the cost of one transformer pass per
-    pair. We run it on the top-N candidates only (default 20) so the
-    cost stays bounded.
+    pair. We score the entire combined pool when its size is at most
+    top_n (default 20); larger pools keep their original ranking. This
+    bounds cost without mixing scored and unscored candidates.
 
     Off by default — install with ``pip install .[rerank]`` (which just
     pulls a slightly newer sentence-transformers anyway), set
@@ -221,8 +222,8 @@ class RerankerConfig:
     # Skip the cross-encoder pass when the gap between the two best
     # bi-encoder-adjusted scores is >= this margin — a decisively
     # separated head can only be reshuffled, not fixed, by reranking.
-    # 0.0 (default) disables the gate: the reranker fires whenever
-    # enabled, exactly the pre-gate behavior.
+    # 0.0 (default) disables this margin gate; the candidate budget
+    # and availability checks still apply.
     # CAUTION: a skip returns raw bi-encoder scores, which sit lower than
     # fused (0.7*sigmoid(ce)) scores for strong matches — don't combine a
     # nonzero margin with a search_confidence_floor tuned to the fused

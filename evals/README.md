@@ -3214,6 +3214,7 @@ the summary:
 $env:PSEUDOLIFE_BENCH_POOL_MULT = "4"   # unset = shipped default 1
 $env:PSEUDOLIFE_BENCH_FUSION    = "rrf" # unset = shipped weighted_sum
 $env:PSEUDOLIFE_BENCH_RERANK    = "1"   # unset/0/false/off = shipped default off (cross-encoder)
+$env:PSEUDOLIFE_BENCH_RERANK_TOP_N = "32"  # unset = shipped budget 20; the WHOLE pool must fit or the pass skips
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
     --tag arm1-pool --phase extract
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
@@ -3295,7 +3296,19 @@ three runs above), both with the reranker ON:
 $env:PSEUDOLIFE_BENCH_RERANK    = "1"
 $env:PSEUDOLIFE_BENCH_FUSION    = "weighted_sum"  # NOT rrf - see the CAUTION above
 $env:PSEUDOLIFE_BENCH_POOL_MULT = "4"             # "1" for the pool-m1rr cell
+$env:PSEUDOLIFE_BENCH_RERANK_TOP_N = "24"         # m4rr only — see below
 ```
+
+Since the bounded-reranking change (2026-09-22) the pass scores the whole
+combined pool or skips it with `candidate_budget_exceeded`. The `m4rr`
+cell's associative pool is `RAG_TOP_K` (6) x 4 = 24 candidates, over the
+shipped `top_n` budget of 20, so a rerun at the default budget serves the
+un-reranked order under a reranker-on stamp; the 2026-09-05 artifact was
+produced under the earlier head/tail rule (top 20 of 24 reranked) and is
+not directly comparable to either. Set `PSEUDOLIFE_BENCH_RERANK_TOP_N` to
+at least the pool width (24 here; `m1rr` fits at 6 and needs nothing).
+The summary stamps `reranker.top_n` (`null` = shipped 20) so a rerun can
+be audited either way.
 
 `weighted_sum` is not a preference: under `rrf` the reranker's
 `fusion_weight` collapses to cross-encoder-only ordering, so an

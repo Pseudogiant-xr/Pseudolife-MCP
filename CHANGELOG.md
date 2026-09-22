@@ -38,6 +38,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   assertion was mutation-checked (blanking the script's Codex-context flag
   makes curl wait out the Claude budget and fails it).
 
+### Fixed (2026-09-22 — bounded reranking keeps one score domain)
+- Optional cross-encoder reranking now scores the entire combined candidate
+  pool only when it fits `top_n`. Larger pools retain their original ranking
+  and report `candidate_budget_exceeded`, instead of returning a scored head
+  followed by an unscored tail. Reference reservations and the disabled default
+  are preserved; query parameters record the pool size and scored count.
+- The LongMemEval bench summary stamps the reranker's `top_n` beside
+  `enabled`, and `PSEUDOLIFE_BENCH_RERANK_TOP_N` is the sanctioned override
+  for it (`evals/ladder_sweep.py`). Under the all-or-skip rule a widened-pool
+  cell whose pool outgrows the budget serves the un-reranked order, which an
+  `enabled: true` stamp alone would misreport as a reranked run.
+
 ### Fixed (2026-09-21 — the client-side updater never pip-upgrades an editable shim)
 - `ops/update_clients.py` decided "editable" by checking whether the
   registered launcher lay under `<--repo>/.venv`; run from a deploy

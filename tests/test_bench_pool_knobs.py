@@ -92,9 +92,10 @@ def test_the_knob_state_rides_in_the_bench_summary_stamp(monkeypatch):
 def test_accepted_spellings_turn_the_reranker_on(ladder, memory_cfg,
                                                  monkeypatch, spelling):
     monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", spelling)
+    monkeypatch.delenv("PSEUDOLIFE_BENCH_RERANK_TOP_N", raising=False)
     ladder.apply_rerank_env(memory_cfg)
     assert memory_cfg.reranker.enabled is True
-    assert ladder.rerank_env_knobs() == {"enabled": True}
+    assert ladder.rerank_env_knobs() == {"enabled": True, "top_n": None}
 
 
 @pytest.mark.parametrize("spelling", [None, "0", "false", "off"])
@@ -104,9 +105,10 @@ def test_unset_or_off_leaves_the_shipped_default(ladder, memory_cfg,
         monkeypatch.delenv("PSEUDOLIFE_BENCH_RERANK", raising=False)
     else:
         monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", spelling)
+    monkeypatch.delenv("PSEUDOLIFE_BENCH_RERANK_TOP_N", raising=False)
     ladder.apply_rerank_env(memory_cfg)
     assert memory_cfg.reranker.enabled is False
-    assert ladder.rerank_env_knobs() == {"enabled": False}
+    assert ladder.rerank_env_knobs() == {"enabled": False, "top_n": None}
 
 
 def test_a_bad_rerank_value_aborts_rather_than_serving_the_default(
@@ -123,8 +125,51 @@ def test_the_rerank_knob_state_rides_in_the_bench_summary_stamp(monkeypatch):
     import longmemeval_bench as B
 
     monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", "1")
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK_TOP_N", "32")
     stamp = B.bench_env_knobs()
-    assert stamp["reranker"] == {"enabled": True}
+    assert stamp["reranker"] == {"enabled": True, "top_n": "32"}
+
+
+@pytest.mark.parametrize("rerank", [None, "1"])
+def test_rerank_top_n_env_is_applied_and_stamped(ladder, memory_cfg,
+                                                 monkeypatch, rerank):
+    """The budget travels with the artifact, whether or not the pass is on.
+
+    Reranking scores the whole combined pool or skips it
+    (``candidate_budget_exceeded``), so a widened-pool cell whose pool
+    outgrows ``top_n`` serves the un-reranked order under a stamp that
+    reads reranker-on. Stamping the budget beside ``enabled`` makes that
+    rerun auditable, and the override is the sanctioned way to widen the
+    budget with the pool. It applies even with the reranker off: the
+    stamp must describe the config that ran, not the config that mattered.
+    """
+    if rerank is None:
+        monkeypatch.delenv("PSEUDOLIFE_BENCH_RERANK", raising=False)
+    else:
+        monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", rerank)
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK_TOP_N", "32")
+    assert memory_cfg.reranker.top_n == 20, "fixture drifted off the default"
+    ladder.apply_rerank_env(memory_cfg)
+    assert memory_cfg.reranker.top_n == 32
+    assert memory_cfg.reranker.enabled is (rerank == "1")
+    assert ladder.rerank_env_knobs() == {
+        "enabled": rerank == "1", "top_n": "32"}
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "20.0", ""])
+def test_a_bad_rerank_top_n_aborts_rather_than_serving_the_default(
+        ladder, memory_cfg, monkeypatch, value):
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", "1")
+    monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK_TOP_N", value)
+    if value.strip() == "":
+        # Blank is "unset", the same reading ``PSEUDOLIFE_BENCH_RERANK``
+        # gives an empty value — not an error.
+        ladder.apply_rerank_env(memory_cfg)
+        assert memory_cfg.reranker.top_n == 20
+        return
+    with pytest.raises(SystemExit):
+        ladder.apply_rerank_env(memory_cfg)
+    assert memory_cfg.reranker.top_n == 20
 
 
 def test_rebuild_contexts_does_not_claim_to_honour_the_pool_knobs():
@@ -171,6 +216,7 @@ def test_off_turns_the_reranker_off_on_a_config_that_has_it_on(
     """
     memory_cfg.reranker.enabled = True
     monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", spelling)
+    monkeypatch.delenv("PSEUDOLIFE_BENCH_RERANK_TOP_N", raising=False)
     ladder.apply_rerank_env(memory_cfg)
     assert memory_cfg.reranker.enabled is False
-    assert ladder.rerank_env_knobs() == {"enabled": False}
+    assert ladder.rerank_env_knobs() == {"enabled": False, "top_n": None}
