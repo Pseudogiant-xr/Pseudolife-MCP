@@ -839,11 +839,15 @@ class ContinuumMemorySystem:
             else False
         )
         # Today's order is truncate-then-rerank: the cross-encoder's
-        # ``top_n`` (20) budget only ever saw the ~k+ref_k entries that
+        # ``top_n`` (20) budget only ever sees the ~k+ref_k entries that
         # survived the cut. That stays the default — flipping it under
         # multiplier 1 would change the shipped path, which this change
         # deliberately does not. With a widened pool the reranker sees the
-        # fused pool BEFORE the cut, which is the point of widening it.
+        # fused pool BEFORE the cut, which is the point of widening it —
+        # provided the whole pool fits ``top_n``. A wider pool skips the
+        # pass (``candidate_budget_exceeded`` in Pool 3 below) rather than
+        # scoring a head and serving an unscored tail, so a widened pool
+        # needs ``top_n`` widened with it to be reranked at all.
         rerank_before_cut = bool(pool_mult > 1 and rerank_enabled)
 
         # v0.7.3: superseded entries are included in retrieval by

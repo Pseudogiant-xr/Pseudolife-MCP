@@ -547,14 +547,24 @@ def rerank_env_knobs() -> dict:
     config cannot be audited afterwards is exactly the failure PR #165
     closed. ``enabled`` reflects whether ``PSEUDOLIFE_BENCH_RERANK`` turned
     the reranker on; the shipped default (``memory.reranker.enabled =
-    False``) is in force whenever the var is unset.
+    False``) is in force whenever the var is unset. ``top_n`` is the
+    ``PSEUDOLIFE_BENCH_RERANK_TOP_N`` override, ``None`` for the shipped
+    budget (20). It is stamped because the pass scores the whole combined
+    pool or skips it (``candidate_budget_exceeded``): a widened-pool cell
+    whose pool outgrows the budget serves the un-reranked order, and
+    ``enabled: true`` alone would read as a reranked run.
     """
     raw = os.environ.get("PSEUDOLIFE_BENCH_RERANK", "").strip().lower()
-    return {"enabled": raw in ("1", "true", "on")}
+    return {
+        "enabled": raw in ("1", "true", "on"),
+        "top_n": (
+            os.environ.get("PSEUDOLIFE_BENCH_RERANK_TOP_N", "").strip()
+            or None),
+    }
 
 
 def apply_rerank_env(memory_cfg) -> None:
-    """Apply the PSEUDOLIFE_BENCH_RERANK env override to a bench config.
+    """Apply the PSEUDOLIFE_BENCH_RERANK* env overrides to a bench config.
 
     The cross-encoder reranker (Tier B, ``memory.reranker``) ships OFF by
     default. This is the ONLY sanctioned way to run a judged eval with it
@@ -562,10 +572,14 @@ def apply_rerank_env(memory_cfg) -> None:
     hard error, not a silent fall-back to the default.
 
         PSEUDOLIFE_BENCH_RERANK=1
+        PSEUDOLIFE_BENCH_RERANK_TOP_N=32   # the whole pool must fit, or
+                                           # the pass skips; widen it with
+                                           # PSEUDOLIFE_BENCH_POOL_MULT
+
+    ``TOP_N`` is applied whether or not the pass is on, so the stamp
+    describes the config that ran rather than the config that mattered.
     """
     raw = os.environ.get("PSEUDOLIFE_BENCH_RERANK", "").strip().lower()
-    if not raw:
-        return
     if raw in ("1", "true", "on"):
         memory_cfg.reranker.enabled = True
     elif raw in ("0", "false", "off"):
@@ -576,9 +590,15 @@ def apply_rerank_env(memory_cfg) -> None:
         # config alone here would ship a judged artifact whose retrieval
         # stamp contradicts the retrieval it measured (2026-09-05 review).
         memory_cfg.reranker.enabled = False
-    else:
+    elif raw:
         sys.exit(f"PSEUDOLIFE_BENCH_RERANK={raw!r}: want "
                  "'1'/'true'/'on' or '0'/'false'/'off'")
+    top_n = os.environ.get("PSEUDOLIFE_BENCH_RERANK_TOP_N", "").strip()
+    if top_n:
+        if not top_n.isdigit() or int(top_n) < 1:
+            sys.exit(f"PSEUDOLIFE_BENCH_RERANK_TOP_N={top_n!r}: want an "
+                     "int >= 1")
+        memory_cfg.reranker.top_n = int(top_n)
 
 
 def ingest(svc) -> None:
