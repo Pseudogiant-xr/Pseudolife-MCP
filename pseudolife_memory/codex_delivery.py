@@ -31,6 +31,41 @@ def _load_connect():
     return _NoRedirectConnect
 
 
+async def _bounded(awaitable, timeout: float):
+    """``asyncio.wait_for`` without the pre-3.12 cancellation swallow.
+
+    Before Python 3.12, ``wait_for`` returned the inner result instead of
+    re-raising ``CancelledError`` when the inner task finished in the same
+    loop tick as the cancellation (bpo-42130). A caller cancelling
+    ``__aenter__`` at that instant saw the bridge carry on into the rpc
+    timeout and raise ``DeliveryError`` instead — the 2026-09-21 CI flake on
+    the 3.11 lane (``tests/test_codex_delivery.py``). Same contract as
+    ``wait_for``: the result, or ``asyncio.TimeoutError`` once the awaitable
+    has been cancelled and reaped (a task that finishes anyway during that
+    reap reports its own result or exception, as ``wait_for`` does); the
+    caller's own cancellation cancels the awaitable, waits for it, and
+    propagates.
+    """
+    task = asyncio.ensure_future(awaitable)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=timeout)
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.wait({task})
+        if not task.cancelled():
+            # Finished under the cancellation: the cancellation wins, and the
+            # exception is retrieved so asyncio never logs it (and its
+            # unsanitized traceback) at garbage collection.
+            task.exception()
+        raise
+    if not done:
+        task.cancel()
+        await asyncio.wait({task})
+        if task.cancelled():
+            raise asyncio.TimeoutError
+    return task.result()
+
+
 def _validate_endpoint(url: str) -> str:
     if not isinstance(url, str):
         raise DeliveryError("invalid Codex delivery endpoint")
@@ -101,8 +136,7 @@ class CodexDelivery:
                 close_timeout=self._close_timeout,
                 max_size=1_048_576,
             )
-            self._socket = await asyncio.wait_for(
-                connection, timeout=self._connect_timeout)
+            self._socket = await _bounded(connection, self._connect_timeout)
             self._reader = asyncio.create_task(self._reader_loop())
             await self._rpc(
                 "initialize",
@@ -139,7 +173,7 @@ class CodexDelivery:
                 async with self._send_lock:
                     await self._socket.send(raw)
 
-            await asyncio.wait_for(write(), timeout=self._rpc_timeout)
+            await _bounded(write(), self._rpc_timeout)
         except DeliveryError:
             raise
         except Exception:
@@ -171,8 +205,8 @@ class CodexDelivery:
                         uncertain=True) from None
                 raise
             try:
-                payload = await asyncio.wait_for(
-                    asyncio.shield(response), timeout=self._rpc_timeout)
+                payload = await _bounded(
+                    asyncio.shield(response), self._rpc_timeout)
             except asyncio.TimeoutError:
                 if uncertain:
                     raise DeliveryError(
@@ -270,7 +304,7 @@ class CodexDelivery:
                 await reader
         if socket is not None:
             with suppress(asyncio.TimeoutError, Exception):
-                await asyncio.wait_for(socket.close(), timeout=self._close_timeout)
+                await _bounded(socket.close(), self._close_timeout)
         for future in list(self._pending.values()):
             if not future.done():
                 future.cancel()
