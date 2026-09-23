@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-23 — warning before capacity eviction deletes history, and a durable record of every drop)
+- Under the flat default every capacity eviction permanently deletes an
+  entry (a Postgres `DELETE`; its `memory_traces` cascade), superseded
+  entries first. On the production bank's measured growth of 36-65
+  entries/day the 5,250-entry cap would be reached between about 9 Nov and
+  18 Dec 2026, with nothing to say so beforehand: `true_drops` was a
+  per-process counter that every restart reset, and a drop left only an
+  INFO log line.
+- `memory_stats()` now carries `capacity_warning` (band, size, capacity,
+  fill and a message) once the terminal band — the only band whose
+  evictions are true drops — reaches 80% of its capacity, and `null` below
+  that. On a multi-band preset a full upper band demotes into the next and
+  loses nothing, so it does not warn. `/health` carries
+  `capacity_warning: true` at the same point; counts stay out of the
+  unauthenticated probe, and `status` is untouched, so a filling bank never
+  turns into a 503 restart loop.
+- Each true drop logs a WARNING naming the entry id, source, superseded flag
+  and band. On Postgres the row is deleted by the new
+  `delete_evicted_entry`, which counts the drop in the `meta` row
+  `capacity_true_drops` in the same transaction: a row is never deleted
+  without being counted, and a drop inside a correction that rolls back is
+  neither. `memory_stats()` reports the all-time `true_drops_total` and
+  `last_true_drop` (time, entry id, source, superseded) across restarts.
+  The record travels with a logical export, like the entry ids it explains.
+  No schema change.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

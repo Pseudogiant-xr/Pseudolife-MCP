@@ -3919,9 +3919,12 @@ for delivery-state and host-verification contracts.
 - **MIRAS preset `flat`** (default since 2026-08-15) — one band named
   `flat` at capacity 5,250 (the previous continuum's summed total), with
   a `balanced` retention policy. Eviction is a retention-scored **true
-  drop** that only fires at genuine capacity, is counted
-  (`memory_stats().true_drops`) and logged — a bank under real pressure
-  is visible, never silent. This is the arm the preregistered flat-band
+  drop** that only fires at genuine capacity: it permanently deletes the
+  entry's row (superseded entries go first), is counted
+  (`memory_stats().true_drops` since start; `true_drops_total` and
+  `last_true_drop` all-time, kept in the `meta` table on Postgres) and
+  logged as a WARNING naming the entry — a bank under real pressure is
+  visible, never silent. This is the arm the preregistered flat-band
   verdict measured as tying the 8-band continuum on every gate (ranking,
   forced-eviction retention quality, real recorded queries — see the
   [benchmarks page](benchmarks.md#band-structure)), so the simpler
@@ -3937,6 +3940,30 @@ for delivery-state and host-verification contracts.
   than the new preset seats, the deepest band is left over capacity and
   the count logged rather than truncated at startup — normal eviction
   drains it from there.
+  **Before the first delete**: from 80% of the last band's capacity (the
+  only band whose evictions are true drops) `memory_stats()` carries a
+  `capacity_warning` and `/health` a `capacity_warning: true` flag. **To
+  raise the cap**, switch to a custom preset that keeps the band name
+  `flat` (so hydration leaves every row's band stamp alone), merged under
+  the existing top-level `memory:` key of `config.yaml` — never a second
+  `memory:` key — then restart the daemon:
+
+  ```yaml
+  memory:
+    miras:
+      preset: custom
+      bands:
+        - name: flat
+          max_entries: 15000   # size to the daemon's RAM and latency budget
+          update_interval: 1000000000
+          promotion_access_count: 1000000000
+          promotion_surprise: 1.1
+          retention_policy: balanced
+  ```
+
+  Every resident entry costs daemon RAM (a correction briefly holds a
+  second copy of the bank), and search latency grows with the bank, since
+  the BM25 pool is rebuilt over every entry per query.
 - **No NLI scorer.** The `cross-encoder/nli-deberta-v3-xsmall`
   contradiction model (~278 MB) is an unwired seam, not a switch: the
   `[nli]` extra and `memory.nli.*` exist for library callers who inject a

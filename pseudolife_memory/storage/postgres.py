@@ -30,6 +30,13 @@ from pseudolife_memory.storage.schema import ensure_schema
 
 logger = logging.getLogger(__name__)
 
+# meta row holding the durable record of capacity-eviction true drops:
+# {"count", "last_at", "last_entry_id", "last_source", "last_superseded"}.
+# Written only by ``delete_evicted_entry``, in the same transaction as the
+# DELETE it counts. It travels with a logical export: it is audit history
+# of this bank's entries, whose ids transfer verbatim.
+CAPACITY_DROPS_META_KEY = "capacity_true_drops"
+
 _ENTRY_COLS = (
     "band", "text", "embedding", "surprise", "ts", "access_count", "source",
     "superseded_at", "superseded_by_text", "last_logical_turn",
@@ -666,6 +673,36 @@ class PostgresStorage:
         with self._txn():
             cur = self.conn.execute("DELETE FROM entries WHERE id = ANY(%s)", (ids,))
         return cur.rowcount
+
+    def delete_evicted_entry(
+        self, entry_id: int | None, *, source: str, superseded: bool,
+    ) -> int:
+        """Delete a capacity-evicted entry and count the drop durably.
+
+        The DELETE and the ``meta`` counter share one transaction, so a
+        drop is never deleted without being counted, and a drop inside a
+        correction that rolls back is neither deleted nor counted.
+        ``entry_id=None`` (an entry whose insert write-through failed, so no
+        row exists) is still counted: its text left the bank all the same.
+        Returns the all-time drop count.
+        """
+        record = {
+            "count": 1, "last_at": time.time(), "last_entry_id": entry_id,
+            "last_source": source, "last_superseded": bool(superseded),
+        }
+        with self._txn():
+            if entry_id is not None:
+                self.conn.execute(
+                    "DELETE FROM entries WHERE id = %s", (entry_id,))
+            row = self.conn.execute(
+                "INSERT INTO meta (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value "
+                "|| jsonb_build_object('count', "
+                "COALESCE((meta.value->>'count')::bigint, 0) + 1) "
+                "RETURNING (value->>'count')::bigint",
+                (CAPACITY_DROPS_META_KEY, Jsonb(record)),
+            ).fetchone()
+        return int(row[0])
 
     def load_entries(self) -> list[dict]:
         cols = ("id",) + _ENTRY_COLS + ("reinforcements",)

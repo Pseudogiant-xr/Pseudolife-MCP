@@ -146,6 +146,19 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     # look at. The loudness lives in the ERROR log this flag mirrors.
     if getattr(svc, "_lesson_synthesis_recovery", None) is not None:
         payload["lesson_reconciliation_required"] = True
+    # The bank is within 20% of the capacity where every new memory
+    # permanently deletes an old one. A flag only: this probe is
+    # unauthenticated, so the counts stay in memory_stats. Same deliberate
+    # choice as migration_partial — NOT `degraded`, which would have the
+    # healthcheck restart a daemon that is serving correctly.
+    capacity_warning = getattr(getattr(svc, "_cms", None),
+                               "capacity_warning", None)
+    if capacity_warning is not None:
+        try:
+            if capacity_warning():
+                payload["capacity_warning"] = True
+        except Exception:  # noqa: BLE001 — /health must never fail on this
+            pass
     # Honest DB liveness (2026-07-02 review fix): /health used to say
     # "ok" while a restarted Postgres had every memory tool failing.
     # ping() uses a dedicated short-lived connection so the probe can't
