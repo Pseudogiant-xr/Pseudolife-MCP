@@ -67,9 +67,10 @@ function Resolve-PwshForTaskScheduler {
 }
 
 $repo = Resolve-MainCheckout
-$script = Join-Path $repo "ops\backup.ps1"
+# Separator-free joins: the tests drive this script under pwsh on Linux CI.
+$script = Join-Path $repo "ops" "backup.ps1"
 if (-not (Test-Path $script)) { throw "not found: $script" }
-$log = Join-Path $repo "data\backups\backup-task.log"
+$log = Join-Path $repo "data" "backups" "backup-task.log"
 # The task runs whatever the main checkout holds. One that has not been
 # updated yet still backs up daily, so warn rather than refuse, but loudly.
 if (-not (Select-String -LiteralPath $script -SimpleMatch "AcceptRowDrop" -Quiet)) {
@@ -121,9 +122,11 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 # The logged-on user, interactively: Docker Desktop only runs in a user
-# session, and PSEUDOLIFE_BACKUP_MIRROR is a User-scope variable.
+# session, and PSEUDOLIFE_BACKUP_MIRROR is a User-scope variable. DOMAIN\user
+# from [Environment] (WindowsIdentity throws off Windows, where CI runs these
+# tests).
 $principal = New-ScheduledTaskPrincipal `
-    -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+    -UserId "$([Environment]::UserDomainName)\$([Environment]::UserName)" `
     -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
