@@ -119,6 +119,22 @@ import pytest
 if TYPE_CHECKING:
     from pseudolife_memory.service import MemoryService
 
+# Fixture HTTP servers (stub extractors, fake daemons, shim upstreams) run
+# serve_forever() on a thread, and shutdown() waits for its next poll: the
+# stdlib default of 0.5 s cost nearly that much per server, since fixtures
+# stop right after their last request. Measured 2026-09-23 UTC on six of the
+# server-heavy files (listed in each artifact's command; 187 tests, 16-CPU
+# Windows host): 65.2 s at 0.5 s, 43-45 s at 0.05 s, two runs each, a gain
+# that includes one 2 s retry sleep dropped from test_extractor_fallback
+# (evals/results/suite-cost-fixture-server-shutdown-slice-*.json). Only
+# servers inside this pytest process are affected; the eval shims' own
+# serve_forever() runs in their separate processes.
+import socketserver  # noqa: E402
+
+# Fail at import, not as a hung shutdown(), if the stdlib signature changes.
+assert socketserver.BaseServer.serve_forever.__defaults__ == (0.5,)
+socketserver.BaseServer.serve_forever.__defaults__ = (0.05,)
+
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Required CI database coverage must fail before collection can skip it."""

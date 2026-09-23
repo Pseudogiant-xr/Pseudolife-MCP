@@ -220,6 +220,7 @@ class _FakeService:
 def test_dream_run_auto_records_selection(monkeypatch):
     from pseudolife_memory.memory import dream as d
     monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: False)
+    monkeypatch.setattr(d, "_probe_retry_delay", 0.0)
     svc = _FakeService(_cfg("http://p:1/v1", fb="http://f:2/v1"))
     res = svc.dream_run_auto()
     assert res["extractor"] == "fallback"
