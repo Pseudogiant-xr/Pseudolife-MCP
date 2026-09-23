@@ -132,7 +132,10 @@ class ReviewJudgments:
     # queue, validate() only the judged batch. The merge ``group`` (the
     # endpoint a row shares with other pending rows) did exactly that, so
     # from 2026-09-22 17:56 the shadow merge judge re-sent the same 8 rows
-    # ~125 times a day and recorded nothing.
+    # ~125 times a day and recorded nothing. Signed as None rather than
+    # dropped: a row that never had a group keeps the fingerprint it was
+    # signed with before the fix, so its verdict or automatic decision
+    # survives the change and only rows that had one re-sign.
     _CROSS_ROW = {"merge": frozenset({"group"})}
 
     def __init__(self, service, kind, extractor, pending, current_model=None):
@@ -163,8 +166,8 @@ class ReviewJudgments:
         cross_row = self._CROSS_ROW.get(self.kind, frozenset())
         return {str(p["id"]): fingerprint({"proposal": _evidence(p),
                                           "evidence": _evidence(
-                                              {k: v for k, v in row.items()
-                                               if k not in cross_row}),
+                                              {k: None if k in cross_row else v
+                                               for k, v in row.items()}),
                                           "policy": policy})
                 for p, row in zip(pending, enriched)}
 

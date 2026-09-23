@@ -144,6 +144,97 @@ def test_second_opinion_on_a_split_group_still_records(svc):
     assert sum(bool(_row(svc, pid)["judge2_verdict"]) for pid in pids) == 1
 
 
+def test_review_signatures_do_not_depend_on_batch_composition(svc):
+    """Every review queue signs a row twice: over the whole pending queue at
+    refresh() and over the judged batch at validate(). An evidence field
+    computed across rows makes the two disagree whenever the batch leaves
+    out a row it relates to, and that row then never records (the merge
+    ``group`` did, 2026-09-22). Pinned for every ReviewJudgments kind, with
+    rows that share endpoints."""
+    import time
+
+    from pseudolife_memory.memory.review_judgments import ReviewJudgments
+    st = svc._storage
+    _propose(svc, "alpha svc", "alpha service")
+    _propose(svc, "alpha srv", "alpha service")
+    _propose(svc, "beta svc", "beta service")
+    for dst in ("beta service", "gamma queue"):
+        assert svc.graph_propose_links([{
+            "src": "alpha service", "relation": "related-to", "dst": dst,
+            "rationale": "t"}])["proposed"] == 1
+    for name in ("junk one", "junk two"):
+        st.ensure_entity(name, display=name)
+        assert st.insert_entity_proposal(
+            "junk", st.find_entity(name)["id"], None, None, "list-artifact",
+            time.time()) is not None
+    entity_rows = st.pending_entity_proposals()
+    queues = {
+        "merge": [p for p in entity_rows if p.get("kind") == "merge"],
+        "link": st.pending_proposals(),
+        "junk": [p for p in entity_rows if p.get("kind") == "junk"],
+    }
+    for kind, pending in queues.items():
+        assert len(pending) >= 2, kind
+        review = ReviewJudgments(svc, kind, _StubJudge({}), pending)
+        with svc._lock:
+            whole = review.signatures(pending)
+            for p in pending:
+                key = str(p["id"])
+                assert review.signatures([p]) == {key: whole[key]}, (kind, key)
+
+
+def test_split_group_auto_rejects_are_not_reopened(svc):
+    """Reconsideration re-signs automatic terminal decisions over yet another
+    row set. With the cross-row ``group`` signed, two auto-rejected rows
+    sharing an endpoint read as changed whenever they were reconsidered
+    apart, and the reject was reopened, deleting its dismissed pair."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    pids = [_propose(svc, "delta svc", "delta service"),
+            _propose(svc, "delta srv", "delta service")]
+    judge = _StubJudge({("delta svc", "delta service"): ("reject", 0.99),
+                        ("delta srv", "delta service"): ("reject", 0.99)})
+    assert svc.deep_dream_judge(judge, limit=2)["auto_rejected"] == 2
+    for _ in range(3):
+        out = svc.deep_dream_judge(_StubJudge({}), limit=1)
+        assert out["reconsideration"]["reopened"] == 0, out
+    assert all(svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+               for pid in pids)
+
+
+def test_ungrouped_auto_reject_survives_the_fingerprint_fix(svc, monkeypatch):
+    """The fix pins ``group`` to None instead of dropping it, so a row that
+    never shared an endpoint keeps the fingerprint it was signed with
+    before 2026-09-23: its automatic reject stays settled across the deploy
+    instead of reopening. Only rows that did carry a group re-sign once."""
+    from pseudolife_memory.memory.review_judgments import ReviewJudgments
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    pid = _propose(svc, "beta svc", "beta service")
+    judge = _StubJudge({("beta svc", "beta service"): ("reject", 0.99)})
+    monkeypatch.setattr(ReviewJudgments, "_CROSS_ROW", {})   # pre-fix signing
+    assert svc.deep_dream_judge(judge)["auto_rejected"] == 1
+    monkeypatch.undo()
+    out = svc.deep_dream_judge(_StubJudge({}))
+    assert out["reconsideration"]["reopened"] == 0, out
+    assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+
+
+def test_ungrouped_shadow_verdict_survives_the_fingerprint_fix(svc, monkeypatch):
+    """Same continuity for a recorded shadow verdict: an ungrouped row is not
+    cleared and re-judged by the first sweep after the deploy."""
+    from pseudolife_memory.memory.review_judgments import ReviewJudgments
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    svc.config.memory.deep_dream.judge_second_opinion = False
+    pid = _propose(svc, "beta svc", "beta service")
+    judge = _StubJudge({("beta svc", "beta service"): ("reject", 0.9)})
+    monkeypatch.setattr(ReviewJudgments, "_CROSS_ROW", {})   # pre-fix signing
+    assert svc.deep_dream_judge(judge)["judged"] == 1
+    monkeypatch.undo()
+    rejudge = _StubJudge({})
+    svc.deep_dream_judge(rejudge)
+    assert rejudge.seen == []
+    assert _row(svc, pid)["judge_verdict"] == "reject"
+
+
 def test_judge_logs_batch_start(svc, caplog):
     """The judge must announce a batch BEFORE calling the model, not only
     log the completed verdicts (2026-09-01). The 2026-08-31 hook-timeout

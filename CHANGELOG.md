@@ -36,10 +36,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sharing an endpoint with a row outside its batch therefore never
   validated, and from 2026-09-22 17:56 the judge re-sent the same 8 rows to
   the extractor ~125 times a day and recorded nothing. The fingerprint now
-  leaves out that cross-row field, which the judge never sees. Every merge
-  fingerprint changes, so the ~10 merge verdicts already recorded are
-  re-judged once. The link, junk, candidate and curation judges bind per-row
-  evidence and were not affected.
+  signs that cross-row field, which the judge never sees, as None. Rows that
+  never shared an endpoint keep their existing fingerprints, so their
+  verdicts and automatic decisions carry over; only rows that carried a
+  group re-judge once. The same field also reopened automatic merge rejects
+  that shared an endpoint whenever reconsideration re-signed them apart,
+  deleting their dismissed pairs. The link, junk, candidate and curation
+  judges bind per-row evidence and were not affected; a test now pins batch
+  independence for every review queue.
 
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection

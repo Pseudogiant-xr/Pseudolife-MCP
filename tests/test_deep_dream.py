@@ -251,6 +251,28 @@ def test_dream_alias_name_memo_is_bounded(svc, monkeypatch):
     assert svc._propose_dream_alias_candidates(
         {nn("deploy pipeline"): "deploy pipeline"}, known) == 1
     assert len(svc._alias_name_memo) == 2
+    calls = _record_encodes(svc, monkeypatch)
+    svc._propose_dream_alias_candidates(
+        {nn("ship pipeline"): "ship pipeline"}, known)
+    [(_, encoded)] = calls
+    assert "ship pipeline" in encoded and "release train" in encoded
+
+
+def test_dream_alias_screen_never_raises_on_an_encode_failure(svc, monkeypatch):
+    """The screen is best-effort: an embedder failure outside the lock files
+    nothing and returns 0 instead of breaking the dream."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("embedder down")
+
+    monkeypatch.setattr(svc._embedder, "encode", boom)
+    assert svc._propose_dream_alias_candidates(
+        {nn("deploy pipeline"): "deploy pipeline"}, known) == 0
+    assert not svc._lock.locked()
 
 
 def _stage_link_pair(svc):
