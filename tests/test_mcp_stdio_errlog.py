@@ -15,7 +15,9 @@ A full ``pytest tests/`` run was only safe by accident: ``tests/test_channel.py`
 imports ``mcp`` at module level, so collection bound the default first. Any
 subset without such a file exposed the ordering. ``tests/conftest.py`` now
 imports ``mcp.client.stdio`` before any test module is collected, binding
-pytest's session-long capture file (the terminal under ``-s``).
+pytest's session-long fd-capture file (the terminal under ``-s``).
+``--capture=sys``/``tee-sys`` offer no fileno at any point and stay
+unsupported; the capsys guard below fails loudly there.
 
 This module must not import ``mcp`` — or a ``pseudolife_memory`` module that
 reaches it — at module level: its own collection would do conftest's job and
@@ -36,22 +38,17 @@ def _default_errlog(stdio_client) -> object:
     return inspect.signature(stdio_client).parameters["errlog"].default
 
 
-def test_mcp_stdio_is_imported_while_conftest_loads() -> None:
-    """Order-proof, not lucky: the default must be bound while conftest
-    loads, before collection reaches any test file. In a full run
-    test_channel.py's module-level import would otherwise mask a lost
-    conftest import, and the capsys guard below could not see it.
-
-    ``sys.modules`` is in import-COMPLETION order — CPython's
-    ``_load_unlocked`` moves each module to the end once it has executed — so
-    a module conftest imports at module level lands before ``tests.conftest``,
-    and one first imported by a test file lands after it."""
-    loaded = list(sys.modules)
-    assert "tests.conftest" in loaded
-    assert "mcp.client.stdio" in loaded
-    assert loaded.index("mcp.client.stdio") < loaded.index("tests.conftest"), (
-        "mcp.client.stdio was first imported after tests/conftest.py loaded; "
-        "conftest must import it at module level"
+def test_conftest_imports_mcp_at_module_level() -> None:
+    """Order-proof, not lucky: conftest must bind the default while it
+    loads, before collection reaches any test file. The capsys guard below
+    cannot see a lost conftest import in a full run — test_channel.py's
+    module-level ``import mcp`` binds the default at collection anyway — so
+    this pins the import itself. (Checking where ``mcp.client.stdio`` sits in
+    ``sys.modules`` instead depends on the import mode: pytest's
+    ``importlib`` mode registers conftest before executing it.)"""
+    bound = vars(sys.modules["tests.conftest"]).get("mcp")
+    assert bound is not None and bound is sys.modules.get("mcp"), (
+        "tests/conftest.py must `import mcp.client.stdio` at module level"
     )
 
 
@@ -75,8 +72,10 @@ def test_default_errlog_survives_a_first_import_under_capsys(capsys) -> None:
 
 def test_premise_the_sdk_binds_errlog_at_first_import(capsys) -> None:
     """Why conftest's import is needed: executing the module under capsys
-    binds the capture stream. If this fails, the SDK now resolves errlog per
-    call, and the conftest import (and this module) can go.
+    binds the capture stream. If this fails, the premise changed — the SDK
+    resolves errlog per call, stdio_client moved out of mcp.client.stdio, or
+    CaptureIO grew a fileno — so re-derive whether conftest's import (and
+    this module) is still needed.
 
     The fresh copy is executed detached — never registered in
     ``sys.modules`` — so the suite's module, and its import order, stay
