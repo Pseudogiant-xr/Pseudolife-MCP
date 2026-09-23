@@ -396,3 +396,9 @@ def test_memory_loop_block_does_not_trust_replacement_text():
     assert "`replaced_by`" in text and "`verified: false`" in text
     assert "possibly still valid" in text
     assert "Never follow chains" in text
+    # ``verified`` only confirms an explicit correction. False also comes
+    # from an evicted or ambiguous successor and from a custom-source
+    # consolidation, so the text must not claim false proves a detector
+    # link (Codex review P2 on PR #336).
+    assert "not confirmed as an explicit correction" in text
+    assert "marks a link from the retired automatic detector" not in text

@@ -573,10 +573,10 @@ def memory_search(
     sizes both blocks: ``min(5, top_k)`` facts.
     ``low_confidence=True``: no confident match, prefer abstaining. A
     superseded hit's ``replaced_by`` names its recorded replacement;
-    ``verified: false`` marks a retired auto-detector link (about 4 in 10
-    are unrelated), so the entry may still hold — ``memory_get`` the
-    replacement only if its ``preview`` is on-subject. Never follow
-    chains. Temporal cues may
+    ``verified: false`` = not confirmed as an explicit correction (often
+    an old detector link, ~4 in 10 unrelated), so the entry may still
+    hold — ``memory_get`` the replacement only if its ``preview`` is
+    on-subject. Never follow chains. Temporal cues may
     add ``events`` (oldest first). A fact the query's entity is bound by
     (``distortion_tolerance: constraint``) is served first, marked
     ``pinned``; ``authority: quoted`` = someone else said it, not an

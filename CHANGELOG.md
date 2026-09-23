@@ -23,11 +23,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a `memory_consolidate` call with a custom `source` reads unverified.
 - Those three surfaces — the `memory_search` description, the served
   session-start block and `examples/CLAUDE.memory.md` — now say what the
-  pointer means: `verified: false` marks a detector link, the entry may
-  still be valid, `memory_get` the replacement only when its preview is on
-  the same subject, and never follow chains. The block stays inside its
-  7,500-char pin (7,488 → 7,479) by dropping clauses it already said
-  elsewhere; the `memory_search` description grows 216 chars, so the
+  pointer means: `verified: false` means only that the link is not
+  confirmed as an explicit correction (often an old detector link, but an
+  evicted or ambiguous successor or a custom-source consolidation reads
+  false too), so the entry may still be valid; `memory_get` the replacement
+  only when its preview is on the same subject, and never follow chains.
+  The block stays inside its 7,500-char pin (7,488 → 7,491) by dropping
+  clauses it already said elsewhere; the `memory_search` description grows
+  242 chars, so the
   `minimal` and `full` manifest budgets in
   `tests/test_tool_consolidation.py` move to 5,250 and 17,500. **Upgrading:**
   if you copied `examples/CLAUDE.memory.md` into your own instructions or

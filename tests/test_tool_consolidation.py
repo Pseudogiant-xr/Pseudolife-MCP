@@ -365,10 +365,10 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Measured 2026-09-23 after memory_search's supersession sentence
     # changed from "prefer superseded_by_text" (a contract the review
     # found wrong for ~4 in 10 legacy links) to the replaced_by pointer
-    # contract (field, verified flag, preview test, no chains): +216 chars
-    # on a minimal-tier tool, so minimal is 5,196 and full 17,454. Both
+    # contract (field, verified flag, preview test, no chains): +242 chars
+    # on a minimal-tier tool, so minimal is 5,222 and full 17,480. Both
     # caps move deliberately rather than cut another sentence of the same
-    # description; core (11,146) still fits.
+    # description; core (11,172) still fits.
     budgets = {"minimal": 5250, "core": 11500, "full": 17500}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))

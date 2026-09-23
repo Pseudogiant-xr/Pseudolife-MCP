@@ -5032,8 +5032,8 @@ surfaces that told agents to prefer the replacement text now describe the
 pointer instead. The ledger meters the pointer in its own column
 (`entries_replaced_by_chars`) but has not been rerun, which needs the live
 daemon; until it is, the rows above describe the 2026-09-04 shape. The same
-change re-priced the manifest (the `memory_search` description, +216
-chars in every tier) and the session-start block (7,488 → 7,479 raw chars).
+change re-priced the manifest (the `memory_search` description, +242
+chars in every tier) and the session-start block (7,488 → 7,491 raw chars).
 
 One approximation, named: the narrow arm slices the width-5 cortex list
 `/api/search` returns rather than re-running `cortex_search` at width 3, so

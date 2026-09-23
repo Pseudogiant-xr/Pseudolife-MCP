@@ -757,6 +757,11 @@ def test_memory_search_docstring_does_not_trust_replacement_text() -> None:
     assert "superseded_by_text" not in doc
     assert "replaced_by" in doc and "verified: false" in doc
     assert "Never follow chains" in doc
+    # False is "not confirmed", never proof of a detector link: an evicted
+    # or ambiguous successor and a custom-source consolidation read false
+    # too (Codex review P2 on PR #336).
+    assert "not confirmed as an explicit correction" in doc
+    assert "marks a retired auto-detector link" not in doc
 
 
 def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monkeypatch) -> None:
