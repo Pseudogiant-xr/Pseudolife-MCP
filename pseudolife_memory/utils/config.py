@@ -684,9 +684,14 @@ class LessonsConfig:
     # Past this age a pending signal is kept as evidence but no longer
     # offered. 30 is a CHOSEN bound, not a measured one: the retry lifetime
     # the old 30-day retention implied. 0 retries for the whole retention.
+    # The age counts from when the signal was recorded, not from its first
+    # attempt: signals never offered (synthesis off, an extractor outage or
+    # backlog longer than this) age out of eligibility too. They stay in
+    # the table, and raising this value offers them again.
     signal_retry_days: int = 30
     # When False (or enabled=False), the dream skips signal drain / lesson
     # synthesis and the retention prune with it: signals are kept, not pruned.
+    # Only those younger than signal_retry_days are offered once it is back on.
     synthesize_in_dream: bool = True
     # Auto-outcome inference (spec 2026-07-18): infer signals for episodes
     # that close with entries but zero explicit outcomes. origin="inferred";

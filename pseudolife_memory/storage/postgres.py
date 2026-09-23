@@ -1657,14 +1657,17 @@ class PostgresStorage:
             },
         }
 
-    def loop_health(self, window_s: float, now: float | None = None) -> dict:
+    def loop_health(self, window_s: float, now: float | None = None,
+                    pending_since_ts: float | None = None) -> dict:
         """Windowed loop-activity counts for the Console tile: current vs the
         immediately preceding window of stores + outcome signals, session
         episodes (parent_id IS NULL), pending signals, lesson recency.
         Read-only, all on indexed timestamp columns. Consumed signals still
         count as outcomes — consumption is the dream's drain cursor, not a
         judgement; the caveat is upstream retention (signal_retention_days)
-        deleting rows older than its cutoff."""
+        deleting rows older than its cutoff. ``pending_since_ts`` splits the
+        unconsumed signals at the synthesis retry window: older ones are
+        reported as ``pending_signals_expired`` (kept, never offered)."""
         t = time.time() if now is None else float(now)
         cutoff, prev_cutoff = t - window_s, t - 2 * window_s
 
@@ -1685,14 +1688,24 @@ class PostgresStorage:
             "SELECT COUNT(*) FROM episodes "
             "WHERE started_at >= %s AND parent_id IS NULL",
             (cutoff,)).fetchone()[0]
-        pending = self.conn.execute(
-            "SELECT COUNT(*) FROM outcome_signals WHERE consumed_at IS NULL"
-        ).fetchone()[0]
+        if pending_since_ts is None:
+            pending, expired = self.conn.execute(
+                "SELECT COUNT(*) FROM outcome_signals WHERE consumed_at IS NULL"
+            ).fetchone()[0], 0
+        else:
+            since = float(pending_since_ts)
+            pending, expired = self.conn.execute(
+                "SELECT COUNT(*) FILTER (WHERE created_at >= %s), "
+                "COUNT(*) FILTER (WHERE created_at < %s) "
+                "FROM outcome_signals WHERE consumed_at IS NULL",
+                (since, since)).fetchone()
         last_lesson, lessons_current = self.conn.execute(
             "SELECT MAX(asserted_at), COUNT(*) FILTER (WHERE status = 'current') "
             "FROM lessons").fetchone()
         return {"stores": stores, "outcomes": outcomes, "sessions": sessions,
-                "pending_signals": pending, "last_lesson_at": last_lesson,
+                "pending_signals": pending,
+                "pending_signals_expired": expired,
+                "last_lesson_at": last_lesson,
                 "lessons_current": lessons_current}
 
     # ── meta ────────────────────────────────────────────────────────────

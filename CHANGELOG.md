@@ -16,9 +16,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shown default moved with it, and a new test pins every Console knob
   default to the config dataclass. Existing installs that never set the
   knob pick up the new window on upgrade; one that set it keeps its own
-  value. The config comment
-  and Console help for `synthesize_in_dream` said signals are still pruned
-  when synthesis is off; nothing prunes them then, and they now say so.
+  value. The config comment and Console help for `synthesize_in_dream` said
+  signals are still pruned when synthesis is off; nothing prunes them then,
+  and they now say so.
 - New `memory.lessons.signal_retry_days` (default **30**) bounds how long a
   pending signal is offered to lesson synthesis, apart from retention. A
   batch that lands no lesson stays pending, and the dream reads pending
@@ -26,8 +26,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   retention, a full batch of permanently failing signals would have been
   re-offered on every sweep and no newer signal would ever reach synthesis
   (Codex review of this change). Past the retry window a pending signal is
-  kept as evidence but no longer offered. `0` retries for the whole
-  retention window.
+  kept as evidence but no longer offered. The age counts from when the
+  signal was recorded, so signals never offered (synthesis off, a long
+  extractor outage) age out of eligibility too; raising the value offers
+  them again. `0` retries for the whole retention window. The Console's
+  loop-health tile now counts pending signals inside the window as "next
+  dream distils" and those past it separately (`pending_signals_expired`
+  in `/api/loop-health`), instead of counting every unconsumed row.
 - The session-start briefing labels a lesson `avoid:` only when its polarity
   is `-`. It used to label every `failure` or `correction` lesson `avoid:`
   too, but synthesis writes a correction (and often a failure) as `+`,

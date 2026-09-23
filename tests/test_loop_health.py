@@ -102,3 +102,22 @@ def test_service_loop_health_rates(pg_url, pg_conn, tmp_path, monkeypatch):
     assert h["window_days"] == 7
     assert h["stores_per_session"] == pytest.approx(1.5)   # 3 / 2
     assert h["outcomes_per_session"] == pytest.approx(1.0)  # 2 / 2
+
+
+def test_service_pending_signals_split_at_the_retry_window(
+        pg_url, pg_conn, tmp_path, monkeypatch):
+    """The tile says the next dream distils the pending signals, so it counts
+    only those inside signal_retry_days. Older pending rows are kept as
+    evidence but never offered again; they are reported apart, not hidden."""
+    from pseudolife_memory.service import MemoryService
+
+    _seed(pg_conn)                           # 2 pending, both in the window
+    pg_conn.execute(
+        "INSERT INTO outcome_signals (task, outcome, created_at) "
+        "VALUES ('t', 'failure', %s)", (NOW - 40 * DAY,))
+    pg_conn.commit()
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
+    svc = MemoryService(data_dir=tmp_path)
+    h = svc.loop_health(window_days=7, now=NOW)
+    assert h["pending_signals"] == 2
+    assert h["pending_signals_expired"] == 1

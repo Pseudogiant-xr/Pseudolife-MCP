@@ -537,7 +537,8 @@ KNOBS: list[dict[str, Any]] = [
      "restart": False,
      "help": "Dream drains outcome signals into lessons. Off = signals are "
              "kept (the retention prune is skipped too) and never become "
-             "lessons."},
+             "lessons. Back on, only signals younger than the retry window "
+             "(memory.lessons.signal_retry_days) are offered."},
     {"path": "memory.lessons.infer_outcomes", "group": "Lessons",
      "label": "Infer missing outcomes", "type": "bool", "default": True,
      "restart": False,

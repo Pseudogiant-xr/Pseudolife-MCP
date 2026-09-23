@@ -567,14 +567,20 @@ for delivery-state and host-verification contracts.
   window, 760 of the live bank's 1,618 current lessons had already lost
   every signal they came from. The log grows about 800 rows (under 1 MB on
   disk) a month.
-- **Pending signals retried for 30 days** (`memory.lessons.signal_retry_days
-  = 30`) — a signal whose extraction lands no lesson stays pending and is
-  offered again on later sweeps, oldest first, up to
-  `synthesis_max_signals` per sweep. Past this age it is kept as evidence
+- **Pending signals offered for 30 days** (`memory.lessons.signal_retry_days
+  = 30`) — a pending signal is offered to lesson synthesis, oldest first
+  and up to `synthesis_max_signals` per sweep, only while it is younger
+  than this. A signal whose extraction lands no lesson stays pending and
+  is offered again on later sweeps. Past this age it is kept as evidence
   but no longer offered, so a full batch of permanently failing signals
-  cannot hold newer ones back for the whole retention window. A chosen
-  bound (the retry lifetime the old 30-day retention implied), not a
-  measured one. `0` retries for the whole retention window.
+  cannot hold newer ones back for the whole retention window. The age
+  counts from when the signal was recorded, not from its first attempt:
+  signals never offered (synthesis off, an extractor outage or backlog
+  longer than this) age out too. They stay in the table, the Console's
+  loop-health tile counts them apart from the pending ones, and raising
+  the value offers them again. A chosen bound (the retry lifetime the old
+  30-day retention implied), not a measured one. `0` offers pending
+  signals for the whole retention window.
 - **Slot-index shadow verification on** (`memory.slot_index_shadow_rate =
   0.01`) — ~1% of slot-pool queries recompute the index from scratch and
   compare; divergences land in `stats()` as

@@ -580,7 +580,9 @@ before it writes anything. One sweep drains at most
 single lock hold rather than the total work; the rest waits for the next sweep.
 
 An empty or failed extraction route leaves its signals pending for a later
-sweep, subject to the existing retention limit. A rule signal whose own claim
+sweep, while they are younger than `memory.lessons.signal_retry_days`
+(default 30 days, counted from when the signal was recorded). Older pending
+signals are kept as evidence but no longer offered. A rule signal whose own claim
 failed stays pending too; the clustering route, whose claims do not map to
 single signals, is acknowledged once any of its claims lands. This is a
 persistence guarantee, not evidence that every extracted lesson is correct or

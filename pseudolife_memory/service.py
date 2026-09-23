@@ -4681,12 +4681,16 @@ class MemoryService(DreamOps):
         """Is the memory loop actually being exercised? Windowed activity
         counts + per-session rates for the Console tile. Needs Postgres —
         ``{"available": False}`` without (never raises)."""
+        retry_days = self.config.memory.lessons.signal_retry_days
+        t = time.time() if now is None else float(now)
+        since = t - retry_days * 86400.0 if retry_days > 0 else None
         with self._lock:
             self._ensure_init()
             if self._storage is None:
                 return {"available": False}
             h = self._storage.loop_health(
-                window_s=float(window_days) * 86400.0, now=now)
+                window_s=float(window_days) * 86400.0, now=now,
+                pending_since_ts=since)
         sessions = h.get("sessions") or 0
 
         def _rate(n: int) -> float | None:
