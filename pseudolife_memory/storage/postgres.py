@@ -12,10 +12,12 @@ Embeddings ride pgvector (numpy float32 in/out via ``register_vector``).
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import math
 import secrets
 import time
+import uuid
 from contextlib import contextmanager
 from typing import Any, Sequence
 
@@ -152,6 +154,7 @@ class PostgresStorage:
         self._transaction_connection = None
         self._lesson_transaction_connection = None
         self._entry_import_connection = None
+        self._entry_mutation_connection = None
         self._conn = self._connect()
         ensure_schema(self._conn)
         register_vector(self._conn)
@@ -191,6 +194,8 @@ class PostgresStorage:
         # transaction: later helpers would then commit outside that batch.
         if self._transaction_connection is not None:
             return self._transaction_connection
+        if self._entry_mutation_connection is not None:
+            return self._entry_mutation_connection
         if self._entry_import_connection is not None:
             return self._entry_import_connection
         if self._lesson_transaction_connection is not None:
@@ -275,6 +280,72 @@ class PostgresStorage:
                 yield
         finally:
             self._transaction_connection = None
+
+    @contextmanager
+    def entry_mutation_lock(self, entry_ids: Sequence[int]):
+        """Serialize a durable entry mutation through resident publication.
+
+        Row locks end at commit, before a service can publish its staged
+        continuum.  Session advisory locks bridge that post-commit gap and
+        are released automatically by PostgreSQL if the connection dies.
+        """
+        keys = sorted({int(entry_id) for entry_id in entry_ids})
+        outermost = self._entry_mutation_connection is None
+        conn = self.conn
+        if outermost:
+            # Advisory locks belong to one PostgreSQL session.  Pin every
+            # operation in the context to that session so a disconnect fails
+            # closed instead of transparently continuing without the lock.
+            self._entry_mutation_connection = conn
+        acquired: list[int] = []
+        body_failed = False
+        abandon_session = False
+        try:
+            for entry_id in keys:
+                conn.execute(
+                    "SELECT pg_advisory_lock(hashtextextended(%s, 41))",
+                    (f"entry-mutation:{entry_id}",),
+                )
+                acquired.append(entry_id)
+            yield
+        except Exception:
+            # A routine refusal or error still releases on this session; the
+            # release below closes it anyway if the session is gone.
+            body_failed = True
+            raise
+        except BaseException:
+            body_failed = True
+            abandon_session = True
+            raise
+        finally:
+            try:
+                if abandon_session:
+                    # An interrupt can leave the session mid-statement.
+                    # Closing releases every lock it holds, including any
+                    # partially acquired set, without trusting its state.
+                    conn.close()
+                elif acquired and (conn.closed or conn.broken):
+                    raise psycopg.OperationalError(
+                        "entry mutation lock connection was lost before release")
+                for entry_id in (() if abandon_session else reversed(acquired)):
+                    released = conn.execute(
+                        "SELECT pg_advisory_unlock(hashtextextended(%s, 41))",
+                        (f"entry-mutation:{entry_id}",),
+                    ).fetchone()
+                    if released is None or released[0] is not True:
+                        raise psycopg.OperationalError(
+                            "entry mutation lock release was not acknowledged")
+            except BaseException:
+                # A release error can leave other session locks held. Closing
+                # this exact session releases them without reconnecting.
+                conn.close()
+                if not body_failed:
+                    raise
+            finally:
+                # Cleanup failure must not pin a broken session forever; the
+                # next operation is then free to reconnect normally.
+                if outermost:
+                    self._entry_mutation_connection = None
 
     @contextmanager
     def entry_import_transaction(self):
@@ -413,6 +484,182 @@ class PostgresStorage:
                 "connection lost during the block")
         return len(ids)
 
+    @staticmethod
+    def _reinstatement_request(
+        *, entry_id: int, operation_id: str,
+        expected_text_sha256: str, expected_source_sha256: str,
+        expected_superseded_at: float,
+        expected_superseded_by_text_sha256: str,
+        evidence_packet_sha256: str, reviewer_ids: list[str],
+        reason: str, decided_by: str,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Validate and fingerprint the immutable reinstatement request."""
+        if type(entry_id) is not int or entry_id <= 0:
+            raise ValueError("invalid_request: entry_id must be a positive integer")
+        try:
+            canonical_operation = str(uuid.UUID(operation_id))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("invalid_request: operation_id must be a UUID") from exc
+        if operation_id != canonical_operation:
+            raise ValueError("invalid_request: operation_id must be canonical")
+        hashes = {
+            "expected_text_sha256": expected_text_sha256,
+            "expected_source_sha256": expected_source_sha256,
+            "expected_superseded_by_text_sha256":
+                expected_superseded_by_text_sha256,
+            "evidence_packet_sha256": evidence_packet_sha256,
+        }
+        if any(not isinstance(value, str) or len(value) != 64
+               or any(ch not in "0123456789abcdef" for ch in value)
+               for value in hashes.values()):
+            raise ValueError("invalid_request: hashes must be lowercase SHA-256")
+        try:
+            expected_superseded_at = float(expected_superseded_at)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid_request: expected_superseded_at must be finite") from exc
+        if not math.isfinite(expected_superseded_at):
+            raise ValueError("invalid_request: expected_superseded_at must be finite")
+        if (not isinstance(reviewer_ids, list) or not reviewer_ids
+                or any(not isinstance(value, str) or not value.strip()
+                       for value in reviewer_ids)):
+            raise ValueError("invalid_request: reviewer_ids must be non-empty strings")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("invalid_request: reason must be non-empty")
+        if not isinstance(decided_by, str) or not decided_by.strip():
+            raise ValueError("invalid_request: decided_by must be non-empty")
+        payload = {
+            "version": 1, "entry_id": entry_id,
+            "operation_id": canonical_operation,
+            **hashes, "expected_superseded_at": expected_superseded_at,
+            "reviewer_ids": reviewer_ids, "reason": reason,
+            "decided_by": decided_by,
+        }
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+        return canonical_operation, hashlib.sha256(encoded).hexdigest(), payload
+
+    def entry_reinstatement_decision(
+        self, operation_id: str,
+    ) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT operation_id::text, entry_id, request_sha256, "
+            "entry_text_sha256, entry_source_sha256, prior_superseded_at, "
+            "prior_superseded_by_text, prior_superseded_by_text_sha256, "
+            "evidence_packet_sha256, reviewer_ids, reason, decided_by, decided_at "
+            "FROM entry_reinstatement_decisions WHERE operation_id = %s::uuid",
+            (operation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        keys = (
+            "operation_id", "entry_id", "request_sha256", "entry_text_sha256",
+            "entry_source_sha256", "prior_superseded_at",
+            "prior_superseded_by_text", "prior_superseded_by_text_sha256",
+            "evidence_packet_sha256", "reviewer_ids", "reason", "decided_by",
+            "decided_at",
+        )
+        return dict(zip(keys, row))
+
+    def reinstate_entry(
+        self, *, entry_id: int, operation_id: str,
+        expected_text_sha256: str, expected_source_sha256: str,
+        expected_superseded_at: float,
+        expected_superseded_by_text_sha256: str,
+        evidence_packet_sha256: str, reviewer_ids: list[str],
+        reason: str, decided_by: str,
+    ) -> dict[str, Any]:
+        """Clear one reviewed retirement with an atomic append-only audit."""
+        operation_id, request_sha256, request = self._reinstatement_request(
+            entry_id=entry_id, operation_id=operation_id,
+            expected_text_sha256=expected_text_sha256,
+            expected_source_sha256=expected_source_sha256,
+            expected_superseded_at=expected_superseded_at,
+            expected_superseded_by_text_sha256=
+                expected_superseded_by_text_sha256,
+            evidence_packet_sha256=evidence_packet_sha256,
+            reviewer_ids=reviewer_ids, reason=reason, decided_by=decided_by,
+        )
+        conn = self.conn
+        with self._txn():
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 41))",
+                (operation_id,),
+            )
+            prior = self.entry_reinstatement_decision(operation_id)
+            if prior is not None:
+                if prior["request_sha256"] != request_sha256:
+                    raise ValueError("operation_conflict")
+                current = conn.execute(
+                    "SELECT superseded_at FROM entries WHERE id = %s",
+                    (entry_id,),
+                ).fetchone()
+                state = ("missing" if current is None else
+                         "live" if current[0] is None else "retired_again")
+                return {
+                    "action": "already_reinstated", "decision": "committed",
+                    "operation_id": operation_id, "entry_id": entry_id,
+                    "current_state": state, "changed_by_this_call": False,
+                    "idempotent_replay": True,
+                }
+            row = conn.execute(
+                "SELECT text, source, superseded_at, superseded_by_text "
+                "FROM entries WHERE id = %s FOR UPDATE", (entry_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("target_not_found")
+            text, source, superseded_at, superseded_by_text = row
+            if superseded_at is None:
+                raise ValueError("target_not_retired")
+            if superseded_by_text is None:
+                # Pre-v5 migrations retired rows without recording the
+                # replacement text, so no exact preimage can name it.
+                raise ValueError("retirement_text_missing")
+            digest = lambda value: hashlib.sha256(value.encode("utf-8")).hexdigest()
+            if (digest(text) != request["expected_text_sha256"]
+                    or digest(source) != request["expected_source_sha256"]
+                    or superseded_at != request["expected_superseded_at"]
+                    or digest(superseded_by_text) !=
+                    request["expected_superseded_by_text_sha256"]):
+                raise ValueError("preimage_mismatch")
+            invalidations = conn.execute(
+                "SELECT count(*) FROM memory_trace_invalidations "
+                "WHERE source_entry_id = %s", (entry_id,),
+            ).fetchone()[0]
+            if invalidations:
+                raise ValueError("trace_invalidations_present")
+            decided_at = time.time()
+            conn.execute(
+                "INSERT INTO entry_reinstatement_decisions "
+                "(operation_id, entry_id, request_sha256, entry_text_sha256, "
+                "entry_source_sha256, prior_superseded_at, "
+                "prior_superseded_by_text, prior_superseded_by_text_sha256, "
+                "evidence_packet_sha256, reviewer_ids, reason, decided_by, "
+                "decided_at) VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s)",
+                (operation_id, entry_id, request_sha256,
+                 request["expected_text_sha256"],
+                 request["expected_source_sha256"], superseded_at,
+                 superseded_by_text,
+                 request["expected_superseded_by_text_sha256"],
+                 request["evidence_packet_sha256"], Jsonb(reviewer_ids),
+                 reason, decided_by, decided_at),
+            )
+            updated = conn.execute(
+                "UPDATE entries SET superseded_at = NULL, "
+                "superseded_by_text = NULL WHERE id = %s "
+                "AND superseded_at = %s AND superseded_by_text = %s",
+                (entry_id, superseded_at, superseded_by_text),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("reinstatement short write")
+        return {
+            "action": "reinstated", "decision": "committed",
+            "operation_id": operation_id, "entry_id": entry_id,
+            "current_state": "live", "changed_by_this_call": True,
+            "idempotent_replay": False,
+        }
+
     def delete_entry_ids(self, ids: list[int]) -> int:
         if not ids:
             return 0
@@ -431,6 +678,19 @@ class PostgresStorage:
             d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
+
+    def load_entry_row(self, entry_id: int) -> dict | None:
+        """One entries row in the :meth:`load_entries` shape, or None."""
+        cols = ("id",) + _ENTRY_COLS + ("reinforcements",)
+        row = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM entries WHERE id = %s",
+            (int(entry_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(zip(cols, row))
+        d["embedding"] = _embedding_out(d["embedding"])
+        return d
 
     def initialize_dream_tracking(
         self, *, eligible_sources=None, exclude_sources=None,

@@ -47,6 +47,13 @@ _REQUIRED_COLUMNS = [
     ("memory_trace_invalidations",
      {"entity_norm", "attribute_norm", "source_entry_id",
       "invalidated_at", "cause"}),
+    # v41 — FK-free, operation-keyed continuum reinstatement audit.
+    ("entry_reinstatement_decisions",
+     {"operation_id", "entry_id", "request_sha256", "entry_text_sha256",
+      "entry_source_sha256", "prior_superseded_at",
+      "prior_superseded_by_text", "prior_superseded_by_text_sha256",
+      "evidence_packet_sha256", "reviewer_ids", "reason", "decided_by",
+      "decided_at"}),
     # v13 reinforcements / v33 explicit_reinforcements (the split counter).
     ("entries", {"reinforcements", "explicit_reinforcements"}),
     # v16 — per-entity source attribution.

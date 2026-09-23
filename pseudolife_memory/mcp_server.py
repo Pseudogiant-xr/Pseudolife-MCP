@@ -227,7 +227,7 @@ _READ_ONLY_TOOLS = {
     "memory_graph", "memory_recall", "document_search",
 }
 _DESTRUCTIVE_TOOLS = {
-    "memory_supersede", "memory_forget", "memory_fact_set", "memory_set_remove",
+    "memory_supersede", "memory_reinstate", "memory_forget", "memory_fact_set", "memory_set_remove",
     "memory_fact_resolve", "memory_consolidate", "memory_graph_unrelate",
     "memory_graph_review", "memory_dream", "memory_world_set",
     "memory_graph_relate", "memory_alias", "memory_relation_define",
@@ -235,13 +235,14 @@ _DESTRUCTIVE_TOOLS = {
     # a cortex value even though the top-level store operation is additive.
     "memory_store", "document_ingest",
 }
+_IDEMPOTENT_TOOLS = {"memory_reinstate"}
 
 
 def _annotations(name: str) -> ToolAnnotations:
     return ToolAnnotations(
         read_only_hint=name in _READ_ONLY_TOOLS,
         destructive_hint=name in _DESTRUCTIVE_TOOLS,
-        idempotent_hint=False,
+        idempotent_hint=name in _IDEMPOTENT_TOOLS,
         open_world_hint=name in {"memory_dream", "memory_message"},
     )
 
@@ -808,6 +809,50 @@ def memory_supersede(
     return service.supersede(old_text=old_text, new_text=new_text, entry_id=entry_id)
 
 
+@_tool()
+def memory_reinstate(
+    entry_id: Annotated[StrictInt, Field(
+        description="Positive durable entry ID from this bank.")],
+    *,
+    operation_id: Annotated[str, Field(
+        description="New canonical UUID; reuse it unchanged after an uncertain response.")],
+    expected_text_sha256: Annotated[str, Field(
+        description="Lowercase SHA-256 of the reviewed entry text.")],
+    expected_source_sha256: Annotated[str, Field(
+        description="Lowercase SHA-256 of the reviewed source tag.")],
+    expected_superseded_at: Annotated[float, Field(
+        description="Exact reviewed superseded_at database value.")],
+    expected_superseded_by_text_sha256: Annotated[str, Field(
+        description="Lowercase SHA-256 of the reviewed replacement text.")],
+    evidence_packet_sha256: Annotated[str, Field(
+        description="Lowercase SHA-256 binding the private review packet.")],
+    reviewer_ids: Annotated[list[str], Field(
+        description="Non-empty reviewer identifiers recorded in the audit.")],
+    reason: Annotated[str, Field(
+        description="Non-empty reason recorded in the audit.")],
+) -> dict[str, Any]:
+    """Reinstate one reviewed retired entry by durable ID. PostgreSQL only;
+    requires a named principal and exact retirement preimage. Refuses
+    trace-invalidated entries and never changes derived cortex. Retry an
+    uncertain call with the same UUID and inputs."""
+    from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+    from pseudolife_memory.writer_context import current_principal
+
+    principal = current_principal()
+    if principal == DEFAULT_PRINCIPAL:
+        raise ValueError("named_principal_required")
+    return service.reinstate(
+        entry_id=entry_id, operation_id=operation_id,
+        expected_text_sha256=expected_text_sha256,
+        expected_source_sha256=expected_source_sha256,
+        expected_superseded_at=expected_superseded_at,
+        expected_superseded_by_text_sha256=
+            expected_superseded_by_text_sha256,
+        evidence_packet_sha256=evidence_packet_sha256,
+        reviewer_ids=reviewer_ids, reason=reason, decided_by=principal,
+    )
+
+
 @_tool(tier="core")
 def memory_stats() -> dict[str, Any]:
     """Memory-bank vital signs: store occupancy vs capacity, hit rates,
@@ -820,7 +865,7 @@ def memory_stats() -> dict[str, Any]:
 _TIER_ADDS = {
     "core": "graph + recall, world facts, lessons, documents, stats, "
             "episodes, memory_get/fact_resolve",
-    "full": "supersede/forget/history/reinforce, recent, dream + "
+    "full": "supersede/reinstate/forget/history/reinforce, recent, dream + "
             "graph-review, aliases, consolidation, relation-define",
 }
 

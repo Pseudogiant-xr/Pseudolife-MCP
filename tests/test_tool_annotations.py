@@ -9,7 +9,7 @@ READS = {
     "memory_graph", "memory_recall", "document_search",
 }
 DESTRUCTIVE = {
-    "memory_supersede", "memory_forget", "memory_fact_set", "memory_set_remove",
+    "memory_supersede", "memory_reinstate", "memory_forget", "memory_fact_set", "memory_set_remove",
     "memory_fact_resolve", "memory_consolidate", "memory_graph_unrelate",
     "memory_graph_review", "memory_dream", "memory_world_set",
     "memory_graph_relate", "memory_alias", "memory_relation_define",
@@ -29,8 +29,7 @@ def test_all_tools_have_conservative_approval_hints():
         assert a.destructive_hint == (tool.name in DESTRUCTIVE), tool.name
         # Dream calls an extractor; addressed mail can reach another agent.
         assert a.open_world_hint == (tool.name in {"memory_dream", "memory_message"})
-        if tool.name not in READS:
-            assert a.idempotent_hint is False, tool.name
+        assert a.idempotent_hint == (tool.name == "memory_reinstate"), tool.name
 
 
 def test_store_can_replace_a_canonical_value_when_auto_promotion_is_enabled(pristine_service, monkeypatch):

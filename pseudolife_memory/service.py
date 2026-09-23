@@ -32,8 +32,9 @@ Design notes
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import ExitStack, nullcontext
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import heapq
 import logging
@@ -84,8 +85,23 @@ class CorrectionReconciliationError(RuntimeError):
     """Durable correction state cannot yet be classified safely."""
 
 
+class EntryReinstatementReconciliationError(RuntimeError):
+    """Durable reinstatement state cannot yet be classified safely."""
+
+
 class _ReplacementRejected(RuntimeError):
     """Internal rollback signal for a deliberately refused replacement."""
+
+
+class _CorrectionLockSessionLost(RuntimeError):
+    """Internal signal: the correction's pinned lock session died with its
+    outcome in flight, so recovery must leave that session and reconcile on
+    a fresh one. ``original`` is the storage failure to re-raise if the
+    correction turns out not to have committed."""
+
+    def __init__(self, original: BaseException | None) -> None:
+        super().__init__("correction lock session lost")
+        self.original = original
 
 
 @dataclass(frozen=True)
@@ -102,6 +118,14 @@ class PendingCorrectionRecovery:
     before_file_signature: tuple | None
     after_file_signature: tuple | None
     response: dict[str, Any]
+    durable_outcome: str | None = None
+
+
+@dataclass(frozen=True)
+class PendingEntryReinstatementRecovery:
+    entry_id: int
+    operation_id: str
+    request_sha256: str
 
 
 def _entry_to_dict(
@@ -667,6 +691,8 @@ class MemoryService(DreamOps):
         self._lesson_synthesis_recovery = None  # uncertain commit: (inputs, handled IDs)
         self._slot_curation_recovery = None  # uncertain atomic lesson/world fold
         self._correction_recovery: PendingCorrectionRecovery | None = None
+        self._entry_reinstatement_recovery: (
+            PendingEntryReinstatementRecovery | None) = None
         from pseudolife_memory.memory.hlc import HybridLogicalClock
         self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
         # A late reseed failure leaves the resident stores initialized, but no
@@ -1009,6 +1035,7 @@ class MemoryService(DreamOps):
 
     def _ensure_init(self) -> None:
         self._recover_correction_locked()
+        self._recover_entry_reinstatement_locked()
         from pseudolife_memory.curation_safety import recover_slot_curation
         recover_slot_curation(self, locked=True)
         self._recover_lesson_synthesis()
@@ -1992,85 +2019,330 @@ class MemoryService(DreamOps):
         self._merge_correction_transients(resident, template, by_db_id=True)
         return resident
 
+    def _publish_recovery_locked(
+        self, original: ContinuumMemorySystem,
+        resident: ContinuumMemorySystem, mutation_locks: ExitStack,
+    ) -> None:
+        """Publish tentatively until the lock session acknowledges release."""
+        previous = self._cms
+        # Identity preservation replaces dictionaries, not their old nested
+        # values. Keep those exact references so rollback also preserves them.
+        snapshots = [
+            (entry, entry.__dict__.copy())
+            for band in original.bands for entry in band.entries
+        ]
+        try:
+            self._preserve_correction_entry_identity(original, resident)
+            self._cms = resident
+            # A successful same-session release proves the lock survived the
+            # already completed publication. A pre-publication ping cannot.
+            mutation_locks.close()
+        except BaseException:
+            for entry, attributes in snapshots:
+                entry.__dict__.clear()
+                entry.__dict__.update(attributes)
+            self._cms = previous
+            raise
+
     def _recover_correction_locked(self) -> str | None:
         pending = self._correction_recovery
         if pending is None:
             return None
+        mutation_locks = ExitStack()
         try:
-            if self._storage is not None:
-                rows = self._storage.load_entries()
-                by_id = {int(row["id"]): row for row in rows}
-                replacement_present = (
-                    pending.replacement_id is not None
-                    and pending.replacement_id in by_id
-                )
-                before_clean, after_complete = self._correction_trace_state(
-                    pending.source_ids, pending.superseded_at)
-                before = (
-                    not replacement_present
-                    and before_clean
-                    and all(
-                        entry_id in by_id
-                        and self._correction_row_fingerprint(by_id[entry_id])
-                        == fingerprint
-                        for entry_id, fingerprint in zip(
-                            pending.source_ids, pending.source_fingerprints)
+            with mutation_locks:
+                if self._storage is not None:
+                    mutation_locks.enter_context(
+                        self._storage.entry_mutation_lock(pending.source_ids))
+                    rows = self._storage.load_entries()
+                    by_id = {int(row["id"]): row for row in rows}
+                    replacement_present = (
+                        pending.replacement_id is not None
+                        and pending.replacement_id in by_id
                     )
-                )
-                staged_by_id = {
-                    entry.db_id: entry
-                    for band in pending.staged.bands for entry in band.entries
-                    if entry.db_id is not None
-                }
-                after_sources = True
-                for entry_id in pending.source_ids:
-                    expected = staged_by_id.get(entry_id)
-                    actual = by_id.get(entry_id)
-                    if expected is None:
-                        after_sources &= actual is None
-                    else:
-                        after_sources &= (
-                            actual is not None
-                            and actual.get("superseded_at")
-                            == pending.superseded_at
-                            and actual.get("superseded_by_text")
-                            == pending.superseded_by_text
+                    before_clean, after_complete = self._correction_trace_state(
+                        pending.source_ids, pending.superseded_at)
+                    before = (
+                        not replacement_present
+                        and before_clean
+                        and all(
+                            entry_id in by_id
+                            and self._correction_row_fingerprint(by_id[entry_id])
+                            == fingerprint
+                            for entry_id, fingerprint in zip(
+                                pending.source_ids, pending.source_fingerprints)
                         )
-                after = replacement_present and after_sources and after_complete
-                if before == after:
-                    raise CorrectionReconciliationError(
-                        "durable correction state is neither uniquely before nor after")
-                template = pending.staged if after else pending.original
-                resident = self._hydrate_correction_rows(rows, template)
-            else:
-                resident = ContinuumMemorySystem(
-                    pending.original.config,
-                    reference_bank=pending.original.reference,
-                    nli_scorer=pending.original._nli_scorer,
-                    reranker=pending.original._reranker,
-                )
-                resident.load(self.config.memory.save_dir)
-                durable_signature = self._correction_file_signature(resident)
-                before = durable_signature == pending.before_file_signature
-                after = durable_signature == pending.after_file_signature
-                if before == after:
-                    raise CorrectionReconciliationError(
-                        "durable correction snapshot is neither uniquely before nor after")
-                template = pending.staged if after else pending.original
-                self._merge_correction_transients(
-                    resident, template, by_db_id=False)
-            self._preserve_correction_entry_identity(
-                pending.original, resident)
-            self._cms = resident
-            self._correction_recovery = None
-            if self._storage is None:
-                self._last_saved_fingerprint = self._entry_fingerprint()
-            return "committed" if after else "rolled_back"
+                    )
+                    staged_by_id = {
+                        entry.db_id: entry
+                        for band in pending.staged.bands for entry in band.entries
+                        if entry.db_id is not None
+                    }
+                    after_sources = True
+                    for entry_id in pending.source_ids:
+                        expected = staged_by_id.get(entry_id)
+                        actual = by_id.get(entry_id)
+                        if expected is None:
+                            after_sources &= actual is None
+                        else:
+                            after_sources &= (
+                                actual is not None
+                                and actual.get("superseded_at")
+                                == pending.superseded_at
+                                and actual.get("superseded_by_text")
+                                == pending.superseded_by_text
+                            )
+                    after = replacement_present and after_sources and after_complete
+                    if pending.durable_outcome is None:
+                        if before == after:
+                            raise CorrectionReconciliationError(
+                                "durable correction state is neither uniquely before nor after")
+                        # Preserve a proven historical outcome if publication
+                        # fails and a peer later changes the source entries.
+                        pending = replace(
+                            pending,
+                            durable_outcome="committed" if after else "rolled_back")
+                        self._correction_recovery = pending
+                    after = pending.durable_outcome == "committed"
+                    template = pending.staged if after else pending.original
+                    resident = self._hydrate_correction_rows(rows, template)
+                    if self._storage.conn.closed or self._storage.conn.broken:
+                        raise CorrectionReconciliationError(
+                            "entry mutation lock connection was lost before "
+                            "correction publication")
+                else:
+                    resident = ContinuumMemorySystem(
+                        pending.original.config,
+                        reference_bank=pending.original.reference,
+                        nli_scorer=pending.original._nli_scorer,
+                        reranker=pending.original._reranker,
+                    )
+                    resident.load(self.config.memory.save_dir)
+                    durable_signature = self._correction_file_signature(resident)
+                    before = durable_signature == pending.before_file_signature
+                    after = durable_signature == pending.after_file_signature
+                    if before == after:
+                        raise CorrectionReconciliationError(
+                            "durable correction snapshot is neither uniquely before nor after")
+                    template = pending.staged if after else pending.original
+                    self._merge_correction_transients(
+                        resident, template, by_db_id=False)
+                self._publish_recovery_locked(
+                    pending.original, resident, mutation_locks)
+                self._correction_recovery = None
+                if self._storage is None:
+                    self._last_saved_fingerprint = self._entry_fingerprint()
+                return "committed" if after else "rolled_back"
         except CorrectionReconciliationError:
             raise
         except Exception as exc:
             raise CorrectionReconciliationError(
                 f"correction commit reconciliation required: {exc}") from exc
+
+    def _reinstatement_target_mirrored(
+        self, entry_id: int, row: dict[str, Any] | None,
+    ) -> ContinuumMemorySystem:
+        """A staged copy of the resident bank whose one reinstatement target
+        mirrors its durable row.
+
+        A reinstatement changes exactly that row, so only that entry is
+        reconciled. Rebuilding the bank from rows would discard resident-only
+        state: access counts are synced to storage only at save time, and an
+        entry whose write-through insert failed stays resident without a row
+        until the dream pull re-flushes it.
+        """
+        from pseudolife_memory.storage.sync import row_to_entry
+
+        assert self._cms is not None
+        staged = self._cms.clone_for_staged_store()
+        holders = [
+            band for band in staged.bands
+            if any(entry.db_id == entry_id for entry in band.entries)
+        ]
+        if row is None:
+            for band in holders:
+                band.entries = [
+                    entry for entry in band.entries if entry.db_id != entry_id]
+                band._dirty = True
+        elif not holders:
+            named = {band.name: band for band in staged.bands}
+            band = named.get(row["band"], staged.bands[0])
+            band.entries.append(row_to_entry(row, device=band.device))
+            band._dirty = True
+        else:
+            for band in holders:
+                for entry in band.entries:
+                    if entry.db_id == entry_id:
+                        entry.superseded_at = row["superseded_at"]
+                        entry.superseded_by_text = row["superseded_by_text"]
+        return staged
+
+    def _recover_entry_reinstatement_locked(self) -> str | None:
+        pending = self._entry_reinstatement_recovery
+        if pending is None:
+            return None
+        mutation_locks = ExitStack()
+        try:
+            with mutation_locks:
+                if self._storage is None:
+                    raise EntryReinstatementReconciliationError(
+                        "reinstatement requires PostgreSQL")
+                mutation_locks.enter_context(
+                    self._storage.entry_mutation_lock([pending.entry_id]))
+                decision = self._storage.entry_reinstatement_decision(
+                    pending.operation_id)
+                row = self._storage.load_entry_row(pending.entry_id)
+                # A different request under the same UUID proves this request did
+                # not commit (the PK excludes it). Mirror whatever that winner
+                # did, then let the original operation_conflict reach the caller.
+                committed = (
+                    decision is not None
+                    and decision["request_sha256"] == pending.request_sha256
+                )
+                resident = self._reinstatement_target_mirrored(
+                    pending.entry_id, row)
+                if self._storage.conn.closed or self._storage.conn.broken:
+                    raise EntryReinstatementReconciliationError(
+                        "entry mutation lock connection was lost before "
+                        "reinstatement publication")
+                self._publish_recovery_locked(
+                    self._cms, resident, mutation_locks)
+                self._entry_reinstatement_recovery = None
+                return "committed" if committed else "rolled_back"
+        except EntryReinstatementReconciliationError:
+            raise
+        except Exception as exc:
+            raise EntryReinstatementReconciliationError(
+                f"reinstatement commit reconciliation required: {exc}"
+            ) from exc
+
+    def reinstate(
+        self, *, entry_id: int, operation_id: str,
+        expected_text_sha256: str, expected_source_sha256: str,
+        expected_superseded_at: float,
+        expected_superseded_by_text_sha256: str,
+        evidence_packet_sha256: str, reviewer_ids: list[str],
+        reason: str, decided_by: str,
+    ) -> dict[str, Any]:
+        """Reinstate one reviewed retired row without touching derived cortex."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                raise ValueError("requires_postgres")
+            from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+            if decided_by == DEFAULT_PRINCIPAL:
+                raise ValueError("named_principal_required")
+            operation_id, request_sha256, _ = (
+                self._storage._reinstatement_request(
+                    entry_id=entry_id, operation_id=operation_id,
+                    expected_text_sha256=expected_text_sha256,
+                    expected_source_sha256=expected_source_sha256,
+                    expected_superseded_at=expected_superseded_at,
+                    expected_superseded_by_text_sha256=
+                        expected_superseded_by_text_sha256,
+                    evidence_packet_sha256=evidence_packet_sha256,
+                    reviewer_ids=reviewer_ids, reason=reason,
+                    decided_by=decided_by,
+                )
+            )
+            request = {
+                "entry_id": entry_id, "operation_id": operation_id,
+                "expected_text_sha256": expected_text_sha256,
+                "expected_source_sha256": expected_source_sha256,
+                "expected_superseded_at": expected_superseded_at,
+                "expected_superseded_by_text_sha256":
+                    expected_superseded_by_text_sha256,
+                "evidence_packet_sha256": evidence_packet_sha256,
+                "reviewer_ids": reviewer_ids, "reason": reason,
+                "decided_by": decided_by,
+            }
+
+            with self._storage.entry_mutation_lock([entry_id]):
+                # PostgreSQL is authoritative for both admission and replay.
+                # Refresh while the cross-daemon mutation lock is held so a
+                # committed result and its resident publication are one
+                # serialized operation.
+                assert self._cms is not None
+                # Admission publishes durable state too. Retain the target
+                # before publication so a lost lock session rolls back resident
+                # identity changes and leaves ordinary reads behind recovery.
+                self._entry_reinstatement_recovery = (
+                    PendingEntryReinstatementRecovery(
+                        entry_id, operation_id, request_sha256))
+                self._recover_entry_reinstatement_locked()
+                resident = self._cms
+                assert resident is not None
+
+                durable = self._storage.entry_reinstatement_decision(
+                    operation_id)
+                if durable is not None:
+                    if durable["request_sha256"] != request_sha256:
+                        raise ValueError("operation_conflict")
+                    return self._storage.reinstate_entry(**request) | {
+                        "cortex_changed": False,
+                        "trace_invalidations_changed": 0,
+                    }
+
+                residents = [
+                    entry for band in resident.bands for entry in band.entries
+                    if entry.db_id == entry_id
+                ]
+                if len(residents) != 1:
+                    raise ValueError(
+                        "target_not_found" if not residents
+                        else "resident_durable_mismatch")
+                target = residents[0]
+                digest = lambda value: hashlib.sha256(
+                    value.encode("utf-8")).hexdigest()
+                if target.superseded_at is None:
+                    raise ValueError("target_not_retired")
+                if target.superseded_by_text is None:
+                    raise ValueError("retirement_text_missing")
+                if (digest(target.text) != expected_text_sha256
+                        or digest(target.source) != expected_source_sha256
+                        or target.superseded_at != float(expected_superseded_at)
+                        or digest(target.superseded_by_text) !=
+                        expected_superseded_by_text_sha256):
+                    raise ValueError("preimage_mismatch")
+
+                response = {
+                    "action": "reinstated", "decision": "committed",
+                    "operation_id": operation_id, "entry_id": entry_id,
+                    "current_state": "live",
+                    "changed_by_this_call": True,
+                    "idempotent_replay": False, "cortex_changed": False,
+                    "trace_invalidations_changed": 0,
+                }
+                self._entry_reinstatement_recovery = (
+                    PendingEntryReinstatementRecovery(
+                        entry_id, operation_id, request_sha256))
+                try:
+                    result = self._storage.reinstate_entry(**request)
+                except Exception as exc:
+                    state = self._recover_entry_reinstatement_locked()
+                    if state == "committed":
+                        current = [
+                            entry for band in self._cms.bands
+                            for entry in band.entries
+                            if entry.db_id == entry_id
+                        ]
+                        response["current_state"] = (
+                            "missing" if not current else
+                            "live" if current[0].superseded_at is None
+                            else "retired_again"
+                        )
+                        return response
+                    raise exc
+
+                # Always publish an authoritative post-commit read.  This
+                # handles concurrent UUID replay and makes an unreadable
+                # commit outcome fail closed instead of serving a staged guess.
+                state = self._recover_entry_reinstatement_locked()
+                assert state == "committed"
+                return result | {
+                    "cortex_changed": False,
+                    "trace_invalidations_changed": 0,
+                }
 
     def _stage_correction_locked(
         self,
@@ -2116,6 +2388,81 @@ class MemoryService(DreamOps):
         return derived, replacement, surprise
 
     def _apply_correction_locked(
+        self,
+        entries: list[MemoryEntry],
+        new_text: str,
+        *,
+        source: str,
+        tags: list[str] | None = None,
+        report_derivations: bool,
+    ) -> dict[str, Any]:
+        if self._storage is None:
+            return self._apply_correction_under_mutation_lock_locked(
+                entries, new_text, source=source, tags=tags,
+                report_derivations=report_derivations,
+            )
+        entry_ids = [
+            int(entry.db_id) for entry in entries if entry.db_id is not None
+        ]
+        mutation_lock = (
+            self._storage.entry_mutation_lock(entry_ids)
+            if hasattr(self._storage, "entry_mutation_lock")
+            else nullcontext()
+        )
+        try:
+            with mutation_lock:
+                return self._apply_correction_under_mutation_lock_locked(
+                    entries, new_text, source=source, tags=tags,
+                    report_derivations=report_derivations,
+                )
+        except _CorrectionLockSessionLost as signal:
+            lost = signal
+        # Outside the handler, so a re-raised storage failure keeps its own
+        # traceback instead of chaining onto the internal signal.
+        return self._recover_correction_after_session_loss_locked(lost)
+
+    def _correction_lock_session_lost_locked(self) -> bool:
+        """Inside a correction's mutation lock: has its pinned session died?"""
+        if not hasattr(self._storage, "entry_mutation_lock"):
+            return False
+        conn = self._storage.conn  # the pinned lock session
+        return bool(getattr(conn, "closed", False)
+                    or getattr(conn, "broken", False))
+
+    def _recover_correction_after_session_loss_locked(
+        self, lost: _CorrectionLockSessionLost,
+    ) -> dict[str, Any]:
+        """Reconcile a correction whose lock session died with its outcome.
+
+        That session took its advisory locks with it, and recovery cannot run
+        on it. Leaving recovery to the next call would expose the before/after
+        classification to peer writes for that whole interval, and one that
+        changes the source can make the outcome permanently unclassifiable.
+        So reconcile now, on a fresh session under fresh locks, exactly as
+        the next call would. A peer can still act in the moment between the
+        session dying and the fresh lock; that gap is narrowed, not closed.
+        """
+        pending = self._correction_recovery
+        if pending is None:
+            raise CorrectionReconciliationError(
+                "correction lock session was lost without a pending recovery")
+        try:
+            state = self._recover_correction_locked()
+        except CorrectionReconciliationError as exc:
+            retained = self._correction_recovery
+            if retained is not None and retained.durable_outcome == "committed":
+                raise CorrectionReconciliationError(
+                    "correction committed; resident publication still "
+                    f"pending: {exc}") from exc
+            raise
+        if state == "committed":
+            return pending.response
+        if lost.original is not None:
+            raise lost.original
+        raise CorrectionReconciliationError(
+            "correction lock session was lost before a proven outcome")
+
+    def _apply_correction_under_mutation_lock_locked(
         self,
         entries: list[MemoryEntry],
         new_text: str,
@@ -2221,7 +2568,12 @@ class MemoryService(DreamOps):
                 original, staged, source_ids, source_dream_ids,
                 source_fingerprints, replacement.db_id,
                 replacement.dream_id, stamp, new_text, None, None, response)
-            state = self._recover_correction_locked()
+            try:
+                state = self._recover_correction_locked()
+            except CorrectionReconciliationError:
+                if self._correction_lock_session_lost_locked():
+                    raise _CorrectionLockSessionLost(exc)
+                raise
             if state == "committed":
                 return response
             raise exc
@@ -2259,8 +2611,29 @@ class MemoryService(DreamOps):
                     return response
                 raise exc
 
-        self._preserve_correction_entry_identity(original, staged)
-        self._cms = staged
+        if self._storage is not None:
+            self._correction_recovery = PendingCorrectionRecovery(
+                original, staged, source_ids, source_dream_ids,
+                source_fingerprints, replacement.db_id,
+                replacement.dream_id, stamp, new_text, None, None, response,
+                durable_outcome="committed")
+            try:
+                with ExitStack() as publication_locks:
+                    if hasattr(self._storage, "entry_mutation_lock"):
+                        publication_locks.enter_context(
+                            self._storage.entry_mutation_lock(source_ids))
+                    self._publish_recovery_locked(
+                        original, staged, publication_locks)
+            except Exception as exc:
+                if self._correction_lock_session_lost_locked():
+                    raise _CorrectionLockSessionLost(None) from exc
+                raise CorrectionReconciliationError(
+                    "correction committed; publication reconciliation "
+                    f"required: {exc}"
+                ) from exc
+        else:
+            self._preserve_correction_entry_identity(original, staged)
+            self._cms = staged
         self._correction_recovery = None
         if self._storage is None:
             self._last_saved_fingerprint = self._entry_fingerprint()
@@ -2828,6 +3201,7 @@ class MemoryService(DreamOps):
         # A correction spans the resident bank itself, so unresolved state
         # blocks every save arm until authoritative persistence classifies it.
         self._recover_correction_locked()
+        self._recover_entry_reinstatement_locked()
 
         # An unresolved lesson commit gates ONLY the lesson arm below. It
         # says nothing about weights, access counts or the cortex/world

@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 40
+SCHEMA_META_VERSION = 41
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -381,6 +381,26 @@ CREATE TABLE IF NOT EXISTS memory_trace_invalidations (
   PRIMARY KEY (entity_norm, attribute_norm, source_entry_id)
 );
 
+-- v41 append-only decisions for explicitly reinstating one retired entry.
+-- No FK: the audit must survive later entry eviction or deletion.
+CREATE TABLE IF NOT EXISTS entry_reinstatement_decisions (
+  operation_id                     UUID PRIMARY KEY,
+  entry_id                         BIGINT NOT NULL,
+  request_sha256                   TEXT NOT NULL,
+  entry_text_sha256                TEXT NOT NULL,
+  entry_source_sha256              TEXT NOT NULL,
+  prior_superseded_at              DOUBLE PRECISION NOT NULL,
+  prior_superseded_by_text         TEXT NOT NULL,
+  prior_superseded_by_text_sha256  TEXT NOT NULL,
+  evidence_packet_sha256           TEXT NOT NULL,
+  reviewer_ids                     JSONB NOT NULL,
+  reason                           TEXT NOT NULL,
+  decided_by                       TEXT NOT NULL,
+  decided_at                       DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS entry_reinstatement_decisions_entry_idx
+  ON entry_reinstatement_decisions (entry_id, decided_at DESC);
+
 -- v16 additive: per-entity project/topic attribution. Denormalized cache of
 -- entity_id -> source(s). 'derived' rows are recomputed from
 -- facts.entity_id ⋈ memory_traces ⋈ entries; 'manual' rows are user overrides
@@ -479,7 +499,8 @@ BENCH_RESET_TABLES = (
     "edges", "edge_proposals", "entity_proposals", "entity_kinds",
     "dismissed_pairs", "facts", "world_facts", "lessons", "outcome_signals",
     "communities", "entity_communities", "memory_traces",
-    "memory_trace_invalidations", "entity_sources",
+    "memory_trace_invalidations", "entry_reinstatement_decisions",
+    "entity_sources",
     # Declared by the additive-migration tail of ensure_schema, not SCHEMA_SQL.
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
     "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",

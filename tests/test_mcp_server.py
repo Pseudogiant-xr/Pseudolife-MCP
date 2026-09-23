@@ -77,6 +77,7 @@ def test_all_tools_registered() -> None:
         "memory_search",
         "memory_recent",
         "memory_supersede",
+        "memory_reinstate",
         "memory_stats",
         "memory_toolset",
         "document_ingest",
