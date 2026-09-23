@@ -374,16 +374,34 @@ _CURATION_STORES = ("lesson", "world")
 DERIVED_FLAGGED_CAP = 50
 
 
+# A literal "|" inside a normalized component, as spelled in a slot key.
+# _norm_key casefolds, so an upper-case "C" never occurs in a component: every
+# "%7C" in a key is an escaped pipe, and the one bare "|" is the joiner.
+_SLOT_KEY_PIPE = "%7C"
+
+
 def _slot_key(entity_norm: str, attribute_norm: str) -> str:
     """Identity string for a slot: normalized components joined with ``|``.
-    ``_norm_key`` does NOT strip ``|``, so a literal pipe in a component would
-    make the joined form ambiguous (("a|b","c") vs ("a","b|c")); fold pipes to
-    ``-`` first. The listing (_curation_records), the human dismissal
+    ``_norm_key`` does NOT strip ``|``, so a literal pipe in a component is
+    escaped as ``%7C``. That is injective, so ("ci|cd","x") and ("ci-cd","x")
+    never share a key, and it leaves every pipe-free key as it was. (Folding
+    the pipe to ``-`` until 2026-09 merged those two slots' listings.) The
+    listing (_curation_records), the human dismissal
     (curation_dismiss_duplicate) and the curation judge's stored names
     (curation_safety.curation_pair_keys) must all build keys through this
     helper so a dismissal or memo always matches the listing that produced
-    it."""
-    return f"{entity_norm.replace('|', '-')}|{attribute_norm.replace('|', '-')}"
+    it; :func:`_parse_slot_key` is the inverse the key-taking tools use."""
+    return (f"{entity_norm.replace('|', _SLOT_KEY_PIPE)}|"
+            f"{attribute_norm.replace('|', _SLOT_KEY_PIPE)}")
+
+
+def _parse_slot_key(key: str) -> tuple[str, str] | None:
+    """``(entity_norm, attribute_norm)`` for a key :func:`_slot_key` built,
+    or None when ``key`` has no single bare ``|`` to split on."""
+    parts = key.split("|")
+    if len(parts) != 2:
+        return None
+    return tuple(p.replace(_SLOT_KEY_PIPE, "|") for p in parts)
 
 
 # Junk KEEP tombstones (2026-09-03): a junk proposal rejected as "keep" is
@@ -702,6 +720,11 @@ class MemoryService(DreamOps):
         # The CMS is published before hydration completes. Coordination may
         # read readiness concurrently, so stay unready until reseeding succeeds.
         self._hlc_reseed_pending = True
+        # The one-shot curation listing-name carry-over (curation_safety.
+        # migrate_folded_dismissals) has run for this bank; after a failed
+        # attempt, the monotonic time the next one may start.
+        self._listing_spelling_checked = False
+        self._listing_spelling_retry_at = 0.0
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._last_saved_fingerprint = None
@@ -1044,6 +1067,7 @@ class MemoryService(DreamOps):
         if self._cms is not None:
             if self._hlc_reseed_pending:
                 self._reseed_hlc()
+            self._carry_over_listing_spelling()
             return
         logger.info("MemoryService: initialising embedder + CMS (first call).")
         # Storage connects BEFORE any model load (2026-08-04 boot balloon):
@@ -1215,6 +1239,32 @@ class MemoryService(DreamOps):
                 logger.warning("Lesson store hydration skipped: %s", exc)
 
         self._reseed_hlc()
+        self._carry_over_listing_spelling()
+
+    def _carry_over_listing_spelling(self) -> None:
+        """Caller holds the lock. First call in a process with storage: move
+        human curation dismissals from the folded to the escaped listing
+        spelling, once per bank (see
+        curation_safety.migrate_folded_dismissals). A failure costs those
+        dismissals' pairs a return to the listing, never a call; it is
+        retried a minute later, because until it lands a new dismissal of a
+        pipe-free twin reads as a folded row that attempt would copy."""
+        import time as _t
+        if (self._listing_spelling_checked or self._storage is None
+                or _t.monotonic() < self._listing_spelling_retry_at):
+            return
+        from pseudolife_memory import curation_safety
+        try:
+            copied = curation_safety.migrate_folded_dismissals(self)
+        except Exception as exc:  # noqa: BLE001
+            self._listing_spelling_retry_at = _t.monotonic() + 60.0
+            logger.warning("curation dismissal spelling carry-over failed "
+                           "(retrying in 60 s): %s", exc)
+            return
+        self._listing_spelling_checked = True
+        if copied:
+            logger.info("curation: carried %d human dismissal(s) over to the "
+                        "escaped slot-key spelling", copied)
 
     def _reseed_hlc(self) -> None:
         # Re-seed the HLC from the stored high-water stamp (2026-07-02 P1): a

@@ -1156,11 +1156,11 @@ def test_evidence_reopen_count_is_returned_without_constructing_a_judge(
         "judged": 0, "reopened_auto_dismissals": 1}
 
 
-# A literal "|" inside a slot name: the duplicate listing folds it to "-"
+# A literal "|" inside a slot name: the duplicate listing spells it "%7C"
 # (service._slot_key) while the evidence snapshot's own "key" keeps it. Every
 # stored curation name must use the listing's spelling or the judge, requeue
 # and the dismissed filter never find what the judge wrote.
-LISTED_PIPE_KEYS = ("ci-cd-deploy|approach", "ci-cd-service|pitfall")
+LISTED_PIPE_KEYS = ("ci%7Ccd-deploy|approach", "ci%7Ccd-service|pitfall")
 
 
 def pipe_lessons(svc):
@@ -1271,3 +1271,240 @@ def test_raw_spelled_rows_from_before_the_fix_are_retired_not_orphaned(svc):
             if pair[0].startswith("lesson:")} == {
         tuple(f"lesson:{key}" for key in LISTED_PIPE_KEYS)}
     assert svc.curation_duplicates()["lesson_duplicates"] == []
+
+
+# Two DIFFERENT slots whose names differ only by "|" against a separator:
+# _norm_key folds " " to "-" but keeps "|", so "ci|cd deploy" and
+# "ci cd deploy" are distinct slots, and a third slot pairs with both. The
+# stub embedder makes every lesson pair a duplicate, so all three pairs list.
+PIPE = ("ci|cd deploy", "approach")
+TWIN = ("ci cd deploy", "approach")
+THIRD = ("release train", "pitfall")
+
+
+def colliding_lessons(svc, *slots):
+    for task, aspect in slots or (PIPE, TWIN, THIRD):
+        svc.lesson_write(
+            task, aspect, f"Pin the image for {task}.", about="ci",
+            outcome="correction", polarity="+", confidence=0.8,
+            origin="agent")
+
+
+def slot_pair(*slots):
+    from pseudolife_memory.memory.cortex import _norm_key
+    return frozenset((_norm_key(e), _norm_key(a)) for e, a in slots)
+
+
+COLLIDING_PAIRS = {slot_pair(PIPE, TWIN), slot_pair(PIPE, THIRD),
+                   slot_pair(TWIN, THIRD)}
+
+
+def side(row, name):
+    return (row[name]["entity"], row[name]["attribute"])
+
+
+def listed_pairs(svc):
+    listed = svc.curation_duplicates()["lesson_duplicates"]
+    keys = [(p["a_key"], p["b_key"]) for p in listed]
+    assert len(set(keys)) == len(keys), f"two listings share a key: {keys}"
+    return {slot_pair(side(p, "a"), side(p, "b")) for p in listed}
+
+
+def test_listing_keeps_a_pipe_slot_apart_from_its_separator_twin(svc):
+    colliding_lessons(svc)
+    assert listed_pairs(svc) == COLLIDING_PAIRS
+
+
+def test_judge_sends_each_colliding_pair_once_on_its_own_evidence(svc):
+    colliding_lessons(svc)
+    svc.config.memory.deep_dream.curation_judge_mode = "shadow"
+    judge = SlotJudge()
+    assert svc.deep_dream_judge_curation(judge, limit=10)["judged"] == 3
+    sent = [slot_pair(side(row, "a"), side(row, "b")) for row in judge.seen]
+    assert len(sent) == 3 and set(sent) == COLLIDING_PAIRS
+    assert len(svc._storage.curation_judgments("lesson")) == 3
+
+    again = SlotJudge()
+    out = svc.deep_dream_judge_curation(again, limit=10)
+    assert out["judged"] == 0 and again.seen == []
+
+
+@pytest.mark.parametrize("dismissed", [PIPE, TWIN])
+def test_dismissing_one_twin_pair_leaves_the_other_listed(svc, dismissed):
+    colliding_lessons(svc)
+    assert svc.curation_dismiss_duplicate(
+        "lesson", *dismissed, *THIRD)["dismissed"] is True
+    assert listed_pairs(svc) == COLLIDING_PAIRS - {slot_pair(dismissed, THIRD)}
+
+
+def mcp_tools(svc, tmp_path, monkeypatch):
+    from tests.helpers import reload_mcp_filemode
+
+    data_dir = tmp_path / "mcp"
+    data_dir.mkdir()
+    mod = reload_mcp_filemode(data_dir, monkeypatch)
+    monkeypatch.setattr(mod, "service", svc)
+    return mod
+
+
+@pytest.mark.parametrize("dismissed", [PIPE, TWIN])
+def test_mcp_slot_pair_dismissal_takes_the_listed_keys_back(
+        svc, tmp_path, monkeypatch, dismissed):
+    colliding_lessons(svc)
+    mod = mcp_tools(svc, tmp_path, monkeypatch)
+    row = next(p for p in svc.curation_duplicates()["lesson_duplicates"]
+               if slot_pair(side(p, "a"), side(p, "b"))
+               == slot_pair(dismissed, THIRD))
+    out = mod.memory_graph_review(
+        "dismiss_slot_pair", store="lesson", src=row["a_key"], dst=row["b_key"])
+    assert out["dismissed"] is True
+    assert listed_pairs(svc) == COLLIDING_PAIRS - {slot_pair(dismissed, THIRD)}
+
+
+@pytest.mark.parametrize("retired,live", [(PIPE, TWIN), (TWIN, PIPE)])
+def test_retired_twin_restores_from_its_listed_key(
+        svc, tmp_path, monkeypatch, retired, live):
+    colliding_lessons(svc)
+    mod = mcp_tools(svc, tmp_path, monkeypatch)
+    before = svc._lessons.lookup(*live).value
+    assert svc.lesson_forget(*retired)["retired"] == 1
+    (entry,) = svc.curation_retired("lesson")["entries"]
+    out = mod.memory_graph_review("restore_slot", store="lesson", src=entry["key"])
+    assert out["restored"] == 1
+    assert svc._lessons.lookup(*retired) is not None
+    assert svc._lessons.lookup(*live).value == before
+
+
+@pytest.mark.parametrize("auto_owner", [PIPE, TWIN])
+def test_folded_human_dismissals_keep_hiding_what_they_hid(
+        svc, tmp_path, pg_url, auto_owner):  # noqa: F811
+    # Until 2026-09 a slot key folded "|" to "-", so a human dismissal of
+    # (PIPE, THIRD) was stored under TWIN's spelling and hid both twin pairs.
+    # So did an automatic one with FOURTH, whether the judge made it for the
+    # pipe pair (under the folded spelling) or for the twin's own pair. On the
+    # first start under the escaped spelling the human row is copied to every
+    # pair it hid; the automatic one is not, and the pipe pair is judged
+    # again instead.
+    from pseudolife_memory.curation_safety import (
+        _pair_id, curation_policy_fingerprint)
+
+    fourth = ("rollout plan", "approach")
+    colliding_lessons(svc, PIPE, TWIN, THIRD, fourth)
+    storage = svc._storage
+    folded = ("lesson:ci-cd-deploy|approach", "lesson:release-train|pitfall")
+    storage.dismiss_pair(*folded)
+    (legacy_at,) = storage.conn.execute(
+        "SELECT dismissed_at FROM dismissed_pairs WHERE a_norm=%s AND b_norm=%s",
+        folded).fetchone()
+    evidence = capture_pair_evidence(
+        "lesson", svc._lessons.lookup(*auto_owner), svc._lessons.lookup(*fourth))
+    owned = ("lesson:ci-cd-deploy|approach", "lesson:rollout-plan|approach")
+    storage.dismiss_pair(*owned)
+    def folded_side(snap):
+        norms = (snap["entity_norm"], snap["attribute_norm"])
+        return {"key": "|".join(n.replace("|", "-") for n in norms),
+                "entity_norm": norms[0], "attribute_norm": norms[1]}
+
+    assert tuple(sorted(f"lesson:{folded_side(s)['key']}"
+                        for s in (evidence.a, evidence.b))) == owned
+    marker = {_pair_id(evidence): {
+        "store": "lesson", "a": folded_side(evidence.a),
+        "b": folded_side(evidence.b),
+        "a_fingerprint": evidence.a_fingerprint,
+        "b_fingerprint": evidence.b_fingerprint,
+        "requested_policy": curation_policy_fingerprint(svc, SlotJudge()),
+        "observed_model": SlotJudge.served_model}}
+    storage.set_meta("curation_auto_dismissals_v1", marker)
+    # A bank last served by the folding code has never been through this.
+    storage.conn.execute(
+        "DELETE FROM meta WHERE key = 'curation_listing_spelling_v2'")
+
+    upgraded = make_service(tmp_path, pg_url)
+    try:
+        everything = {slot_pair(x, y) for i, x in enumerate(
+            (PIPE, TWIN, THIRD, fourth)) for y in (PIPE, TWIN, THIRD, fourth)[i + 1:]}
+        hidden = {slot_pair(PIPE, THIRD), slot_pair(TWIN, THIRD)}
+        if auto_owner == TWIN:          # still valid, still the twin's
+            hidden.add(slot_pair(TWIN, fourth))
+        assert listed_pairs(upgraded) == everything - hidden
+        (copied_at,) = storage.conn.execute(
+            "SELECT dismissed_at FROM dismissed_pairs "
+            "WHERE a_norm=%s AND b_norm=%s",
+            ("lesson:ci%7Ccd-deploy|approach", "lesson:release-train|pitfall"),
+        ).fetchone()
+        assert copied_at == legacy_at
+        assert storage.get_meta("curation_auto_dismissals_v1") == (
+            marker if auto_owner == TWIN else {})
+
+        # Dismissed after the upgrade: exact, including on the next start.
+        upgraded.curation_dismiss_duplicate("lesson", *TWIN, *fourth)
+        expected = everything - {slot_pair(PIPE, THIRD), slot_pair(TWIN, THIRD),
+                                 slot_pair(TWIN, fourth)}
+        assert listed_pairs(upgraded) == expected
+    finally:
+        upgraded._storage.close()
+    restarted = make_service(tmp_path, pg_url)
+    try:
+        assert listed_pairs(restarted) == expected
+    finally:
+        restarted._storage.close()
+
+
+def test_folded_dismissal_of_a_compacted_pipe_slot_survives_its_restore(
+        svc, tmp_path, pg_url):  # noqa: F811
+    # Compaction purged the retired pipe slot's row; only its audit remains,
+    # and a restore brings the slot back from that. Its dismissal is carried
+    # over all the same.
+    colliding_lessons(svc, PIPE, THIRD)
+    svc.lesson_forget(*PIPE)
+    cfg = svc.config.memory.compaction
+    cfg.keep_per_slot = 0
+    cfg.min_age_days = 0
+    assert svc.compact_superseded()["lessons"] == 1
+    storage = svc._storage
+    storage.dismiss_pair(
+        "lesson:ci-cd-deploy|approach", "lesson:release-train|pitfall")
+    storage.conn.execute(
+        "DELETE FROM meta WHERE key = 'curation_listing_spelling_v2'")
+
+    upgraded = make_service(tmp_path, pg_url)
+    try:
+        out = upgraded.lesson_restore(*PIPE)
+        assert out["restored"] == 1 and out["source"] == "audit_snapshot"
+        assert listed_pairs(upgraded) == set()
+    finally:
+        upgraded._storage.close()
+
+
+def test_a_failed_carry_over_is_retried_in_the_same_process(
+        svc, tmp_path, pg_url, monkeypatch):  # noqa: F811
+    # Until the carry-over lands, a new dismissal of the pipe-free twin reads
+    # as a legacy folded row on the attempt that finally succeeds, so a
+    # failed attempt is retried soon rather than at the next process start.
+    import pseudolife_memory.curation_safety as safety
+
+    colliding_lessons(svc, PIPE, THIRD)
+    svc._storage.dismiss_pair(
+        "lesson:ci-cd-deploy|approach", "lesson:release-train|pitfall")
+    svc._storage.conn.execute(
+        "DELETE FROM meta WHERE key = 'curation_listing_spelling_v2'")
+    real, calls = safety.migrate_folded_dismissals, []
+
+    def flaky(service):
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise RuntimeError("connection dropped mid carry-over")
+        return real(service)
+
+    monkeypatch.setattr(safety, "migrate_folded_dismissals", flaky)
+    upgraded = make_service(tmp_path, pg_url)
+    try:
+        assert listed_pairs(upgraded) == {slot_pair(PIPE, THIRD)}
+        listed_pairs(upgraded)
+        assert len(calls) == 1                 # backing off, not per call
+        upgraded._listing_spelling_retry_at = 0.0
+        assert listed_pairs(upgraded) == set()
+        listed_pairs(upgraded)
+        assert len(calls) == 2                 # done: never again
+    finally:
+        upgraded._storage.close()

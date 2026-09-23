@@ -545,6 +545,45 @@ def test_current_export_empty_invalidation_member_is_authoritative(
     assert count == 0
 
 
+_SPELLING_FLAG = "curation_listing_spelling_v2"
+
+
+def _spelling_flag(pg_url):
+    with psycopg.connect(pg_url) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = %s", (_SPELLING_FLAG,)).fetchone()
+    return row[0] if row else None
+
+
+@pytest.mark.parametrize("exported_flag", [None, {"copied": 2, "at": 160.0}])
+def test_import_leaves_the_curation_spelling_flag_to_the_export(
+        pg_url, tmp_path, exported_flag):
+    # A daemon started on the fresh target sets the one-time carry-over flag
+    # of folded curation dismissals (curation_safety.migrate_folded_
+    # dismissals) with nothing to carry. An export from before that flag
+    # existed brings folded dismissals the next start must still carry over;
+    # one that carries the flag has already been through it.
+    from pseudolife_memory.curation_safety import _LISTING_SPELLING_META
+    assert _LISTING_SPELLING_META == _SPELLING_FLAG
+
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+        conn.execute(
+            "INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) VALUES "
+            "('lesson:ci-cd-deploy|approach', 'lesson:release-train|pitfall', 150.0)")
+        if exported_flag is not None:
+            conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb)",
+                         (_SPELLING_FLAG, json.dumps(exported_flag)))
+    archive = tmp_path / "bank.zip"
+    perform_export(pg_url, archive)
+
+    with _bank(pg_url) as conn:
+        conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb)",
+                     (_SPELLING_FLAG, json.dumps({"copied": 0, "at": 900.0})))
+    perform_import(pg_url, archive)
+    assert _spelling_flag(pg_url) == exported_flag
+
+
 def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
     with _bank(pg_url) as conn:
         _seed_bank(conn)

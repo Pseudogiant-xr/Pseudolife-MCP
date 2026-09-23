@@ -75,7 +75,8 @@ from mcp.types import ToolAnnotations  # noqa: E402
 # optionality are untouched.
 from pydantic import Field, StrictInt  # noqa: E402
 
-from pseudolife_memory.service import MemoryService  # noqa: E402
+from pseudolife_memory.service import (  # noqa: E402
+    _SLOT_KEY_PIPE, MemoryService, _parse_slot_key)
 
 # Log to stderr so MCP's JSON-RPC chatter on stdout stays clean.
 logging.basicConfig(
@@ -1754,21 +1755,26 @@ def memory_graph_review(
             return {"error": "src_dst_required"}
         return service.graph_dismiss_duplicate(src, dst)
     if action == "dismiss_slot_pair":
-        # Listed keys fold literal pipes into "-" (service._slot_key), so the
-        # first "|" is always the entity/attribute boundary.
-        if not store or not src or not dst or "|" not in src or "|" not in dst:
+        # Listed keys spell a literal "|" in a name as "%7C" (service._slot_key),
+        # so a key has exactly one bare "|"; decode it rather than re-split it.
+        a = _parse_slot_key(src) if src else None
+        b = _parse_slot_key(dst) if dst else None
+        if not store or a is None or b is None:
             return {"error": "store_src_dst_required",
                     "detail": "store='lesson'|'world'; src/dst are "
-                              "'entity|attribute' keys from the deep response"}
-        return service.curation_dismiss_duplicate(
-            store, *src.split("|", 1), *dst.split("|", 1))
+                              "'entity|attribute' keys from the deep response "
+                              "(a literal '|' in a name is spelled %7C)"}
+        return service.curation_dismiss_duplicate(store, *a, *b)
     if action == "restore_slot":
-        if store not in ("lesson", "world") or not src:
+        key = _parse_slot_key(src) if src and "|" in src else None
+        if store not in ("lesson", "world") or not src or (
+                "|" in src and key is None):
             return {"error": "store_src_required",
                     "detail": "store='lesson'|'world'; src is the retired "
                               "'entity|attribute' key (or a bare entity to "
-                              "restore every retired aspect of it)"}
-        ent, _, attr = src.partition("|")
+                              "restore every retired aspect of it); a "
+                              "literal '|' in a name is spelled %7C"}
+        ent, attr = key or (src.replace(_SLOT_KEY_PIPE, "|"), None)
         fn = (service.lesson_restore if store == "lesson"
               else service.world_restore)
         return fn(ent, attr or None, decided_by="agent")

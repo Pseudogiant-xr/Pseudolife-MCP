@@ -684,13 +684,47 @@ def test_apply_lists_store_duplicates_but_never_deletes(svc):
     assert len(svc._world.current_records()) == 2
 
 
-def test_slot_key_folds_literal_pipes():
+def test_slot_key_is_injective_and_round_trips():
     # _norm_key does NOT strip "|" (its separator class is whitespace ._-/),
     # so the "|" slot-key joiner would be ambiguous: ("a|b","c") and
-    # ("a","b|c") would join identically. _slot_key folds literal pipes in
-    # the components, keeping the encoding injective for both the listing
-    # and the dismissal side.
-    from pseudolife_memory.service import _slot_key
-    assert _slot_key("a-b", "c") == "a-b|c"
-    assert _slot_key("a|b", "c") == "a-b|c"          # folded, not ambiguous
-    assert _slot_key("a|b", "c") != _slot_key("a", "b|c")
+    # ("a","b|c") would join identically. Folding the pipe to "-" (the
+    # pre-2026-09 spelling) traded that for ("a|b","c") == ("a-b","c").
+    # _slot_key escapes it as "%7C", which no normalized component contains
+    # (_norm_key casefolds), and _parse_slot_key takes a key back.
+    from pseudolife_memory.memory.cortex import _norm_key
+    from pseudolife_memory.service import _parse_slot_key, _slot_key
+    assert _slot_key("a-b", "c") == "a-b|c"          # pipe-free: unchanged
+    assert _slot_key("a|b", "c") == "a%7Cb|c"
+    names = [("a|b", "c"), ("a", "b|c"), ("a-b", "c"), ("a%7cb", "c"),
+             ("a|", "|b"), ("|", "|"), ("a%7|b", "c")]
+    slots = [(_norm_key(e), _norm_key(a)) for e, a in names]
+    keys = [_slot_key(*slot) for slot in slots]
+    assert len(set(slots)) == len(names)
+    assert len(set(keys)) == len(keys)               # injective
+    assert [_parse_slot_key(k) for k in keys] == slots
+    assert all(k.count("|") == 1 for k in keys)
+    assert _parse_slot_key("no-pipe") is None
+    assert _parse_slot_key("a|b|c") is None
+
+
+def test_first_boot_carries_folded_dismissals_over_before_any_listing(
+        svc, pg_url, tmp_path_factory):
+    # A human dismissal stored under the pre-2026-09 folded key must be
+    # carried over by the call that initialises the service, not the next
+    # one — a first call that lists would otherwise show the pair again.
+    from pseudolife_memory.service import MemoryService
+    svc.lesson_write("ci|cd deploy", "approach", "Pin the runner image.")
+    svc._storage.dismiss_pair("lesson:ci-cd-deploy|approach",
+                              "lesson:release-train|pitfall")
+    svc._storage.conn.execute(
+        "DELETE FROM meta WHERE key = 'curation_listing_spelling_v2'")
+    booted = MemoryService(data_dir=tmp_path_factory.mktemp("dd-boot"),
+                           database_url=pg_url)
+    try:
+        booted.curation_retired("lesson")      # first call: full init
+        assert ("lesson:ci%7Ccd-deploy|approach",
+                "lesson:release-train|pitfall") in booted._storage.dismissed_pairs()
+        assert booted._storage.get_meta(
+            "curation_listing_spelling_v2")["copied"] == 1
+    finally:
+        booted._storage.close()

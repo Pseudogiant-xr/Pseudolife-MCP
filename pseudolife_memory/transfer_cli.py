@@ -110,6 +110,13 @@ _META_SKIP_KEYS = {
 def _skip_meta_key(key) -> bool:
     return key in _META_SKIP_KEYS or str(key).endswith("_schema_version")
 
+
+# curation_safety._LISTING_SPELLING_META (not imported: that module loads
+# torch): the one-time carry-over of folded curation dismissals has run. A
+# daemon started on the fresh target sets it with nothing to carry, so the
+# import clears it and only the export's own value stands.
+_CURATION_LISTING_SPELLING_META = "curation_listing_spelling_v2"
+
 # The freshness check import runs. Derived, not listed: every exported
 # table must be empty except the two a daemon-initialized bank legitimately
 # populates — meta (schema_version) and relations (the builtin vocabulary,
@@ -288,6 +295,8 @@ def perform_import(dsn: str, zip_path: Path | str, force: bool = False) -> dict:
                     "LOCK TABLE " + ", ".join(EXPORTED_TABLES)
                     + " IN EXCLUSIVE MODE")
                 _refuse_nonempty(conn)
+                conn.execute("DELETE FROM meta WHERE key = %s",
+                             (_CURATION_LISTING_SPELLING_META,))
                 for table in EXPORTED_TABLES:
                     if f"{table}.jsonl" not in names:
                         continue  # an older export without this table

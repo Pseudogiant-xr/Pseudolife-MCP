@@ -208,7 +208,10 @@ No merge proposal is filed whose side is junk-flagged.
 ## 3c. Step C — settle lesson/world duplicate listings (this session)
 Judge each `lesson_duplicates` / `world_duplicates` pair from the values shown
 (each side carries entity/attribute/value, plus polarity/outcome/about for
-lessons and source_url for world facts). Nothing is ever auto-deleted:
+lessons and source_url for world facts). Pass `a_key`/`b_key` and retired
+keys exactly as listed: a key is the normalized `entity|attribute`, and a
+literal `|` inside a name is spelled `%7C` (`ci%7Ccd-deploy|approach`).
+Nothing is ever auto-deleted:
 - **Duplicate** → keep the better-keyed slot; drop the other via
   `memory_forget(scope="lesson"|"world", ...)` (or re-write the surviving
   slot first to fold in anything the dropped one added). A forget RETIRES

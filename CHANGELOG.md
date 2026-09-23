@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-24 — a slot named with a `|` no longer shares its curation listing with its separator twin)
+- Two different lesson or world slots whose names differ only by a literal
+  `|` against a separator (`ci|cd deploy` and `ci cd deploy`) were listed for
+  duplicate curation under one key, because the key folded the pipe to `-`
+  (`ci-cd-deploy|approach`). The two twins were never listed as a pair; their
+  pairs with any third slot came out under one name, so the judge took one
+  twin's record as the evidence for both and judged the other pair on it or
+  not at all; a memo, dismissal or automatic dismissal of either pair applied
+  to both; and a retired pipe slot's listed key could not restore it. The key
+  now escapes a literal `|` as `%7C` (`ci%7Ccd-deploy|approach`). Normalized
+  names are casefolded, so none contains an upper-case `C` and the key is
+  injective. Every pipe-free key is unchanged, so nothing stored for any other
+  pair moves.
+- `memory_graph_review` decodes a listed key (`dismiss_slot_pair` `src`/`dst`,
+  `restore_slot` `src`) instead of splitting it at the first `|`: normalizing
+  an escaped half would casefold `%7C` to `%7c`, a name no slot has. A key
+  with more than one bare `|` is refused rather than split by guess, and the
+  refusal says how a pipe is spelled. The Console posts display names and
+  needed no change.
+- Human dismissals made under the folded spelling (every one since
+  2026-07-19) are carried over once, on the first start of this version
+  (`curation_listing_spelling_v2` meta key): each is copied, with its date,
+  to every pair of a pipe slot it hid, and stays where it is, because its name
+  is also the twin's own. A fallback that also read the folded name would
+  not do: a dismissal of the pipe-free twin made after the upgrade is
+  byte-identical to a folded row, so it would go on hiding the pipe slot's
+  pair. A failed carry-over is retried a minute later, and `import` into a
+  fresh bank clears the flag unless the export carries it, so an older
+  export's dismissals are carried over on the next start.
+- Automatic dismissals are not carried over; the judge re-derives them. A
+  pipe pair that one hid (its own, under the folded spelling, which only a
+  bank that ran the 2026-09-23 fix below without this one has; or its
+  twin's, which shared the name) is judged once more: the refresh withdraws
+  a folded marker together with its row, and the twin's own dismissal stays.
+  A memo row under the folded spelling is left in place when the pipe pair
+  is judged again, because the name is also the twin pair's own.
+
 ### Fixed (2026-09-23 — the curation judge stops re-judging a slot pair whose name contains a `|`)
 - A lesson or world slot with a literal `|` in its entity or attribute was
   listed under a key that folds the pipe to `-`, but the store-curation judge
