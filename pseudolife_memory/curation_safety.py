@@ -83,6 +83,10 @@ def snapshot_record(store: str, record: object) -> dict[str, Any]:
     record, not its storage placement.  The derived embedding is represented by
     dtype, shape, and digest so a re-embed also invalidates a similarity-based
     judgment without putting a 1024-float vector in the request.
+
+    ``key`` is evidence, not a name: it keeps a literal ``|`` inside a
+    component, and it is fingerprinted, so it must stay as it is.  Stored
+    curation rows are named by :func:`curation_pair_keys`.
     """
     if store not in ("lesson", "world"):
         raise ValueError("store must be 'lesson' or 'world'")
@@ -375,6 +379,23 @@ def curation_bound_action(
     return str(binding.get("action") or "settled")
 
 
+def _listing_key(side: Mapping[str, Any]) -> str:
+    from pseudolife_memory.service import _slot_key
+    return _slot_key(str(side["entity_norm"]), str(side["attribute_norm"]))
+
+
+def curation_pair_keys(evidence: PairEvidence) -> tuple[str, str]:
+    """The pair's sorted slot keys as the duplicate listing spells them.
+
+    ``curation_judgments`` rows, ``dismissed_pairs`` names and automatic
+    dismissal markers are all read back through the listing's keys
+    (``service._slot_key``, which folds a literal ``|`` in a component to
+    ``-``), so every one of them is written under this spelling, never under
+    the evidence snapshot's raw ``key``.
+    """
+    return tuple(sorted((_listing_key(evidence.a), _listing_key(evidence.b))))
+
+
 def record_bound_curation_judgment(
         service, evidence: PairEvidence, *, verdict: Mapping[str, Any],
         policy_fingerprint: str, model: str | None, at: float,
@@ -392,12 +413,20 @@ def record_bound_curation_judgment(
         with slot_curation_transaction(storage):
             if _locked_evidence_state(storage, evidence) != "current":
                 return False
+            a_key, b_key = curation_pair_keys(evidence)
             storage.record_curation_judgment(
-                evidence.store, evidence.a["key"], evidence.b["key"],
+                evidence.store, a_key, b_key,
                 verdict=str(verdict.get("verdict") or "leave"),
                 keep=verdict.get("keep"), fold=verdict.get("fold"),
                 confidence=verdict.get("confidence"), note=verdict.get("note"),
                 model=model, at=at)
+            raw = tuple(sorted((evidence.a["key"], evidence.b["key"])))
+            if raw != (a_key, b_key):
+                # A row written under the raw evidence keys before the names
+                # followed the listing spelling. Nothing reads it any more.
+                storage.conn.execute(
+                    "DELETE FROM curation_judgments WHERE store=%s "
+                    "AND a_key=%s AND b_key=%s", (evidence.store, *raw))
             bindings = curation_judgment_bindings(storage)
             bindings[_pair_id(evidence)] = {
                 "signature": _judgment_signature(evidence, policy_fingerprint),
@@ -427,10 +456,8 @@ def settle_curation_judgment_action(
 
 
 def _dismissal_names(evidence: PairEvidence) -> tuple[str, str]:
-    return tuple(sorted((
-        f"{evidence.store}:{evidence.a['key']}",
-        f"{evidence.store}:{evidence.b['key']}",
-    )))
+    return tuple(f"{evidence.store}:{key}"
+                 for key in curation_pair_keys(evidence))
 
 
 def apply_auto_distinct(service, evidence: PairEvidence, *,
@@ -463,12 +490,15 @@ def apply_auto_distinct(service, evidence: PairEvidence, *,
             # it as automatic merely because a judge reached the same answer.
             if new or _pair_id(evidence) in markers:
                 marker_id = _pair_id(evidence)
+                # A marker's keys name the dismissed_pairs row it owns.
                 markers[marker_id] = {
                     "store": evidence.store,
-                    "a": {k: evidence.a[k] for k in (
-                        "key", "entity_norm", "attribute_norm")},
-                    "b": {k: evidence.b[k] for k in (
-                        "key", "entity_norm", "attribute_norm")},
+                    "a": {"key": _listing_key(evidence.a),
+                          "entity_norm": evidence.a["entity_norm"],
+                          "attribute_norm": evidence.a["attribute_norm"]},
+                    "b": {"key": _listing_key(evidence.b),
+                          "entity_norm": evidence.b["entity_norm"],
+                          "attribute_norm": evidence.b["attribute_norm"]},
                     "a_fingerprint": evidence.a_fingerprint,
                     "b_fingerprint": evidence.b_fingerprint,
                     "requested_policy": bound.get("requested_policy"),
@@ -482,7 +512,8 @@ def apply_auto_distinct(service, evidence: PairEvidence, *,
             if settle_judgment:
                 _set_action_state(storage, evidence, "applied")
         return {"dismissed": True, "new": new, "store": evidence.store,
-                "a_key": evidence.a["key"], "b_key": evidence.b["key"]}
+                "a_key": _listing_key(evidence.a),
+                "b_key": _listing_key(evidence.b)}
 
 
 def mark_human_curation_dismissal(
@@ -555,6 +586,12 @@ def refresh_auto_dismissals(
             if (live_a is None or live_b is None
                     or evidence_fingerprint(live_a) != marker.get("a_fingerprint")
                     or evidence_fingerprint(live_b) != marker.get("b_fingerprint")):
+                stale.append((marker_id, marker))
+                continue
+            if a.get("key") != _listing_key(a) or b.get("key") != _listing_key(b):
+                # Written under the raw evidence keys: the listing never read
+                # this dismissal. Withdraw it so the pair is judged again and
+                # dismissed under the names the listing reads.
                 stale.append((marker_id, marker))
                 continue
             if (check_policy

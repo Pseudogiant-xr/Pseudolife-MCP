@@ -378,9 +378,11 @@ def _slot_key(entity_norm: str, attribute_norm: str) -> str:
     """Identity string for a slot: normalized components joined with ``|``.
     ``_norm_key`` does NOT strip ``|``, so a literal pipe in a component would
     make the joined form ambiguous (("a|b","c") vs ("a","b|c")); fold pipes to
-    ``-`` first. Both the listing (_curation_records) and the dismissal
-    (curation_dismiss_duplicate) must build keys through this helper so a
-    dismissal always matches the listing that produced it."""
+    ``-`` first. The listing (_curation_records), the human dismissal
+    (curation_dismiss_duplicate) and the curation judge's stored names
+    (curation_safety.curation_pair_keys) must all build keys through this
+    helper so a dismissal or memo always matches the listing that produced
+    it."""
     return f"{entity_norm.replace('|', '-')}|{attribute_norm.replace('|', '-')}"
 
 

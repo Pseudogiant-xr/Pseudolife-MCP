@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — the curation judge stops re-judging a slot pair whose name contains a `|`)
+- A lesson or world slot with a literal `|` in its entity or attribute was
+  listed under a key that folds the pipe to `-`, but the store-curation judge
+  saved its memo, its automatic distinct dismissal and that dismissal's marker
+  under the raw key. Nothing that reads them found them: the pair went back to
+  the model on every tick that reached it instead of once per
+  `curation_rejudge_days`, `review_rejudge('curation')` could not
+  forget it, and an automatic "distinct" never hid it. All three are now
+  written under the listing's spelling (`curation_safety.curation_pair_keys`,
+  built on `service._slot_key`). The fingerprinted evidence keeps its raw key,
+  so no memo binding, marker fingerprint or retire audit changes and no other
+  pair is re-judged.
+- Rows written under the old spelling retire on their next touch rather than
+  through a migration: the first auto-dismissal refresh (the Console listing or
+  a judge tick) withdraws a raw-spelled marker together with the dismissal row
+  it owns, and the pair's next judgment, which the missed memo now triggers
+  once, deletes the raw-spelled memo row it replaces. A raw memo row whose
+  pair is never judged again (dismissed by a human, one side retired, or no
+  longer similar enough to list) stays behind unread; its key has at least two
+  `|` and cannot match a listing key, which has exactly one.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

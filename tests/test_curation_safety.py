@@ -1154,3 +1154,120 @@ def test_evidence_reopen_count_is_returned_without_constructing_a_judge(
             AssertionError("no markers or candidates means no judge setup")))
     assert svc.deep_dream_judge_curation() == {
         "judged": 0, "reopened_auto_dismissals": 1}
+
+
+# A literal "|" inside a slot name: the duplicate listing folds it to "-"
+# (service._slot_key) while the evidence snapshot's own "key" keeps it. Every
+# stored curation name must use the listing's spelling or the judge, requeue
+# and the dismissed filter never find what the judge wrote.
+LISTED_PIPE_KEYS = ("ci-cd-deploy|approach", "ci-cd-service|pitfall")
+
+
+def pipe_lessons(svc):
+    # The stub embedder makes every lesson pair a duplicate, so these two are
+    # the only lessons written.
+    svc.lesson_write(
+        "ci|cd deploy", "approach", "Pin the runner image.", about="ci",
+        outcome="correction", polarity="+", confidence=0.8, origin="agent")
+    svc.lesson_write(
+        "ci|cd service", "pitfall", "Pin the runner image.", about="ci",
+        outcome="correction", polarity="+", confidence=0.9, origin="agent")
+    evidence = capture_pair_evidence(
+        "lesson", svc._lessons.lookup("ci|cd deploy", "approach"),
+        svc._lessons.lookup("ci|cd service", "pitfall"))
+    listed = svc.curation_duplicates()["lesson_duplicates"]
+    assert [(p["a_key"], p["b_key"]) for p in listed] == [LISTED_PIPE_KEYS]
+    return evidence
+
+
+def test_pipe_slot_judgment_is_not_resent_on_the_next_tick(svc):
+    pipe_lessons(svc)
+    svc.config.memory.deep_dream.curation_judge_mode = "shadow"
+    assert svc.deep_dream_judge_curation(SlotJudge())["judged"] == 1
+
+    second = SlotJudge()
+    out = svc.deep_dream_judge_curation(second)
+    assert "error" not in out
+    assert out["judged"] == 0 and second.seen == []
+    assert set(svc._storage.curation_judgments("lesson")) == {LISTED_PIPE_KEYS}
+
+
+def test_requeue_forgets_a_pipe_slot_judgment(svc):
+    pipe_lessons(svc)
+    svc.config.memory.deep_dream.curation_judge_mode = "shadow"
+    assert svc.deep_dream_judge_curation(SlotJudge())["judged"] == 1
+
+    assert svc.review_rejudge("curation", limit=1)["requeued"] == 1
+    assert svc._storage.curation_judgments("lesson") == {}
+    judge = SlotJudge()
+    assert svc.deep_dream_judge_curation(judge)["judged"] == 1
+    assert judge.seen
+
+
+def test_auto_distinct_dismissal_of_a_pipe_slot_pair_is_honoured(svc):
+    evidence = pipe_lessons(svc)
+    cfg = svc.config.memory.deep_dream
+    cfg.curation_judge_mode = "auto-distinct"
+    cfg.curation_distinct_min_confidence = 0.9
+    assert svc.deep_dream_judge_curation(SlotJudge())["applied"] == 1
+    assert svc.curation_duplicates()["lesson_duplicates"] == []
+    assert svc._storage.get_meta("curation_auto_dismissals_v1")
+
+    # A human confirmation of the same pair clears the automatic marker, so a
+    # later change to either record can no longer reopen it.
+    svc.curation_dismiss_duplicate(
+        "lesson", evidence.a["entity"], evidence.a["attribute"],
+        evidence.b["entity"], evidence.b["attribute"])
+    assert svc._storage.get_meta("curation_auto_dismissals_v1") == {}
+    svc.lesson_write(
+        "ci|cd service", "pitfall", "Pin the runner image.", about="ci",
+        outcome="correction", polarity="+", confidence=0.9, origin="agent",
+        provenance={"new-version"})
+    assert svc.curation_duplicates()["lesson_duplicates"] == []
+
+
+def test_raw_spelled_rows_from_before_the_fix_are_retired_not_orphaned(svc):
+    import time
+
+    from pseudolife_memory.curation_safety import (
+        _pair_id, curation_policy_fingerprint)
+
+    evidence = pipe_lessons(svc)
+    raw = tuple(sorted((evidence.a["key"], evidence.b["key"])))
+    assert raw != LISTED_PIPE_KEYS
+    storage = svc._storage
+    # The judge's earlier writes, all under the raw evidence keys: its memo,
+    # an automatic distinct dismissal, and that dismissal's marker.
+    storage.record_curation_judgment(
+        "lesson", *raw, verdict="distinct", keep=None, fold=None,
+        confidence=0.99, note="written before the fix",
+        model=SlotJudge.served_model, at=time.time())
+    storage.dismiss_pair(*(f"lesson:{key}" for key in raw))
+    side = ("key", "entity_norm", "attribute_norm")
+    storage.set_meta("curation_auto_dismissals_v1", {_pair_id(evidence): {
+        "store": "lesson",
+        "a": {k: evidence.a[k] for k in side},
+        "b": {k: evidence.b[k] for k in side},
+        "a_fingerprint": evidence.a_fingerprint,
+        "b_fingerprint": evidence.b_fingerprint,
+        "requested_policy": curation_policy_fingerprint(svc, SlotJudge()),
+        "observed_model": SlotJudge.served_model}})
+
+    # The raw dismissal never hid the pair. Its marker is withdrawn with it
+    # instead of surviving as an unowned row the listing cannot read.
+    listed = svc.curation_duplicates()["lesson_duplicates"]
+    assert [(p["a_key"], p["b_key"]) for p in listed] == [LISTED_PIPE_KEYS]
+    assert storage.get_meta("curation_auto_dismissals_v1") == {}
+    assert not any(a.startswith("lesson:") for a, _ in storage.dismissed_pairs())
+
+    cfg = svc.config.memory.deep_dream
+    cfg.curation_judge_mode = "auto-distinct"
+    cfg.curation_distinct_min_confidence = 0.9
+    out = svc.deep_dream_judge_curation(SlotJudge())
+    assert out["judged"] == 1 and out["applied"] == 1
+    # One memo row per pair, under the listing spelling; the raw twin is gone.
+    assert set(storage.curation_judgments("lesson")) == {LISTED_PIPE_KEYS}
+    assert {pair for pair in storage.dismissed_pairs()
+            if pair[0].startswith("lesson:")} == {
+        tuple(f"lesson:{key}" for key in LISTED_PIPE_KEYS)}
+    assert svc.curation_duplicates()["lesson_duplicates"] == []
