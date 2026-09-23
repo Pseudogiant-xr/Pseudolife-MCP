@@ -10,6 +10,8 @@ merging pipeline as the neural banks.
 from __future__ import annotations
 
 import hashlib
+import logging
+import threading
 import time
 from pathlib import Path
 
@@ -17,6 +19,8 @@ import torch
 
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.utils.config import ReferenceConfig
+
+logger = logging.getLogger(__name__)
 
 
 def cosine_similarity_from_distance(dist: float) -> float:
@@ -68,6 +72,16 @@ class ReferenceBank:
     Stores document chunks as embeddings in a persistent ChromaDB collection.
     Uses pre-computed embeddings from the shared EmbeddingPipeline (not
     ChromaDB's built-in embedding function).
+
+    The ChromaDB client opens lazily: on the first ingest, or on the first
+    read once a store exists on disk. chromadb keeps every opened client's
+    System in a process-wide cache for the life of the process (about 19
+    threads, ~3 MB and ~0.08 s per open on a 16-CPU Windows host, measured
+    2026-09-23 over 50 service starts with evals/service_init_bench.py), so
+    a bank never used for documents must not open one. A
+    store that does not exist yet reads as an empty collection. A store that
+    fails to open disables the bank the way a constructor failure used to:
+    reads come back empty and ingest refuses.
     """
 
     def __init__(
@@ -78,20 +92,61 @@ class ReferenceBank:
         self.config = config
         self.embedding_dim = embedding_dim
 
-        import chromadb
+        # A missing dependency still fails here, at construction.
+        import chromadb  # noqa: F401
 
-        persist_dir = Path(config.persist_dir)
-        persist_dir.mkdir(parents=True, exist_ok=True)
+        self._persist_dir = Path(config.persist_dir)
+        self._persist_dir.mkdir(parents=True, exist_ok=True)
+        self._client = None
+        self._collection = None
+        self._open_error: Exception | None = None
+        self._open_lock = threading.Lock()
 
-        self._client = chromadb.PersistentClient(path=str(persist_dir))
-        self._collection = self._client.get_or_create_collection(
-            name=config.collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+    def _store_exists(self) -> bool:
+        try:
+            return any(self._persist_dir.iterdir())
+        except FileNotFoundError:
+            return False
+
+    def _open(self, create: bool):
+        """The collection, opening the client on first need.
+
+        Returns None when no store exists yet and ``create`` is false, or
+        when the store failed to open; ingest (``create``) raises instead.
+        """
+        if self._collection is not None:
+            return self._collection
+        with self._open_lock:
+            if self._collection is not None:
+                return self._collection
+            if self._open_error is None:
+                try:
+                    # Inside the try: an unreadable directory is an open
+                    # failure like any other, never an error out of search.
+                    if not create and not self._store_exists():
+                        return None
+                    import chromadb
+
+                    client = chromadb.PersistentClient(path=str(self._persist_dir))
+                    self._collection = client.get_or_create_collection(
+                        name=self.config.collection_name,
+                        metadata={"hnsw:space": "cosine"},
+                    )
+                    self._client = client
+                    return self._collection
+                except Exception as exc:  # noqa: BLE001 — optional tier
+                    self._open_error = exc
+                    logger.warning("ReferenceBank disabled: %s", exc)
+            if create:
+                raise RuntimeError(
+                    "Reference bank disabled (ChromaDB init failed: "
+                    f"{self._open_error}). Documents cannot be ingested.")
+            return None
 
     @property
     def size(self) -> int:
-        return self._collection.count()
+        collection = self._open(create=False)
+        return 0 if collection is None else collection.count()
 
     def ingest_text(
         self,
@@ -119,6 +174,8 @@ class ReferenceBank:
 
         if not chunks:
             return {"chunks_total": 0, "chunks_stored": 0}
+        # Open (or refuse) before spending the embedding work.
+        collection = self._open(create=True)
 
         # Embed all chunks
         embeddings = embedder.encode(chunks)  # (N, dim) tensor
@@ -144,7 +201,7 @@ class ReferenceBank:
             emb_list.append(embeddings[i])
 
         # Upsert into ChromaDB (handles duplicates by ID)
-        self._collection.upsert(
+        collection.upsert(
             ids=ids,
             embeddings=emb_list,
             documents=documents,
@@ -175,7 +232,8 @@ class ReferenceBank:
     ) -> RetrievalResult:
         """Query ChromaDB and return results as RetrievalResult."""
         k = top_k or self.config.max_results
-        if self._collection.count() == 0:
+        collection = self._open(create=False)
+        if collection is None or collection.count() == 0:
             return RetrievalResult(entries=[], scores=[], surprises=[])
 
         # Convert tensor to list for ChromaDB
@@ -183,9 +241,9 @@ class ReferenceBank:
         if isinstance(q[0], list):
             q = q[0]  # Handle batch dimension
 
-        results = self._collection.query(
+        results = collection.query(
             query_embeddings=[q],
-            n_results=min(k, self._collection.count()),
+            n_results=min(k, collection.count()),
             include=["documents", "metadatas", "distances"],
         )
 
@@ -217,11 +275,12 @@ class ReferenceBank:
 
     def list_documents(self) -> list[dict]:
         """List unique documents with their chunk counts."""
-        if self._collection.count() == 0:
+        collection = self._open(create=False)
+        if collection is None or collection.count() == 0:
             return []
 
         # Get all metadatas
-        all_data = self._collection.get(include=["metadatas"])
+        all_data = collection.get(include=["metadatas"])
         source_map: dict[str, dict] = {}
 
         for meta in (all_data["metadatas"] or []):
@@ -239,15 +298,16 @@ class ReferenceBank:
 
     def clear(self) -> None:
         """Delete all entries from the collection."""
-        if self._collection.count() > 0:
-            all_ids = self._collection.get()["ids"]
+        collection = self._open(create=False)
+        if collection is not None and collection.count() > 0:
+            all_ids = collection.get()["ids"]
             if all_ids:
-                self._collection.delete(ids=all_ids)
+                collection.delete(ids=all_ids)
 
     def stats(self) -> dict:
         """Return reference bank statistics."""
         docs = self.list_documents()
         return {
-            "reference_bank_size": self._collection.count(),
+            "reference_bank_size": self.size,
             "reference_document_count": len(docs),
         }
