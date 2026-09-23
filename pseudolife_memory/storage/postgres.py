@@ -299,6 +299,7 @@ class PostgresStorage:
             self._entry_mutation_connection = conn
         acquired: list[int] = []
         body_failed = False
+        abandon_session = False
         try:
             for entry_id in keys:
                 conn.execute(
@@ -307,19 +308,26 @@ class PostgresStorage:
                 )
                 acquired.append(entry_id)
             yield
+        except Exception:
+            # A routine refusal or error still releases on this session; the
+            # release below closes it anyway if the session is gone.
+            body_failed = True
+            raise
         except BaseException:
             body_failed = True
+            abandon_session = True
             raise
         finally:
             try:
-                if body_failed:
-                    # Preserve the original failure while releasing every lock
-                    # on this session, including any partially acquired set.
+                if abandon_session:
+                    # An interrupt can leave the session mid-statement.
+                    # Closing releases every lock it holds, including any
+                    # partially acquired set, without trusting its state.
                     conn.close()
                 elif acquired and (conn.closed or conn.broken):
                     raise psycopg.OperationalError(
                         "entry mutation lock connection was lost before release")
-                for entry_id in (() if body_failed else reversed(acquired)):
+                for entry_id in (() if abandon_session else reversed(acquired)):
                     released = conn.execute(
                         "SELECT pg_advisory_unlock(hashtextextended(%s, 41))",
                         (f"entry-mutation:{entry_id}",),
@@ -601,8 +609,12 @@ class PostgresStorage:
             if row is None:
                 raise ValueError("target_not_found")
             text, source, superseded_at, superseded_by_text = row
-            if superseded_at is None or superseded_by_text is None:
+            if superseded_at is None:
                 raise ValueError("target_not_retired")
+            if superseded_by_text is None:
+                # Pre-v5 migrations retired rows without recording the
+                # replacement text, so no exact preimage can name it.
+                raise ValueError("retirement_text_missing")
             digest = lambda value: hashlib.sha256(value.encode("utf-8")).hexdigest()
             if (digest(text) != request["expected_text_sha256"]
                     or digest(source) != request["expected_source_sha256"]
@@ -666,6 +678,19 @@ class PostgresStorage:
             d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
+
+    def load_entry_row(self, entry_id: int) -> dict | None:
+        """One entries row in the :meth:`load_entries` shape, or None."""
+        cols = ("id",) + _ENTRY_COLS + ("reinforcements",)
+        row = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM entries WHERE id = %s",
+            (int(entry_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(zip(cols, row))
+        d["embedding"] = _embedding_out(d["embedding"])
+        return d
 
     def initialize_dream_tracking(
         self, *, eligible_sources=None, exclude_sources=None,

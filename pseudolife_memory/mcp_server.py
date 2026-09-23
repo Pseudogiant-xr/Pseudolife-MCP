@@ -865,7 +865,7 @@ def memory_stats() -> dict[str, Any]:
 _TIER_ADDS = {
     "core": "graph + recall, world facts, lessons, documents, stats, "
             "episodes, memory_get/fact_resolve",
-    "full": "supersede/forget/history/reinforce, recent, dream + "
+    "full": "supersede/reinstate/forget/history/reinforce, recent, dream + "
             "graph-review, aliases, consolidation, relation-define",
 }
 

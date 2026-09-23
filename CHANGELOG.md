@@ -10,8 +10,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.
   Losing the PostgreSQL session during publication restores the prior resident
-  objects and retains a pending recovery guard; the next ordinary read reloads
-  committed state under fresh protection before serving it.
+  objects. A correction then reconciles again within the same call (next
+  entry). Otherwise, and for reinstatement, a pending recovery guard stays and
+  the next ordinary read reloads committed state under fresh protection before
+  serving it.
+- A correction whose mutation-lock session dies with its outcome in flight
+  reconciles on a fresh session before returning, as the pre-lock code did by
+  reconnecting. A committed correction reports its result instead of an
+  error. The outcome is no longer exposed to peer writes until the next call,
+  where one that changed the source could leave it unclassifiable until
+  restart; only the moment before the fresh lock remains. A publication that
+  fails after a proven commit is reconciled the same way; if that retry fails
+  too, the error says the correction committed.
+- A routine refusal inside the mutation lock releases its keys on the same
+  PostgreSQL session instead of closing the shared connection, which logged a
+  spurious "postgres connection lost" and reconnected on every refusal.
 
 ### Added (2026-09-22 — retired continuum entries can be reinstated with a durable audit)
 - Schema **v41** adds the FK-free `entry_reinstatement_decisions` audit and
@@ -22,6 +35,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   commits reconcile from durable state before resident publication. The first
   version refuses every target with a trace invalidation and never changes or
   confirms derived cortex state.
+- Admission, publication and recovery reconcile only the target entry against
+  its durable row rather than rebuilding the resident bank from rows, so
+  access counts not yet synced and entries still awaiting the dream re-flush
+  survive every call, refused ones included. Retired rows that never recorded
+  a replacement text (pre-v5 migrations) are refused as
+  `retirement_text_missing`. Logical transfer keeps audited entry IDs retired,
+  so an import never hands a deleted, reinstated entry's ID to a new entry.
 
 ### Fixed (2026-09-22 — a cancelled Codex delivery start-up ran on into its rpc timeout)
 - `pseudolife_memory/codex_delivery.py` bounded its connect, send, reply and

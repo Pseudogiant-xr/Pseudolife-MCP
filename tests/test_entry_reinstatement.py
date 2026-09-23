@@ -341,6 +341,121 @@ def test_service_rehydrates_authoritative_target_before_new_admission(
         storage.close()
 
 
+@pytest.mark.parametrize("outcome", ["reinstated", "refused"])
+def test_service_reinstate_keeps_resident_only_state(
+    tmp_path, monkeypatch, pg_conn, pg_url, outcome,
+):
+    """A reinstatement changes one row, so it must not rebuild the resident
+    bank from rows. Access counts are synced only at save time, and an entry
+    whose write-through insert failed stays resident with no row until the
+    dream pull re-flushes it; a whole-bank rebuild would discard both."""
+    svc, storage, old = _retired_service(tmp_path, monkeypatch, pg_url)
+    try:
+        neighbour = _seed(svc, text="synthetic neighbour", source="test")
+        neighbour.access_count = 9
+        unpersisted = _seed(svc, text="synthetic unpersisted", source="test")
+        storage.delete_entry_ids([unpersisted.db_id])
+        unpersisted.db_id = None
+
+        request = _request(old.db_id)
+        if outcome == "refused":
+            request["expected_text_sha256"] = _sha("not the reviewed text")
+            with pytest.raises(ValueError, match="preimage_mismatch"):
+                svc.reinstate(**request)
+            assert old.superseded_at == 20.0
+        else:
+            assert svc.reinstate(**request)["current_state"] == "live"
+            assert old.superseded_at is None
+        residents = [
+            entry for band in svc._cms.bands for entry in band.entries]
+        assert any(entry is unpersisted for entry in residents)
+        assert any(entry is neighbour for entry in residents)
+        assert neighbour.access_count == 9
+        assert any(entry is old for entry in residents)
+    finally:
+        storage.close()
+
+
+def test_retirement_without_replacement_text_is_named(
+    tmp_path, monkeypatch, pg_conn, pg_url, storage,
+):
+    """Pre-v5 migrations left retired rows with no replacement text; say so
+    instead of claiming the row is not retired."""
+    row = _entry()
+    row["superseded_by_text"] = None
+    entry_id = storage.insert_entry(row)
+    with pytest.raises(ValueError, match="retirement_text_missing"):
+        storage.reinstate_entry(**_request(entry_id))
+
+    svc, service_storage, old = _retired_service(tmp_path, monkeypatch, pg_url)
+    try:
+        service_storage.conn.execute(
+            "UPDATE entries SET superseded_by_text = NULL WHERE id = %s",
+            (old.db_id,))
+        old.superseded_by_text = None
+        with pytest.raises(ValueError, match="retirement_text_missing"):
+            svc.reinstate(**_request(old.db_id))
+    finally:
+        service_storage.close()
+
+
+def test_entry_mutation_lock_refusal_keeps_the_session(storage, pg_conn):
+    """A routine refusal inside the lock releases its keys on the same
+    session; closing the shared connection would log a spurious
+    'postgres connection lost' and force a reconnect on every refusal."""
+    connection = storage.conn
+    backend = connection.info.backend_pid
+    with pytest.raises(ValueError, match="routine refusal"):
+        with storage.entry_mutation_lock([123, 124]):
+            raise ValueError("routine refusal")
+    assert storage._entry_mutation_connection is None
+    assert not connection.closed
+    assert storage.conn is connection
+    assert storage.conn.info.backend_pid == backend
+    for key in ("entry-mutation:123", "entry-mutation:124"):
+        assert pg_conn.execute(
+            "SELECT pg_try_advisory_lock(hashtextextended(%s, 41))", (key,),
+        ).fetchone()[0] is True
+        pg_conn.execute(
+            "SELECT pg_advisory_unlock(hashtextextended(%s, 41))", (key,))
+
+
+def test_entry_mutation_lock_refusal_after_lost_key_closes_the_session(
+    storage,
+):
+    """A refusal whose key was already gone leaves the release
+    unacknowledged: the session closes, and the refusal still surfaces."""
+    connection = storage.conn
+    with pytest.raises(ValueError, match="routine refusal"):
+        with storage.entry_mutation_lock([123]):
+            assert connection.execute(
+                "SELECT pg_advisory_unlock(hashtextextended(%s, 41))",
+                ("entry-mutation:123",),
+            ).fetchone()[0] is True
+            raise ValueError("routine refusal")
+    assert connection.closed
+    assert storage._entry_mutation_connection is None
+
+
+def test_entry_mutation_lock_refusal_on_a_dead_session_surfaces_it(storage):
+    connection = storage.conn
+    with pytest.raises(ValueError, match="routine refusal"):
+        with storage.entry_mutation_lock([123]):
+            connection.close()
+            raise ValueError("routine refusal")
+    assert storage._entry_mutation_connection is None
+    assert storage.conn is not connection
+
+
+def test_entry_mutation_lock_interrupt_abandons_the_session(storage):
+    connection = storage.conn
+    with pytest.raises(KeyboardInterrupt):
+        with storage.entry_mutation_lock([123]):
+            raise KeyboardInterrupt
+    assert connection.closed
+    assert storage._entry_mutation_connection is None
+
+
 @pytest.mark.parametrize("first", ["correction", "reinstate"])
 def test_service_correction_and_reinstatement_serialize_through_publication(
     tmp_path, monkeypatch, pg_conn, pg_url, first,
@@ -489,15 +604,15 @@ def test_unreadable_reconciliation_gates_persistence(
 ):
     svc, storage, old = _retired_service(tmp_path, monkeypatch, pg_url)
     original_reinstate = storage.reinstate_entry
-    original_load = storage.load_entries
+    original_load = storage.load_entry_row
 
     def committed_but_lost(**kwargs):
         original_reinstate(**kwargs)
         raise RuntimeError("synthetic lost response")
 
-    reads = iter([original_load()])
+    reads = iter([original_load(old.db_id)])
 
-    def readable_admission_then_unavailable():
+    def readable_admission_then_unavailable(entry_id):
         try:
             return next(reads)
         except StopIteration:
@@ -505,7 +620,7 @@ def test_unreadable_reconciliation_gates_persistence(
 
     monkeypatch.setattr(storage, "reinstate_entry", committed_but_lost)
     monkeypatch.setattr(
-        storage, "load_entries",
+        storage, "load_entry_row",
         readable_admission_then_unavailable,
     )
     try:
@@ -521,7 +636,7 @@ def test_unreadable_reconciliation_gates_persistence(
             svc.search("synthetic read while reconciliation is unavailable")
         with pytest.raises(EntryReinstatementReconciliationError):
             svc.autosave_if_changed()
-        monkeypatch.setattr(storage, "load_entries", original_load)
+        monkeypatch.setattr(storage, "load_entry_row", original_load)
         monkeypatch.setattr(storage, "reinstate_entry", original_reinstate)
         svc.autosave_if_changed()
         assert svc._entry_reinstatement_recovery is None

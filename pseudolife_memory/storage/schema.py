@@ -1100,29 +1100,6 @@ def ensure_schema(conn) -> dict:
             "CREATE INDEX IF NOT EXISTS store_decisions_slot_idx "
             "ON store_decisions (store, entity_norm, attribute_norm, "
             "decided_at DESC)")
-        # v41: operation-keyed, FK-free audit for single-entry reinstatement.
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS entry_reinstatement_decisions (
-              operation_id                     UUID PRIMARY KEY,
-              entry_id                         BIGINT NOT NULL,
-              request_sha256                   TEXT NOT NULL,
-              entry_text_sha256                TEXT NOT NULL,
-              entry_source_sha256              TEXT NOT NULL,
-              prior_superseded_at              DOUBLE PRECISION NOT NULL,
-              prior_superseded_by_text         TEXT NOT NULL,
-              prior_superseded_by_text_sha256  TEXT NOT NULL,
-              evidence_packet_sha256           TEXT NOT NULL,
-              reviewer_ids                     JSONB NOT NULL,
-              reason                           TEXT NOT NULL,
-              decided_by                       TEXT NOT NULL,
-              decided_at                       DOUBLE PRECISION NOT NULL
-            )
-            """
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS entry_reinstatement_decisions_entry_idx "
-            "ON entry_reinstatement_decisions (entry_id, decided_at DESC)")
         cur.execute(
             """
             INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)

@@ -123,12 +123,9 @@ class PendingCorrectionRecovery:
 
 @dataclass(frozen=True)
 class PendingEntryReinstatementRecovery:
-    original: ContinuumMemorySystem
-    staged: ContinuumMemorySystem
     entry_id: int
     operation_id: str
     request_sha256: str
-    response: dict[str, Any]
 
 
 def _entry_to_dict(
@@ -2142,6 +2139,44 @@ class MemoryService(DreamOps):
             raise CorrectionReconciliationError(
                 f"correction commit reconciliation required: {exc}") from exc
 
+    def _reinstatement_target_mirrored(
+        self, entry_id: int, row: dict[str, Any] | None,
+    ) -> ContinuumMemorySystem:
+        """A staged copy of the resident bank whose one reinstatement target
+        mirrors its durable row.
+
+        A reinstatement changes exactly that row, so only that entry is
+        reconciled. Rebuilding the bank from rows would discard resident-only
+        state: access counts are synced to storage only at save time, and an
+        entry whose write-through insert failed stays resident without a row
+        until the dream pull re-flushes it.
+        """
+        from pseudolife_memory.storage.sync import row_to_entry
+
+        assert self._cms is not None
+        staged = self._cms.clone_for_staged_store()
+        holders = [
+            band for band in staged.bands
+            if any(entry.db_id == entry_id for entry in band.entries)
+        ]
+        if row is None:
+            for band in holders:
+                band.entries = [
+                    entry for entry in band.entries if entry.db_id != entry_id]
+                band._dirty = True
+        elif not holders:
+            named = {band.name: band for band in staged.bands}
+            band = named.get(row["band"], staged.bands[0])
+            band.entries.append(row_to_entry(row, device=band.device))
+            band._dirty = True
+        else:
+            for band in holders:
+                for entry in band.entries:
+                    if entry.db_id == entry_id:
+                        entry.superseded_at = row["superseded_at"]
+                        entry.superseded_by_text = row["superseded_by_text"]
+        return staged
+
     def _recover_entry_reinstatement_locked(self) -> str | None:
         pending = self._entry_reinstatement_recovery
         if pending is None:
@@ -2156,22 +2191,22 @@ class MemoryService(DreamOps):
                     self._storage.entry_mutation_lock([pending.entry_id]))
                 decision = self._storage.entry_reinstatement_decision(
                     pending.operation_id)
-                rows = self._storage.load_entries()
+                row = self._storage.load_entry_row(pending.entry_id)
                 # A different request under the same UUID proves this request did
-                # not commit (the PK excludes it). Hydrate whatever that winner
+                # not commit (the PK excludes it). Mirror whatever that winner
                 # did, then let the original operation_conflict reach the caller.
                 committed = (
                     decision is not None
                     and decision["request_sha256"] == pending.request_sha256
                 )
-                template = pending.staged if committed else pending.original
-                resident = self._hydrate_correction_rows(rows, template)
+                resident = self._reinstatement_target_mirrored(
+                    pending.entry_id, row)
                 if self._storage.conn.closed or self._storage.conn.broken:
                     raise EntryReinstatementReconciliationError(
                         "entry mutation lock connection was lost before "
                         "reinstatement publication")
                 self._publish_recovery_locked(
-                    pending.original, resident, mutation_locks)
+                    self._cms, resident, mutation_locks)
                 self._entry_reinstatement_recovery = None
                 return "committed" if committed else "rolled_back"
         except EntryReinstatementReconciliationError:
@@ -2228,14 +2263,12 @@ class MemoryService(DreamOps):
                 # committed result and its resident publication are one
                 # serialized operation.
                 assert self._cms is not None
-                prior_resident = self._cms
                 # Admission publishes durable state too. Retain the target
                 # before publication so a lost lock session rolls back resident
                 # identity changes and leaves ordinary reads behind recovery.
                 self._entry_reinstatement_recovery = (
                     PendingEntryReinstatementRecovery(
-                        prior_resident, prior_resident, entry_id,
-                        operation_id, request_sha256, {}))
+                        entry_id, operation_id, request_sha256))
                 self._recover_entry_reinstatement_locked()
                 resident = self._cms
                 assert resident is not None
@@ -2261,9 +2294,10 @@ class MemoryService(DreamOps):
                 target = residents[0]
                 digest = lambda value: hashlib.sha256(
                     value.encode("utf-8")).hexdigest()
-                if (target.superseded_at is None
-                        or target.superseded_by_text is None):
+                if target.superseded_at is None:
                     raise ValueError("target_not_retired")
+                if target.superseded_by_text is None:
+                    raise ValueError("retirement_text_missing")
                 if (digest(target.text) != expected_text_sha256
                         or digest(target.source) != expected_source_sha256
                         or target.superseded_at != float(expected_superseded_at)
@@ -2271,17 +2305,6 @@ class MemoryService(DreamOps):
                         expected_superseded_by_text_sha256):
                     raise ValueError("preimage_mismatch")
 
-                original = resident
-                staged = original.clone_for_staged_store()
-                staged_targets = [
-                    entry for band in staged.bands for entry in band.entries
-                    if entry.db_id == entry_id
-                ]
-                if len(staged_targets) != 1:
-                    raise RuntimeError(
-                        "reinstatement staging could not map target")
-                staged_targets[0].superseded_at = None
-                staged_targets[0].superseded_by_text = None
                 response = {
                     "action": "reinstated", "decision": "committed",
                     "operation_id": operation_id, "entry_id": entry_id,
@@ -2292,8 +2315,7 @@ class MemoryService(DreamOps):
                 }
                 self._entry_reinstatement_recovery = (
                     PendingEntryReinstatementRecovery(
-                        original, staged, entry_id, operation_id, request_sha256,
-                        response))
+                        entry_id, operation_id, request_sha256))
                 try:
                     result = self._storage.reinstate_entry(**request)
                 except Exception as exc:

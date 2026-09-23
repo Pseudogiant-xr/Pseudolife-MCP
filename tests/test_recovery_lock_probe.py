@@ -54,11 +54,11 @@ def test_delayed_recovery_holds_lock_through_publication(
 ):
     svc, storage, old = _retired_service(
         tmp_path / "primary", monkeypatch, pg_url)
-    load = storage.load_entries
+    load = storage.load_entry_row
     reinstate = storage.reinstate_entry
-    admission = iter([load()])
+    admission = iter([load(old.db_id)])
 
-    def unavailable_after_admission():
+    def unavailable_after_admission(entry_id):
         try:
             return next(admission)
         except StopIteration:
@@ -68,7 +68,7 @@ def test_delayed_recovery_holds_lock_through_publication(
         reinstate(**kwargs)
         raise RuntimeError("synthetic lost response")
 
-    monkeypatch.setattr(storage, "load_entries", unavailable_after_admission)
+    monkeypatch.setattr(storage, "load_entry_row", unavailable_after_admission)
     monkeypatch.setattr(storage, "reinstate_entry", committed_response_lost)
     peer_storage = None
     threads = []
@@ -80,7 +80,7 @@ def test_delayed_recovery_holds_lock_through_publication(
         with pytest.raises(EntryReinstatementReconciliationError):
             svc.reinstate(**_request(old.db_id))
         assert svc._entry_reinstatement_recovery is not None
-        monkeypatch.setattr(storage, "load_entries", load)
+        monkeypatch.setattr(storage, "load_entry_row", load)
         monkeypatch.setattr(storage, "reinstate_entry", reinstate)
         if reconnect:
             storage.conn.close()
@@ -152,11 +152,11 @@ def test_connection_loss_after_recovery_read_fails_closed_then_retries(
 ):
     svc, storage, old = _retired_service(
         tmp_path / "primary", monkeypatch, pg_url)
-    load = storage.load_entries
+    load = storage.load_entry_row
     reinstate = storage.reinstate_entry
-    admission = iter([load()])
+    admission = iter([load(old.db_id)])
 
-    def unavailable_after_admission():
+    def unavailable_after_admission(entry_id):
         try:
             return next(admission)
         except StopIteration:
@@ -166,7 +166,7 @@ def test_connection_loss_after_recovery_read_fails_closed_then_retries(
         reinstate(**kwargs)
         raise RuntimeError("synthetic lost response")
 
-    monkeypatch.setattr(storage, "load_entries", unavailable_after_admission)
+    monkeypatch.setattr(storage, "load_entry_row", unavailable_after_admission)
     monkeypatch.setattr(storage, "reinstate_entry", committed_response_lost)
     try:
         with pytest.raises(EntryReinstatementReconciliationError):
@@ -174,17 +174,17 @@ def test_connection_loss_after_recovery_read_fails_closed_then_retries(
         pending = svc._entry_reinstatement_recovery
         assert pending is not None
         assert pending.entry_id == old.db_id
-        monkeypatch.setattr(storage, "load_entries", load)
+        monkeypatch.setattr(storage, "load_entry_row", load)
         monkeypatch.setattr(storage, "reinstate_entry", reinstate)
-        hydrate = svc._hydrate_correction_rows
+        mirror = svc._reinstatement_target_mirrored
 
         def disconnect_after_hydration(*args):
-            resident = hydrate(*args)
+            resident = mirror(*args)
             storage.conn.close()
             return resident
 
         monkeypatch.setattr(
-            svc, "_hydrate_correction_rows", disconnect_after_hydration)
+            svc, "_reinstatement_target_mirrored", disconnect_after_hydration)
         with svc._lock, pytest.raises(
             EntryReinstatementReconciliationError,
             match="lock connection was lost before reinstatement publication",
@@ -193,7 +193,7 @@ def test_connection_loss_after_recovery_read_fails_closed_then_retries(
         assert svc._entry_reinstatement_recovery is pending
         assert old.superseded_at == 20.0
 
-        monkeypatch.setattr(svc, "_hydrate_correction_rows", hydrate)
+        monkeypatch.setattr(svc, "_reinstatement_target_mirrored", mirror)
         svc.autosave_if_changed()
         assert svc._entry_reinstatement_recovery is None
         assert old.superseded_at is None
@@ -304,11 +304,11 @@ def test_reinstatement_publication_loss_restores_resident_and_retries(
 ):
     svc, storage, old = _retired_service(
         tmp_path / "primary", monkeypatch, pg_url)
-    load = storage.load_entries
+    load = storage.load_entry_row
     reinstate = storage.reinstate_entry
-    admission = iter([load()])
+    admission = iter([load(old.db_id)])
 
-    def unavailable_after_admission():
+    def unavailable_after_admission(entry_id):
         try:
             return next(admission)
         except StopIteration:
@@ -318,7 +318,7 @@ def test_reinstatement_publication_loss_restores_resident_and_retries(
         reinstate(**kwargs)
         raise RuntimeError("synthetic lost response")
 
-    monkeypatch.setattr(storage, "load_entries", unavailable_after_admission)
+    monkeypatch.setattr(storage, "load_entry_row", unavailable_after_admission)
     monkeypatch.setattr(storage, "reinstate_entry", committed_response_lost)
     peer_storage = None
     try:
@@ -330,7 +330,7 @@ def test_reinstatement_publication_loss_restores_resident_and_retries(
         prior_cms = svc._cms
         prior_entry = _entry_state(old)
 
-        monkeypatch.setattr(storage, "load_entries", load)
+        monkeypatch.setattr(storage, "load_entry_row", load)
         monkeypatch.setattr(storage, "reinstate_entry", reinstate)
         peer_storage = PostgresStorage(pg_url)
         peer = _service(
@@ -680,7 +680,6 @@ def test_admission_publication_loss_restores_resident_and_retries(
 
         pending = svc._entry_reinstatement_recovery
         assert pending is not None
-        assert pending.original is prior_cms
         assert pending.entry_id == old.db_id
         assert pending.operation_id == request["operation_id"]
         assert pending.request_sha256 == request_sha256
