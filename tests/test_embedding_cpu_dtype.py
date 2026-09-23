@@ -2,11 +2,13 @@
 
 2026-09-23: the production daemon was cgroup OOM-killed under an ordinary
 request burst. The fp32 Qwen3-Embedding-0.6B embedder dominates its
-footprint (~2.85 GB steady, a 3.8 GB load peak, in a throwaway container
-from the production image). The checkpoint itself is bfloat16; loading it
-directly in bf16 measured ~1.4 GB steady and a 537 MB load peak, with
-retrieval parity on real bank data (400 entries, 60 queries: bf16 queries
-against stored fp32 vectors keep top-8 overlap 0.996 and rank-0 60/60).
+footprint (~2.85 GB steady, 3.8 GB peak RSS while loading, in a throwaway
+container from the production image). The checkpoint itself is bfloat16;
+loading it directly in bf16 measured ~1.4 GB steady and 537 MB peak RSS
+while loading (the weights page in on first use), with retrieval parity
+on real bank data (400 entries, 60 queries: bf16 queries against stored
+fp32 vectors keep top-8 overlap 0.994 and rank-0 60/60 through this
+pipeline; evals/results/embedder-cpu-bf16-probe-20260923.json).
 bf16 on a CPU WITHOUT native support is slow, though — the 2026-09-20 CI
 diagnostics behind the fp32 cast — so the switch is capability-gated.
 
