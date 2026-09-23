@@ -60,12 +60,21 @@ def _private(proc: psutil.Process) -> int:
     return int(getattr(info, "private", info.rss))
 
 
+# A Windows venv's python.exe is a launcher that re-runs the same command
+# line under the base interpreter as its only child, and the tests run in
+# that child. A direct interpreter (Linux, CI, no venv) runs them itself.
+LAUNCHER = os.name == "nt" and os.path.normcase(sys.executable) != os.path.normcase(
+    getattr(sys, "_base_executable", sys.executable))
+
+
 class Sampler(threading.Thread):
     """Peak memory and threads of a process tree, sampled on an interval."""
 
-    def __init__(self, root: psutil.Process, interval: float) -> None:
+    def __init__(self, root: psutil.Process, interval: float, *,
+                 expect_launcher: bool) -> None:
         super().__init__(daemon=True)
         self.root = root
+        self.expect_launcher = expect_launcher
         self.interval = interval
         self.stop = threading.Event()
         self.samples = 0
@@ -81,11 +90,13 @@ class Sampler(threading.Thread):
     def _resolve(self) -> psutil.Process | None:
         """The process the tests run in, or None while it is not known yet.
 
-        A Windows venv's python.exe is a launcher that re-runs the same
-        command line under the base interpreter as its only child; the tests
-        run in that child. Elsewhere the root is the pytest process itself,
-        which is settled once it has run a few seconds with no such child.
+        Without a launcher that is the root itself, from the first sample.
+        Behind one it is the launcher's same-command child, waited for (at
+        most a few seconds) so the launcher is never mistaken for pytest.
         """
+        if not self.expect_launcher:
+            return self.root
+
         def cmdline(p: psutil.Process) -> list[str] | None:
             try:
                 return p.cmdline()[1:]
@@ -132,6 +143,20 @@ class Sampler(threading.Thread):
             elapsed = round(time.monotonic() - self._t0, 1)
             self.trace.append((elapsed, root_private // 2**20, children // 2**20, threads))
             self.stop.wait(self.interval)
+
+
+def peaks(sampler: Sampler) -> dict[str, float | int | None]:
+    """The sampled peaks; None (unknown), never 0, when nothing was sampled."""
+    if not sampler.samples:
+        return {"peak_pytest_private_gb": None, "peak_children_private_gb": None,
+                "peak_tree_private_gb": None, "peak_pytest_threads": None}
+    gib = 2**30
+    return {
+        "peak_pytest_private_gb": round(sampler.peak_root_private / gib, 2),
+        "peak_children_private_gb": round(sampler.peak_children_private / gib, 2),
+        "peak_tree_private_gb": round(sampler.peak_tree_private / gib, 2),
+        "peak_pytest_threads": sampler.peak_root_threads,
+    }
 
 
 def _junit_counts(path: Path) -> dict[str, int]:
@@ -183,7 +208,8 @@ def main() -> int:
     t0 = time.monotonic()
     commit_before = _commit_gb()
     proc = subprocess.Popen(cmd, cwd=REPO)
-    sampler = Sampler(psutil.Process(proc.pid), args.interval)
+    sampler = Sampler(psutil.Process(proc.pid), args.interval,
+                      expect_launcher=LAUNCHER)
     sampler.start()
     status = proc.wait()
     wall = time.monotonic() - t0
@@ -192,7 +218,6 @@ def main() -> int:
 
     import torch  # the interpreter's build decides CPU vs GPU runs
 
-    gib = 2**30
     result = {
         "tag": args.tag,
         "note": args.note,
@@ -202,10 +227,7 @@ def main() -> int:
         "wall_s": round(wall, 1),
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
         **provenance(),
-        "peak_pytest_private_gb": round(sampler.peak_root_private / gib, 2),
-        "peak_children_private_gb": round(sampler.peak_children_private / gib, 2),
-        "peak_tree_private_gb": round(sampler.peak_tree_private / gib, 2),
-        "peak_pytest_threads": sampler.peak_root_threads,
+        **peaks(sampler),
         "system_commit_gb": {"before": commit_before, "peak": sampler.peak_commit_gb or None},
         "samples": sampler.samples,
         "interval_s": args.interval,
@@ -222,7 +244,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
     print(f"suite-cost: exit {status}, wall {wall:.0f}s, peak pytest "
-          f"{result['peak_pytest_private_gb']} GB / {sampler.peak_root_threads} "
+          f"{result['peak_pytest_private_gb']} GB / {result['peak_pytest_threads']} "
           f"threads -> {out}", flush=True)
     return status
 
