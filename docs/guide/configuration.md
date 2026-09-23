@@ -565,9 +565,9 @@ for delivery-state and host-verification contracts.
   `memory_outcome` signals, consumed or pending, once they are older than
   this. Signals are the only evidence behind a lesson: under the 30-day
   window, 760 of the live bank's 1,618 current lessons had already lost
-  every signal they came from. The log grows about 800 rows (~0.5 MB) a
-  month. The same window bounds how long a signal whose extraction never
-  lands is retried.
+  every signal they came from. The log grows about 800 rows (under 1 MB on
+  disk) a month. The same window bounds how long a signal whose extraction
+  never lands is retried.
 - **Slot-index shadow verification on** (`memory.slot_index_shadow_rate =
   0.01`) — ~1% of slot-pool queries recompute the index from scratch and
   compare; divergences land in `stats()` as

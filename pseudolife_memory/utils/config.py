@@ -673,8 +673,9 @@ class LessonsConfig:
     # 3650 (was 30) since 2026-09-23: signals are the only evidence behind a
     # lesson, and on the live bank 760 of 1,618 current lessons predated every
     # retained signal, with ~14-21 more rows deleted a day. The log grows
-    # ~800 rows (~0.5 MB) a month (784 rows in the first 30 days). The same
-    # window also bounds how long a signal no extraction lands is retried.
+    # ~800 rows a month (the 30-day window held 787 rows in 792 kB on disk,
+    # indexes included). The same window also bounds how long a signal whose
+    # extraction never lands is retried.
     signal_retention_days: int = 3650
     # When False, the dream skips signal drain / lesson synthesis (signals still
     # pruned by retention).
