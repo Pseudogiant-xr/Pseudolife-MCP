@@ -690,15 +690,20 @@ class PostgresStorage:
             "count": 1, "last_at": time.time(), "last_entry_id": entry_id,
             "last_source": source, "last_superseded": bool(superseded),
         }
+        conn = self.conn
         with self._txn():
             if entry_id is not None:
-                self.conn.execute(
-                    "DELETE FROM entries WHERE id = %s", (entry_id,))
-            row = self.conn.execute(
+                conn.execute("DELETE FROM entries WHERE id = %s", (entry_id,))
+            # A malformed prior count (hand-edited or imported) restarts at
+            # 1 rather than failing the cast: a failure here would roll the
+            # DELETE back on every drop, leaving rows in Postgres past the
+            # cap that all return on the next restart.
+            row = conn.execute(
                 "INSERT INTO meta (key, value) VALUES (%s, %s) "
                 "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value "
-                "|| jsonb_build_object('count', "
-                "COALESCE((meta.value->>'count')::bigint, 0) + 1) "
+                "|| jsonb_build_object('count', CASE "
+                "WHEN jsonb_typeof(meta.value->'count') = 'number' "
+                "THEN (meta.value->>'count')::numeric::bigint ELSE 0 END + 1) "
                 "RETURNING (value->>'count')::bigint",
                 (CAPACITY_DROPS_META_KEY, Jsonb(record)),
             ).fetchone()

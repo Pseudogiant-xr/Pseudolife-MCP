@@ -2845,18 +2845,26 @@ class MemoryService(DreamOps):
                 result["communities"] = len(_c)
                 result["graph_digest_at"] = (self._storage.get_meta("graph_digest") or {}).get("computed_at")
                 # All-time capacity drops, durable across restarts (the CMS
-                # ``true_drops`` counter is per process).
+                # ``true_drops`` counter is per process). Guarded like the
+                # telemetry reads below: stats() is on the session-start
+                # path, and a malformed meta row must not break it.
                 from pseudolife_memory.storage.postgres import (
                     CAPACITY_DROPS_META_KEY,
                 )
-                drops = self._storage.get_meta(CAPACITY_DROPS_META_KEY) or {}
-                result["true_drops_total"] = int(drops.get("count", 0))
-                result["last_true_drop"] = {
-                    "at": drops.get("last_at"),
-                    "entry_id": drops.get("last_entry_id"),
-                    "source": drops.get("last_source"),
-                    "superseded": drops.get("last_superseded"),
-                } if drops else None
+                try:
+                    drops = self._storage.get_meta(CAPACITY_DROPS_META_KEY) or {}
+                    result["true_drops_total"] = int(drops.get("count", 0))
+                    result["last_true_drop"] = {
+                        "at": drops.get("last_at"),
+                        "entry_id": drops.get("last_entry_id"),
+                        "source": drops.get("last_source"),
+                        "superseded": drops.get("last_superseded"),
+                    } if drops else None
+                except Exception:  # noqa: BLE001
+                    logger.warning("capacity drop record unreadable",
+                                   exc_info=True)
+                    result["true_drops_total"] = None
+                    result["last_true_drop"] = None
                 # Retrieval log liveness: nothing else reads the table, and
                 # both write paths swallow their errors, so this is the only
                 # place a silently-dead log becomes visible. Guarded: a

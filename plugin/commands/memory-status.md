@@ -10,8 +10,12 @@ Report the state of the Pseudolife memory stack:
 2. Call `memory_stats()` and summarize: `total_memories`, store occupancy
    as a capacity meter (`bands[0].size` / `capacity` under the default
    flat preset — multi-band presets get a per-band table instead), the
-   `preset`, `true_drops` (non-zero means real capacity pressure —
-   flag it), the reference bank (`reference_bank_size` /
+   `preset`, and capacity pressure. A non-null `capacity_warning` means
+   the store is within 20% of the point where every new memory
+   permanently deletes an old one: lead the report with its `message`.
+   `true_drops_total` counts those deletions all-time (`last_true_drop`
+   names the most recent; `true_drops` counts only since the daemon
+   started) — flag any non-zero. Then the reference bank (`reference_bank_size` /
    `reference_document_count`), and `communities`. Flag
    `weights_reset: true` if present — it means the store's counters
    restarted fresh. If `read_audit` is present, note its

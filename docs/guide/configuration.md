@@ -432,7 +432,7 @@ for delivery-state and host-verification contracts.
       preset: custom
       bands:
         - name: flat
-          max_entries: 15000   # size to the daemon's RAM and latency budget
+          max_entries: 10000   # size to the daemon's RAM and latency budget
           update_interval: 1000000000
           promotion_access_count: 1000000000
           promotion_surprise: 1.1

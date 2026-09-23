@@ -173,6 +173,41 @@ class TestTrueDropRecord:
         assert any("true drop" in r.message and r.levelno == logging.WARNING
                    for r in caplog.records)
 
+    def test_an_entry_without_a_row_is_still_counted(self):
+        # Its insert write-through failed, so there is no row to delete —
+        # but its text leaves the bank all the same.
+        class _NoRows(_EvictRecorder):
+            def insert_entry(self, *args, **fields):
+                return None
+
+        cms = ContinuumMemorySystem(_cfg(("flat", 2)))
+        cms.storage = _NoRows()
+        _fill(cms, 2)
+        cms.store("turn overflow", _emb(99), source="user")
+        assert cms.storage.evicted == [(None, "user", False)]
+
+    def test_a_failed_eviction_write_does_not_lose_the_new_memory(
+        self, caplog,
+    ):
+        # band.store evicts BEFORE it appends, so an error escaping the
+        # eviction would abort the store and drop the incoming memory.
+        class _Down(_EvictRecorder):
+            def delete_evicted_entry(self, entry_id, *, source, superseded):
+                raise ConnectionError("server closed the connection")
+
+        cms = ContinuumMemorySystem(_cfg(("flat", 2)))
+        cms.storage = _Down()
+        _fill(cms, 2)
+        with caplog.at_level(logging.WARNING,
+                             logger="pseudolife_memory.memory.cms"):
+            cms.store("turn overflow", _emb(99), source="user")
+
+        assert "turn overflow" in {e.text for e in cms.bands[0].entries}
+        messages = [r.message for r in caplog.records]
+        assert any("evict write-through failed" in m for m in messages)
+        assert any("true drop" in m and "all-time n/a" in m
+                   for m in messages)
+
     def test_a_demotion_is_not_logged_as_a_drop(self, caplog):
         cms = ContinuumMemorySystem(_cfg(("a", 1), ("b", 5)))
         cms.storage = _EvictRecorder()
@@ -247,8 +282,12 @@ class TestDurableTrueDropRecord:
         svc._storage.close()
         monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
         restarted = MemoryService(data_dir=tmp_path / "restarted")
-        restarted._ensure_init()
-        stats = restarted.stats()
+        try:
+            restarted._ensure_init()
+            stats = restarted.stats()
+        finally:
+            if restarted._storage is not None:
+                restarted._storage.close()
         # The session counter resets with the process; the record does not.
         assert stats["true_drops"] == 0
         assert stats["true_drops_total"] == 1
@@ -297,6 +336,8 @@ class TestDurableTrueDropRecord:
     def test_a_failed_count_keeps_the_row(self, pg_service, monkeypatch):
         # Never deleted without being counted: when the meta write fails,
         # the DELETE in the same transaction must roll back with it.
+        import psycopg
+
         import pseudolife_memory.storage.postgres as pg
 
         svc = pg_service
@@ -304,11 +345,40 @@ class TestDurableTrueDropRecord:
         entry = svc._cms.bands[0].entries[0]
         monkeypatch.setattr(pg, "CAPACITY_DROPS_META_KEY", None)
 
-        with pytest.raises(Exception):
+        # The meta INSERT (NULL key) fails AFTER the DELETE ran.
+        with pytest.raises(psycopg.errors.NotNullViolation):
             svc._storage.delete_evicted_entry(
                 entry.db_id, source="alpha", superseded=False)
 
         assert _row_exists(svc._storage.conn, entry.db_id)
+
+    @pytest.mark.parametrize("corrupt", [
+        {"count": "not-a-number"}, {"count": 2.5}, "not-an-object",
+    ])
+    def test_a_malformed_record_never_blocks_a_drop(self, pg_service, corrupt):
+        # A hand-edited or imported meta row must not make every capacity
+        # delete roll back (rows would pile up in Postgres past the cap
+        # and all come back on restart).
+        from pseudolife_memory.storage.postgres import CAPACITY_DROPS_META_KEY
+
+        storage = pg_service._storage
+        storage.set_meta(CAPACITY_DROPS_META_KEY, corrupt)
+        count = storage.delete_evicted_entry(
+            None, source="alpha", superseded=False)
+        assert isinstance(count, int) and count >= 1
+
+    @pytest.mark.parametrize("corrupt", [
+        {"count": "not-a-number"}, "not-an-object", ["a", "list"],
+    ])
+    def test_a_malformed_record_never_breaks_stats(self, pg_service, corrupt):
+        # stats() is on the session-start path, like the telemetry reads
+        # beside it that are guarded for the same reason.
+        from pseudolife_memory.storage.postgres import CAPACITY_DROPS_META_KEY
+
+        pg_service._storage.set_meta(CAPACITY_DROPS_META_KEY, corrupt)
+        stats = pg_service.stats()
+        assert stats["true_drops_total"] is None
+        assert stats["last_true_drop"] is None
 
     def test_the_drop_record_travels_with_a_logical_export(self):
         # Decision, pinned: the record is audit history of THIS bank's

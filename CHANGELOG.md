@@ -30,7 +30,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   neither. `memory_stats()` reports the all-time `true_drops_total` and
   `last_true_drop` (time, entry id, source, superseded) across restarts.
   The record travels with a logical export, like the entry ids it explains.
-  No schema change.
+  A malformed record (hand-edited or imported) restarts the count instead of
+  blocking the delete, and never breaks `memory_stats()`. No schema change.
+- The plugin's `/memory-status` command leads with `capacity_warning` and
+  reports `true_drops_total` / `last_true_drop` instead of the per-process
+  `true_drops` alone.
 
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
