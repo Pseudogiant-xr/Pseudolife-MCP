@@ -192,6 +192,18 @@ _LEASE_RETRY_SECONDS = 5.0
 # bounds a burst to one attempt, and recovery waits at most this long.
 _RECONNECT_RETRY_SECONDS = 5.0
 
+# How long a writer session verified alive stays trusted before
+# verify_writer_session probes it again. Measured 2026-09-23 on the bench PG
+# (Windows host -> Docker): the probe (SELECT 1) costs 0.72 ms median,
+# 1.8 ms p95. Probing on every call cost +1.0 ms (+17%) on cortex_lookup and
+# took recent(5) from 34 us to 673 us; on store/search (~200 ms with the CPU
+# embedder) it was below the noise. At most one probe per interval keeps a
+# burst of cheap calls cheap. The stale-read window it leaves needs another
+# writer to take, write and release the bank within this interval of the
+# last good probe, after this session died. Writes are not exposed: every
+# reconnect re-checks the lease epoch.
+_SESSION_PROBE_INTERVAL = 1.0
+
 # A meta row counting lease acquisitions. Each writer bumps it when it takes
 # the lease and remembers the value; after a reconnect, a different value
 # means another writer held the bank in the gap (see PostgresStorage.conn).
@@ -255,6 +267,9 @@ class PostgresStorage:
         # refusal set when a reconnect finds another writer's epoch.
         self._lease_epoch: int | None = None
         self.resident_invalidated: str | None = None
+        # When the writer session was last known alive and continuous (a
+        # probe, or a fresh epoch-checked session); see verify_writer_session.
+        self._session_ok_at = 0.0
         self._transaction_connection = None
         self._lesson_transaction_connection = None
         self._entry_import_connection = None
@@ -266,6 +281,7 @@ class PostgresStorage:
             self._seed_relations()
             if self._writer_lease:
                 self._lease_epoch = self._bump_lease_epoch(self._conn)
+            self._session_ok_at = time.monotonic()
         except BaseException:
             # Release the lease now, not when this half-built instance is
             # garbage-collected: the caller's retry would otherwise refuse
@@ -367,10 +383,15 @@ class PostgresStorage:
         """
         if not self._writer_lease or self._pinned():
             return
+        c = self._conn
+        if (not (c.closed or c.broken) and time.monotonic()
+                - self._session_ok_at < _SESSION_PROBE_INTERVAL):
+            return  # verified alive moments ago (see _SESSION_PROBE_INTERVAL)
         try:
             try:
                 conn = self.conn
-                conn.execute("SELECT 1")
+                self._probe_session(conn)
+                self._session_ok_at = time.monotonic()
                 return
             except psycopg.OperationalError:
                 if self._reconnect_error:
@@ -380,6 +401,10 @@ class PostgresStorage:
             return  # flagged: the owner re-reads the bank next
         except psycopg.OperationalError:
             return  # unreachable; retried after _RECONNECT_RETRY_SECONDS
+
+    @staticmethod
+    def _probe_session(conn: psycopg.Connection) -> None:
+        conn.execute("SELECT 1")
 
     def _pinned(self) -> bool:
         return any(c is not None for c in (
@@ -515,6 +540,7 @@ class PostgresStorage:
                 raise
             self._conn = conn
             self._lease_lost = None
+            self._session_ok_at = time.monotonic()  # fresh, epoch-checked
             if handed_over is not None:
                 self.resident_invalidated = (
                     "another writer held this bank while this process was "

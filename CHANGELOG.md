@@ -66,8 +66,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - The service then drops its resident stores and meta-backed state and
       re-reads the bank before serving or saving anything. It logs any
       pending recovery or unsaved write it discards.
-    - Each operation starts with a `SELECT 1` on the writer session, so a
-      dead session is caught before a stale copy is served.
+    - Operations probe the writer session (`SELECT 1`) at most once a
+      second, so a dead session is caught before a stale copy is served.
+      The measured probe cost on the bench PG was 0.72 ms median. Probing
+      on every call cost +1.0 ms on a fact lookup, and took `recent(5)`
+      from 34 µs to 673 µs. With the 1 s gate, a burst costs +65 µs and
+      +3 µs respectively; on store/search it is below the noise.
     - A reconnect with no other writer in between keeps the resident copy.
     - The counter stays out of logical exports, so an import cannot move it
       backwards.

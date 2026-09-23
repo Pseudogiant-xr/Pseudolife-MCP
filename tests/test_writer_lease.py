@@ -275,12 +275,23 @@ def _attempt(fn, *args, **kwargs):
     return None
 
 
+@pytest.fixture()
+def immediate_probe(monkeypatch):
+    """Handover detection waits for the next session probe, at most
+    _SESSION_PROBE_INTERVAL after the last good one; 0 makes it immediate,
+    so these tests do not depend on how long the other writer took. The
+    interval itself is pinned by the probe-gating test."""
+    from pseudolife_memory.storage import postgres as postgres_module
+
+    monkeypatch.setattr(postgres_module, "_SESSION_PROBE_INTERVAL", 0.0)
+
+
 _B_URL = "https://example.com/pg-release"
 
 
 @pytest.mark.parametrize("a_next", ["serve", "write", "flush"])
 def test_a_writer_that_lost_the_bank_rehydrates_before_it_serves_or_writes(
-        pg_conn, pg_url, tmp_path, a_next):
+        pg_conn, pg_url, tmp_path, a_next, immediate_probe):
     """A holds the bank and loses its session. B takes the lease, writes
     the same slot and unrelated canonical rows, and leaves. When A comes
     back, a silent reconnect must not let A serve or save its stale
@@ -340,7 +351,7 @@ def test_a_writer_that_lost_the_bank_rehydrates_before_it_serves_or_writes(
 
 
 def test_reconnecting_with_no_other_writer_keeps_the_resident_bank(
-        pg_conn, pg_url, tmp_path):
+        pg_conn, pg_url, tmp_path, immediate_probe):
     """The common case, a database restart or a dropped link with nobody
     else writing, must not cost a rehydration: the same process simply
     takes the bank back and carries on from its resident copy."""
@@ -360,7 +371,7 @@ def test_reconnecting_with_no_other_writer_keeps_the_resident_bank(
 
 
 def test_an_unreachable_bank_still_serves_reads_from_memory(
-        pg_conn, pg_url, tmp_path, monkeypatch):
+        pg_conn, pg_url, tmp_path, monkeypatch, immediate_probe):
     """Nothing can write a bank this process cannot reach either, so the
     resident copy stays servable through an outage. The per-call session
     check must not turn every read into a failure, or every call into a
@@ -389,6 +400,36 @@ def test_an_unreachable_bank_still_serves_reads_from_memory(
     assert len(attempts) == 1
 
 
+def test_the_session_probe_runs_at_most_once_per_interval(
+        pg_conn, pg_url, tmp_path, monkeypatch):
+    """A round trip on every call is measurable on cheap calls: recent(5)
+    went from 34 us to 673 us, and a fact lookup +1.0 ms (bench PG,
+    2026-09-23). A burst of calls pays for one probe per interval."""
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.storage import postgres as postgres_module
+
+    a = MemoryService(data_dir=tmp_path / "a", database_url=pg_url)
+    a.store("a note to list", source="t")
+    probes: list[int] = []
+    real = PostgresStorage._probe_session
+
+    def counted(conn):
+        probes.append(1)
+        real(conn)
+
+    monkeypatch.setattr(PostgresStorage, "_probe_session", staticmethod(counted))
+    monkeypatch.setattr(postgres_module, "_SESSION_PROBE_INTERVAL", 60.0)
+    a._storage._session_ok_at = 0.0  # noqa: SLF001 — the next call probes
+    for _ in range(20):
+        a.recent(n=5)
+    assert len(probes) == 1
+    monkeypatch.setattr(postgres_module, "_SESSION_PROBE_INTERVAL", 0.0)
+    for _ in range(3):
+        a.recent(n=5)
+    assert len(probes) == 4
+    a._storage.close()  # noqa: SLF001
+
+
 def test_a_mangled_lease_epoch_row_does_not_lock_the_bank_out(pg_conn, pg_url):
     PostgresStorage(pg_url).close()
     pg_conn.execute("UPDATE meta SET value = '\"not a number\"'::jsonb "
@@ -398,7 +439,7 @@ def test_a_mangled_lease_epoch_row_does_not_lock_the_bank_out(pg_conn, pg_url):
 
 
 def test_a_reread_after_a_handover_forgets_what_the_other_writer_cleared(
-        pg_conn, pg_url, tmp_path):
+        pg_conn, pg_url, tmp_path, immediate_probe):
     """The re-read reloads meta-backed state too. Init only overwrites it
     when the row holds a value, so without a reset, a session pointer the
     other writer cleared would survive in this process."""
