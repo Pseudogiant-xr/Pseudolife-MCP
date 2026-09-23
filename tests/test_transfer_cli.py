@@ -455,6 +455,41 @@ def test_import_advances_entry_ids_past_deleted_invalidation_sources(
     assert new_id > retained_source_id
 
 
+def test_import_advances_entry_ids_past_reinstatement_audit_targets(
+    pg_url, tmp_path,
+):
+    """A reinstated entry that was later deleted keeps its ID retired: the
+    audit's replay reports on ``entry_id``, so a reused ID would answer for
+    an unrelated entry."""
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+        audited_id = conn.execute(
+            "SELECT GREATEST("
+            "  COALESCE((SELECT MAX(id) FROM entries), 0), "
+            "  COALESCE((SELECT MAX(source_entry_id) "
+            "            FROM memory_trace_invalidations), 0)) + 50"
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE entry_reinstatement_decisions SET entry_id = %s",
+            (audited_id,),
+        )
+    archive = tmp_path / "deleted-reinstated.zip"
+    perform_export(pg_url, archive)
+
+    with _bank(pg_url):
+        pass
+    perform_import(pg_url, archive)
+
+    with psycopg.connect(pg_url) as conn:
+        new_id = conn.execute(
+            "INSERT INTO entries (band, text, embedding, ts) "
+            "VALUES ('flat', 'post-import entry', %s::vector, 999.0) "
+            "RETURNING id",
+            (_VEC,),
+        ).fetchone()[0]
+    assert new_id > audited_id
+
+
 def test_old_export_without_invalidation_member_backfills_surviving_pairs(
     pg_url, tmp_path,
 ):

@@ -485,9 +485,11 @@ def _advance_sequences(conn) -> None:
     """Move each serial id sequence past the imported rows so fresh writes
     extend the bank instead of colliding.
 
-    Entry IDs also survive in FK-free invalidation events after their source
-    row is deleted. Keep those identities retired: reusing one could collide
-    with an old slot/source event and suppress a later correction warning.
+    Entry IDs also survive in FK-free invalidation events and reinstatement
+    decisions after their row is deleted. Keep those identities retired:
+    reusing one could collide with an old slot/source event and suppress a
+    later correction warning, or make a reinstatement replay report on an
+    unrelated entry.
     """
     for table in EXPORTED_TABLES:
         if "id" not in _column_types(conn, table):
@@ -502,7 +504,9 @@ def _advance_sequences(conn) -> None:
                 "SELECT GREATEST("
                 "  COALESCE((SELECT MAX(id) FROM entries), 0), "
                 "  COALESCE((SELECT MAX(source_entry_id) "
-                "            FROM memory_trace_invalidations), 0))"
+                "            FROM memory_trace_invalidations), 0), "
+                "  COALESCE((SELECT MAX(entry_id) "
+                "            FROM entry_reinstatement_decisions), 0))"
             ).fetchone()[0]
             if max_retained_id:
                 conn.execute("SELECT setval(%s, %s, true)",
