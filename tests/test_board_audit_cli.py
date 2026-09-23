@@ -93,7 +93,8 @@ def test_export_never_replaces_an_existing_file(store, cli, tmp_path):
                                   ("export", "--until", "nan")])
 def test_malformed_arguments_are_refused_before_connecting(cli, args):
     code, output = cli(*args)
-    assert code == 2 and output.out == ""
+    # argparse's own refusal, not a later failure that also exits 2.
+    assert code == 2 and output.out == "" and "usage:" in output.err
 
 
 def test_an_archive_line_that_is_not_an_exported_event_cannot_be_checked(store, cli, tmp_path):
