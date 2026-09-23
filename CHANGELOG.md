@@ -23,6 +23,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--accept-row-drop`.
   Before, a logical wipe followed by `PSEUDOLIFE_BACKUP_MIRROR_KEEP`
   backups rotated every good copy off the mirror.
+- `ops/restore.ps1|.sh` with no file named skip dumps the gate held (after
+  a wipe, the newest dump is the wiped one, and its rehearsal passed
+  because both sides were wiped) and refuse if every dump is held;
+  `-BackupFile` / `--backup-file` overrides.
 - The end-of-dump marker now counts only outside COPY data. A dump cut off
   right after a stored memory that quoted the marker used to pass.
 - New `ops/install-backup-task.ps1` registers a daily `ops/backup.ps1` run

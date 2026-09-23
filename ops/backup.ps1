@@ -228,7 +228,8 @@ if ($drops) {
     $goodDump = $baseline.Data.dump
     $note = ("fell by more than $MaxRowDropPercent% since $($baseline.Name): " +
              ($drops -join "; ") + "; last good dump: $goodDump")
-    # restore.ps1 picks the NEWEST dump by default, which is now this one.
+    # restore.ps1 skips held dumps when no file is named; naming the last
+    # good one is still the unambiguous way back.
     $restoreHint = (" To restore the last good backup instead: ops\restore.ps1 " +
                     "-BackupFile '$(Join-Path $baseline.Dir $goodDump)'.")
 } elseif ($blind) {

@@ -981,8 +981,9 @@ cannot list), so a gate that cannot see never waves a wipe through. On the
 first run after upgrading there are dumps but no manifests yet; the
 newest complete date-stamped dump is then read as the baseline, and only
 a truly empty history rotates without one. The warning names the last
-good dump and the `restore` command for it, because `restore` otherwise
-picks the newest dump, which is the one that shrank. The hold repeats on
+good dump and the `restore` command for it. With no file named, `restore`
+skips held dumps (the newest one after a wipe is the one that shrank) and
+refuses if every dump is held; naming a file overrides that. The hold repeats on
 every run until one passes `-AcceptRowDrop` / `--accept-row-drop`, which
 rotates and makes that dump the new baseline. The gate compares each dump
 with the newest good one, so it is built for sudden loss: a slow decline

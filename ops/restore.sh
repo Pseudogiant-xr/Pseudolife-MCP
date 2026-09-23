@@ -45,10 +45,25 @@ done
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 
-# 1. Resolve + validate the backup artifact.
+# 1. Resolve + validate the backup artifact. With no file named, take the
+# newest dump the row-count gate did not hold (see ops/restore.ps1 for why);
+# --backup-file is the override, and a dump with no manifest is taken as
+# before.
 if [ -z "$BACKUP_FILE" ]; then
-    BACKUP_FILE="$(ls -1t "$repo/data/backups"/pseudolife_memory-*.sql.gz 2>/dev/null | head -1 || true)"
-    [ -n "$BACKUP_FILE" ] || { echo "no backups found under data/backups" >&2; exit 1; }
+    found=0
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        found=1
+        m="$(dirname "$f")/pseudolife_manifest-$(basename "$f" | sed 's/^pseudolife_memory-\(.*\)\.sql\.gz$/\1/').json"
+        if [ -f "$m" ] && grep -q '"rotation": *"held"' "$m"; then
+            echo "==> Skipping $(basename "$f"): the row-count gate held it (its entries, facts or lessons fell sharply). Pass --backup-file to restore it anyway."
+            continue
+        fi
+        BACKUP_FILE="$f"
+        break
+    done < <(ls -1t "$repo/data/backups"/pseudolife_memory-*.sql.gz 2>/dev/null || true)
+    [ "$found" -eq 1 ] || { echo "no backups found under data/backups" >&2; exit 1; }
+    [ -n "$BACKUP_FILE" ] || { echo "every backup under data/backups is held by the row-count gate; pass --backup-file <path> to restore one anyway" >&2; exit 1; }
 fi
 [ -s "$BACKUP_FILE" ] || { echo "backup artifact missing or empty: $BACKUP_FILE" >&2; exit 1; }
 echo "==> Backup: $BACKUP_FILE ($(( $(wc -c < "$BACKUP_FILE") / 1024 )) KB)"

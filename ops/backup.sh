@@ -231,7 +231,8 @@ if [ -n "$drops" ]; then
         good_dump="$(grep -o -m1 '"dump": *"[^"]*"' "$baseline" | sed 's/.*"\([^"]*\)"$/\1/' || true)"
     fi
     note="fell by more than $MAX_ROW_DROP_PERCENT% since $(basename "$baseline"): $drops; last good dump: $good_dump"
-    # restore.sh picks the NEWEST dump by default, which is now this one.
+    # restore.sh skips held dumps when no file is named; naming the last
+    # good one is still the unambiguous way back.
     restore_hint=" To restore the last good backup instead: ops/restore.sh --backup-file '$(dirname "$baseline")/$good_dump'."
 elif [ "$blind" -eq 1 ]; then
     note="no usable baseline among $n_history earlier backup record(s)$list_failures"

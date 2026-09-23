@@ -33,12 +33,36 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 
-# 1. Resolve + validate the backup artifact.
+# 1. Resolve + validate the backup artifact. With no file named, take the
+# newest dump the row-count gate did not hold: ops\backup.ps1 marks a dump
+# whose entries, facts or lessons fell sharply "held" in its manifest, and
+# after a wipe that is exactly the newest one (restoring it puts the wipe
+# back, and the rehearsal passes because both sides are wiped). Naming the
+# file is the override; a dump with no manifest (older than the gate) is
+# taken as before.
 if (-not $BackupFile) {
-    $newest = Get-ChildItem (Join-Path $repo "data\backups") -Filter "pseudolife_memory-*.sql.gz" |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $newest) { throw "no backups found under data\backups" }
-    $BackupFile = $newest.FullName
+    $dumps = @(Get-ChildItem (Join-Path $repo "data" "backups") -Filter "pseudolife_memory-*.sql.gz" |
+        Sort-Object LastWriteTime -Descending)
+    if (-not $dumps) { throw "no backups found under data\backups" }
+    foreach ($d in $dumps) {
+        $manifest = Join-Path $d.DirectoryName `
+            ($d.Name -replace '^pseudolife_memory-(.*)\.sql\.gz$', 'pseudolife_manifest-$1.json')
+        $rotation = $null
+        if (Test-Path -LiteralPath $manifest) {
+            try { $rotation = (Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json).rotation } catch { }
+        }
+        if ($rotation -eq "held") {
+            Write-Host ("==> Skipping $($d.Name): the row-count gate held it (its entries, " +
+                "facts or lessons fell sharply). Pass -BackupFile to restore it anyway.")
+            continue
+        }
+        $BackupFile = $d.FullName
+        break
+    }
+    if (-not $BackupFile) {
+        throw ("every backup under data\backups is held by the row-count gate; " +
+               "pass -BackupFile <path> to restore one anyway")
+    }
 }
 if (-not (Test-Path $BackupFile) -or (Get-Item $BackupFile).Length -eq 0) {
     throw "backup artifact missing or empty: $BackupFile"
