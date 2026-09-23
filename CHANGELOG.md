@@ -35,15 +35,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `examples/CLAUDE.memory.md` say what `current: false` means: the
   replacement was itself replaced or is unresolved, so search again
   instead (even when its preview is on-subject). No cap moved. The block
-  grows 7,479 → 7,497 of its 7,500 chars; the sentence is funded in part
-  by dropping two restatements ("once at the start is not enough" beside
+  grows 7,491 → 7,498 of its 7,500 chars; the sentence is funded by
+  dropping two restatements ("once at the start is not enough" beside
   "RECALL AGAIN mid-session"; "so they don't pollute the graph" beside
-  "excluded from fact/graph extraction") and a filler "now". The tool
-  manifests measure minimal 5,247 / core 11,210 / full 17,498 against
-  5,250 / 11,500 / 17,500, paid for by compressing `memory_search`'s
-  clipped-hit sentence and the `memory_get` / `memory_episode_summary`
-  descriptions — the next addition to either trims first. Ranking, the
-  retrieval log, the schema and every eval number are unchanged.
+  "excluded from fact/graph extraction"), a filler "now", and saying the
+  briefing arrives "via a hook, not MCP" instead of "via a hook, a
+  separate channel". The tool manifests measure minimal 5,215 / core
+  11,178 / full 17,466 against 5,250 / 11,500 / 17,500, paid for by
+  compressing `memory_search`'s clipped-hit sentence, moving its
+  `min(5, top_k)` cortex-width rule into the `top_k` parameter
+  description (where the 2026-08-25 restructure puts argument contracts),
+  and tightening the `memory_get` / `memory_episode_summary` descriptions
+  — the next addition to the block trims first. Ranking, the retrieval
+  log, the schema and every eval number are unchanged.
   **Upgrading:** a copied instruction block gains one sentence.
 
 ### Fixed (2026-09-23 — search stops handing agents an often-unrelated "replacement" as the answer)
@@ -63,11 +67,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a `memory_consolidate` call with a custom `source` reads unverified.
 - Those three surfaces — the `memory_search` description, the served
   session-start block and `examples/CLAUDE.memory.md` — now say what the
-  pointer means: `verified: false` marks a detector link, the entry may
-  still be valid, `memory_get` the replacement only when its preview is on
-  the same subject, and never follow chains. The block stays inside its
-  7,500-char pin (7,488 → 7,479) by dropping clauses it already said
-  elsewhere; the `memory_search` description grows 216 chars, so the
+  pointer means: `verified: false` means only that the link is not
+  confirmed as an explicit correction (often an old detector link, but an
+  evicted or ambiguous successor or a custom-source consolidation reads
+  false too), so the entry may still be valid; `memory_get` the replacement
+  only when its preview is on the same subject, and never follow chains.
+  The block stays inside its 7,500-char pin (7,488 → 7,491) by dropping
+  clauses it already said elsewhere; the `memory_search` description grows
+  242 chars, so the
   `minimal` and `full` manifest budgets in
   `tests/test_tool_consolidation.py` move to 5,250 and 17,500. **Upgrading:**
   if you copied `examples/CLAUDE.memory.md` into your own instructions or
@@ -83,6 +90,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   except for this pointer. `evals/agent_token_ledger.py` meters the pointer
   in its own column, and the 2026-09-04 ledger rows that priced
   `superseded_by_text` are marked superseded in `evals/README.md`.
+
+### Fixed (2026-09-23 — starting a service no longer opens a document store it may never use)
+- The reference (document) bank opens its ChromaDB client on the first
+  document ingest, or on the first read once a store exists on disk, instead
+  of whenever a service starts. chromadb keeps every opened client in a
+  process-wide cache until the process exits, each with about 19 threads and
+  ~3 MB on a 16-CPU host, so a process that builds many services, like the
+  test suite, piled them up by the thousand. Measured on that host:
+  with the embedding model stubbed out,
+  a service start drops from 0.068 s to 0.002 s,
+  and 50 starts leave 34 threads instead of 988
+  (`evals/results/service-init-reference-bank-*.json`);
+  a slice of 218 PG-backed tests runs in 91.2 s instead of 107.5 s
+  and peaks at 61 threads instead of 3,743 and 3.92 GB instead of 4.54 GB
+  (`evals/results/suite-cost-reference-bank-slice-*.json`). A store that
+  does not exist yet reads as empty. A store that fails to open, including
+  a directory that cannot be read, still disables the bank without
+  affecting memory search, and document ingest still refuses. The daemon is
+  effectively unchanged: an existing store (every install so far) still
+  opens during its start-up warmup search.
 
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection

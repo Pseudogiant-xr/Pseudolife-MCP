@@ -365,13 +365,14 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Measured 2026-09-23 after memory_search's supersession sentence
     # changed from "prefer superseded_by_text" (a contract the review
     # found wrong for ~4 in 10 legacy links) to the replaced_by pointer
-    # contract (field, verified flag, preview test, no chains): +216 chars
-    # on a minimal-tier tool, so minimal is 5,196 and full 17,454. Both
+    # contract (field, verified flag, preview test, no chains): +242 chars
+    # on a minimal-tier tool, so minimal is 5,222 and full 17,480. Both
     # caps move deliberately rather than cut another sentence of the same
-    # description; core (11,146) still fits.
+    # description; core (11,172) still fits.
     # 2026-09-23 follow-up (replaced_by.current, memory_get's pointer):
-    # paid for inside the same descriptions, caps unchanged — minimal
-    # 5,247, core 11,210, full 17,498 (3 / 290 / 2 chars of headroom).
+    # paid for inside the same descriptions (memory_search's min(5, top_k)
+    # rule moved into its top_k param description), caps unchanged —
+    # minimal 5,215, core 11,178, full 17,466.
     budgets = {"minimal": 5250, "core": 11500, "full": 17500}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
@@ -412,6 +413,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # full stood at 8398 before the fix.
     # Measured 2026-09-22 after memory_reinstate's nine exact-input
     # descriptions: full is 8,832 chars. The 8,925 cap leaves 93 chars.
+    # 2026-09-24: memory_search's top_k gained the min(5, top_k) rule its
+    # description dropped (+13): minimal 2,494, core 5,248, full 8,845 —
+    # core has 2 chars left.
     param_budgets = {"minimal": 2600, "core": 5250, "full": 8925}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))

@@ -24,13 +24,13 @@ RECALL — at the start of any task:
 - `memory_recall(<question>)` when the answer needs multi-hop chaining across
   related facts.
 - Long hits are clipped (`truncated: true` → `memory_get`). A superseded hit's
-  `replaced_by` names the note recorded as replacing it. `verified: false`
-  marks a link from the retired automatic detector (about 4 in 10 point at an
-  unrelated note): treat the entry as possibly still valid and `memory_get`
-  the replacement only if its `preview` is on the same subject.
-  `current: false` = replacement itself replaced or unresolved: search
-  again instead. Never follow chains. Pass `verbose=true` only when
-  debugging retrieval.
+  `replaced_by` names its recorded replacement. `verified: false` means not
+  confirmed as an explicit correction (often an old detector link; about 4 in
+  10 of those are unrelated): treat the entry as possibly still valid and
+  `memory_get` the replacement only if its `preview` is on the same subject.
+  `current: false` = replacement itself replaced or unresolved: search again
+  instead. Never follow chains. Pass `verbose=true` only when debugging
+  retrieval.
 - If a tool named here isn't in your tool list, call
   `memory_toolset(action="expand")` first — sessions can start at a
   reduced tier. A harness notice that some `mcp__pseudolife-memory__*`
@@ -125,5 +125,5 @@ near-duplicates; `stored=false` is not an error). The first memory call may
 lag while the embedder loads.
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
-(this briefing arrives via a hook, a separate channel) — tell the user to run
+(this briefing arrives via a hook, not MCP) — tell the user to run
 the repo installer (`ops/install.sh` / `ops\install.ps1`), which wires it.

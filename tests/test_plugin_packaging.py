@@ -264,9 +264,10 @@ def test_memory_loop_block_leaves_briefing_headroom():
     2026-09-05: the `used_ids` clause funded itself by three trims of
     text the block already said elsewhere (`one claim per call` in the
     CAPTURE header, `heed polarity:-` in the RECALL bullet, and
-    `rather than silently picking one`). 7,479 then 7,497 on 2026-09-23:
-    the `replaced_by` pointer text, then its `current` clause, each
-    funded in part by dropping restatements — 3 chars of reserve left."""
+    `rather than silently picking one`). 7,479, 7,491 and then 7,498 on
+    2026-09-23/24: the `replaced_by` pointer text, its Codex-review
+    `verified` correction, then its `current` clause, the last funded by
+    dropping restatements — 2 chars of reserve left."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
                                                     MEMORY_LOOP_BLOCK)
     assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000
@@ -398,6 +399,12 @@ def test_memory_loop_block_does_not_trust_replacement_text():
     assert "`replaced_by`" in text and "`verified: false`" in text
     assert "possibly still valid" in text
     assert "Never follow chains" in text
+    # ``verified`` only confirms an explicit correction. False also comes
+    # from an evicted or ambiguous successor and from a custom-source
+    # consolidation, so the text must not claim false proves a detector
+    # link (Codex review P2 on PR #336).
+    assert "not confirmed as an explicit correction" in text
+    assert "marks a link from the retired automatic detector" not in text
 
 
 def test_memory_loop_block_explains_replacement_currency():

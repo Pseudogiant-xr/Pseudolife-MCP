@@ -555,7 +555,8 @@ def memory_search(
     query: Annotated[str, Field(
         description="Natural-language description; specific beats vague.")],
     top_k: Annotated[int, Field(
-        description="Max entries; caps cortex facts too.")] = 8,
+        description="Max entries; caps cortex facts at "
+                    "min(5, top_k).")] = 8,
     sources: Annotated[list[str] | None, Field(
         description="Keep only entries with one of these source tags.")] = None,
     bands: Annotated[list[str] | None, Field(
@@ -587,15 +588,14 @@ def memory_search(
     you before letting it steer, and re-derive when today's context
     differs from the one it was written in. ``cortex``
     facts arrive AHEAD of ``entries`` — the current, deduped answer
-    (``contested: true`` awaits ``memory_fact_resolve``). ``top_k``
-    sizes both blocks: ``min(5, top_k)`` facts.
+    (``contested: true`` awaits ``memory_fact_resolve``).
     ``low_confidence=True``: no confident match, prefer abstaining. A
     superseded hit's ``replaced_by`` names its recorded replacement;
-    ``verified: false`` marks a retired auto-detector link (about 4 in 10
-    are unrelated), so the entry may still hold — ``memory_get`` the
-    replacement only if its ``preview`` is on-subject; ``current: false``
-    = itself replaced or unresolved: search again instead. Never follow
-    chains. Temporal cues may
+    ``verified: false`` = not confirmed as an explicit correction (often
+    an old detector link, ~4 in 10 unrelated), so the entry may still
+    hold — ``memory_get`` the replacement only if its ``preview`` is
+    on-subject; ``current: false`` = itself replaced or unresolved:
+    search again instead. Never follow chains. Temporal cues may
     add ``events`` (oldest first). A fact the query's entity is bound by
     (``distortion_tolerance: constraint``) is served first, marked
     ``pinned``; ``authority: quoted`` = someone else said it, not an
