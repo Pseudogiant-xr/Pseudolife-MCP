@@ -14,6 +14,12 @@
 # digest text changed; the rest is the text. It prints here once, when the
 # watermark is past the shared .seen marker (the tool-result hint advances
 # the same marker), so a quiet turn adds nothing. Still file reads only.
+#
+# Claude Code keeps an MCP server's session id for the life of the process,
+# while /clear and /resume give hooks a new one (env-vars docs, 2026-09-23).
+# session-start.sh therefore records the shim's key per Claude Code process
+# in claude-$CLAUDE_PID.host; when that record belongs to this session's
+# host, its key replaces the one derived from the stdin id.
 
 echo "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
 
@@ -30,9 +36,24 @@ case "$SID" in ''|*[!A-Za-z0-9._-]*) SID="" ;; esac
 # Codex desktop can start hooks without HOME in the environment.
 DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
 if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
+    KEY=""
+    # The env id equals the stdin id only in a hook Claude Code started for
+    # this session; a host run from a Claude Bash command inherits both
+    # variables from the outer session and must not follow its record.
+    case "${CLAUDE_PID:-}" in
+        ''|*[!0-9]*) ;;
+        *)
+            RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
+            if [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] && [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
+                IFS= read -r KEY 2>/dev/null < "$RECORD"
+                case "$KEY" in *[!0-9a-f]*) KEY="" ;; esac
+                [ "${#KEY}" -eq 64 ] || KEY=""
+            fi
+            ;;
+    esac
     # A pipeline's status is its last command's, so the fallback lives
     # inside the group, not after it.
-    KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+    [ -n "$KEY" ] || KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
     FILE="$DIGEST_DIR/$KEY.txt"
     if [ -n "$KEY" ] && [ -f "$FILE" ] && [ ! -L "$FILE" ]; then
         SEEN="$DIGEST_DIR/$KEY.seen"

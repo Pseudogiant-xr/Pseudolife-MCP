@@ -146,7 +146,7 @@
    "d": [
     "GET /api/hook/session-start → stdout becomes session context",
     "Fail-open: daemon down → friendly fallback, still exit 0",
-    "Payload capped at 9,500 chars (client caps stdout at 10k)", "On resume or compact clears the coordination digest's .seen marker so the next prompt prints the current digest afresh"
+    "Payload capped at 9,500 chars (client caps stdout at 10k)", "On resume, compact or clear clears the coordination digest's .seen marker so the next prompt prints the current digest afresh", "Records the shim's digest key once per Claude Code process (claude-<CLAUDE_PID>.host) at launch and keeps it across /clear and an in-session /resume, whose hooks get a new session_id while the shim keeps its launch id"
    ]
   },
   {
@@ -160,7 +160,7 @@
    "d": [
     "One-line memory discipline injected on every user turn",
     "Recall-before-review: search the bank, then compare to the files",
-    "No daemon call — offline-safe, always exit 0", "Coordination digest: reads the shim's per-session digest file (SHA-256 of the stdin session_id under PSEUDOLIFE_DIGEST_DIR) and prints it only when its watermark passed the shared .seen marker, then advances it; quiet turns add nothing; one ledger line per firing"
+    "No daemon call — offline-safe, always exit 0", "Coordination digest: reads the shim's per-session digest file (SHA-256 of the stdin session_id under PSEUDOLIFE_DIGEST_DIR, or the key in claude-<CLAUDE_PID>.host when the hook's CLAUDE_CODE_SESSION_ID matches that session_id) and prints it only when its watermark passed the shared .seen marker, then advances it; quiet turns add nothing; one ledger line per firing"
    ]
   },
   {
@@ -173,7 +173,7 @@
    "p": "plugin/hooks/",
    "d": [
     "POST /api/hook/session-end closes the session episode",
-    "Ownership-guarded: only clears the active-session pointer it owns"
+    "Ownership-guarded: only clears the active-session pointer it owns", "First, before the connection checks and any network call (plugin SessionEnd hooks get 1.5 s): on an in-session /clear or /resume writes the process's digest-key record if missing and marks a /resume (claude-<CLAUDE_PID>.switch) so SessionStart keeps the record"
    ]
   },
   {

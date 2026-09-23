@@ -3599,9 +3599,13 @@ set `PSEUDOLIFE_AGENT_STATE` to a
 private file outside the repository for deliberate mailbox resume. Each concurrent
 adapter needs its own state file; sharing one does not create a second identity.
 Claude Code sessions can instead set `PSEUDOLIFE_AGENT_STATE_DIR` to a private
-directory: the shim keys one state file per session under it by the
-`CLAUDE_CODE_SESSION_ID` the host exports, so a resumed session keeps its
-address and concurrent sessions never share one. Without either, each launch
+directory: the shim keys one state file under it by the
+`CLAUDE_CODE_SESSION_ID` Claude Code launches it with, so concurrent sessions
+never share one and `claude --resume <id>` returns to the session's address.
+That id is fixed for the shim's lifetime: `/clear` or an in-session `/resume`
+keeps the running shim and its address. `claude --continue`, or `--resume`
+without an id, may launch the shim with the process's startup id instead of
+the resumed one, and the session then gets a new address. Without either, each launch
 gets a new address, registered as not resumable and retired an hour after it
 goes quiet. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
@@ -3622,7 +3626,20 @@ shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
 unchanged, a one-line reminder rides every tenth tool result. The file is
 removed when the shim exits; a session id without an adapter (or a host that
-exports none, such as Claude Desktop) gets hints only.
+exports none, such as the app-level MCP servers Claude Desktop launches from
+`claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
+Code, whose per-session stdio shim does receive the id.
+
+Claude Code hooks see the current session id, which `/clear` and an
+in-session `/resume` change, while the shim keeps the id it was launched with.
+The plugin's SessionStart hook therefore records the shim's digest key once
+per Claude Code process, in `claude-<CLAUDE_PID>.host` beside the digests,
+and the prompt hook reads through that record. `CLAUDE_PID` is the Claude Code
+process id, which Claude Code v2.1.214 and later export to hooks; older
+versions keep the per-session key. After `/clear`, compaction or a resume,
+the current digest prints once more. A `--continue` launch whose shim got the
+startup id cannot be mapped, since no hook ever sees that id; such a session
+gets hints only.
 
 ### Codex CLI and desktop
 

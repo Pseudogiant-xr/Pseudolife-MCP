@@ -116,18 +116,85 @@ INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$SRC" ] || SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"session_start_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-# A resumed or compacted session lost the coordination digest it saw;
-# clearing the marker makes the next prompt hook print the current one
-# afresh (see user-prompt-submit.sh for the file layout).
-case "$SRC" in
-    resume|compact)
-        DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
-        if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
-            KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+# Coordination digest key (see user-prompt-submit.sh for the file layout).
+# Claude Code keeps an MCP server's CLAUDE_CODE_SESSION_ID for the life of
+# the process, while /clear and /resume give hooks a new session id
+# (env-vars docs, 2026-09-23). The shim writes its digest under its spawn
+# id, so a launch records that key per Claude Code process, named by the
+# CLAUDE_PID Claude Code exports to hooks (not to MCP servers), and later
+# sessions of the same process keep it. The env id equals the stdin id only
+# in a hook Claude Code started for this session: a host run from a Claude
+# Bash command inherits both variables and must leave the record alone.
+# --continue can still spawn the shim with a startup id no hook ever sees;
+# the record cannot name that one.
+read_record() {  # $1 = path; prints the key it holds when well formed
+    local key=""
+    [ -f "$1" ] && [ ! -L "$1" ] || return 0
+    IFS= read -r key 2>/dev/null < "$1"
+    case "$key" in *[!0-9a-f]*) return 0 ;; esac
+    [ "${#key}" -eq 64 ] && printf '%s' "$key"
+}
+write_record() {  # $1 = path, $2 = line; atomic replace, best effort
+    printf '%s\n' "$2" 2>/dev/null > "$1.$$" && mv -f "$1.$$" "$1" 2>/dev/null || rm -f "$1.$$" 2>/dev/null
+}
+DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
+if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
+    KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+    case "${CLAUDE_PID:-}" in
+        ''|*[!0-9]*) ;;
+        *)
+            if [ -n "$KEY" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
+                RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
+                SWITCH="$DIGEST_DIR/claude-$CLAUDE_PID.switch"
+                HOLD=""
+                # A launch (startup, fork, or a resume nothing marked)
+                # replaces the record. An in-session /resume keeps it:
+                # session-end.sh marks one, and the marker is honoured only
+                # for a minute and only on resume, so one left by a dead
+                # process whose PID came back cannot keep its record.
+                case "$SRC" in
+                    clear|compact) HOLD=1 ;;
+                    resume)
+                        STAMP=""
+                        [ -f "$SWITCH" ] && [ ! -L "$SWITCH" ] && IFS= read -r STAMP 2>/dev/null < "$SWITCH"
+                        NOW=$(date +%s 2>/dev/null)
+                        # Validated before any arithmetic: bash aborts the
+                        # whole script on a malformed number such as 08.
+                        case "$STAMP" in ''|0*|*[!0-9]*) STAMP="" ;; esac
+                        case "$NOW" in ''|0*|*[!0-9]*) STAMP="" ;; esac
+                        if [ -n "$STAMP" ] && [ "${#STAMP}" -le 12 ] && [ "${#NOW}" -le 12 ] &&
+                                [ $((NOW - STAMP)) -ge 0 ] && [ $((NOW - STAMP)) -le 60 ]; then
+                            HOLD=1
+                        fi
+                        ;;
+                esac
+                HELD=$(read_record "$RECORD")
+                if [ -z "$HOLD" ]; then
+                    write_record "$RECORD" "$KEY"
+                elif [ -n "$HELD" ]; then
+                    KEY="$HELD"
+                    write_record "$RECORD" "$KEY"  # refreshed, so the sweep keeps a live one
+                fi
+                rm -f "$SWITCH" 2>/dev/null
+                if [ "$SRC" = startup ]; then
+                    # Records of long-gone processes, and temp files a killed
+                    # hook left behind. A live one is rewritten on every
+                    # launch, /clear, compaction and resume.
+                    find "$DIGEST_DIR" -maxdepth 1 -type f \( -name 'claude-*.host*' -o -name 'claude-*.switch*' \) \
+                        -mtime +30 -delete 2>/dev/null
+                fi
+            fi
+            ;;
+    esac
+    # A resumed, compacted or cleared conversation lost the coordination
+    # digest it saw; clearing the marker makes the next prompt hook print
+    # the current one afresh.
+    case "$SRC" in
+        resume|compact|clear)
             [ -n "$KEY" ] && rm -f "$DIGEST_DIR/$KEY.seen" 2>/dev/null
-        fi
-        ;;
-esac
+            ;;
+    esac
+fi
 # The plugin release this hook runs from, read beside the script so the
 # daemon can open the briefing with a notice when the two differ (a cached
 # plugin moves only on /plugin update; the daemon on every deploy). A copy

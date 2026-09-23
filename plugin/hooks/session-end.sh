@@ -26,6 +26,45 @@ decode_connection_value() {
     fi
 }
 
+INPUT=$(cat 2>/dev/null || true)
+SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+REASON=$(printf '%s' "$INPUT" | sed -n 's/.*"reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+
+# Coordination digest key, first: Claude Code gives a plugin SessionEnd hook
+# 1.5s, whatever hooks.json says, and the connection checks and curl below
+# can use all of it. An in-session /clear or /resume keeps this process's
+# shim, so session-start.sh keeps its record of the shim's key (see there).
+# A session launched under older hooks has no record yet; the session ending
+# here then names the key, correctly unless an earlier /clear under those
+# hooks already moved it. A /resume also leaves a marker, because
+# session-start.sh cannot otherwise tell it from a launch.
+case "$REASON" in
+    clear|resume)
+        DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
+        case "${CLAUDE_PID:-}" in
+            ''|*[!0-9]*) ;;
+            *)
+                if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
+                    RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
+                    HELD=""
+                    [ -f "$RECORD" ] && [ ! -L "$RECORD" ] && IFS= read -r HELD 2>/dev/null < "$RECORD"
+                    case "$HELD" in *[!0-9a-f]*) HELD="" ;; esac
+                    if [ "${#HELD}" -ne 64 ]; then
+                        KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+                        [ -n "$KEY" ] && { printf '%s\n' "$KEY" 2>/dev/null > "$RECORD.$$" &&
+                            mv -f "$RECORD.$$" "$RECORD" 2>/dev/null || rm -f "$RECORD.$$" 2>/dev/null; }
+                    fi
+                    if [ "$REASON" = resume ]; then
+                        SWITCH="$DIGEST_DIR/claude-$CLAUDE_PID.switch"
+                        { date +%s 2>/dev/null > "$SWITCH.$$" &&
+                            mv -f "$SWITCH.$$" "$SWITCH" 2>/dev/null || rm -f "$SWITCH.$$" 2>/dev/null; }
+                    fi
+                fi
+                ;;
+        esac
+        ;;
+esac
+
 CONNECTION_HOME="${CODEX_HOME:-${HOME}/.codex}"
 CONNECTION="${CONNECTION_HOME}/pseudolife/connection.json"
 MANAGED_URL=""
@@ -104,8 +143,7 @@ AUTH=()
 if [ -z "$CONNECTION_ERROR" ] && [ -n "$TOKEN" ]; then
     AUTH=(-H "Authorization: Bearer $TOKEN")
 fi
-INPUT=$(cat 2>/dev/null || true)
-SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+
 if [ -n "$SID" ] && [ -z "$CONNECTION_ERROR" ]; then
     # One retry bridges short daemon maintenance stalls (autosave/sweep
     # lock holds; measured 2026-09-01). Plain --retry treats a timeout as

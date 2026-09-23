@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — the per-turn mail notice survives /clear under Claude Code)
+- The plugin's prompt hook stopped printing the coordination digest after
+  `/clear` or an in-session `/resume`. Claude Code gives hooks the new session
+  id, while a stdio MCP server keeps the id it was launched with, and the shim
+  writes the digest under that launch id. The plugin's SessionStart hook now
+  records the shim's key once per Claude Code process, in
+  `claude-<CLAUDE_PID>.host` beside the digests, and the prompt hook reads
+  through it. Claude Code v2.1.214 and later export `CLAUDE_PID` to hooks but
+  not to MCP servers. The record is followed only when the hook's
+  `CLAUDE_CODE_SESSION_ID` equals its stdin `session_id`, so a host run from a
+  Claude Bash command, which inherits both variables, neither writes nor
+  follows the outer session's record. A launch replaces any record left by a
+  dead process with the same PID. SessionEnd, before its connection checks
+  and network call, marks an in-session `/resume` so SessionStart keeps the
+  record (honoured only on resume, within a minute), and names the key for a
+  session launched under the previous hooks on its first `/clear`. A startup
+  sweeps records and stray temp files untouched for more than 30 days, and
+  only those. After `/clear` the current digest prints once more, as after
+  resume and compaction.
+- An in-session `/resume` to a conversation whose earlier shim left a digest
+  behind no longer prints that dead shim's stale mail.
+- Docs: the configuration guide and the shim no longer claim that every resumed
+  session keeps its coordination address. That holds for `--resume <id>`;
+  `--continue`, or `--resume` without an id, may launch the shim with the
+  startup id, which gets a new address and no prompt-hook digest (tool-result
+  hints still arrive). Claude Desktop's Code tab does pass the session id to
+  its per-session shim; only the app-level servers from
+  `claude_desktop_config.json` get none.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

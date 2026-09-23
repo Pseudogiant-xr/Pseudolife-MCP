@@ -1008,9 +1008,13 @@ def _session_state_path(url: str):
     """Key the adapter's state file by the host session, so a resumed Claude
     Code session keeps its address instead of minting one per launch.
 
-    Claude Code exports ``CLAUDE_CODE_SESSION_ID`` to the MCP servers it
-    launches and keeps it across resume (seen 2026-09-20 in a running
-    shim's environment). It applies only with ``PSEUDOLIFE_AGENT_STATE_DIR``
+    Claude Code exports ``CLAUDE_CODE_SESSION_ID`` to the stdio MCP servers it
+    launches (seen 2026-09-20 in a running shim's environment). The value is
+    fixed for the process: ``/clear`` and an in-session ``/resume`` keep this
+    shim and its address, and ``--resume <id>`` launches it with the resumed
+    id. ``--continue``, or ``--resume`` without an id, may launch it with the
+    startup id instead, which then gets a new address (Claude Code env-vars
+    docs, checked 2026-09-23). It applies only with ``PSEUDOLIFE_AGENT_STATE_DIR``
     configured and a canonical UUID; anything else means a fresh address
     per launch, as before. An unusable directory is reported and falls
     back the same way rather than taking the memory proxy down."""
@@ -1118,8 +1122,10 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                     wake_enabled=wake, label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "agent"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
                     task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid,
-                    # The prompt hook reads this file by the same session id
-                    # it receives on stdin; a host without one gets hints only.
+                    # Keyed by the launch-time session id. The plugin hooks
+                    # map later sessions of this Claude Code process (after
+                    # /clear or /resume) back to it; a host without an id
+                    # gets hints only.
                     digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")))),
                     timeout=_ADAPTER_STARTUP_SECONDS)
             except (AdapterError, CredentialError, TimeoutError):
@@ -1208,8 +1214,8 @@ def run_shim(*, channel: bool = False) -> None:
     # (opened/closed here) and per-store stamping (rides every call as
     # X-PL-Session), so lifecycle and attribution always agree. It stays the
     # shim's own: Claude Code does export CLAUDE_CODE_SESSION_ID, which keys
-    # only the coordination state file (_session_state_path); other hosts
-    # export nothing comparable.
+    # only the coordination state file (_session_state_path) and the turn
+    # digest; other hosts export nothing comparable.
     session_uid = uuid.uuid4().hex
     _post_episode(url, None, "/api/episode/start", {
         "session_key": session_uid,
