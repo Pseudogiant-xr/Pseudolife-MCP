@@ -350,8 +350,7 @@ for delivery-state and host-verification contracts.
 - **ONNX acceleration is load-only** (`EmbeddingConfig.backend = "onnx"`).
   The MCP defaults select it only when the optional ONNX stack is installed
   *and* the configured model's artifact already resolves locally. Otherwise
-  they choose torch up front and log one INFO line saying so. They never pick
-  a backend that could only warn and fall back on every boot. The default
+  they choose torch up front and log one INFO line saying so. The default
   Qwen3-Embedding-0.6B ships no ONNX artifact, so the daemon runs it on torch;
   MiniLM, whose artifact the daemon image bakes, still gets ONNX. An explicit
   `embedding.backend` is never overridden: `backend: onnx` without the

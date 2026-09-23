@@ -79,11 +79,14 @@ def test_onnx_backend_auto_selected_when_artifact_resolves(tmp_path, monkeypatch
     assert svc.config.embedding.backend == "onnx"
 
 
-def test_onnx_backend_not_auto_selected_when_artifact_absent(tmp_path, monkeypatch):
+def test_onnx_backend_not_auto_selected_when_artifact_absent(
+    tmp_path, monkeypatch, caplog,
+):
     """optimum installed but the configured model has no ONNX artifact (the
     Qwen3-Embedding default): choose torch up front instead of selecting a
-    backend the loader can only warn about and fall back from on every boot.
-    Unmocked probe over a real model dir without the artifact."""
+    backend the loader can only warn about and fall back from on every boot,
+    and say why at INFO — never WARNING. Unmocked probe over a real model dir
+    without the artifact."""
     import pseudolife_memory.service as service_mod
 
     monkeypatch.setattr(service_mod, "_onnx_embedding_available", lambda: True)
@@ -92,8 +95,15 @@ def test_onnx_backend_not_auto_selected_when_artifact_absent(tmp_path, monkeypat
     (model_dir / "config.json").write_text("{}", encoding="utf-8")
     _write_model_config(tmp_path, model_dir)
 
-    svc = MemoryService(data_dir=tmp_path)
+    with caplog.at_level("INFO", logger="pseudolife_memory"):
+        svc = MemoryService(data_dir=tmp_path)
     assert svc.config.embedding.backend == "torch"
+    explained = [
+        r for r in caplog.records
+        if r.name == "pseudolife_memory.service" and "No ONNX artifact" in r.getMessage()
+    ]
+    assert [r.levelname for r in explained] == ["INFO"]
+    assert model_dir.as_posix() in explained[0].getMessage()
 
 
 def test_default_model_without_onnx_artifact_stays_torch(tmp_path, monkeypatch):
