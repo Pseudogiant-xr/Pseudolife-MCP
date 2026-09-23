@@ -495,6 +495,7 @@ def test_dream_status_would_fire_on_idle(svc):
     assert "dream_cursor" in st and "idle_seconds" in st
 
 
+@pytest.mark.real_model
 def test_dream_resolves_paraphrased_slot_and_supersedes(svc):
     svc.config.memory.cortex.dream_slot_match_threshold = 0.3  # on
     svc.store("payments-db host is db-prod-1", source="notes")

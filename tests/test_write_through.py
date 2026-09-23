@@ -174,6 +174,7 @@ def test_consolidate_supersession_survives_restart(pg_conn, pg_url, tmp_path):
     assert entry["superseded_by_text"] == "Consolidated: fact A current"
 
 
+@pytest.mark.real_model
 def test_consolidate_paraphrase_refusal_survives_restart(
     pg_conn, pg_url, tmp_path,
 ):

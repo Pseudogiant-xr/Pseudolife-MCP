@@ -12,8 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pseudolife_memory.service import MemoryService
 from pseudolife_memory.utils.config import AppConfig, load_config
+
+pytestmark = pytest.mark.real_model
 
 # Every service-backed test here only stores and searches, so they share
 # conftest's module-scoped ``warm_service`` via ``pristine_service`` (bank

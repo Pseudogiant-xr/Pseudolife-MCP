@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import tempfile
 
+import pytest
+
 from pseudolife_memory.service import MemoryService
 
 
@@ -156,6 +158,7 @@ def test_history_as_of_set_slot(pristine_service):
     assert [v["value"] for v in out["versions"]] == ["alpha"]
 
 
+@pytest.mark.real_model
 def test_fact_get_miss_returns_candidates(pristine_service):
     svc = pristine_service
     svc.cortex_write("server", "port", "8080", support="user")

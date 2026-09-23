@@ -172,6 +172,7 @@ def test_apply_survives_junk_delete_of_a_mentioned_entity(svc):
     assert audited
 
 
+@pytest.mark.real_model
 def test_dream_alias_proposal_folds_thin_side_into_evidence_bearing(svc):
     # The alias screen compares a freshly-minted name against existing cortex
     # entities. When the NEW side carries the evidence (facts/edges) and the
@@ -226,6 +227,7 @@ def _find_candidate(out, a="atlas queue", b="review workbench"):
     return None
 
 
+@pytest.mark.real_model
 def test_candidate_snippets_fall_back_to_mention_scan(svc):
     _stage_link_pair(svc)
     out = svc.deep_dream(apply=False)
@@ -237,6 +239,7 @@ def test_candidate_snippets_fall_back_to_mention_scan(svc):
     assert "low_differential" not in c and "evidence_overlap" not in c
 
 
+@pytest.mark.real_model
 def test_candidates_respect_dismissed_pairs(svc):
     _stage_link_pair(svc)
     assert _find_candidate(svc.deep_dream(apply=False)) is not None
@@ -295,6 +298,7 @@ def test_apply_prunes_old_snapshots(svc):
     assert out["snapshot"] in names                # the fresh one survives
 
 
+@pytest.mark.real_model
 def test_candidate_snippets_are_truncated(svc):
     _stage_link_pair(svc)
     svc.config.memory.deep_dream.snippet_max_chars = 40
@@ -305,6 +309,7 @@ def test_candidate_snippets_are_truncated(svc):
     assert snips and all(len(s) <= 40 for s in snips)
 
 
+@pytest.mark.real_model
 def test_deep_dream_can_omit_snippets(svc):
     _stage_link_pair(svc)
     out = svc.deep_dream(apply=False, include_snippets=False)
@@ -589,6 +594,7 @@ def _lesson_dup_pair(out):
     return None
 
 
+@pytest.mark.real_model
 def test_dry_run_lists_cross_key_lesson_duplicates(svc):
     _stage_lesson_dups(svc)
     out = svc.deep_dream(apply=False)
@@ -602,6 +608,7 @@ def test_dry_run_lists_cross_key_lesson_duplicates(svc):
     assert len(svc._lessons.current_records()) == 3
 
 
+@pytest.mark.real_model
 def test_dry_run_lists_world_slot_duplicates(svc):
     svc.world_write("MCP spec 2026-07-28", "session identity",
                     "protocol sessions are removed; explicit state handles are required",
@@ -617,6 +624,7 @@ def test_dry_run_lists_world_slot_duplicates(svc):
     assert c["a"]["source_url"].startswith("https://example.com")
 
 
+@pytest.mark.real_model
 def test_lesson_duplicate_dismissal_persists(svc):
     _stage_lesson_dups(svc)
     assert _lesson_dup_pair(svc.deep_dream(apply=False)) is not None
@@ -634,6 +642,7 @@ def test_curation_dismiss_rejects_unknown_store_and_self_pair(svc):
     assert same["dismissed"] is False and same["reason"] == "bad_pair"
 
 
+@pytest.mark.real_model
 def test_curation_duplicates_standing_listing(svc):
     """The Console review drawer's standing listing: the same lesson/world
     pairs the deep dream reports, without the graph-wide dream pass, and
@@ -653,6 +662,7 @@ def test_curation_duplicates_standing_listing(svc):
     assert _lesson_dup_pair(svc.curation_duplicates()) is None
 
 
+@pytest.mark.real_model
 def test_curation_duplicates_world_side_carries_source_url(svc):
     svc.world_write("MCP spec 2026-07-28", "session identity",
                     "protocol sessions are removed; explicit state handles are required",
@@ -667,6 +677,7 @@ def test_curation_duplicates_world_side_carries_source_url(svc):
                                                     "value", "source_url"}
 
 
+@pytest.mark.real_model
 def test_apply_lists_store_duplicates_but_never_deletes(svc):
     _stage_lesson_dups(svc)
     svc.world_write("MCP spec 2026-07-28", "session identity",

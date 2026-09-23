@@ -541,6 +541,7 @@ def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
     assert cos_doc > 0.99, f"cos_doc {cos_doc:.6f} for text={text!r}"
 
 
+@pytest.mark.real_model
 def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
     pg_conn = v24_bank
     # Keep entries.embedding NOT NULL going into the migration -- the

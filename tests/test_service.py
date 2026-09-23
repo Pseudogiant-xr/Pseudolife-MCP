@@ -202,6 +202,7 @@ class TestSupersede:
         assert wrong["superseded"] is True
         assert wrong["superseded_by_text"] == "Sky is blue"
 
+    @pytest.mark.real_model
     def test_supersede_refuses_paraphrased_target(
         self, pristine_service: MemoryService,
     ) -> None:
@@ -983,6 +984,7 @@ class TestConsolidation:
     cluster → dict, plus the consolidate-and-supersede round-trip.
     """
 
+    @pytest.mark.real_model
     def test_consolidation_candidates_returns_cluster_dicts(
         self, pristine_service: MemoryService,
     ) -> None:

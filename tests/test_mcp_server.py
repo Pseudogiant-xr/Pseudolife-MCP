@@ -435,6 +435,7 @@ def test_memory_fact_get_on_a_fully_emptied_set_slot_reads_as_empty(
     assert "candidates" in got
 
 
+@pytest.mark.real_model
 def test_store_auto_promotes_and_search_surfaces_cortex(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
@@ -526,6 +527,7 @@ def test_memory_episode_summary_via_mcp_dispatch(
     assert out["found"] is True and out["id"] == ep["id"]
 
 
+@pytest.mark.real_model
 def test_memory_consolidation_candidates_via_mcp_dispatch(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -713,6 +715,7 @@ def test_memory_search_explain_implies_verbose_entries(tmp_path: Path, monkeypat
         assert k in e, f"explain entry missing {k!r}"
 
 
+@pytest.mark.real_model
 def test_compact_search_keeps_supersession_signal(tmp_path: Path, monkeypatch) -> None:
     """superseded_by_text changes answers — it must survive compaction."""
     _reload_mod(tmp_path, monkeypatch)

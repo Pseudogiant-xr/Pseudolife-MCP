@@ -329,6 +329,7 @@ def _stage_pair(svc):
                       "deploy-the-daemon-to-the-host|pitfall"})
 
 
+@pytest.mark.real_model
 def test_curation_judge_distinct_dismisses_and_memoizes(svc):
     cfg = svc.config.memory.deep_dream
     cfg.curation_judge_mode = "auto-distinct"
@@ -343,6 +344,7 @@ def test_curation_judge_distinct_dismisses_and_memoizes(svc):
     assert len(svc._lessons.current_records()) == 2                  # nothing deleted
 
 
+@pytest.mark.real_model
 def test_curation_judge_duplicate_waits_in_auto_distinct_and_forgets_in_auto(svc):
     cfg = svc.config.memory.deep_dream
     cfg.curation_judge_mode = "auto-distinct"

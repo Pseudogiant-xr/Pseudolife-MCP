@@ -101,6 +101,7 @@ _LEGACY_FACT_GET = {
 }
 
 
+@pytest.mark.real_model
 def test_legacy_payloads_survive_the_projection_refactor(
         tmp_path: Path, monkeypatch) -> None:
     mod = _reload(tmp_path, monkeypatch)
@@ -279,6 +280,7 @@ def test_cortex_block_width_is_five_when_not_compacting(
     assert seen == [5]
 
 
+@pytest.mark.real_model
 def test_pinned_constraint_facts_stay_first_under_a_narrow_top_k(
         tmp_path: Path, monkeypatch) -> None:
     """The narrowed block must not evict the pin — ``cortex_search`` pins
