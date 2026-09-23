@@ -700,10 +700,7 @@ for delivery-state and host-verification contracts.
   — instead of the replacement's full text, which `verbose=true` still serves
   (2026-09-23: about 4 in 10 links the automatic contradiction detector
   left before it stopped superseding point at an unrelated note, so the
-  full text must not arrive framed as the answer). `memory_get` serves
-  the same pointer when the fetched entry is superseded, and
-  `memory_episode_summary` compacts its `recent_entries` like
-  `memory_recent`;
+  full text must not arrive framed as the answer);
   the cortex block serves `min(5, top_k)` facts,
   so a narrow search stops paying for five;
   and `memory_fact_get` serves the acting subset — value, kind/members,
@@ -716,7 +713,10 @@ for delivery-state and host-verification contracts.
   `memory_fact_get` from 2,175 to 1,296. These are PROJECTIONS above the
   service layer — ranking, `min_score` and every benchmark number are
   unaffected. Set `compact_payloads: false` to restore the pre-2026-09-04
-  payloads verbatim (superseded hits keep the `replaced_by` pointer); raise
+  payloads verbatim (superseded hits keep the `replaced_by` pointer, which
+  `memory_get` also serves for a superseded entry, and
+  `memory_episode_summary` still compacts its `recent_entries` like
+  `memory_recent` — none of the three follows the knob); raise
   `entry_text_chars` for long-form corpora where
   the tail of a note carries the answer.
 

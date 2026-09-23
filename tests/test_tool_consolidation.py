@@ -371,7 +371,7 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # description; core (11,146) still fits.
     # 2026-09-23 follow-up (replaced_by.current, memory_get's pointer):
     # paid for inside the same descriptions, caps unchanged — minimal
-    # 5,239, core 11,202, full 17,490.
+    # 5,247, core 11,210, full 17,498 (3 / 290 / 2 chars of headroom).
     budgets = {"minimal": 5250, "core": 11500, "full": 17500}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))

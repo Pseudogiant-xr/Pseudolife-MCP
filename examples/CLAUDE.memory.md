@@ -28,8 +28,9 @@ RECALL — at the start of any task:
   marks a link from the retired automatic detector (about 4 in 10 point at an
   unrelated note): treat the entry as possibly still valid and `memory_get`
   the replacement only if its `preview` is on the same subject.
-  `current: false` = itself replaced or unresolved: search again. Never
-  follow chains. Pass `verbose=true` only when debugging retrieval.
+  `current: false` = replacement itself replaced or unresolved: search
+  again instead. Never follow chains. Pass `verbose=true` only when
+  debugging retrieval.
 - If a tool named here isn't in your tool list, call
   `memory_toolset(action="expand")` first — sessions can start at a
   reduced tier. A harness notice that some `mcp__pseudolife-memory__*`

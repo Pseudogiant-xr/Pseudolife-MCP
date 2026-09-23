@@ -264,9 +264,9 @@ def test_memory_loop_block_leaves_briefing_headroom():
     2026-09-05: the `used_ids` clause funded itself by three trims of
     text the block already said elsewhere (`one claim per call` in the
     CAPTURE header, `heed polarity:-` in the RECALL bullet, and
-    `rather than silently picking one`). 7,479 then 7,475 on 2026-09-23:
-    the `replaced_by` pointer text and its `current` clause were both
-    funded by dropping restatements."""
+    `rather than silently picking one`). 7,479 then 7,497 on 2026-09-23:
+    the `replaced_by` pointer text, then its `current` clause, each
+    funded in part by dropping restatements — 3 chars of reserve left."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
                                                     MEMORY_LOOP_BLOCK)
     assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000

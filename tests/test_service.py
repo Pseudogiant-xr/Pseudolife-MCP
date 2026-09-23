@@ -1022,6 +1022,23 @@ class TestEpisodes:
                 old["superseded_by_current"]) == (None, True, True)
         assert "superseded_by_id" not in by_text["port is 5433"]
 
+    def test_episode_summary_resolves_a_successor_from_another_episode(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """The successor is resolved over every resident entry, not only
+        the episode's: a note stored in one session and corrected in the
+        next must still name its replacement in the first summary."""
+        first = pristine_service.episode_start("first-session")
+        pristine_service.store("port is 5432", source="notes")
+        pristine_service.episode_end()
+        pristine_service.episode_start("second-session")
+        pristine_service.supersede("port is 5432", "port is 5433")
+        (old,) = pristine_service.episode_summary(first["id"])[
+            "recent_entries"]
+        assert old["text"] == "port is 5432"
+        assert (old["supersession_verified"],
+                old["superseded_by_current"]) == (True, True)
+
     def test_episode_summary_for_missing_id_returns_not_found(
         self, pristine_service: MemoryService,
     ) -> None:

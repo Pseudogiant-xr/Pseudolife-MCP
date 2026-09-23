@@ -21,24 +21,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   row being served (two existing columns added to its `SELECT`, no schema
   change), so a row the CMS does not hold is not served as live. A live
   entry's payload is unchanged. The service / REST payload (`/api/entry`)
-  gains `superseded_at`, `superseded_by_text` and the successor annotation
-  on superseded entries only.
+  gains `superseded: true`, `superseded_at`, `superseded_by_text` and the
+  successor annotation on superseded entries only.
 - `memory_episode_summary` compacts `recent_entries` the way
   `memory_recent` compacts its entries: the raw dicts carried every
-  superseded entry's uncapped `superseded_by_text`.
+  superseded entry's uncapped `superseded_by_text`. The MCP entries also
+  lose `timestamp`, `episode_id`, `episode_title`, `bank`,
+  `access_count`, `surprise_score` and `slots`, as `memory_recent`'s do;
   `memory_recent(episodes=[id], verbose=true)` still serves the full
-  dicts, and the service (Console, REST) keeps them, now annotated.
+  dicts, and the service (Console, REST) keeps them, now annotated. None
+  of this follows `compact_payloads`.
 - The `memory_search` description, the served session-start block and
   `examples/CLAUDE.memory.md` say what `current: false` means: the
-  replacement was itself replaced or is unresolved, so search again. No
-  cap moved. The block shrinks 7,479 → 7,475 chars by dropping two
-  restatements ("once at the start is not enough" beside "RECALL AGAIN
-  mid-session"; "so they don't pollute the graph" beside "excluded from
-  fact/graph extraction") and a filler "now". The tool manifests measure
-  minimal 5,239 / core 11,202 / full 17,490 against 5,250 / 11,500 /
-  17,500, paid for by compressing `memory_search`'s clipped-hit sentence
-  and the `memory_get` / `memory_episode_summary` descriptions. Ranking,
-  the retrieval log, the schema and every eval number are unchanged.
+  replacement was itself replaced or is unresolved, so search again
+  instead (even when its preview is on-subject). No cap moved. The block
+  grows 7,479 → 7,497 of its 7,500 chars; the sentence is funded in part
+  by dropping two restatements ("once at the start is not enough" beside
+  "RECALL AGAIN mid-session"; "so they don't pollute the graph" beside
+  "excluded from fact/graph extraction") and a filler "now". The tool
+  manifests measure minimal 5,247 / core 11,210 / full 17,498 against
+  5,250 / 11,500 / 17,500, paid for by compressing `memory_search`'s
+  clipped-hit sentence and the `memory_get` / `memory_episode_summary`
+  descriptions — the next addition to either trims first. Ranking, the
+  retrieval log, the schema and every eval number are unchanged.
   **Upgrading:** a copied instruction block gains one sentence.
 
 ### Fixed (2026-09-23 — search stops handing agents an often-unrelated "replacement" as the answer)

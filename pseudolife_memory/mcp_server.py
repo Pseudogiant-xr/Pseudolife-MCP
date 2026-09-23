@@ -410,7 +410,9 @@ def _replaced_by(e: dict[str, Any]) -> dict[str, Any]:
     """The ``{id, at, preview, verified, current}`` pointer a superseded
     entry dict (one carrying ``superseded_by_text``) is served with, in
     place of the replacement's full text: the successor's row id (None
-    when the service could not resolve one entry by its text), the
+    when the service could not resolve one entry by its text, and also in
+    file mode or for a successor with no row yet — so ``id: None`` with
+    ``current: True`` is a found, live successor without an id), the
     supersession date, the first ``_REPLACED_BY_PREVIEW_CHARS`` of the
     replacement's text, whether an explicit correction made the link, and
     whether the successor is itself still live — false marks a chain link
@@ -592,7 +594,7 @@ def memory_search(
     ``verified: false`` marks a retired auto-detector link (about 4 in 10
     are unrelated), so the entry may still hold — ``memory_get`` the
     replacement only if its ``preview`` is on-subject; ``current: false``
-    = itself replaced or unresolved: search again. Never follow
+    = itself replaced or unresolved: search again instead. Never follow
     chains. Temporal cues may
     add ``events`` (oldest first). A fact the query's entity is bound by
     (``distortion_tolerance: constraint``) is served first, marked

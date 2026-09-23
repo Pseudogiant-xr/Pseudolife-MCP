@@ -834,6 +834,22 @@ def test_memory_get_on_a_superseded_entry_serves_the_pointer(
     assert rb["preview"] == long_text[:120] + "…"
 
 
+def test_memory_get_on_a_superseded_entry_without_replacement_text(
+        tmp_path: Path, monkeypatch) -> None:
+    """A row retired before replacement text was recorded (pre-schema-v5)
+    is still flagged superseded but has nothing to point at — the same
+    rule ``_compact_entry`` applies — and no raw service key leaks."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    legacy = {**_LIVE_GET, "superseded": True,
+              "superseded_at": 1_790_000_000.0, "superseded_by_text": None,
+              "superseded_by_id": None, "supersession_verified": False,
+              "superseded_by_current": False}
+    monkeypatch.setattr(mod.service, "get_entry",
+                        lambda entry_id: dict(legacy))
+    assert _invoke("memory_get", {"entry_id": 5}) == {
+        **_LIVE_GET, "superseded": True}
+
+
 def test_memory_get_faded_payload_is_unchanged(
         tmp_path: Path, monkeypatch) -> None:
     mod = _reload_mod(tmp_path, monkeypatch)
