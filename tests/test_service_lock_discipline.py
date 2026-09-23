@@ -77,10 +77,11 @@ CALLER_HOLDS_LOCK = {
     "_emit_correction_signal",
     "_link_lesson_graph",
     "_write_lesson_locked",
-    # Lock-taking wrappers and ReviewJudgments invoke these while locked.
-    "_judge_enrich_locked",
-    "_enrich_link_proposals_locked",
-    "_enrich_junk_proposals_locked",
+    # ReviewJudgments invokes these evidence reads while locked; the
+    # *_from pack builders that consume them touch no storage.
+    "_judge_evidence_locked",
+    "_link_evidence_locked",
+    "_junk_evidence_locked",
     "_graph_accept_proposal_locked",
     "_graph_reject_proposal_locked",
     "_graph_accept_entity_merge_locked",

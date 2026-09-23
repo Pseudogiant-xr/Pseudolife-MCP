@@ -679,6 +679,16 @@ class PostgresStorage:
             out.append(d)
         return out
 
+    def load_entry_texts(self) -> list[dict]:
+        """``id``/``text``/``source`` of every entry, in :meth:`load_entries`
+        order, for readers that never touch an embedding (the review-judge
+        evidence packs). Transferring and decoding the vectors is ~96% of
+        a full load: 650 ms vs 23 ms for 2,239 entries, live bank,
+        2026-09-23."""
+        return [{"id": r[0], "text": r[1], "source": r[2]}
+                for r in self.conn.execute(
+                    "SELECT id, text, source FROM entries ORDER BY id").fetchall()]
+
     def load_entry_row(self, entry_id: int) -> dict | None:
         """One entries row in the :meth:`load_entries` shape, or None."""
         cols = ("id",) + _ENTRY_COLS + ("reinforcements",)

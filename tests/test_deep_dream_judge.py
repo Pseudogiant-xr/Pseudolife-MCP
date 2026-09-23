@@ -112,7 +112,7 @@ def test_shadow_mode_records_and_applies_nothing(svc):
 
 def test_rows_sharing_an_endpoint_beyond_the_batch_still_record(svc):
     """A row's review fingerprint must not depend on which other rows share
-    its batch. refresh() signs the whole pending queue and validate() only
+    its batch. refresh() signed the whole pending queue and validate() only
     the judged batch, and the evidence pack's ``group`` (the endpoint a row
     shares with OTHER pending rows) came out set over the queue and None
     over a batch that left the sibling out, so the row never validated. On
@@ -145,8 +145,9 @@ def test_second_opinion_on_a_split_group_still_records(svc):
 
 
 def test_review_signatures_do_not_depend_on_batch_composition(svc):
-    """Every review queue signs a row twice: over the whole pending queue at
-    refresh() and over the judged batch at validate(). An evidence field
+    """Every review queue signs a row twice, among different rows: with the
+    rows prepare() picked for refresh(), and with the judged batch at
+    validate(). An evidence field
     computed across rows makes the two disagree whenever the batch leaves
     out a row it relates to, and that row then never records (the merge
     ``group`` did, 2026-09-22). Pinned for every ReviewJudgments kind, with
@@ -181,6 +182,71 @@ def test_review_signatures_do_not_depend_on_batch_composition(svc):
             for p in pending:
                 key = str(p["id"])
                 assert review.signatures([p]) == {key: whole[key]}, (kind, key)
+
+
+def test_merge_pack_matches_the_whole_graph_computation(svc):
+    """Deploy continuity (2026-09-23). The merge pack now resolves mentions
+    for the rows' own entities, from entry texts without embeddings. It must
+    equal the old computation over every graph entity from full entries:
+    any drift changes every fingerprint, so the first tick after a deploy
+    would clear every recorded verdict and reopen every automatic reject.
+    Covers trace-backed mentions, the token fallback, an entity below
+    min_entity_mentions and one over max_fallback_mentions, and the one
+    case where the mentions pass changes the pack at all: an entity with
+    more fallback notes than the pack's own 12-note scan reaches."""
+    import time
+
+    import numpy as np
+
+    from pseudolife_memory.memory import graph_consolidation as gc
+    cfg = svc.config.memory.deep_dream
+    cfg.max_fallback_mentions = 20
+    st = svc._storage
+
+    def note(text):
+        return st.insert_entry({"band": "flat", "text": text, "source": "t",
+                                "embedding": np.zeros(1024, dtype=np.float32),
+                                "surprise": 0.5, "ts": time.time(),
+                                "access_count": 0})
+    # 14 notes name 'alpha service'; only the 14th also names 'alpha svc'.
+    # The mentions pass sees all 14, so the 'alpha svc' side's evidence sits
+    # inside the other side's (low_differential); the 12-note scan misses it.
+    for i in range(13):
+        note(f"alpha service note {i}")
+    note("alpha svc is the alpha service renamed")
+    for i in range(21):                  # over max_fallback_mentions
+        note(f"beta hub fact {i}")
+    traced = [note("beta svc deploys from main"), note("beta svc pages on failure")]
+    note("filler 0 and filler 1 share a note")
+    _propose(svc, "alpha svc", "alpha service")
+    _propose(svc, "beta svc", "beta hub")
+    _propose(svc, "gamma one", "gamma two")
+    for i in range(6):
+        st.ensure_entity(f"filler {i}", display=f"filler {i}")
+    canonical = st.find_entity("beta svc")["canonical"]
+    for entry_id in traced:
+        st.add_trace(canonical, "role", entry_id, time.time())
+    rows = [p for p in st.pending_entity_proposals() if p.get("kind") == "merge"]
+    with svc._lock:
+        g = st.load_graph()
+        scopes, traces = st.entity_sources_map(), st.traces_by_entity_norm()
+        entries, facts = st.load_entries(), st.entity_fact_counts()
+        evidence = svc._judge_evidence_locked(rows)
+    _, mentions = gc.entity_context_vectors(
+        g["entities"], entries, traces, min_mentions=cfg.min_entity_mentions,
+        max_fallback_mentions=cfg.max_fallback_mentions or None)
+    reference = svc._enrich_merge_proposals(
+        rows, g["entities"], g["edges"], entries, traces, mentions, scopes,
+        cfg.max_context_snippets, cfg.judge_snippet_max_chars, True,
+        fact_counts=facts)
+    alpha = next(r for r in reference
+                 if {r["from"]["display"], r["into"]["display"]}
+                 == {"alpha svc", "alpha service"})
+    assert alpha["from"]["snippets"] and alpha["into"]["snippets"]
+    assert alpha["low_differential"], "the scenario must reach the 14th note"
+    assert svc._judge_enrich_from(rows, evidence) == reference
+    for row, expected in zip(rows, reference):
+        assert svc._judge_enrich_from([row], evidence) == [expected]
 
 
 def test_split_group_auto_rejects_are_not_reopened(svc):

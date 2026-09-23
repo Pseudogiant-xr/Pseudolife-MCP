@@ -3009,32 +3009,42 @@ class DreamOps:
                 extra_body=ex.extra_body)
         return ex if hasattr(ex, method) else None
 
-    def _judge_enrich(self, pending: list[dict]) -> list[dict]:
-        with self._lock:
-            return self._judge_enrich_locked(pending)
+    def _judge_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the merge-judge evidence pack (caller
+        holds the lock); :meth:`_judge_enrich_from` builds the pack from
+        them with the lock released. Entry TEXTS only: nothing in the pack
+        reads an embedding, and decoding them was most of the read."""
+        return {"graph": self._storage.load_graph(),
+                "scopes": self._storage.entity_sources_map(),
+                "traces": self._storage.traces_by_entity_norm(),
+                "entries": self._storage.load_entry_texts(),
+                "facts": self._storage.entity_fact_counts()}
 
-    def _judge_enrich_locked(self, pending: list[dict]) -> list[dict]:
+    def _judge_enrich_from(self, pending: list[dict], evidence: dict) -> list[dict]:
         """The merge-judge evidence pack for ``pending`` rows — the same
         snippets/scopes/degree the review surfaces show, with the
-        ``low_differential`` stamp."""
+        ``low_differential`` stamp. Pure over ``evidence``: no lock."""
         cfg = self.config.memory.deep_dream
-        g = self._storage.load_graph()
-        scope_map = self._storage.entity_sources_map()
-        traces = self._storage.traces_by_entity_norm()
-        entries = self._storage.load_entries()
-        fact_counts = self._storage.entity_fact_counts()
+        g = evidence["graph"]
         from pseudolife_memory.memory import graph_consolidation as gc
+        # Mentions for the rows' own entities only (each entity resolves
+        # independently of the others). The graph-wide pass was ~1.1 s of
+        # every ~1.3 s enrichment: 7,473 entities, live bank, 2026-09-23.
+        ids = {eid for p in pending for eid in (p.get("entity_id"), p.get("into_id"))}
         _, mentions = gc.entity_context_vectors(
-            g["entities"], entries, traces,
+            [e for e in g["entities"] if e["id"] in ids],
+            evidence["entries"], evidence["traces"],
             min_mentions=cfg.min_entity_mentions,
-            max_fallback_mentions=cfg.max_fallback_mentions or None)
+            max_fallback_mentions=cfg.max_fallback_mentions or None,
+            with_vectors=False)
         # Built at the JUDGE's cap, not the review surface's: the
         # 2026-09-02 panel judged 305/309 merge snippets clipped to 240
         # chars at build time and lost guidance in three folds.
         return self._enrich_merge_proposals(
-            pending, g["entities"], g["edges"], entries, traces,
-            mentions, scope_map, cfg.max_context_snippets,
-            cfg.judge_snippet_max_chars, True, fact_counts=fact_counts)
+            pending, g["entities"], g["edges"], evidence["entries"],
+            evidence["traces"], mentions, evidence["scopes"],
+            cfg.max_context_snippets, cfg.judge_snippet_max_chars, True,
+            fact_counts=evidence["facts"])
 
     @staticmethod
     def _model_name(ex, fallback: str | None = None) -> str:
@@ -3125,6 +3135,9 @@ class DreamOps:
                 review = ReviewJudgments(self, "merge", ex, pending, current_model)
                 reconsidered = refresh_proposal_terminals(review, limit=cap)
                 review.pending = [p for p in self._storage.pending_entity_proposals() if p.get("kind") == "merge"]
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
                 pending = review.refresh()
             first = [p for p in pending if not p.get("judge_verdict")]
             second = ([p for p in pending
@@ -3132,7 +3145,6 @@ class DreamOps:
                       if cfg.judge_second_opinion else [])
             if not first and not second:
                 return {"judged": 0, "reconsideration": reconsidered}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
             out = {"judged": 0, "auto_rejected": 0, "auto_accepted": 0,
                    "second_opinions": 0, "pending_unjudged": 0,
                    "reconsideration": reconsidered,
@@ -3156,7 +3168,9 @@ class DreamOps:
                 logger.info("deep-dream judge: second opinion on %d pending "
                             "merge proposal(s) (mode %s)", len(batch),
                             cfg.judge_mode)
-                enriched = self._judge_enrich(batch)
+                # The signed packs: validate() re-checks exactly the
+                # evidence the model is shown.
+                enriched = review.rows(batch)
                 proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
                               "reason": e.get("reason"), "score": e.get("score"),
                               "low_differential": e.get("low_differential"),
@@ -3272,12 +3286,12 @@ class DreamOps:
                                     out["auto_accepted"] += 1
             if first and cap > len(second[:cap]):
                 batch = first[:cap - len(second[:cap])]
-                # Announce the batch BEFORE the enrichment + model call: the
-                # completion line alone let the 2026-08-31 forensics misplace
-                # a ~50s window inside this (mostly lock-free) phase.
+                # Announce the batch BEFORE the model call: the completion
+                # line alone let the 2026-08-31 forensics misplace a ~50s
+                # window inside this (lock-free) phase.
                 logger.info("deep-dream judge: judging %d pending merge "
                             "proposal(s) (mode %s)", len(batch), cfg.judge_mode)
-                enriched = self._judge_enrich(batch)
+                enriched = review.rows(batch)
                 proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
                               "reason": e.get("reason"), "score": e.get("score"),
                               "low_differential": e.get("low_differential"),
@@ -3320,21 +3334,26 @@ class DreamOps:
 
     # ── link judge (2026-09-02) ───────────────────────────────────────────
 
-    def _enrich_link_proposals(self, pending: list[dict]) -> list[dict]:
-        with self._lock:
-            return self._enrich_link_proposals_locked(pending)
+    def _link_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the link-judge evidence pack (caller
+        holds the lock); entry texts only, as for the merge pack."""
+        return {"graph": self._storage.load_graph(),
+                "scopes": self._storage.entity_sources_map(),
+                "entries": self._storage.load_entry_texts()}
 
-    def _enrich_link_proposals_locked(self, pending: list[dict]) -> list[dict]:
+    def _enrich_link_proposals_from(self, pending: list[dict],
+                                    evidence: dict) -> list[dict]:
         """Evidence pack for pending edge proposals: each side's live
         edges and scopes, the detector's rationale, and the notes naming
-        BOTH entities (per-side notes when nothing names both)."""
+        BOTH entities (per-side notes when nothing names both). Pure over
+        ``evidence``: no lock."""
         from pseudolife_memory.memory import graph_consolidation as gc
         from pseudolife_memory.memory.graph_review import _token_set
         cfg = self.config.memory.deep_dream
         cap = cfg.snippet_max_chars
-        g = self._storage.load_graph()
-        scope_map = self._storage.entity_sources_map()
-        entries = self._storage.load_entries()
+        g = evidence["graph"]
+        scope_map = evidence["scopes"]
+        entries = evidence["entries"]
         disp = {e["id"]: e["display"] for e in g["entities"]}
         outs: dict[int, list[str]] = {}
         ins: dict[int, list[str]] = {}
@@ -3351,17 +3370,16 @@ class DreamOps:
             src = e.get("source")
             return (f"[{src}] " if src else "") + str(e.get("text", ""))[:cap]
 
-        entry_tokens = None
+        # Tokenized once per pack, not once per row: validate() builds the
+        # judged batch's pack under the service lock.
+        tokens = [_token_set(e.get("text", "")) for e in entries] if pending else []
 
         def mentions_of(display, k=2):
-            nonlocal entry_tokens
             want = _token_set(display)
             if not want:
                 return []
-            if entry_tokens is None:
-                entry_tokens = [(e, _token_set(e.get("text", ""))) for e in entries]
             found = []
-            for e, toks in entry_tokens:
+            for e, toks in zip(entries, tokens):
                 if want <= toks:
                     found.append(stamp(e))
                     if len(found) >= k:
@@ -3371,7 +3389,7 @@ class DreamOps:
         rows = []
         for i, p in enumerate(pending):
             both = [t[:cap] for t in gc.shared_mention_entries(
-                entries, p["src"], p["dst"], limit=3)]
+                entries, p["src"], p["dst"], limit=3, tokens=tokens)]
             rows.append({
                 "n": i + 1, "src": p["src"], "relation": p["relation"],
                 "dst": p["dst"], "rationale": p.get("rationale"),
@@ -3420,14 +3438,16 @@ class DreamOps:
                 review = ReviewJudgments(self, "link", ex, pending, current_model)
                 reconsidered = refresh_proposal_terminals(review, limit=cap)
                 review.pending = self._storage.pending_proposals()
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
                 pending = [p for p in review.refresh() if not p.get("judge_verdict")]
             if not pending:
                 return {"judged": 0, "reconsideration": reconsidered}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
-            batch = pending[:cap]
+            batch = pending[:cap]      # the cap prepare() signed for
             logger.info("deep-dream link judge: judging %d pending link "
                         "proposal(s) (mode %s)", len(batch), mode)
-            rows = self._enrich_link_proposals(batch)
+            rows = review.rows(batch)
             verdicts = ex.judge_links(rows)
             self._stamp_skipped(verdicts, rows, relation=None)
             model = self._model_name(ex)
@@ -3474,27 +3494,37 @@ class DreamOps:
 
     # ── junk judge (2026-09-02) ───────────────────────────────────────────
 
-    def _enrich_junk_proposals(self, pending: list[dict]) -> list[dict]:
-        with self._lock:
-            return self._enrich_junk_proposals_locked(pending)
+    def _junk_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the junk-judge evidence pack for
+        ``pending`` (caller holds the lock); entry texts only, as for the
+        merge pack."""
+        g = self._storage.load_graph()
+        canon = {e["id"]: e["canonical"] for e in g["entities"]}
+        return {"graph": g,
+                "scopes": self._storage.entity_sources_map(),
+                "entries": self._storage.load_entry_texts(),
+                "facts": self._storage.entity_fact_counts(),
+                "fact_texts": self._storage.current_fact_counts_by_entity_text(),
+                "fact_rows": {p["entity_id"]: self._storage.entity_fact_rows(
+                    p["entity_id"], canon.get(p["entity_id"], ""))
+                    for p in pending}}
 
-    def _enrich_junk_proposals_locked(self, pending: list[dict]) -> list[dict]:
+    def _enrich_junk_proposals_from(self, pending: list[dict],
+                                    evidence: dict) -> list[dict]:
         """Evidence pack for pending junk proposals: detector class, live
         degree and edges (with origin), fact count and text, whether the
-        node is a lesson-minted object, scopes, mentioning notes."""
+        node is a lesson-minted object, scopes, mentioning notes. Pure over
+        ``evidence`` (read for these rows): no lock."""
         from pseudolife_memory.graph import degree_counts, norm_name as _nn
         from pseudolife_memory.memory.graph_review import _token_set
         cfg = self.config.memory.deep_dream
         cap = cfg.snippet_max_chars
-        g = self._storage.load_graph()
-        scope_map = self._storage.entity_sources_map()
-        entries = self._storage.load_entries()
-        fact_counts = self._storage.entity_fact_counts()
-        fact_texts = self._storage.current_fact_counts_by_entity_text()
-        fact_rows = {p["entity_id"]: self._storage.entity_fact_rows(
-            p["entity_id"], next((e["canonical"] for e in g["entities"]
-                                  if e["id"] == p["entity_id"]), ""))
-            for p in pending}
+        g = evidence["graph"]
+        scope_map = evidence["scopes"]
+        entries = evidence["entries"]
+        fact_counts = evidence["facts"]
+        fact_texts = evidence["fact_texts"]
+        fact_rows = evidence["fact_rows"]
         disp = {e["id"]: e["display"] for e in g["entities"]}
         canon = {e["id"]: e["canonical"] for e in g["entities"]}
         deg = degree_counts(g["edges"])
@@ -3587,14 +3617,16 @@ class DreamOps:
                 review = ReviewJudgments(self, "junk", ex, pending, current_model)
                 reconsidered = refresh_proposal_terminals(review, limit=cap)
                 review.pending = [p for p in self._storage.pending_entity_proposals() if p.get("kind") == "junk"]
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
                 pending = [p for p in review.refresh() if not p.get("judge_verdict")]
             if not pending:
                 return {"judged": 0, "reconsideration": reconsidered}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
-            batch = pending[:cap]
+            batch = pending[:cap]      # the cap prepare() signed for
             logger.info("deep-dream junk judge: judging %d pending junk "
                         "proposal(s) (mode %s)", len(batch), mode)
-            rows = self._enrich_junk_proposals(batch)
+            rows = review.rows(batch)
             verdicts = ex.judge_junk(rows)
             self._stamp_skipped(verdicts, rows)
             model = self._model_name(ex)
@@ -4017,7 +4049,8 @@ class DreamOps:
             mark = None
             from pseudolife_memory.memory.review_judgments import (
                 fingerprint, judging_policy, candidate_generation, candidate_current,
-                observed_model, last_response_identity, record_response_identity)
+                candidate_inputs, observed_model, last_response_identity,
+                record_response_identity)
             from pseudolife_memory.memory.dream import _CANDIDATE_JUDGE_SYSTEM_PROMPT
             from pseudolife_memory.memory.review_decisions import (
                 record_candidate_dismissal, refresh_candidate_dismissals,
@@ -4034,12 +4067,16 @@ class DreamOps:
                     return {"judged": 0, "skipped": "no_storage"}
                 last_model = last_response_identity(self, "candidate", policy)
                 memo_model = current_model or last_model
-                decision_generation = candidate_generation(self, decision_inputs=False)
                 reconsidered = refresh_candidate_dismissals(
                     self, policy_fingerprint=policy,
-                    generation_fingerprint=decision_generation,
                     served_model=current_model, last_response_model=last_model, limit=cap)
-                generation = candidate_generation(self)
+                # After the refresh: a reopen deletes a dismissed pair, an
+                # input of the full generation only.
+                inputs = candidate_inputs(self)
+            decision_generation = candidate_generation(
+                self, decision_inputs=False, inputs=inputs)
+            generation = candidate_generation(self, inputs=inputs)
+            del inputs
             if candidates is None:
                 with self._lock:
                     self._ensure_init()
@@ -4066,11 +4103,13 @@ class DreamOps:
                 return "|".join(sorted((_nn(c["src"]), _nn(c["dst"]))))
 
             with self._lock:
-                if candidate_generation(self) != generation:
-                    return {"judged": 0, "reason": "stale_evidence"}
-                source_evidence = dict(zip(
-                    (key(c) for c in candidates),
-                    candidate_evidence_fingerprints(self, candidates)))
+                inputs = candidate_inputs(self)
+            if candidate_generation(self, inputs=inputs) != generation:
+                return {"judged": 0, "reason": "stale_evidence"}
+            source_evidence = dict(zip(
+                (key(c) for c in candidates),
+                candidate_evidence_fingerprints(self, candidates, inputs=inputs)))
+            del inputs
 
             def signature(c):
                 return fingerprint({"candidate": c, "policy": policy,

@@ -47,6 +47,25 @@ def test_evidence_changed_during_inference_cannot_apply(svc):
     assert _pending_link(svc, pid) is not None
 
 
+def test_evidence_changed_while_signing_cannot_apply(svc, monkeypatch):
+    """The queue is signed with the lock released, so a write can land
+    between the evidence read and the stale check. The model is shown the
+    packs that were signed, and validate() re-signs under the lock, so the
+    opinion is neither recorded nor applied."""
+    svc.config.memory.deep_dream.link_judge_mode = 'auto'
+    pid = _link(svc, 'alpha-tool', 'uses', 'beta-lib')
+    original = svc._enrich_link_proposals_from
+    def racing(rows, evidence):
+        if not svc._lock.locked():       # the unlocked signing pass
+            svc.graph_relate('alpha-tool', 'uses', 'gamma-lib')
+        return original(rows, evidence)
+    monkeypatch.setattr(svc, '_enrich_link_proposals_from', racing)
+    result = svc.deep_dream_judge_links(_judge())
+    assert result.get('applied', 0) == 0
+    row = _pending_link(svc, pid)
+    assert row is not None and row['judge_verdict'] is None
+
+
 def test_changed_evidence_invalidates_saved_opinion(svc):
     svc.config.memory.deep_dream.link_judge_mode = 'shadow'
     _link(svc, 'alpha-tool', 'uses', 'beta-lib')
@@ -214,12 +233,12 @@ def test_link_batch_does_not_project_full_evidence_per_verdict(svc, monkeypatch)
         _link(svc, f'tool-{i}', 'uses', f'library-{i}')
     judge = _LinkJudge({(f'tool-{i}', 'uses', f'library-{i}'): ('leave', .5, None)
                         for i in range(8)})
-    original = svc._enrich_link_proposals_locked
+    original = svc._enrich_link_proposals_from
     projections = []
-    def observe(rows):
+    def observe(rows, evidence):
         projections.append(len(rows))
-        return original(rows)
-    monkeypatch.setattr(svc, '_enrich_link_proposals_locked', observe)
+        return original(rows, evidence)
+    monkeypatch.setattr(svc, '_enrich_link_proposals_from', observe)
     assert svc.deep_dream_judge_links(judge)['judged'] == 8
     assert len(projections) <= 3
 

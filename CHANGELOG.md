@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — the review judges stop holding the service lock for seconds every sweep)
+- The merge, link and junk judges no longer rebuild the evidence for their
+  whole pending queue under the service lock on every sweep tick. In ~23.5 h
+  of daemon logs the judge stages held the lock for 1 s or more 636 times
+  (879 s in total, up to 3.13 s), and every store and search waited behind
+  them. A tick now reads its evidence under the lock, builds and signs the
+  evidence packs with the lock released, and takes the lock again only to
+  clear stale verdicts and, after the model call, to re-check the judged
+  batch together with the writes that check guards. It signs the rows that
+  carry a verdict (each still gets its freshness check every tick) and the
+  first `judge_batch` unjudged rows, which covers any batch the tick can
+  take; the rest of the queue is neither read nor signed. The stale check
+  reads the last observed judge identity once per tick, not once per
+  verdict row (up to ~490 reads under the lock).
+- The model is shown the packs that were signed, instead of a second pack
+  built under the lock just before the call. A write that lands while the
+  packs are built is caught by the batch re-check, like a write during the
+  model call.
+- The evidence reads skip entry embeddings, which none of the three packs
+  uses (new `load_entry_texts`: 23 ms against 650 ms for `load_entries` on
+  the 2,239-entry live bank). Merge mentions are resolved for the rows' own
+  entities, not all 7,473 graph entities, which was ~1.1 s of every ~1.3 s
+  merge enrichment. The link pack tokenizes the entries once instead of once
+  per row (~140 ms a row). Measured from the host against the live bank,
+  read-only: the merge judge's locked read takes ~50 ms and its batch
+  re-check ~270 ms, where each hold took ~1.3-1.7 s before.
+- The candidate judge reads the bank once per lock hold instead of up to
+  three times, and computes the scan-generation fingerprints with the lock
+  released. When no automatic dismissal is due for reconsideration it skips
+  that evidence read entirely. The fingerprints themselves are unchanged, so
+  no stored generation or memo resets on deploy. Its locked read (~480 ms)
+  still loads embeddings, because the candidate evidence fingerprints them.
+- `tests/test_judge_lock_budget.py` pins each tick's work by counting rows,
+  entities, reads and tokenizations, never by timing.
+
 ### Fixed (2026-09-23 — dream stages stop freezing the daemon; the shadow merge judge records again)
 - The contested-facts scan behind the graph digest's "unsure" questions no
   longer holds the service lock for 42-78 s on every dream, empty dreams

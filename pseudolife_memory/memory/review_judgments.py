@@ -67,23 +67,46 @@ def last_response_identity(service, queue, policy_fingerprint):
     return saved.get("model") if saved.get("policy") == policy_fingerprint else None
 
 
-def candidate_generation(service, *, decision_inputs=True):
-    """Caller holds the lock. Observe all inputs to the candidate scan."""
-    evidence = {"graph": service._storage.load_graph(),
+def candidate_inputs(service):
+    """Caller holds the lock. One read of everything the candidate scan's
+    generation and the candidate evidence fingerprints consume, so a lock
+    hold reads the bank once and the fingerprinting can run with the lock
+    released (2026-09-23: an idle candidate tick read it three times under
+    the lock, embeddings included)."""
+    storage = service._storage
+    return {"graph": storage.load_graph(),
+            "entries": storage.load_entries(),
+            "scopes": storage.entity_sources_map(),
+            "traces": storage.traces_by_entity_norm(),
+            "facts": storage.entity_fact_counts(),
+            "fact_texts": storage.current_fact_counts_by_entity_text(),
+            "pending_entities": storage.pending_entity_proposals(),
+            "lesson_refs": storage.lesson_entity_ids(),
+            "pending_links": storage.pending_proposals(),
+            "dismissed": storage.dismissed_pairs()}
+
+
+def candidate_generation(service, *, decision_inputs=True, inputs=None):
+    """Observe all inputs to the candidate scan. Pure over ``inputs``
+    (from :func:`candidate_inputs`); without them the caller holds the lock
+    and they are read here."""
+    if inputs is None:
+        inputs = candidate_inputs(service)
+    evidence = {"graph": inputs["graph"],
                         # Candidate vectors and snippets consume these fields.
                         # Recall counters must not stale an in-flight judgment.
                         "entries": [{key: row.get(key) for key in ("id", "text", "embedding")}
-                                    for row in service._storage.load_entries()],
-                        "scopes": service._storage.entity_sources_map(),
-                        "traces": service._storage.traces_by_entity_norm(),
-                        "facts": service._storage.entity_fact_counts(),
-                        "fact_texts": service._storage.current_fact_counts_by_entity_text(),
-                        "pending_entities": [_evidence(p) for p in service._storage.pending_entity_proposals()],
-                        "lesson_refs": service._storage.lesson_entity_ids(),
+                                    for row in inputs["entries"]],
+                        "scopes": inputs["scopes"],
+                        "traces": inputs["traces"],
+                        "facts": inputs["facts"],
+                        "fact_texts": inputs["fact_texts"],
+                        "pending_entities": [_evidence(p) for p in inputs["pending_entities"]],
+                        "lesson_refs": inputs["lesson_refs"],
                         "config": dataclasses.asdict(service.config.memory.deep_dream)}
     if decision_inputs:
-        evidence["pending_links"] = [_evidence(p) for p in service._storage.pending_proposals()]
-        evidence["dismissed"] = sorted(service._storage.dismissed_pairs())
+        evidence["pending_links"] = [_evidence(p) for p in inputs["pending_links"]]
+        evidence["dismissed"] = sorted(inputs["dismissed"])
     return fingerprint(evidence)
 
 
@@ -120,16 +143,26 @@ def _evidence(value):
 
 
 class ReviewJudgments:
-    """Caller holds the service lock around refresh/check/record and apply."""
+    """One judge tick over a review queue. The caller holds the service lock
+    around prepare(), refresh(), validate() and the record/apply calls, and
+    releases it for sign(): prepare reads the evidence, sign computes the
+    packs and fingerprints from it, refresh clears the verdicts they no
+    longer match. The queue-sized work thus runs unlocked; validate()
+    re-signs only the judged batch, under the lock that also covers its
+    writes (2026-09-23: signing the whole ~490-row merge queue under the
+    lock held it 1-3 s every tick)."""
 
-    _ENRICH = {"merge": "_judge_enrich_locked", "link": "_enrich_link_proposals_locked",
-               "junk": "_enrich_junk_proposals_locked"}
+    # (storage reads under the lock, pure pack builder) per kind.
+    _ENRICH = {"merge": ("_judge_evidence_locked", "_judge_enrich_from"),
+               "link": ("_link_evidence_locked", "_enrich_link_proposals_from"),
+               "junk": ("_junk_evidence_locked", "_enrich_junk_proposals_from")}
     _PROMPT = {"merge": "_JUDGE_SYSTEM_PROMPT", "link": "_LINK_JUDGE_SYSTEM_PROMPT",
                "junk": "_JUNK_JUDGE_SYSTEM_PROMPT"}
     # Enriched fields derived from the OTHER rows of the list being
     # enriched. The judge never sees them, and signing one ties a row's
-    # fingerprint to batch composition: refresh() signs the whole pending
-    # queue, validate() only the judged batch. The merge ``group`` (the
+    # fingerprint to batch composition: a tick signs a row among the rows
+    # prepare() picked, validate() only among the judged batch (before
+    # 2026-09-23, among the whole pending queue). The merge ``group`` (the
     # endpoint a row shares with other pending rows) did exactly that, so
     # from 2026-09-22 17:56 the shadow merge judge re-sent the same 8 rows
     # ~125 times a day and recorded nothing. Signed as None rather than
@@ -147,6 +180,8 @@ class ReviewJudgments:
         self.pending = pending
         self.current_model = current_model
         self.expected = {}
+        self.enriched = {}
+        self._to_sign, self._evidence = [], None
         self.request_policy = fingerprint(self.policy())
 
     def observed(self, proposal):
@@ -158,29 +193,77 @@ class ReviewJudgments:
         return judging_policy(self.service, self.extractor,
                               getattr(dream, self._PROMPT[self.kind]))
 
-    def signatures(self, pending):
-        if not pending:
-            return {}
-        enriched = getattr(self.service, self._ENRICH[self.kind])(pending)
+    def evidence(self, pending):
+        """Caller holds the lock: the storage reads that signing ``pending``
+        needs."""
+        return getattr(self.service, self._ENRICH[self.kind][0])(pending)
+
+    def _sign(self, pending, evidence):
+        """Pure: ``(fingerprints, packs)`` by proposal id."""
+        enriched = getattr(self.service, self._ENRICH[self.kind][1])(pending, evidence)
         policy = self.policy()
         cross_row = self._CROSS_ROW.get(self.kind, frozenset())
-        return {str(p["id"]): fingerprint({"proposal": _evidence(p),
-                                          "evidence": _evidence(
-                                              {k: None if k in cross_row else v
-                                               for k, v in row.items()}),
-                                          "policy": policy})
-                for p, row in zip(pending, enriched)}
+        signatures, packs = {}, {}
+        for p, row in zip(pending, enriched):
+            key = str(p["id"])
+            signatures[key] = fingerprint({"proposal": _evidence(p),
+                                           "evidence": _evidence(
+                                               {k: None if k in cross_row else v
+                                                for k, v in row.items()}),
+                                           "policy": policy})
+            packs[key] = row
+        return signatures, packs
+
+    def signatures(self, pending):
+        """Caller holds the lock (the evidence is read here)."""
+        if not pending:
+            return {}
+        return self._sign(pending, self.evidence(pending))[0]
+
+    def prepare(self, limit):
+        """Caller holds the lock. Read the evidence for every row this tick
+        may sign: the rows carrying a verdict (refresh() checks each one)
+        and the first ``limit`` unjudged rows. That covers any batch of at
+        most ``limit`` unjudged rows taken in queue order after refresh():
+        a row it clears already carried a verdict. The rest of the queue
+        is neither signed nor read."""
+        unjudged = {id(p) for p in [p for p in self.pending
+                                    if not p.get("judge_verdict")][:max(0, int(limit))]}
+        self._to_sign = [p for p in self.pending
+                         if p.get("judge_verdict") or id(p) in unjudged]
+        self._evidence = self.evidence(self._to_sign) if self._to_sign else None
+
+    def sign(self):
+        """Lock released: fingerprint the prepared rows and keep their packs
+        (the model payload, see rows())."""
+        if self._to_sign:
+            self.expected, self.enriched = self._sign(self._to_sign, self._evidence)
+        else:
+            self.expected, self.enriched = {}, {}
+        self._evidence = None
+
+    def rows(self, batch):
+        """The signed packs for ``batch``, numbered in batch order."""
+        return [{**self.enriched[str(p["id"])], "n": i + 1}
+                for i, p in enumerate(batch)]
 
     def refresh(self):
-        self.expected = self.signatures(self.pending)
+        """Caller holds the lock, after prepare() and sign(). Clears every
+        verdict whose evidence, policy or served model no longer matches
+        what it was recorded under, and returns the pending rows. A change
+        landing between prepare() and here goes unseen until the next
+        tick; validate() keeps it from being recorded or applied."""
         memo = self.storage.get_meta(self.key) or {}
-        memo = {key: value for key, value in memo.items() if key in self.expected}
+        live = {str(p["id"]) for p in self.pending}
+        memo = {key: value for key, value in memo.items() if key in live}
+        # One meta read per tick, not per verdict row: this runs under the
+        # lock over a queue that can be all verdict rows (~490 merges).
+        observations = (self.current_model, getattr(self.extractor, "served_model", None),
+                        last_response_identity(self.service, self.kind, self.request_policy))
         def matches(p):
             saved = memo.get(str(p["id"]))
             if not isinstance(saved, dict):
                 return False
-            observations = (self.current_model, getattr(self.extractor, "served_model", None),
-                            last_response_identity(self.service, self.kind, self.request_policy))
             return (saved.get("fingerprint") == self.expected[str(p["id"])]
                     and all(not model or saved.get("served_model") == model
                             for model in observations))
