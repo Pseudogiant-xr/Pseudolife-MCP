@@ -135,6 +135,41 @@ def test_unknown_served_id_cannot_authorize_merge(svc):
     assert svc._storage.get_entity_proposal(pid)['status'] == 'pending'
 
 
+@pytest.mark.parametrize('mode,verdict,c1,c2', [('auto-reject', 'reject', .6, .9),
+                                                 ('auto', 'reject', .6, .9),
+                                                 ('auto', 'accept', .9, .9)])
+def test_second_vote_cannot_pair_with_a_first_verdict_requeued_mid_call(
+        svc, mode, verdict, c1, c2):
+    # The evidence signature strips every judge* key, so it cannot see a
+    # requeue clear the first verdict while the second model is thinking.
+    from tests.test_queue_judges_service import _MergeJudge, _SecondJudge
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = mode
+    cfg.judge_second_opinion = True
+    cfg.judge_reject_min_confidence = .8
+    cfg.judge_reject_min_confidence_2 = .7
+    cfg.judge_accept_min_confidence = .6
+    svc.store('omega svc runs the omega ingestion', source='t')
+    svc.store('omega service is the deployed omega daemon', source='t')
+    pid = _propose(svc, 'omega svc', 'omega service')
+    pair = ('omega svc', 'omega service')
+    first = _MergeJudge({pair: (verdict, c1)})
+    assert svc.deep_dream_judge(first)['judged'] == 1
+
+    class RequeueingJudge(_SecondJudge):
+        def judge_merges(self, proposals):
+            assert svc.review_rejudge('merge', limit=1)['requeued'] == 1
+            return super().judge_merges(proposals)
+
+    result = svc.deep_dream_judge(first, second_extractor=RequeueingJudge({pair: (verdict, c2)}))
+    assert result['second_opinions'] == 0
+    assert result['auto_rejected'] == 0 and result['auto_accepted'] == 0
+    row = svc._storage.get_entity_proposal(pid)
+    assert row['status'] == 'pending'
+    assert row['judge_verdict'] is None and row['judge2_verdict'] is None
+    assert svc.deep_dream_judge(first)['judged'] == 1        # re-judged from scratch
+
+
 def test_candidate_retries_saved_action_without_new_model_call(svc, monkeypatch):
     cfg = svc.config.memory.deep_dream
     cfg.candidate_judge_mode = 'auto'

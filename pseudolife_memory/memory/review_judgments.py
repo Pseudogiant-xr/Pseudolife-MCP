@@ -218,7 +218,11 @@ class ReviewJudgments:
                       if signatures[str(p["id"])] == self.expected.get(str(p["id"]))}
         self.batch = {p["id"]: p for p in live}
 
-    def current(self, proposal):
+    def current(self, proposal, *, first_opinion=False):
+        """``first_opinion``: a second vote pairs with the first verdict
+        ``proposal`` was read with, so the live row must still carry it.
+        The signatures strip every judge* key and cannot see requeue()
+        clear it during the second model call."""
         if proposal["id"] not in self.valid:
             return False
         if self.kind == "link":
@@ -226,6 +230,9 @@ class ReviewJudgments:
         else:
             row = self.storage.get_entity_proposal(proposal["id"])
         if row is None or row.get("status") != "pending":
+            return False
+        if first_opinion and any(row.get(key) != proposal.get(key)
+                                 for key in ("judge_verdict", "judge_confidence")):
             return False
         return True
 

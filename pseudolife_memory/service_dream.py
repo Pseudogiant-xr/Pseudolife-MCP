@@ -3155,7 +3155,7 @@ class DreamOps:
                             note1 = (row.get("judge_note") or "")[:160]
                             tag = ("split" if v1 != v2 else "agree")
                             note = f"{note1} | 2nd ({model2}): {v2} {c2:.2f} [{tag}]"
-                            if not review.current(row):
+                            if not review.current(row, first_opinion=True):
                                 continue
                             ok = self._storage.set_entity_proposal_second_judgment(
                                 e["id"], verdict=v2, confidence=c2, model=model2,

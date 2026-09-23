@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — a merge second opinion cannot pair with a requeued first verdict)
+- A `review_rejudge` (or `/api/graph/rejudge`) that cleared a merge row's
+  first verdict while its second opinion was in flight no longer lets that
+  second vote land. The second-opinion pass paired the new vote with the
+  first verdict it read before the model call, and the evidence check it
+  re-ran afterwards ignores every `judge*` column. So the vote was recorded
+  on a row with no first verdict, and in `auto-reject` (or `auto`) mode two
+  rejects auto-rejected the row on the verdict a human had just requeued.
+  Before recording, the pass now requires the live row's `judge_verdict`
+  and `judge_confidence` to match the pair it read, under the same lock
+  hold and transaction as the write. A requeued row is left to a fresh
+  first opinion on the next tick. The link and junk judges take one vote
+  per row and never read an earlier one, so they were not affected.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.
