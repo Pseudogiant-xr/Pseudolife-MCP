@@ -148,10 +148,13 @@ Move-Item -LiteralPath $part -Destination $out -Force
 # become every later run's baseline. For the same reason the gate fails
 # CLOSED when history existed that it could not use (all manifests unusable,
 # or a folder it could not list: an offline share may hold the only history
-# of a fresh worktree). Only a truly empty history, the very first run,
-# rotates without a baseline.
+# of a fresh worktree). Dumps written before manifests existed are history
+# too: with no manifest anywhere, the newest complete stamp-named dump is
+# read as the baseline, so the first run after an upgrade cannot mark an
+# already-wiped bank "ok". Only a truly empty history rotates without one.
 $gatedTables = "public.entries", "public.facts", "public.lessons"
 $manifestOut = Join-Path $OutDir "pseudolife_manifest-$stamp.json"
+$outName = Split-Path $out -Leaf
 function Test-UsableManifest($m) {
     if ($m -isnot [pscustomobject] -or $m.tables -isnot [pscustomobject]) { return $false }
     if ($m.rotation -notin "ok", "accepted", "held") { return $false }
@@ -164,14 +167,21 @@ function Test-UsableManifest($m) {
 $searchDirs = @($OutDir)
 if ($MirrorDir -and (Test-Path -LiteralPath $MirrorDir)) { $searchDirs += $MirrorDir }
 $candidates = @()
+$legacyDumps = @()
 $listFailures = @()
 foreach ($d in $searchDirs) {
     try {
-        $candidates += @(Get-ChildItem -LiteralPath $d -Filter "pseudolife_manifest-*.json" -File)
+        $files = @(Get-ChildItem -LiteralPath $d -File)
     } catch {
         Write-Warning "could not list $d for backup manifests: $_"
         $listFailures += $d
+        continue
     }
+    $candidates += @($files | Where-Object { $_.Name -like "pseudolife_manifest-*.json" })
+    # Stamp-shaped names only: a tagged artifact (a migration cutover dump)
+    # sorts above every date stamp and is not a routine backup.
+    $legacyDumps += @($files | Where-Object {
+            $_.Name -match '^pseudolife_memory-\d{8}-\d{6}\.sql\.gz$' -and $_.Name -ne $outName })
 }
 $baseline = $null
 $unusable = @()
@@ -183,8 +193,22 @@ foreach ($m in ($candidates | Sort-Object Name -Descending)) {
     $baseline = @{ Name = $m.Name; Data = $parsed; Dir = $m.DirectoryName }
     break
 }
-if ($unusable) { Write-Warning ("skipped unusable backup manifest(s): " + ($unusable -join ", ")) }
-$blind = (-not $baseline) -and ($candidates.Count -gt 0 -or $listFailures.Count -gt 0)
+if ($candidates.Count -eq 0) {
+    # Out-dir first for a name present in both folders (-Stable keeps it).
+    foreach ($ld in ($legacyDumps | Sort-Object Name -Descending -Stable)) {
+        $scan = Read-Dump $ld.FullName
+        $legacy = [pscustomobject]@{
+            rotation = "ok"; dump = $ld.Name; tables = [pscustomobject]$scan.Tables }
+        if (-not $scan.Complete -or -not (Test-UsableManifest $legacy)) {
+            $unusable += $ld.Name; continue
+        }
+        $baseline = @{ Name = $ld.Name; Data = $legacy; Dir = $ld.DirectoryName }
+        break
+    }
+}
+if ($unusable) { Write-Warning ("skipped unusable backup baseline(s): " + ($unusable -join ", ")) }
+$history = $candidates.Count + $(if ($candidates.Count -eq 0) { $legacyDumps.Count } else { 0 })
+$blind = (-not $baseline) -and ($history -gt 0 -or $listFailures.Count -gt 0)
 $drops = @()
 if ($baseline) {
     foreach ($t in $gatedTables) {
@@ -208,7 +232,7 @@ if ($drops) {
     $restoreHint = (" To restore the last good backup instead: ops\restore.ps1 " +
                     "-BackupFile '$(Join-Path $baseline.Dir $goodDump)'.")
 } elseif ($blind) {
-    $note = "no usable baseline among $($candidates.Count) manifest(s)"
+    $note = "no usable baseline among $history earlier backup record(s)"
     foreach ($d in $listFailures) { $note += "; could not list $d" }
 }
 [ordered]@{

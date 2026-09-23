@@ -216,12 +216,28 @@ class GateCase:
     raw_local: tuple[tuple[str, str], ...] = ()
     # The mirror exists but listing it fails (offline share, permissions).
     unlistable_mirror: bool = False
+    # The aged dump in the out-dir, written before manifests existed:
+    # "garbage" (unreadable), "base" (a complete dump holding BASE), "none".
+    legacy: str = "garbage"
+    # A tagged, non-stamp artifact (e.g. a migration cutover dump) staged
+    # beside it with these counts; it must never serve as a baseline.
+    tagged_dump: dict[str, int] | None = None
 
 
 _GOOD = ((BASELINE_STAMP, "ok", BASE),)
+TAGGED_DUMP = "pseudolife_memory-pg18cut-20260814-120000.sql.gz"
 
 GATE_SCENARIOS: dict[str, GateCase] = {
-    "gate_first_run": GateCase(dump=BASE),
+    "gate_first_run": GateCase(dump=BASE, legacy="none"),
+    # The first run after upgrading: dumps exist, manifests do not. They are
+    # history, so the newest complete one is the baseline.
+    "gate_legacy_bootstrap": GateCase(dump=BASE, legacy="base"),
+    "gate_legacy_wipe": GateCase(dump=WIPED, legacy="base"),
+    "gate_unreadable_legacy": GateCase(dump=BASE, legacy="garbage"),
+    "gate_truncated_legacy": GateCase(dump=BASE, legacy="truncated"),
+    "gate_tagged_legacy_ignored": GateCase(
+        dump=BASE, legacy="base",
+        tagged_dump=_counts(entries=0, facts=0, lessons=0)),
     "gate_small_drop": GateCase(dump=_counts(entries=90, slots=5), local=_GOOD),
     "gate_wipe_entries": GateCase(dump=WIPED, local=_GOOD, mirror=(),
                                   mirror_keep=1),
@@ -235,7 +251,7 @@ GATE_SCENARIOS: dict[str, GateCase] = {
     "gate_mirror_baseline": GateCase(dump=WIPED, mirror=_GOOD, mirror_keep=1),
     "gate_custom_threshold": GateCase(dump=_counts(entries=90), local=_GOOD,
                                       max_drop=5),
-    "gate_daemon_down": GateCase(dump=BASE, daemon_down=True),
+    "gate_daemon_down": GateCase(dump=BASE, daemon_down=True, legacy="none"),
     # A corrupt newest manifest is skipped, not trusted: the wipe is still
     # measured against the last good one.
     "gate_skips_unusable_manifest": GateCase(
@@ -298,8 +314,11 @@ def _stage(root: Path, name: str, sql: str,
     if mirror:
         mirror_dir = sdir / "mirror"
         mirror_dir.mkdir(exist_ok=True)
+        # Real, complete dumps: with no manifest anywhere, the row-count
+        # gate reads the newest of them as its baseline.
+        old_dump = gzip.compress(_dump_with(BASE).encode("utf-8"))
         for filename in OLD_MIRROR_FILES:
-            (mirror_dir / filename).write_text("old", encoding="utf-8")
+            (mirror_dir / filename).write_bytes(old_dump)
     return artifact, sdir / "out", mirror_dir
 
 
@@ -310,10 +329,20 @@ def _stage_gate(root: Path, name: str, case: GateCase) -> tuple[Path, Path, Path
     artifact, out_dir, mirror = _stage(root, name, _dump_with(case.dump),
                                        mirror=case.mirror is not None)
     out_dir.mkdir(exist_ok=True)
-    aged = out_dir / AGED_DUMP
-    aged.write_text("old", encoding="utf-8")
-    old = time.time() - 30 * 86400
-    os.utime(aged, (old, old))
+    if case.legacy != "none":
+        aged = out_dir / AGED_DUMP
+        if case.legacy == "base":
+            aged.write_bytes(gzip.compress(_dump_with(BASE).encode("utf-8")))
+        elif case.legacy == "truncated":   # every table's rows, no end marker
+            aged.write_bytes(gzip.compress(
+                _dump_with(BASE).replace(f"-- {MARKER}", "").encode("utf-8")))
+        else:
+            aged.write_text("old", encoding="utf-8")
+        old = time.time() - 30 * 86400
+        os.utime(aged, (old, old))
+    if case.tagged_dump is not None:
+        (out_dir / TAGGED_DUMP).write_bytes(
+            gzip.compress(_dump_with(case.tagged_dump).encode("utf-8")))
     for stamp, rotation, tables in case.local:
         (out_dir / _manifest_name(stamp)).write_text(
             _manifest_json(stamp, rotation, tables), encoding="utf-8")
@@ -433,7 +462,7 @@ def _ps1_scenarios(root: Path) -> list[Scenario]:
         invoke = f'& "{BACKUP_PS1}" -OutDir "{out_dir.as_posix()}"'
         scenarios.append(Scenario(name, setup, invoke))
     for name, (mirror_keep, env_keep) in MIRROR_SCENARIOS.items():
-        artifact, out_dir, mirror = _stage(root, name, COMPLETE_DUMP,
+        artifact, out_dir, mirror = _stage(root, name, _dump_with(BASE),
                                            mirror=True)
         setup = _ps1_setup(artifact, env_keep=env_keep, fail_dump=False,
                            daemon_data=out_dir.parent / "daemon_data")
@@ -469,7 +498,7 @@ def _sh_scenarios(root: Path) -> list[Scenario]:
         invoke = f'bash "{BACKUP_SH.as_posix()}" --out-dir "{out_dir.as_posix()}"'
         scenarios.append(Scenario(name, setup, invoke))
     for name, (mirror_keep, env_keep) in MIRROR_SCENARIOS.items():
-        artifact, out_dir, mirror = _stage(root, name, COMPLETE_DUMP,
+        artifact, out_dir, mirror = _stage(root, name, _dump_with(BASE),
                                            mirror=True)
         setup = _sh_setup(artifact, env_keep=env_keep, fail_dump=False,
                           daemon_data=out_dir.parent / "daemon_data")
@@ -693,10 +722,52 @@ def test_a_manifest_records_the_dump_row_counts(gate):
     # UTC, second precision, 'Z' suffix: the daemon parses this for /health.
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ",
                         manifest["created_at"]), manifest
+    # A truly empty history (no manifest, no earlier dump) is the one case
+    # that rotates without a baseline.
     assert manifest["rotation"] == "ok", manifest
-    assert manifest["baseline"] is None, manifest   # nothing to compare yet
-    assert AGED_DUMP not in _dumps(out_dir), (
-        "a first run has no baseline and must rotate as before" + res.detail())
+    assert manifest["baseline"] is None, manifest
+
+
+def test_the_first_run_after_an_upgrade_uses_the_newest_legacy_dump(gate):
+    """Dumps written before manifests existed are history. Without them as
+    a baseline, the first gated run would call an already-wiped bank "ok",
+    and every later run would compare against that."""
+    res, out_dir, _, manifest = gate("gate_legacy_bootstrap")
+    assert res.returncode == 0, res.detail()
+    assert manifest["rotation"] == "ok", manifest
+    assert manifest["baseline"] == AGED_DUMP, manifest
+    assert AGED_DUMP not in _dumps(out_dir), res.detail()   # healthy: rotates
+
+
+def test_a_wipe_before_the_first_gated_run_still_holds(gate):
+    res, out_dir, _, manifest = gate("gate_legacy_wipe")
+    out = res.stdout + res.stderr
+    assert res.returncode == 0, res.detail()
+    assert manifest["rotation"] == "held", manifest
+    assert manifest["baseline"] == AGED_DUMP, manifest
+    assert "public.entries 100 -> 3" in manifest["note"], manifest
+    assert AGED_DUMP in _dumps(out_dir), res.detail()
+    assert AGED_DUMP in out and ("-BackupFile" in out or "--backup-file" in out), out
+
+
+@pytest.mark.parametrize("name", ["gate_unreadable_legacy", "gate_truncated_legacy"])
+def test_unreadable_legacy_dumps_fail_closed(gate, name):
+    """Garbage, or a dump that holds every table's rows but never reached
+    the end marker: neither is a trustworthy baseline."""
+    res, out_dir, _, manifest = gate(name)
+    assert res.returncode == 0, res.detail()
+    assert manifest["rotation"] == "held", manifest
+    assert "no usable baseline" in manifest["note"], manifest
+    assert AGED_DUMP in _dumps(out_dir), res.detail()
+
+
+def test_a_tagged_artifact_is_never_a_legacy_baseline(gate):
+    """A migration cutover dump sorts above every date stamp; it is not a
+    routine backup and must not be read as the last good one."""
+    res, _, _, manifest = gate("gate_tagged_legacy_ignored")
+    assert res.returncode == 0, res.detail()
+    assert manifest["baseline"] == AGED_DUMP, manifest
+    assert manifest["rotation"] == "ok", manifest
 
 
 def test_small_drops_and_housekeeping_shrinkage_pass(gate):

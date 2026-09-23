@@ -4499,8 +4499,10 @@ local rotation and mirror pruning and says so loudly. It looks for that
 baseline in both the backup folder and the mirror. A logical wipe therefore
 cannot rotate the good copies away. It also holds when history exists but
 none of it is usable (unreadable or count-less manifests, or a folder it
-cannot list), so a gate that cannot see never waves a wipe through; only
-the very first run rotates without a baseline. The warning names the last
+cannot list), so a gate that cannot see never waves a wipe through. On the
+first run after upgrading there are dumps but no manifests yet; the
+newest complete date-stamped dump is then read as the baseline, and only
+a truly empty history rotates without one. The warning names the last
 good dump and the `restore` command for it, because `restore` otherwise
 picks the newest dump, which is the one that shrank. The hold repeats on
 every run until one passes `-AcceptRowDrop` / `--accept-row-drop`, which

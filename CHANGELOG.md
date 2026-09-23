@@ -16,8 +16,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skipped with a loud warning, and the run still exits 0. The warning names
   the last good dump and the `restore -BackupFile` command for it. The gate
   fails closed: it also holds when manifests exist but none is usable, or a
-  backup folder cannot be listed (which no longer aborts the run). The hold
-  repeats on every run until `-AcceptRowDrop` / `--accept-row-drop`.
+  backup folder cannot be listed (which no longer aborts the run). With no
+  manifest anywhere (the first run after upgrading), the newest complete
+  date-stamped dump is read as the baseline, so an already-wiped bank is
+  not marked "ok". The hold repeats on every run until `-AcceptRowDrop` /
+  `--accept-row-drop`.
   Before, a logical wipe followed by `PSEUDOLIFE_BACKUP_MIRROR_KEEP`
   backups rotated every good copy off the mirror.
 - The end-of-dump marker now counts only outside COPY data. A dump cut off

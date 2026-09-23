@@ -105,12 +105,16 @@ fi
 # "table <name> <rows>" line per table, then "complete" last if it was.
 # The `|| true` keeps the script's `pipefail` from turning gzip's expected
 # error on a corrupt artifact into a bare exit with no explanation.
-dump_scan="$(gzip -dc "$part" 2>/dev/null | awk '
+dump_scan_awk='
     table != "" { if ($0 == "\\.") { print "table", table, rows; table = "" } else rows++; next }
     /^COPY [^ ]+ .*FROM stdin;$/ { table = $2; rows = 0; next }
     $0 == "-- PostgreSQL database dump complete" { complete = 1 }
     END { if (complete) print "complete" }
-' || true)"
+'
+scan_count() { # $1 = a scan's output, $2 = table; prints nothing if absent
+    printf '%s\n' "$1" | awk -v t="$2" '$1 == "table" && $2 == t { print $3 }'
+}
+dump_scan="$(gzip -dc "$part" 2>/dev/null | awk "$dump_scan_awk" || true)"
 if [ "${dump_scan##*$'\n'}" != "complete" ]; then
     # Kept, not deleted: a truncated dump is the evidence for whatever
     # went wrong, and the previous good backups sit untouched beside it.
@@ -122,9 +126,11 @@ mv "$part" "$out"
 # Row-count gate: compare against the newest usable manifest that was not
 # itself held, in the out-dir OR the mirror. A manifest is usable only with
 # a count for every gated table, and the gate fails CLOSED when history
-# existed that it could not use (see ops/backup.ps1 for why each rule).
-# Manifests are read with grep, not a JSON parser: both scripts write
-# "key": value pairs this tolerates.
+# existed that it could not use. With no manifest anywhere, the newest
+# complete stamp-named dump is the baseline (the first run after an
+# upgrade). See ops/backup.ps1 for why each rule. Manifests are read with
+# grep, not a JSON parser: both scripts write "key": value pairs this
+# tolerates.
 gated_tables="public.entries public.facts public.lessons"
 manifest_out="$OUT_DIR/pseudolife_manifest-$stamp.json"
 manifest_rotation() { # $1 = manifest file
@@ -140,7 +146,11 @@ manifest_usable() { # $1 = manifest file
     done
 }
 candidates=""
+legacy=""
 list_failures=""
+# Stamp-shaped names only: a tagged artifact (a migration cutover dump)
+# sorts above every date stamp and is not a routine backup.
+legacy_re='^pseudolife_memory-[0-9]{8}-[0-9]{6}\.sql\.gz$'
 for d in "$OUT_DIR" ${MIRROR_DIR:+"$MIRROR_DIR"}; do
     [ -d "$d" ] || continue
     if ! ls -1 "$d" >/dev/null 2>&1; then
@@ -151,8 +161,15 @@ for d in "$OUT_DIR" ${MIRROR_DIR:+"$MIRROR_DIR"}; do
     for f in "$d"/pseudolife_manifest-*.json; do
         if [ -f "$f" ]; then candidates="$candidates$(basename "$f")"$'\t'"$f"$'\n'; fi
     done
+    for f in "$d"/pseudolife_memory-*.sql.gz; do
+        n="$(basename "$f")"
+        if [ -f "$f" ] && [ "$f" != "$out" ] && [[ $n =~ $legacy_re ]]; then
+            legacy="$legacy$n"$'\t'"$f"$'\n'
+        fi
+    done
 done
 baseline=""
+baseline_scan=""
 unusable=""
 while IFS=$'\t' read -r name f; do
     [ -n "$f" ] || continue
@@ -161,16 +178,36 @@ while IFS=$'\t' read -r name f; do
     baseline="$f"
     break
 done < <(printf '%s' "$candidates" | sort -r)
-[ -z "$unusable" ] || echo "WARNING: skipped unusable backup manifest(s): $unusable" >&2
 n_candidates="$(printf '%s' "$candidates" | grep -c . || true)"
+n_history="$n_candidates"
+if [ "$n_candidates" -eq 0 ]; then
+    n_history="$(printf '%s' "$legacy" | grep -c . || true)"
+    # Out-dir first for a name present in both folders (-s keeps it).
+    while IFS=$'\t' read -r name f; do
+        [ -n "$f" ] || continue
+        scan="$(gzip -dc "$f" 2>/dev/null | awk "$dump_scan_awk" || true)"
+        usable=1
+        [ "${scan##*$'\n'}" = complete ] || usable=0
+        for t in $gated_tables; do
+            [ -n "$(scan_count "$scan" "$t")" ] || usable=0
+        done
+        if [ "$usable" -eq 1 ]; then baseline="$f"; baseline_scan="$scan"; break; fi
+        unusable="${unusable:+$unusable, }$name"
+    done < <(printf '%s' "$legacy" | sort -t $'\t' -k1,1 -r -s)
+fi
+[ -z "$unusable" ] || echo "WARNING: skipped unusable backup baseline(s): $unusable" >&2
+baseline_count() { # $1 = table
+    if [ -n "$baseline_scan" ]; then scan_count "$baseline_scan" "$1"
+    else manifest_count "$baseline" "$1"; fi
+}
 blind=0
-if [ -z "$baseline" ] && { [ "$n_candidates" -gt 0 ] || [ -n "$list_failures" ]; }; then
+if [ -z "$baseline" ] && { [ "$n_history" -gt 0 ] || [ -n "$list_failures" ]; }; then
     blind=1
 fi
 drops=""
 if [ -n "$baseline" ]; then
     for t in $gated_tables; do
-        before="$(manifest_count "$baseline" "$t")"
+        before="$(baseline_count "$t")"
         # A gated table missing from the dump is a drop to zero.
         after="$(printf '%s\n' "$dump_scan" \
             | awk -v t="$t" '$1 == "table" && $2 == t { n = $3 } END { print n + 0 }')"
@@ -188,12 +225,16 @@ restore_hint=""
 baseline_json=null
 if [ -n "$baseline" ]; then baseline_json="\"$(basename "$baseline")\""; fi
 if [ -n "$drops" ]; then
-    good_dump="$(grep -o -m1 '"dump": *"[^"]*"' "$baseline" | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    if [ -n "$baseline_scan" ]; then
+        good_dump="$(basename "$baseline")"
+    else
+        good_dump="$(grep -o -m1 '"dump": *"[^"]*"' "$baseline" | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    fi
     note="fell by more than $MAX_ROW_DROP_PERCENT% since $(basename "$baseline"): $drops; last good dump: $good_dump"
     # restore.sh picks the NEWEST dump by default, which is now this one.
     restore_hint=" To restore the last good backup instead: ops/restore.sh --backup-file '$(dirname "$baseline")/$good_dump'."
 elif [ "$blind" -eq 1 ]; then
-    note="no usable baseline among $n_candidates manifest(s)$list_failures"
+    note="no usable baseline among $n_history earlier backup record(s)$list_failures"
 fi
 {
     printf '{\n'
