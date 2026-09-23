@@ -119,6 +119,7 @@ def test_cold_service_pays_full_init_only_for_send(pg_service, tmp_path, monkeyp
     the first send pays the full initialization once, for the HLC reseed."""
     from pseudolife_memory.service import MemoryService
 
+    pg_service._storage.close()  # the cold daemon is the bank's one writer
     cold = MemoryService(data_dir=tmp_path / "cold")
     cold.config.coordination.enabled = True
     cold.config.coordination.allowed_principals = [PRINCIPAL]
@@ -163,6 +164,7 @@ def test_send_during_initial_hydration_waits_for_clock_history(
     from pseudolife_memory.storage import sync
     from pseudolife_memory.storage.coordination import HLC_META_KEY
 
+    pg_service._storage.close()  # the cold daemon is the bank's one writer
     cold = MemoryService(data_dir=tmp_path / "clock-startup")
     cold.config.coordination.enabled = True
     cold.config.coordination.allowed_principals = [PRINCIPAL]

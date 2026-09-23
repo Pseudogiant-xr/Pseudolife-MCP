@@ -236,6 +236,7 @@ def test_settled_analyzer_pair_does_not_recur_after_service_restart(
                and {p["src"], p["dst"]} == set(names))
     assert svc.graph_reject_proposal(row["id"])["rejected"]
 
+    st.close()  # the first daemon exits, releasing the bank
     restarted = MemoryService(data_dir=tmp_path / "restart", database_url=pg_url)
     try:
         with restarted._lock:
@@ -245,3 +246,5 @@ def test_settled_analyzer_pair_does_not_recur_after_service_restart(
         assert restarted.analyzer_duplicate_tick()["filed"] == 0
     finally:
         restarted.flush()
+        if restarted._storage is not None:
+            restarted._storage.close()  # hand the bank back for teardown

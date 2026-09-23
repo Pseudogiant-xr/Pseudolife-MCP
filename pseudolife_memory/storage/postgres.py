@@ -5,6 +5,11 @@ writer and ``MemoryService``'s coarse lock already serializes calls,
 so no pooling is needed. Every mutating method commits before
 returning — a store that returned to the caller is durable.
 
+The single writer is enforced, not just assumed: each instance holds the
+bank's writer lease (a session advisory lock) on its connection, and a
+second instance on the same database refuses to start. See
+:meth:`PostgresStorage._acquire_writer_lease`.
+
 Embeddings ride pgvector (numpy float32 in/out via ``register_vector``).
 ``tags`` / ``slots`` / ``support`` / ``provenance`` are JSONB.
 """
@@ -15,7 +20,10 @@ import json
 import hashlib
 import logging
 import math
+import os
+import re
 import secrets
+import sys
 import time
 import uuid
 from contextlib import contextmanager
@@ -146,19 +154,184 @@ def _embedding_out(value: Any):
     return np.asarray(value, dtype=np.float32)
 
 
+# The bank writer lease: a session advisory lock keyed in its own space
+# (seed 0), apart from the per-entry mutation locks (seed 41), so the two
+# can never collide on a key.
+WRITER_LEASE_KEY = "pseudolife-bank-writer"
+
+# Server-side TCP keepalive for the lease-holding session. A client that
+# vanishes without closing its socket (host sleep, a dropped link to a
+# remote server) otherwise keeps its session, and with it the lease, until
+# the server's own keepalive gives up: 7200 s idle + 9 x 75 s probes in the
+# bench server's settings (PG 18, read from pg_settings 2026-09-23, not
+# timed), over two hours of every restarted writer refusing. These bound it
+# to ~90 s. All three are user-settable GUCs; ignored on Unix-socket
+# connections, which have no such failure mode.
+_LEASE_KEEPALIVE = (
+    ("tcp_keepalives_idle", 60),
+    ("tcp_keepalives_interval", 10),
+    ("tcp_keepalives_count", 3),
+)
+
+# How long a new writer waits for the lease before refusing. A session that
+# is closing keeps its locks until its server process exits (a daemon
+# restart, the reconnect after this process closed its own connection, a
+# backend a test fixture just terminated), which can lag the client on a
+# loaded host. A live holder is refused after this. Not measured: long
+# enough for a backend exit, short enough that a refused call stays prompt.
+_LEASE_WAIT = "2s"
+
+# After a reconnect is refused the lease, calls inside this window are
+# refused from the cached message instead of each waiting out _LEASE_WAIT
+# under the service lock (a burst of 30 calls would otherwise hold it ~60 s).
+_LEASE_RETRY_SECONDS = 5.0
+
+
+class WriterLeaseHeld(RuntimeError):
+    """Another session holds this bank's writer lease.
+
+    ``MemoryService`` records it as retryable (``/health`` reports
+    ``degraded`` with the message under ``not_ready``) and retries after a
+    backoff, since the holder may leave. A ``RuntimeError`` subclass, so
+    callers that only know the generic refusal still fail loudly."""
+
+
+def _application_name() -> str:
+    """How this process appears in ``pg_stat_activity``, so a refused
+    writer can say who holds the bank: the daemon, a script, a test run.
+    Only a fallback: an ``application_name`` in the DSN still wins."""
+    argv = sys.argv or []
+    prog = os.path.basename(argv[0]) if argv and argv[0] else "python"
+    # A subcommand word (``serve``) says which process this is. Any other
+    # argument may be a path or a secret (``--dsn postgresql://...``), and
+    # pg_stat_activity shows this name to every role on the server.
+    if len(argv) > 1 and re.fullmatch(r"[a-z][a-z-]{0,19}", argv[1]):
+        prog = f"{prog} {argv[1]}"
+    return f"pseudolife-mcp pid={os.getpid()} {prog}"[:63]
+
+
 class PostgresStorage:
     """Durable layer under the in-memory bands / cortex (single writer)."""
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, *, writer_lease: bool = True) -> None:
+        """Connect, take the bank's writer lease, and ensure the schema.
+
+        ``writer_lease=False`` is for a caller that deliberately opens a
+        second connection to a bank another instance owns (the test probes
+        that build a racing peer). Such an instance never takes, or waits
+        for, the lease. Anything that writes a live bank leaves it on.
+        """
         self.dsn = dsn
+        self._writer_lease = writer_lease
+        # Set while a reconnect is refused because another writer took the
+        # lease; ping() reports it (see there). Until _lease_retry_at, calls
+        # are refused from it without another lease wait.
+        self._lease_lost: str | None = None
+        self._lease_retry_at = 0.0
         self._transaction_connection = None
         self._lesson_transaction_connection = None
         self._entry_import_connection = None
         self._entry_mutation_connection = None
-        self._conn = self._connect()
-        ensure_schema(self._conn)
-        register_vector(self._conn)
-        self._seed_relations()
+        self._conn = self._open_session()
+        try:
+            ensure_schema(self._conn)
+            register_vector(self._conn)
+            self._seed_relations()
+        except BaseException:
+            # Release the lease now, not when this half-built instance is
+            # garbage-collected: the caller's retry would otherwise refuse
+            # against its own earlier attempt.
+            self._conn.close()
+            raise
+
+    def _open_session(self) -> psycopg.Connection:
+        """A configured connection holding the writer lease (unless this
+        instance opted out). Closed again on any failure, so a refused
+        attempt never leaves a session behind."""
+        conn = self._connect()
+        try:
+            if self._writer_lease:
+                self._acquire_writer_lease(conn)
+        except BaseException:
+            conn.close()
+            raise
+        return conn
+
+    def _acquire_writer_lease(self, conn: psycopg.Connection) -> None:
+        """Take this database's writer lease on ``conn``'s session, or raise
+        :class:`WriterLeaseHeld` naming the session that holds it.
+
+        The service keeps a resident copy of every canonical store and saves
+        each slot by DELETE-then-insert from that copy, so a second writer on
+        the same bank does not merely race: whichever saves a slot last
+        erases the other's history for it. The single-writer rule was
+        documented but never enforced (fresh-eyes review 2026-09-23). Now a
+        second writer is refused.
+
+        The lease lives on the same session every read and write goes
+        through, never on a side connection. If that session dies, the lease
+        dies with it, and :attr:`conn` must win it back before the
+        replacement serves anything. It is a session-level lock, so a
+        rolled-back transaction does not release it; closing the session
+        does.
+        """
+        for name, value in _LEASE_KEEPALIVE:
+            # SET takes no bind parameters; names and values are constants.
+            conn.execute(f"SET {name} = {int(value)}")
+        # Wait (event-driven, not polled) up to _LEASE_WAIT for a holder that
+        # is exiting, then restore the session's own lock_timeout.
+        previous = conn.execute("SHOW lock_timeout").fetchone()[0]
+        conn.execute("SELECT set_config('lock_timeout', %s, false)",
+                     (_LEASE_WAIT,))
+        try:
+            conn.execute("SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+                         (WRITER_LEASE_KEY,))
+        except psycopg.errors.LockNotAvailable:
+            raise WriterLeaseHeld(self._describe_lease_holder(conn)) from None
+        conn.execute("SELECT set_config('lock_timeout', %s, false)",
+                     (previous,))
+
+    @staticmethod
+    def _lease_holders(conn: psycopg.Connection) -> list[tuple]:
+        """``(pid, application_name)`` of every session holding this
+        database's writer lease. A bigint advisory key shows in
+        ``pg_locks`` split into ``classid`` (high half) and ``objid`` (low
+        half), with ``objsubid`` 1."""
+        return conn.execute(
+            """
+            WITH k AS (SELECT hashtextextended(%s, 0) AS key)
+            SELECT a.pid, a.application_name
+            FROM pg_locks l
+            JOIN pg_stat_activity a ON a.pid = l.pid
+            CROSS JOIN k
+            WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+              AND l.database = (SELECT oid FROM pg_database
+                                WHERE datname = current_database())
+              AND l.classid = ((k.key >> 32) & 4294967295)::oid
+              AND l.objid = (k.key & 4294967295)::oid
+            """,
+            (WRITER_LEASE_KEY,),
+        ).fetchall()
+
+    @classmethod
+    def _describe_lease_holder(cls, conn: psycopg.Connection) -> str:
+        """The refusal message: which session holds the lease, and what to
+        do about it."""
+        rows = cls._lease_holders(conn)
+        bank = conn.execute("SELECT current_database()").fetchone()[0]
+        if rows:
+            holder = ", ".join(
+                f"backend pid {pid} (application_name {(app or '')!r})"
+                for pid, app in rows)
+        else:
+            holder = "a session that released it a moment ago (retry)"
+        return (
+            f"another process holds the writer lease on bank {bank!r}: "
+            f"{holder}. A bank has exactly one writer, because two would "
+            "each save slots from their own resident copy and erase each "
+            "other's history. Stop that process first (for the Docker "
+            "daemon: `docker compose -f ops/docker-compose.yml stop "
+            "pseudolife-daemon`), or point this one at a different database.")
 
     def _connect(self) -> psycopg.Connection:
         """Open + session-configure a connection (shared by init and the
@@ -169,7 +342,8 @@ class PostgresStorage:
         autovacuum on the churny canonical tables) and held ACCESS SHARE
         locks that blocked any concurrent DDL. Mutations get explicit
         transaction blocks via :meth:`_txn`."""
-        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True)
+        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True,
+                               fallback_application_name=_application_name())
         # Never block forever on a lock — a stuck/orphaned writer should
         # raise here, not hang the whole daemon. (Session-level GUCs; they
         # apply immediately under autocommit.)
@@ -189,7 +363,11 @@ class PostgresStorage:
         daemon until manual restart). Heal-on-next-use: the call that hits
         the dead connection still raises; the *next* one reconnects.
         Schema is NOT re-ensured (it exists); the vector adapter is
-        per-connection and must be re-registered."""
+        per-connection and must be re-registered. The writer lease died with
+        the old session, so the replacement must win it back before it
+        serves anything. If another writer took the bank in the gap, this
+        raises, and keeps raising on every later call while the other holds
+        it (fail closed)."""
         # A lesson batch must not silently reconnect halfway through its
         # transaction: later helpers would then commit outside that batch.
         if self._transaction_connection is not None:
@@ -202,19 +380,38 @@ class PostgresStorage:
             return self._lesson_transaction_connection
         c = self._conn
         if c.closed or c.broken:
+            if self._lease_lost and time.monotonic() < self._lease_retry_at:
+                raise WriterLeaseHeld(self._lease_lost)
             logger.warning("postgres connection lost (closed=%s broken=%s); "
                            "reconnecting", c.closed, c.broken)
-            self._conn = self._connect()
-            register_vector(self._conn)
+            try:
+                conn = self._open_session()
+            except WriterLeaseHeld as exc:
+                self._lease_lost = str(exc)
+                self._lease_retry_at = time.monotonic() + _LEASE_RETRY_SECONDS
+                raise
+            try:
+                register_vector(conn)
+            except BaseException:
+                conn.close()
+                raise
+            self._conn = conn
+            self._lease_lost = None
         return self._conn
 
     def ping(self) -> bool:
         """Cheap liveness probe for /health on a DEDICATED short-lived
         connection, so it can't interleave with — or leave an idle
         transaction on — the shared connection another thread is using.
-        Raises on an unreachable server."""
+        Raises on an unreachable server, and while the last reconnect was
+        refused because another writer holds the lease and that writer is
+        still there: a healthy server would otherwise report a daemon whose
+        every call fails as fine. Once the holder is gone the next call
+        reconnects and takes the lease, so the probe stops reporting it."""
         with psycopg.connect(self.dsn, connect_timeout=2) as c:
             c.execute("SELECT 1")
+            if self._lease_lost and self._lease_holders(c):
+                raise WriterLeaseHeld(self._lease_lost)
         return True
 
     def _seed_relations(self) -> None:

@@ -130,6 +130,7 @@ def test_service_restart_roundtrip(pg_conn, pg_url, tmp_path):
     svc.cortex_write("quorvax", "owner", "alice", support="user")
     svc.episode_start("restart check")
     svc.flush()
+    svc._storage.close()  # the first daemon exits, releasing the bank
 
     svc2 = MemoryService(data_dir=tmp_path, database_url=pg_url)
     s = svc2.search("what is the quorvax timeout?")
@@ -149,11 +150,17 @@ def test_service_restart_roundtrip(pg_conn, pg_url, tmp_path):
 # that is the restart the loss actually manifests in.
 
 
-def _rehydrated(tmp_path, pg_url, text):
+def _rehydrated(live, tmp_path, pg_url, text):
+    """Stop ``live`` (a bank has one writer) and read ``text`` back through
+    a restarted service, which releases the bank again afterwards."""
     from pseudolife_memory.service import MemoryService
 
+    live._storage.close()
     svc = MemoryService(data_dir=tmp_path / "restart", database_url=pg_url)
-    recent = svc.recent(n=50)
+    try:
+        recent = svc.recent(n=50)
+    finally:
+        svc._storage.close()
     return next(e for e in recent["entries"] if e["text"] == text)
 
 
@@ -169,7 +176,7 @@ def test_consolidate_supersession_survives_restart(pg_conn, pg_url, tmp_path):
     )
     assert out["superseded_count"] == 1
 
-    entry = _rehydrated(tmp_path, pg_url, "fact A v1")
+    entry = _rehydrated(svc, tmp_path, pg_url, "fact A v1")
     assert entry["superseded"] is True
     assert entry["superseded_by_text"] == "Consolidated: fact A current"
 
@@ -193,7 +200,7 @@ def test_consolidate_paraphrase_refusal_survives_restart(
     assert len(svc._storage.load_entries()) == 1
 
     entry = _rehydrated(
-        tmp_path, pg_url, "the deploy target is the staging cluster",
+        svc, tmp_path, pg_url, "the deploy target is the staging cluster",
     )
     assert entry["superseded"] is False
     assert entry["superseded_by_text"] is None
@@ -209,7 +216,7 @@ def test_supersede_supersession_survives_restart(pg_conn, pg_url, tmp_path):
     out = svc.supersede("Sky is green", "Sky is blue")
     assert out["superseded_count"] == 1
 
-    entry = _rehydrated(tmp_path, pg_url, "Sky is green")
+    entry = _rehydrated(svc, tmp_path, pg_url, "Sky is green")
     assert entry["superseded"] is True
     assert entry["superseded_by_text"] == "Sky is blue"
 
@@ -237,8 +244,8 @@ def test_explicit_replacement_bypasses_surprise_and_survives_restart(
 
     assert result['superseded_count'] == 1
     assert result['new_memory_stored'] is True
-    assert _rehydrated(tmp_path, pg_url, old_text)['superseded'] is True
-    replacement = _rehydrated(tmp_path, pg_url, new_text)
+    assert _rehydrated(svc, tmp_path, pg_url, old_text)['superseded'] is True
+    replacement = _rehydrated(svc, tmp_path, pg_url, new_text)
     assert replacement['superseded'] is False
 
 

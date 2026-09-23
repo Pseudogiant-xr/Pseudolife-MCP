@@ -24,7 +24,9 @@ import urllib.request
 
 import pytest
 
-from tests.helpers import free_port as _free_port, pg_reachable as _pg_reachable
+from tests.helpers import (free_port as _free_port,
+                           pg_reachable as _pg_reachable,
+                           private_bank as _private_bank)
 from tests.pg_fixtures import resolve_test_db_url
 
 pytest.importorskip("psycopg")
@@ -334,10 +336,16 @@ def trust_bind_daemon(tmp_path_factory):
     exposure boundary is external (compose publishes the port to 127.0.0.1
     only), so the bind guard lets it start without a token. Module-scoped:
     a daemon spawn costs a cold torch import, and two tests need this shape.
+    It runs beside the module's ``daemon``, so it gets a bank of its own.
     """
     url = resolve_test_db_url()
     if not _pg_reachable(url):
         pytest.skip("no test Postgres reachable")
+    with _private_bank(url, "trustbind") as bank_url:
+        yield from _spawn_trust_bind_daemon(tmp_path_factory, bank_url)
+
+
+def _spawn_trust_bind_daemon(tmp_path_factory, url):
     port = _free_port()
     data_dir = tmp_path_factory.mktemp("trust_bind_data")
     env = {

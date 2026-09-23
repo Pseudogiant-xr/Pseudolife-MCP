@@ -113,6 +113,15 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     if init_refusal:
         payload["status"] = "degraded"
         payload["init_refusal"] = init_refusal
+    # The retryable counterpart (2026-09-23): a failed store build backing
+    # off, or the bank writer lease held by another process. Degraded, so
+    # the Docker healthcheck and ops/update.* see a daemon that serves
+    # nothing yet, but under its own key: the shim exits on init_refusal,
+    # and a client that starts during a retry window must still attach.
+    not_ready = getattr(svc, "_not_ready", None)
+    if not_ready:
+        payload["status"] = "degraded"
+        payload["not_ready"] = not_ready
     # A legacy .pt import that stopped part-way leaves a bank that serves
     # normally but is SHORT (#187). Nothing else on this payload would show
     # it, so it surfaces here — but deliberately WITHOUT touching `status`:

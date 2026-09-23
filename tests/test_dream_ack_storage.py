@@ -451,7 +451,7 @@ def _rewrite_archive(source, target, *, schema_version, strip_dream_state):
             new.writestr(name, payload)
 
 
-def test_logical_transfer_preserves_states_but_rotates_secret(pg_url, tmp_path):
+def test_logical_transfer_preserves_states_but_rotates_secret(pg_conn, pg_url, tmp_path):
     from pseudolife_memory.storage.postgres import PostgresStorage
     from pseudolife_memory.transfer_cli import perform_export, perform_import
 
@@ -495,7 +495,7 @@ def test_logical_transfer_preserves_states_but_rotates_secret(pg_url, tmp_path):
         ).fetchone()[0] == "b" * 64
 
 
-def test_old_logical_export_imports_entries_with_null_marker(pg_url, tmp_path):
+def test_old_logical_export_imports_entries_with_null_marker(pg_conn, pg_url, tmp_path):
     from pseudolife_memory.storage.postgres import PostgresStorage
     from pseudolife_memory.transfer_cli import perform_export, perform_import
 

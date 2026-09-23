@@ -68,7 +68,7 @@ def _row(svc, pid):
 
 # ── the storage-level gate under the sweep (schema v30) ──────────────────
 
-def test_judgment_round_trips_and_gates_on_pending(pg_url):  # noqa: F811
+def test_judgment_round_trips_and_gates_on_pending(pg_conn, pg_url):  # noqa: F811
     """The verdict is an OPINION recorded on a PENDING row. Once a decision
     path ratifies the row, the verdict freezes with it — a later judge call
     must be refused rather than rewriting the history of a decided merge."""

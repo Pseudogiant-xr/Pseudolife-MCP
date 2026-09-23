@@ -28,7 +28,8 @@ slots](#set-valued-slots)), retrievable out of the context window.
   `my <attr> is <value>`, `<Entity>'s <attr> is <value>`,
   `the <attr> of <entity> is <value>`, and single-line
   `<entity> <attr>: <value>`.) A one-time `ops/dedup_cortex.py`
-  (dry-run-first, reversible) collapses sibling slots left by past
+  (dry-run-first, reversible; run it with the daemon stopped, since it
+  opens the bank as its writer) collapses sibling slots left by past
   auto-promotes.
 - **Documented vs enacted.** A fact stated by a *document* you shared (a
   spec, policy, protocol, runbook) is captured under that document's

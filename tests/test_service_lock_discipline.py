@@ -70,6 +70,9 @@ CALLER_HOLDS_LOCK = {
     "_reseed_hlc",
     # Reached only from _ensure_init; the fixpoint below verifies its lock.
     "_initialize_dream_tracking",
+    # The store-building body of _ensure_init (fail-closed hydration,
+    # 2026-09-23), split out only so a failure can drop what it built.
+    "_hydrate_resident_stores",
     "_ensure_postgres_storage",
     "_ensure_subject_entity",
     "_persist_all",

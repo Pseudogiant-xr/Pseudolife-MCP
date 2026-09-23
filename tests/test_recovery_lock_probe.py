@@ -1,4 +1,9 @@
-"""PostgreSQL counterexamples for delayed/reconnected reinstatement recovery."""
+"""PostgreSQL counterexamples for delayed/reconnected reinstatement recovery.
+
+Every peer here is the out-of-contract second writer the bank writer lease
+now refuses, built on purpose to probe the per-entry locks, so each one opts
+out of the lease (``writer_lease=False``).
+"""
 from contextlib import contextmanager
 from copy import deepcopy
 import threading
@@ -84,7 +89,7 @@ def test_delayed_recovery_holds_lock_through_publication(
         monkeypatch.setattr(storage, "reinstate_entry", reinstate)
         if reconnect:
             storage.conn.close()
-        peer_storage = PostgresStorage(pg_url)
+        peer_storage = PostgresStorage(pg_url, writer_lease=False)
         peer = _service(
             tmp_path / "peer", monkeypatch, peer_storage,
             embedding_dim=1024)
@@ -235,7 +240,7 @@ def test_delayed_correction_recovery_holds_lock_through_publication(
         assert svc._correction_recovery is not None
         monkeypatch.setattr(storage, "transaction", transaction)
         monkeypatch.setattr(storage, "load_entries", load)
-        peer_storage = PostgresStorage(pg_url)
+        peer_storage = PostgresStorage(pg_url, writer_lease=False)
         peer = _service(
             tmp_path / "peer", monkeypatch, peer_storage,
             embedding_dim=1024)
@@ -332,7 +337,7 @@ def test_reinstatement_publication_loss_restores_resident_and_retries(
 
         monkeypatch.setattr(storage, "load_entry_row", load)
         monkeypatch.setattr(storage, "reinstate_entry", reinstate)
-        peer_storage = PostgresStorage(pg_url)
+        peer_storage = PostgresStorage(pg_url, writer_lease=False)
         peer = _service(
             tmp_path / "peer", monkeypatch, peer_storage,
             embedding_dim=1024)
@@ -419,7 +424,7 @@ def test_correction_publication_loss_restores_resident_and_retries(
 
         monkeypatch.setattr(storage, "transaction", transaction)
         monkeypatch.setattr(storage, "load_entries", load)
-        peer_storage = PostgresStorage(pg_url)
+        peer_storage = PostgresStorage(pg_url, writer_lease=False)
         peer = _service(
             tmp_path / "peer", monkeypatch, peer_storage,
             embedding_dim=1024)
@@ -488,7 +493,7 @@ def test_successful_correction_publication_loss_retries_then_stays_pending(
     old = correction_seed(svc)
     prior_cms = svc._cms
     prior_entry = _entry_state(old)
-    peer_storage = PostgresStorage(pg_url)
+    peer_storage = PostgresStorage(pg_url, writer_lease=False)
     peer = _service(tmp_path / "peer", monkeypatch, peer_storage,
                     embedding_dim=1024)
     publish = svc._preserve_correction_entry_identity
@@ -581,7 +586,7 @@ def test_correction_lock_session_loss_reconciles_on_fresh_session(
         raise RuntimeError("synthetic lost commit response")
 
     monkeypatch.setattr(storage, "transaction", outcome_lost_with_session)
-    fresh = PostgresStorage(pg_url)
+    fresh = PostgresStorage(pg_url, writer_lease=False)
     try:
         if outcome == "committed":
             result = correction_call(svc, "supersede", ids=[old.db_id])
@@ -637,7 +642,7 @@ def test_admission_publication_loss_restores_resident_and_retries(
         tmp_path / "primary", monkeypatch, pg_url)
     retired = _row(storage, old.db_id)
     request = _request_for_durable_row(retired)
-    peer_storage = PostgresStorage(pg_url)
+    peer_storage = PostgresStorage(pg_url, writer_lease=False)
     peer = _service(
         tmp_path / "peer", monkeypatch, peer_storage,
         embedding_dim=1024)

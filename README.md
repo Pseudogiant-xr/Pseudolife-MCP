@@ -444,7 +444,14 @@ LAN agent ────────┘  or stdio shim         (single writer)    
 
 This kills two v0.1 hazards by construction: a single writer means
 concurrent sessions can't clobber each other, and entries are transactional
-so a crash can't wipe the bank. On top of the associative store sit the
+so a crash can't wipe the bank. The single writer is enforced: the daemon
+holds a Postgres advisory-lock *writer lease* on its bank. A second daemon,
+or a script or eval that opens the live bank through the service, refuses
+to start and names the process that holds it. Stop the daemon before
+offline maintenance such as `ops/dedup_cortex.py`. If the bank fails to
+load at startup, the daemon serves nothing rather than a partly loaded
+bank, and `/health` reports `degraded` with the reason until a retry
+succeeds. On top of the associative store sit the
 canonical layers — cortex, world facts, lessons, temporal/HLC stamps
 ([the memory model](docs/guide/memory-model.md)) — joined to a typed
 knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`

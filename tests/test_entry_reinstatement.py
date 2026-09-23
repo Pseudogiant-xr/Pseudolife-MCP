@@ -186,7 +186,8 @@ def test_trace_and_reinstatement_serialize_on_source_row(
     pg_conn, pg_url, first,
 ):
     a = PostgresStorage(pg_url)
-    b = PostgresStorage(pg_url)
+    # The racing peer is an out-of-contract second writer on purpose.
+    b = PostgresStorage(pg_url, writer_lease=False)
     try:
         entry_id = a.insert_entry(_entry())
         locked = threading.Event()
@@ -288,7 +289,8 @@ def test_service_replay_rehydrates_later_retirement_and_deletion(
     tmp_path, monkeypatch, pg_conn, pg_url,
 ):
     svc, storage, old = _retired_service(tmp_path, monkeypatch, pg_url)
-    external = PostgresStorage(pg_url)
+    # An out-of-process writer, deliberately outside the writer lease.
+    external = PostgresStorage(pg_url, writer_lease=False)
     request = _request(old.db_id)
     try:
         external.reinstate_entry(**request)
@@ -387,6 +389,7 @@ def test_retirement_without_replacement_text_is_named(
     with pytest.raises(ValueError, match="retirement_text_missing"):
         storage.reinstate_entry(**_request(entry_id))
 
+    storage.close()  # one writer per bank: hand it to the service below
     svc, service_storage, old = _retired_service(tmp_path, monkeypatch, pg_url)
     try:
         service_storage.conn.execute(
@@ -476,7 +479,8 @@ def test_service_correction_and_reinstatement_serialize_through_publication(
             (old.db_id,),
         )
 
-    peer_storage = PostgresStorage(pg_url)
+    # The racing peer service is an out-of-contract second writer on purpose.
+    peer_storage = PostgresStorage(pg_url, writer_lease=False)
     peer = _service(
         tmp_path / "peer", monkeypatch, peer_storage, embedding_dim=1024)
     peer._cms = peer._hydrate_correction_rows(

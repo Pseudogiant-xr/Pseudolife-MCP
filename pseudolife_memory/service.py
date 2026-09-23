@@ -35,6 +35,7 @@ from collections import Counter
 from contextlib import ExitStack, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, replace
+import gc
 import hashlib
 import heapq
 import logging
@@ -72,6 +73,15 @@ from pseudolife_memory.utils.config import AppConfig, load_config
 from pseudolife_memory.utils.locks import SLOW_LOCK_SECONDS, MonitoredLock
 
 logger = logging.getLogger(__name__)
+
+# Retry backoff after a failed store build (fail-closed hydration,
+# 2026-09-23). Not tuned against a measurement; sized from the incidents it
+# guards. The 2026-08-04 boot balloon re-ran init ~0.9 s apart on every
+# queued call, and the 2026-09-23 OOM followed a burst of ~30 searches. The
+# 5 s floor collapses such a burst into one attempt. The 60 s cap bounds how
+# long a cleared cause keeps the bank refused to callers.
+INIT_RETRY_BASE_SECONDS = 5.0
+INIT_RETRY_MAX_SECONDS = 60.0
 
 
 class PersistenceError(RuntimeError):
@@ -732,6 +742,23 @@ class MemoryService(DreamOps):
         # exception still propagates to the caller; this is purely for
         # visibility.
         self._init_refusal: str | None = None
+        # The RETRYABLE counterpart, kept apart because the shim exits on
+        # init_refusal: a failed store build (fail-closed hydration, retried
+        # after a backoff) or the bank writer lease held by another process.
+        # /health reports it as degraded + not_ready; cleared when an init
+        # completes (or, for the lease, when storage opens).
+        self._not_ready: str | None = None
+        # Retry backoff after a failed store build: until _init_retry_at
+        # (time.monotonic) passes, _ensure_init refuses at once instead of
+        # rebuilding and re-hydrating every store for each incoming call.
+        # _init_backoff_s is the window last armed; all three reset when an
+        # init completes.
+        self._init_failures = 0
+        self._init_backoff_s = 0.0
+        self._init_retry_at = 0.0
+        # Set when a failed attempt abandoned half-built stores: the next
+        # attempt collects them first (see _ensure_init).
+        self._collect_before_retry = False
         # Set by _ensure_init when the legacy .pt import left a partial
         # bank behind (#187). Boot deliberately continues -- a half-imported
         # bank is still usable -- but the state must not be silent, so it
@@ -1006,9 +1033,21 @@ class MemoryService(DreamOps):
                 "this operation requires the durable Postgres tier; "
                 "configure PSEUDOLIFE_MCP_DATABASE_URL or install the "
                 "lite tier")
-        from pseudolife_memory.storage.postgres import PostgresStorage
+        # Inside a lease refusal's retry window, refuse at once: every
+        # attempt waits out the lease under the service lock, so a burst of
+        # calls must pay that once per window, not once per call.
+        self._refuse_while_backing_off()
+        from pseudolife_memory.storage.postgres import (
+            PostgresStorage, WriterLeaseHeld)
         try:
             self._storage = PostgresStorage(self._db_url)
+        except WriterLeaseHeld as exc:
+            # Another process owns the bank. Retryable, not a refusal: the
+            # holder may be a maintenance script, and a retry after the
+            # window costs a connect, never a model load.
+            self._not_ready = str(exc)
+            self._arm_retry_backoff()
+            raise
         except RuntimeError as exc:
             # schema.py's dim-mismatch refusal (schema v25) fires here —
             # record it for /health, then let it propagate: this call
@@ -1017,6 +1056,7 @@ class MemoryService(DreamOps):
             self._init_refusal = str(exc)
             raise
         self._init_refusal = None
+        self._not_ready = None
         logger.info("storage: postgres (%s)",
                     self._db_url.rsplit("@", 1)[-1])
         # Invariant: unqualified tables MUST resolve to the real `public`
@@ -1043,6 +1083,16 @@ class MemoryService(DreamOps):
             if self._hlc_reseed_pending:
                 self._reseed_hlc()
             return
+        self._refuse_while_backing_off()
+        if self._collect_before_retry:
+            # Reclaim the last failed attempt's stores before building new
+            # ones, once per abandoned build. Not inside that attempt: its
+            # exception, still in flight there, held the frames that
+            # reference them. They sit in torch reference cycles a quiet
+            # process can leave uncollected (the retention behind the
+            # 2026-08-04 balloon).
+            self._collect_before_retry = False
+            gc.collect()
         logger.info("MemoryService: initialising embedder + CMS (first call).")
         # Storage connects BEFORE any model load (2026-08-04 boot balloon):
         # while Postgres is in crash-recovery after machine boot, every
@@ -1085,6 +1135,85 @@ class MemoryService(DreamOps):
         # 1024-d; all-MiniLM-L6-v2 is 384-d. Whatever model is configured,
         # this line keeps memory.embedding_dim honest without hand-tuning.
         self.config.memory.embedding_dim = self._embedder.embedding_dim
+        try:
+            self._hydrate_resident_stores()
+        except BaseException as exc:
+            self._abandon_partial_init(exc)
+            raise
+        self._init_failures = 0
+        self._init_backoff_s = 0.0
+        self._init_retry_at = 0.0
+        self._init_refusal = None
+        self._not_ready = None
+        self._reseed_hlc()
+
+    def _arm_retry_backoff(self) -> None:
+        """Open, or widen, the retry window after a failed init attempt: a
+        failed store build or a refused writer lease."""
+        self._init_failures += 1
+        self._init_backoff_s = min(
+            INIT_RETRY_MAX_SECONDS,
+            INIT_RETRY_BASE_SECONDS * 2 ** min(self._init_failures - 1, 16))
+        self._init_retry_at = time.monotonic() + self._init_backoff_s
+
+    def _refuse_while_backing_off(self) -> None:
+        """Refuse at once while a failed init's retry window is open, so a
+        burst of calls costs one attempt per window, not one per call.
+        Storage connect failures never open a window: they are already
+        cheap, and a database that is still starting must be picked up as
+        soon as it answers."""
+        wait = self._init_retry_at - time.monotonic()
+        if wait > 0:
+            raise RuntimeError(
+                f"memory bank not ready: "
+                f"{self._not_ready or self._init_refusal} "
+                f"(next retry in {wait:.0f}s)")
+
+    def _abandon_partial_init(self, exc: BaseException) -> None:
+        """Drop every store a failed ``_ensure_init`` attempt built.
+
+        Fail closed (fresh-eyes review 2026-09-23). A failed cortex, world
+        or lesson hydration used to be logged and skipped, so the daemon
+        served that store EMPTY and saved from it slot by slot. Its next
+        write to a pre-existing slot replaced the slot's durable history,
+        and an explicit save rewrote the whole table from the empty copy. A
+        failed entry hydration left the half-built CMS assigned, so
+        ``_ensure_init`` never ran again. With ``_cms`` gone, every tool
+        call re-enters ``_ensure_init``, and the autosave and exit-flush
+        paths no-op, so nothing is served or written until an attempt
+        completes. The embedder is kept: rebuilding the ~2.4 GB model on
+        every attempt was the 2026-08-04 boot balloon.
+        """
+        self._cms = None
+        self._cortex = None
+        self._world = None
+        self._lessons = None
+        self._collect_before_retry = True
+        if not isinstance(exc, Exception):
+            return  # an interrupt, not a failed attempt: nothing to back off
+        reason = (str(exc) if isinstance(exc, RuntimeError)
+                  else f"{type(exc).__name__}: {exc}")
+        # Retryable unless a permanent guard (the hydrated-dim refusal)
+        # recorded itself as init_refusal before raising. The shim exits on
+        # init_refusal, so it must never carry a state a retry can clear.
+        self._not_ready = None if self._init_refusal == reason else reason
+        self._arm_retry_backoff()
+        logger.error(
+            "initialization failed; refusing to serve a partially loaded "
+            "bank (%s). Nothing is served or written until a retry "
+            "succeeds; next attempt in %.0fs.", reason, self._init_backoff_s)
+
+    def _hydrate_resident_stores(self) -> None:
+        """Build the resident stores and fill them from storage (or the
+        v0.1 files). A failed Postgres hydration of entries, cortex, world
+        facts or lessons raises, as does any other unhandled failure, and
+        ``_ensure_init`` then drops whatever was built
+        (:meth:`_abandon_partial_init`): a store that failed to load is
+        never served or saved from. Five steps keep their own deliberate
+        tolerance: the legacy ``.pt`` import (resumable, surfaced as
+        ``migration_partial``), the weights file, the optional reference
+        bank, dream tracking (a failure disables the dream alone, surfaced
+        as ``dream_tracking_error``), and the v0.1 file-mode loads."""
         try:
             self._reference = ReferenceBank(
                 self.config.memory.reference,
@@ -1145,7 +1274,10 @@ class MemoryService(DreamOps):
                     "SHORT bank): %s — progress is recorded in the '%s' meta "
                     "row; fix the cause and restart to resume the import.",
                     exc, _migrate.MIGRATION_META_KEY)
-            n = _sync.hydrate_cms(self._cms, self._storage)
+            try:
+                n = _sync.hydrate_cms(self._cms, self._storage)
+            except Exception as exc:
+                raise RuntimeError(f"entry hydration failed: {exc}") from exc
             logger.info("hydrated %d entries from storage", n)
             try:
                 self._cms.load_weights(self.config.memory.save_dir)
@@ -1176,8 +1308,8 @@ class MemoryService(DreamOps):
             from pseudolife_memory.storage import sync as _sync
             try:
                 _sync.hydrate_cortex(self._cortex, self._storage)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Cortex hydration skipped: %s", exc)
+            except Exception as exc:
+                raise RuntimeError(f"cortex hydration failed: {exc}") from exc
         else:
             try:
                 self._cortex.load(self._cortex_path())
@@ -1197,8 +1329,9 @@ class MemoryService(DreamOps):
             from pseudolife_memory.storage import sync as _sync
             try:
                 _sync.hydrate_world_cortex(self._world, self._storage)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("World cortex hydration skipped: %s", exc)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"world cortex hydration failed: {exc}") from exc
 
         # Procedural / outcome memory (schema v10) — sibling slot store for the
         # lessons the agent learns from its own work (what worked / dead-ended /
@@ -1209,10 +1342,8 @@ class MemoryService(DreamOps):
             from pseudolife_memory.storage import sync as _sync
             try:
                 _sync.hydrate_lessons(self._lessons, self._storage)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Lesson store hydration skipped: %s", exc)
-
-        self._reseed_hlc()
+            except Exception as exc:
+                raise RuntimeError(f"lesson hydration failed: {exc}") from exc
 
     def _reseed_hlc(self) -> None:
         # Re-seed the HLC from the stored high-water stamp (2026-07-02 P1): a
@@ -5462,14 +5593,31 @@ class MemoryService(DreamOps):
 
     def warmup(self):
         """Eagerly load embedder + reranker + NLI so the first real tool call
-        is warm. Safe to run in a background thread at startup."""
-        try:
-            with self._lock:
-                self._ensure_init()
-                self._last_saved_fingerprint = self._entry_fingerprint()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("warmup init failed: %s", exc)
-            return
+        is warm. Safe to run in a background thread at startup.
+
+        A retryable startup failure (a failed store build, or the writer
+        lease held elsewhere) is retried here each time its backoff window
+        expires, so a daemon nobody is calling still recovers from a
+        transient cause. Once the window reaches its cap (after about two
+        minutes), warmup leaves further retries to callers and the session
+        reaper, so a failure that never clears is not re-attempted every
+        minute forever. Any other failure (an unreachable database, a
+        permanent refusal) waits for the next caller, as before."""
+        while True:
+            try:
+                with self._lock:
+                    self._ensure_init()
+                    self._last_saved_fingerprint = self._entry_fingerprint()
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("warmup init failed: %s", exc)
+                # Only a retryable failure sets _not_ready and arms a window;
+                # a permanent refusal is not retried here.
+                wait = self._init_retry_at - time.monotonic()
+                if (not self._not_ready or wait <= 0
+                        or self._init_backoff_s >= INIT_RETRY_MAX_SECONDS):
+                    return
+                time.sleep(wait)
         try:
             self.search("warmup probe", top_k=1)
         except Exception as exc:  # noqa: BLE001

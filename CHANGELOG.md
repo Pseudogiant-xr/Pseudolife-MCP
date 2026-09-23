@@ -6,6 +6,89 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
+- **Hydration fails closed.** If loading cortex facts, world facts or lessons
+  from Postgres failed at startup, the daemon logged a warning and carried on
+  with that store empty. Its next write to a pre-existing slot then replaced
+  the slot's durable history with a single row, because a slot save deletes
+  the slot's rows and re-inserts the resident ones. An explicit save rewrote
+  the whole table from the empty copy. A failed entry load was a different
+  failure: it left the half-built store in place, and startup never ran
+  again. `tests/test_fail_closed_hydration.py` reproduces the history loss
+  against real Postgres; before this it had only been shown on fake storage.
+  Now any failure while building the resident stores drops all of them and
+  raises. Nothing is served, autosaved or flushed until an attempt completes.
+  - `/health` reports `status: "degraded"` with the reason under a new key,
+    `not_ready`, and the first init that completes clears it.
+    `init_refusal` stays reserved for permanent refusals (the embedding-dim
+    guards). The stdio shim exits on `init_refusal`, but a client that
+    starts during a retry window still attaches.
+  - Retries back off exponentially, from 5 s doubling to 60 s. A call inside
+    the window is refused at once without touching storage.
+  - A failure during the daemon's startup warmup is retried each time the
+    window expires, until the window reaches its cap (about two minutes),
+    so a daemon nobody is calling still recovers from a transient cause.
+    After that, callers and the session reaper (every 5 minutes) retry, so
+    a failure that never clears is not re-attempted every minute forever.
+  - A storage connect failure, such as a database that is still starting,
+    never opens a window.
+  - The embedder is still built once and reused across attempts (the
+    2026-08-04 boot balloon). The abandoned attempt's stores are
+    garbage-collected when the next attempt starts, not inside the failed
+    one, where the exception in flight still referenced them.
+- **One writer per bank, enforced.** The single-writer rule was documented
+  but nothing enforced it.
+  - `PostgresStorage` now holds a Postgres session advisory lock, the bank
+    writer lease, on its shared connection for as long as it lives. It is
+    taken before any schema DDL, keyed by
+    `hashtextextended('pseudolife-bank-writer', 0)`, a key space apart from
+    the per-entry mutation locks.
+  - A second instance on the same database waits up to 2 s for the lease,
+    long enough for a holder that is exiting (a restart) to go, then refuses
+    with `WriterLeaseHeld`. The error names the holder's backend pid and
+    `application_name`, which is now `pseudolife-mcp pid=<os pid> <program>
+    [<subcommand>]` unless the DSN sets one. A daemon refused this way reports
+    `degraded` with the reason in `not_ready`, and retries on the same
+    backoff as a failed load, so a burst of calls pays the 2 s wait once per
+    window, not once per call under the service lock.
+  - After a lost connection, the replacement must win the lease back before
+    it serves anything. While another writer holds it, calls keep failing:
+    from a cached refusal for 5 s between attempts. `/health` reports
+    `degraded` until that writer has gone.
+  - The lease session sets server-side TCP keepalives (60 s + 3 × 10 s). A
+    writer that vanishes without closing its socket now frees the bank in
+    about 90 s. The server defaults would take over 2 h (7200 s + 9 × 75 s,
+    read from the bench server's settings, not timed).
+  - `PostgresStorage(dsn, writer_lease=False)` is the explicit opt-out. Only
+    the test probes that build a racing peer on purpose use it.
+- **Behaviour change, intended: a second writer now refuses to start.**
+  Anything that opens a `MemoryService` or `PostgresStorage` on a bank a
+  running daemon holds now refuses instead of silently becoming a second
+  writer. That covers `ops/dedup_cortex.py`, `ops/restore_from_pt.py`, the
+  eval harnesses when pointed at a live bank DSN, a stdio-embedded server,
+  and a second daemon. Stop the daemon first, or point them at a restored
+  copy. Anything that does not open the bank through `PostgresStorage` takes
+  no lease and is unchanged:
+  - `pseudolife-mcp export`, which only reads.
+  - `import`, which already refuses a bank other sessions are connected to.
+  - `backup` (`pg_dump`).
+  - The coordination mailbox's own connection.
+  - The `/health` ping.
+  - Ops scripts that write through plain `psycopg`, such as
+    `ops/retire_by_writer.py` and `ops/backfill_edge_confidence.py`. These
+    still rely on their own safeguards.
+- **`ops/dedup_cortex.py --dry-run` no longer rewrites the bank.** Every run
+  ended with `svc.flush()`, a full snapshot that deletes and re-inserts every
+  fact, world fact and lesson from the script's own copy. Against a bank a
+  daemon was serving, that silently reverted everything the daemon wrote
+  after the script started. Now:
+  - A dry run saves nothing. Opening the bank still runs the startup
+    bookkeeping that every service start does.
+  - `--apply` persists per slot, like the daemon's autosave: the slots it
+    retired, plus the weights file and entry access counts that every
+    autosave writes. It never rewrites a whole table.
+  - While a daemon holds the bank, the script exits 2 and names the holder.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

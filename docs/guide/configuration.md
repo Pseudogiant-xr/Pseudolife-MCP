@@ -818,6 +818,24 @@ from the legacy bank. Leave the original `.pt` files in place until it
 completes: the resume reads them, and deleting one makes the bank
 unfinishable.
 
+The daemon owns its bank alone. It holds a Postgres advisory-lock *writer
+lease* for as long as it runs. A second daemon, a stdio-embedded server, or
+a maintenance script or eval that opens the same bank through the service
+refuses to start, and names the process that holds it. Stop the daemon for
+offline maintenance such as `ops/dedup_cortex.py`. If loading the bank fails
+at startup, the daemon serves nothing rather than a partly loaded bank:
+- `/health` reports `status: "degraded"` with the reason in `not_ready`. A
+  daemon refused the lease reads the same way.
+- Tool calls are refused.
+- Retries back off from 5 s, doubling to 60 s. The daemon retries a
+  startup failure on its own for the first couple of minutes. After that,
+  or for a failure first met by a later call, it retries on the next call
+  or on the session reaper's 5-minute tick.
+
+`init_refusal` is different. It marks a bank the daemon will never serve as
+configured, such as an embedding-dimension mismatch, and the shim exits on
+it.
+
 ## Session identity
 
 Every request resolves "which session/episode does this write belong to"
