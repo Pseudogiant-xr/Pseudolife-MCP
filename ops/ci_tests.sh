@@ -52,7 +52,8 @@ export PSEUDOLIFE_SUITE_PROFILE_DIR=ci-results/profile
 set +e
 /usr/bin/time -v -o ci-results/process.txt \
     python -m pytest -q -n 2 --dist loadfile -ra \
-    --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml \n    -p tests.suite_profile_plugin "$@"
+    --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml \
+    -p tests.suite_profile_plugin "$@"
 test_status=$?
 set -e
 free -m > ci-results/memory-after.txt || true
