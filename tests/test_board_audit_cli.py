@@ -66,13 +66,16 @@ def test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_veri
     head = f"{report['head_seq']}:{report['head_hash']}"
     assert cli("verify", "--input", str(archive), "--expect-head", head)[0] == 0
 
+    code, output = cli("verify", "--expect-head", "3:" + "0" * 64)
+    assert (code, json.loads(output.out)["reason"]) == (1, "head_mismatch")
+    code, output = cli("verify", "--expect-head", "9:" + report["head_hash"])
+    assert (code, json.loads(output.out)["reason"]) == (1, "head_missing")
+
     store.storage.conn.execute("UPDATE coordination_events SET task='elsewhere' WHERE seq=2")
     code, output = cli("verify")
     assert (code, json.loads(output.out)) == (1, {"ok": False, "seq": 2, "reason": "hash_mismatch"})
     # Exported before the damage, the archive is still intact on its own.
     assert cli("verify", "--input", str(archive), "--expect-head", head)[0] == 0
-    code, output = cli("verify", "--expect-head", "3:" + "0" * 64)
-    assert (code, json.loads(output.out)["reason"]) == (1, "hash_mismatch")
 
 
 def test_export_never_replaces_an_existing_file(store, cli, tmp_path):
@@ -105,16 +108,73 @@ def test_an_archive_line_that_is_not_an_exported_event_cannot_be_checked(store, 
     assert "line 1 is not an exported audit event" in output.err
 
 
-def test_failures_never_print_the_database_url(monkeypatch, capsys):
+@pytest.mark.parametrize("dsn", [
+    "postgresql://auditor:hunter2@127.0.0.1:1/nowhere?connect_timeout=2",
+    # psycopg echoes an unparseable DSN in its own error text.
+    "hunter2",
+])
+def test_failures_never_print_the_database_url(monkeypatch, capsys, dsn):
     from pseudolife_memory.board_audit_cli import main
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL",
-                       "postgresql://auditor:hunter2@127.0.0.1:1/nowhere?connect_timeout=2")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
     assert main(["verify"]) == 2
     output = capsys.readouterr()
     assert "hunter2" not in output.out + output.err
-    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL")
+
+
+def test_without_a_database_url_or_a_lite_bank_it_says_what_is_missing(
+        monkeypatch, capsys, tmp_path):
+    from pseudolife_memory.board_audit_cli import main
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     assert main(["export"]) == 2
     assert "PSEUDOLIFE_MCP_DATABASE_URL" in capsys.readouterr().err
+
+
+def test_a_bank_without_the_audit_log_cannot_be_checked(store, cli):
+    store.storage.conn.execute("DROP TABLE coordination_events")
+    code, output = cli("verify")
+    assert code == 2 and output.out == "" and "no audit log" in output.err
+
+
+def test_a_failed_export_removes_the_file_it_created(store, cli, tmp_path, monkeypatch):
+    from pseudolife_memory import board_audit_cli
+    pair(store)
+    real = board_audit_cli.audit_events
+
+    def breaks_after_one(conn, **filters):
+        rows = real(conn, **filters)
+        yield next(rows)
+        rows.close()
+        raise RuntimeError("connection lost mid-export")
+
+    monkeypatch.setattr(board_audit_cli, "audit_events", breaks_after_one)
+    target = tmp_path / "board-audit.jsonl"
+    code, output = cli("export", "--out", str(target))
+    assert code == 2 and not target.exists()
+
+
+def test_an_output_directory_that_does_not_exist_is_named_not_blamed_on_the_bank(
+        store, cli, tmp_path):
+    pair(store)
+    target = tmp_path / "missing" / "board-audit.jsonl"
+    code, output = cli("export", "--out", str(target))
+    assert code == 2 and "cannot create" in output.err and "database" not in output.err
+
+
+def test_a_reader_that_closes_early_is_not_reported_as_a_database_failure(
+        store, cli, monkeypatch):
+    """``export | head`` on Windows fails the write with EINVAL, not EPIPE."""
+    import errno
+    import io
+    pair(store)
+
+    class Closed(io.StringIO):
+        def write(self, text):
+            raise OSError(errno.EINVAL, "Invalid argument")
+
+    monkeypatch.setattr("sys.stdout", Closed())
+    code, output = cli("export")
+    assert code == 2 and "database" not in output.err
 
 
 def test_the_console_script_routes_board_audit(monkeypatch):

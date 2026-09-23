@@ -247,12 +247,22 @@ def test_recovery_still_revokes_on_a_restore_that_predates_the_audit_log(store):
     assert store.rebind(a["agent_id"], "alice")["audited"] is False
 
 
+def test_the_recovery_cli_says_when_the_restored_bank_cannot_record_it(
+        store, pg_url, tmp_path, monkeypatch, capsys):
+    from tests.test_coordination_recovery import invoke, settings
+    store.register("alice")
+    store.storage.conn.execute("DROP TABLE coordination_events")
+    assert invoke(monkeypatch, pg_url, settings(tmp_path), "recover", "--confirm-restore") == 0
+    assert "not recorded" in capsys.readouterr().out
+
+
 def test_verify_accepts_the_intact_chain_and_names_the_first_tampered_row(store):
     a, b = pair(store)
     for n in range(3):
         store.send(*creds(a), to=b["agent_id"], text=f"note {n}", request_id=f"r{n}")
     report = verify(store)
     assert report["ok"] and (report["events"], report["first_seq"], report["head_seq"]) == (5, 1, 5)
+    assert (report["head_created_at"], report["start_cut"]) == (1000.0, None)
     store.storage.conn.execute(
         "UPDATE coordination_events SET payload=replace(payload, 'note 1', 'note X') WHERE seq=4")
     assert verify(store) == {"ok": False, "seq": 4, "reason": "hash_mismatch"}
@@ -312,7 +322,11 @@ def test_an_expected_head_that_retention_removed_cannot_be_confirmed(store):
     store.update(*creds(a), status="later")
     store.prune(audit_retention_days=7)
     assert verify(store)["ok"]
-    assert verify(store, expect_head=early) == {"ok": False, "seq": 1, "reason": "head_pruned"}
+    pruned = verify(store, expect_head=early)
+    assert (pruned["ok"], pruned["seq"], pruned["reason"]) == (False, 1, "head_pruned")
+    [cut] = events(store, "audit_prune")
+    assert pruned["start_cut"] == {"seq": cut["seq"], "created_at": cut["created_at"],
+                                   "cutoff": 3 * DAY, "retention_days": 7, "through_seq": 2}
 
 
 def test_audit_retention_prunes_an_old_prefix_logs_the_cut_and_still_verifies(store):
@@ -326,8 +340,9 @@ def test_audit_retention_prunes_an_old_prefix_logs_the_cut_and_still_verifies(st
     assert [e["event"] for e in events(store)] == ["update", "expire", "prune", "audit_prune"]
     [cut] = events(store, "audit_prune")
     assert cut["actor"] == "daemon"
+    # The cut falls on a UTC day boundary: at least 7 days kept, at most 8.
     assert cut["payload"] == {"through_seq": 3, "through_hash": third["hash"], "removed": 3,
-                              "retention_days": 7, "cutoff": 1000.0 + 3 * DAY}
+                              "retention_days": 7, "cutoff": 3 * DAY}
     report = verify(store)
     assert report["ok"] and report["first_seq"] == 4
 
@@ -338,6 +353,108 @@ def test_audit_retention_prunes_an_old_prefix_logs_the_cut_and_still_verifies(st
     assert [e["event"] for e in events(store)] == ["prune", "audit_prune"]
     assert chain(store)[0]["seq"] == 8
     assert verify(store)["ok"]
+
+
+def test_retention_cuts_at_most_once_a_day_so_its_own_records_cannot_feed_it(store):
+    """Each cut appends an audit_prune, which ages out a window later. Cut
+    whenever anything aged out and a steadily used board makes a new cut on
+    almost every prune pass, forever, mostly of earlier cut records (review
+    of 15f31aec: 30 cutting passes a day from 31 events). On a day boundary
+    it is one cut a day."""
+    a, b = pair(store)
+    for hour in range(24):                      # a day of activity, hourly
+        store.test_time[0] += 3600
+        store.update(*creds(a), status=f"hour {hour}")
+    cutting_days = {}
+    for _ in range(4 * 48):                     # four days of half-hourly passes
+        store.test_time[0] += 1800
+        store.update(*creds(b), status="still here")
+        if store.prune(audit_retention_days=1)["audit_removed"]:
+            day = int(store.test_time[0] // DAY)
+            cutting_days[day] = cutting_days.get(day, 0) + 1
+    assert cutting_days and max(cutting_days.values()) == 1
+    assert len(events(store, "audit_prune")) <= 2
+    assert verify(store)["ok"]
+
+
+def test_retention_refuses_a_negative_window(store):
+    pair(store)
+    with pytest.raises(ValueError, match="audit_retention_days"):
+        store.prune(audit_retention_days=-1)
+    assert len(events(store)) == 2
+
+
+def _forged_prefix_cut(store, *, actor="daemon", created_at, cutoff, retention_days):
+    """Remove seq 1-3 of a five-row chain and append a chained audit_prune
+    naming the removed rows, as someone with write access to the table could.
+    Returns the original rows."""
+    from pseudolife_memory.storage.coordination import audit_hash
+    a, b = pair(store)
+    for n in range(3):
+        store.send(*creds(a), to=b["agent_id"], text=f"note {n}", request_id=f"r{n}")
+    rows = chain(store)
+    store.storage.conn.execute("DELETE FROM coordination_events WHERE seq<=3")
+    forged = {"seq": 6, "event": "audit_prune", "actor": actor, "principal": "",
+              "agent_id": "", "recipient_agent_id": None, "project": "", "task": "",
+              "message_id": None, "created_at": created_at, "hlc": "",
+              "payload": json.dumps({"through_seq": 3, "through_hash": rows[2]["hash"],
+                                     "removed": 3, "cutoff": cutoff,
+                                     "retention_days": retention_days},
+                                    sort_keys=True, separators=(",", ":")),
+              "prev_hash": rows[-1]["hash"]}
+    forged["hash"] = audit_hash(forged["prev_hash"], forged)
+    store.storage.conn.execute(
+        "INSERT INTO coordination_events (seq,event,actor,principal,agent_id,"
+        "recipient_agent_id,project,task,message_id,payload,created_at,hlc,prev_hash,hash) "
+        "VALUES (%(seq)s,%(event)s,%(actor)s,%(principal)s,%(agent_id)s,"
+        "%(recipient_agent_id)s,%(project)s,%(task)s,%(message_id)s,%(payload)s,"
+        "%(created_at)s,%(hlc)s,%(prev_hash)s,%(hash)s)", forged)
+    return rows
+
+
+@pytest.mark.parametrize("forgery", [
+    # A cutoff its own time and window cannot produce (they give 0).
+    dict(created_at=1000.0 + 7 * DAY, cutoff=500, retention_days=7),
+    # A window that never prunes, or is not a whole number of days.
+    dict(created_at=1000.0 + 7 * DAY, cutoff=0, retention_days=0),
+    dict(created_at=1000.0 + 7 * DAY, cutoff=0, retention_days=7.0),
+    # Not the daemon's own maintenance.
+    dict(actor="agent", created_at=1000.0 + 7 * DAY, cutoff=0, retention_days=7),
+    # A real cut at that cutoff would have removed the first surviving row too.
+    dict(created_at=20 * DAY, cutoff=13 * DAY, retention_days=7),
+])
+def test_a_cut_record_that_does_not_add_up_does_not_anchor_the_chain(store, forgery):
+    """A removed prefix is accepted only behind a daemon cut whose own fields
+    agree with how prune makes one."""
+    _forged_prefix_cut(store, **forgery)
+    assert verify(store) == {"ok": False, "seq": 4, "reason": "unanchored_start"}
+
+
+def test_a_careful_forged_cut_hides_a_removed_prefix_which_only_its_record_reveals(store):
+    """The documented limit: with no secret, someone who can write the table
+    can remove the oldest rows and append a consistent cut record, and verify
+    passes, even against a head recorded after those rows. What it can do is
+    name the cut the log starts from, so an operator who knows the window
+    can see a cut that removed rows younger than it."""
+    created = 1000.0 + 7 * DAY
+    rows = _forged_prefix_cut(store, created_at=created, cutoff=0, retention_days=7)
+    report = verify(store, expect_head=(rows[-1]["seq"], rows[-1]["hash"]))
+    assert report["ok"] and report["first_seq"] == 4
+    assert report["start_cut"] == {"seq": 6, "created_at": created, "cutoff": 0,
+                                   "retention_days": 7, "through_seq": 3}
+    pruned = verify(store, expect_head=(2, rows[1]["hash"]))
+    assert (pruned["ok"], pruned["reason"], pruned["start_cut"]["seq"]) == (
+        False, "head_pruned", 6)
+
+
+def test_a_malformed_cut_record_fails_verification_instead_of_crashing(store):
+    from pseudolife_memory.storage.coordination import audit_hash, verify_audit_chain
+    pair(store)
+    second = dict(chain(store)[1])
+    second["event"] = "audit_prune"
+    second["payload"] = json.dumps({"through_seq": [1], "through_hash": {"x": 1}})
+    second["hash"] = audit_hash(second["prev_hash"], second)
+    assert verify_audit_chain([second]) == {"ok": False, "seq": 2, "reason": "unanchored_start"}
 
 
 def test_zero_audit_retention_keeps_the_log_forever(store):
@@ -439,6 +556,20 @@ def test_the_volume_harness_counts_one_row_per_logged_mutation(pg_conn, pg_url):
                                 "read": 5, "register": 3, "send": 5, "update": 6}
     assert set(logged["latency"]) == {"send", "receive", "ack", "update"}
     assert measure(pg_url, audit=False, **workload)["events_total"] == 0
+
+
+def test_the_volume_harness_refuses_a_database_that_is_not_scratch(pg_conn, pg_url, monkeypatch):
+    """The bench server also holds the production bank, and the harness
+    truncates the board it replays into."""
+    import evals.coordination_audit_volume as harness
+    pg_conn.autocommit = True
+    store = CoordinationStore(Storage(pg_conn))
+    store.register("alice")
+    monkeypatch.setattr(harness, "SCRATCH_PREFIXES", ("pseudolife_memory_bench_",))
+    with pytest.raises(SystemExit, match="refusing"):
+        harness.measure(pg_url, agents=2, messages=1, updates_per_agent=0,
+                        attaches_per_agent=0, seed=1)
+    assert pg_conn.execute("SELECT count(*) FROM coordination_agents").fetchone() == (1,)
 
 
 @pytest.mark.parametrize("bad", [-1, 1.5, True, "90", None])

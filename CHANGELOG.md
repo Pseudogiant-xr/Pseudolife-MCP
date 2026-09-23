@@ -17,31 +17,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   detach, send (with the full body), first read, acknowledgment, delivery
   attempt, the prune pass's body expiry and row removal, bank identity, and the
   operator's restore `recover` and `rebind`. Lease heartbeats are not logged.
-  The live mailbox keeps its 24-hour body TTL.
-- The first time a recipient is served a message, by explicit receive or by the
+  The live mailbox keeps its 24-hour body TTL, and `memory_message`'s
+  description now tells agents the operator's audit log keeps a copy.
+- The first time a receive returns a message, explicitly or to the recipient's
   live-delivery adapter, is stamped as `coordination_messages.first_read_at`
   and logged as a `read` event; the push transport previously left only a
-  delivery attempt, and the pull path left nothing.
+  delivery attempt, and the pull path left nothing. The per-turn digest's
+  preview is not a read.
 - Rows are chained by sha256 over the previous hash and the row's canonical
   content, in a dense sequence allocated under a transaction-scoped advisory
-  lock taken last, so edited, inserted, reordered or deleted rows fail
-  verification. The log keeps events for `coordination.audit_retention_days`
-  (default 90; `0` keeps it forever), separate from the mailbox TTL. Its prune
-  removes only a prefix and logs the cut, which anchors the surviving chain.
-  A synthetic replay at the scale of the 2026-09-23/24 fifteen-session trial
-  left 2,671 events in 1.6 MB with indexes, and the append added 1.3 to 2.2 ms
-  to median send, receive and acknowledgment against a control arm
+  lock taken after every board-row lock, so edited, inserted or reordered rows
+  fail verification, and so do removed rows other than the oldest behind a
+  retention cut whose own fields add up. With no secret, the chain cannot on
+  its own see its newest rows dropped, a rewrite with every hash recomputed, or
+  its oldest rows removed behind a forged but consistent cut record;
+  `verify --expect-head` catches the first two, and the report names the cut
+  the log starts from so an operator can judge the third.
+- The log keeps events for `coordination.audit_retention_days` (default 90;
+  `0` keeps it forever), separate from the mailbox TTL. The prune pass cuts
+  only a prefix, on UTC day boundaries so at most once a day (a cutoff that
+  moved every minute re-cut its own records on nearly every pass), logs the
+  cut as the surviving chain's anchor, and runs only while the board is in
+  use. A synthetic replay at the scale of the 2026-09-23/24 fifteen-session
+  trial left 2,671 events in 1.6 MB with indexes, and
+  the append added 1.3 to 2.2 ms to median send, receive and acknowledgment
+  against a control arm whose own runs differed by up to 0.6 ms
   (`evals/results/coordination-audit-volume-20260924.json`,
   `evals/coordination_audit_volume.py`).
 - `pseudolife-mcp board-audit export` (JSON lines, filterable by project, task,
   agent and time) and `pseudolife-mcp board-audit verify` (prints the chain
-  head; `--expect-head` catches a truncated or recomputed log, `--input`
-  checks an archived export) are operator-only and read-only. They read the
-  bank through `PSEUDOLIFE_MCP_DATABASE_URL`; there is no MCP tool or REST
-  route. The log holds bodies verbatim, lives only in the bank and its full
-  backups, and is excluded from portable exports. Offline restore recovery
-  handles a restored backup that predates the log: it still revokes and
-  rebinds, and says the operation went unrecorded.
+  head and the cut it starts from; `--expect-head` checks a recorded head,
+  `--input` checks an archived export) are operator-only and read-only. They
+  read the bank through `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's
+  embedded instance; there is no MCP tool or REST route. The log holds bodies
+  verbatim, lives only in the bank and its full backups, and is excluded from
+  portable exports. Offline restore recovery handles a restored backup that
+  predates the log: it still revokes and rebinds, and says the operation went
+  unrecorded.
 
 ### Fixed (2026-09-23 — starting a service no longer opens a document store it may never use)
 - The reference (document) bank opens its ChromaDB client on the first

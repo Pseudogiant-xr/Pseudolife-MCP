@@ -157,9 +157,10 @@ MESSAGE_ORIGIN = "agent"
 AUDIT_FORMAT = "pseudolife-coordination-audit-v1"
 GENESIS_HASH = "0" * 64
 # Serializes chain appends across connections (the daemon's mailbox connection,
-# the offline recovery CLI, any second process). Always the LAST lock a
-# mutation takes: its holder only reads the head and inserts new rows, so it
-# never waits on anything and cannot close a deadlock cycle.
+# the offline recovery CLI, any second process). Always taken after every
+# board-row lock a mutation takes: its holder then only reads, inserts new log
+# rows and (in prune) deletes old ones nobody else locks, so it never waits on
+# anything and cannot close a deadlock cycle.
 AUDIT_LOCK_KEY = "coordination-audit-chain"
 AUDIT_COLUMNS = ("seq", "event", "actor", "principal", "agent_id", "recipient_agent_id",
                  "project", "task", "message_id", "payload", "created_at", "hlc",
@@ -253,8 +254,38 @@ def audit_hash(prev_hash: str, row) -> str:
     return hashlib.sha256((prev_hash + material).encode("utf-8")).hexdigest()
 
 
-def _broken(seq, reason):
-    return {"ok": False, "seq": seq, "reason": reason}
+def _broken(seq, reason, **detail):
+    return {"ok": False, "seq": seq, "reason": reason, **detail}
+
+
+def audit_cutoff(now: float, retention_days: int) -> int:
+    """The newest time retention removes: the UTC day boundary at or before
+    ``now - retention_days``. Cutting on day boundaries makes at most one
+    cut, and one ``audit_prune`` row, a day. A cutoff that moved with every
+    once-a-minute prune pass cut again on almost every pass, and each cut's
+    own record aged out a window later and fed the next one (review of
+    15f31aec, 2026-09-24: 30 cutting passes a day from 31 events)."""
+    return math.floor((now - retention_days * 86400) / 86400) * 86400
+
+
+def _cut(row):
+    """The fields of an ``audit_prune`` row, or None when they are not shaped
+    like the ones prune writes."""
+    payload = row["payload"]
+    try:
+        cut = json.loads(payload) if isinstance(payload, str) else payload
+    except ValueError:
+        return None
+    if not isinstance(cut, dict):
+        return None
+    through_seq, through_hash = cut.get("through_seq"), cut.get("through_hash")
+    cutoff, days = cut.get("cutoff"), cut.get("retention_days")
+    if (type(through_seq) is not int or not isinstance(through_hash, str)
+            or type(cutoff) not in (int, float) or type(days) is not int):
+        return None
+    return {"seq": row["seq"], "created_at": float(row["created_at"]), "cutoff": cutoff,
+            "retention_days": days, "through_seq": through_seq,
+            "through_hash": through_hash, "actor": row["actor"]}
 
 
 def verify_audit_chain(rows, *, expect_head=None) -> dict:
@@ -263,19 +294,28 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
     A row fails as ``sequence_gap`` (a missing seq), ``broken_link`` (its
     prev_hash is not the previous row's hash) or ``hash_mismatch`` (its
     content changed). A log whose oldest rows were removed must start right
-    after an ``audit_prune`` cut recorded later in the same chain, else
-    ``unanchored_start``. The chain alone cannot see the newest rows being
-    dropped, or a rewrite that recomputes every hash (there is no secret);
-    ``expect_head=(seq, hash)``, a head recorded elsewhere earlier, catches
-    both as ``head_missing`` / ``head_mismatch``, or reports ``head_pruned``
-    when retention has since removed that row.
+    after a cut recorded later in the same chain (an ``audit_prune`` naming
+    the last removed row) whose own fields add up: written by the daemon, a
+    window of at least a day, the cutoff that window gives at its time, and
+    a first surviving row no older than that cutoff. Otherwise the start is
+    ``unanchored_start``. ``expect_head=(seq, hash)``, a head recorded
+    elsewhere earlier, fails as ``head_missing``, ``head_mismatch``, or
+    ``head_pruned`` when the log now starts after it.
 
-    Returns ``{ok: True, events, first_seq, head_seq, head_hash}`` or
-    ``{ok: False, seq, reason}``.
+    What this cannot see, with no secret involved: the newest rows dropped,
+    a rewrite that recomputes every hash, or the oldest rows removed by
+    someone who also appends a consistent cut record. An expected head
+    catches the first two, not the third. The report names the cut the log
+    starts from (``start_cut``) so an operator can check it against the
+    retention window they configured.
+
+    Returns ``{ok: True, events, first_seq, head_seq, head_hash,
+    head_created_at, start_cut}``
+    or ``{ok: False, seq, reason}`` (plus ``start_cut`` on ``head_pruned``).
     """
     first = prev = None
     count = 0
-    cuts = set()
+    cuts = {}
     expected = None
     for row in rows:
         seq = row["seq"]
@@ -289,29 +329,35 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
             return _broken(seq, "broken_link")
         if audit_hash(row["prev_hash"], row) != row["hash"]:
             return _broken(seq, "hash_mismatch")
-        if row["event"] == "audit_prune":
-            payload = row["payload"]
-            cut = json.loads(payload) if isinstance(payload, str) else payload
-            if isinstance(cut, dict):
-                cuts.add((cut.get("through_seq"), cut.get("through_hash")))
+        if row["event"] == "audit_prune" and (cut := _cut(row)) is not None:
+            cuts[(cut["through_seq"], cut["through_hash"])] = cut
         if expect_head is not None and seq == expect_head[0]:
             expected = row["hash"]
         prev = row
         count += 1
-    if first is not None and first["seq"] != 1 and (
-            first["seq"] - 1, first["prev_hash"]) not in cuts:
-        return _broken(first["seq"], "unanchored_start")
+    start_cut = None
+    if first is not None and first["seq"] != 1:
+        cut = cuts.get((first["seq"] - 1, first["prev_hash"]))
+        if (cut is None or cut["actor"] != "daemon" or cut["retention_days"] < 1
+                or cut["cutoff"] != audit_cutoff(cut["created_at"], cut["retention_days"])
+                or float(first["created_at"]) < cut["cutoff"]):
+            return _broken(first["seq"], "unanchored_start")
+        start_cut = {key: cut[key] for key in
+                     ("seq", "created_at", "cutoff", "retention_days", "through_seq")}
     if expect_head is not None:
         seq, digest = expect_head
         if expected is None:
-            pruned = first is not None and seq < first["seq"]
-            return _broken(seq, "head_pruned" if pruned else "head_missing")
+            if first is not None and seq < first["seq"]:
+                return _broken(seq, "head_pruned", start_cut=start_cut)
+            return _broken(seq, "head_missing")
         if expected != digest:
             return _broken(seq, "head_mismatch")
     return {"ok": True, "events": count,
             "first_seq": first["seq"] if first else None,
             "head_seq": prev["seq"] if prev else None,
-            "head_hash": prev["hash"] if prev else None}
+            "head_hash": prev["hash"] if prev else None,
+            "head_created_at": float(prev["created_at"]) if prev else None,
+            "start_cut": start_cut}
 
 
 def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, until=None):
@@ -793,6 +839,11 @@ class CoordinationStore:
         # once even when two receives race on the same page.
         if unread:
             with self.storage._txn():
+                # The mailbox row first, as ack and mark_attempt take it, so
+                # a first read and an acknowledgment on separate connections
+                # lock message rows in the same order.
+                self._one("SELECT 1 FROM coordination_agents WHERE agent_id=%s FOR UPDATE",
+                          (agent_id,))
                 first = {r["message_id"] for r in self._all(
                     "UPDATE coordination_messages SET first_read_at=%s WHERE message_id=ANY(%s) "
                     "AND first_read_at IS NULL RETURNING message_id", (now, unread))}
@@ -884,9 +935,12 @@ class CoordinationStore:
 
         The pass logs what it blanked (``expire``) and removed (``prune``).
         With ``audit_retention_days`` > 0 it also removes the audit log's
-        prefix older than that window and logs the cut (``audit_prune``,
-        naming the last removed row, which anchors the surviving chain); 0
-        keeps the log forever."""
+        prefix older than that window, cut on a UTC day boundary
+        (``audit_cutoff``), and logs the cut (``audit_prune``, naming the last
+        removed row, which anchors the surviving chain); 0 keeps the log
+        forever."""
+        if (type(audit_retention_days) is not int or audit_retention_days < 0):
+            raise ValueError("audit_retention_days must be a whole number of days, 0 or more")
         now = self.clock()
         ephemeral = "a.capabilities->>'resumable'='false'"
         with self.storage._txn():
@@ -913,7 +967,7 @@ class CoordinationStore:
                                           actor="daemon"))
             head, audit_removed = None, 0
             if audit_retention_days:
-                cutoff = now - audit_retention_days * 86400
+                cutoff = audit_cutoff(now, audit_retention_days)
                 # The head is read before the cut: when every row is older than
                 # the window the head itself goes, and the chain must continue
                 # from it rather than restart at genesis.

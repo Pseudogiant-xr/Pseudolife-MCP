@@ -19,13 +19,13 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import platform
 import random
 import statistics
 import sys
 import time
-import uuid
 
 import psycopg
 from psycopg import sql
@@ -33,6 +33,7 @@ from psycopg import sql
 REFERENCE = ("2026-09-23/24 fifteen-session coordination trial board export: 40 agents, "
              "623 messages, 273,426 body bytes (mean 439, median 397, max 2110) over 9.6 h")
 DAY = 86400
+SCRATCH_PREFIXES = ("pseudolife_memory_bench_", "pseudolife_memory_test_")
 
 
 def body(rng: random.Random, n: int) -> str:
@@ -54,6 +55,13 @@ def measure(dsn: str, *, agents: int, messages: int, updates_per_agent: int,
 
     offset = [0.0]
     storage = CoordinationConnection(dsn)
+    # The bench server also holds the production bank; this truncates the
+    # board, so it runs only on a scratch or per-run test database.
+    name = storage.conn.execute("SELECT current_database()").fetchone()[0]
+    if not name.startswith(SCRATCH_PREFIXES):
+        storage.close()
+        raise SystemExit(f"refusing to replay into database {name!r}: only a scratch or "
+                         "test database may be truncated")
     store = CoordinationStore(storage, clock=lambda: time.time() + offset[0])
     if not audit:
         store._append = lambda events, now, head=None: None
@@ -117,7 +125,9 @@ def measure(dsn: str, *, agents: int, messages: int, updates_per_agent: int,
 
 @contextmanager
 def scratch_database(admin_url: str):
-    name = f"pseudolife_audit_volume_{uuid.uuid4().hex[:12]}"
+    # The per-run pid suffix lets tests/pg_fixtures.py drop it if a hard kill
+    # skips the cleanup below.
+    name = f"pseudolife_memory_bench_audit_{os.getpid()}"
     with psycopg.connect(admin_url, autocommit=True, connect_timeout=5) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
@@ -145,7 +155,8 @@ def main(argv=None) -> int:
     parser.add_argument("--updates-per-agent", type=int, default=15)
     parser.add_argument("--attaches-per-agent", type=int, default=2)
     parser.add_argument("--seed", type=int, default=20260924)
-    parser.add_argument("--admin-url", help="bench server admin URL (default: the dev "
+    parser.add_argument("--admin-url", help="bench server admin URL (default: "
+                                            "PSEUDOLIFE_BENCH_ADMIN_URL, else the dev "
                                             "container from ops/.env)")
     args = parser.parse_args(argv)
     out = Path(args.out)
@@ -154,8 +165,8 @@ def main(argv=None) -> int:
     admin_url = args.admin_url
     if admin_url is None:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from tests.pg_defaults import default_admin_url
-        admin_url = default_admin_url()
+        from tests.pg_defaults import bench_admin_url
+        admin_url = bench_admin_url()
     workload = {"agents": args.agents, "messages": args.messages,
                 "updates_per_agent": args.updates_per_agent,
                 "attaches_per_agent": args.attaches_per_agent, "seed": args.seed}

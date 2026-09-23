@@ -362,6 +362,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Measured 2026-09-22 after adding the full-tier memory_reinstate
     # contract: full is 17,238 chars across 38 tools. The 17,250 cap leaves
     # 12 chars and keeps the minimal/core ceilings unchanged.
+    # 2026-09-24: memory_message now tells agents an operator audit log
+    # keeps a copy of each body (schema v42), paid for by trimming its own
+    # reply_to / receive / ack wording: full 17,243, core 10,935.
     budgets = {"minimal": 5000, "core": 11500, "full": 17250}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))

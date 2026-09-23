@@ -1192,11 +1192,13 @@ class CoordinationConfig:
     # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
     # still blank after 24 h. Measured 2026-09-24
     # (evals/results/coordination-audit-volume-20260924.json): a synthetic
-    # replay at the scale of the 2026-09-23/24 fifteen-session trial, the
-    # busiest night the board has run (40 agents, 623 messages), leaves 2,671
-    # events in 1.6 MB with indexes, so 90 such nights would be 144.5 MB. Ninety
-    # days outlives the 7-day backup rotation (ops/backup.ps1) by a quarter of
-    # retrospectives while keeping growth bounded.
+    # replay at the scale of the 2026-09-23/24 fifteen-session trial (40
+    # agents, 623 messages, with assumed status-update and attach counts)
+    # leaves 2,671 events in 1.6 MB with indexes, so 90 such nights would be
+    # 144.5 MB. Ninety days outlives the 7-day backup rotation
+    # (ops/backup.ps1) by a quarter of retrospectives while keeping growth
+    # bounded. The log is cut on UTC day boundaries, so an event stays up to
+    # a day longer than this.
     audit_retention_days: int = 90
 
     def __post_init__(self) -> None:

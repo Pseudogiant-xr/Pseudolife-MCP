@@ -27,7 +27,7 @@ class Storage:
 def store(pg_conn):
     pg_conn.autocommit = True
     pg_conn.execute(COORDINATION_SCHEMA_SQL)
-    pg_conn.execute("TRUNCATE coordination_messages, coordination_agents")
+    pg_conn.execute("TRUNCATE coordination_messages, coordination_agents, coordination_events")
     now = [1000.0]
     out = CoordinationStore(Storage(pg_conn), clock=lambda: now[0])
     out.test_time = now

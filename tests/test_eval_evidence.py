@@ -9486,6 +9486,30 @@ for _doc, _prefix in ((CONFIG_GUIDE, "config-guide"), (CHANGELOG, "changelog")):
             id=f"{_prefix}-{_cid}", doc=_doc, needle=_needle,
             artifacts=(AUDIT_VOLUME,), value=_val, stated=_stated,
             places=_places))
+
+
+def _control_spread(kinds) -> Callable[[dict], float]:
+    """How far the two control runs' medians drifted apart: the noise floor
+    the append's cost is read against."""
+    def value(d):
+        arms = d["arms"]
+        return max(abs(arms["control"]["latency"][k]["p50_ms"]
+                       - arms["control-repeat"]["latency"][k]["p50_ms"])
+                   for k in kinds)
+    return value
+
+
+for _doc, _prefix, _needle in (
+        (CONFIG_GUIDE, "config-guide", "own two runs differed by up to 0.6 ms"),
+        (CHANGELOG, "changelog", "whose own runs differed by up to 0.6 ms")):
+    CLAIMS.append(Claim(
+        id=f"{_prefix}-audit-control-spread", doc=_doc, needle=_needle,
+        artifacts=(AUDIT_VOLUME,), value=_control_spread(("send", "receive", "ack")),
+        stated=0.6, places=1))
+CLAIMS.append(Claim(
+    id="config-guide-audit-update-control-spread", doc=CONFIG_GUIDE,
+    needle="its two control runs were 1.8 ms apart", artifacts=(AUDIT_VOLUME,),
+    value=_control_spread(("update",)), stated=1.8, places=1))
 CLAIMS.append(Claim(
     id="config-guide-audit-90-nights", doc=CONFIG_GUIDE,
     needle="144.5 MB if every one of 90 nights",
