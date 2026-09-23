@@ -116,8 +116,58 @@ if _bench_pin is not None:
 
 import pytest
 
+from tests.fake_embedder import FakeSentenceTransformer, is_known
+
 if TYPE_CHECKING:
     from pseudolife_memory.service import MemoryService
+
+# Which embedder a test gets. By default every test that is not marked
+# ``real_model`` runs on tests/fake_embedder.py's deterministic hashing model;
+# PSEUDOLIFE_TEST_EMBEDDER=real restores the real weights for the whole run.
+EMBEDDER_ENV = "PSEUDOLIFE_TEST_EMBEDDER"
+_real_model_test = False
+
+
+def embedder_mode(environ) -> str:
+    """"fake" (the default) or "real". Anything else is refused: a typo in
+    CI's all-real lane must not quietly run it on the fake and still pass."""
+    value = environ.get(EMBEDDER_ENV)
+    if value is None:
+        return "fake"
+    if value not in ("fake", "real"):
+        raise pytest.UsageError(
+            f"{EMBEDDER_ENV} must be 'fake' or 'real' (or unset), got {value!r}")
+    return value
+
+
+def _use_fake_embedder(args: tuple, kwargs: dict) -> bool:
+    if embedder_mode(os.environ) == "real" or _real_model_test:
+        return False
+    if kwargs.get("backend", "torch") != "torch":
+        return False
+    return is_known(args[0] if args else kwargs.get("model_name_or_path"))
+
+
+def _refuse_fake_in_real_model_test() -> None:
+    # A module-scoped service built by an earlier unmarked test would hand a
+    # real_model test the fake; fail rather than pass on the wrong model.
+    if _real_model_test:
+        raise RuntimeError(
+            "a real_model test is embedding through the fake model built by "
+            "an earlier unmarked test in this module; mark the module "
+            "(pytestmark = pytest.mark.real_model) so the shared service "
+            "loads the real weights")
+
+
+FakeSentenceTransformer.guard = staticmethod(_refuse_fake_in_real_model_test)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Record whether the test about to set up needs the real weights —
+    before its fixtures run, so module-scoped services see it too."""
+    global _real_model_test
+    _real_model_test = item.get_closest_marker("real_model") is not None
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -167,6 +217,7 @@ def pytest_configure(config: pytest.Config) -> None:
     Qwen3, MiniLM torch, MiniLM ONNX, plus the guard test's
     deliberately-capped ~90 MB MiniLM.
     """
+    embedder_mode(os.environ)  # a bad PSEUDOLIFE_TEST_EMBEDDER fails here
     from pseudolife_memory.memory import embedding as embedding_module
     from pseudolife_memory.utils.config import EmbeddingConfig
 
@@ -182,13 +233,16 @@ def pytest_configure(config: pytest.Config) -> None:
     def _shared_load(*args, **kwargs):  # noqa: ANN002, ANN003 — passthrough
         cap = _shared_load.next_cap if _shared_load.next_cap is not None \
             else default_cap
+        fake = _use_fake_embedder(args, kwargs)
         key = (
             args,
             tuple(sorted((k, repr(v)) for k, v in kwargs.items())),
             cap,
+            fake,
         )
         if key not in loaded:
-            loaded[key] = real_load(*args, **kwargs)
+            loaded[key] = (FakeSentenceTransformer(*args, **kwargs) if fake
+                           else real_load(*args, **kwargs))
         return loaded[key]
 
     _shared_load.next_cap = None
@@ -206,6 +260,34 @@ def pytest_configure(config: pytest.Config) -> None:
 
     embedding_module.SentenceTransformer = _shared_load
     embedding_module.EmbeddingPipeline.__init__ = _capturing_init
+
+    # The guard sits on the pipeline as well as the fake: the pipeline's LRU
+    # answers repeated texts without calling the model at all.
+    real_encode = embedding_module.EmbeddingPipeline.encode
+
+    def _guarded_encode(self, texts, normalize=True):  # noqa: ANN001
+        if getattr(self.model, "is_fake", False):
+            _refuse_fake_in_real_model_test()
+        return real_encode(self, texts, normalize)
+
+    embedding_module.EmbeddingPipeline.encode = _guarded_encode
+
+
+def _match_embedder_to_test(svc: MemoryService) -> None:
+    """Rebuild ``svc``'s pipeline when the running test wants the other kind
+    of embedder (fake vs real weights) than the one it holds."""
+    from pseudolife_memory.memory.embedding import EmbeddingPipeline
+
+    config = svc.config.embedding
+    model = getattr(svc._embedder, "model", None)  # noqa: SLF001
+    # The backend in use, not the configured one: an "onnx" config that fell
+    # back to torch holds a fake or real torch model like any other; a real
+    # ONNX model is never faked, so rebuilding it would change nothing.
+    if model is None or getattr(svc._embedder, "backend", "torch") != "torch":  # noqa: SLF001
+        return
+    if getattr(model, "is_fake", False) != _use_fake_embedder(
+            (config.model_name,), {}):
+        svc._embedder = EmbeddingPipeline(config)  # noqa: SLF001
 
 
 @pytest.fixture(scope="module")
@@ -233,8 +315,16 @@ def pristine_service(warm_service: MemoryService) -> MemoryService:
     state it did not itself write (surveyed 2026-08-28 across all thirteen
     fixture-consuming files). Also not reset: ``svc.config``, which outlives
     the bank clear, so a test that flips a config knob must restore it.
+
+    The embedder follows the test: the bank is emptied here, so a
+    ``real_model`` test in a module of fake-embedder tests (or the reverse)
+    gets a pipeline of its own kind without leaving vectors of the other
+    kind in the bank. (The uncleared world and lesson stores can keep them;
+    per the survey above, no test reads state there it did not write.)
+    Model loads are memoized, so the swap costs no reload.
     """
     warm_service._ensure_init()  # noqa: SLF001 — fixture wiring.
+    _match_embedder_to_test(warm_service)
     assert warm_service._cms is not None
     warm_service._cms.clear()
     # Slot-keyed facts survive a CMS clear — without this, cortex writes leak
