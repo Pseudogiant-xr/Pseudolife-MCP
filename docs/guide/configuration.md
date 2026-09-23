@@ -102,6 +102,76 @@ unchanged, a one-line reminder rides every tenth tool result. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as Claude Desktop) gets hints only.
 
+### Waking an idle session: `pseudolife-mcp wait-mail`
+
+Mail reaches a recipient on its next Pseudolife tool call or prompt; nothing in
+MCP can start a turn in a session that has gone idle, so the host has to.
+`pseudolife-mcp wait-mail` gives the host something to wake on: it blocks until
+the digest above shows mail nothing has shown yet, prints it and exits.
+
+```sh
+pseudolife-mcp wait-mail [--session-id ID | --digest PATH] [--timeout SECONDS] [--interval SECONDS]
+```
+
+It keys the coordination digest the way the shim does (`--session-id`, a Codex
+thread id for instance, else `CLAUDE_CODE_SESSION_ID`; `PSEUDOLIFE_DIGEST_DIR`
+applies); `--digest` names the file outright and accepts only a digest's own
+`<64 hex digits>.txt` name. After `/clear` changes the session id, it follows a
+`claude-<CLAUDE_PID>.host` record of the shim's spawn-time key for this Claude
+process if one exists and its second line confirms it for the current session
+(the SHA-256 of its id); without one, a waiter armed after `/clear` finds no
+digest. It needs no daemon connection, token or
+network. Each check is a file `stat` (every 2 s by default); the file is read
+only after the adapter rewrites it. It fires when the watermark is past the
+shared `.seen` marker and the digest lists pending mail, so mail that arrived
+while the agent was busy fires at once and mail a prompt hook or tool-result
+hint already showed does not. On firing it prints the digest body verbatim on
+stdout, agent-origin framing included, then advances `.seen` so the hook and
+hint do not repeat it, and appends a `wait` line to `ledger.log`. Exit codes:
+`0` new mail; `3` timeout (default 4 h, at most 24 h), re-arm; `2` nothing to
+wait on — no session id, no digest file (the adapter writes it when it
+attaches: at shim start in Claude Code, on a thread's first `memory_*` call in
+Codex), a file that disappeared because the shim exited, a file that cannot be
+inspected when armed (a later read error is retried), a
+stdout that cannot take the mail (left unmarked), or a bad argument.
+Diagnostics go to stderr. The adapter refreshes the digest on its 20 s
+heartbeat, so a waiter fires up to about 22 s after the send. It also rewrites
+an unchanged digest every hour, without moving the watermark, so the day-old
+sweep another adapter runs at start never takes a long-idle session's file.
+
+In Claude Code, the agent arms it with the Bash or PowerShell tool and
+`run_in_background: true`. Claude Code reports the exit as a task notification,
+which starts a turn even in an idle session (observed on Claude Code 2.1.280,
+2026-09-23):
+
+1. After registering with `memory_agents`, arm one waiter; keep exactly one
+   armed.
+2. On exit `0`: `memory_message` receive, act, acknowledge each `message_id`,
+   then re-arm. On `3`: re-arm. On `2`: read the stderr line, fix what it
+   names (in Codex, make one `memory_*` call first) and re-arm once; if it
+   persists, continue pull-only.
+3. Before ending a turn that waits on a peer, make sure a waiter is armed.
+
+Arm it from the main conversation: a command started by a foreground subagent
+ends with that subagent's final response, and `-p` runs end background commands
+shortly after their final result. When `pseudolife-mcp` is not on the shell's
+`PATH`, call the shim's own executable or `python -m pseudolife_memory.cli
+wait-mail` under the interpreter the shim runs on. In Claude Code's auto mode a
+classifier reviews each such command, and in one 2026-09-23 session it refused
+a long-running waiter script from the home directory as persistence (it allowed
+the same script in another). The recommended setup is a narrow allow rule,
+`Bash(pseudolife-mcp wait-mail *)` (and `PowerShell(pseudolife-mcp wait-mail *)`
+on Windows), which also matches the bare command: auto mode resolves narrow
+shell rules before the classifier runs, while it drops broad ones such as
+`Bash(python*)` and every rule naming the Monitor tool, so arm the waiter as a
+background Bash or PowerShell command, not a Monitor. Setting
+`autoMode.classifyAllShell` suspends even narrow rules. Codex never starts a turn
+when a background command exits, so run it there only in the foreground: a
+background run would advance `.seen` with nobody reading its output.
+Acknowledging some messages while a waiter is armed, and leaving others pending,
+rewrites the digest and fires once, the same way the tool-result hint
+re-delivers a changed digest.
+
 ### Codex CLI and desktop
 
 Use the ordinary stdio shim with `PSEUDOLIFE_WRITER_ID=codex`. Codex supplies

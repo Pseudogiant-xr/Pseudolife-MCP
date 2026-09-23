@@ -6,16 +6,18 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
+import stat
 import uuid
 
 import httpx
 
 
-def default_digest_dir() -> Path:
+def default_digest_dir(env=None) -> Path:
     """Where per-session turn digests live. The prompt hooks compute the same
     default from their own environment, so a host's MCP env block and its
     hook env must agree if ``PSEUDOLIFE_DIGEST_DIR`` overrides it."""
-    configured = os.environ.get("PSEUDOLIFE_DIGEST_DIR")
+    configured = (os.environ if env is None else env).get("PSEUDOLIFE_DIGEST_DIR")
     if configured:
         return Path(configured).expanduser()
     return Path.home() / ".pseudolife-mcp" / "digests"
@@ -28,6 +30,55 @@ def digest_path_for(session_id: str, root: Path | None = None) -> Path | None:
         return None
     root = default_digest_dir() if root is None else Path(root)
     return root / (hashlib.sha256(session_id.encode("utf-8")).hexdigest() + ".txt")
+
+
+_HOST_KEY = re.compile(rb"[0-9a-f]{64}")
+
+
+def resolve_digest_path(session_id: str, root: Path | None = None, *,
+                        env=None) -> Path | None:
+    """The digest file a Claude Code hook or Bash command should read for
+    ``session_id``, its host's current session id.
+
+    The shim keys its file by the id it was spawned with. ``/clear`` gives
+    the session a new id, which the hooks and the Bash tool see but the shim
+    never does. A ``claude-<CLAUDE_PID>.host`` record in the digest directory
+    maps a Claude process back to the shim's spawn-time key, for hooks that
+    handle ``/clear`` to write and read under this same rule. The record
+    counts only when ``CLAUDE_PID`` is all ASCII digits,
+    ``session_id`` is this process's current ``CLAUDE_CODE_SESSION_ID``, and
+    the record is a regular file (not a link) whose first line is exactly 64
+    lowercase hex digits (the shim's key) and whose second line is exactly
+    the SHA-256 of ``session_id`` (the session the record was confirmed
+    for). Otherwise the id keys the file directly."""
+    env = os.environ if env is None else env
+    path = digest_path_for(session_id, default_digest_dir(env) if root is None else root)
+    pid = env.get("CLAUDE_PID", "")
+    if (path is None or not (pid.isascii() and pid.isdigit())
+            or env.get("CLAUDE_CODE_SESSION_ID") != session_id):
+        return path
+    record = path.parent / f"claude-{pid}.host"
+    try:
+        # Never follow a link, never block on a FIFO; judge what was opened.
+        fd = os.open(record, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    except OSError:
+        return path
+    try:
+        if os.path.islink(record) or not stat.S_ISREG(os.fstat(fd).st_mode):
+            return path
+        # Two 64-hex lines fit in 130 bytes; anything longer fails the match.
+        lines = os.read(fd, 256).split(b"\n")
+    except OSError:
+        return path
+    finally:
+        os.close(fd)
+    # Line 2 confirms the session the record belongs to, so a record left by
+    # another session (or in the retired one-line format) is never followed.
+    if (len(lines) < 2 or _HOST_KEY.fullmatch(lines[0]) is None
+            or lines[1] != path.stem.encode("ascii")):
+        return path
+    return path.parent / (lines[0].decode("ascii") + ".txt")
 
 
 def bound_state_path(root: Path, url: str, thread_id: str) -> Path:

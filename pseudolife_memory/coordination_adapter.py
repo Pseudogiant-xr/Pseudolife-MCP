@@ -171,6 +171,12 @@ class CoordinationAdapter:
     # Digest and marker files older than this are swept when the adapter
     # first writes: a killed shim never removes its own.
     STALE_DIGEST_SECONDS = 86400
+    # A quiet mailbox renders the same text for days, so a live adapter
+    # rewrites its unchanged digest (and touches its marker) this often,
+    # well inside STALE_DIGEST_SECONDS: another adapter's sweep never takes
+    # a live session's file, and a file lost anyway comes back within one
+    # heartbeat. A rewrite never moves the watermark.
+    DIGEST_REFRESH_SECONDS = 3600
 
     def __init__(self, url: str, token: str, *, state_path=None, wake_enabled=False,
                  label="", project="", task="", episode=None, client=None,
@@ -204,6 +210,8 @@ class CoordinationAdapter:
         # sequence: a marker the hook wrote at 5 must not hide a fresh 1.
         self._digest_watermark = self._leftover_watermark()
         self._digest_written = False
+        self._digest_written_at = 0.0
+        self._digest_swept = False
         self._delivered_watermark = 0
         self._hint_calls_since = 0
         self._digest_write_reported = False
@@ -302,24 +310,42 @@ class CoordinationAdapter:
         self._refresh_digest()
 
     def _refresh_digest(self):
+        if self._closing:
+            return  # the file is being removed; nothing may put it back
         text = render_digest(self._pending_count or 0, self._pending_preview)
-        if text == self._digest_text and self._digest_written:
+        if text == self._digest_text and self._digest_written and not self._digest_due():
             return
         if text != self._digest_text:
             self._digest_text = text
             self._digest_watermark += 1
         # The first write happens even for an empty mailbox, so a file left
-        # by a dead process never shows its stale text.
+        # by a dead process never shows its stale text. Rewriting unchanged
+        # text (due, lost, or refused last time) keeps the watermark.
         self._write_digest()
 
+    def _digest_due(self) -> bool:
+        if self.digest_path is None:
+            return False
+        # os.path.exists swallows every OSError (Path.exists re-raises some),
+        # so this can never escape into the heartbeat task; a file it cannot
+        # see is simply rewritten.
+        return (time.monotonic() - self._digest_written_at >= self.DIGEST_REFRESH_SECONDS
+                or not os.path.exists(self.digest_path))
+
     def _leftover_watermark(self) -> int:
+        """Continue above whatever a dead process left: its digest, or a
+        marker that outlived it (a waiter marking as the shim exited, or a
+        delete Windows refused), which would otherwise hide new mail."""
         if self.digest_path is None:
             return 0
-        try:
-            with open(self.digest_path, encoding="utf-8") as handle:
-                return max(0, int(handle.readline().strip() or 0))
-        except (OSError, ValueError):
-            return 0
+        leftover = 0
+        for path in (self.digest_path, self._seen_path()):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    leftover = max(leftover, int(handle.readline().strip() or 0))
+            except (OSError, ValueError):
+                pass
+        return leftover
 
     def _seen_path(self):
         return self.digest_path.with_suffix(".seen") if self.digest_path is not None else None
@@ -343,11 +369,17 @@ class CoordinationAdapter:
     def _write_digest(self) -> None:
         if self.digest_path is None:
             return
-        if not self._digest_written:
+        if not self._digest_swept:
+            self._digest_swept = True
             self._sweep_stale_digests()
-        self._digest_written = True
         body = f"{self._digest_watermark}\n" + (self._digest_text + "\n" if self._digest_text else "")
-        self._write_private(self.digest_path, body)
+        self._digest_written = self._write_private(self.digest_path, body)
+        if self._digest_written:
+            self._digest_written_at = time.monotonic()
+            # The marker must stay as fresh as the digest, or the sweep takes
+            # it and mail already shown looks unshown again.
+            with suppress(OSError):
+                os.utime(self._seen_path())
 
     def _sweep_stale_digests(self) -> None:
         cutoff = time.time() - self.STALE_DIGEST_SECONDS
@@ -362,9 +394,11 @@ class CoordinationAdapter:
         except OSError:
             pass
 
-    def _write_private(self, path: Path, body: str) -> None:
+    def _write_private(self, path: Path, body: str) -> bool:
         """Atomic replace inside a private directory; the digest is advisory,
-        so a filesystem problem is reported once and never stops the shim."""
+        so a filesystem problem is reported once and never stops the shim.
+        Returns whether the file was written; a digest that was not is
+        written again at the next heartbeat."""
         try:
             from .codex_coordination import _prepare_private_dir
             _prepare_private_dir(path.parent, path.parent)
@@ -373,16 +407,21 @@ class CoordinationAdapter:
                 _private_fd(fd, Path(temp))
                 with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                     handle.write(body)
+                # On Windows a reader holding the file open (a prompt hook, a
+                # waiter) refuses the replace; the temp file must not outlive it.
+                os.replace(temp, path)
             except BaseException:
                 with suppress(OSError):
                     os.unlink(temp)
                 raise
-            os.replace(temp, path)
+            return True
         except (OSError, ValueError, RuntimeError) as error:
             if not self._digest_write_reported:
                 self._digest_write_reported = True
-                print(f"pseudolife-mcp: coordination digest file not written ({error}); "
+                print(f"pseudolife-mcp: coordination digest or marker file not written "
+                      f"({error}); the digest is retried at the next heartbeat and "
                       "tool-result hints continue.", file=sys.stderr)
+            return False
 
     def _ledger(self, kind: str, watermark: int, size: int) -> None:
         """One line per delivery for the token-cost measurement; the prompt

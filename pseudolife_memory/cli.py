@@ -35,6 +35,9 @@ modes:
   import         load a logical export into a fresh, empty bank
   episode-start  open a session episode (legacy hook helper)
   episode-end    close it
+  wait-mail      block until new addressed agent mail, print it and exit
+                 (arm as a background command to wake an idle session;
+                 exit 0 mail, 3 timeout, 2 setup; --help for options)
   help           show this message (also -h / --help)
 
 credentials (token-gated daemon): PSEUDOLIFE_MCP_TOKEN=<bearer>, or
@@ -81,6 +84,9 @@ def main() -> None:
     elif mode in ("episode-start", "episode-end"):
         from pseudolife_memory.episode_cli import run_episode
         run_episode(mode)
+    elif mode == "wait-mail":
+        from pseudolife_memory.wait_mail_cli import run_wait_mail
+        sys.exit(run_wait_mail(sys.argv[2:]))
     else:
         print(
             f"unknown mode {mode!r}; see: pseudolife-mcp --help",

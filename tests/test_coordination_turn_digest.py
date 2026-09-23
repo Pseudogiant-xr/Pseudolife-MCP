@@ -258,6 +258,143 @@ def test_reminder_is_silent_when_the_count_is_unknown(tmp_path):
     asyncio.run(asyncio.wait_for(drive(), 5))
 
 
+def _signature(path):
+    info = os.stat(path)
+    return info.st_ino, info.st_mtime_ns, info.st_size
+
+
+def test_an_unchanged_digest_is_rewritten_before_the_stale_sweep_can_take_it(monkeypatch, tmp_path):
+    """Other adapters sweep digest files a day old, and a quiet mailbox renders
+    the same text for days: the live adapter rewrites its unchanged digest
+    (and touches its marker) periodically so a long-idle session keeps it.
+    The watermark does not move; only a text change moves it."""
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        monkeypatch.setattr(CoordinationAdapter, "DIGEST_REFRESH_SECONDS", 0.05)
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        digest = tmp_path / "d" / "k.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            assert instance.deliver_hint() is not None
+            seen = tmp_path / "d" / "k.seen"
+            os.utime(seen, (1000, 1000))
+            first = _signature(digest)
+            await _wait_for(lambda: _signature(digest) != first)
+            await _wait_for(lambda: seen.stat().st_mtime > 1000)
+            assert digest.read_text(encoding="utf-8").split("\n", 1)[0] == "1"
+            assert instance.digest_watermark == 1
+            assert instance.deliver_hint() is None  # the rewrite is not a new change
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_lost_digest_file_is_put_back_at_the_next_heartbeat(monkeypatch, tmp_path):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        digest = tmp_path / "d" / "k.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            expected = digest.read_bytes()
+            digest.unlink()
+            await _wait_for(digest.exists)
+            assert digest.read_bytes() == expected
+            assert instance.digest_watermark == 1
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_refused_replace_is_retried_and_leaves_no_temp_file(monkeypatch, tmp_path):
+    """On Windows a reader holding the digest open (a prompt hook, a waiter)
+    makes the atomic replace fail. The write must count as not done, so the
+    next heartbeat writes it (the old file is still there, so nothing else
+    would), and the temp file must not be left behind."""
+    async def drive():
+        from pseudolife_memory import coordination_adapter
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        digest = tmp_path / "d" / "k.txt"
+        real_replace = os.replace
+        refused = []
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(dst) == digest and digest.exists() and not refused:
+                refused.append(dst)  # a rewrite while a reader has the file open
+                raise PermissionError(5, "Access is denied", str(dst))
+            return real_replace(src, dst, *args, **kwargs)
+        monkeypatch.setattr(coordination_adapter.os, "replace", replace)
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)},
+                               {"count": 2, "preview": _preview(2)}])
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            await _wait_for(lambda: refused)
+            await _wait_for(lambda: digest.read_text(encoding="utf-8").startswith("2\n"))
+            assert "- m1 from codex" in digest.read_text(encoding="utf-8")
+            assert instance.digest_watermark == 2
+            assert not [p.name for p in digest.parent.iterdir() if p.name.startswith(".tmp-")]
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_an_unstattable_digest_never_stops_the_heartbeat(monkeypatch, tmp_path):
+    """The keep-alive looks at the file on every heartbeat. A refused stat
+    must not escape into the heartbeat task: that would end the lease renewal
+    while the hints kept saying all is well."""
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        digest = tmp_path / "d" / "k.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            real_stat = os.stat
+
+            def refusing(path, *args, **kwargs):
+                if isinstance(path, (str, os.PathLike)) and Path(path) == digest:
+                    raise PermissionError(13, "Permission denied", str(path))
+                return real_stat(path, *args, **kwargs)
+            monkeypatch.setattr(os, "stat", refusing)
+            beats = len(_heartbeats(daemon))
+            await _wait_for(lambda: len(_heartbeats(daemon)) >= beats + 3)
+            monkeypatch.setattr(os, "stat", real_stat)
+            assert instance._heartbeat_task is not None and not instance._heartbeat_task.done()
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_refresh_after_close_does_not_bring_the_file_back(tmp_path):
+    async def drive():
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        digest = tmp_path / "d" / "k.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            pass
+        assert not digest.exists()
+        instance._refresh_digest()  # a late mailbox update after close
+        assert not digest.exists()
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_marker_left_behind_keeps_new_mail_above_it(tmp_path):
+    """A marker can outlive its digest (a waiter marking as the shim exits,
+    or a delete Windows refused). A new adapter starts above it, or the hook,
+    the hint and a waiter would all treat new mail as already shown."""
+    async def drive():
+        directory = tmp_path / "d"
+        directory.mkdir()
+        (directory / "k.seen").write_text("5\n", encoding="utf-8")
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        client, instance = adapter(daemon, digest_path=directory / "k.txt")
+        async with client, instance:
+            assert instance.digest_watermark == 6
+            assert instance.deliver_hint() is not None
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
 def test_codex_tool_result_carries_the_digest_exactly_once(monkeypatch):
     """The registry's hint is consumed once per tool call: the failure text
     for a missing adapter must not be fetched through the delivering path."""

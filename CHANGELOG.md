@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-23 — `pseudolife-mcp wait-mail` wakes an idle session when addressed mail arrives)
+- Addressed mail reached a recipient only on its next Pseudolife tool call or
+  prompt, so an idle session sat on it until someone typed. `pseudolife-mcp
+  wait-mail` is a supported, cross-platform command (native Windows needs no
+  Git Bash) that an agent arms as a background command: it exits when new
+  mail shows up, and Claude Code reports the exit as a notification that
+  starts a turn in an idle session. It replaces a hand-rolled watcher script
+  used in the 2026-09-23 coordination trial. It blocks on the coordination
+  digest file the shim's adapter already writes, keyed like the shim
+  (`--session-id`, else `CLAUDE_CODE_SESSION_ID`; `--digest` names a
+  `<64 hex>.txt` digest outright), and needs no daemon connection, token or
+  network. The new `coordination_identity.resolve_digest_path` follows a
+  per-process `claude-<CLAUDE_PID>.host` record of the shim's spawn-time key
+  after `/clear` when one exists and its second line confirms it for the
+  current session (the SHA-256 of its id; a one-line record is never
+  followed), and falls back to the plain id key otherwise; nothing in this
+  release writes that record yet.
+- It fires only for mail nothing has shown yet: the digest watermark past the
+  shared `.seen` marker, with pending mail in the body. Mail that arrived
+  while the agent was busy fires at once, instead of being absorbed into an
+  arm-time baseline (the trial's watcher missed a message exactly that way).
+  On firing it prints the digest body verbatim, then advances `.seen` (in
+  that order, so a killed waiter duplicates rather than loses a wake) and
+  logs a `wait` line to `ledger.log`, so the prompt hook and tool-result hint
+  do not repeat it and a re-arm over unread mail waits. Exit 0 mail, 3
+  timeout (default 4 h, at most 24 h), 2 nothing to wait on. Polling is a
+  `stat` every 2 s; the file is read only after a rewrite, so a waiter fires
+  within about one 20 s adapter heartbeat of the send. A daemon outage
+  leaves the digest untouched, so a restart wakes nobody. The docs recommend
+  a narrow `Bash(pseudolife-mcp wait-mail *)` allow rule for auto mode.
+
+### Fixed (2026-09-23 — a long-idle session no longer loses its coordination digest)
+- Each adapter's first write sweeps digest and `.seen` files a day old, and a
+  live adapter rewrote its digest only when the text changed, so a session
+  whose mailbox stayed quiet for a day had its file swept by the next
+  session to start, and nothing ever put it back: its prompt hook and any
+  waiter went blind. The adapter now rewrites an unchanged digest hourly
+  (`DIGEST_REFRESH_SECONDS`) and touches its marker, puts a missing file
+  back at the next heartbeat, and never moves the watermark for either.
+- A digest write whose atomic replace failed (on Windows, a reader holding
+  the file open refuses it) still counted as written, so the file kept its
+  old text until the next text change and the temp file was left behind.
+  The write now counts only when it lands, is retried at the next heartbeat,
+  and removes its temp file.
+- A new adapter continues above a `.seen` marker its predecessor left without
+  a digest, so new mail is not treated as already shown.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.
