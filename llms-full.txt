@@ -3874,7 +3874,10 @@ for delivery-state and host-verification contracts.
   *and* the loader would load it: the configured model's artifact already
   resolves locally, and, on native Windows, the model's Transformer module
   does not load from a nested subfolder (see the end of this item).
-  Otherwise they choose torch up front and log one INFO line saying why. The
+  Otherwise they choose torch up front and log one INFO line saying why. One
+  deliberate exception: an `onnx_file_name` that fails validation (for
+  example, one that leaves the model directory) keeps ONNX selected, so the
+  loader's warning names the bad setting instead of hiding it. The
   default Qwen3-Embedding-0.6B ships no ONNX artifact, so the daemon runs it
   on torch; MiniLM, whose artifact the daemon image bakes, still gets ONNX.
   An explicit `embedding.backend` is never overridden: `backend: onnx`

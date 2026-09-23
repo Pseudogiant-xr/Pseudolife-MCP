@@ -100,7 +100,8 @@ def test_onnx_backend_not_auto_selected_when_artifact_absent(
     assert svc.config.embedding.backend == "torch"
     explained = [
         r for r in caplog.records
-        if r.name == "pseudolife_memory.service" and "No ONNX artifact" in r.getMessage()
+        if r.name == "pseudolife_memory.service"
+        and "No verified ONNX artifact" in r.getMessage()
     ]
     assert [r.levelname for r in explained] == ["INFO"]
     assert model_dir.as_posix() in explained[0].getMessage()
@@ -139,10 +140,14 @@ def test_windows_nested_layout_not_auto_selected(tmp_path, monkeypatch, caplog):
     with caplog.at_level("INFO", logger="pseudolife_memory"):
         svc = MemoryService(data_dir=tmp_path)
     assert svc.config.embedding.backend == "torch"
+    # Match the reason's own wording, not "nested" alone: pytest names
+    # tmp_path after the test, so the model path in the message already
+    # contains "nested" and would let the absent-artifact reason pass.
     explained = [
         r for r in caplog.records
         if r.name == "pseudolife_memory.service"
-        and "nested" in r.getMessage() and "Windows" in r.getMessage()
+        and "nested subfolder" in r.getMessage()
+        and "mis-detects on native Windows" in r.getMessage()
     ]
     assert [r.levelname for r in explained] == ["INFO"]
 

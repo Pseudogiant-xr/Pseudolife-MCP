@@ -602,7 +602,7 @@ def _onnx_auto_select_blocker(config: AppConfig) -> str | None:
         file_name, source = embedding._configured_onnx_source(emb)  # noqa: SLF001
         if source is None:
             return (
-                f"No ONNX artifact {file_name!r} for embedding model "
+                f"No verified ONNX artifact {file_name!r} for embedding model "
                 f"{emb.model_name} in the local model or Hub cache"
             )
         if embedding._native_windows_nested_layout(source):  # noqa: SLF001
