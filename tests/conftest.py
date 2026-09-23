@@ -24,6 +24,13 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# CPU-only unless PSEUDOLIFE_TEST_CUDA=1, and one full suite per machine —
+# tests/suite_lock.py carries the measurements. The GPU is hidden here,
+# before anything can import torch; the lock is taken in pytest_configure.
+from tests import suite_lock  # noqa: E402
+
+suite_lock.hide_cuda(os.environ)
+
 # The eval-backed suites (test_recall, test_memcot_bench,
 # test_constraint_pinning) and evals/ladder_sweep.py read the bench admin
 # URL from PSEUDOLIFE_BENCH_ADMIN_URL. Seed it once, here, from the same
@@ -119,6 +126,8 @@ import pytest
 if TYPE_CHECKING:
     from pseudolife_memory.service import MemoryService
 
+_SUITE_LOCK = pytest.StashKey[suite_lock.HeldLock]()
+
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Required CI database coverage must fail before collection can skip it."""
@@ -167,6 +176,12 @@ def pytest_configure(config: pytest.Config) -> None:
     Qwen3, MiniLM torch, MiniLM ONNX, plus the guard test's
     deliberately-capped ~90 MB MiniLM.
     """
+    # A full run queues for the suite lock first, while it holds ~50 MB:
+    # the embedding import below commits ~1.3 GB (measured 2026-09-23).
+    held = suite_lock.take_for_session(config, os.environ, ROOT / "tests")
+    if held is not None:
+        config.stash[_SUITE_LOCK] = held
+
     from pseudolife_memory.memory import embedding as embedding_module
     from pseudolife_memory.utils.config import EmbeddingConfig
 
@@ -206,6 +221,12 @@ def pytest_configure(config: pytest.Config) -> None:
 
     embedding_module.SentenceTransformer = _shared_load
     embedding_module.EmbeddingPipeline.__init__ = _capturing_init
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    held = config.stash.get(_SUITE_LOCK, None)
+    if held is not None:
+        suite_lock.release(held)
 
 
 @pytest.fixture(scope="module")

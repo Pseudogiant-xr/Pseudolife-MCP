@@ -76,6 +76,28 @@ python -m pytest tests/ > /tmp/pytest-last.log 2>&1; ec=$?; tail -60 /tmp/pytest
 
 or `set -o pipefail; ... | tee /tmp/pytest-last.log | tail -60`.
 
+**One full suite at a time per machine** — every session, worktree and
+harness (Claude Code, Codex, anything else) — **and CPU-only.** Measured
+2026-09-23 on the maintainer's Windows host: a full CPU suite commits ~20 GB
+(pytest ~14.9 GB, its spawned test daemons ~4.5 GB) against a ~120 GB commit
+limit of which the desktop, WSL and ~75 MCP shims already hold ~100 GB. Two
+concurrent suites killed test daemons with os error 1455 ("paging file is too
+small") where the same head passed alone, and a GPU run beside two suites
+took 143 CUDA OOMs.
+
+- `tests/conftest.py` enforces it. A full run (paths covering `tests/`, no
+  `-k`/`-m`) takes the machine-wide lock
+  `~/.pseudolife-mcp/locks/full-suite.lock` and waits for the holder, naming
+  it about once a minute. `PSEUDOLIFE_SUITE_LOCK=fail` exits instead; `=off`
+  skips the lock (the default on GitHub Actions: one job per VM). Targeted
+  runs are never locked.
+- The suite sets `CUDA_VISIBLE_DEVICES=-1` itself (`PSEUDOLIFE_TEST_CUDA=1`
+  opts back in). Never `""`: on Windows an empty value leaves the GPU usable.
+- With several sessions active, still announce `SUITE-START` / `SUITE-END` on
+  the coordination board (`memory_agents` / `memory_message`) and keep
+  `suite=running|idle` in your status: the lock queues runs, the board lets
+  peers plan around the queue.
+
 ## Review discipline
 
 - **Recall precedes review.** Before reviewing code, docs, or a PR, search

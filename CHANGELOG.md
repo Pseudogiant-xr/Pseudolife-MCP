@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-23 — one full test suite at a time per machine, CPU-only)
+- A full test run (`pytest tests/`, or bare `pytest` from the root) takes a
+  machine-wide exclusive lock, `~/.pseudolife-mcp/locks/full-suite.lock`,
+  before it loads the embedder. A second full run from any worktree or agent
+  waits for it and prints the holder's worktree, pid and start time about
+  once a minute. The lock is an OS byte-range lock (`msvcrt.locking` /
+  `fcntl.flock`), so a holder that crashes frees it; no pid file can go
+  stale. `PSEUDOLIFE_SUITE_LOCK=fail` exits with a usage error instead of
+  waiting, and `=off` skips the lock. `off` is the default on GitHub Actions,
+  where each job has its own VM. Targeted runs are never locked: named files
+  or node ids, `-k`/`-m` selections, `--collect-only` and the other listings.
+  xdist workers leave the lock to their controller. Measured 2026-09-23 on
+  the maintainer's Windows host, one full CPU suite commits ~20 GB, and two
+  concurrent suites crossed the commit limit: test daemons died with os
+  error 1455 (`tests/suite_lock.py` has the numbers).
+- The test session hides the GPU with `CUDA_VISIBLE_DEVICES=-1` unless
+  `PSEUDOLIFE_TEST_CUDA=1` is set. An empty value does not work here: on
+  Windows it left `torch.cuda.is_available()` true, so the embedder still
+  loaded on the GPU.
+
 ### Fixed (2026-09-23 — starting a service no longer opens a document store it may never use)
 - The reference (document) bank opens its ChromaDB client on the first
   document ingest, or on the first read once a store exists on disk, instead
