@@ -959,7 +959,9 @@ class DreamOps:
         proposals filed under it again: encoding ~1,000-2,050 existing names
         while holding the lock froze the daemon 55-171 s per new-entity
         dream (2026-09-23 lock-stalls review). Names an earlier screen
-        embedded come from ``_alias_name_memo``, not the model.
+        embedded come from ``_alias_name_memo``, not the model. Proposals
+        are filed only between entities that still exist in the graph; the
+        screen never mints one.
         Returns the number of proposals filed; never raises."""
         import time as _t
         try:
@@ -1039,8 +1041,19 @@ class DreamOps:
                 for disp, target, pair, score in matches:
                     if pair in dismissed:
                         continue
-                    a = self._resolve_or_create_entity(disp)
-                    b = self._resolve_or_create_entity(target)
+                    # Find, never create. Every fact write mints its
+                    # subject's node, so a name with no node is one the graph
+                    # dropped on purpose: a junk-shaped subject, or an entity
+                    # deleted (graph_delete_entity, an accepted junk review)
+                    # whose facts survive -- possibly while these names were
+                    # embedded outside the lock. Re-minting it resurrected
+                    # the deleted entity and queued a merge against it
+                    # (Codex review of #338). find_entity follows aliases, so
+                    # an endpoint merged away resolves to its survivor.
+                    a = self._storage.find_entity(norm_name(disp))
+                    b = self._storage.find_entity(norm_name(target))
+                    if a is None or b is None:
+                        continue
                     if a["id"] == b["id"]:
                         continue                    # already aliased/merged
                     # The name-keyed check above misses a display-enriched

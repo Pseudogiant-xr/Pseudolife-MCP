@@ -29,6 +29,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   four-thread probe of the real model matched serial output (fp32 and bf16,
   cosine >= 0.9999998, no errors), and a cold screen right after a restart
   now slows concurrent searches by CPU contention instead of blocking them.
+- The alias screen no longer re-mints a deleted entity. It resolved both
+  names with create-on-miss, so an endpoint deleted while the names were
+  being embedded (`graph_delete_entity`, an accepted junk review) came back
+  with a merge queued against it (Codex review, P1). The same path already
+  resurrected such names at any later dream, because deleting a graph
+  entity keeps its facts and so its name. The screen now only looks
+  entities up (aliases included, so a merged-away name lands on its
+  survivor) and skips a match whose endpoint is gone. Every fact write
+  mints its subject's node, so the only names skipped are ones the graph
+  dropped on purpose: deleted entities and junk-shaped subjects.
 - The shadow merge judge records verdicts again. A row's review fingerprint
   included the evidence pack's `group` (the endpoint it shares with other
   pending rows), which is computed over whatever list is enriched: the

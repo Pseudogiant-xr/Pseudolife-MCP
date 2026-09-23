@@ -227,6 +227,9 @@ def test_dream_alias_screen_encodes_outside_the_service_lock(svc, monkeypatch):
                      support="user")
     svc.cortex_write("release train", "cadence", "weekly", support="user")
     known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    # The cycle's own claim write, as in a dream: it mints the new node.
+    svc.cortex_write("deploy pipeline", "stage", "build then test",
+                     support="user")
     calls = _record_encodes(svc, monkeypatch)
     assert svc._propose_dream_alias_candidates(
         {nn("deploy pipeline"): "deploy pipeline"}, known) == 1
@@ -247,6 +250,8 @@ def test_dream_alias_name_memo_is_bounded(svc, monkeypatch):
                      support="user")
     svc.cortex_write("release train", "cadence", "weekly", support="user")
     known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    svc.cortex_write("deploy pipeline", "stage", "build then test",
+                     support="user")
     monkeypatch.setattr(svc, "_ALIAS_MEMO_MAX", 2, raising=False)
     assert svc._propose_dream_alias_candidates(
         {nn("deploy pipeline"): "deploy pipeline"}, known) == 1
@@ -273,6 +278,100 @@ def test_dream_alias_screen_never_raises_on_an_encode_failure(svc, monkeypatch):
     assert svc._propose_dream_alias_candidates(
         {nn("deploy pipeline"): "deploy pipeline"}, known) == 0
     assert not svc._lock.locked()
+
+
+def _alias_screen_setup(svc):
+    """A standing entity with facts, then this cycle's claim about a new
+    near-duplicate name: the screen will match 'deploy pipeline' to
+    'deployment pipeline'. Both writes mint graph nodes."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")
+    svc.cortex_write("release train", "cadence", "weekly", support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    svc.cortex_write("deploy pipeline", "stage", "build then test",
+                     support="user")
+    return {nn("deploy pipeline"): "deploy pipeline"}, known
+
+
+def _during_encode(svc, monkeypatch, action):
+    """Run ``action`` once, from inside the screen's unlocked encode: a
+    concurrent Console or judge-sweep call landing mid-screen."""
+    real = svc._embedder.encode
+
+    def encode(texts, *args, **kwargs):
+        # Guard, not a hang: action takes the non-reentrant service lock.
+        assert not svc._lock.locked(), "alias screen encoded under the lock"
+        if not getattr(encode, "fired", False):
+            encode.fired = True
+            action()
+        return real(texts, *args, **kwargs)
+
+    monkeypatch.setattr(svc._embedder, "encode", encode)
+
+
+def _merge_rows_touching(svc, eid):
+    return [p for p in svc._storage.pending_entity_proposals()
+            if p.get("kind") == "merge" and eid in (p["entity_id"], p["into_id"])]
+
+
+def test_alias_screen_skips_an_endpoint_deleted_during_the_encode(
+        svc, monkeypatch):
+    """The screen reads names under the lock, embeds them without it, and
+    files under it again. An endpoint deleted in between (graph_delete_entity
+    from the Console) must not be re-minted by the filing step, and no merge
+    may be queued against it (Codex review of #338, P1)."""
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    _during_encode(svc, monkeypatch,
+                   lambda: svc.graph_delete_entity("deployment pipeline"))
+    assert svc._propose_dream_alias_candidates(new, known) == 0
+    assert svc._storage.find_entity(nn("deployment pipeline")) is None
+
+
+def test_alias_screen_skips_an_endpoint_junk_deleted_during_the_encode(
+        svc, monkeypatch):
+    """Same race through an accepted junk review, whose tombstone does not
+    guard the screen's entity resolution."""
+    import time
+
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    st = svc._storage
+    pid = st.insert_entity_proposal(
+        "junk", st.find_entity(nn("deployment pipeline"))["id"], None, None,
+        "list-artifact", time.time())
+    _during_encode(svc, monkeypatch,
+                   lambda: svc.graph_accept_entity_junk(pid))
+    assert svc._propose_dream_alias_candidates(new, known) == 0
+    assert st.find_entity(nn("deployment pipeline")) is None
+
+
+def test_alias_screen_follows_an_endpoint_merged_during_the_encode(
+        svc, monkeypatch):
+    """A merge in the window leaves the old name as an alias of the
+    survivor, so the proposal lands on the survivor, not a re-minted node."""
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    st = svc._storage
+    survivor = st.find_entity(nn("release train"))["id"]
+    _during_encode(svc, monkeypatch,
+                   lambda: svc.graph_merge("deployment pipeline", "release train"))
+    assert svc._propose_dream_alias_candidates(new, known) == 1
+    assert st.find_entity(nn("deployment pipeline"))["id"] == survivor
+    assert _merge_rows_touching(svc, survivor)
+
+
+def test_alias_screen_never_mints_a_node_for_a_deleted_cortex_name(svc):
+    """Deleting a graph entity keeps its cortex facts, so its name stays a
+    screen candidate. The screen files only between entities that exist
+    and never re-mints the deleted one (the fully locked screen before #338
+    did, at any later dream)."""
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    assert svc.graph_delete_entity("deployment pipeline")["deleted"]
+    svc._propose_dream_alias_candidates(new, known)
+    assert svc._storage.find_entity(nn("deployment pipeline")) is None
 
 
 def _stage_link_pair(svc):
