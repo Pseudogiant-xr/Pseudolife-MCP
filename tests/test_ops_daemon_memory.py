@@ -1,12 +1,12 @@
 """Guard: the daemon container's memory sizing in ops/docker-compose.yml.
 
 2026-09-23: the 4g cap (set 2026-08-20 against a 2.8 GB steady RSS measured
-on a smaller bank) left ~200 MB of headroom once file-backed library pages
-and bank growth were counted, and an ordinary request burst OOM-killed the
-daemon. The cap moved to 6g; memory+swap stays pinned to the same value so
-hitting it is a clean restart, never host swap. glibc's per-thread malloc
-arenas held ~450 MB of freed memory after a concurrent burst, so the
-daemon runs with two.
+on a smaller bank) had no allowance for bursts: the daemon held ~3.1-3.3
+GiB anon at rest, and an ordinary request burst grew it to the limit and
+OOM-killed it. The cap moved to 6g; memory+swap stays pinned to the same
+value so hitting it is a clean restart, never host swap. Right after a
+concurrent burst, RSS was ~430 MB higher with glibc's default per-thread
+malloc arenas than with two, so the daemon runs with two.
 """
 from __future__ import annotations
 

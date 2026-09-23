@@ -1,10 +1,10 @@
 """/health reports how close the daemon sits to its memory limit.
 
 2026-09-23: the production daemon was cgroup OOM-killed while /health said
-"ok". It lived at ~95% of its 4 GiB cap, and after the restart the kernel's
-own ``memory.events`` ``max`` counter reached 8,021 within ~27 minutes as
-reclaim squeezed hot library pages (15.8 s searches). Nothing the daemon
-published showed any of it. Silence read as health.
+"ok". It held ~3.1-3.3 GiB anon at rest under a 4 GiB cap with no burst
+allowance (memory.current ~95% of the cap counting page cache), and a
+~30-search burst grew anon to the limit. Nothing the daemon published
+showed how thin that margin was. Silence read as health.
 
 Contract pinned here:
 

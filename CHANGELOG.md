@@ -8,15 +8,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (2026-09-23 — the memory daemon OOM-restarted under ordinary load)
 - The Docker daemon was cgroup OOM-killed (exit 137) at 15:12 AEST on
-  2026-09-23 by an ordinary burst of concurrent requests. It had been living
-  at 3.84–3.90 GB of its 4 GiB cap: ~3.1 GB anon plus ~0.7 GB of
-  file-backed torch/python library pages, ~200 MB of headroom, with
-  `memory.events` `max` reaching 8,021 within ~27 minutes of the restart
-  as reclaim squeezed hot library pages (15.8 s searches). Sizing, not a
-  leak: the 4g cap (2026-08-20) was set against 2.8 GB / 2.7 GB steady
-  states on a smaller bank and missed the file pages, the fp32 embedder's
-  3.8 GB load peak, bank growth, and ~256 MB held in 25 per-thread malloc
-  arenas.
+  2026-09-23 by an ordinary burst of concurrent requests. At rest it held
+  ~3.1–3.3 GiB anon (RssFile only ~80–165 MB; most of the cgroup's ~0.7 GB
+  `file` charge was reclaimable page cache) under a 4 GiB cap with no
+  burst allowance, and a ~30–34-search burst grew anon ~0.8 GB to the
+  limit (kernel memcg kill at 4,169,120 kB anon-rss). What grew is not
+  pinned down: the idle daemon held ~256 MB in 25 per-thread malloc
+  arenas, but that is a partial contributor at most. After the restart
+  `memory.events` `max` reached 8,021 within ~27 minutes (model load and
+  early load), then stayed flat. Sizing, not a leak: the 4g cap
+  (2026-08-20) was set against 2.8 GB / 2.7 GB steady states on a smaller
+  bank and missed the fp32 embedder's 3.8 GB load peak, burst growth and
+  bank growth. By ~19:45 the same evening the live fp32 daemon (cap
+  already raised to 6 GiB) held 4.48 GB anon.
 - `ops/docker-compose.yml`: the daemon cap defaults to `6g`
   (`PSEUDOLIFE_DAEMON_MEM_LIMIT`; memory+swap still pinned equal, so no
   swap), and the daemon runs with `MALLOC_ARENA_MAX=2` (after a concurrent

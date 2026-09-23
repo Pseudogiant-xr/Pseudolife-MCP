@@ -91,22 +91,22 @@ services:
     restart: unless-stopped
     logging: *default-logging
     # Hard memory cap. Measured 2026-09-23 on the reference deployment
-    # (0.15.0, ~2,160-entry bank, fp32 embedder): steady state ~3.1 GB anon
-    # plus ~0.7 GB of file-backed torch/python library pages, 3.84-3.90 GB of
-    # the then 4g cap. With ~200 MB of headroom an ordinary request burst
-    # was an OOM kill (docker events: oom, exit 137), and after the restart
-    # memory.events "max" reached 8,021 within ~27 minutes as reclaim
-    # squeezed hot library pages (15.8 s searches). The 4g figure had been
-    # sized against steady RSS of 2.8 GB (2026-08-04) and 2.7 GB (a standby,
-    # 2026-08-19/20) on a smaller bank, and missed the file pages, the fp32
-    # embedder's load transient (a 3.8 GB peak on its own) and bank growth,
-    # plus ~256 MB the idle daemon holds in 25 per-thread malloc arenas
-    # (read from /proc/1/smaps, 2026-09-23). 6g leaves ~2 GB over that
-    # fp32 steady state; with the bf16 embedder (embedding.cpu_dtype "auto"
-    # on a CPU with native bf16) steady state drops by ~1.4 GB and encode
-    # transients roughly halve. /health's "memory" block reports use against
-    # this cap. Raise it via PSEUDOLIFE_DAEMON_MEM_LIMIT in ops/.env for very
-    # large banks.
+    # (0.15.0, ~2,160-entry bank, fp32 embedder): ~3.1-3.3 GiB anon at rest
+    # (RssFile only ~80-165 MB; the rest of the cgroup's file charge was
+    # reclaimable page cache), and a ~30-34-search burst grew anon ~0.8 GB
+    # to the then 4g cap: kernel memcg kill at 4,169,120 kB anon-rss (docker
+    # events: oom, exit 137). The 4g figure had been sized against steady
+    # RSS of 2.8 GB (2026-08-04) and 2.7 GB (a standby, 2026-08-19/20) on a
+    # smaller bank, with no allowance for bursts, the fp32 embedder's load
+    # transient (a 3.8 GB peak on its own) or bank growth; the idle daemon
+    # also holds ~256 MB in 25 per-thread malloc arenas (/proc/1/smaps).
+    # Hours later the live fp32 daemon held 4.48 GB anon, 4.66 GB in the
+    # cgroup (2026-09-23 ~19:45), so 6g leaves ~1.8 GB over the worst fp32
+    # state seen; with the bf16 embedder (embedding.cpu_dtype "auto" on a
+    # CPU with native bf16) steady state drops by ~1.4 GB and encode
+    # transients roughly halve. /health's "memory" block reports use
+    # against this cap. Raise it via PSEUDOLIFE_DAEMON_MEM_LIMIT in ops/.env
+    # for very large banks.
     # The cap also fences a runaway allocation from the host: on 2026-08-04
     # the daemon ballooned to 21 GB RSS within minutes of boot. That cause
     # was found and fixed the same day in 4df20ef2 (MemoryService._ensure_init

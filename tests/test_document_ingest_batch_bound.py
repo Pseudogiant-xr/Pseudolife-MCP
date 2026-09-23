@@ -7,8 +7,8 @@ call, which sentence-transformers then batched at ``embedding.batch_size``
 container from the production image with the fp32 Qwen3-Embedding-0.6B
 embedder: a 104-chunk document ingested the old way peaked +2,565 MB over
 steady state (slices of 8: +1,028 MB, same speed), and a 32 x 512-token
-batch +4.4 GB — against a daemon that then had ~200 MB of headroom under
-its cgroup cap. Any real document would have OOM-killed it. Production held
+batch +4.4 GB — against a daemon then holding ~3.1-3.3 GiB anon under a
+4 GiB cgroup cap. Any real document would have OOM-killed it. Production held
 no documents, so the path had simply never run there.
 """
 from __future__ import annotations
