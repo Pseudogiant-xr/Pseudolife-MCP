@@ -114,6 +114,16 @@ if _bench_pin is not None:
 
     atexit.register(_drop_run_bench_db)
 
+# mcp.client.stdio.stdio_client binds ``errlog=sys.stderr`` as a default at
+# first import (``import mcp`` imports it eagerly). A first import inside a
+# capsys test binds capsys's CaptureIO, which has no fileno, and every later
+# stdio_client(params) in the process fails with io.UnsupportedOperation —
+# six tests/test_shim.py failures when PR #352's test_codex_doorbell.py ran
+# first (2026-09-23). Importing here, before any test runs, binds pytest's
+# session-long capture file instead (the terminal under -s). Pinned by
+# tests/test_mcp_stdio_errlog.py.
+import mcp.client.stdio  # noqa: E402, F401
+
 import pytest
 
 if TYPE_CHECKING:
