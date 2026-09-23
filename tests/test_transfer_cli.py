@@ -30,6 +30,7 @@ import pytest
 from pseudolife_memory.storage.schema import (
     BENCH_RESET_TABLES,
     SCHEMA_META_VERSION,
+    assert_disposable_database,
     ensure_schema,
 )
 from pseudolife_memory.storage.postgres import PostgresStorage
@@ -64,6 +65,7 @@ def _bank(pg_url):
     """
     await_background_dreams()
     with psycopg.connect(pg_url) as conn:
+        assert_disposable_database(conn)  # first: before the reap below
         conn.execute("SET search_path TO public")
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
@@ -77,6 +79,7 @@ def _bank(pg_url):
 
 
 def _truncate_all(conn) -> None:
+    assert_disposable_database(conn)
     conn.execute(
         "TRUNCATE " + ", ".join(BENCH_RESET_TABLES)
         + " RESTART IDENTITY CASCADE"

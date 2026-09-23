@@ -12,6 +12,8 @@ The ``vector`` extension is REQUIRED. Apache AGE is no longer used or probed.
 from __future__ import annotations
 
 import logging
+import os
+from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -507,6 +509,101 @@ BENCH_RESET_TABLES = (
     "store_decisions",
     "coordination_agents", "coordination_messages",
 )
+
+# A test or bench reset reaps every other backend on its database, applies
+# this checkout's DDL, and TRUNCATEs BENCH_RESET_TABLES — the whole bank. The
+# bundled stack's server (127.0.0.1:5433) hosts the production bank beside
+# the per-run test and bench databases, under the same owning role, so until
+# the 2026-09-23 review only the configured database NAME kept a mistyped
+# PSEUDOLIFE_TEST_DATABASE_URL or PSEUDOLIFE_BENCH_DB off the bank. The
+# deny-list stays minimal on purpose: `pseudolife_memory_bench` (the eval
+# CLIs' fixed default) and every CI/per-run test name must keep working.
+DEFAULT_PRODUCTION_DATABASE = "pseudolife_memory"
+PRODUCTION_DATABASES = frozenset({DEFAULT_PRODUCTION_DATABASE})
+
+# tests/conftest.py removes PSEUDOLIFE_MCP_DATABASE_URL from the suite's
+# environment and records here the database it named — the name only, never
+# the DSN — or the default bank's name when none was exported. While this is
+# set it supersedes the live variable, which tests legitimately point at
+# their own per-run databases (pg_service, test_pg_fixture_dream_wait, ...).
+PRODUCTION_DATABASE_ENV = "_PSEUDOLIFE_PRODUCTION_DB"
+
+
+class ProductionDatabaseError(RuntimeError):
+    """A test or bench reset was pointed at a production bank."""
+
+
+def dsn_database_name(dsn: str) -> str | None:
+    """The database a libpq DSN names, parsed by libpq's own rules.
+
+    Covers both spellings, percent-encoding and a ``?dbname=`` query
+    parameter (which libpq lets override the URI path) — a hand-rolled
+    split misses the last two. A DSN naming no database falls back to
+    ``PGDATABASE``, as libpq does first; libpq's later fallbacks (a
+    ``service=`` entry, then the user name) are not modelled. None when
+    neither names one, or when the DSN does not parse (nothing can connect
+    with it either).
+    """
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        name = conninfo_to_dict(dsn).get("dbname")
+    except Exception:  # noqa: BLE001 — the message can carry credentials
+        return None
+    return name or os.environ.get("PGDATABASE") or None
+
+
+def _fold(name: str) -> str:
+    # A trailing slash is dropped: libpq reads `/pseudolife_memory/` as a
+    # different, nonexistent database, but a guard should treat it as the
+    # typo it is rather than let it launder the bank's name.
+    return name.rstrip("/").casefold()
+
+
+def _production_database_names() -> frozenset[str]:
+    """Folded: the default bank, plus conftest's recorded bank inside the
+    test suite, or else the bank PSEUDOLIFE_MCP_DATABASE_URL names."""
+    names = set(PRODUCTION_DATABASES)
+    recorded = os.environ.get(PRODUCTION_DATABASE_ENV)
+    if recorded:
+        names.add(recorded)
+    else:
+        live_dsn = os.environ.get("PSEUDOLIFE_MCP_DATABASE_URL")
+        if live_dsn:
+            names.add(dsn_database_name(live_dsn) or "")
+    return frozenset(_fold(name) for name in names if name)
+
+
+def is_production_database(name: str, *, extra: Iterable[str] = ()) -> bool:
+    """Whether ``name`` (case-folded) is a production bank, or one of the
+    caller's own ``extra`` refusals."""
+    refused = _production_database_names() | {_fold(e) for e in extra}
+    return _fold(name) in refused
+
+
+def refuse_production_database(name: str) -> None:
+    """Raise before a test or bench harness resolves ``name`` as its target."""
+    if is_production_database(name):
+        raise ProductionDatabaseError(
+            f"refusing to reset database {name!r}: it is a production bank "
+            "(pseudolife_memory, or the database PSEUDOLIFE_MCP_DATABASE_URL "
+            "names). Test and bench resets reap its connections, migrate it "
+            "and truncate every table; point them at a disposable database."
+        )
+
+
+def assert_disposable_database(conn) -> str:
+    """Refuse to reset a production bank; returns the database name.
+
+    Asks the SERVER which database ``conn`` reached, so no DSN spelling can
+    walk around it. Call it as the first statement at every site that reaps
+    backends on, runs DDL against, or truncates a database it connected to
+    itself — before the reap, which would already have killed the daemon's
+    connections (tests/test_disposable_database_guard.py).
+    """
+    name = conn.execute("SELECT current_database()").fetchone()[0]
+    refuse_production_database(name)
+    return name
 
 # The dimension every embedding column is declared at (schema v25). Not
 # derived from EmbeddingConfig on purpose: ensure_schema must refuse based

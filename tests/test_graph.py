@@ -327,9 +327,11 @@ def svc(pg_url, tmp_path_factory):
     """Module-scoped service against a wiped DB — embedder loads once."""
     import psycopg as _psy
     from pseudolife_memory.storage.schema import (BENCH_RESET_TABLES,
+                                                  assert_disposable_database,
                                                   ensure_schema)
 
     with _psy.connect(pg_url) as conn:
+        assert_disposable_database(conn)  # first: before the DDL + TRUNCATE
         # Pin to public first (see pg_fixtures.pg_conn) — mirrors PostgresStorage.
         conn.execute("SET search_path TO public")
         conn.commit()

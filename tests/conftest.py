@@ -71,6 +71,40 @@ def scrub_extractor_endpoint_env(environ) -> list[str]:
 
 scrub_extractor_endpoint_env(os.environ)
 
+
+# The production daemon's DSN never reaches the suite. MemoryService falls
+# back to PSEUDOLIFE_MCP_DATABASE_URL when no database_url is passed, so an
+# exported value binds every file-mode fixture to that bank — and
+# pristine_service.save() then snapshots a just-cleared cortex over it
+# (replace_facts([]) -> DELETE FROM facts), a path no reset-site guard sees
+# (2026-09-23 review). Tests that need a PG-bound service set the variable
+# themselves (monkeypatch in pg_service, a child env in the daemon fixtures);
+# none read the ambient value. Its database NAME is kept — never the DSN,
+# which carries a credential — so the reset guard keeps refusing that bank;
+# and because a record always exists, the guard ignores the live variable
+# those tests point at their own per-run databases.
+def scrub_live_bank_dsn(environ) -> str:
+    """Drop PSEUDOLIFE_MCP_DATABASE_URL from ``environ`` and record the bank
+    it named for the reset guard: the default bank's name when none was
+    exported, and an inherited record (an xdist worker's, from the
+    controller) is kept. Returns the recorded name."""
+    from pseudolife_memory.storage.schema import (
+        DEFAULT_PRODUCTION_DATABASE, PRODUCTION_DATABASE_ENV, dsn_database_name,
+    )
+
+    dsn = environ.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
+    name = dsn_database_name(dsn) if dsn else None
+    if name:
+        environ[PRODUCTION_DATABASE_ENV] = name
+    else:
+        # Never the empty string: Windows deletes a variable assigned one,
+        # and xdist workers would then inherit no record at all.
+        environ.setdefault(PRODUCTION_DATABASE_ENV, DEFAULT_PRODUCTION_DATABASE)
+    return environ[PRODUCTION_DATABASE_ENV]
+
+
+scrub_live_bank_dsn(os.environ)
+
 # Bench-DB isolation: evals' reset_bench() reaps every backend on its
 # database before truncating, so concurrent suite runs must not share one
 # bench DB (same crossfire as pg_fixtures' per-run test DB — see its module
@@ -104,7 +138,10 @@ if _bench_pin is not None:
 
             admin = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or bench_admin_url()
             admin = conninfo_with_dbname(admin, "postgres")
-            db = os.environ["PSEUDOLIFE_BENCH_DB"]
+            # The name pinned above, not whatever PSEUDOLIFE_BENCH_DB holds
+            # by exit: a DROP ... WITH (FORCE) must never follow a later
+            # (or mistyped) value onto a database this run did not create.
+            db = _bench_pin
             with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:
                 conn.execute(f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
         except Exception:  # noqa: BLE001 — best-effort; pg_fixtures prunes leftovers
@@ -129,6 +166,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     except ImportError:
         raise pytest.UsageError("Required test PostgreSQL needs psycopg") from None
 
+    from pseudolife_memory.storage.schema import ProductionDatabaseError
     from tests.helpers import pg_reachable
     from tests.pg_defaults import (
         PostgresAuthError, PostgresSetupError, PostgresUnavailableError,
@@ -138,7 +176,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     try:
         ensure_test_db()
         pg_reachable(resolve_test_db_url())
-    except (PostgresAuthError, PostgresSetupError, PostgresUnavailableError) as exc:
+    except (PostgresAuthError, PostgresSetupError, PostgresUnavailableError,
+            ProductionDatabaseError) as exc:
         raise pytest.UsageError(str(exc)) from None
 
 

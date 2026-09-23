@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import tempfile
 import time
@@ -122,8 +121,17 @@ def cmd_harvest(args) -> int:
 # ══════════════════════════════════════════════════════════════════════════
 
 def _guard_dsn(dsn: str) -> None:
-    db = re.sub(r"\?.*$", "", dsn).rsplit("/", 1)[-1]
-    if db in FORBIDDEN_DBS:
+    """Refuse the live and shared-bench banks by name, in any DSN spelling
+    libpq accepts and regardless of case. The name comes from libpq's own
+    parser, shared with the test/bench resets (storage/schema.py); the
+    rsplit('/') this replaced let a ``dbname=`` keyword DSN, a trailing
+    slash or an upper-cased name through (2026-09-23)."""
+    from pseudolife_memory.storage.schema import (
+        dsn_database_name, is_production_database,
+    )
+
+    db = dsn_database_name(dsn)
+    if db is not None and is_production_database(db, extra=FORBIDDEN_DBS):
         sys.exit(f"refusing to run against {db!r} — restore a dedicated "
                  "replay copy instead (see module docstring)")
 

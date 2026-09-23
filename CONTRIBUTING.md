@@ -27,12 +27,26 @@ finds it at `127.0.0.1:5433` on its own, reading the role password from
 `ops/.env` (`POSTGRES_PASSWORD`; `PSEUDOLIFE_TEST_PG_PASSWORD` overrides it).
 A server that answers but rejects the credentials makes the PG-backed tests
 **error**, not skip — only an absent server skips them — so a rotated
-password can never produce a green run by accident. Point at a different
-server with `PSEUDOLIFE_TEST_DATABASE_URL` (it wins whenever set):
+password can never produce a green run by accident.
+
+That instance is also the server holding your real bank (`pseudolife_memory`),
+so for it **set nothing**: the suite provisions its own per-run database
+there (see below). `PSEUDOLIFE_TEST_DATABASE_URL` exists to point the suite
+at a *different*, disposable server — CI's service container, or a throwaway
+Postgres of your own — and wins whenever set:
 
 ```bash
-export PSEUDOLIFE_TEST_DATABASE_URL="postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test"
+export PSEUDOLIFE_TEST_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:55432/pseudolife_memory_test"
 ```
+
+An override is used verbatim: its database is reset at the start of every
+PG-backed test (other connections to it terminated, then every table
+truncated) and is not dropped afterwards. The test and bench fixtures refuse
+a production bank — `pseudolife_memory`, or whichever database
+`PSEUDOLIFE_MCP_DATABASE_URL` names — before connecting, and ask the server
+which database they reached before resetting it. The suite also removes
+`PSEUDOLIFE_MCP_DATABASE_URL` from its own environment, so an exported daemon
+DSN never binds a test fixture to your bank.
 
 URI query options and keyword connection strings are preserved when selecting
 isolated test databases. Eval-backed tests use the same server unless

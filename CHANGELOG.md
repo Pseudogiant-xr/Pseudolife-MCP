@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — test and bench resets refuse the production bank)
+- Every reset that opens its own connection now asks the server which
+  database it reached, as its first statement. It raises
+  `ProductionDatabaseError` before reaping backends, running DDL or
+  truncating when that database is `pseudolife_memory` or the one
+  `PSEUDOLIFE_MCP_DATABASE_URL` names (case-folded). Covered: the `pg_conn`
+  fixture, `evals/ladder_sweep.py` `reset_bench` (shared by 12 eval
+  harnesses), and the transfer, graph, dream-ack and lesson test resets. The
+  bundled stack's server holds the bank beside the test and bench databases
+  under the same owning role. Until now, a mistyped
+  `PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_BENCH_DB` in a
+  single-process run would have killed the daemon's connections and emptied
+  all 31 tables. The same names are also refused where the test and bench
+  database names resolve, before anything connects.
+  `pseudolife_memory_bench`, the per-run names and CI's names are unaffected.
+- The test suite removes `PSEUDOLIFE_MCP_DATABASE_URL` from its environment
+  at start-up. It records only that DSN's database name (the default bank's
+  when none was exported), so the guard still refuses it. Inside the suite
+  the guard checks that record, not the live variable, which tests point at
+  their own per-run databases. With the DSN exported, file-mode fixtures
+  bound to that bank, and `pristine_service.save()` would have run
+  `DELETE FROM facts` there. The exit-time drop of the per-run bench
+  database now drops the name it pinned, not whatever
+  `PSEUDOLIFE_BENCH_DB` holds by then.
+- The five eval harnesses that refuse the live and shared-bench databases by
+  DSN now read the name with libpq's own parser, through the shared helper
+  in `storage/schema.py`. Two exact-match copies let a keyword DSN, a
+  trailing slash or an upper-case name through. The three hardened copies
+  still missed a `?dbname=` query override and a percent-encoded name. A DSN
+  that names no database is now checked against `PGDATABASE`, as libpq
+  would resolve it.
+- `.gitignore` now covers every `ops/.env*` copy except the tracked
+  `ops/.env.example`. A timestamped backup of `ops/.env` matched neither
+  `.env` nor `*.bak`.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

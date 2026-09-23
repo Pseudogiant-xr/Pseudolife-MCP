@@ -616,7 +616,9 @@ def test_file_mode_still_skips_synthesis(tmp_path):
 
 
 def test_export_import_preserves_committed_and_pending_partition(svc, tmp_path, pg_conn, pg_url):
-    from pseudolife_memory.storage.schema import BENCH_RESET_TABLES, SCHEMA_META_VERSION
+    from pseudolife_memory.storage.schema import (
+        BENCH_RESET_TABLES, SCHEMA_META_VERSION, assert_disposable_database,
+    )
     from pseudolife_memory.transfer_cli import perform_export, perform_import
 
     pending_id = signal(svc)
@@ -632,6 +634,7 @@ def test_export_import_preserves_committed_and_pending_partition(svc, tmp_path, 
     svc._storage.close()
     # Both connections belong to this test's private database. Empty it and
     # import the snapshot, with only the inert fixture connection left open.
+    assert_disposable_database(pg_conn)
     pg_conn.execute("TRUNCATE " + ", ".join(BENCH_RESET_TABLES)
                     + " RESTART IDENTITY CASCADE")
     pg_conn.execute("INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)",

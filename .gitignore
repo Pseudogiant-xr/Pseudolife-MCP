@@ -1,5 +1,10 @@
 # Local compose env overrides (machine-specific volume names etc.) — never committed.
 .env
+# ...and every copy of it (ops/.env holds the DB password and principal
+# tokens; a timestamped backup matched neither `.env` nor `*.bak`). Only the
+# template is tracked. Guarded by tests/test_release_ux.py.
+ops/.env*
+!ops/.env.example
 
 # Machine-local compose overrides (e.g. fine-tuned GGUF mounts over the baked
 # extractor default) — referencing personal files from the tracked compose file
