@@ -17,7 +17,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default to the config dataclass. Existing installs that never set the
   knob pick up the new window on upgrade; one that set it keeps its own
   value. The window also bounds how long a signal whose extraction never
-  lands is retried, now ten years instead of thirty days.
+  lands is retried, now ten years instead of thirty days. The config comment
+  and Console help for `synthesize_in_dream` said signals are still pruned
+  when synthesis is off; nothing prunes them then, and they now say so.
 - The session-start briefing labels a lesson `avoid:` only when its polarity
   is `-`. It used to label every `failure` or `correction` lesson `avoid:`
   too, but synthesis writes a correction (and often a failure) as `+`,

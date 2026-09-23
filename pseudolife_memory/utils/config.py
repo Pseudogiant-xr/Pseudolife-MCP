@@ -677,8 +677,8 @@ class LessonsConfig:
     # indexes included). The same window also bounds how long a signal whose
     # extraction never lands is retried.
     signal_retention_days: int = 3650
-    # When False, the dream skips signal drain / lesson synthesis (signals still
-    # pruned by retention).
+    # When False (or enabled=False), the dream skips signal drain / lesson
+    # synthesis and the retention prune with it: signals are kept, not pruned.
     synthesize_in_dream: bool = True
     # Auto-outcome inference (spec 2026-07-18): infer signals for episodes
     # that close with entries but zero explicit outcomes. origin="inferred";

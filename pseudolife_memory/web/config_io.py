@@ -536,7 +536,8 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Synthesize in dream", "type": "bool", "default": True,
      "restart": False,
      "help": "Dream drains outcome signals into lessons. Off = signals are "
-             "still pruned by retention but never become lessons."},
+             "kept (the retention prune is skipped too) and never become "
+             "lessons."},
     {"path": "memory.lessons.infer_outcomes", "group": "Lessons",
      "label": "Infer missing outcomes", "type": "bool", "default": True,
      "restart": False,
