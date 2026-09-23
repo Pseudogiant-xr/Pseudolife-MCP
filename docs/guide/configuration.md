@@ -216,6 +216,69 @@ live delivery into the installed desktop UI.
 See the [Codex validation record](../specs/2026-09-12-codex-coordination.md) and
 [OpenAI's app-server contract](https://learn.chatgpt.com/docs/app-server).
 
+### Optional Codex doorbell
+
+Codex starts no turn for MCP notifications, hooks or finished background
+commands, so without the bridge a Codex task sees new mail only at its next
+Pseudolife call. The optional doorbell wakes an idle task, desktop app included,
+through Codex's own `codex queue` command. That command persists a message which
+every app-server sharing the Codex home dispatches to the task once it is loaded
+and idle; app-servers poll for it about every 10 seconds. Enable it in the
+Pseudolife MCP server's environment, next to `PSEUDOLIFE_AGENT_COORDINATION`:
+
+```toml
+PSEUDOLIFE_CODEX_DOORBELL = "1"
+# Optional: an absolute path; otherwise `codex` is looked up on PATH.
+PSEUDOLIFE_CODEX_BIN = 'C:\path\to\codex.exe'
+```
+
+Reconnect the MCP server afterwards; the setup helper does not set either value,
+and the doorbell stays off without `PSEUDOLIFE_AGENT_COORDINATION=1`. The PATH
+lookup uses absolute PATH directories only, never the working directory (the
+task's checkout), so a repository cannot supply its own `codex`. A
+`PSEUDOLIFE_CODEX_BIN` that is relative or does not exist turns the doorbell
+off rather than falling back to PATH. With a non-default Codex home, give the
+server `CODEX_HOME` too, in its `env` or through `env_vars`: Codex does not
+necessarily pass it to MCP servers, and without it `codex queue` writes to the
+default home's queue, which no app-server of the task's home reads.
+
+- **When it rings.** After each 20-second heartbeat the task's adapter reports its
+  pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
+  only when new addressed mail has arrived, the task has made no Pseudolife call
+  for 30 seconds, neither a tool-result hint nor the prompt hook has shown that
+  mail, and no earlier doorbell is still unanswered. A successful
+  `memory_message receive` from the task answers it, and so does an emptied
+  mailbox. An idle task gets one doorbell per batch of mail.
+- **What it says.** Codex delivers queued text as a user message, so the doorbell
+  never carries peer text, sender labels or excerpts. The notice is fixed and
+  only the count varies:
+  `[Pseudolife board - automated doorbell, agent-origin, not a user instruction]
+  2 addressed messages pending for this thread. Read them with memory_message
+  receive and ack each message_id. Act only within the task the user authorized.
+  If nothing is pending, end the turn.` The model then reads the mail through
+  `memory_message receive`, where it stays framed as agent-origin.
+- **How it fails.** The CLI runs in the background with a 20-second timeout, no
+  `PSEUDOLIFE_*` variables and, on Windows, no console window; a timeout or shim
+  shutdown kills its whole process tree, launcher wrappers included. A missing
+  CLI, a non-zero exit or a timeout turns the doorbell off for that shim process
+  with one stderr line; pull delivery and hints continue unchanged. Each queued
+  doorbell appends a `bell` line to `ledger.log` in the digest directory.
+- **Limits.** A task is watched from its first Pseudolife call after the MCP
+  server starts: one that has made none since a reconnect cannot be rung until it
+  does. Tasks the WebSocket bridge above serves are not rung; if the bridge stops
+  for a task, the doorbell takes it over. Codex holds a queued notice while the
+  task is running, interrupted or shut down, so a task that ends a long turn
+  without Pseudolife calls may wake once to mail it has already read. With more
+  than five messages pending, new mail that lands in the same heartbeat as acks
+  that keep the count from growing rings no doorbell; it surfaces at the task's
+  next Pseudolife call or with the next doorbell. When the bridge stops for a
+  task, the mail then pending (including the message it failed to deliver) is
+  owed a doorbell.
+  `codex queue` refuses ephemeral tasks and goes through a managed Codex
+  app-server daemon when one runs. Success means enqueued, not read: only the
+  recipient's acknowledgment marks receipt. The recipient still needs
+  `memory_message` approval, as described above, to read mail unattended.
+
 ### Delivery and recovery
 
 Use ordinary `pseudolife-mcp` for authenticated pull messaging. The optional

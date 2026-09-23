@@ -279,6 +279,7 @@ def test_codex_tool_result_carries_the_digest_exactly_once(monkeypatch):
         async def get(self, thread_id, snapshot=None): return self.adapter
         def unread_hint(self, thread_id, adapter):
             return adapter.deliver_hint() if adapter is not None else "Coordination: unavailable"
+        def note_call(self, thread_id, name, arguments, **options): pass
 
     texts = []
 

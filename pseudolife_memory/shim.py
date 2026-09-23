@@ -816,6 +816,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
     async def _call_tool(ctx, params):
         call_headers = {}
         call_hint = coordination_hint
+        noted_thread = None
         attempt = _UpstreamAttempt(phase="initialize")
         try:
             with anyio.fail_after(_operation_timeout_seconds()):
@@ -852,6 +853,9 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                                     if name in adapter.instance_headers
                                 })
                                 adapter.note_turn()
+                                coordination_registry.note_call(
+                                    thread_id, params.name, params.arguments)
+                                noted_thread = thread_id
                             # Fetched once, at result time: the adapter's hint
                             # marks the digest delivered when read.
                             call_hint = lambda: coordination_registry.unread_hint(
@@ -878,6 +882,10 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             raise
         except Exception as exc:
             raise _transport_error(exc, attempt, "call") from None
+        if noted_thread is not None and not result.is_error:
+            # Only a receive that succeeded has read the mailbox.
+            coordination_registry.note_call(
+                noted_thread, params.name, params.arguments, succeeded=True)
         # The daemon's tools/list_changed lands on the per-call upstream
         # session above and dies with it, so a tier change would be invisible
         # to the real client — re-emit it downstream on BOTH eras: the
@@ -1096,10 +1104,28 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                                   "authenticated bridge with a separate host credential; "
                                   "using pull coordination.",
                                   file=sys.stderr)
+                    if os.environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower() in {
+                            "1", "true", "yes", "on"}:
+                        from pseudolife_memory.codex_doorbell import (
+                            CodexDoorbell, resolve_codex_command)
+                        command = resolve_codex_command()
+                        if command is not None:
+                            registry_options["doorbell"] = CodexDoorbell(command)
+                        else:
+                            reason = ("PSEUDOLIFE_CODEX_BIN is not an absolute path to an "
+                                      "existing file"
+                                      if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip()
+                                      else "no codex CLI found on PATH")
+                            print(f"pseudolife-mcp: Codex board doorbell off ({reason}); "
+                                  "using pull coordination.", file=sys.stderr)
                     registry = CodexCoordinationRegistry(
                         url, token, provider=provider, **registry_options)
                     stack.push_async_callback(registry.aclose)
                     kwargs["coordination_registry"] = registry
+            elif os.environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower() in {
+                    "1", "true", "yes", "on"}:
+                print("pseudolife-mcp: PSEUDOLIFE_CODEX_DOORBELL needs "
+                      "PSEUDOLIFE_AGENT_COORDINATION=1; doorbell off.", file=sys.stderr)
             await _proxy(url, token, session_uid, provider=provider, **kwargs)
             return
 

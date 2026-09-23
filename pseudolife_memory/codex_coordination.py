@@ -85,7 +85,7 @@ class CodexCoordinationRegistry:
                  retry_seconds: float = 5.0,
                  max_threads: int = 128, clock=None, delivery_url=None,
                  delivery_token=None, delivery_factory=None, provider=None,
-                 digest_dir=None):
+                 digest_dir=None, doorbell=None):
         self.url = url
         self.token = token if provider is None else None
         self.provider = provider
@@ -99,6 +99,9 @@ class CodexCoordinationRegistry:
         self._delivery_url = delivery_url
         self._delivery_token = delivery_token
         self._delivery_factory = delivery_factory
+        # Optional ``codex queue`` doorbell (codex_doorbell.CodexDoorbell) for
+        # threads the WebSocket bridge does not reach.
+        self._doorbell = doorbell
         self._adapters: dict[str, object] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._retry_after: dict[str, float] = {}
@@ -180,6 +183,13 @@ class CodexCoordinationRegistry:
                     await adapter.downgrade_to_pull()
                 except Exception:  # noqa: BLE001 - local pull mode is already set
                     pass
+                if self._doorbell is not None and not self._closing:
+                    # Pull now: the doorbell covers the thread the bridge
+                    # dropped, and nothing pending was shown while it held it.
+                    try:
+                        self._doorbell.watch(thread_id, adapter, shown=False)
+                    except Exception:  # noqa: BLE001 - memory must survive optional coordination
+                        pass
             try:
                 await delivery.__aexit__(None, None, None)
             except Exception:  # noqa: BLE001 - shutdown is best effort
@@ -207,6 +217,17 @@ class CodexCoordinationRegistry:
         # form falls back to the raw digest.
         deliver = getattr(adapter, "deliver_hint", None)
         return deliver() if deliver is not None else adapter.unread_hint
+
+    def note_call(self, thread_id: str, name: str, arguments, *,
+                  succeeded: bool = False) -> None:
+        """A tool call from an attached thread, as it starts and when it
+        succeeds, for the doorbell's view of which threads are active and
+        which have read their mail."""
+        if self._doorbell is not None:
+            try:
+                self._doorbell.note_call(thread_id, name, arguments, succeeded=succeeded)
+            except Exception:  # noqa: BLE001 - never fail or error the user's tool call
+                pass
 
     async def get(self, thread_id: str, *, snapshot=None):
         canonical = thread_id_from_meta({"threadId": thread_id})
@@ -346,6 +367,12 @@ class CodexCoordinationRegistry:
                 self._deliveries[thread_id] = delivery
                 self._delivery_tasks[thread_id] = asyncio.create_task(
                     self._pump_delivery(thread_id, adapter, delivery))
+            elif self._doorbell is not None:
+                # A bridged thread is woken by the bridge itself.
+                try:
+                    self._doorbell.watch(thread_id, adapter)
+                except Exception:  # noqa: BLE001 - memory must survive optional coordination
+                    pass
             self._retry_after.pop(thread_id, None)
             self._retry_generations.pop(thread_id, None)
             self._failure_hints.pop(thread_id, None)
@@ -365,6 +392,11 @@ class CodexCoordinationRegistry:
             if startups:
                 await asyncio.gather(*startups, return_exceptions=True)
 
+            if self._doorbell is not None:
+                try:
+                    await self._doorbell.aclose()
+                except Exception:  # noqa: BLE001 - shutdown is best effort
+                    pass
             delivery_tasks = list(self._delivery_tasks.values())
             self._delivery_tasks.clear()
             for task in delivery_tasks:

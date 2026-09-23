@@ -207,6 +207,10 @@ class CoordinationAdapter:
         self._delivered_watermark = 0
         self._hint_calls_since = 0
         self._digest_write_reported = False
+        # Called with this adapter after every mailbox update (attach,
+        # heartbeat, re-attach): the Codex doorbell reads the new state here.
+        # It runs on the heartbeat task, so it must return at once.
+        self.mailbox_observer = None
         self.wake_enabled = wake_enabled is True
         # ``resumable`` tells the daemon whether a state file backs this
         # address: without one nothing can ever attach to it again, so the
@@ -262,6 +266,24 @@ class CoordinationAdapter:
     def digest_watermark(self) -> int:
         return self._digest_watermark
 
+    @property
+    def pending_count(self) -> int | None:
+        """Pending mail at the last mailbox update; ``None`` while degraded."""
+        return self._pending_count
+
+    @property
+    def pending_preview(self) -> list:
+        return list(self._pending_preview)
+
+    def delivered_watermark(self) -> int:
+        """The newest digest watermark already shown to the model, by a
+        tool-result hint here or by a prompt hook through the shared marker."""
+        return self._read_seen()
+
+    def note_delivery(self, kind: str, size: int) -> None:
+        """Record a delivery made outside the adapter in the digest ledger."""
+        self._ledger(kind, self._digest_watermark, size)
+
     def deliver_hint(self) -> str | None:
         """The hint to attach to a tool result: a failure notice every call,
         otherwise the digest once per change and a one-line reminder every
@@ -300,6 +322,15 @@ class CoordinationAdapter:
         self._pending_preview = (preview if isinstance(preview, list)
                                  and all(_preview_entry(entry) for entry in preview) else [])
         self._refresh_digest()
+        observer = self.mailbox_observer
+        if observer is not None:
+            try:
+                observer(self)
+            except Exception as error:  # noqa: BLE001 - an optional doorbell never costs the lease
+                self.mailbox_observer = None
+                print(f"pseudolife-mcp: coordination mailbox observer failed "
+                      f"({type(error).__name__}); the Codex doorbell is off for this "
+                      "task, pull delivery continues.", file=sys.stderr)
 
     def _refresh_digest(self):
         text = render_digest(self._pending_count or 0, self._pending_preview)

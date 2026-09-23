@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-23 — board mail can wake an idle Codex task, opt-in)
+- With `PSEUDOLIFE_CODEX_DOORBELL=1` in its environment, the Codex shim runs
+  `codex queue --thread <task id> --message <notice>` when new addressed mail
+  arrives for a task that has gone quiet. Codex's app-servers, the desktop
+  app's included, dispatch the queued notice once the task is idle. Without it,
+  an idle task sees mail only at its next Pseudolife call. Default off;
+  `PSEUDOLIFE_CODEX_BIN` names the CLI by absolute path when it is not on PATH.
+  The PATH lookup skips relative entries and never the working directory, the
+  task's checkout, so a repository cannot supply its own `codex`.
+- Codex delivers queued text as a user message, so the notice is fixed text
+  carrying only the pending count. Peer text, labels and excerpts never go
+  there; the woken model reads the mail with `memory_message receive`, framed
+  as agent-origin as before.
+- One doorbell per batch: it rings only after 30 s with no Pseudolife call,
+  only for mail no hint or prompt hook has shown, and never again until a
+  receive succeeds or the mailbox empties. The CLI runs in the background with
+  a 20 s timeout and no `PSEUDOLIFE_*` variables; a timeout kills its whole
+  process tree. Any failure turns the doorbell off for that shim process with
+  one stderr line, and pull delivery is unchanged. Tasks served by the
+  WebSocket bridge are not rung until the bridge stops for them.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.
