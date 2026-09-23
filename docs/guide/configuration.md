@@ -349,12 +349,14 @@ for delivery-state and host-verification contracts.
   cutover itself.
 - **ONNX acceleration is load-only** (`EmbeddingConfig.backend = "onnx"`).
   The MCP defaults select it only when the optional ONNX stack is installed
-  *and* the configured model's artifact already resolves locally. Otherwise
-  they choose torch up front and log one INFO line saying so. The default
-  Qwen3-Embedding-0.6B ships no ONNX artifact, so the daemon runs it on torch;
-  MiniLM, whose artifact the daemon image bakes, still gets ONNX. An explicit
-  `embedding.backend` is never overridden: `backend: onnx` without the
-  artifact still warns and falls back to torch at load.
+  *and* the loader would load it: the configured model's artifact already
+  resolves locally, and, on native Windows, the model's Transformer module
+  does not load from a nested subfolder (see the end of this item).
+  Otherwise they choose torch up front and log one INFO line saying why. The
+  default Qwen3-Embedding-0.6B ships no ONNX artifact, so the daemon runs it
+  on torch; MiniLM, whose artifact the daemon image bakes, still gets ONNX.
+  An explicit `embedding.backend` is never overridden: `backend: onnx`
+  without a loadable artifact still warns and falls back to torch at load.
   `EmbeddingConfig.onnx_file_name` defaults to
   `onnx/model.onnx`; that exact artifact must already exist in a local model
   directory or a revision-specific cached Hub snapshot. A missing artifact falls

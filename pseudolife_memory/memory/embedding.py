@@ -125,6 +125,18 @@ def _configured_onnx_source(config: EmbeddingConfig) -> tuple[str, str | None]:
     return file_name, _resolve_onnx_source(config.model_name, file_name)
 
 
+def _native_windows_nested_layout(onnx_source: str) -> bool:
+    """True when the loader must refuse ONNX for this resolved model root.
+
+    The pinned Optimum stack matches a POSIX subfolder pattern against
+    OS-native path strings, so on native Windows it never detects the
+    artifact of a Transformer module loaded from a nested subfolder and
+    re-enables export. Shared by the loader's fallback and the MCP default
+    overlay's auto-select, so the two gates cannot drift.
+    """
+    return _native_windows() and has_nested_transformer_module(onnx_source)
+
+
 class EmbeddingPipeline:
     """Encodes text into dense vector embeddings using sentence-transformers.
 
@@ -166,14 +178,11 @@ class EmbeddingPipeline:
                         f"configured ONNX artifact {file_name!r} is not "
                         "available in the local model or Hub cache",
                     )
-                if _native_windows() and has_nested_transformer_module(
-                    onnx_source,
-                ):
-                    # Narrower than a platform gate: the pinned Optimum stack
-                    # matches a POSIX subfolder pattern against OS-native path
-                    # strings, so only a nested module subfolder goes
-                    # undetected here and re-enables export. A flat layout
-                    # resolves on both platforms and keeps the accelerator.
+                if _native_windows_nested_layout(onnx_source):
+                    # Narrower than a platform gate: only a nested module
+                    # subfolder goes undetected on native Windows and
+                    # re-enables export. A flat layout resolves on both
+                    # platforms and keeps the accelerator.
                     logger.warning(
                         "ONNX embedding backend is disabled on native Windows "
                         "for this model's nested module layout because the "

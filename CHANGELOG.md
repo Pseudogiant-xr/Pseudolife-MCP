@@ -22,6 +22,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the loader's warning names the bad path instead of hiding it. The loader
   and the defaults share one normalize-and-resolve helper, so a
   backslash-separated `onnx_file_name` resolves the same way in both.
+- The same applies on native Windows to a model whose Transformer module
+  loads from a nested subfolder. The pinned Optimum stack mis-detects that
+  artifact there, so the loader refuses it and falls back with a warning.
+  The defaults now choose torch up front for such a model, with an INFO line
+  naming the reason, through the same helper the loader's fallback uses. A
+  flat layout, and any layout on Linux or in the daemon image, still gets
+  ONNX.
 
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection

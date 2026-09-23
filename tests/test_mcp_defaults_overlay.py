@@ -106,6 +106,78 @@ def test_onnx_backend_not_auto_selected_when_artifact_absent(
     assert model_dir.as_posix() in explained[0].getMessage()
 
 
+def _nested_layout(tmp_path):
+    """A model whose Transformer module loads from ``0_Transformer/``, with
+    its ONNX artifact present where the loader looks for it."""
+    import json
+
+    model_dir = tmp_path / "model"
+    (model_dir / "0_Transformer" / "onnx").mkdir(parents=True)
+    (model_dir / "0_Transformer" / "onnx" / "model.onnx").write_bytes(b"fixture")
+    (model_dir / "modules.json").write_text(json.dumps([
+        {"idx": 0, "name": "0", "path": "0_Transformer",
+         "type": "sentence_transformers.models.Transformer"},
+        {"idx": 1, "name": "1", "path": "1_Pooling",
+         "type": "sentence_transformers.models.Pooling"},
+    ]), encoding="utf-8")
+    return model_dir
+
+
+def test_windows_nested_layout_not_auto_selected(tmp_path, monkeypatch, caplog):
+    """On native Windows the loader refuses a nested module layout (the
+    pinned Optimum stack mis-detects its artifact and re-enables export) and
+    falls back with a warning. Auto-selecting ONNX there would repeat that
+    warning on every boot, so the defaults choose torch and say why at INFO."""
+    import pseudolife_memory.service as service_mod
+    from pseudolife_memory.memory import embedding
+
+    monkeypatch.setattr(service_mod, "_onnx_embedding_available", lambda: True)
+    monkeypatch.setattr(embedding, "_native_windows", lambda: True)
+    model_dir = _nested_layout(tmp_path)
+    _write_model_config(tmp_path, model_dir)
+
+    with caplog.at_level("INFO", logger="pseudolife_memory"):
+        svc = MemoryService(data_dir=tmp_path)
+    assert svc.config.embedding.backend == "torch"
+    explained = [
+        r for r in caplog.records
+        if r.name == "pseudolife_memory.service"
+        and "nested" in r.getMessage() and "Windows" in r.getMessage()
+    ]
+    assert [r.levelname for r in explained] == ["INFO"]
+
+
+def test_nested_layout_still_auto_selected_off_windows(tmp_path, monkeypatch):
+    """The Windows gate is platform-specific: the same nested layout keeps
+    ONNX on Linux and in the daemon image."""
+    import pseudolife_memory.service as service_mod
+    from pseudolife_memory.memory import embedding
+
+    monkeypatch.setattr(service_mod, "_onnx_embedding_available", lambda: True)
+    monkeypatch.setattr(embedding, "_native_windows", lambda: False)
+    _write_model_config(tmp_path, _nested_layout(tmp_path))
+
+    svc = MemoryService(data_dir=tmp_path)
+    assert svc.config.embedding.backend == "onnx"
+
+
+def test_windows_flat_layout_still_auto_selected(tmp_path, monkeypatch):
+    """Only a NESTED module subfolder trips the Windows defect; a flat
+    ``onnx`` subfolder keeps ONNX on native Windows too."""
+    import pseudolife_memory.service as service_mod
+    from pseudolife_memory.memory import embedding
+
+    monkeypatch.setattr(service_mod, "_onnx_embedding_available", lambda: True)
+    monkeypatch.setattr(embedding, "_native_windows", lambda: True)
+    model_dir = tmp_path / "model"
+    (model_dir / "onnx").mkdir(parents=True)
+    (model_dir / "onnx" / "model.onnx").write_bytes(b"fixture")
+    _write_model_config(tmp_path, model_dir)
+
+    svc = MemoryService(data_dir=tmp_path)
+    assert svc.config.embedding.backend == "onnx"
+
+
 def test_default_model_without_onnx_artifact_stays_torch(tmp_path, monkeypatch):
     """The shipped default (no config.yaml) probes the default model and
     default artifact name, and stays on torch when that artifact is absent."""
