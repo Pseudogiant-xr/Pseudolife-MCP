@@ -173,6 +173,10 @@ services:
       PSEUDOLIFE_DREAM_FALLBACK_BASE_URL: ${PSEUDOLIFE_DREAM_FALLBACK_BASE_URL:-}
       PSEUDOLIFE_DREAM_FALLBACK_MODEL: ${PSEUDOLIFE_DREAM_FALLBACK_MODEL:-}
       PSEUDOLIFE_DREAM_EXTRACTOR_MODE: ${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-auto}
+      # How often the daemon returns heap memory glibc keeps after encode
+      # bursts (malloc_trim). Empty = the 60 s default; 0 disables. See
+      # docs/guide/configuration.md.
+      PSEUDOLIFE_MALLOC_TRIM_SECONDS: ${PSEUDOLIFE_MALLOC_TRIM_SECONDS:-}
     # Make host.docker.internal resolve to the host on Linux Docker Engine
     # (Docker Desktop on Windows/macOS provides the name automatically, and
     # this entry is harmless there). Enabled by default since issue #11: with

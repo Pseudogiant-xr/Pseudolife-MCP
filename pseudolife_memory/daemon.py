@@ -267,6 +267,10 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
     mcp_server.start_session_reaper()
+    # Returns what glibc keeps resident after encode bursts (Linux only).
+    from pseudolife_memory.utils import heap_trim
+
+    heap_trim.start()
 
     # DNS-rebinding policy for /mcp (see mcp_server.transport_security_for).
     # MUST precede streamable_http_app() below — the SDK caches these settings

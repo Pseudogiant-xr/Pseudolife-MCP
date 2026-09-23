@@ -9401,3 +9401,168 @@ for _cid, _doc, _needle, _val, _stated, _places in [
         id=_cid, doc=_doc, needle=_needle, artifacts=(MULTISERVE,),
         value=_val, stated=_stated, places=_places))
 
+
+
+# ── the daemon's idle heap trim (2026-09-23) ─────────────────────────────
+# The CHANGELOG and the configuration guide publish how much memory glibc
+# kept after encode bursts, what trimming cost, and why the fixed mmap
+# threshold was not shipped. Every number is recomputed from the raw
+# per-run data of the three artifacts, not from their summaries.
+ALLOC_POOL = RESULTS + "allocator-trim-pool-20260923.json"
+ALLOC_SWEEP = RESULTS + "allocator-trim-probe-20260923.json"
+ALLOC_PAIRS = RESULTS + "allocator-trim-latency-20260923.json"
+
+
+def _alloc_runs(art, dtype=None, workload=None, arm=None):
+    return [r["result"] for r in art["runs"]
+            if dtype in (None, r["dtype"]) and workload in (None, r["workload"])
+            and arm in (None, r["arm"])]
+
+
+def _alloc_pool_kept(pool, dtype, arm):
+    """Worst growth over base a burst left resident: the settled reading,
+    or what remained after the trim in a trimming arm."""
+    return max((s["trim"]["anon_after_mb"] if "trim" in s else s["anon_settled_mb"])
+               - res["base"]["anon_mb"]
+               for res in _alloc_runs(pool, dtype, "pool4", arm)
+               for s in res["steps"])
+
+
+def _alloc_pool_idle(pool, dtype, arm):
+    """(lowest, highest) resident growth over base at idle, per run."""
+    idle = [res["idle_after_gc"]["anon_mb"] - res["base"]["anon_mb"]
+            for res in _alloc_runs(pool, dtype, "pool4", arm)]
+    return min(idle), max(idle)
+
+
+def _alloc_trims(sweep):
+    """Every trim of the sweep's trim-after-every-burst arm."""
+    return [s["trim"] for res in _alloc_runs(sweep, arm="trim")
+            for s in res["steps"]]
+
+
+def _alloc_median(values):
+    values = sorted(values)
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+def _alloc_peak_cut(sweep):
+    """(smallest, largest) drop in the worst burst peak, ctrl -> mmap128k."""
+    cuts = [max(s["peak_hwm_mb"] for res in _alloc_runs(sweep, d, w, "ctrl")
+                for s in res["steps"])
+            - max(s["peak_hwm_mb"] for res in _alloc_runs(sweep, d, w, "mmap128k")
+                  for s in res["steps"])
+            for d in ("fp32", "auto") for w in ("single", "threads4")]
+    return min(cuts), max(cuts)
+
+
+def _alloc_none(pairs, dtype, arm, metric):
+    return pairs["pairs_summary"][f"{dtype}/pairs/{arm}"][metric]["none_median"]
+
+
+_ALLOC_KEPT = ("encodes left up to 3,158 MiB of freed\n  memory resident with "
+               "the fp32 embedder (1,693 MiB bf16)")
+_ALLOC_IDLE = ("1,007-1,433 MiB of it (bf16 897-1,476 MiB) was still resident "
+               "at idle;\n  with glibc's default arenas, 2,616-2,739 MiB (bf16 "
+               "1,462-1,523 MiB)")
+_ALLOC_IDLE_GUIDE = ("1,007-1,433 MiB of it was still resident at idle with the "
+                     "fp32 embedder (897-1,476 MiB bf16)")
+_ALLOC_TRIMMED = ("stayed at or below its starting level (within 14 MiB above it "
+                  "with\n  default arenas)")
+_ALLOC_TRIM_COST = ("a trim took a median\n  7 ms (at most 141 ms, returning 1,381 MiB)")
+_ALLOC_POOL_TRIM = ("Trims returning 1,387-3,030 MiB after a concurrent\n"
+                    "  burst took 21-54 ms")
+
+
+def _alloc_pool_big_trims(pool):
+    """Trims after a concurrent burst that returned at least 1 GiB."""
+    return [s["trim"] for res in _alloc_runs(pool, workload="pool4")
+            for s in res["steps"]
+            if "trim" in s and s["trim"]["freed_mb"] >= 1024]
+
+
+_ALLOC_ENCODE = "(+0.01 s against a 0.23 s noise floor)"
+_ALLOC_MMAP = "removes the retention and cuts burst peaks by 228-1,238 MiB"
+_ALLOC_SLOWDOWN = "slows a bf16 encode\n  ~26% (fp32 ~10%)"
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("alloc-pool-kept-fp32", CHANGELOG, _ALLOC_KEPT, ALLOC_POOL,
+     lambda a: _alloc_pool_kept(a, "fp32", "ctrl"), 3158, 0),
+    ("alloc-pool-kept-bf16", CHANGELOG, _ALLOC_KEPT, ALLOC_POOL,
+     lambda a: _alloc_pool_kept(a, "auto", "ctrl"), 1693, 0),
+    ("alloc-pool-idle-fp32-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[0], 1007, 0),
+    ("alloc-pool-idle-fp32-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[1], 1433, 0),
+    ("alloc-pool-idle-bf16-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[0], 897, 0),
+    ("alloc-pool-idle-bf16-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[1], 1476, 0),
+    ("alloc-pool-idle-defarena-fp32-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "defarena")[0], 2616, 0),
+    ("alloc-pool-idle-defarena-fp32-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "defarena")[1], 2739, 0),
+    ("alloc-pool-idle-defarena-bf16-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "defarena")[0], 1462, 0),
+    ("alloc-pool-idle-defarena-bf16-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "defarena")[1], 1523, 0),
+    ("alloc-pool-idle-guide-fp32-lo", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[0], 1007, 0),
+    ("alloc-pool-idle-guide-fp32-hi", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[1], 1433, 0),
+    ("alloc-pool-idle-guide-bf16-lo", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[0], 897, 0),
+    ("alloc-pool-idle-guide-bf16-hi", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[1], 1476, 0),
+    ("alloc-pool-trimmed-arena2", CHANGELOG, _ALLOC_TRIMMED, ALLOC_POOL,
+     lambda a: max(0, max(_alloc_pool_kept(a, d, "trim") for d in ("fp32", "auto"))),
+     0, 0),
+    ("alloc-pool-trimmed-defarena", CHANGELOG, _ALLOC_TRIMMED, ALLOC_POOL,
+     lambda a: max(_alloc_pool_kept(a, d, "defarena_trim") for d in ("fp32", "auto")),
+     14, 0),
+    ("alloc-pool-trim-ms-lo", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: min(t["ms"] for t in _alloc_pool_big_trims(a)), 21, 0),
+    ("alloc-pool-trim-ms-hi", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: max(t["ms"] for t in _alloc_pool_big_trims(a)), 54, 0),
+    ("alloc-pool-trim-freed-lo", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: min(t["freed_mb"] for t in _alloc_pool_big_trims(a)), 1387, 0),
+    ("alloc-pool-trim-freed-hi", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: max(t["freed_mb"] for t in _alloc_pool_big_trims(a)), 3030, 0),
+    ("alloc-trim-median-ms", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: _alloc_median(t["ms"] for t in _alloc_trims(a)), 7, 0),
+    ("alloc-trim-median-ms-guide", CONFIG_GUIDE, "a trim took a median 7 ms",
+     ALLOC_SWEEP, lambda a: _alloc_median(t["ms"] for t in _alloc_trims(a)), 7, 0),
+    ("alloc-trim-max-ms", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: max(t["ms"] for t in _alloc_trims(a)), 141, 0),
+    ("alloc-trim-max-freed", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: max(_alloc_trims(a), key=lambda t: t["ms"])["freed_mb"], 1381, 0),
+    ("alloc-trim-encode-delta", CHANGELOG, _ALLOC_ENCODE, ALLOC_PAIRS,
+     lambda a: a["pairs_summary"]["fp32/pairs/ctrl"]["encode_4x512_s"]
+     ["median_delta"], 0.01, 2),
+    ("alloc-trim-encode-noise", CHANGELOG, _ALLOC_ENCODE, ALLOC_PAIRS,
+     lambda a: a["pairs_summary"]["fp32/pairs/ctrl"]["encode_4x512_s"]
+     ["noise_floor"], 0.23, 2),
+    ("alloc-mmap-peak-cut-min", CHANGELOG, _ALLOC_MMAP, ALLOC_SWEEP,
+     lambda a: _alloc_peak_cut(a)[0], 228, 0),
+    ("alloc-mmap-peak-cut-max", CHANGELOG, _ALLOC_MMAP, ALLOC_SWEEP,
+     lambda a: _alloc_peak_cut(a)[1], 1238, 0),
+    ("alloc-mmap-faults-fp32", CHANGELOG,
+     "multiplies the embedder's page faults 3.4-4.9x", ALLOC_PAIRS,
+     lambda a: _alloc_none(a, "fp32", "mmap128k", "minflt")
+     / _alloc_none(a, "fp32", "ctrl", "minflt"), 3.4, 1),
+    ("alloc-mmap-faults-bf16", CHANGELOG,
+     "multiplies the embedder's page faults 3.4-4.9x", ALLOC_PAIRS,
+     lambda a: _alloc_none(a, "auto", "mmap128k", "minflt")
+     / _alloc_none(a, "auto", "ctrl", "minflt"), 4.9, 1),
+    ("alloc-mmap-slowdown-bf16", CHANGELOG, _ALLOC_SLOWDOWN, ALLOC_PAIRS,
+     lambda a: 100 * (_alloc_none(a, "auto", "mmap128k", "encode_4x512_s")
+                      / _alloc_none(a, "auto", "ctrl", "encode_4x512_s") - 1),
+     26, 0),
+    ("alloc-mmap-slowdown-fp32", CHANGELOG, _ALLOC_SLOWDOWN, ALLOC_PAIRS,
+     lambda a: 100 * (_alloc_none(a, "fp32", "mmap128k", "encode_4x512_s")
+                      / _alloc_none(a, "fp32", "ctrl", "encode_4x512_s") - 1),
+     10, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))

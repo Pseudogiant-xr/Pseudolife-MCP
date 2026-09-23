@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-23 — the daemon hands memory freed by encode bursts back to the OS)
+- After concurrent embedder encodes, glibc kept the memory they freed
+  resident, and much of it was still there once the burst was over.
+  Measured in throwaway containers from the 0.15.0 image with four
+  persistent worker threads (the daemon's threadpool shape) and
+  `MALLOC_ARENA_MAX=2`: concurrent encodes left up to 3,158 MiB of freed
+  memory resident with the fp32 embedder (1,693 MiB bf16), and
+  1,007-1,433 MiB of it (bf16 897-1,476 MiB) was still resident at idle;
+  with glibc's default arenas, 2,616-2,739 MiB (bf16 1,462-1,523 MiB). A
+  daemon thread now calls glibc's `malloc_trim(0)` every
+  `PSEUDOLIFE_MALLOC_TRIM_SECONDS` (default 60; `0` disables; Linux/glibc
+  only, so the Docker tier). With a trim after each burst, resident memory
+  stayed at or below its starting level (within 14 MiB above it with
+  default arenas). Trims returning 1,387-3,030 MiB after a concurrent
+  burst took 21-54 ms; across the single-burst sweep a trim took a median
+  7 ms (at most 141 ms, returning 1,381 MiB), and in paired runs the next
+  fp32 encode was no slower (+0.01 s against a 0.23 s noise floor). It
+  lowers what the daemon holds after a burst, not the peak of the burst
+  itself.
+- Measured and not shipped: a fixed `MALLOC_MMAP_THRESHOLD_=131072` also
+  removes the retention and cuts burst peaks by 228-1,238 MiB, but it
+  multiplies the embedder's page faults 3.4-4.9x and slows a bf16 encode
+  ~26% (fp32 ~10%). Evidence: `evals/results/allocator-trim-pool-20260923.json`,
+  `allocator-trim-probe-20260923.json` and
+  `allocator-trim-latency-20260923.json`, harness
+  `evals/allocator_trim_probe.py`.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.
