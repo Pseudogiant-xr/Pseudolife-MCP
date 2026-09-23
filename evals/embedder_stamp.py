@@ -163,19 +163,22 @@ def _is_description(stamp: dict) -> bool:
     return "backend" in stamp and not isinstance(stamp["backend"], dict)
 
 
+def _stages(stamp) -> dict:
+    """Stage -> recorded description; a single-run artifact's flat
+    description reads as one stage, ``run``."""
+    if not isinstance(stamp, dict):
+        return {}
+    return {"run": stamp} if _is_description(stamp) else stamp
+
+
 def labels(stamp) -> dict[str, set[str]]:
     """Stage -> the known precision labels in a stamp.
 
-    A single-run artifact's flat description reads as one stage, ``run``.
     Unknown contributes nothing: an absent stamp, ``"unknown"``, a None
     description, or a stage every variant of which is None.
     """
-    if not isinstance(stamp, dict):
-        return {}
-    if _is_description(stamp):
-        stamp = {"run": stamp}
     out: dict[str, set[str]] = {}
-    for stage, desc in stamp.items():
+    for stage, desc in _stages(stamp).items():
         if isinstance(desc, dict) and "mixed" in desc:
             found = {_label(v.get("embedder")) for v in desc["mixed"]}
         else:
@@ -196,12 +199,14 @@ def precision_warnings(a, b, a_label: str = "a",
 
     Per side: a warning when one run mixes precisions within a stage.
     Per stage either side recorded: a warning when the two sides' known
-    labels differ. A side without a later stage (a source run against its
-    rebuild) is compared through its base stage, which built that part of
-    its contexts; a side whose base stage is unknown stays unknown, and
-    unknown is never a mismatch.
+    labels differ. A side that never RAN a later stage (a source run
+    against its rebuild) is compared through its base stage, which built
+    that part of its contexts. A stage that ran but was recorded as None
+    stays unknown and never inherits, and neither does a missing base
+    stage: unknown is never a mismatch.
     """
     la, lb = labels(a), labels(b)
+    ran_a, ran_b = set(_stages(a)), set(_stages(b))
     out = []
     for side, found_by_stage in ((a_label, la), (b_label, lb)):
         for stage, found in sorted(found_by_stage.items()):
@@ -211,18 +216,19 @@ def precision_warnings(a, b, a_label: str = "a",
                     f"({_fmt(found)}) — its rows were embedded at "
                     f"different precisions")
 
-    def effective(found_by_stage: dict, stage: str) -> tuple[set, str]:
+    def effective(found_by_stage: dict, ran: set,
+                  stage: str) -> tuple[set, str]:
         if stage in found_by_stage:
             return found_by_stage[stage], ""
-        if stage in _BASE_STAGES:
-            return set(), ""
+        if stage in ran or stage in _BASE_STAGES:
+            return set(), ""                  # recorded unknown / no base
         base = [s for s in _BASE_STAGES if s in found_by_stage]
         inherited = set().union(*(found_by_stage[s] for s in base))
         return inherited, (f" (its {'/'.join(base)} stage)" if base else "")
 
     for stage in sorted((set(la) | set(lb)) - _UNCOMPARED_STAGES):
-        ea, note_a = effective(la, stage)
-        eb, note_b = effective(lb, stage)
+        ea, note_a = effective(la, ran_a, stage)
+        eb, note_b = effective(lb, ran_b, stage)
         if ea and eb and ea != eb:
             out.append(
                 f"embedder {stage}: {a_label} {_fmt(ea)}{note_a} vs "
@@ -241,7 +247,8 @@ def summary_line(*sides: tuple[str, object]) -> str:
         found = labels(stamp)
         if found:
             parts.append(f"{side} " + ", ".join(
-                f"{stage}={_fmt(v)}" for stage, v in sorted(found.items())))
+                f"{stage}={_fmt(found[stage]) if stage in found else UNKNOWN}"
+                for stage in sorted(_stages(stamp))))
         else:
             parts.append(f"{side} {UNKNOWN}")
     return "embedder precision: " + "; ".join(parts)

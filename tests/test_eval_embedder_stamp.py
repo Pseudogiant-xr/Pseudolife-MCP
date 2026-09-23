@@ -240,6 +240,31 @@ def test_an_unknown_base_stage_is_inherited_as_unknown_not_a_mismatch():
         {"extract": FP32, "rebuild_contexts": BF16}) == []
 
 
+def test_a_stage_recorded_as_unknown_never_inherits_the_base():
+    """Only a MISSING stage inherits from extract. A stage that ran but was
+    recorded as None (describe() failed soft, or band_ablation rebuilt a
+    pre-stamp dump) is unknown, and unknown is never a mismatch. Repro from
+    the Codex review of PR #340 (2026-09-23)."""
+    a = {"extract": BF16, "rebuild_contexts": None}
+    b = {"extract": BF16, "rebuild_contexts": FP32}
+    assert embedder_stamp.precision_warnings(a, b, "A", "B") == []
+    assert embedder_stamp.precision_warnings(b, a, "B", "A") == []
+    # against a side that never ran the stage, too: only extract differs
+    warnings = embedder_stamp.precision_warnings(a, {"extract": FP32})
+    assert len(warnings) == 1 and "embedder extract:" in warnings[0]
+    # a merged stage whose every row was None is the same unknown
+    merged = embedder_stamp.merge_rows(
+        [{"embedder": {"extract": BF16, "band_ablation": None}}] * 2)
+    assert embedder_stamp.precision_warnings(
+        merged, {"extract": BF16, "band_ablation": FP32}) == []
+
+
+def test_summary_line_names_a_stage_recorded_as_unknown():
+    line = embedder_stamp.summary_line(
+        ("run", {"extract": BF16, "rebuild_contexts": None}))
+    assert "extract=bf16" in line and "rebuild_contexts=unknown" in line
+
+
 def test_a_crossed_pair_warns_on_each_stage_it_differs_on():
     a = {"extract": FP32, "rebuild_contexts": BF16}
     b = {"extract": FP32, "band_ablation": BF16}

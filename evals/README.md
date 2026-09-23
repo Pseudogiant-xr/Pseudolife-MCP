@@ -1920,6 +1920,7 @@ Convention, updated:
   sides embedded at different precisions. Stages are compared one by one,
   and a side that never ran a later stage is compared through its
   `extract` stage, so a tag rebuilt in bf16 warns against its fp32 source.
+  A stage that ran but was recorded as unknown (None) never inherits.
   `rag_lite_rebuild` is recorded but not compared, because its output is
   byte-identical to the judged control by construction. It is a caveat,
   not a failure: bf16

@@ -38,7 +38,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never fails the gate. Stages are compared one by one, and a side that
   never ran a later stage is compared through its `extract` stage, which
   built that part of its contexts. So a `diag-knobs` tag rebuilt in bf16
-  warns against its own fp32 `diag` source. `rag_lite_rebuild` is recorded
+  warns against its own fp32 `diag` source. A stage that ran but was
+  recorded as unknown never inherits: `describe()` fails soft to None, and
+  a `band_ablation` rebuild over pre-stamp dumps records None.
+  `rag_lite_rebuild` is recorded
   but never compared: it refuses to write unless its ranking is
   byte-identical to the judged control's. compare writes the warning to
   stderr and records `a_embedder` / `b_embedder` / `embedder_warnings` in
