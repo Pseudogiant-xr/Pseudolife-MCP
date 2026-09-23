@@ -584,6 +584,24 @@ def _onnx_embedding_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
 
 
+def _onnx_artifact_absent(config: AppConfig) -> bool:
+    """True only when the configured model definitely lacks its ONNX artifact.
+
+    Runs the loader's own local-only preflight (a local model directory or a
+    cached Hub snapshot, never the network). A probe error, such as an
+    ``onnx_file_name`` outside the model, is not an absence: it reports False
+    so the loader's warning names the error instead of a silent torch choice
+    hiding it.
+    """
+    from pseudolife_memory.memory import embedding  # noqa: PLC0415
+
+    try:
+        _, source = embedding._configured_onnx_source(config.embedding)  # noqa: SLF001
+    except Exception:  # noqa: BLE001 — the loader reports it at load time
+        return False
+    return source is None
+
+
 class _UseLabelFailed:
     """Sentinel: a retrieval-use label the storage layer refused.
 
@@ -906,19 +924,29 @@ class MemoryService(DreamOps):
         # library default stays 0.0 (no-op) — this is a deployment-build choice.
         if absent("memory.traces.retention_boost"):
             config.memory.traces.retention_boost = 1.0
-        # ONNX embedder whenever the optional extra is installed (the
-        # daemon image bakes it): ~3x faster single-text encode on CPU
-        # with parity-checked embeddings (fp32 ONNX, min cosine vs torch
-        # 1.00000 over 20 texts, 2026-07-12) -- true for MiniLM,
-        # which has a baked ONNX artifact. Qwen3-Embedding-0.6B (the default
-        # since embedding-backbone-v25) has NO in-repo ONNX artifact, so the
-        # load-only preflight takes the warn-and-fall-back path before ONNX
-        # construction. Expect that warning in the daemon log on every deploy
-        # that uses the Qwen default.
-        # A plain pip install (no [onnx] extra) still never takes this
-        # branch at all.
+        # ONNX embedder when the optional extra is installed (the daemon
+        # image bakes it) AND the configured model's ONNX artifact already
+        # resolves locally: ~3x faster single-text encode on CPU with
+        # parity-checked embeddings (fp32 ONNX, min cosine vs torch 1.00000
+        # over 20 texts, 2026-07-12) -- measured on MiniLM, whose artifact
+        # the image bakes. Qwen3-Embedding-0.6B (the default since
+        # embedding-backbone-v25) has no ONNX artifact, so it gets torch here
+        # rather than an ONNX selection the load-only loader can only warn
+        # about and fall back from on every boot; a warning on every boot
+        # trains operators to ignore warnings. The probe is the loader's own
+        # local-only preflight. An explicit embedding.backend is never
+        # second-guessed (backend: onnx keeps its warn-and-fall-back), and a
+        # plain pip install (no [onnx] extra) never runs the probe.
         if absent("embedding.backend") and _onnx_embedding_available():
-            config.embedding.backend = "onnx"
+            if _onnx_artifact_absent(config):
+                logger.info(
+                    "No ONNX artifact %r for embedding model %s in the local "
+                    "model or Hub cache; using the torch backend.",
+                    config.embedding.onnx_file_name,
+                    config.embedding.model_name,
+                )
+            else:
+                config.embedding.backend = "onnx"
 
     def _refuse_on_stale_hydrated_dims(self) -> None:
         """Refuse to serve a bank whose hydrated embeddings don't fit the

@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — daemon boots no longer warn about an ONNX backend nobody asked for)
+- The MCP defaults selected the ONNX embedding backend whenever the optional
+  ONNX stack was installed, whether or not the configured model had an ONNX
+  artifact. The daemon image installs that stack, and the default
+  Qwen3-Embedding-0.6B has no artifact, so every daemon boot logged "ONNX
+  embedding backend failed to load … falling back to torch". The defaults
+  now select ONNX only when the configured artifact already resolves in the
+  local model or Hub cache, using the loader's own local-only preflight
+  (about 1–3 ms in the daemon image). Otherwise they choose torch up front
+  and log one INFO line naming the model. MiniLM, whose `onnx/model.onnx`
+  the image bakes, still gets ONNX. An explicit `embedding.backend` is never
+  overridden, so `backend: onnx` without an artifact still warns and falls
+  back at load. An invalid `onnx_file_name` also stays on the ONNX path, so
+  the loader's warning names the bad path instead of hiding it. The loader
+  and the defaults share one normalize-and-resolve helper, so a
+  backslash-separated `onnx_file_name` resolves the same way in both.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

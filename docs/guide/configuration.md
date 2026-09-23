@@ -347,9 +347,16 @@ for delivery-state and host-verification contracts.
   for what this changes about retrieval, and the
   [schema version history](#schema-version-history) below for the v25
   cutover itself.
-- **ONNX acceleration is load-only** (`EmbeddingConfig.backend = "onnx"`,
-  selected automatically by the MCP defaults when the optional ONNX stack is
-  installed). `EmbeddingConfig.onnx_file_name` defaults to
+- **ONNX acceleration is load-only** (`EmbeddingConfig.backend = "onnx"`).
+  The MCP defaults select it only when the optional ONNX stack is installed
+  *and* the configured model's artifact already resolves locally. Otherwise
+  they choose torch up front and log one INFO line saying so. They never pick
+  a backend that could only warn and fall back on every boot. The default
+  Qwen3-Embedding-0.6B ships no ONNX artifact, so the daemon runs it on torch;
+  MiniLM, whose artifact the daemon image bakes, still gets ONNX. An explicit
+  `embedding.backend` is never overridden: `backend: onnx` without the
+  artifact still warns and falls back to torch at load.
+  `EmbeddingConfig.onnx_file_name` defaults to
   `onnx/model.onnx`; that exact artifact must already exist in a local model
   directory or a revision-specific cached Hub snapshot. A missing artifact falls
   back to torch before SentenceTransformers constructs its ONNX backend, in

@@ -111,6 +111,20 @@ def _resolve_onnx_source(model_name: str, file_name: str) -> str | None:
     return None
 
 
+def _configured_onnx_source(config: EmbeddingConfig) -> tuple[str, str | None]:
+    """Normalize the configured ONNX artifact name and resolve its local root.
+
+    Shared by the loader and the MCP default overlay's auto-select probe, so
+    the two can never check different paths. Returns the normalized file name
+    and the resolved root, or ``None`` when the artifact is absent. Raises
+    ``ValueError`` for an ``onnx_file_name`` outside the model.
+    """
+    file_name = "/".join(_onnx_file_parts(
+        getattr(config, "onnx_file_name", "onnx/model.onnx"),
+    ))
+    return file_name, _resolve_onnx_source(config.model_name, file_name)
+
+
 class EmbeddingPipeline:
     """Encodes text into dense vector embeddings using sentence-transformers.
 
@@ -146,14 +160,7 @@ class EmbeddingPipeline:
         self.backend = "torch"
         if requested == "onnx":
             try:
-                file_name = getattr(
-                    config, "onnx_file_name", "onnx/model.onnx",
-                )
-                file_name = "/".join(_onnx_file_parts(file_name))
-                onnx_source = _resolve_onnx_source(
-                    config.model_name,
-                    file_name,
-                )
+                file_name, onnx_source = _configured_onnx_source(config)
                 if onnx_source is None:
                     raise FileNotFoundError(
                         f"configured ONNX artifact {file_name!r} is not "
