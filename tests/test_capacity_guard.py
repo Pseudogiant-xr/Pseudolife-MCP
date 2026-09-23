@@ -354,6 +354,9 @@ class TestDurableTrueDropRecord:
 
     @pytest.mark.parametrize("corrupt", [
         {"count": "not-a-number"}, {"count": 2.5}, "not-an-object",
+        # Out of bigint range, at bigint max (the increment overflows), and
+        # negative: none is a count this code wrote (Codex review, #341).
+        {"count": 1e30}, {"count": 9223372036854775807}, {"count": -5},
     ])
     def test_a_malformed_record_never_blocks_a_drop(self, pg_service, corrupt):
         # A hand-edited or imported meta row must not make every capacity
@@ -361,11 +364,30 @@ class TestDurableTrueDropRecord:
         # and all come back on restart).
         from pseudolife_memory.storage.postgres import CAPACITY_DROPS_META_KEY
 
-        storage = pg_service._storage
+        svc = pg_service
+        svc.store("The staging cluster runs on three nodes.", source="alpha")
+        entry = svc._cms.bands[0].entries[0]
+        storage = svc._storage
         storage.set_meta(CAPACITY_DROPS_META_KEY, corrupt)
+
         count = storage.delete_evicted_entry(
-            None, source="alpha", superseded=False)
+            entry.db_id, source="alpha", superseded=False)
+
+        assert not _row_exists(storage.conn, entry.db_id)
         assert isinstance(count, int) and count >= 1
+
+    def test_a_valid_count_keeps_counting_up_to_the_last_increment(
+        self, pg_service,
+    ):
+        # The guard must not reset a legitimate count: one below bigint max
+        # still has room for the increment.
+        from pseudolife_memory.storage.postgres import CAPACITY_DROPS_META_KEY
+
+        storage = pg_service._storage
+        storage.set_meta(CAPACITY_DROPS_META_KEY,
+                         {"count": 9223372036854775806})
+        assert storage.delete_evicted_entry(
+            None, source="alpha", superseded=False) == 9223372036854775807
 
     @pytest.mark.parametrize("corrupt", [
         {"count": "not-a-number"}, "not-an-object", ["a", "list"],

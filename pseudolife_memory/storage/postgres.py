@@ -694,16 +694,24 @@ class PostgresStorage:
         with self._txn():
             if entry_id is not None:
                 conn.execute("DELETE FROM entries WHERE id = %s", (entry_id,))
-            # A malformed prior count (hand-edited or imported) restarts at
-            # 1 rather than failing the cast: a failure here would roll the
-            # DELETE back on every drop, leaving rows in Postgres past the
-            # cap that all return on the next restart.
+            # A malformed prior count (hand-edited or imported: not a
+            # number, negative, or without room below bigint max for the
+            # increment) restarts at 1 rather than failing the cast or the
+            # increment: a failure here would roll the DELETE back on every
+            # drop, leaving rows in Postgres past the cap that all return on
+            # the next restart. Nested CASE, not AND: Postgres does not fix
+            # the evaluation order of AND operands, and the numeric cast
+            # must only see a JSON number.
             row = conn.execute(
                 "INSERT INTO meta (key, value) VALUES (%s, %s) "
                 "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value "
                 "|| jsonb_build_object('count', CASE "
-                "WHEN jsonb_typeof(meta.value->'count') = 'number' "
-                "THEN (meta.value->>'count')::numeric::bigint ELSE 0 END + 1) "
+                "WHEN jsonb_typeof(meta.value->'count') "
+                "IS DISTINCT FROM 'number' THEN 0 "
+                "WHEN (meta.value->>'count')::numeric >= 0 "
+                "AND (meta.value->>'count')::numeric < 9223372036854775807 "
+                "THEN floor((meta.value->>'count')::numeric)::bigint "
+                "ELSE 0 END + 1) "
                 "RETURNING (value->>'count')::bigint",
                 (CAPACITY_DROPS_META_KEY, Jsonb(record)),
             ).fetchone()
