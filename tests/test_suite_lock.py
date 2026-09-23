@@ -180,7 +180,10 @@ def test_a_run_over_named_files_is_targeted(args):
 @pytest.mark.parametrize("narrowing", [
     {"keyword": "graph"},
     {"keyword": "graph and not slow"},
-    {"keyword": "nothing_shadowed"},     # "not" only as a whole word
+    {"keyword": "not slow and graph"},   # starts with "not", still narrows
+    {"keyword": "nothing_shadowed"},     # "not" only as a keyword
+    {"keyword": "not-slow"},             # one identifier in pytest's grammar
+    {"keyword": "NOT slow"},             # pytest rejects it before any test
     {"markexpr": "slow"},
     {"keyword": "not graph", "markexpr": "real_model"},
     {"listing_only": True},
@@ -192,6 +195,8 @@ def test_selection_and_listing_runs_over_the_tree_are_targeted(narrowing):
 @pytest.mark.parametrize("exclusion", [
     {"keyword": "not graph"},
     {"keyword": " not (graph or bm25)"},
+    {"keyword": "(not graph)"},
+    {"keyword": "graph or not bm25"},    # keeps everything that is not bm25
     {"markexpr": "not slow"},
 ])
 def test_an_exclusion_only_selection_is_still_full(exclusion):
@@ -205,6 +210,10 @@ def test_naming_most_test_files_is_full():
     assert suite_lock.is_full_run(files, ROOT, TESTS)
     assert suite_lock.is_full_run(half, ROOT, TESTS)
     assert not suite_lock.is_full_run(half[:-1], ROOT, TESTS)
+    # Only real test modules count: not conftest.py, a helper, or a typo.
+    padded = [*half[:-1], str(TESTS / "conftest.py"), str(TESTS / "suite_lock.py"),
+              str(TESTS / "test_no_such_module.py")]
+    assert not suite_lock.is_full_run(padded, ROOT, TESTS)
 
 
 # --- mode -------------------------------------------------------------------

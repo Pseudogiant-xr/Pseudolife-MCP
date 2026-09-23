@@ -30,7 +30,8 @@ pid file to go stale. Configuration:
 ``PSEUDOLIFE_TEST_CUDA=1``
     Leaves ``CUDA_VISIBLE_DEVICES`` as the environment has it.
 
-Standard library only: conftest imports this before torch.
+Only the standard library at import time (pytest is imported lazily, where
+a session already has it): conftest imports this before torch.
 """
 
 from __future__ import annotations
@@ -38,11 +39,11 @@ from __future__ import annotations
 import errno
 import json
 import os
-import re
 import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import IO
 
@@ -68,9 +69,19 @@ LISTING_OPTIONS = (
 # EACCES from msvcrt.locking, EWOULDBLOCK/EAGAIN from flock.
 _BUSY_ERRNOS = frozenset({errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK})
 
-# A -k/-m expression that only excludes (``not slow``) still selects nearly
-# the whole suite.
-_EXCLUSION = re.compile(r"\s*not\b")
+
+def _only_excludes(expression: str) -> bool:
+    """Whether a -k/-m expression still selects an item that matches none
+    of its names (``not slow``, ``slow or not graph``) — nearly the whole
+    suite. Evaluated with pytest's own -k/-m grammar; an expression pytest
+    cannot parse is rejected before any test runs, so it narrows."""
+    try:
+        from _pytest.mark.expression import Expression
+
+        return bool(Expression.compile(expression).evaluate(
+            lambda name, **kwargs: False))
+    except Exception:  # noqa: BLE001 — any parse error, or a moved private API
+        return False
 
 
 class SuiteLockBusy(RuntimeError):
@@ -123,16 +134,16 @@ def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
 
     Full: some path argument is ``tests/`` itself or one of its ancestors
     (``pytest`` with no arguments resolves to ``tests`` via testpaths), or
-    the named files are at least half of ``tests/test_*.py`` (a shell glob
-    such as ``tests/test_*.py`` names them all). Targeted: a few named files
-    or node ids, a ``-k``/``-m`` selection — unless it only excludes
+    the named test files are at least half of ``tests/test_*.py`` (a shell
+    glob such as ``tests/test_*.py`` names them all). Targeted: a few named
+    files or node ids, a ``-k``/``-m`` selection — unless it only excludes
     (``-k "not x"``) — or a run that executes no test (``--collect-only``,
     ``--fixtures``, ``--help``).
     """
     if listing_only:
         return False
     for expression in (keyword, markexpr):
-        if expression and not _EXCLUSION.match(expression):
+        if expression and not _only_excludes(expression):
             return False
     root = tests_root.resolve()
     named: set[Path] = set()
@@ -149,7 +160,10 @@ def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
             continue
         if path == root or path in root.parents:
             return True
-        if path.parent == root:
+        # Only real test modules count toward the share: not conftest.py,
+        # helpers or a mistyped path.
+        if (path.parent == root and fnmatch(path.name, "test_*.py")
+                and path.is_file()):
             named.add(path)
     if not named:
         return False
