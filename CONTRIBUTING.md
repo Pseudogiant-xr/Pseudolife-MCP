@@ -46,7 +46,10 @@ a production bank — `pseudolife_memory`, or whichever database
 `PSEUDOLIFE_MCP_DATABASE_URL` names — before connecting, and ask the server
 which database they reached before resetting it. The suite also removes
 `PSEUDOLIFE_MCP_DATABASE_URL` from its own environment, so an exported daemon
-DSN never binds a test fixture to your bank.
+DSN never binds a test fixture to your bank. If that DSN leaves its database
+implicit (no `dbname`, so libpq would use the user name or a service file),
+the suite refuses to start, and the eval harnesses refuse to reset or
+replay anything: unset it — tests never need it — or name the database.
 
 URI query options and keyword connection strings are preserved when selecting
 isolated test databases. Eval-backed tests use the same server unless

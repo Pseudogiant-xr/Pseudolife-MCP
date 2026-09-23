@@ -87,15 +87,19 @@ def scrub_live_bank_dsn(environ) -> str:
     """Drop PSEUDOLIFE_MCP_DATABASE_URL from ``environ`` and record the bank
     it named for the reset guard: the default bank's name when none was
     exported, and an inherited record (an xdist worker's, from the
-    controller) is kept. Returns the recorded name."""
+    controller) is kept. A DSN that leaves its database implicit (libpq's
+    user-name default, or a service file) is recorded as unresolved, which
+    stops the run in pytest_configure — the DSN is about to be gone, and
+    with it the only clue to the bank's name. Returns the recorded name."""
     from pseudolife_memory.storage.schema import (
-        DEFAULT_PRODUCTION_DATABASE, PRODUCTION_DATABASE_ENV, dsn_database_name,
+        DEFAULT_PRODUCTION_DATABASE, PRODUCTION_DATABASE_ENV,
+        UNRESOLVED_PRODUCTION_DATABASE, dsn_database_name,
     )
 
     dsn = environ.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
-    name = dsn_database_name(dsn) if dsn else None
-    if name:
-        environ[PRODUCTION_DATABASE_ENV] = name
+    if dsn:
+        environ[PRODUCTION_DATABASE_ENV] = (
+            dsn_database_name(dsn) or UNRESOLVED_PRODUCTION_DATABASE)
     else:
         # Never the empty string: Windows deletes a variable assigned one,
         # and xdist workers would then inherit no record at all.
@@ -206,6 +210,20 @@ def pytest_configure(config: pytest.Config) -> None:
     Qwen3, MiniLM torch, MiniLM ONNX, plus the guard test's
     deliberately-capped ~90 MB MiniLM.
     """
+    # Before anything else: refuse to run when the exported daemon DSN hid
+    # its database (scrub_live_bank_dsn above). Every PG reset would refuse
+    # anyway; one message here beats a thousand errors.
+    from pseudolife_memory.storage.schema import (
+        PRODUCTION_DATABASE_ENV, UNRESOLVED_PRODUCTION_DATABASE,
+    )
+
+    if os.environ.get(PRODUCTION_DATABASE_ENV) == UNRESOLVED_PRODUCTION_DATABASE:
+        raise pytest.UsageError(
+            "PSEUDOLIFE_MCP_DATABASE_URL is exported without an explicit "
+            "database name (libpq would use the user name or a service file), "
+            "so the test/bench reset guard cannot identify the production "
+            "bank. Unset it — the suite never needs it — or add dbname=.")
+
     from pseudolife_memory.memory import embedding as embedding_module
     from pseudolife_memory.utils.config import EmbeddingConfig
 

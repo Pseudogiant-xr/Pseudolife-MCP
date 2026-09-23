@@ -30,13 +30,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DELETE FROM facts` there. The exit-time drop of the per-run bench
   database now drops the name it pinned, not whatever
   `PSEUDOLIFE_BENCH_DB` holds by then.
+- A daemon DSN that leaves its database implicit fails closed. That covers
+  the user-name default, as in `postgresql://live_bank@host` or an explicit
+  empty `dbname`, and a `service=` entry. libpq picks a bank the guard cannot
+  name, so the test
+  suite now stops at start-up and every reset refuses. It is no longer
+  recorded as the default bank, which let a reset reach that bank (Codex
+  review of this change).
 - The five eval harnesses that refuse the live and shared-bench databases by
   DSN now read the name with libpq's own parser, through the shared helper
   in `storage/schema.py`. Two exact-match copies let a keyword DSN, a
   trailing slash or an upper-case name through. The three hardened copies
   still missed a `?dbname=` query override and a percent-encoded name. A DSN
-  that names no database is now checked against `PGDATABASE`, as libpq
-  would resolve it.
+  that names no database is checked against `PGDATABASE` when no service is
+  in play, as libpq would resolve it; otherwise the harness refuses it.
 - `.gitignore` now covers every `ops/.env*` copy except the tracked
   `ops/.env.example`. A timestamped backup of `ops/.env` matched neither
   `.env` nor `*.bak`.

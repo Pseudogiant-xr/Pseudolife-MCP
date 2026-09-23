@@ -78,8 +78,9 @@ def guard_dsn(dsn: str) -> None:
     )
 
     db = dsn_database_name(dsn)
-    if db is not None and is_production_database(db, extra=FORBIDDEN_DBS):
-        sys.exit(f"refusing to run against {db!r} — restore a dedicated "
+    if db is None or is_production_database(db, extra=FORBIDDEN_DBS):
+        target = repr(db) if db else "a database the DSN leaves implicit"
+        sys.exit(f"refusing to run against {target} — restore a dedicated "
                  "replay copy instead (see the module docstring)")
 
 

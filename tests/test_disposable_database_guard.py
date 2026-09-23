@@ -326,23 +326,135 @@ def test_a_trailing_slash_does_not_launder_the_bank_name(name, clean_env):
      "pseudolife_memory"),
     ("postgresql://u:p@h:5433/pseudolife%5Fmemory", "pseudolife_memory"),
     ("host=h dbname='pseudolife_memory'", "pseudolife_memory"),
+    # libpq's implicit choices are unknown here, never guessed: the user-name
+    # default, and a service file's dbname (Codex review of #344).
     ("host=h", None),
+    ("postgresql://live_bank@127.0.0.1:5433", None),
+    ("host=127.0.0.1 user=live_bank", None),
+    ("service=prod", None),
     ("not a dsn ===", None),
 ])
 def test_dsn_database_name_parses_like_libpq(dsn, name, monkeypatch):
     monkeypatch.delenv("PGDATABASE", raising=False)
+    monkeypatch.delenv("PGSERVICE", raising=False)
     assert schema.dsn_database_name(dsn) == name
 
 
 def test_a_dsn_naming_no_database_falls_back_to_pgdatabase_like_libpq(
         clean_env, monkeypatch):
     monkeypatch.setenv("PGDATABASE", "pseudolife_memory")
+    monkeypatch.delenv("PGSERVICE", raising=False)
     assert schema.dsn_database_name("host=h port=5433") == "pseudolife_memory"
     assert schema.dsn_database_name(
         "host=h dbname=replay_copy") == "replay_copy"
     for guard in _harness_guards().values():
         with pytest.raises(SystemExit):
             guard("host=h port=5433 user=u")
+
+
+@pytest.mark.parametrize("dsn, pgservice", [
+    ("service=prod host=h", None),     # the DSN names a service
+    ("host=h user=u", "prod"),         # ...or the environment does
+])
+def test_a_service_beats_pgdatabase_so_the_name_is_unknown(
+        dsn, pgservice, clean_env, monkeypatch):
+    """libpq fills unset parameters from the service file BEFORE the
+    environment, so with a service in play PGDATABASE is not the answer."""
+    monkeypatch.setenv("PGDATABASE", "not_the_answer")
+    if pgservice:
+        monkeypatch.setenv("PGSERVICE", pgservice)
+    else:
+        monkeypatch.delenv("PGSERVICE", raising=False)
+    assert schema.dsn_database_name(dsn) is None
+
+
+# The P1 from the Codex review of #344: an exported daemon DSN that leaves its
+# database implicit — libpq then connects to the database named after the
+# user, or the one a service file names — must not shrink the refusal list to
+# the default. The guard cannot know that bank's name, so it fails closed.
+_IMPLICIT_DAEMON_DSNS = [
+    "postgresql://live_bank:secret@127.0.0.1:5433",
+    "host=127.0.0.1 port=5433 user=live_bank",
+    "service=prod",
+]
+
+
+@pytest.mark.parametrize("dsn", _IMPLICIT_DAEMON_DSNS)
+def test_an_implicit_daemon_dsn_fails_every_check_closed(
+        dsn, clean_env, monkeypatch):
+    monkeypatch.delenv("PGDATABASE", raising=False)
+    monkeypatch.delenv("PGSERVICE", raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
+    for server_db in ("live_bank", "prod_bank", "pseudolife_memory_test_1"):
+        with pytest.raises(schema.ProductionDatabaseError,
+                           match="does not name its database"):
+            schema.assert_disposable_database(_StubConn(server_db, []))
+    with pytest.raises(schema.ProductionDatabaseError):
+        schema.refuse_production_database("pseudolife_memory_bench")
+
+
+@pytest.mark.parametrize("site", sorted(_RESET_SITES))
+@pytest.mark.parametrize("dsn", _IMPLICIT_DAEMON_DSNS)
+def test_reset_refuses_before_touching_a_bank_the_daemon_dsn_names_implicitly(
+        site, dsn, stub_server, allowed_bench_name, monkeypatch):
+    monkeypatch.delenv("PGDATABASE", raising=False)
+    monkeypatch.delenv("PGSERVICE", raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
+    stub_server.target = "live_bank"
+    with pytest.raises(schema.ProductionDatabaseError):
+        _RESET_SITES[site]()
+    sent_to_bank = [sql for db, sql in stub_server.statements
+                    if db == "live_bank"]
+    assert sent_to_bank in ([], [_PROBE]), sent_to_bank
+    assert not [sql for _, sql in stub_server.statements
+                if _DESTRUCTIVE.search(sql)]
+    assert stub_server.ensure_schema_calls == []
+
+
+@pytest.mark.parametrize("dsn", ["host=127.0.0.1 user=live_bank dbname=''",
+                                 "postgresql://live_bank@127.0.0.1?dbname="])
+def test_an_explicit_empty_dbname_is_the_user_name_not_pgdatabase(
+        dsn, clean_env, monkeypatch):
+    """An empty dbname is SET as far as libpq is concerned: it skips the
+    service file and PGDATABASE, then falls back to the user name."""
+    monkeypatch.setenv("PGDATABASE", "scratch")
+    monkeypatch.delenv("PGSERVICE", raising=False)
+    assert schema.dsn_database_name(dsn) is None
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
+    with pytest.raises(schema.ProductionDatabaseError):
+        schema.assert_disposable_database(_StubConn("live_bank", []))
+
+
+def test_an_unresolved_record_fails_every_check_closed(clean_env, monkeypatch):
+    """What conftest records when the exported DSN hid its database."""
+    monkeypatch.setenv(schema.PRODUCTION_DATABASE_ENV,
+                       schema.UNRESOLVED_PRODUCTION_DATABASE)
+    with pytest.raises(schema.ProductionDatabaseError,
+                       match="does not name its database"):
+        schema.assert_disposable_database(
+            _StubConn("pseudolife_memory_test_1", []))
+
+
+def test_the_suite_stops_at_start_up_on_an_unresolved_record(monkeypatch):
+    from tests import conftest
+
+    monkeypatch.setenv(schema.PRODUCTION_DATABASE_ENV,
+                       schema.UNRESOLVED_PRODUCTION_DATABASE)
+    with pytest.raises(pytest.UsageError, match="PSEUDOLIFE_MCP_DATABASE_URL"):
+        conftest.pytest_configure(None)
+
+
+@pytest.mark.parametrize("harness", ["graph_ablation", "live_replay_flat_ab",
+                                     "recall_fanout_bench", "retrieval_replay",
+                                     "retrieval_telemetry_review"])
+@pytest.mark.parametrize("dsn", ["host=h port=5433 user=u", "service=replay",
+                                 "postgresql://u:p@h:5433"])
+def test_every_harness_guard_refuses_a_dsn_whose_database_it_cannot_tell(
+        harness, dsn, clean_env, monkeypatch):
+    monkeypatch.delenv("PGDATABASE", raising=False)
+    monkeypatch.delenv("PGSERVICE", raising=False)
+    with pytest.raises(SystemExit):
+        _harness_guards()[harness](dsn)
 
 
 # ── name-level refusals where test and bench names resolve ────────────────
@@ -566,10 +678,14 @@ def _import_conftest_in_child(**env_changes) -> dict:
     probe = (
         "import json, os, tests.conftest\n"
         "from pseudolife_memory.storage import schema\n"
+        "try:\n"
+        "    protected = sorted(schema._production_database_names())\n"
+        "except schema.ProductionDatabaseError as exc:\n"
+        "    protected = 'refused: ' + str(exc)\n"
         "print(json.dumps({\n"
         "  'dsn': os.environ.get('PSEUDOLIFE_MCP_DATABASE_URL'),\n"
         "  'recorded': os.environ.get(schema.PRODUCTION_DATABASE_ENV),\n"
-        "  'protected': sorted(schema._production_database_names()),\n"
+        "  'protected': protected,\n"
         "}))\n"
     )
     proc = subprocess.run([sys.executable, "-c", probe], cwd=ROOT, env=env,
@@ -588,6 +704,18 @@ def test_conftest_removes_the_daemon_dsn_and_keeps_its_bank_name():
     assert got["dsn"] is None
     assert got["recorded"] == "Live_Bank_Name"  # the name only: no credential
     assert "live_bank_name" in got["protected"]
+
+
+@pytest.mark.parametrize("dsn", _IMPLICIT_DAEMON_DSNS)
+def test_conftest_records_an_implicit_daemon_dsn_as_unresolved(dsn):
+    """Recording the default here was the P1: the DSN, and with it the only
+    clue to the bank's name, is gone after the scrub."""
+    got = _import_conftest_in_child(PSEUDOLIFE_MCP_DATABASE_URL=dsn,
+                                    PGDATABASE=None, PGSERVICE=None)
+    assert got["dsn"] is None
+    assert got["recorded"] == schema.UNRESOLVED_PRODUCTION_DATABASE
+    assert got["protected"].startswith("refused: ")
+    assert "secret" not in json.dumps(got)
 
 
 def test_conftest_records_the_default_bank_when_no_dsn_was_exported():
