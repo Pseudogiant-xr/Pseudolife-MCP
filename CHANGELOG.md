@@ -36,9 +36,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resurrected such names at any later dream, because deleting a graph
   entity keeps its facts and so its name. The screen now only looks
   entities up (aliases included, so a merged-away name lands on its
-  survivor) and skips a match whose endpoint is gone. Every fact write
-  mints its subject's node, so the only names skipped are ones the graph
-  dropped on purpose: deleted entities and junk-shaped subjects.
+  survivor) and skips a match whose endpoint is gone. Fact writes mint
+  their subject's node, so the names skipped are ones the graph never kept
+  or has dropped: deleted entities, junk-shaped subjects, facts older than
+  that rule (2026-06-11), and new names whose claim wrote nothing (which the
+  old code turned into orphan nodes).
 - The shadow merge judge records verdicts again. A row's review fingerprint
   included the evidence pack's `group` (the endpoint it shares with other
   pending rows), which is computed over whatever list is enriched: the

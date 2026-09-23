@@ -347,6 +347,23 @@ def test_alias_screen_skips_an_endpoint_junk_deleted_during_the_encode(
     assert st.find_entity(nn("deployment pipeline")) is None
 
 
+def test_alias_screen_skips_a_deleted_new_name_and_files_the_rest(
+        svc, monkeypatch):
+    """The new side can vanish too. A skipped match must not end the
+    screen: a later match in the same screen is still filed (an unchecked
+    None would raise into the catch-all and file nothing)."""
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    svc.cortex_write("release trains", "cadence", "biweekly", support="user")
+    new[nn("release trains")] = "release trains"      # screened second
+    st = svc._storage
+    _during_encode(svc, monkeypatch,
+                   lambda: svc.graph_delete_entity("deploy pipeline"))
+    assert svc._propose_dream_alias_candidates(new, known) == 1
+    assert st.find_entity(nn("deploy pipeline")) is None
+    assert _merge_rows_touching(svc, st.find_entity(nn("release trains"))["id"])
+
+
 def test_alias_screen_follows_an_endpoint_merged_during_the_encode(
         svc, monkeypatch):
     """A merge in the window leaves the old name as an alias of the

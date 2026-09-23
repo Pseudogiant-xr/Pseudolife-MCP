@@ -1041,15 +1041,17 @@ class DreamOps:
                 for disp, target, pair, score in matches:
                     if pair in dismissed:
                         continue
-                    # Find, never create. Every fact write mints its
-                    # subject's node, so a name with no node is one the graph
-                    # dropped on purpose: a junk-shaped subject, or an entity
-                    # deleted (graph_delete_entity, an accepted junk review)
-                    # whose facts survive -- possibly while these names were
-                    # embedded outside the lock. Re-minting it resurrected
-                    # the deleted entity and queued a merge against it
-                    # (Codex review of #338). find_entity follows aliases, so
-                    # an endpoint merged away resolves to its survivor.
+                    # Find, never create. Fact writes mint their subject's
+                    # node (since 2026-06-11), so a name with no node is one
+                    # the graph never kept or has dropped: an entity deleted
+                    # (graph_delete_entity, an accepted junk review, the deep
+                    # dream's junk sweep) whose facts survive -- possibly
+                    # while these names were embedded outside the lock -- a
+                    # junk-shaped subject, an older fact, or a claim that
+                    # wrote nothing. Re-minting resurrected deleted entities
+                    # and queued merges against them (Codex review of #338).
+                    # find_entity follows aliases, so an endpoint merged away
+                    # resolves to its survivor.
                     a = self._storage.find_entity(norm_name(disp))
                     b = self._storage.find_entity(norm_name(target))
                     if a is None or b is None:
