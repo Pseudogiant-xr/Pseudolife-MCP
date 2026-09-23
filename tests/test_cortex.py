@@ -680,3 +680,29 @@ def test_clear_empties_every_mutable_attribute_and_leaves_a_usable_store():
     assert s2.supersede_confidence_margin == 0.42
     assert s2.reinforce_rate == 0.11
     assert s2.protect_provenance is False
+
+
+def test_contender_lookups_normalise_only_contested_records(monkeypatch):
+    """contenders_for and _active_contender test status before the slot
+    key: ``key`` normalises entity and attribute on every evaluation, and
+    both run over the whole store per call (cortex_search, the dream claim
+    path, every contended write). Checking the cheap field first took a
+    lookup from 13 ms to 0.13 ms on the 7,162-fact live bank (2026-09-23)."""
+    from pseudolife_memory.memory import cortex as cx
+    s = CortexStore()
+    s.records = [CortexRecord(f"e{i}", "a", "v") for i in range(500)]
+    s.records.append(CortexRecord("E0", "A", "w", status="contested"))
+    calls = 0
+    real = cx._norm_key
+
+    def counting(x):
+        nonlocal calls
+        calls += 1
+        return real(x)
+
+    monkeypatch.setattr(cx, "_norm_key", counting)
+    assert [r.value for r in s.contenders_for("e0", "a")] == ["w"]
+    assert calls == 4          # the query's two parts + the one contender
+    calls = 0
+    assert s._active_contender(("e0", "a")).value == "w"
+    assert calls == 2

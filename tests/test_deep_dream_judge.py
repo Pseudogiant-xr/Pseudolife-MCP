@@ -110,6 +110,40 @@ def test_shadow_mode_records_and_applies_nothing(svc):
     assert row["judge_model"] == "stub-judge"
 
 
+def test_rows_sharing_an_endpoint_beyond_the_batch_still_record(svc):
+    """A row's review fingerprint must not depend on which other rows share
+    its batch. refresh() signs the whole pending queue and validate() only
+    the judged batch, and the evidence pack's ``group`` (the endpoint a row
+    shares with OTHER pending rows) came out set over the queue and None
+    over a batch that left the sibling out, so the row never validated. On
+    the live bank the shadow judge re-sent the same 8 rows ~125 times a day
+    from 2026-09-22 17:56 on and recorded nothing."""
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    pids = [_propose(svc, "alpha svc", "alpha service"),
+            _propose(svc, "alpha srv", "alpha service")]
+    judge = _StubJudge({("alpha svc", "alpha service"): ("reject", 0.9),
+                        ("alpha srv", "alpha service"): ("reject", 0.9)})
+    out = svc.deep_dream_judge(judge, limit=1)
+    assert out["judged"] == 1
+    assert sum(bool(_row(svc, pid)["judge_verdict"]) for pid in pids) == 1
+
+
+def test_second_opinion_on_a_split_group_still_records(svc):
+    """The second-opinion batch validates through the same fingerprint, so
+    it wedged the same way once a group's rows were split across batches."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "shadow"
+    cfg.judge_second_opinion = True
+    pids = [_propose(svc, "alpha svc", "alpha service"),
+            _propose(svc, "alpha srv", "alpha service")]
+    judge = _StubJudge({("alpha svc", "alpha service"): ("reject", 0.9),
+                        ("alpha srv", "alpha service"): ("reject", 0.9)})
+    assert svc.deep_dream_judge(judge, limit=2)["judged"] == 2
+    out = svc.deep_dream_judge(judge, limit=1, second_extractor=judge)
+    assert out["second_opinions"] == 1
+    assert sum(bool(_row(svc, pid)["judge2_verdict"]) for pid in pids) == 1
+
+
 def test_judge_logs_batch_start(svc, caplog):
     """The judge must announce a batch BEFORE calling the model, not only
     log the completed verdicts (2026-09-01). The 2026-08-31 hook-timeout

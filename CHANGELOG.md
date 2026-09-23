@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — dream stages stop freezing the daemon; the shadow merge judge records again)
+- The contested-facts scan behind the graph digest's "unsure" questions no
+  longer holds the service lock for 42-78 s on every dream, empty dreams
+  included. It paired each current fact with its contenders through one
+  whole-store `contenders_for` scan per fact, normalising every record's
+  slot key (46M key evaluations on the 7,162-fact live bank). It now
+  buckets contenders by slot in one pass, as `cortex_dump` already did;
+  the output and its order are unchanged.
+- `contenders_for` and `_active_contender` test a record's status before
+  its slot key, which normalises on every evaluation: 13 ms to 0.13 ms per
+  lookup on the live bank, for `cortex_search`, the dream claim path and
+  every contended write.
+- The dream alias screen no longer embeds entity names while holding the
+  service lock. On a dream that minted a new entity it re-encoded
+  ~1,000-2,050 existing names on CPU inside the lock (55-171 s holds, the
+  embedder's 1,024-entry LRU being smaller than the name set). Names are now
+  read under the lock, embedded outside it, and proposals filed under it
+  again. A per-process memo (at most 4,096 names, ~8 MB for today's ~2,050)
+  means later screens encode only names they have not seen. This is the
+  first embedder call made outside the service lock; a concurrent
+  four-thread probe of the real model matched serial output (fp32 and bf16,
+  cosine >= 0.9999998, no errors), and a cold screen right after a restart
+  now slows concurrent searches by CPU contention instead of blocking them.
+- The shadow merge judge records verdicts again. A row's review fingerprint
+  included the evidence pack's `group` (the endpoint it shares with other
+  pending rows), which is computed over whatever list is enriched: the
+  whole queue at refresh, only the judged batch at validation. Any row
+  sharing an endpoint with a row outside its batch therefore never
+  validated, and from 2026-09-22 17:56 the judge re-sent the same 8 rows to
+  the extractor ~125 times a day and recorded nothing. The fingerprint now
+  leaves out that cross-row field, which the judge never sees. Every merge
+  fingerprint changes, so the ~10 merge verdicts already recorded are
+  re-judged once. The link, junk, candidate and curation judges bind per-row
+  evidence and were not affected.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

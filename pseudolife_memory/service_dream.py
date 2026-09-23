@@ -77,6 +77,12 @@ class DreamOps:
     # Post-pass caps: screen at most this many freshly-minted entities per
     # cycle, one best-match proposal each — the queue stays reviewable.
     _ALIAS_SCAN_MAX = 20
+    # Entity display name -> embedding, kept between alias screens so each
+    # screen encodes only names it has not seen. Capped at 4,096 names
+    # (<= 16 MB at 1,024 dims); the live bank held ~2,050 entity names on
+    # 2026-09-23, ~8 MB. Replaced per instance on first write.
+    _ALIAS_MEMO_MAX = 4096
+    _alias_name_memo: dict | None = None
     _INFER_CURSOR_KEY = "outcome_inference_cursor"
     _DIGEST_CURSOR_KEY = "session_digest_cursor"
 
@@ -948,15 +954,21 @@ class DreamOps:
         auto-folded). Complements ``_propose_write_dedup``: paraphrase
         coreference ("production extractor sidecar" ~ "Pseudolife-MCP default
         extractor sidecar") shares almost no tokens but embeds close.
+
+        Names are read under the service lock, embedded OUTSIDE it, and
+        proposals filed under it again: encoding ~1,000-2,050 existing names
+        while holding the lock froze the daemon 55-171 s per new-entity
+        dream (2026-09-23 lock-stalls review). Names an earlier screen
+        embedded come from ``_alias_name_memo``, not the model.
         Returns the number of proposals filed; never raises."""
         import time as _t
         try:
             thr = float(self.config.memory.dream.alias_candidate_min_cosine)
             if thr <= 0 or not new_entities:
                 return 0
+            import torch
             from pseudolife_memory.graph import norm_name
             from pseudolife_memory.memory.graph_consolidation import variant_conflict
-            filed = 0
             with self._lock:
                 self._ensure_init()
                 if (self._storage is None or self._embedder is None
@@ -972,12 +984,45 @@ class DreamOps:
                             existing[k] = r.entity
                 if not existing:
                     return 0
+            new_items = list(new_entities.items())[:self._ALIAS_SCAN_MAX]
+            ex_items = list(existing.items())
+            # Unlocked until the filing block. The embedder is built once
+            # per process and never replaced, and dream_run's single-flight
+            # guard makes this the memo's only writer.
+            memo = self._alias_name_memo or {}
+            names = list(dict.fromkeys(
+                [d for _, d in new_items] + [d for _, d in ex_items]))
+            missing = [n for n in names if n not in memo]
+            if missing:
+                fresh = self._embedder.encode(missing)     # normalized
+                memo.update((n, v.clone()) for n, v in zip(missing, fresh))
+            # Keep exactly this screen's names, capped: a retired or renamed
+            # entity's vector drops out, and past the cap the tail is
+            # re-encoded each screen rather than growing the memo.
+            self._alias_name_memo = {n: memo[n]
+                                     for n in names[:self._ALIAS_MEMO_MAX]}
+            sims = (torch.stack([memo[d] for _, d in new_items])
+                    @ torch.stack([memo[d] for _, d in ex_items]).T)
+            matches = []
+            for i, (_, disp) in enumerate(new_items):
+                j = int(sims[i].argmax())
+                score = float(sims[i][j])
+                if score < thr:
+                    continue
+                target = ex_items[j][1]
+                pair = tuple(sorted((norm_name(disp), norm_name(target))))
+                if pair[0] == pair[1]:
+                    continue
+                if variant_conflict(disp, target):
+                    continue    # size/quant/version mismatch: never a merge
+                matches.append((disp, target, pair, score))
+            if not matches:
+                return 0
+            filed = 0
+            with self._lock:
+                if self._storage is None:
+                    return 0
                 dismissed = frozenset(self._storage.dismissed_pairs())
-                new_items = list(new_entities.items())[:self._ALIAS_SCAN_MAX]
-                ex_items = list(existing.items())
-                new_emb = self._embedder.encode([d for _, d in new_items])
-                ex_emb = self._embedder.encode([d for _, d in ex_items])
-                sims = new_emb @ ex_emb.T          # encode() normalizes
                 # Fold direction is evidence-ranked like _propose_write_dedup:
                 # the thin side folds into the evidence-bearing side. Filing
                 # (new, existing) verbatim made the reviewer's only accept
@@ -991,17 +1036,9 @@ class DreamOps:
                     return deg.get(eid, 0) + fct.get(eid, 0)
 
                 now = _t.time()
-                for i, (_, disp) in enumerate(new_items):
-                    j = int(sims[i].argmax())
-                    score = float(sims[i][j])
-                    if score < thr:
+                for disp, target, pair, score in matches:
+                    if pair in dismissed:
                         continue
-                    target = ex_items[j][1]
-                    pair = tuple(sorted((norm_name(disp), norm_name(target))))
-                    if pair[0] == pair[1] or pair in dismissed:
-                        continue
-                    if variant_conflict(disp, target):
-                        continue    # size/quant/version mismatch: never a merge
                     a = self._resolve_or_create_entity(disp)
                     b = self._resolve_or_create_entity(target)
                     if a["id"] == b["id"]:
@@ -2488,15 +2525,24 @@ class DreamOps:
 
     def _contested_facts(self) -> list[dict]:
         """Contested cortex facts shaped for graph_insight.suggest_questions.
-        Mirrors how cortex_search detects contention: current_records() +
-        contenders_for(). CortexRecord exposes .entity/.attribute/.value."""
+        Same pairing as cortex_search (each current record against its
+        slot's contenders), but contenders are bucketed by slot in one pass
+        like ``cortex_dump``: one ``contenders_for`` scan per current record
+        was quadratic and held the service lock 42-78 s on every dream
+        (7,162-fact live bank, 2026-09-23)."""
         out = []
         with self._lock:
             self._ensure_init()
             if self._cortex is None:
                 return out
+            parked: dict[tuple[str, str], list] = {}
+            for c in self._cortex.records:
+                if c.status == "contested":
+                    parked.setdefault(c.key, []).append(c)
+            if not parked:
+                return out
             for r in self._cortex.current_records():
-                conts = self._cortex.contenders_for(r.entity, r.attribute)
+                conts = parked.get(r.key)
                 if conts:
                     out.append({
                         "entity": r.entity, "attribute": r.attribute, "value": r.value,

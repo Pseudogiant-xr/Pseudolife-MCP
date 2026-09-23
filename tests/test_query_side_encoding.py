@@ -35,6 +35,8 @@ _SERVICE_FILES = (_PKG / "service.py", _PKG / "service_dream.py")
 # verified against the source's counts: 22 raw call sites (9 encode_query, 13
 # encode_single/encode) collapse to 20 unique pairs here because cortex_write and
 # _propose_dream_alias_candidates each call the same method twice in the same function.
+# (2026-09-23: the alias screen now makes ONE document-side encode, outside the service
+# lock, over only the names its memo lacks -- same pair, same classification.)
 #
 # Task 4 (set-valued slots) added ("set_add", "encode_single") -- set_add embeds the
 # member text through the same document-side composition cortex_write uses, so it

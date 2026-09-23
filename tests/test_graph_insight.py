@@ -235,3 +235,88 @@ def test_god_nodes_degree_tiebreak_when_betweenness_zero():
     gods = gi.god_nodes(edges, entities, top_n=4)
     assert [g["entity_id"] for g in gods] == [1, 2, 3, 4]
     assert all(g["betweenness"] == 0.0 for g in gods)
+
+
+# ── the service-side contested scan that feeds suggest_questions ─────────
+
+def _contested_scan_host(records):
+    """The smallest host for DreamOps._contested_facts: a lock, a no-op
+    init and a cortex holding ``records`` verbatim."""
+    import threading
+
+    from pseudolife_memory.memory.cortex import CortexStore
+    from pseudolife_memory.service_dream import DreamOps
+
+    class _Host:
+        _contested_facts = DreamOps._contested_facts
+
+        def __init__(self):
+            self._lock = threading.RLock()
+            self._cortex = CortexStore()
+            self._cortex.records = list(records)
+
+        def _ensure_init(self):
+            pass
+
+    return _Host()
+
+
+def test_contested_scan_pairs_each_current_row_with_its_slot_contender():
+    """A contender parks against the SLOT: it matches the current row
+    through the normalised key whatever its spelling, every member row of a
+    contested set slot carries it, and a slot without a current row
+    contributes nothing."""
+    from pseudolife_memory.memory.cortex import CortexRecord as R
+    parked = R("nebula_serpent", "Port", "5432", status="contested",
+               support={"agent"})
+    host = _contested_scan_host([
+        R("Nebula Serpent", "port", "5433", support={"user"}),
+        parked,
+        R("tags", "colour", "red", kind="member"),
+        R("quiet", "slot", "x"),
+        R("quiet", "slot", "old", status="superseded"),
+        R("tags", "colour", "blue", kind="member"),
+        R("tags", "colour", "green", status="contested"),
+        R("orphan", "slot", "y", status="contested"),
+    ])
+    assert host._contested_facts() == [
+        {"entity": "Nebula Serpent", "attribute": "port", "value": "5433",
+         "contender_value": "5432", "contender_origin": "agent"},
+        {"entity": "tags", "attribute": "colour", "value": "red",
+         "contender_value": "green", "contender_origin": ""},
+        {"entity": "tags", "attribute": "colour", "value": "blue",
+         "contender_value": "green", "contender_origin": ""},
+    ]
+
+
+def test_contested_scan_is_linear_in_the_store(monkeypatch):
+    """_contested_facts runs under the service lock on every dream, empty
+    ones included. It called contenders_for once per current record, and
+    each call scanned the whole store normalising every record's slot key:
+    46M key evaluations and a 42-78 s lock hold on the 7,162-fact live bank
+    (2026-09-23 lock-stalls review). Normalisations are counted, not timed,
+    so CI cannot flake; a quadratic scan trips the budget within a few
+    rows instead of running to completion."""
+    from pseudolife_memory.memory import cortex as cx
+    records = [cx.CortexRecord(f"entity {i}", "attr", "v")
+               for i in range(2000)]
+    records += [cx.CortexRecord(f"Entity_{i}", "attr", "w", status="contested")
+                for i in range(0, 2000, 40)]
+    host = _contested_scan_host(records)
+    budget = 4 * len(records)
+    calls = 0
+    real = cx._norm_key
+
+    def counting(s):
+        nonlocal calls
+        calls += 1
+        if calls > budget:
+            raise AssertionError(
+                f"more than {budget} key normalisations over {len(records)} "
+                "records: the contested scan is no longer linear")
+        return real(s)
+
+    monkeypatch.setattr(cx, "_norm_key", counting)
+    out = host._contested_facts()
+    assert len(out) == 50
+    assert {row["contender_value"] for row in out} == {"w"}

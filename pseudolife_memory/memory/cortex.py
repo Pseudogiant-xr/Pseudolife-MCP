@@ -1070,16 +1070,20 @@ class CortexStore:
     # ------------------------------------------------------------------
 
     def _active_contender(self, key: tuple[str, str]) -> "CortexRecord | None":
-        """The one active (status='contested') contender at a slot, or None."""
+        """The one active (status='contested') contender at a slot, or None.
+        Status is tested first: ``key`` normalises on every evaluation."""
         for r in self.records:
-            if r.key == key and r.status == "contested":
+            if r.status == "contested" and r.key == key:
                 return r
         return None
 
     def contenders_for(self, entity: str, attribute: str) -> list["CortexRecord"]:
-        """Active contenders at a slot (0 or 1 under the at-most-one invariant)."""
+        """Active contenders at a slot (0 or 1 under the at-most-one invariant).
+        Status is tested before the key, which normalises on every
+        evaluation (13 ms -> 0.13 ms per call on the 7,162-fact live bank,
+        2026-09-23)."""
         key = (_norm_key(entity), _norm_key(attribute))
-        return [r for r in self.records if r.key == key and r.status == "contested"]
+        return [r for r in self.records if r.status == "contested" and r.key == key]
 
     def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason,
                  slot_embedding=None, writer_id=None, session_id=None,

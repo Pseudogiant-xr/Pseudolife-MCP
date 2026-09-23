@@ -126,6 +126,14 @@ class ReviewJudgments:
                "junk": "_enrich_junk_proposals_locked"}
     _PROMPT = {"merge": "_JUDGE_SYSTEM_PROMPT", "link": "_LINK_JUDGE_SYSTEM_PROMPT",
                "junk": "_JUNK_JUDGE_SYSTEM_PROMPT"}
+    # Enriched fields derived from the OTHER rows of the list being
+    # enriched. The judge never sees them, and signing one ties a row's
+    # fingerprint to batch composition: refresh() signs the whole pending
+    # queue, validate() only the judged batch. The merge ``group`` (the
+    # endpoint a row shares with other pending rows) did exactly that, so
+    # from 2026-09-22 17:56 the shadow merge judge re-sent the same 8 rows
+    # ~125 times a day and recorded nothing.
+    _CROSS_ROW = {"merge": frozenset({"group"})}
 
     def __init__(self, service, kind, extractor, pending, current_model=None):
         if kind not in self._ENRICH:
@@ -152,8 +160,11 @@ class ReviewJudgments:
             return {}
         enriched = getattr(self.service, self._ENRICH[self.kind])(pending)
         policy = self.policy()
+        cross_row = self._CROSS_ROW.get(self.kind, frozenset())
         return {str(p["id"]): fingerprint({"proposal": _evidence(p),
-                                          "evidence": _evidence(row),
+                                          "evidence": _evidence(
+                                              {k: v for k, v in row.items()
+                                               if k not in cross_row}),
                                           "policy": policy})
                 for p, row in zip(pending, enriched)}
 

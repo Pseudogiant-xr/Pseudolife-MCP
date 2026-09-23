@@ -201,6 +201,58 @@ def test_dream_alias_proposal_folds_thin_side_into_evidence_bearing(svc):
     assert prop and prop[0]["entity_id"] == thin and prop[0]["into_id"] == rich
 
 
+def _record_encodes(svc, monkeypatch):
+    """Wrap the service's embedder so every encode records whether the
+    service lock was held and which texts it embedded."""
+    real = svc._embedder.encode
+    calls = []
+
+    def encode(texts, *args, **kwargs):
+        calls.append((svc._lock.locked(),
+                      [texts] if isinstance(texts, str) else list(texts)))
+        return real(texts, *args, **kwargs)
+
+    monkeypatch.setattr(svc._embedder, "encode", encode)
+    return calls
+
+
+def test_dream_alias_screen_encodes_outside_the_service_lock(svc, monkeypatch):
+    """The screen embeds every existing entity name to compare it with the
+    names a dream just minted: ~1,000-2,050 CPU encodes that held the
+    service lock 55-171 s per new-entity dream on the live bank (2026-09-23
+    lock-stalls review). The encode runs unlocked, the proposal is still
+    filed, and a name an earlier screen embedded is not re-encoded."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")
+    svc.cortex_write("release train", "cadence", "weekly", support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    calls = _record_encodes(svc, monkeypatch)
+    assert svc._propose_dream_alias_candidates(
+        {nn("deploy pipeline"): "deploy pipeline"}, known) == 1
+    screened = [c for c in calls if "deployment pipeline" in c[1]]
+    assert screened and not any(locked for locked, _ in screened)
+    calls.clear()
+    svc._propose_dream_alias_candidates(
+        {nn("ship pipeline"): "ship pipeline"}, known)
+    assert [texts for _, texts in calls] == [["ship pipeline"]]
+
+
+def test_dream_alias_name_memo_is_bounded(svc, monkeypatch):
+    """The name memo holds at most ``_ALIAS_MEMO_MAX`` vectors (the live
+    bank's ~2,050 names are ~8 MB at 1,024 dims); names past the cap are
+    re-encoded each screen instead of growing it."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")
+    svc.cortex_write("release train", "cadence", "weekly", support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    monkeypatch.setattr(svc, "_ALIAS_MEMO_MAX", 2, raising=False)
+    assert svc._propose_dream_alias_candidates(
+        {nn("deploy pipeline"): "deploy pipeline"}, known) == 1
+    assert len(svc._alias_name_memo) == 2
+
+
 def _stage_link_pair(svc):
     """Two similar-context entities with NO memory_traces rows, no shared edge
     and no name containment -> a deep-dream LINK candidate whose evidence can
