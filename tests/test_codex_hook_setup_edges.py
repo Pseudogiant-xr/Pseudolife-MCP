@@ -27,13 +27,17 @@ def user_config(home, **features):
 
 
 def plugin_hooks(home):
+    """What Codex lists for the plugin: one hook per event in the shipped
+    hooks.json (read from the file, not from setup's own constants, so a new
+    event there cannot hide from these tests)."""
     directory = home / "plugin/hooks"
     shutil.copytree(ROOT / "plugin/hooks", directory)
+    events = json.loads((directory / "hooks.json").read_text(encoding="utf-8"))["hooks"]
     return [{"key": "plugin-" + event, "currentHash": "sha256:" + "a" * 64,
-             "eventName": event, "enabled": True, "trustStatus": "untrusted", "isManaged": False,
-             "sourcePath": str(directory / "hooks.json"), "source": "plugin",
+             "eventName": event[0].lower() + event[1:], "enabled": True, "trustStatus": "untrusted",
+             "isManaged": False, "sourcePath": str(directory / "hooks.json"), "source": "plugin",
              "pluginId": setup.PLUGIN_ID, "handlerType": "command"}
-            for event in setup.EVENTS]
+            for event in events]
 
 
 def mock_runtime(monkeypatch, home, config, hooks):
@@ -106,7 +110,7 @@ def test_unexpected_plugin_is_not_trusted_or_replaced(tmp_path, monkeypatch, pro
     original = seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     if problem == "partial":
-        hooks.pop()
+        hooks = [h for h in hooks if h["eventName"] != "sessionEnd"]
     else:
         script = tmp_path / "plugin/hooks/lifecycle.ps1"
         script.write_text("Write-Output 'custom user script'\n")
@@ -119,6 +123,135 @@ def test_unexpected_plugin_is_not_trusted_or_replaced(tmp_path, monkeypatch, pro
     assert not (tmp_path / "pseudolife").exists()
     if problem == "script-mismatch":
         assert script.read_text() == "Write-Output 'custom user script'\n"
+
+
+# --- the plugin's Stop entry (Claude Code's opt-in wake hook) ---------------
+# Codex loads the plugin's hooks.json too, so it lists the Stop entry beside
+# the three lifecycle hooks. It is a no-op in Codex, and setup approves it with
+# them; manual installs keep the three lifecycle events.
+
+def approving_runtime(monkeypatch, home, hooks):
+    """A runtime that accepts one trust write and then lists every hook trusted."""
+    writes = []
+
+    class Client:
+        def rpc(self, method, params):
+            if method == "config/read":
+                return user_config(home)
+            if method == "hooks/list":
+                return {"data": [{"hooks": hooks, "errors": []}]}
+            if method == "config/batchWrite":
+                writes.append(params)
+                for h in hooks:
+                    h["trustStatus"] = "trusted"
+                return {}
+            pytest.fail("Unexpected RPC: " + method)
+
+    @contextmanager
+    def codex(*args, **kwargs):
+        yield Client()
+
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.setattr(setup, "resolve_codex", lambda: "fixture-codex")
+    monkeypatch.setattr(setup, "codex", codex)
+    monkeypatch.setattr(setup, "verify", lambda *a, **kw: {"session_start": True})
+    return writes
+
+
+def test_setup_knows_every_event_the_plugin_ships():
+    shipped = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    assert set(setup.PLUGIN_EVENTS.values()) == set(shipped)
+    assert set(setup.EVENTS.values()) < set(shipped)
+
+
+@pytest.mark.parametrize("listed", ["all", "without-stop"])
+def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, listed):
+    """Codex 0.148+ lists the plugin's async Stop hook; older Codex skips
+    async hooks outside SessionEnd and lists three. Both reach ready."""
+    seed_user_files(tmp_path)
+    hooks = plugin_hooks(tmp_path)
+    if listed == "without-stop":
+        hooks = [h for h in hooks if h["eventName"] != "stop"]
+    writes = approving_runtime(monkeypatch, tmp_path, hooks)
+    result = setup.setup(options())
+    assert result["status"] == "ready", result
+    [write] = writes
+    assert sorted(edit["keyPath"] for edit in write["edits"]) == sorted(
+        setup.dotted("hooks", "state", h["key"], "trusted_hash") for h in hooks)
+
+
+def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
+    """A user who disabled the no-op Stop entry in /hooks keeps that choice;
+    the three lifecycle hooks are still approved."""
+    seed_user_files(tmp_path)
+    hooks = plugin_hooks(tmp_path)
+    [stop] = [h for h in hooks if h["eventName"] == "stop"]
+    stop["enabled"] = False
+    writes = approving_runtime(monkeypatch, tmp_path, hooks)
+    result = setup.setup(options())
+    assert result["status"] == "ready", result
+    assert len(writes[0]["edits"]) == 3
+    assert all(stop["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
+
+
+def test_the_plugin_byte_check_covers_the_stop_script(tmp_path, monkeypatch):
+    """stop-wake.sh is Codex's non-Windows Stop command, run outside the
+    sandbox under the trust setup writes: a changed copy is skew."""
+    original = seed_user_files(tmp_path)
+    hooks = plugin_hooks(tmp_path)
+    (tmp_path / "plugin/hooks/stop-wake.sh").write_text("exit 2\n")
+    mock_runtime(monkeypatch, tmp_path, user_config(tmp_path), hooks)
+    result = setup.setup(options())
+    assert result["status"] == "unavailable" and "differ" in result["recovery"], result
+    assert all(path.read_bytes() == data for path, data in original.items())
+
+
+def test_a_plugin_from_before_the_stop_hook_is_reported_as_skew(tmp_path, monkeypatch):
+    hooks = [h for h in plugin_hooks(tmp_path) if h["eventName"] != "stop"]
+    directory = tmp_path / "plugin/hooks"
+    stale = json.loads((directory / "hooks.json").read_text(encoding="utf-8"))
+    del stale["hooks"]["Stop"]
+    (directory / "hooks.json").write_text(json.dumps(stale), encoding="utf-8")
+    (directory / "stop-wake.sh").unlink()
+    mock_runtime(monkeypatch, tmp_path, user_config(tmp_path), hooks)
+    result = setup.setup(options())
+    assert result["status"] == "unavailable" and "differ" in result["recovery"], result
+
+
+def test_verification_counts_every_selected_hook(tmp_path, monkeypatch):
+    hooks = plugin_hooks(tmp_path)
+    for h in hooks:
+        h["trustStatus"] = "trusted"
+
+    class Client:
+        events = [{"method": "hook/completed", "params": {"run": {
+            "eventName": event, "status": "completed", "entries": [{"text": text}]}}}
+            for event, text in (("sessionStart", "Session episode: fixture"),
+                                ("userPromptSubmit", "memory_lesson_search"))]
+
+        def rpc(self, method, params):
+            answers = {"config/read": {"config": {}},
+                       "hooks/list": {"data": [{"hooks": hooks, "errors": []}]},
+                       "thread/start": {"thread": {"id": "fixture-thread"}}, "turn/start": {}}
+            if method not in answers:
+                pytest.fail("Unexpected RPC: " + method)
+            return answers[method]
+
+        def receive(self, timeout):
+            pass
+
+    @contextmanager
+    def codex(*args, **kwargs):
+        yield Client()
+
+    opened = iter([True, False])
+    monkeypatch.setattr(setup, "codex", codex)
+    monkeypatch.setattr(setup, "wait_for_daemon", lambda: None)
+    monkeypatch.setattr(setup, "episode_open", lambda thread: next(opened))
+    verified = setup.verify("fixture-codex", tmp_path, tmp_path, {"config": {}}, hooks, hooks)
+    assert verified == {"session_start": True, "user_prompt_submit": True, "session_end": True}
 
 
 def test_legacy_migration_removes_exact_commands_and_preserves_lookalikes(tmp_path):

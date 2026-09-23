@@ -862,9 +862,11 @@ If `[features] hooks = false` is intentional, keep it and use the standing
 `AGENTS.md` block. Windows plugin hooks use native PowerShell 7 commands.
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
-**Codex hook trust:** setup approval is limited to PseudoLife's three current
-hook definitions. It does not approve other plugins or bypass future trust
-checks. Changed definitions need approval again. If automatic setup cannot
+**Codex hook trust:** setup approval is limited to PseudoLife's current hook
+definitions: the three lifecycle hooks, plus the plugin's `Stop` entry (Claude
+Code's opt-in wake hook, a no-op in Codex). It does not approve other
+plugins or bypass future trust checks. Changed definitions need approval
+again. If automatic setup cannot
 use the installed runtime's trust interface, it reports the problem and
 asks you to open `/hooks` to review and trust the definitions. Approved standing
 instructions remain available as fallback. Installed files alone do not

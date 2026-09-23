@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # (2026-09-21) measured 19s wall-clock for session-end.sh, which spawns about
 # seven processes around a two-second curl, and session-start.sh, which
 # spawns roughly four times as many (stdin parse, manifest read, the
-# four-file hooks digest), then hit the previous 30s guard.
+# five-file hooks digest), then hit the previous 30s guard.
 HOOK_PROCESS_TIMEOUT = 180
 
 
@@ -74,7 +74,7 @@ def pwsh_run(*args, input=None, env=None, raw=False):
                           timeout=HOOK_PROCESS_TIMEOUT, check=True)
 
 
-def bash_run(script, *, input, env):
+def bash_exe():
     bash = shutil.which("bash")
     if os.name == "nt":
         # Git for Windows puts git.exe under cmd/, bin/ or mingw64/bin/
@@ -86,7 +86,11 @@ def bash_run(script, *, input, env):
         bash = next((str(c) for c in candidates if c.is_file()), None)
     if not bash:
         pytest.skip("Bash is not installed")
-    return subprocess.run([bash, str(script)], input=input, env=env,
+    return bash
+
+
+def bash_run(script, *, input, env):
+    return subprocess.run([bash_exe(), str(script)], input=input, env=env,
                           capture_output=True, text=True,
                           timeout=HOOK_PROCESS_TIMEOUT, check=True)
 

@@ -329,6 +329,62 @@ knowledge cannot clone live mailboxes or instance credentials. Follow the
 restore. See the [experimental design](../specs/2026-09-11-agent-coordination-design.md)
 for delivery-state and host-verification contracts.
 
+### Waking an idle Claude Code session: the Stop hook
+
+Mail otherwise reaches a Claude Code session only at its next memory call or
+prompt, so an idle session can sit on a message for hours. The plugin ships an
+opt-in `Stop` hook that waits on the session's digest after every turn and
+wakes the session when new mail arrives. It is off unless the hook's
+environment sets `PSEUDOLIFE_AGENT_WAKE_HOOK=1` (for example in the `env` block
+of `~/.claude/settings.json`, which Claude Code passes to the processes it
+starts); the hook's command checks the flag before bash reads the script. It
+needs the coordination adapter above, since it waits on the digest file the
+adapter writes: without a digest directory it exits at once. It also needs a
+Claude Code release that honours `asyncRewake` (verified on 2.1.280); one
+that ignored `async` would run it in the foreground and hold each turn end.
+
+Opting in lets any peer allowed to mail this session start a model turn in it
+while you are away, in whatever permission mode the session runs; peer text
+still cannot grant approval. Every wake spends tokens, and two opted-in
+sessions can keep waking each other, so wakes are capped (below).
+
+- The hook runs with `"async": true` and `"asyncRewake": true`: in the
+  background after each turn, and exit code 2 starts a new turn even when the
+  session is idle. Verified in the Desktop Code tab on Claude Code 2.1.280, in
+  auto permission mode (under a second from exit to the new turn). Claude Code
+  labels the delivery "Stop hook blocking error"; that label is the wake, not
+  a failure. The reminder is one line saying so, then the digest, which reads
+  as agent-origin, not user authority.
+- It fires when the digest's watermark is past the `.seen` marker and the
+  digest lists mail. Mail that arrived during the turn fires at once; a digest
+  the session already saw (through the prompt hook, the tool-result hint or an
+  earlier wake) does not fire again at the next turn end. Firing advances
+  `.seen` and appends a `wait` line to `ledger.log`; if the marker cannot be
+  written, the hook does not wake at all. SessionStart clears `.seen` on
+  resume and compact, and any change to the digest while mail is pending
+  (acknowledging some of it, a message expiring) is a new digest, so either
+  can wake the session once more.
+- At most 20 wakes per session in any hour. Mail over the cap waits for the
+  window to free up; it is delayed, not dropped.
+- One watcher per session: each turn end takes the lease in `<key>.wake`, and
+  the previous watcher exits within one poll (5 s). A digest file absent when
+  the watch starts is waited for; one that vanishes during it (the shim
+  exited) ends the watch. After `/clear` it reads the
+  digest named by the per-process `claude-<pid>.host` record, when
+  SessionStart has written one.
+- A watcher waits at most 3540 s after the turn that armed it; the hook's
+  `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
+  `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
+  longer is not woken; its mail still appears on its next prompt. On Linux and
+  macOS the watcher also stops when Claude Code exits. In `claude -p` runs,
+  Claude Code ends a waiting hook at teardown.
+- Codex loads the same `hooks.json`. The `Stop` entry is a no-op there: the
+  native command (`lifecycle.ps1 -Event Stop`) exits at once; the bash
+  command stops at the flag check, and the script exits unless Claude Code
+  started it.
+  `ops/setup-codex-hooks.py` approves it with the other three definitions
+  (see [Codex specifics](providers.md#codex-specifics)).
+
 ## Built-in defaults (tuned for Claude's use case)
 
 - **Embedding backbone `Qwen/Qwen3-Embedding-0.6B`** (`EmbeddingConfig.model_name`,

@@ -135,16 +135,16 @@ esac
 # nothing. Only a version-shaped value goes on the wire.
 PLUGIN_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9A-Za-z.+-]*\)".*/\1/p' \
     "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/.claude-plugin/plugin.json" 2>/dev/null | head -1)
-# A digest of the four hook scripts beside this one, so the daemon can tell
+# A digest of the hook scripts beside this one, so the daemon can tell
 # a cached plugin at its own version apart from its own hooks (the version
 # only moves with a release). Same function as pseudolife_memory.plugin_hooks
 # and lifecycle.ps1: SHA-256 over `name NUL bytes NUL`, CRLF read as LF.
 hooks_digest() {  # $1 = directory
     local name
-    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh session-end.sh; do
+    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh session-end.sh stop-wake.sh; do
         [ -f "$1/$name" ] || return 1
     done
-    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh session-end.sh; do
+    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh session-end.sh stop-wake.sh; do
         printf '%s\0' "$name"; tr -d '\r' < "$1/$name"; printf '\0'
     done | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
 }

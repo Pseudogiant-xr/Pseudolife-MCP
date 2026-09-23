@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-23 — board mail can wake an idle Claude Code session)
+- The plugin ships an opt-in `Stop` hook (`plugin/hooks/stop-wake.sh`, off
+  unless the hook environment sets `PSEUDOLIFE_AGENT_WAKE_HOOK=1`, checked in
+  the hook's command before bash reads the script) that waits on the
+  session's coordination digest after each turn and wakes the idle session
+  when new addressed mail arrives. It is registered with `async` and
+  `asyncRewake`, so exit code 2 starts a new turn even when the session is
+  idle: under a second from exit to turn in the Desktop Code tab on Claude
+  Code 2.1.280 (2026-09-23 probe). It fires when the watermark is past
+  `.seen` and the digest lists mail, so mail that landed during the turn
+  fires at once and a digest already shown does not fire at the next turn
+  end; firing advances `.seen` (no wake if it cannot) and logs a `wait`
+  ledger line. A lease file keeps one watcher per session, wakes are capped
+  at 20 an hour per session (mail over the cap is delayed, not dropped), and
+  a digest absent at arm time is waited for, while one that vanishes
+  mid-watch (the shim exited) ends it. The wait ends at 3540 s, under the
+  hook's enforced 3600 s timeout; `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` shortens
+  it. The plugin hooks digest now covers `stop-wake.sh` too; a manual Codex
+  bundle (four scripts, no `Stop` hook) therefore sends no digest, which
+  changes nothing, since it sends no plugin version either.
+- Codex loads the same `hooks.json`, so the `Stop` entry is a no-op there:
+  `lifecycle.ps1 -Event Stop` exits at once and the bash script exits
+  outside Claude Code. `ops/setup-codex-hooks.py` accepts the plugin's fourth
+  definition, byte-checks `stop-wake.sh`, approves it with the other three,
+  treats it as optional for Codex before 0.148 (which does not list async
+  `Stop` hooks), and no longer refuses setup over a disabled `Stop` entry.
+  Manual installs keep the three lifecycle events. An existing Codex plugin
+  install lists the new entry in Codex's startup hook review until setup
+  reruns.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.
@@ -119,7 +149,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The plugin's version string is pinned to the package version, so a
   plugin-only change on master left `/plugin update` saying "already
   latest" and the version handshake seeing two equal strings. `/health`
-  now carries `hooks_digest` (SHA-256 over the four hook scripts the daemon
+  now carries `hooks_digest` (SHA-256 over the hook scripts the daemon
   image shipped with, `pseudolife_memory/plugin_hooks.py`; the image copies
   `plugin/hooks` and sets `PSEUDOLIFE_PLUGIN_DIR`), the SessionStart hooks
   send `plugin_hooks_digest` computed the same way over the scripts beside

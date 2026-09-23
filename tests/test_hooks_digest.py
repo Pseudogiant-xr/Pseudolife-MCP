@@ -30,7 +30,8 @@ from tests.test_codex_hooks import (
     ROOT, _hook_env, _recording_daemon, bash_run, pwsh_run,
 )
 
-SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
+SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh",
+           "stop-wake.sh")
 REPO_DIGEST = plugin_hooks.hooks_digest(ROOT / "plugin/hooks")
 
 
@@ -63,6 +64,14 @@ def test_hooks_digest_is_sha256_over_names_and_lf_normalised_bytes(tmp_path):
         expected.update(name.encode() + b"\0" + (hooks / name).read_bytes() + b"\0")
     assert plugin_hooks.hooks_digest(hooks) == expected.hexdigest()
     assert len(plugin_hooks.hooks_digest(hooks)) == 64
+
+
+def test_the_digest_covers_every_hook_script_the_plugin_ships():
+    """A script left out of the digest can go stale in a cached plugin with
+    no notice: the 2026-09-21 failure, one script at a time."""
+    shipped = {p.name for p in (ROOT / "plugin/hooks").iterdir() if p.suffix in (".sh", ".ps1")}
+    assert plugin_hooks.HOOK_SCRIPTS == SCRIPTS
+    assert set(SCRIPTS) == shipped
 
 
 def test_hooks_digest_ignores_crlf_but_not_content(tmp_path):
@@ -208,16 +217,16 @@ def test_native_hook_sends_the_checkout_digest(tmp_path):
 @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize("hook", ["bash", "native"])
 def test_a_copy_of_the_scripts_sends_the_same_digest_in_either_line_ending(tmp_path, hook, newline):
-    """Codex runs a content-addressed copy of the four scripts with no
-    manifest; a Windows marketplace clone may be checked out CRLF. Neither
-    may read as a different plugin."""
+    """A copy of the plugin's hook scripts may arrive without a manifest,
+    and a Windows marketplace clone may be checked out CRLF. Neither may
+    read as a different plugin."""
     copy = tmp_path / "hooks-copy"
     copy.mkdir()
     for name in SCRIPTS:
         text = (ROOT / "plugin/hooks" / name).read_bytes().replace(b"\r\n", b"\n")
         # POSIX bash will not run a CRLF script at all (exit 2 on Linux CI),
         # which is bash's concern, not the digest's: the script that runs
-        # stays LF in the bash variant; the other three carry the CRLF case.
+        # stays LF in the bash variant; the others carry the CRLF case.
         keep_lf = hook == "bash" and name == "session-start.sh"
         (copy / name).write_bytes(text if keep_lf else text.replace(b"\n", newline.encode()))
     server, worker, paths = _recording_daemon()
@@ -233,3 +242,27 @@ def test_a_copy_of_the_scripts_sends_the_same_digest_in_either_line_ending(tmp_p
     sent = _sent(paths)
     assert sent["plugin_hooks_digest"] == [REPO_DIGEST]
     assert "plugin_version" not in sent  # no manifest beside a bare copy
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+def test_a_manual_codex_bundle_sends_no_digest(tmp_path, hook):
+    """ops/setup-codex-hooks.py copies four scripts, not stop-wake.sh (manual
+    installs have no Stop hook), so the bundle has no digest to send. It
+    sends no plugin version either, so the notice was never live there."""
+    from tests.test_codex_hook_setup import setup as codex_setup
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    for name in codex_setup.SCRIPTS:
+        shutil.copyfile(ROOT / "plugin/hooks" / name, bundle / name)
+    server, worker, paths = _recording_daemon()
+    try:
+        env = _hook_env(tmp_path, server.server_port)
+        if hook == "bash":
+            bash_run(bundle / "session-start.sh", input="{}", env=env)
+        else:
+            pwsh_run("-Command", f"& '{bundle.as_posix()}/lifecycle.ps1' -Event SessionStart",
+                     input="{}", env=env)
+    finally:
+        server.shutdown(); server.server_close(); worker.join(timeout=2)
+    sent = _sent(paths)
+    assert "plugin_hooks_digest" not in sent and "plugin_version" not in sent
