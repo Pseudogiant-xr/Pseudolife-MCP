@@ -1,0 +1,467 @@
+{
+ "title": "Daemon OOM (2026-09-23): CPU embedder bf16 vs fp32 memory, speed, retrieval parity; ingest slicing; regression gate",
+ "date": "2026-09-23",
+ "model": "Qwen/Qwen3-Embedding-0.6B",
+ "environment": {
+  "image": "pseudolife-daemon:0.15.0 (transformers 4.57.6, sentence-transformers 5.6.0, torch 2.13.0+cpu)",
+  "container": "throwaway: --network none --memory 7g --cpus 3, no volumes (read-only mounts only)",
+  "cpu": "AMD Ryzen 7 9800X3D (reports avx512_bf16)",
+  "threads": 3
+ },
+ "memory_probe_raw_sentence_transformers": {
+  "note": "mem_probe.py driving SentenceTransformer directly (review session). hwm = VmHWM, rss = VmRSS; 'loaded' hwm is the peak while constructing the model. bf16 weights page in on first use, so bf16 steady RSS (~1.4 GB) exceeds its load peak.",
+  "fp32": {
+   "start": {
+    "rss_mb": 9,
+    "hwm_mb": 10
+   },
+   "after import torch": {
+    "rss_mb": 215,
+    "hwm_mb": 215
+   },
+   "after import sentence_transformers": {
+    "rss_mb": 391,
+    "hwm_mb": 391
+   },
+   "loaded": {
+    "rss_mb": 2812,
+    "hwm_mb": 3808,
+    "ms": 1846
+   },
+   "after cast to fp32": {
+    "rss_mb": 2812,
+    "hwm_mb": 3808
+   },
+   "1 short query encode": {
+    "rss_mb": 2821,
+    "hwm_mb": 3808,
+    "ms": 108
+   },
+   "10 short query encodes": {
+    "rss_mb": 2822,
+    "hwm_mb": 3808,
+    "ms": 1606
+   },
+   "32 x ~512-token batch": {
+    "rss_mb": 2834,
+    "hwm_mb": 7250,
+    "ms": 98904
+   },
+   "2000 short names (alias screen)": {
+    "rss_mb": 2837,
+    "hwm_mb": 7250,
+    "ms": 121244
+   },
+   "4 threads x 8 x ~256 tokens": {
+    "rss_mb": 3289,
+    "hwm_mb": 7250,
+    "ms": 25389
+   },
+   "idle after gc": {
+    "rss_mb": 2868,
+    "hwm_mb": 7250
+   }
+  },
+  "bf16_loaded_directly": {
+   "start": {
+    "rss_mb": 9,
+    "hwm_mb": 9
+   },
+   "after import torch": {
+    "rss_mb": 215,
+    "hwm_mb": 215
+   },
+   "after import sentence_transformers": {
+    "rss_mb": 391,
+    "hwm_mb": 391
+   },
+   "loaded": {
+    "rss_mb": 519,
+    "hwm_mb": 537,
+    "ms": 445
+   },
+   "after cast to bf16direct": {
+    "rss_mb": 519,
+    "hwm_mb": 537
+   },
+   "1 short query encode": {
+    "rss_mb": 1359,
+    "hwm_mb": 1359,
+    "ms": 373
+   },
+   "10 short query encodes": {
+    "rss_mb": 1360,
+    "hwm_mb": 1360,
+    "ms": 884
+   },
+   "32 x ~512-token batch": {
+    "rss_mb": 1368,
+    "hwm_mb": 3576,
+    "ms": 26737
+   },
+   "2000 short names (alias screen)": {
+    "rss_mb": 1380,
+    "hwm_mb": 3576,
+    "ms": 17081
+   },
+   "4 threads x 8 x ~256 tokens": {
+    "rss_mb": 1646,
+    "hwm_mb": 3576,
+    "ms": 7243
+   },
+   "idle after gc": {
+    "rss_mb": 1452,
+    "hwm_mb": 3576
+   }
+  },
+  "bf16_cast_after_fp32_load": {
+   "start": {
+    "rss_mb": 9,
+    "hwm_mb": 10
+   },
+   "after import torch": {
+    "rss_mb": 216,
+    "hwm_mb": 216
+   },
+   "after import sentence_transformers": {
+    "rss_mb": 391,
+    "hwm_mb": 391
+   },
+   "loaded": {
+    "rss_mb": 2812,
+    "hwm_mb": 3808,
+    "ms": 2183
+   },
+   "after cast to bf16": {
+    "rss_mb": 2517,
+    "hwm_mb": 3808
+   },
+   "1 short query encode": {
+    "rss_mb": 2528,
+    "hwm_mb": 3808,
+    "ms": 83
+   },
+   "10 short query encodes": {
+    "rss_mb": 2528,
+    "hwm_mb": 3808,
+    "ms": 1921
+   },
+   "32 x ~512-token batch": {
+    "rss_mb": 2539,
+    "hwm_mb": 4491,
+    "ms": 47380
+   },
+   "2000 short names (alias screen)": {
+    "rss_mb": 2541,
+    "hwm_mb": 4491,
+    "ms": 29372
+   },
+   "4 threads x 8 x ~256 tokens": {
+    "rss_mb": 2862,
+    "hwm_mb": 4491,
+    "ms": 8022
+   },
+   "idle after gc": {
+    "rss_mb": 2617,
+    "hwm_mb": 4491
+   }
+  },
+  "fp32_default_arenas_burst": {
+   "start": {
+    "rss_mb": 9,
+    "hwm_mb": 10
+   },
+   "after import torch": {
+    "rss_mb": 216,
+    "hwm_mb": 216
+   },
+   "after import sentence_transformers": {
+    "rss_mb": 392,
+    "hwm_mb": 392
+   },
+   "loaded": {
+    "rss_mb": 2812,
+    "hwm_mb": 3809,
+    "ms": 947
+   },
+   "after cast to fp32": {
+    "rss_mb": 2812,
+    "hwm_mb": 3809
+   },
+   "1 short query encode": {
+    "rss_mb": 2821,
+    "hwm_mb": 3809,
+    "ms": 121
+   },
+   "10 short query encodes": {
+    "rss_mb": 2822,
+    "hwm_mb": 3809,
+    "ms": 1623
+   },
+   "4 threads x 8 x ~256 tokens": {
+    "rss_mb": 3274,
+    "hwm_mb": 5243,
+    "ms": 20284
+   },
+   "idle after gc": {
+    "rss_mb": 2858,
+    "hwm_mb": 5243
+   }
+  },
+  "fp32_malloc_arena_max_2_burst": {
+   "start": {
+    "rss_mb": 9,
+    "hwm_mb": 9
+   },
+   "after import torch": {
+    "rss_mb": 216,
+    "hwm_mb": 216
+   },
+   "after import sentence_transformers": {
+    "rss_mb": 391,
+    "hwm_mb": 391
+   },
+   "loaded": {
+    "rss_mb": 2812,
+    "hwm_mb": 3808,
+    "ms": 637
+   },
+   "after cast to fp32": {
+    "rss_mb": 2812,
+    "hwm_mb": 3808
+   },
+   "1 short query encode": {
+    "rss_mb": 2820,
+    "hwm_mb": 3808,
+    "ms": 120
+   },
+   "10 short query encodes": {
+    "rss_mb": 2822,
+    "hwm_mb": 3808,
+    "ms": 2247
+   },
+   "4 threads x 8 x ~256 tokens": {
+    "rss_mb": 2841,
+    "hwm_mb": 5181,
+    "ms": 23894
+   },
+   "idle after gc": {
+    "rss_mb": 2841,
+    "hwm_mb": 5181
+   }
+  }
+ },
+ "parity_raw_sentence_transformers": {
+  "note": "parity.py (review session): 400 random live bank entries with their STORED fp32 vectors, 60 real agent queries; bf16 = model_kwargs torch_dtype; batch 8.",
+  "timing:fp32": {
+   "resolved_dtype": "fp32",
+   "docs_s": 617.6,
+   "ms_per_doc": 1544,
+   "ms_per_query": 166
+  },
+  "timing:bf16": {
+   "resolved_dtype": "bf16",
+   "docs_s": 145.7,
+   "ms_per_doc": 364,
+   "ms_per_query": 36
+  },
+  "reproduction fp32-now vs STORED": {
+   "min": 1.0,
+   "p05": 1.0,
+   "median": 1.0
+  },
+  "doc cos fp32 vs bf16": {
+   "min": 0.99789,
+   "p05": 0.99825,
+   "median": 1.00045
+  },
+  "query cos fp32 vs bf16": {
+   "min": 0.99787,
+   "p05": 0.99813,
+   "median": 1.00029
+  },
+  "bf16-query vs stored": {
+   "top8_overlap_mean": 0.996,
+   "top8_overlap_min": 0.875,
+   "rank0_agree": 60,
+   "queries": 60,
+   "score_delta_mean": 0.0011,
+   "score_delta_max": 0.0056
+  },
+  "all-bf16": {
+   "top8_overlap_mean": 0.977,
+   "top8_overlap_min": 0.875,
+   "rank0_agree": 60,
+   "queries": 60,
+   "score_delta_mean": 0.0015,
+   "score_delta_max": 0.0086
+  }
+ },
+ "parity_branch_embedding_pipeline": {
+  "note": "parity_branch.py: the same 400 entries / 60 queries through the branch's EmbeddingPipeline, cpu_dtype fp32 vs auto (no env override); queries encoded one at a time via encode_query.",
+  "timing:fp32": {
+   "resolved_dtype": "fp32",
+   "docs_s": 607.7,
+   "ms_per_doc": 1519,
+   "ms_per_query": 220
+  },
+  "timing:auto": {
+   "resolved_dtype": "bf16",
+   "docs_s": 171.9,
+   "ms_per_doc": 430,
+   "ms_per_query": 87
+  },
+  "reproduction fp32 (branch) vs STORED": {
+   "min": 1.0,
+   "p05": 1.0,
+   "median": 1.0
+  },
+  "doc cos fp32 vs auto": {
+   "min": 0.99789,
+   "p05": 0.99825,
+   "median": 1.00045
+  },
+  "query cos fp32 vs auto": {
+   "min": 0.99791,
+   "p05": 0.99817,
+   "median": 1.00087
+  },
+  "auto-query vs stored": {
+   "top8_overlap_mean": 0.994,
+   "top8_overlap_min": 0.875,
+   "rank0_agree": 60,
+   "queries": 60,
+   "score_delta_mean": 0.0012,
+   "score_delta_max": 0.0058
+  },
+  "all-auto": {
+   "top8_overlap_mean": 0.979,
+   "top8_overlap_min": 0.875,
+   "rank0_agree": 60,
+   "queries": 60,
+   "score_delta_mean": 0.0015,
+   "score_delta_max": 0.0086
+  }
+ },
+ "ingest_probe_branch": {
+  "note": "ingest_probe.py through the branch's EmbeddingPipeline (batch_size 16 = the daemon default) and ReferenceBank.ingest_text; VmHWM reset via /proc/self/clear_refs before each measurement. OLD = one encode over all chunks (pre-change ingest); NEW = slices of INGEST_ENCODE_BATCH=8.",
+  "fp32": {
+   "encode_transients": {
+    "4": {
+     "base_mb": 2820,
+     "peak_mb": 3525,
+     "transient_mb": 705,
+     "seconds": 8.8
+    },
+    "8": {
+     "base_mb": 3422,
+     "peak_mb": 4438,
+     "transient_mb": 1016,
+     "seconds": 17.3
+    },
+    "16": {
+     "base_mb": 3991,
+     "peak_mb": 5432,
+     "transient_mb": 1441,
+     "seconds": 36.7
+    }
+   },
+   "resolved_dtype": "fp32",
+   "after_load_rss_mb": 2811,
+   "load_hwm_mb": 3808,
+   "old_ingest": {
+    "chunks": 104,
+    "base_mb": 2832,
+    "peak_mb": 5397,
+    "transient_mb": 2565,
+    "seconds": 171.1
+   },
+   "new_ingest": {
+    "chunks": 104,
+    "base_mb": 2858,
+    "peak_mb": 3886,
+    "transient_mb": 1028,
+    "seconds": 166.9
+   }
+  },
+  "auto": {
+   "encode_transients": {
+    "4": {
+     "base_mb": 1361,
+     "peak_mb": 1733,
+     "transient_mb": 372,
+     "seconds": 2.3
+    },
+    "8": {
+     "base_mb": 1586,
+     "peak_mb": 2105,
+     "transient_mb": 519,
+     "seconds": 4.7
+    },
+    "16": {
+     "base_mb": 1883,
+     "peak_mb": 2883,
+     "transient_mb": 1000,
+     "seconds": 10.6
+    }
+   },
+   "resolved_dtype": "bf16",
+   "after_load_rss_mb": 520,
+   "load_hwm_mb": 537,
+   "old_ingest": {
+    "chunks": 104,
+    "base_mb": 1588,
+    "peak_mb": 2660,
+    "transient_mb": 1072,
+    "seconds": 44.7
+   },
+   "new_ingest": {
+    "chunks": 104,
+    "base_mb": 2406,
+    "peak_mb": 2406,
+    "transient_mb": 0,
+    "seconds": 45.6
+   }
+  }
+ },
+ "regression_gate_bf16": {
+  "note": "evals/regression_gate.ps1 on branch commit b8dbadbf; its stage 1 rebuild_contexts.py embeds with EmbeddingPipeline(EmbeddingConfig(device='cpu')), which resolved to bf16 on this CPU.",
+  "verdict": "PASS",
+  "replicates": 2,
+  "baseline_commit": "dbda72c5",
+  "arms": {
+   "rag": {
+    "mean": 0.5897,
+    "std": 0.0,
+    "accuracies": [
+     0.5897,
+     0.5897
+    ]
+   },
+   "cortex": {
+    "mean": 0.6923,
+    "std": 0.0,
+    "accuracies": [
+     0.6923,
+     0.6923
+    ]
+   },
+   "hybrid": {
+    "mean": 0.7692,
+    "std": 0.0,
+    "accuracies": [
+     0.7692,
+     0.7692
+    ]
+   },
+   "cascade": {
+    "mean": 0.7692,
+    "std": 0.0,
+    "accuracies": [
+     0.7692,
+     0.7692
+    ]
+   }
+  }
+ }
+}

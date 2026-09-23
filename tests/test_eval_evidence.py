@@ -613,6 +613,48 @@ CLAIMS.append(Claim(
     value=_mcnemar_p("Qwen3-Embedding-0.6B (instructed)", 10),
     stated=0.004, places=3))
 
+# ── the CPU bf16 embedder (daemon OOM fix, 2026-09-23) ────────────────────
+BF16_PROBE = RESULTS + "embedder-cpu-bf16-probe-20260923.json"
+_BF16_PARITY = ("parity_branch_embedding_pipeline", "auto-query vs stored")
+
+for _id, _doc, _needle, _path, _stated, _places in [
+    ("bf16-parity-top8", CONFIG_GUIDE, "top-8 overlap 0.994 and rank-0 60/60",
+     _BF16_PARITY + ("top8_overlap_mean",), 0.994, 3),
+    ("bf16-parity-rank0", CONFIG_GUIDE, "top-8 overlap 0.994 and rank-0 60/60",
+     _BF16_PARITY + ("rank0_agree",), 60, 0),
+    ("bf16-parity-top8-changelog", CHANGELOG,
+     "vectors kept top-8 overlap 0.994 (min 0.875) and rank-0 60/60 (max score",
+     _BF16_PARITY + ("top8_overlap_mean",), 0.994, 3),
+    ("bf16-parity-min-changelog", CHANGELOG,
+     "vectors kept top-8 overlap 0.994 (min 0.875) and rank-0 60/60 (max score",
+     _BF16_PARITY + ("top8_overlap_min",), 0.875, 3),
+    ("bf16-gate-cortex", CHANGELOG,
+     "every arm identical to its fp32 baseline (rag 0.5897, cortex 0.6923,",
+     ("regression_gate_bf16", "arms", "cortex", "mean"), 0.6923, 4),
+    ("bf16-gate-rag", CHANGELOG,
+     "every arm identical to its fp32 baseline (rag 0.5897, cortex 0.6923,",
+     ("regression_gate_bf16", "arms", "rag", "mean"), 0.5897, 4),
+    ("bf16-load-peak-fp32", CHANGELOG, "while loading 537 MB vs 3,808 MB",
+     ("memory_probe_raw_sentence_transformers", "fp32", "loaded", "hwm_mb"),
+     3808, 0),
+    ("bf16-load-peak-bf16", CHANGELOG, "while loading 537 MB vs 3,808 MB",
+     ("memory_probe_raw_sentence_transformers", "bf16_loaded_directly",
+      "loaded", "hwm_mb"), 537, 0),
+    ("ingest-old-transient", CHANGELOG,
+     "A 104-chunk document peaked +2,565 MB over",
+     ("ingest_probe_branch", "fp32", "old_ingest", "transient_mb"), 2565, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_id, doc=_doc, needle=_needle, artifacts=(BF16_PROBE,),
+        value=(lambda path: lambda d: _dig(d, path))(_path),
+        stated=_stated, places=_places))
+
+
+def _dig(d, path):
+    for key in path:
+        d = d[key]
+    return d
+
 
 # ── the cortex-BM25 opt-in decision (2026-07-30) ─────────────────────────
 # The channel ships OFF because a pre-registered A/B measured no benefit;

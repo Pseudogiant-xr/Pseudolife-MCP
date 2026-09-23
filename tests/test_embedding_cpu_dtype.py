@@ -328,7 +328,55 @@ def test_a_loader_that_ignores_the_dtype_kwarg_is_caught_and_cast(
         "a silently ignored dtype kwarg must be logged")
 
 
+def test_a_partly_bf16_model_is_finished_by_a_cast(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """sentence-transformers 3.0.x passed the dtype to the Transformer module
+    only; a downstream Dense layer stayed fp32 and every encode then failed
+    with a dtype mismatch. The first parameter alone reads bf16 there, so
+    the check has to cover all of them."""
+
+    class _Mixed(_Model):
+        def __init__(self):
+            super().__init__(torch.bfloat16)
+            self.dense = torch.nn.Parameter(torch.ones(4, dtype=torch.float32))
+
+    monkeypatch.setattr(embedding, "SentenceTransformer",
+                        lambda model_name, device=None, **kwargs: _Mixed())
+    monkeypatch.delenv(ENV, raising=False)
+    _native(monkeypatch, True)
+    with caplog.at_level(logging.WARNING, logger=embedding.logger.name):
+        pipe = embedding.EmbeddingPipeline(
+            EmbeddingConfig(device="cpu", cpu_dtype="auto"))
+    assert {p.dtype for p in pipe.model.parameters()} == {torch.bfloat16}
+    assert pipe.dtype == "bf16"
+    assert any("cast" in r.getMessage() for r in caplog.records)
+
+
 # ── what leaves the pipeline ───────────────────────────────────────────────
+
+
+def test_cached_rows_are_ordinary_tensors(
+    loads, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sentence-transformers 5 encodes under torch.inference_mode(); rows
+    kept in the LRU must not be inference tensors (an in-place op on one
+    raises outside inference mode). The numpy path this replaced never
+    produced them."""
+    _native(monkeypatch, True)
+
+    class _InferenceModel(_Model):
+        def encode(self, texts, convert_to_tensor=False, **kwargs):
+            with torch.inference_mode():
+                return torch.ones(len(texts), 4, dtype=torch.float32)
+
+    monkeypatch.setattr(embedding, "SentenceTransformer",
+                        lambda model_name, device=None, **kwargs: _InferenceModel())
+    pipe = embedding.EmbeddingPipeline(
+        EmbeddingConfig(device="cpu", cpu_dtype="fp32", cache_size=8))
+    pipe.encode(["alpha"])
+    (cached,) = pipe._cache.values()
+    assert not cached.is_inference()
 
 
 @pytest.mark.parametrize("cache_size", [0, 16])

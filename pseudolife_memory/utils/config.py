@@ -55,11 +55,15 @@ class EmbeddingConfig:
     # bf16 on a CPU without it is slow (the 2026-09-20 CI diagnostics).
     # Measured 2026-09-23, Qwen3-Embedding-0.6B in a throwaway container from
     # the 0.15.0 daemon image on a Ryzen 7 9800X3D (avx512_bf16), bf16 loaded
-    # directly vs fp32: steady RSS ~1.4 GB vs ~2.85 GB, load peak 537 MB vs
-    # 3,808 MB, a single short query encode ~88 ms vs ~160 ms. Parity on 400
-    # live bank entries + 60 real queries: bf16 queries against the stored
-    # fp32 vectors keep top-8 overlap 0.996 (min 0.875), rank-0 60/60, max
-    # score delta 0.0056. PSEUDOLIFE_EMBEDDING_CPU_DTYPE overrides this.
+    # directly vs fp32: steady RSS ~1.4 GB vs ~2.85 GB, peak RSS while
+    # loading 537 MB vs 3,808 MB (bf16 weights page in on first use), a
+    # single short query encode ~88 ms vs ~160 ms. Parity through this
+    # pipeline on 400 live bank entries + 60 real queries: bf16 queries
+    # against the stored fp32 vectors keep top-8 overlap 0.994 (min 0.875),
+    # rank-0 60/60, max score delta 0.0058; the regression gate scored every
+    # arm identically to its fp32 baseline. Evidence:
+    # evals/results/embedder-cpu-bf16-probe-20260923.json.
+    # PSEUDOLIFE_EMBEDDING_CPU_DTYPE overrides this.
     cpu_dtype: str = "auto"
 
 

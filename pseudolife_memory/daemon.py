@@ -85,7 +85,7 @@ def _warn_near_memory_limit(memory: dict) -> None:
     _last_memory_warning = now
     events = memory.get("events") or {}
     logger.warning(
-        "daemon memory is near its limit: %.0f%% of %d MiB in use "
+        "daemon memory is near its limit: working set %.0f%% of %d MiB "
         "(memory.events max=%s oom_kill=%s). An OOM kill restarts the "
         "daemon; raise PSEUDOLIFE_DAEMON_MEM_LIMIT or find the growth.",
         100 * memory["used_fraction"], memory["limit_bytes"] // 2**20,
@@ -177,7 +177,11 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     # is still serving as dead. The loudness is the rate-limited WARNING.
     from pseudolife_memory.utils import memory_headroom
 
-    memory = memory_headroom.read_memory_headroom()
+    try:
+        memory = memory_headroom.read_memory_headroom()
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        logger.debug("memory headroom read failed", exc_info=True)
+        memory = {"source": "unavailable"}
     payload["memory"] = memory
     if memory.get("near_limit"):
         _warn_near_memory_limit(memory)

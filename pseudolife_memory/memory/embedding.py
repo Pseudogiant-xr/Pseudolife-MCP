@@ -122,12 +122,14 @@ def _accepts_model_kwargs(factory) -> bool:
     )
 
 
-def _param_dtype(model) -> torch.dtype | None:
-    """The resident dtype of a torch model; None for ONNX or a stub."""
+def _param_dtypes(model) -> set[torch.dtype]:
+    """Every dtype among a torch model's parameters; empty for ONNX or a
+    stub. All of them, not the first: sentence-transformers 3.0.x applied a
+    load dtype to the Transformer module only, leaving a Dense head fp32."""
     try:
-        return next(model.parameters()).dtype
-    except (AttributeError, StopIteration, TypeError):
-        return None
+        return {p.dtype for p in model.parameters()}
+    except (AttributeError, TypeError):
+        return set()
 
 
 def _cached_hf_file(
@@ -301,20 +303,22 @@ class EmbeddingPipeline:
                       if torch.device(device).type == "cpu" else None)
             if target is torch.bfloat16 and _accepts_model_kwargs(SentenceTransformer):
                 # Load straight into bf16. Casting after an fp32 load keeps
-                # the fp32 load peak: 3,808 MB vs 537 MB for the Qwen default
-                # (2026-09-23 probe), which alone crowded the old 4g cap.
+                # the fp32 load peak: peak RSS while loading the Qwen default
+                # measured 3,808 MB that way vs 537 MB direct (2026-09-23;
+                # bf16 weights then page in on first use, ~1.4 GB steady).
                 dtype_kwarg = _dtype_kwarg_name()
                 self.model = SentenceTransformer(
                     config.model_name,
                     device=device,
                     model_kwargs={dtype_kwarg: torch.bfloat16},
                 )
-                loaded = _param_dtype(self.model)
-                if loaded not in (None, torch.bfloat16):
+                loaded = _param_dtypes(self.model)
+                if loaded and loaded != {torch.bfloat16}:
                     logger.warning(
-                        "The model loader ignored %s=bfloat16 and loaded "
-                        "%s; casting to bf16 after load (the fp32 load peak "
-                        "was not avoided).", dtype_kwarg, loaded,
+                        "The model loader left parameters in %s despite "
+                        "%s=bfloat16; casting them to bf16 after load (the "
+                        "fp32 load peak is avoided only for what loaded in "
+                        "bf16).", sorted(map(str, loaded)), dtype_kwarg,
                     )
                     self.model.to(torch.bfloat16)
             elif target is torch.bfloat16:
@@ -342,7 +346,11 @@ class EmbeddingPipeline:
                     self.model.float()
         # The resident precision, read back rather than assumed. None for
         # ONNX, whose precision is the configured artifact's.
-        self.dtype: str | None = _DTYPE_LABELS.get(_param_dtype(self.model))
+        resident = _param_dtypes(self.model)
+        self.dtype: str | None = (
+            _DTYPE_LABELS.get(next(iter(resident))) if len(resident) == 1
+            else "mixed" if resident else None
+        )
         # Cap the tokenizer's max sequence length. Applies to both backends:
         # SentenceTransformer.max_seq_length delegates to the underlying
         # Transformer module regardless of which runtime (torch/onnx) does
@@ -431,6 +439,11 @@ class EmbeddingPipeline:
             )
             if isinstance(embeddings, torch.Tensor):
                 fresh = embeddings.detach().to(device="cpu", dtype=torch.float32)
+                # sentence-transformers 5 encodes under inference_mode, and
+                # .to() is a no-op for fp32 CPU rows; cached rows stay
+                # ordinary tensors, as the numpy path always produced.
+                if fresh.is_inference():
+                    fresh = fresh.clone()
             else:
                 fresh = torch.from_numpy(np.array(embeddings)).float()
             for row, i in enumerate(misses):

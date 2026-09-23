@@ -340,7 +340,11 @@ for delivery-state and host-verification contracts.
   native support is slow; `fp32` / `bf16` force one. Measured 2026-09-23 on
   the production image, bf16 held ~1.4 GB steady vs ~2.85 GB for fp32, and
   on 400 real bank entries bf16 queries against stored fp32 vectors kept
-  top-8 overlap 0.996 and rank-0 60/60. Vectors are stored as float32
+  top-8 overlap 0.994 and rank-0 60/60, with the regression gate scoring
+  every arm identically to its fp32 baseline
+  (`evals/results/embedder-cpu-bf16-probe-20260923.json`). The default
+  applies everywhere the embedder runs, evals included: an eval on a
+  native-bf16 CPU embeds in bf16. Vectors are stored as float32
   either way. `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` overrides the config value;
   `/health` reports the resident `embedder.dtype`. It's
   instruction-asymmetric: query-side text (search/recall probes) is encoded
@@ -947,10 +951,13 @@ of truth — see the volume note above.)
 ## Windows / WSL2 memory (Docker tier)
 
 Docker Desktop's WSL2 VM (`Vmmem`) claims up to **~50% of host RAM** by
-default, which is far more than the stack needs. Under dream load the whole
-stack wants ~6–7 GB with the default extractor sidecar, or roughly 3 GB in
-`sonnet-only` mode with the bf16 embedder (~4 GB with fp32) — where the
-Qwen3 embedding backbone is the bulk of it.
+default, which is far more than the stack needs. Adding up the parts
+measured 2026-09-23 — daemon ~2.5 GB with the bf16 embedder or ~4 GB with
+fp32, the extractor sidecar's ~5.3 GB mmapped model plus its context, and
+Postgres — the whole stack wants ~9 GB under dream load with the default
+sidecar (~10 GB with fp32), or ~3 GB in `sonnet-only` mode (~4.5 GB), where
+the Qwen3 embedding backbone is the bulk of it. Encode bursts add up to
+~1 GB on top.
 Cap the VM by copying `ops/wslconfig.example` to
 `%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
 

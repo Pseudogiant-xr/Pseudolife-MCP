@@ -74,6 +74,43 @@ def test_reads_a_container_cgroup_v2_limit(tmp_path: Path) -> None:
     assert got["rss_peak_bytes"] == 3_800_000 * 1024
 
 
+def test_near_limit_counts_the_working_set_not_reclaimable_cache(
+    tmp_path: Path,
+) -> None:
+    """memory.current includes inactive page cache the kernel drops first
+    (ops/backup.* tars /data inside the daemon container). near_limit keys
+    on the working set, current minus inactive_file, as the kubelet does."""
+    cg = _cgroup(tmp_path / "cg", current=int(3.8 * GIB), limit=str(4 * GIB),
+                 stat=f"anon {int(2.4 * GIB)}\nfile {int(1.4 * GIB)}\n"
+                      f"inactive_file {int(1.2 * GIB)}\n")
+    got = mh.read_memory_headroom(cgroup_root=cg, proc_self=_proc(tmp_path / "p"))
+    assert got["current_bytes"] == int(3.8 * GIB)
+    assert got["working_set_bytes"] == int(3.8 * GIB) - int(1.2 * GIB)
+    assert got["used_fraction"] == pytest.approx(0.65, abs=1e-3)
+    assert got["near_limit"] is False
+
+
+@pytest.mark.parametrize("bad", ["²\n", "not-a-number\n"])
+def test_unparseable_cgroup_values_do_not_raise(tmp_path: Path, bad: str) -> None:
+    """``str.isdigit()`` accepts '²', which ``int()`` rejects: a check that
+    passes and a parse that raises would 500 /health."""
+    cg = _cgroup(tmp_path / "cg", current=int(1.0 * GIB), limit=str(2 * GIB))
+    (cg / "memory.max").write_text(bad, encoding="utf-8")
+    got = mh.read_memory_headroom(cgroup_root=cg, proc_self=_proc(tmp_path / "p"))
+    assert got["limit_bytes"] is None
+    (cg / "memory.current").write_text(bad, encoding="utf-8")
+    got = mh.read_memory_headroom(cgroup_root=cg, proc_self=_proc(tmp_path / "p"))
+    assert got["source"] == "process"
+
+
+def test_undecodable_files_do_not_raise(tmp_path: Path) -> None:
+    cg = _cgroup(tmp_path / "cg", current=int(1.0 * GIB), limit=str(2 * GIB))
+    (cg / "memory.events").write_bytes(b"max \xff\xfe\n")
+    got = mh.read_memory_headroom(cgroup_root=cg, proc_self=_proc(tmp_path / "p"))
+    assert got["source"] == "cgroup"
+    assert got["events"] == {}
+
+
 def test_below_ninety_percent_is_not_near_the_limit(tmp_path: Path) -> None:
     cg = _cgroup(tmp_path / "cg", current=int(2.0 * GIB), limit=str(6 * GIB))
     got = mh.read_memory_headroom(cgroup_root=cg, proc_self=_proc(tmp_path / "p"))
@@ -188,6 +225,20 @@ def test_the_near_limit_warning_is_rate_limited(
         daemon._build_health_payload(_Svc(), token_present=False)
     assert first == 1
     assert len(caplog.records) == 2
+
+
+def test_a_failing_memory_read_never_breaks_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pseudolife_memory.daemon import _build_health_payload
+
+    def _boom():
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(mh, "read_memory_headroom", _boom)
+    payload = _build_health_payload(_Svc(), token_present=False)
+    assert payload["status"] == "ok"
+    assert payload["memory"] == {"source": "unavailable"}
 
 
 def test_health_names_the_embedder_precision_once_built(

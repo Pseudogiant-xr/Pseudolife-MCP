@@ -24,7 +24,16 @@ _EVENT_KEYS = ("max", "oom", "oom_kill")
 def _read(path: Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, ValueError):  # ValueError covers UnicodeDecodeError
+        return None
+
+
+def _int(text: str | None) -> int | None:
+    # int() rather than str.isdigit(), which accepts digits like "²" that
+    # int() rejects.
+    try:
+        return int(text) if text is not None else None
+    except ValueError:
         return None
 
 
@@ -33,10 +42,9 @@ def _keyed_ints(text: str | None) -> dict[str, int]:
     out: dict[str, int] = {}
     for line in (text or "").splitlines():
         key, _, value = line.partition(" ")
-        try:
-            out[key] = int(value)
-        except ValueError:
-            continue
+        parsed = _int(value)
+        if parsed is not None:
+            out[key] = parsed
     return out
 
 
@@ -60,12 +68,9 @@ def _process_rss(proc_self: Path) -> dict[str, int]:
     for line in (status or "").splitlines():
         key, _, rest = line.partition(":")
         name = {"VmRSS": "rss_bytes", "VmHWM": "rss_peak_bytes"}.get(key)
-        if name is None:
-            continue
-        try:
-            out[name] = int(rest.split()[0]) * 1024  # reported in kB
-        except (IndexError, ValueError):
-            continue
+        kb = _int(rest.split()[0]) if name and rest.split() else None
+        if kb is not None:
+            out[name] = kb * 1024  # reported in kB
     return out
 
 
@@ -79,22 +84,26 @@ def read_memory_headroom(
     ``source`` says where the numbers came from: ``cgroup`` (usage, limit,
     ``used_fraction``, ``near_limit``, the anon/file split and the
     ``memory.events`` max/oom/oom_kill counters, plus RSS), ``process``
-    (RSS only, no limit known), or ``unavailable``. ``near_limit`` is None
-    whenever no limit is known. Never raises.
+    (RSS only: no cgroup v2 ``memory.current`` readable), or
+    ``unavailable``. ``used_fraction`` is the working set (current minus
+    ``inactive_file``, the page cache the kernel reclaims first; the
+    kubelet's measure) over the limit. ``near_limit`` is None whenever no
+    limit is known (``memory.max`` = ``max``). Never raises.
     """
     cgroup_root, proc_self = Path(cgroup_root), Path(proc_self)
     rss = _process_rss(proc_self)
     cg = _cgroup_dir(cgroup_root, proc_self)
-    current = _read(cg / "memory.current") if cg is not None else None
-    if current is not None and current.isdigit():
-        raw_limit = _read(cg / "memory.max")
-        limit = int(raw_limit) if raw_limit and raw_limit.isdigit() else None
-        fraction = int(current) / limit if limit else None
+    current = _int(_read(cg / "memory.current")) if cg is not None else None
+    if current is not None:
+        limit = _int(_read(cg / "memory.max"))
         events = _keyed_ints(_read(cg / "memory.events"))
         stat = _keyed_ints(_read(cg / "memory.stat"))
+        working_set = max(0, current - stat.get("inactive_file", 0))
+        fraction = working_set / limit if limit else None
         reading: dict[str, Any] = {
             "source": "cgroup",
-            "current_bytes": int(current),
+            "current_bytes": current,
+            "working_set_bytes": working_set,
             "limit_bytes": limit,
             "used_fraction": round(fraction, 4) if fraction is not None else None,
             "near_limit": (fraction >= NEAR_LIMIT_FRACTION

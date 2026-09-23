@@ -480,6 +480,7 @@
    "d": [
     "sentence-transformers; torch or ONNX backend with auto-fallback",
     "Thread-safe LRU cache; weights baked into the image (HF_HUB_OFFLINE)",
+    "CPU precision cpu_dtype auto: bf16 loaded directly on native-bf16 CPUs, else fp32; rows leave as float32",
     "Swapped from MiniLM 384-d in schema v25 after a seven-arm shootout"
    ]
   },
