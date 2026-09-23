@@ -258,8 +258,9 @@ jobs:
           python -m pip install -U pip
           pip install -e .[dev,lite]
 
-      - name: Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins)
+      - name: Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins, suite lock)
         # These start their own embedded instances (including the crash /
         # attach / lock paths) — no pre-started server, no service
         # container (unsupported on Windows runners), no HF download.
-        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_ops_update_credentials.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py -q
+        # test_suite_lock.py is the only CI coverage of the msvcrt backend.
+        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_ops_update_credentials.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py tests/test_suite_lock.py -q

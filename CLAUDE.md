@@ -85,12 +85,14 @@ concurrent suites killed test daemons with os error 1455 ("paging file is too
 small") where the same head passed alone, and a GPU run beside two suites
 took 143 CUDA OOMs.
 
-- `tests/conftest.py` enforces it. A full run (paths covering `tests/`, no
-  `-k`/`-m`) takes the machine-wide lock
-  `~/.pseudolife-mcp/locks/full-suite.lock` and waits for the holder, naming
-  it about once a minute. `PSEUDOLIFE_SUITE_LOCK=fail` exits instead; `=off`
-  skips the lock (the default on GitHub Actions: one job per VM). Targeted
-  runs are never locked.
+- `tests/conftest.py` enforces it. A full run (all of `tests/`, half or more
+  of its files, or a `-k`/`-m` that only excludes, like `not slow`) takes
+  the lock `~/.pseudolife-mcp/locks/full-suite.lock` and waits for the
+  holder, naming it about once a minute, so start full runs in the
+  background. `PSEUDOLIFE_SUITE_LOCK=fail` exits instead; `=off` skips the
+  lock (the default on GitHub Actions: one job per VM). Targeted runs are
+  never locked. The lock lives in your home directory: a WSL or other-user
+  run does not see it.
 - The suite sets `CUDA_VISIBLE_DEVICES=-1` itself (`PSEUDOLIFE_TEST_CUDA=1`
   opts back in). Never `""`: on Windows an empty value leaves the GPU usable.
 - With several sessions active, still announce `SUITE-START` / `SUITE-END` on

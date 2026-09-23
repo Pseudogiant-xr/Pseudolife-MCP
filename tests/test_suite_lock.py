@@ -9,6 +9,7 @@ would wait forever.
 
 from __future__ import annotations
 
+import errno
 import os
 import queue
 import signal
@@ -94,9 +95,8 @@ class _Proc:
         self.proc.stdin.flush()
 
     def stop(self) -> None:
-        # EOF on stdin first: a lock process releases and exits on its own,
-        # which also covers a Windows venv, where kill() reaches only the
-        # launcher and not the interpreter holding the lock.
+        # EOF on stdin first, so a lock process releases and exits on its
+        # own; kill only what does not.
         try:
             assert self.proc.stdin is not None
             self.proc.stdin.close()
@@ -107,8 +107,8 @@ class _Proc:
 
 
 def _kill_pid(pid: int) -> None:
-    """Hard-kill the interpreter itself: under a Windows venv, Popen.pid is
-    the launcher, and the lock belongs to the interpreter it spawned."""
+    """Hard-kill the interpreter that holds the lock, by its own pid: under
+    a Windows venv, Popen.pid is the launcher in front of it."""
     os.kill(pid, signal.SIGTERM if os.name == "nt" else signal.SIGKILL)
 
 
@@ -141,7 +141,7 @@ def held(tmp_path, procs):
 
 def _config(args, *, cwd: Path = ROOT, worker: bool = False, **options):
     option = SimpleNamespace(
-        keyword="", markexpr="", collectonly=False, help=False, markers=False,
+        keyword="", markexpr="", collectonly=False, markers=False,
         showfixtures=False, show_fixtures_per_test=False)
     for name, value in options.items():
         setattr(option, name, value)
@@ -179,11 +179,32 @@ def test_a_run_over_named_files_is_targeted(args):
 
 @pytest.mark.parametrize("narrowing", [
     {"keyword": "graph"},
+    {"keyword": "graph and not slow"},
+    {"keyword": "nothing_shadowed"},     # "not" only as a whole word
     {"markexpr": "slow"},
+    {"keyword": "not graph", "markexpr": "real_model"},
     {"listing_only": True},
 ])
 def test_selection_and_listing_runs_over_the_tree_are_targeted(narrowing):
     assert not suite_lock.is_full_run(["tests"], ROOT, TESTS, **narrowing)
+
+
+@pytest.mark.parametrize("exclusion", [
+    {"keyword": "not graph"},
+    {"keyword": " not (graph or bm25)"},
+    {"markexpr": "not slow"},
+])
+def test_an_exclusion_only_selection_is_still_full(exclusion):
+    assert suite_lock.is_full_run(["tests"], ROOT, TESTS, **exclusion)
+
+
+def test_naming_most_test_files_is_full():
+    # `pytest tests/test_*.py` reaches pytest as every file, one by one.
+    files = sorted(str(path) for path in TESTS.glob("test_*.py"))
+    half = files[: (len(files) + 1) // 2]
+    assert suite_lock.is_full_run(files, ROOT, TESTS)
+    assert suite_lock.is_full_run(half, ROOT, TESTS)
+    assert not suite_lock.is_full_run(half[:-1], ROOT, TESTS)
 
 
 # --- mode -------------------------------------------------------------------
@@ -272,8 +293,7 @@ def test_a_targeted_run_ignores_a_held_lock(held):
                "PSEUDOLIFE_SUITE_LOCK": "fail"}
     for config in (_config(["tests/test_bm25.py"]),
                    _config(["tests"], keyword="graph"),
-                   _config(["tests"], collectonly=True),
-                   _config(["tests"], help=True)):
+                   _config(["tests"], collectonly=True)):
         assert suite_lock.take_for_session(config, environ, TESTS) is None
 
 
@@ -284,6 +304,37 @@ def test_an_xdist_worker_never_takes_the_lock(held):
                "PSEUDOLIFE_SUITE_LOCK": "fail"}
     worker = _config(["tests"], worker=True)
     assert suite_lock.take_for_session(worker, environ, TESTS) is None
+
+
+def _lock_backend_raises(monkeypatch, code: int) -> None:
+    def refuse(*args, **kwargs):
+        raise OSError(code, os.strerror(code))
+
+    if os.name == "nt":
+        monkeypatch.setattr(suite_lock.msvcrt, "locking", refuse)
+    else:
+        monkeypatch.setattr(suite_lock.fcntl, "flock", refuse)
+
+
+@pytest.mark.parametrize("code", [errno.EACCES, errno.EAGAIN])
+def test_contention_errors_read_as_busy(tmp_path, monkeypatch, code):
+    _lock_backend_raises(monkeypatch, code)
+    with pytest.raises(suite_lock.SuiteLockBusy):
+        suite_lock.acquire(tmp_path, "fail", worktree="w")
+
+
+def test_any_other_lock_error_is_raised_instead_of_waited_on(tmp_path, monkeypatch):
+    # Read as "busy", a filesystem without locks would queue the run forever
+    # behind a holder that does not exist. (Fail mode, so a regression fails
+    # the test rather than hanging it.)
+    _lock_backend_raises(monkeypatch, errno.ENOLCK)
+    with pytest.raises(OSError) as raised:
+        suite_lock.acquire(tmp_path, "fail", worktree="w")
+    assert raised.value.errno == errno.ENOLCK
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path),
+               "PSEUDOLIFE_SUITE_LOCK": "fail"}
+    with pytest.raises(pytest.UsageError, match="PSEUDOLIFE_SUITE_LOCK=off skips it"):
+        suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
 
 
 def test_a_bad_mode_is_a_usage_error_even_for_a_targeted_run(tmp_path):
@@ -323,6 +374,8 @@ def _pytest_env(directory: Path, mode: str) -> dict[str, str]:
     env = dict(os.environ)
     env["PSEUDOLIFE_SUITE_LOCK_DIR"] = str(directory)
     env["PSEUDOLIFE_SUITE_LOCK"] = mode
+    # These runs never reach a PG test; don't provision a database for them.
+    env.pop("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", None)
     return env
 
 
@@ -358,6 +411,19 @@ def test_an_xdist_run_takes_the_lock_once_in_its_controller(tmp_path, procs):
     pytest.importorskip("xdist")
     run = procs(_full_run_collecting_nothing(workers=1), _pytest_env(tmp_path, "fail"))
     assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
+    # The refusal line is the signal: xdist 3.8 still exits 5 when a worker
+    # fails in pytest_configure, even with --max-worker-restart=0 (checked).
+    assert not any("full-suite lock held by" in line for line in run.seen), run.seen
+
+
+@pytest.mark.parametrize("listing", [
+    "--collect-only", "--fixtures", "--fixtures-per-test", "--markers", "--help",
+])
+def test_a_listing_pytest_run_over_the_tree_is_not_locked(held, procs, listing):
+    # Pins LISTING_OPTIONS to the option names pytest really uses.
+    run = procs([*_full_run_collecting_nothing(), listing],
+                _pytest_env(held.dir, "fail"))
+    assert run.drain() != pytest.ExitCode.USAGE_ERROR, run.seen
     assert not any("full-suite lock held by" in line for line in run.seen), run.seen
 
 

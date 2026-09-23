@@ -11,16 +11,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machine-wide exclusive lock, `~/.pseudolife-mcp/locks/full-suite.lock`,
   before it loads the embedder. A second full run from any worktree or agent
   waits for it and prints the holder's worktree, pid and start time about
-  once a minute. The lock is an OS byte-range lock (`msvcrt.locking` /
-  `fcntl.flock`), so a holder that crashes frees it; no pid file can go
-  stale. `PSEUDOLIFE_SUITE_LOCK=fail` exits with a usage error instead of
-  waiting, and `=off` skips the lock. `off` is the default on GitHub Actions,
-  where each job has its own VM. Targeted runs are never locked: named files
-  or node ids, `-k`/`-m` selections, `--collect-only` and the other listings.
-  xdist workers leave the lock to their controller. Measured 2026-09-23 on
-  the maintainer's Windows host, one full CPU suite commits ~20 GB, and two
-  concurrent suites crossed the commit limit: test daemons died with os
-  error 1455 (`tests/suite_lock.py` has the numbers).
+  once a minute. The OS holds the lock (`msvcrt.locking` on Windows,
+  `fcntl.flock` elsewhere), so a holder that crashes frees it; no pid file
+  can go stale. `PSEUDOLIFE_SUITE_LOCK=fail` exits with a usage error
+  instead of waiting, and `=off` skips the lock. `off` is the default on
+  GitHub Actions, where each job has its own VM. Runs naming half or more of
+  the test files, or selecting with a `-k`/`-m` that only excludes
+  (`not slow`), count as full. Targeted runs are never locked: a few named
+  files or node ids, other `-k`/`-m` selections, `--collect-only` and the
+  other listings. xdist workers leave the lock to their controller. A lock
+  error other than contention is a usage error, never an endless wait.
+  Measured 2026-09-23 on the maintainer's Windows host, one full CPU suite
+  commits ~20 GB, and two concurrent suites crossed the commit limit: test
+  daemons died with os error 1455 (`tests/suite_lock.py` has the numbers).
+  The Windows CI lane now runs `tests/test_suite_lock.py`, so both lock
+  backends are tested in CI.
 - The test session hides the GPU with `CUDA_VISIBLE_DEVICES=-1` unless
   `PSEUDOLIFE_TEST_CUDA=1` is set. An empty value does not work here: on
   Windows it left `torch.cuda.is_available()` true, so the embedder still

@@ -35,8 +35,10 @@ Standard library only: conftest imports this before torch.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -56,10 +58,19 @@ MODES = ("wait", "fail", "off")
 LOCK_FILE = "full-suite.lock"
 HOLDER_FILE = "full-suite.holder.json"
 
-# pytest options under which a session runs no test: help and the listings.
+# pytest options under which a session runs no test. (--help needs no entry:
+# pytest stops parsing before it sets config.args, so no path covers tests/.)
 LISTING_OPTIONS = (
-    "help", "collectonly", "markers", "showfixtures", "show_fixtures_per_test",
+    "collectonly", "markers", "showfixtures", "show_fixtures_per_test",
 )
+
+# What a non-blocking lock attempt raises while another process holds it:
+# EACCES from msvcrt.locking, EWOULDBLOCK/EAGAIN from flock.
+_BUSY_ERRNOS = frozenset({errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK})
+
+# A -k/-m expression that only excludes (``not slow``) still selects nearly
+# the whole suite.
+_EXCLUSION = re.compile(r"\s*not\b")
 
 
 class SuiteLockBusy(RuntimeError):
@@ -108,16 +119,23 @@ def lock_dir(environ) -> Path:
 def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
                 keyword: str = "", markexpr: str = "",
                 listing_only: bool = False) -> bool:
-    """Whether a run covers the whole ``tests/`` tree.
+    """Whether a run covers the whole ``tests/`` tree, or most of it.
 
     Full: some path argument is ``tests/`` itself or one of its ancestors
-    (``pytest`` with no arguments resolves to ``tests`` via testpaths).
-    Targeted: named files or node ids, a ``-k``/``-m`` selection, or a run
-    that executes no test (``--collect-only``, ``--fixtures``, ``--help``).
+    (``pytest`` with no arguments resolves to ``tests`` via testpaths), or
+    the named files are at least half of ``tests/test_*.py`` (a shell glob
+    such as ``tests/test_*.py`` names them all). Targeted: a few named files
+    or node ids, a ``-k``/``-m`` selection — unless it only excludes
+    (``-k "not x"``) — or a run that executes no test (``--collect-only``,
+    ``--fixtures``, ``--help``).
     """
-    if keyword or markexpr or listing_only:
+    if listing_only:
         return False
+    for expression in (keyword, markexpr):
+        if expression and not _EXCLUSION.match(expression):
+            return False
     root = tests_root.resolve()
+    named: set[Path] = set()
     for arg in args:
         path_part = str(arg).split("::", 1)[0]
         if not path_part:
@@ -131,18 +149,27 @@ def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
             continue
         if path == root or path in root.parents:
             return True
-    return False
+        if path.parent == root:
+            named.add(path)
+    if not named:
+        return False
+    return 2 * len(named) >= sum(1 for _ in root.glob("test_*.py"))
 
 
 def _try_lock(handle: IO[bytes]) -> bool:
+    """True when taken, False when another process holds it. Any other
+    failure (a bad handle, a filesystem without locks) raises: read as
+    "busy", it would queue the run forever behind nobody."""
     try:
         if os.name == "nt":
             handle.seek(0)
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return False
+    except OSError as exc:
+        if exc.errno in _BUSY_ERRNOS:
+            return False
+        raise
     return True
 
 
@@ -176,23 +203,26 @@ def acquire(directory: Path, mode: str, *, worktree: str,
     lock_path = directory / LOCK_FILE
     handle = open(lock_path, "a+b")  # noqa: SIM115 — held until release()
     waited_from = next_notice = None
-    while not _try_lock(handle):
-        holder = describe_holder(read_holder(directory))
-        if mode == "fail":
-            handle.close()
-            raise SuiteLockBusy(
-                f"full-suite lock held by {holder}; {LOCK_ENV}=fail refuses to "
-                f"queue (unset it to wait, or run a targeted subset)")
-        now = time.monotonic()
-        hint = ""
-        if waited_from is None:
-            waited_from = next_notice = now
-            hint = f" ({lock_path}; {LOCK_ENV}=fail exits instead, =off skips it)"
-        if now >= next_notice:
-            print(f"waiting for the full-suite lock held by {holder}{hint}",
-                  file=out, flush=True)
-            next_notice = now + notice_every
-        time.sleep(poll)
+    try:
+        while not _try_lock(handle):
+            holder = describe_holder(read_holder(directory))
+            if mode == "fail":
+                raise SuiteLockBusy(
+                    f"full-suite lock held by {holder}; {LOCK_ENV}=fail refuses "
+                    f"to queue (unset it to wait, or run a targeted subset)")
+            now = time.monotonic()
+            hint = ""
+            if waited_from is None:
+                waited_from = next_notice = now
+                hint = f" ({lock_path}; {LOCK_ENV}=fail exits instead, =off skips it)"
+            if now >= next_notice:
+                print(f"waiting for the full-suite lock held by {holder}{hint}",
+                      file=out, flush=True)
+                next_notice = now + notice_every
+            time.sleep(poll)
+    except BaseException:  # refused, a lock error, or Ctrl-C while queued
+        handle.close()
+        raise
     record = {
         "pid": os.getpid(),
         "worktree": str(worktree),
@@ -251,7 +281,12 @@ def take_for_session(config, environ, tests_root: Path) -> HeldLock | None:
             listing_only=any(getattr(option, name, False)
                              for name in LISTING_OPTIONS)):
         return None
+    directory = lock_dir(environ)
     try:
-        return acquire(lock_dir(environ), mode, worktree=str(tests_root.parent))
+        return acquire(directory, mode, worktree=str(tests_root.parent))
     except SuiteLockBusy as exc:
         raise pytest.UsageError(str(exc)) from None
+    except OSError as exc:
+        raise pytest.UsageError(
+            f"cannot take the full-suite lock in {directory}: {exc} "
+            f"({LOCK_ENV}=off skips it)") from None
