@@ -1188,12 +1188,25 @@ class CoordinationConfig:
     # Initial context limit, not a measured throughput tuning constant.
     awareness_limit: int = 5
     allowed_principals: list[str] = field(default_factory=list)
+    # Days the board's audit log (coordination_events, schema v42) keeps an
+    # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
+    # still blank after 24 h. Measured 2026-09-24
+    # (evals/results/coordination-audit-volume-20260924.json): a synthetic
+    # replay at the scale of the 2026-09-23/24 fifteen-session trial, the
+    # busiest night the board has run (40 agents, 623 messages), leaves 2,671
+    # events in 1.6 MB with indexes, so 90 such nights would be 144.5 MB. Ninety
+    # days outlives the 7-day backup rotation (ops/backup.ps1) by a quarter of
+    # retrospectives while keeping growth bounded.
+    audit_retention_days: int = 90
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
             raise ValueError("coordination.enabled must be a boolean")
         if type(self.awareness_limit) is not int or not 1 <= self.awareness_limit <= 20:
             raise ValueError("coordination.awareness_limit must be an integer in 1..20")
+        if type(self.audit_retention_days) is not int or self.audit_retention_days < 0:
+            raise ValueError("coordination.audit_retention_days must be a whole number of "
+                             "days, 0 or more (0 keeps the audit log forever)")
         if not isinstance(self.allowed_principals, list) or any(
             not isinstance(p, str) or not p.strip() for p in self.allowed_principals
         ):

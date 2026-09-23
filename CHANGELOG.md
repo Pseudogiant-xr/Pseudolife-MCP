@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-24 — the agent board keeps a durable, tamper-evident record)
+- Schema **v42** adds `coordination_events`, an append-only audit log of the
+  agent board (`memory_agents` / `memory_message`). Before this, a message
+  body was blanked 24 hours after sending, message rows went after seven days,
+  idle addresses were removed, and each status update overwrote the last, so
+  nothing could say afterwards who reported what, or when. Every board
+  mutation now appends one row in the mutation's own transaction: register,
+  update (with the values it replaced, which is the status history), attach,
+  detach, send (with the full body), first read, acknowledgment, delivery
+  attempt, the prune pass's body expiry and row removal, bank identity, and the
+  operator's restore `recover` and `rebind`. Lease heartbeats are not logged.
+  The live mailbox keeps its 24-hour body TTL.
+- The first time a recipient is served a message, by explicit receive or by the
+  live-delivery adapter, is stamped as `coordination_messages.first_read_at`
+  and logged as a `read` event; the push transport previously left only a
+  delivery attempt, and the pull path left nothing.
+- Rows are chained by sha256 over the previous hash and the row's canonical
+  content, in a dense sequence allocated under a transaction-scoped advisory
+  lock taken last, so edited, inserted, reordered or deleted rows fail
+  verification. The log keeps events for `coordination.audit_retention_days`
+  (default 90; `0` keeps it forever), separate from the mailbox TTL. Its prune
+  removes only a prefix and logs the cut, which anchors the surviving chain.
+  A synthetic replay at the scale of the 2026-09-23/24 fifteen-session trial
+  left 2,671 events in 1.6 MB with indexes, and the append added 1.3 to 2.2 ms
+  to median send, receive and acknowledgment against a control arm
+  (`evals/results/coordination-audit-volume-20260924.json`,
+  `evals/coordination_audit_volume.py`).
+- `pseudolife-mcp board-audit export` (JSON lines, filterable by project, task,
+  agent and time) and `pseudolife-mcp board-audit verify` (prints the chain
+  head; `--expect-head` catches a truncated or recomputed log, `--input`
+  checks an archived export) are operator-only and read-only. They read the
+  bank through `PSEUDOLIFE_MCP_DATABASE_URL`; there is no MCP tool or REST
+  route. The log holds bodies verbatim, lives only in the bank and its full
+  backups, and is excluded from portable exports. Offline restore recovery
+  handles a restored backup that predates the log: it still revokes and
+  rebinds, and says the operation went unrecorded.
+
 ### Fixed (2026-09-23 — starting a service no longer opens a document store it may never use)
 - The reference (document) bank opens its ChromaDB client on the first
   document ingest, or on the first read once a store exists on disk, instead

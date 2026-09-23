@@ -251,7 +251,7 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
         if action in {"register", "send", "heartbeat"}:
             now = time.monotonic()
             if now - getattr(service, "_coordination_pruned_at", float("-inf")) >= 60:
-                store.prune()
+                store.prune(audit_retention_days=cfg.audit_retention_days)
                 service._coordination_pruned_at = now
         if action == "register":
             return store.register(principal, **parameters)

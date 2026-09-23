@@ -671,7 +671,7 @@ def test_mcp_requires_named_principal_and_derives_actor(monkeypatch):
 
 
 def test_schema_40_migrates_to_41_idempotently_and_audit_has_no_fk(pg_conn):
-    from pseudolife_memory.storage.schema import ensure_schema
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION, ensure_schema
 
     pg_conn.execute("DROP TABLE entry_reinstatement_decisions")
     pg_conn.execute(
@@ -681,7 +681,7 @@ def test_schema_40_migrates_to_41_idempotently_and_audit_has_no_fk(pg_conn):
 
     assert pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
-    ).fetchone()[0] == 41
+    ).fetchone()[0] == SCHEMA_META_VERSION
     assert pg_conn.execute(
         "SELECT to_regclass('public.entry_reinstatement_decisions')"
     ).fetchone()[0] == "entry_reinstatement_decisions"

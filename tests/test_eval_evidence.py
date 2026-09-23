@@ -9450,3 +9450,45 @@ for _cid, _needle, _arts, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=_arts,
         value=_val, stated=_stated, places=_places))
+
+# -- the board audit log's cost (2026-09-24) -------------------------------
+# One synthetic night at the recorded scale of the 2026-09-23/24
+# fifteen-session trial. The retention default
+# (CoordinationConfig.audit_retention_days) and both docs rest on it.
+AUDIT_VOLUME = RESULTS + "coordination-audit-volume-20260924.json"
+
+
+def _audit_overhead(bound: Callable) -> Callable[[dict], float]:
+    """The append's paired median cost on send, receive and acknowledgment:
+    each audit arm against the control arm that ran just before it."""
+    def value(d):
+        arms = d["arms"]
+        return bound(arms[audit]["latency"][kind]["p50_ms"]
+                     - arms[control]["latency"][kind]["p50_ms"]
+                     for audit, control in (("audit", "control"),
+                                            ("audit-repeat", "control-repeat"))
+                     for kind in ("send", "receive", "ack"))
+    return value
+
+
+for _doc, _prefix in ((CONFIG_GUIDE, "config-guide"), (CHANGELOG, "changelog")):
+    for _cid, _needle, _val, _stated, _places in [
+        ("audit-events", "left 2,671 events in 1.6 MB",
+         lambda d: d["arms"]["audit"]["events_total"], 2671, 0),
+        ("audit-mb", "left 2,671 events in 1.6 MB",
+         lambda d: d["arms"]["audit"]["table_total_bytes"] / 1e6, 1.6, 1),
+        ("audit-overhead-min", "the append added 1.3 to 2.2 ms",
+         _audit_overhead(min), 1.3, 1),
+        ("audit-overhead-max", "the append added 1.3 to 2.2 ms",
+         _audit_overhead(max), 2.2, 1),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"{_prefix}-{_cid}", doc=_doc, needle=_needle,
+            artifacts=(AUDIT_VOLUME,), value=_val, stated=_stated,
+            places=_places))
+CLAIMS.append(Claim(
+    id="config-guide-audit-90-nights", doc=CONFIG_GUIDE,
+    needle="144.5 MB if every one of 90 nights",
+    artifacts=(AUDIT_VOLUME,),
+    value=lambda d: d["if_every_night_were_a_trial_mb"]["90"],
+    stated=144.5, places=1))

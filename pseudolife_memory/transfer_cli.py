@@ -89,6 +89,9 @@ EXCLUDED_TABLES = (
     "slot_reads",
     # Mail and instance credentials belong to the source bank's runtime.
     "coordination_agents", "coordination_messages",
+    # The board's audit log holds message bodies (paths, usernames) and its
+    # hash chain is anchored in this bank: it stays in full backups only.
+    "coordination_events",
 )
 
 # meta keys that must not travel: the target build owns its schema_version

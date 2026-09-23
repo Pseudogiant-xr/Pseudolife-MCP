@@ -67,6 +67,7 @@ def _perform(args):
         with _connect() as conn:
             result = CoordinationStore(_RecoveryStorage(conn)).recover()
         print(f"Revoked {result['revoked']} mailbox credentials; pending mail retained and wake disabled.")
+        _note_unaudited(result)
         return
 
     if not all((args.agent, args.principal, args.bank_url, args.state)):
@@ -97,6 +98,15 @@ def _perform(args):
             adapter._identity = {key: result[key] for key in ("agent_id", "credential")}
             adapter._save_new_identity(reservation)
     print("Mailbox rebound; private state written. Wake remains disabled until explicit adapter opt-in.")
+    _note_unaudited(result)
+
+
+def _note_unaudited(result):
+    # A restored pre-v42 backup has no audit log, and recovery never migrates
+    # a schema; the operation still happened, it just is not recorded.
+    if result.get("audited") is False:
+        print("The restored bank predates the board audit log (schema v42), so this "
+              "operation is not recorded in it; the log starts empty at the next daemon start.")
 
 
 def main(argv=None) -> int:

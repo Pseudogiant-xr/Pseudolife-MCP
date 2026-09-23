@@ -14,7 +14,9 @@ from psycopg.types.json import Jsonb
 import pytest
 
 from pseudolife_memory.coordination import dispatch
-from pseudolife_memory.storage.coordination import CoordinationError, CoordinationStore
+from pseudolife_memory.storage.coordination import (
+    COORDINATION_SCHEMA_SQL, CoordinationError, CoordinationStore,
+)
 from pseudolife_memory.web.api import build_console_app
 from tests.asgi_helpers import call, stub_mcp
 from tests.pg_fixtures import pg_conn, pg_service, pg_url  # noqa: F401
@@ -258,6 +260,9 @@ def test_independent_bank_differs_while_metadata_clone_keeps_identity(pg_url):
                 conn.execute(sql.SQL(
                     "CREATE TABLE {}.meta (key TEXT PRIMARY KEY, value JSONB NOT NULL)"
                 ).format(sql.Identifier(name)))
+                # Establishing a bank identity is a logged board mutation.
+                conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(name)))
+                conn.execute(COORDINATION_SCHEMA_SQL)
 
         def context(schema):
             with psycopg.connect(pg_url, autocommit=True) as conn:

@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 41
+SCHEMA_META_VERSION = 42
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -469,9 +469,36 @@ CREATE INDEX IF NOT EXISTS coordination_messages_sender_time_idx
     ON coordination_messages (sender_agent_id, created_at);
 CREATE INDEX IF NOT EXISTS coordination_messages_expiry_idx
     ON coordination_messages (expires_at);
+-- v42: when the recipient was first served each message, by either path.
+ALTER TABLE coordination_messages ADD COLUMN IF NOT EXISTS first_read_at DOUBLE PRECISION;
+-- v42: the board's append-only audit log, one row per mutation, written in
+-- the mutation's own transaction. No foreign keys: it outlives the agent and
+-- message rows it describes. seq is dense and allocated under a transaction
+-- advisory lock; hash = sha256(prev_hash || canonical row). payload is the
+-- canonical JSON text that was hashed, kept as TEXT because JSONB would
+-- renormalize it.
+CREATE TABLE IF NOT EXISTS coordination_events (
+    seq BIGINT PRIMARY KEY,
+    event TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    principal TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL DEFAULT '',
+    recipient_agent_id TEXT,
+    project TEXT NOT NULL DEFAULT '',
+    task TEXT NOT NULL DEFAULT '',
+    message_id TEXT,
+    payload TEXT NOT NULL,
+    created_at DOUBLE PRECISION NOT NULL,
+    hlc TEXT NOT NULL DEFAULT '',
+    prev_hash TEXT NOT NULL,
+    hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS coordination_events_time_idx
+    ON coordination_events (created_at);
 """
 
 # v40: operational identities and addressed mail never enter the memory tables.
+# v42 adds their audit log, which does not either.
 SCHEMA_SQL += COORDINATION_SCHEMA_SQL
 
 # Every table this schema declares — the ONE list a bench/test reset
@@ -505,7 +532,7 @@ BENCH_RESET_TABLES = (
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
     "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",
     "store_decisions",
-    "coordination_agents", "coordination_messages",
+    "coordination_agents", "coordination_messages", "coordination_events",
 )
 
 # The dimension every embedding column is declared at (schema v25). Not

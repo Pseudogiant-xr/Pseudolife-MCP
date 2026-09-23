@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v41). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v42). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -48,9 +48,12 @@ coordination:
   enabled: true
   awareness_limit: 5
   allowed_principals: [editor, reviewer]
+  audit_retention_days: 90
 ```
 
-`awareness_limit` must be an integer from 1 to 20 and caps peer summaries. Existing
+`awareness_limit` must be an integer from 1 to 20 and caps peer summaries.
+`audit_retention_days` is how long the [audit log](#audit-log) keeps each event:
+a whole number of days, default 90, and `0` keeps the log forever. Existing
 episodes have no trustworthy project/task or principal fields, so unregistered
 peers are shown with unknown scope and host capability. Titles do not establish
 identity. Last reported activity comes from attributed writes; an open episode
@@ -216,6 +219,86 @@ live delivery into the installed desktop UI.
 See the [Codex validation record](../specs/2026-09-12-codex-coordination.md) and
 [OpenAI's app-server contract](https://learn.chatgpt.com/docs/app-server).
 
+### Audit log
+
+The live mailbox forgets on purpose: bodies blank after 24 hours, rows go after
+seven days, idle addresses are removed, and a status update overwrites the one
+before it. The audit log (`coordination_events`, schema v42) is the durable
+record of what happened on the board, kept for `audit_retention_days`.
+
+Every board mutation appends one row in the same database transaction as the
+mutation itself, so a refused or rolled-back call leaves no event and no event
+exists without its change. The events are `register`, `update` (the new values
+and the ones they replaced, which is the status history), `attach`, `detach`,
+`send` (with the full body), `read`, `ack`, `attempt`, the prune pass's
+`expire` (bodies blanked) and `prune` (messages and addresses removed),
+`bank_identity`, and the operator's restore `recover` and `rebind`. A `read`
+records the first time the recipient was served a message, by explicit receive
+(`path: pull`) or by the live-delivery adapter (`path: delivery`); the same time
+is stamped on the message as `first_read_at`. The per-turn digest's
+100-character preview is not a read. Lease heartbeats are not logged: at the
+shim's 20-second cadence one session would add about 4,300 rows a day, and
+`attach`/`detach` already bracket each lease.
+
+Each row carries a dense sequence number `seq`, the event, its actor (`agent`,
+`daemon` or `operator`), the bearer principal the daemon verified for agent
+actions (never a credential), the agent and recipient IDs, project and task,
+the message ID, a JSON payload, `created_at`, the message's HLC stamp on `send`
+(other events are ordered by `seq`: stamping every mutation would need the full
+service initialization that mailbox calls deliberately avoid), and two hashes.
+`hash` is sha256 of the previous row's hash followed by the row's canonical
+content, so editing, inserting, reordering or deleting a row breaks the chain.
+Appends take a transaction-scoped advisory lock as the mutation's last lock,
+which orders writers on separate connections.
+
+Retention is separate from the mailbox. The prune pass that expires bodies (at
+most once a minute, during registration, sending or heartbeats) also removes the
+log's oldest rows once they are older than `audit_retention_days`, always as a
+prefix, and records the cut as an `audit_prune` event naming the last removed
+row. The surviving chain starts from that anchor. `0` never prunes. A synthetic
+replay at the scale of the 2026-09-23/24 fifteen-session trial, the busiest night
+the board has run (40 agents, 623 messages), left 2,671 events in 1.6 MB
+including indexes: 144.5 MB if every one of 90 nights were that busy
+([artifact](../../evals/results/coordination-audit-volume-20260924.json)). In the
+same run the append added 1.3 to 2.2 ms to the median send, receive and
+acknowledgment on a local server, against a control arm with it disabled.
+
+The log is read by an operator, never by an agent: there is no MCP tool and no
+REST route for it. `pseudolife-mcp board-audit` reads the bank directly through
+`PSEUDOLIFE_MCP_DATABASE_URL`, in a read-only snapshot, so it is safe beside a
+running daemon:
+
+```sh
+pseudolife-mcp board-audit export --task fix-week --since 2026-09-23 > board.jsonl
+pseudolife-mcp board-audit verify
+```
+
+`export` writes one JSON object per line, oldest first, filtered by
+`--project`, `--task`, `--agent` (actor or recipient), `--since` and `--until`
+(epoch seconds or ISO 8601; a time without an offset is local), to stdout or a
+new `--out` file that it never overwrites. `verify` walks the chain and prints
+one JSON report with the head (`head_seq`, `head_hash`), exiting 0 when intact,
+1 on a break (naming the first broken `seq` and whether it was a sequence gap, a
+broken link, changed content or an unanchored start), and 2 when it could not
+check. `verify --input <file>` checks an unfiltered export instead of the bank.
+In the Docker tier run it inside the daemon container, which already has the
+database URL: `docker exec pseudolife-mcp-daemon pseudolife-mcp board-audit verify`.
+
+What the chain does not prove on its own: it cannot see its newest rows being
+deleted, and anyone with write access to the table can rewrite it and recompute
+every hash, because there is no secret. Record the head from a `verify` somewhere
+outside the bank, then check it later with `verify --expect-head SEQ:HASH`,
+which fails if that row was dropped or rewritten (or reports it pruned, once
+retention removed it). The log records mutations made through the coordination
+store; a direct SQL edit of the mailbox tables leaves no event. It proves what
+was sent and by which verified principal, not that a message was true.
+
+The log is private data. It holds message bodies verbatim for the whole
+retention window, and bodies carry machine paths and usernames. It lives only
+in the bank database and its full backups, portable `export`/`import` archives
+omit it, and the CLI writes only to stdout or a local file you name. Keep
+exports out of repositories and anywhere public.
+
 ### Delivery and recovery
 
 Use ordinary `pseudolife-mcp` for authenticated pull messaging. The optional
@@ -237,6 +320,8 @@ decision explicitly as ordinary memory if it should become durable knowledge.
 Initial limits are 8192 UTF-8 bytes per message, 256 pending messages per recipient,
 60 new sends per sender per minute and 50 messages per receive page. Bodies stop
 being served after 24 hours; request-key metadata is retained for seven days.
+The [audit log](#audit-log) keeps its own copy of every body for
+`audit_retention_days`.
 Opportunistic pruning runs at most once per minute during registration, sending
 or heartbeats. Expired bodies remain unservable even when no adapter is running
 to trigger physical cleanup. Full queues and rate limits return explicit errors.
@@ -322,8 +407,8 @@ lock, so concurrent launches cannot both register against that stale reservation
 The lock file remains on disk; lock ownership is released when the process exits,
 including a crash. Do not delete it while an adapter might be using it.
 
-Full database backups contain coordination mail. Portable `export`/`import`
-archives omit both coordination tables and their clock metadata so moving
+Full database backups contain coordination mail and the audit log. Portable `export`/`import`
+archives omit the coordination tables (agents, mail and the audit log) and their clock metadata so moving
 knowledge cannot clone live mailboxes or instance credentials. Follow the
 [offline mailbox recovery procedure](coordination-recovery.md) after a database
 restore. See the [experimental design](../specs/2026-09-11-agent-coordination-design.md)
@@ -1023,7 +1108,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v41**; migrations are additive
+The current Postgres meta version is **v42**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -1070,6 +1155,7 @@ The milestones:
 | v39 | `memory_trace_invalidations` preserves source-supersession events by normalized slot and source entry ID, without entry or fact foreign keys. Explicit correction records entry retirement and existing trace invalidations together. Events survive source deletion, cortex snapshots and compaction; confirmation still clears the served warning. Table creation and older logical imports reconstruct only surviving superseded source/trace pairs. **Upgrade effect:** the first v39 start materialises one event per surviving superseded-source trace pair — 2077 pairs on the reference bank on 2026-09-11, measured with `ops/measure_reverify_population.py`. That reproduces the warnings the bank already served, but from then on they no longer drain when the source is evicted or deleted; each clears only when its slot is confirmed again (`memory_fact_set` at the slot with the same or a new value, or accepting a contender). To clear a population deliberately, re-assert those slots. `re_verify` stays a passive flag and is still excluded from `correct_with`. Additive/idempotent |
 | v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
 | v41 | Audited continuum entry reinstatement (2026-09-22). Adds `entry_reinstatement_decisions`, an operation-keyed, FK-free append-only audit that survives later entry deletion. A single Postgres transaction binds the reviewed retirement preimage to the decision and clears only the entry's retirement fields; retries use the operation UUID. The first version refuses entries with trace invalidations and leaves all cortex state unchanged. Additive/idempotent; existing banks start with an empty decision table. |
+| v42 | Board audit log (2026-09-24). Adds `coordination_events`, an append-only, FK-free, sha256-hash-chained record of every agent-board mutation (register, update with the replaced values, attach, detach, send with its body, first read, ack, attempt, expire, prune, bank identity, restore recover/rebind), written in the mutation's own transaction and pruned only by its own `coordination.audit_retention_days` window (default 90, `0` keeps it forever), which logs its cuts. Adds `coordination_messages.first_read_at`. Operational data, excluded from portable exports like the other coordination tables; read and verified with `pseudolife-mcp board-audit`. Additive/idempotent; existing banks start with an empty log, and history before the upgrade is not reconstructed. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

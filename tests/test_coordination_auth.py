@@ -7,7 +7,7 @@ import pytest
 
 def service(enabled=True, allowed=None):
     return SimpleNamespace(config=SimpleNamespace(coordination=SimpleNamespace(
-        enabled=enabled, allowed_principals=allowed or [])),
+        enabled=enabled, allowed_principals=allowed or [], audit_retention_days=90)),
         _lock=nullcontext(), _storage=object(), _ensure_init=lambda: None,
         _hlc=SimpleNamespace(tick=lambda: (100, 1)))
 
@@ -60,7 +60,7 @@ def test_identity_comes_from_instance_headers(monkeypatch):
     class Store:
         def __init__(self, storage):
             pass
-        def prune(self):
+        def prune(self, *, audit_retention_days):
             return {}
         def send(self, principal, agent_id, credential, **kwargs):
             seen.append((principal, agent_id, credential, kwargs))
