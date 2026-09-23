@@ -14,6 +14,9 @@
 # A run that stops happening shows as a growing last_backup age in /health.
 param(
     [string]$At = "03:00",
+    # How long a run waits for Docker + Postgres before trying the backup
+    # anyway: a catch-up run fires at logon, often before Docker Desktop is up.
+    [ValidateRange(0, 3600)][int]$DockerWaitSeconds = 600,
     [switch]$Uninstall
 )
 
@@ -67,21 +70,45 @@ $repo = Resolve-MainCheckout
 $script = Join-Path $repo "ops\backup.ps1"
 if (-not (Test-Path $script)) { throw "not found: $script" }
 $log = Join-Path $repo "data\backups\backup-task.log"
+# The task runs whatever the main checkout holds. One that has not been
+# updated yet still backs up daily, so warn rather than refuse, but loudly.
+if (-not (Select-String -LiteralPath $script -SimpleMatch "AcceptRowDrop" -Quiet)) {
+    Write-Warning ("$script predates the row-count gate: until $repo is updated, " +
+        "the daily run backs up without it (a wipe followed by a few runs can " +
+        "rotate the good copies away) and /health shows no last_backup.")
+}
 
 # The task's view of success is the process exit code, and its window is
 # hidden: log every run, and turn a thrown backup into exit 1 with the
-# reason in the log. Base64 -EncodedCommand survives Task Scheduler's
+# reason in the log. Before the backup, wait (bounded) until Postgres
+# answers: a catch-up run fires at logon, when Docker Desktop is often
+# still starting, and would otherwise fail every morning after a
+# powered-off night. Base64 -EncodedCommand survives Task Scheduler's
 # single argument string; single quotes are doubled for paths like
 # C:\Users\O'Brien\...
 $template = @'
 $log = '@LOG@'
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $log) | Out-Null
 "==> $(Get-Date -Format s) scheduled backup" | Out-File -Append -FilePath $log
+$deadline = (Get-Date).AddSeconds(@WAIT@)
+$ready = $false
+while ((Get-Date) -lt $deadline) {
+    $global:LASTEXITCODE = 1
+    docker exec pseudolife-mcp-postgres pg_isready -q *> $null
+    if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+    $left = ($deadline - (Get-Date)).TotalMilliseconds
+    Start-Sleep -Milliseconds ([Math]::Max(100, [Math]::Min(10000, $left)))
+}
+if (-not $ready -and @WAIT@ -gt 0) {
+    "Docker/Postgres not ready after @WAIT@s; trying the backup anyway" |
+        Out-File -Append -FilePath $log
+}
 try { & '@SCRIPT@' *>> $log }
 catch { "FAILED: $_" | Out-File -Append -FilePath $log; exit 1 }
 '@
 $inner = $template.Replace('@LOG@', ($log -replace "'", "''")).
-    Replace('@SCRIPT@', ($script -replace "'", "''"))
+    Replace('@SCRIPT@', ($script -replace "'", "''")).
+    Replace('@WAIT@', [string]$DockerWaitSeconds)
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
 $action = New-ScheduledTaskAction -Execute (Resolve-PwshForTaskScheduler) `

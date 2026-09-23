@@ -229,6 +229,29 @@ def test_the_registered_pwsh_is_an_absolute_existing_path(tmp_path):
 # The registered command itself, executed against stand-in backups
 # ----------------------------------------------------------------------
 
+def _fake_docker(tmp_path: Path, rc: int) -> tuple[dict, Path]:
+    """A ``docker`` first on PATH that logs its arguments and exits ``rc``,
+    so the task's readiness probe never reaches a real Docker."""
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    calls = tmp_path / "docker-calls.log"
+    (fakebin / "docker.cmd").write_text(
+        f'@echo %* >> "{calls}"\r\n@exit /b {rc}\r\n', encoding="ascii")
+    sh = fakebin / "docker"
+    sh.write_text(f'#!/bin/sh\necho "$@" >> "{calls.as_posix()}"\nexit {rc}\n',
+                  encoding="ascii", newline="\n")
+    sh.chmod(0o755)
+    return {"PATH": str(fakebin) + os.pathsep + os.environ.get("PATH", "")}, calls
+
+
+def _execute(registered: dict, env: dict | None = None):
+    return subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-EncodedCommand",
+         _encoded(registered)],
+        capture_output=True, text=True, timeout=120,
+        env={**os.environ, **(env or {})})
+
+
 @pytest.mark.parametrize("body, rc, expect", [
     ("Write-Output 'backup ran'", 0, "backup ran"),
     ("throw 'pg_dump failed inside container'", 1, "FAILED"),
@@ -238,12 +261,10 @@ def test_every_run_is_logged_and_a_failure_exits_non_zero(tmp_path, body, rc, ex
     view of success: the process exit code."""
     plain = _checkout(tmp_path / "plain", backup_body=body)
     proc, registered, _ = _run(tmp_path, plain / "ops" / SCRIPT.name,
+                               "-DockerWaitSeconds", "0",
                                env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
     assert proc.returncode == 0, proc.stderr
-    run = subprocess.run(
-        [PWSH, "-NoProfile", "-NonInteractive", "-EncodedCommand",
-         _encoded(registered)],
-        capture_output=True, text=True, timeout=120)
+    run = _execute(registered)
     assert run.returncode == rc, (run.stdout, run.stderr)
     log = plain / "data" / "backups" / "backup-task.log"
     assert log.exists(), "the run left no log"
@@ -251,6 +272,62 @@ def test_every_run_is_logged_and_a_failure_exits_non_zero(tmp_path, body, rc, ex
     assert "scheduled backup" in text and expect in text, text
     if rc:
         assert "pg_dump failed inside container" in text, text
+
+
+def test_a_catch_up_run_waits_for_docker_first(tmp_path):
+    """StartWhenAvailable fires at the next logon, when Docker Desktop is
+    often still starting: probe Postgres before the backup, not after it
+    has already failed."""
+    plain = _checkout(tmp_path / "plain")
+    proc, registered, _ = _run(tmp_path, plain / "ops" / SCRIPT.name,
+                               env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert proc.returncode == 0, proc.stderr
+    env, calls = _fake_docker(tmp_path, rc=0)
+    run = _execute(registered, env)
+    assert run.returncode == 0, (run.stdout, run.stderr)
+    probes = calls.read_text(encoding="utf-8", errors="replace")
+    assert "exec pseudolife-mcp-postgres pg_isready" in probes, probes
+    text = (plain / "data" / "backups" / "backup-task.log").read_text(encoding="utf-8-sig")
+    assert "backup ran" in text and "not ready" not in text, text
+
+
+def test_a_docker_that_never_comes_up_still_gets_a_logged_attempt(tmp_path):
+    plain = _checkout(tmp_path / "plain")
+    proc, registered, _ = _run(tmp_path, plain / "ops" / SCRIPT.name,
+                               "-DockerWaitSeconds", "1",
+                               env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert proc.returncode == 0, proc.stderr
+    env, _ = _fake_docker(tmp_path, rc=1)
+    run = _execute(registered, env)
+    assert run.returncode == 0, (run.stdout, run.stderr)   # the stand-in succeeds
+    text = (plain / "data" / "backups" / "backup-task.log").read_text(encoding="utf-8-sig")
+    assert "not ready after 1s" in text and "backup ran" in text, text
+
+
+# ----------------------------------------------------------------------
+# A main checkout that predates the gate
+# ----------------------------------------------------------------------
+
+def test_installing_against_a_pre_gate_backup_warns(tmp_path):
+    """The task runs whatever the main checkout holds. Before that checkout
+    is updated, its backup.ps1 has no row-count gate and writes no
+    last_backup record: still a daily backup, so warn rather than refuse,
+    but loudly."""
+    plain = _checkout(tmp_path / "plain")
+    proc, registered, _ = _run(tmp_path, plain / "ops" / SCRIPT.name,
+                               env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert proc.returncode == 0, proc.stderr
+    assert registered is not None
+    assert "predates the row-count gate" in proc.stdout + proc.stderr, proc.stdout
+
+
+def test_installing_against_a_gated_backup_does_not_warn(tmp_path):
+    plain = _checkout(tmp_path / "plain",
+                      backup_body="param([switch]$AcceptRowDrop)\nWrite-Output 'ok'")
+    proc, _, _ = _run(tmp_path, plain / "ops" / SCRIPT.name,
+                      env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert proc.returncode == 0, proc.stderr
+    assert "predates" not in proc.stdout + proc.stderr, proc.stdout
 
 
 # ----------------------------------------------------------------------

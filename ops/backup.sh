@@ -119,31 +119,58 @@ if [ "${dump_scan##*$'\n'}" != "complete" ]; then
 fi
 mv "$part" "$out"
 
-# Row-count gate: compare against the newest manifest that was not itself
-# held, in the out-dir OR the mirror (see ops/backup.ps1 for why both, and
-# why held runs are skipped). Manifests are read with grep, not a JSON
-# parser: both scripts write "key": value pairs this tolerates.
+# Row-count gate: compare against the newest usable manifest that was not
+# itself held, in the out-dir OR the mirror. A manifest is usable only with
+# a count for every gated table, and the gate fails CLOSED when history
+# existed that it could not use (see ops/backup.ps1 for why each rule).
+# Manifests are read with grep, not a JSON parser: both scripts write
+# "key": value pairs this tolerates.
+gated_tables="public.entries public.facts public.lessons"
 manifest_out="$OUT_DIR/pseudolife_manifest-$stamp.json"
 manifest_rotation() { # $1 = manifest file
     grep -o -m1 '"rotation": *"[a-z]*"' "$1" | sed 's/.*"\([a-z]*\)"$/\1/' || true
 }
 manifest_count() { # $1 = manifest file, $2 = table; prints nothing if absent
-    grep -o -m1 "\"$2\": *[0-9]*" "$1" | grep -o '[0-9]*$' || true
+    grep -o -m1 "\"$2\": *[0-9][0-9]*" "$1" | grep -o '[0-9]*$' || true
 }
+manifest_usable() { # $1 = manifest file
+    case "$(manifest_rotation "$1")" in ok|accepted|held) ;; *) return 1 ;; esac
+    for t in $gated_tables; do
+        [ -n "$(manifest_count "$1" "$t")" ] || return 1
+    done
+}
+candidates=""
+list_failures=""
+for d in "$OUT_DIR" ${MIRROR_DIR:+"$MIRROR_DIR"}; do
+    [ -d "$d" ] || continue
+    if ! ls -1 "$d" >/dev/null 2>&1; then
+        echo "WARNING: could not list $d for backup manifests" >&2
+        list_failures="$list_failures; could not list $d"
+        continue
+    fi
+    for f in "$d"/pseudolife_manifest-*.json; do
+        if [ -f "$f" ]; then candidates="$candidates$(basename "$f")"$'\t'"$f"$'\n'; fi
+    done
+done
 baseline=""
-while IFS=$'\t' read -r _ f; do
-    if [ "$(manifest_rotation "$f")" != "held" ]; then baseline="$f"; break; fi
-done < <(for d in "$OUT_DIR" ${MIRROR_DIR:+"$MIRROR_DIR"}; do
-             [ -d "$d" ] || continue
-             for f in "$d"/pseudolife_manifest-*.json; do
-                 if [ -f "$f" ]; then printf '%s\t%s\n' "$(basename "$f")" "$f"; fi
-             done
-         done | sort -r)
+unusable=""
+while IFS=$'\t' read -r name f; do
+    [ -n "$f" ] || continue
+    if ! manifest_usable "$f"; then unusable="${unusable:+$unusable, }$name"; continue; fi
+    [ "$(manifest_rotation "$f")" = held ] && continue
+    baseline="$f"
+    break
+done < <(printf '%s' "$candidates" | sort -r)
+[ -z "$unusable" ] || echo "WARNING: skipped unusable backup manifest(s): $unusable" >&2
+n_candidates="$(printf '%s' "$candidates" | grep -c . || true)"
+blind=0
+if [ -z "$baseline" ] && { [ "$n_candidates" -gt 0 ] || [ -n "$list_failures" ]; }; then
+    blind=1
+fi
 drops=""
 if [ -n "$baseline" ]; then
-    for t in public.entries public.facts public.lessons; do
+    for t in $gated_tables; do
         before="$(manifest_count "$baseline" "$t")"
-        [ -n "$before" ] || continue
         # A gated table missing from the dump is a drop to zero.
         after="$(printf '%s\n' "$dump_scan" \
             | awk -v t="$t" '$1 == "table" && $2 == t { n = $3 } END { print n + 0 }')"
@@ -153,14 +180,20 @@ if [ -n "$baseline" ]; then
         fi
     done
 fi
-if [ -z "$drops" ]; then rotation=ok
+if [ -z "$drops" ] && [ "$blind" -eq 0 ]; then rotation=ok
 elif [ "$ACCEPT_ROW_DROP" -eq 1 ]; then rotation=accepted
 else rotation=held; fi
 note=""
+restore_hint=""
 baseline_json=null
 if [ -n "$baseline" ]; then baseline_json="\"$(basename "$baseline")\""; fi
 if [ -n "$drops" ]; then
-    note="fell by more than $MAX_ROW_DROP_PERCENT% since $(basename "$baseline"): $drops"
+    good_dump="$(grep -o -m1 '"dump": *"[^"]*"' "$baseline" | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    note="fell by more than $MAX_ROW_DROP_PERCENT% since $(basename "$baseline"): $drops; last good dump: $good_dump"
+    # restore.sh picks the NEWEST dump by default, which is now this one.
+    restore_hint=" To restore the last good backup instead: ops/restore.sh --backup-file '$(dirname "$baseline")/$good_dump'."
+elif [ "$blind" -eq 1 ]; then
+    note="no usable baseline among $n_candidates manifest(s)$list_failures"
 fi
 {
     printf '{\n'
@@ -175,7 +208,7 @@ fi
     printf '  }\n}\n'
 } > "$manifest_out"
 if [ "$rotation" = held ]; then
-    echo "WARNING: ROW-COUNT GATE: $note. Rotation and mirror pruning are HELD: nothing older is deleted and the new dump is kept. If the drop is intended, re-run with --accept-row-drop; until then every backup holds." >&2
+    echo "WARNING: ROW-COUNT GATE: $note. Rotation and mirror pruning are HELD: nothing older is deleted and the new dump is kept.$restore_hint If this is intended, re-run with --accept-row-drop; until then every backup holds." >&2
 elif [ "$rotation" = accepted ]; then
     echo "WARNING: ROW-COUNT GATE: $note. Accepted (--accept-row-drop): rotating, and this backup is the new baseline." >&2
 fi

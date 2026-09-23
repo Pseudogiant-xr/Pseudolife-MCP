@@ -135,31 +135,60 @@ if (-not $dump.Complete) {
 }
 Move-Item -LiteralPath $part -Destination $out -Force
 
-# Row-count gate: compare against the newest manifest that was not itself
-# held, in the out-dir OR the mirror. Skipping held runs keeps the hold on
-# until -AcceptRowDrop; otherwise the next backup would compare the wiped
-# bank with itself and rotation would resume. Searching the mirror covers a
-# deploy from a fresh worktree, whose empty out-dir has no history but
-# which prunes the same shared mirror.
+# Row-count gate: compare against the newest usable manifest that was not
+# itself held, in the out-dir OR the mirror. Skipping held runs keeps the
+# hold on until -AcceptRowDrop; otherwise the next backup would compare the
+# wiped bank with itself and rotation would resume. Searching the mirror
+# covers a deploy from a fresh worktree, whose empty out-dir has no history
+# but which prunes the same shared mirror.
+#
+# A manifest is usable only if it parses and carries a count for every gated
+# table: an empty or count-less one registers no drop at all, so trusting it
+# would wave a wipe through, and the "ok" manifest that run wrote would
+# become every later run's baseline. For the same reason the gate fails
+# CLOSED when history existed that it could not use (all manifests unusable,
+# or a folder it could not list: an offline share may hold the only history
+# of a fresh worktree). Only a truly empty history, the very first run,
+# rotates without a baseline.
 $gatedTables = "public.entries", "public.facts", "public.lessons"
 $manifestOut = Join-Path $OutDir "pseudolife_manifest-$stamp.json"
+function Test-UsableManifest($m) {
+    if ($m -isnot [pscustomobject] -or $m.tables -isnot [pscustomobject]) { return $false }
+    if ($m.rotation -notin "ok", "accepted", "held") { return $false }
+    foreach ($t in $gatedTables) {
+        $v = $m.tables.PSObject.Properties[$t]
+        if (-not $v -or -not ($v.Value -is [long] -or $v.Value -is [int])) { return $false }
+    }
+    return $true
+}
 $searchDirs = @($OutDir)
 if ($MirrorDir -and (Test-Path -LiteralPath $MirrorDir)) { $searchDirs += $MirrorDir }
-$candidates = @($searchDirs | ForEach-Object {
-        Get-ChildItem -LiteralPath $_ -Filter "pseudolife_manifest-*.json" -File
-    } | Sort-Object Name -Descending)
-$baseline = $null
-foreach ($m in $candidates) {
-    try { $parsed = Get-Content -LiteralPath $m.FullName -Raw | ConvertFrom-Json }
-    catch { Write-Warning "skipping unreadable manifest $($m.FullName): $_"; continue }
-    if ($parsed.rotation -ne "held") { $baseline = @{ Name = $m.Name; Data = $parsed }; break }
+$candidates = @()
+$listFailures = @()
+foreach ($d in $searchDirs) {
+    try {
+        $candidates += @(Get-ChildItem -LiteralPath $d -Filter "pseudolife_manifest-*.json" -File)
+    } catch {
+        Write-Warning "could not list $d for backup manifests: $_"
+        $listFailures += $d
+    }
 }
+$baseline = $null
+$unusable = @()
+foreach ($m in ($candidates | Sort-Object Name -Descending)) {
+    $parsed = $null
+    try { $parsed = Get-Content -LiteralPath $m.FullName -Raw | ConvertFrom-Json } catch { }
+    if (-not (Test-UsableManifest $parsed)) { $unusable += $m.Name; continue }
+    if ($parsed.rotation -eq "held") { continue }
+    $baseline = @{ Name = $m.Name; Data = $parsed; Dir = $m.DirectoryName }
+    break
+}
+if ($unusable) { Write-Warning ("skipped unusable backup manifest(s): " + ($unusable -join ", ")) }
+$blind = (-not $baseline) -and ($candidates.Count -gt 0 -or $listFailures.Count -gt 0)
 $drops = @()
-if ($baseline -and $baseline.Data.tables) {
+if ($baseline) {
     foreach ($t in $gatedTables) {
-        $prop = $baseline.Data.tables.PSObject.Properties[$t]
-        if (-not $prop) { continue }
-        $before = [long]$prop.Value
+        $before = [long]$baseline.Data.tables.PSObject.Properties[$t].Value
         # A gated table missing from the dump is a drop to zero.
         $after = if ($dump.Tables.Contains($t)) { [long]$dump.Tables[$t] } else { 0 }
         if ($before -gt 0 -and ($before - $after) * 100 -gt $before * $MaxRowDropPercent) {
@@ -168,10 +197,19 @@ if ($baseline -and $baseline.Data.tables) {
         }
     }
 }
-$rotation = if (-not $drops) { "ok" } elseif ($AcceptRowDrop) { "accepted" } else { "held" }
+$rotation = if (-not $drops -and -not $blind) { "ok" } elseif ($AcceptRowDrop) { "accepted" } else { "held" }
 $note = ""
+$restoreHint = ""
 if ($drops) {
-    $note = "fell by more than $MaxRowDropPercent% since $($baseline.Name): " + ($drops -join "; ")
+    $goodDump = $baseline.Data.dump
+    $note = ("fell by more than $MaxRowDropPercent% since $($baseline.Name): " +
+             ($drops -join "; ") + "; last good dump: $goodDump")
+    # restore.ps1 picks the NEWEST dump by default, which is now this one.
+    $restoreHint = (" To restore the last good backup instead: ops\restore.ps1 " +
+                    "-BackupFile '$(Join-Path $baseline.Dir $goodDump)'.")
+} elseif ($blind) {
+    $note = "no usable baseline among $($candidates.Count) manifest(s)"
+    foreach ($d in $listFailures) { $note += "; could not list $d" }
 }
 [ordered]@{
     dump       = Split-Path $out -Leaf
@@ -184,8 +222,8 @@ if ($drops) {
 } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $manifestOut -Encoding utf8NoBOM
 if ($rotation -eq "held") {
     Write-Warning ("ROW-COUNT GATE: $note. Rotation and mirror pruning are HELD: " +
-        "nothing older is deleted and the new dump is kept. If the drop is " +
-        "intended, re-run with -AcceptRowDrop; until then every backup holds.")
+        "nothing older is deleted and the new dump is kept.$restoreHint If this " +
+        "is intended, re-run with -AcceptRowDrop; until then every backup holds.")
 } elseif ($rotation -eq "accepted") {
     Write-Warning ("ROW-COUNT GATE: $note. Accepted (-AcceptRowDrop): rotating, " +
         "and this backup is the new baseline.")

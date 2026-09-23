@@ -4497,12 +4497,19 @@ per-table row counts, read from the dump itself. The manifests drive a
 manifest that was not itself held, the script keeps the new dump but skips
 local rotation and mirror pruning and says so loudly. It looks for that
 baseline in both the backup folder and the mirror. A logical wipe therefore
-cannot rotate the good copies away. The hold repeats on every run until
-one passes `-AcceptRowDrop` / `--accept-row-drop`, which rotates and makes
-that dump the new baseline. The manifest is also copied into the daemon,
-and `/health` reports it as `last_backup` (`at`, `age_hours`,
-`rotation`). The key is absent until a backup script has run; the pip
-tiers' `pseudolife-mcp backup` does not record one yet.
+cannot rotate the good copies away. It also holds when history exists but
+none of it is usable (unreadable or count-less manifests, or a folder it
+cannot list), so a gate that cannot see never waves a wipe through; only
+the very first run rotates without a baseline. The warning names the last
+good dump and the `restore` command for it, because `restore` otherwise
+picks the newest dump, which is the one that shrank. The hold repeats on
+every run until one passes `-AcceptRowDrop` / `--accept-row-drop`, which
+rotates and makes that dump the new baseline. The gate compares each dump
+with the newest good one, so it is built for sudden loss: a slow decline
+of less than the threshold per backup passes. The manifest is also
+copied into the daemon, and `/health` reports it as `last_backup` (`at`,
+`age_hours`, `rotation`). The key is absent until a backup script has
+run; the pip tiers' `pseudolife-mcp backup` does not record one yet.
 
 Deploys back up first, but nothing else backs up on a schedule. On
 Windows, register a daily run once:
@@ -4514,10 +4521,14 @@ ops\install-backup-task.ps1 -Uninstall   # remove it
 ```
 
 The task runs the main checkout's `ops\backup.ps1`, even when installed
-from a worktree. It catches up at the next boot or logon if the machine
-was off, and it runs as you, so `PSEUDOLIFE_BACKUP_MIRROR` applies. Each
-run is appended to `data\backups\backup-task.log`. On Linux/macOS, a cron
-entry that runs `ops/backup.sh` does the same job.
+from a worktree; the installer warns if that copy predates the row-count
+gate. It catches up at the next boot or logon if the machine was off,
+waiting up to 10 minutes (`-DockerWaitSeconds`) for Docker to answer
+first, and it runs as you, so `PSEUDOLIFE_BACKUP_MIRROR` applies. Each run
+is appended to `data\backups\backup-task.log`. On Linux/macOS, a cron entry
+that runs `ops/backup.sh` does the same job, but cron starts with a bare
+environment: set `PATH` (so it finds `docker`) and any
+`PSEUDOLIFE_BACKUP_MIRROR*` variables in the crontab itself.
 
 The pip tiers (lite / host-process) use `pseudolife-mcp backup` instead:
 same shape — a `pg_dump | gzip` of the bank (`--no-owner --no-acl`, so

@@ -212,6 +212,10 @@ class GateCase:
     accept: bool = False
     max_drop: int | None = None
     daemon_down: bool = False
+    # Manifests staged with raw text (corrupt, empty): (stamp, text).
+    raw_local: tuple[tuple[str, str], ...] = ()
+    # The mirror exists but listing it fails (offline share, permissions).
+    unlistable_mirror: bool = False
 
 
 _GOOD = ((BASELINE_STAMP, "ok", BASE),)
@@ -232,6 +236,22 @@ GATE_SCENARIOS: dict[str, GateCase] = {
     "gate_custom_threshold": GateCase(dump=_counts(entries=90), local=_GOOD,
                                       max_drop=5),
     "gate_daemon_down": GateCase(dump=BASE, daemon_down=True),
+    # A corrupt newest manifest is skipped, not trusted: the wipe is still
+    # measured against the last good one.
+    "gate_skips_unusable_manifest": GateCase(
+        dump=WIPED, local=_GOOD, raw_local=((LATER_STAMP, ""),)),
+    # Manifests exist but none is usable (0-byte, not an object with counts,
+    # counts missing for the gated tables): fail CLOSED, even for a healthy
+    # dump. Trusting "no baseline" here would mark a wipe "ok", and every
+    # later run would compare against it.
+    "gate_no_usable_baseline": GateCase(
+        dump=BASE,
+        local=((LATER_STAMP, "ok", {"public.dream_run_slots": 50}),),
+        raw_local=((AGED_STAMP, ""), (BASELINE_STAMP, "{}"))),
+    # A fresh worktree's empty out-dir, and a mirror that cannot be listed:
+    # not "no history", so the gate fails closed and the backup still exits 0.
+    "gate_unlistable_mirror": GateCase(dump=BASE, mirror=_GOOD,
+                                       unlistable_mirror=True),
 }
 WIPE_SCENARIOS = ["gate_wipe_entries", "gate_wipe_facts",
                   "gate_lessons_table_gone"]
@@ -297,6 +317,8 @@ def _stage_gate(root: Path, name: str, case: GateCase) -> tuple[Path, Path, Path
     for stamp, rotation, tables in case.local:
         (out_dir / _manifest_name(stamp)).write_text(
             _manifest_json(stamp, rotation, tables), encoding="utf-8")
+    for stamp, text in case.raw_local:
+        (out_dir / _manifest_name(stamp)).write_text(text, encoding="utf-8")
     for stamp, rotation, tables in case.mirror or ():
         (mirror / _manifest_name(stamp)).write_text(
             _manifest_json(stamp, rotation, tables), encoding="utf-8")
@@ -304,7 +326,8 @@ def _stage_gate(root: Path, name: str, case: GateCase) -> tuple[Path, Path, Path
 
 
 def _ps1_setup(artifact: Path, *, env_keep: int | None, fail_dump: bool,
-               daemon_data: Path, daemon_down: bool = False) -> str:
+               daemon_data: Path, daemon_down: bool = False,
+               fail_list_dir: Path | None = None) -> str:
     env_line = (f"$env:PSEUDOLIFE_BACKUP_MIRROR_KEEP = '{env_keep}'"
                 if env_keep is not None else
                 "Remove-Item Env:\\PSEUDOLIFE_BACKUP_MIRROR_KEEP "
@@ -317,10 +340,24 @@ def _ps1_setup(artifact: Path, *, env_keep: int | None, fail_dump: bool,
     # container (materialized from the prepared artifact), while the backup
     # record goes INTO the daemon (landed in daemon_data for inspection).
     daemon_rc = 1 if daemon_down else 0
+    # Every scenario (re)sets the unlistable dir, since the Get-ChildItem
+    # proxy below is global and outlives the scenario in the shared batch.
+    fail_list = str(fail_list_dir) if fail_list_dir else ""
     return f'''
 {env_line}
 $global:Artifact = "{artifact.as_posix()}"
 $global:DaemonData = "{daemon_data.as_posix()}"
+$global:FailListDir = '{fail_list}'
+function global:Get-ChildItem {{
+    [CmdletBinding()]
+    param([Parameter(Position = 0)][string[]]$Path, [string[]]$LiteralPath,
+          [string]$Filter, [switch]$File)
+    $target = if ($LiteralPath) {{ $LiteralPath }} else {{ $Path }}
+    if ($global:FailListDir -and ($target -contains $global:FailListDir)) {{
+        throw "simulated: cannot list $target"
+    }}
+    Microsoft.PowerShell.Management\\Get-ChildItem @PSBoundParameters
+}}
 function global:docker {{
     $global:LASTEXITCODE = 0
     $a = @($args | ForEach-Object {{ "$_" }})
@@ -346,12 +383,27 @@ function global:docker {{
 
 
 def _sh_setup(artifact: Path, *, env_keep: int | None, fail_dump: bool,
-              daemon_data: Path, daemon_down: bool = False) -> str:
+              daemon_data: Path, daemon_down: bool = False,
+              fail_list_dir: Path | None = None) -> str:
     env_line = (f"export PSEUDOLIFE_BACKUP_MIRROR_KEEP={env_keep}"
                 if env_keep is not None
                 else "unset PSEUDOLIFE_BACKUP_MIRROR_KEEP || true")
+    unlistable = ""
+    if fail_list_dir:
+        unlistable = f'''
+export FAIL_LIST_DIR="{fail_list_dir.as_posix()}"
+ls() {{
+    for a in "$@"; do
+        if [ "$a" = "$FAIL_LIST_DIR" ]; then
+            echo "ls: cannot open directory '$a'" >&2; return 2
+        fi
+    done
+    command ls "$@"
+}}
+export -f ls
+'''
     return f'''
-{env_line}
+{env_line}{unlistable}
 export ART="{artifact.as_posix()}"
 export DAEMON_DATA="{daemon_data.as_posix()}"
 docker() {{
@@ -393,7 +445,8 @@ def _ps1_scenarios(root: Path) -> list[Scenario]:
         artifact, out_dir, mirror = _stage_gate(root, name, case)
         setup = _ps1_setup(artifact, env_keep=None, fail_dump=False,
                            daemon_data=out_dir.parent / "daemon_data",
-                           daemon_down=case.daemon_down)
+                           daemon_down=case.daemon_down,
+                           fail_list_dir=mirror if case.unlistable_mirror else None)
         args = f'-OutDir "{out_dir}"'
         if mirror is not None:
             args += f' -MirrorDir "{mirror}"'
@@ -430,7 +483,8 @@ def _sh_scenarios(root: Path) -> list[Scenario]:
         artifact, out_dir, mirror = _stage_gate(root, name, case)
         setup = _sh_setup(artifact, env_keep=None, fail_dump=False,
                           daemon_data=out_dir.parent / "daemon_data",
-                          daemon_down=case.daemon_down)
+                          daemon_down=case.daemon_down,
+                          fail_list_dir=mirror if case.unlistable_mirror else None)
         args = f'--out-dir "{out_dir.as_posix()}"'
         if mirror is not None:
             args += f' --mirror-dir "{mirror.as_posix()}"'
@@ -676,6 +730,11 @@ def test_a_wipe_holds_rotation_and_deletes_nothing(gate, name):
                "gate_wipe_facts": "public.facts",
                "gate_lessons_table_gone": "public.lessons"}[name]
     assert dropped in out and dropped in manifest["note"], (out, manifest)
+    # restore.* picks the NEWEST dump by default — after a wipe, the wiped
+    # one. The hold must name the last good dump and how to restore it.
+    good = f"pseudolife_memory-{BASELINE_STAMP}.sql.gz"
+    assert good in out and good in manifest["note"], (out, manifest)
+    assert "-BackupFile" in out or "--backup-file" in out, out
 
 
 def test_a_wipe_does_not_prune_the_mirror(gate):
@@ -725,6 +784,44 @@ def test_the_mirror_manifest_is_a_baseline(gate):
     assert manifest["rotation"] == "held", manifest
     assert manifest["baseline"] == _manifest_name(BASELINE_STAMP), manifest
     assert set(OLD_MIRROR_FILES) <= set(_mirror_names(mirror)), res.detail()
+
+
+def test_an_unusable_manifest_is_skipped_not_trusted(gate):
+    """A 0-byte newest manifest must not become the baseline: it has no
+    counts, so nothing would register as a drop."""
+    res, out_dir, _, manifest = gate("gate_skips_unusable_manifest")
+    assert res.returncode == 0, res.detail()
+    assert manifest["rotation"] == "held", manifest
+    assert manifest["baseline"] == _manifest_name(BASELINE_STAMP), manifest
+    assert AGED_DUMP in _dumps(out_dir), res.detail()
+
+
+def test_manifests_without_a_usable_baseline_fail_closed(gate):
+    """History exists but none of it is usable: hold, even though this
+    dump is healthy. Rotating would make this run the next baseline, and a
+    wipe in it would then pass as normal."""
+    res, out_dir, _, manifest = gate("gate_no_usable_baseline")
+    out = res.stdout + res.stderr
+    assert res.returncode == 0, res.detail()
+    assert manifest["rotation"] == "held", manifest
+    assert manifest["baseline"] is None, manifest
+    assert "no usable baseline" in manifest["note"], manifest
+    assert "HELD" in out, out
+    assert AGED_DUMP in _dumps(out_dir), res.detail()
+
+
+def test_an_unlistable_mirror_fails_closed_without_failing_the_backup(gate):
+    """A mirror that exists but cannot be listed may hold the only history
+    (a fresh worktree's out-dir is empty). The run must neither abort after
+    promoting the dump (it used to, under -ErrorAction Stop) nor treat the
+    missing history as a first run."""
+    res, out_dir, mirror, manifest = gate("gate_unlistable_mirror")
+    out = res.stdout + res.stderr
+    assert res.returncode == 0, res.detail()
+    assert manifest is not None, "the run aborted before its manifest" + res.detail()
+    assert manifest["rotation"] == "held", manifest
+    assert "could not list" in manifest["note"], manifest
+    assert AGED_DUMP in _dumps(out_dir), res.detail()
 
 
 def test_the_threshold_is_configurable(gate):

@@ -13,18 +13,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   more than 25% (`-MaxRowDropPercent` / `--max-row-drop-percent`) against
   the newest manifest that was not itself held, in the backup folder or the
   mirror, the new dump is kept, local rotation and mirror pruning are
-  skipped with a loud warning, and the run still exits 0. The hold repeats
-  on every run until `-AcceptRowDrop` / `--accept-row-drop`. Before, a
-  logical wipe followed by `PSEUDOLIFE_BACKUP_MIRROR_KEEP` backups rotated
-  every good copy off the mirror.
+  skipped with a loud warning, and the run still exits 0. The warning names
+  the last good dump and the `restore -BackupFile` command for it. The gate
+  fails closed: it also holds when manifests exist but none is usable, or a
+  backup folder cannot be listed (which no longer aborts the run). The hold
+  repeats on every run until `-AcceptRowDrop` / `--accept-row-drop`.
+  Before, a logical wipe followed by `PSEUDOLIFE_BACKUP_MIRROR_KEEP`
+  backups rotated every good copy off the mirror.
 - The end-of-dump marker now counts only outside COPY data. A dump cut off
   right after a stored memory that quoted the marker used to pass.
 - New `ops/install-backup-task.ps1` registers a daily `ops/backup.ps1` run
   from the main checkout, even when installed from a worktree
   (StartWhenAvailable, battery-tolerant, one-hour limit, runs as the
-  logged-on user; `-At`, `-Uninstall`). Each run is appended to
-  `data/backups/backup-task.log`. Nothing backed up on a schedule before:
-  from 2026-09-14 13:28 to 09-20 12:18 no dump existed anywhere.
+  logged-on user; `-At`, `-Uninstall`). Each run waits up to 10 minutes
+  for Docker (`-DockerWaitSeconds`), since a catch-up run fires at logon,
+  and is appended to `data/backups/backup-task.log`. The installer warns
+  when the main checkout's `backup.ps1` predates the gate. Nothing backed
+  up on a schedule before: from 2026-09-14 13:28 to 09-20 12:18 no dump
+  existed anywhere.
 - `/health` gains `last_backup` (`at`, `age_hours`, `rotation`), read from
   the manifest the backup scripts copy into the daemon as
   `/data/last-backup.json`. It is informational and never changes
