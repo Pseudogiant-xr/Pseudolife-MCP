@@ -134,3 +134,13 @@ def test_signal_prune_by_age(storage):
     assert removed == 1
     pend = storage.pending_signals()
     assert len(pend) == 1 and pend[0]["task"] == "recent-task"
+
+
+def test_pending_signals_since_keeps_older_rows(storage):
+    # The synthesis retry window filters what is offered; it never deletes.
+    storage.add_signal("old-task", "failure", now=100.0)
+    storage.add_signal("recent-task", "success", now=10_000.0)
+    offered = storage.pending_signals(since_ts=5_000.0)
+    assert [s["task"] for s in offered] == ["recent-task"]
+    assert [s["task"] for s in storage.pending_signals()] == [
+        "old-task", "recent-task"]

@@ -566,8 +566,15 @@ for delivery-state and host-verification contracts.
   this. Signals are the only evidence behind a lesson: under the 30-day
   window, 760 of the live bank's 1,618 current lessons had already lost
   every signal they came from. The log grows about 800 rows (under 1 MB on
-  disk) a month. The same window bounds how long a signal whose extraction
-  never lands is retried.
+  disk) a month.
+- **Pending signals retried for 30 days** (`memory.lessons.signal_retry_days
+  = 30`) — a signal whose extraction lands no lesson stays pending and is
+  offered again on later sweeps, oldest first, up to
+  `synthesis_max_signals` per sweep. Past this age it is kept as evidence
+  but no longer offered, so a full batch of permanently failing signals
+  cannot hold newer ones back for the whole retention window. A chosen
+  bound (the retry lifetime the old 30-day retention implied), not a
+  measured one. `0` retries for the whole retention window.
 - **Slot-index shadow verification on** (`memory.slot_index_shadow_rate =
   0.01`) — ~1% of slot-pool queries recompute the index from scratch and
   compare; divergences land in `stats()` as

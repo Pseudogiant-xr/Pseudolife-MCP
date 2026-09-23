@@ -1185,15 +1185,21 @@ class PostgresStorage:
         ).fetchone()
         return int(row[0])
 
-    def pending_signals(self, limit: int | None = None) -> list[dict]:
+    def pending_signals(self, limit: int | None = None,
+                        since_ts: float | None = None) -> list[dict]:
+        """Unconsumed signals, oldest first. ``since_ts`` keeps only those
+        created at or after it (the synthesis retry window)."""
         cols = ("id",) + _SIGNAL_COLS
-        sql = (
-            f"SELECT {', '.join(cols)} FROM outcome_signals "
-            "WHERE consumed_at IS NULL ORDER BY created_at, id"
-        )
+        sql = (f"SELECT {', '.join(cols)} FROM outcome_signals "
+               "WHERE consumed_at IS NULL")
+        params: tuple = ()
+        if since_ts is not None:
+            sql += " AND created_at >= %s"
+            params = (float(since_ts),)
+        sql += " ORDER BY created_at, id"
         if limit is not None:
             sql += f" LIMIT {int(limit)}"
-        rows = self.conn.execute(sql).fetchall()
+        rows = self.conn.execute(sql, params).fetchall()
         return [dict(zip(cols, r)) for r in rows]
 
     def consume_signals(self, ids: list[int], now: float | None = None) -> int:

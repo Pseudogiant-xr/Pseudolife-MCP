@@ -400,7 +400,9 @@ class DreamOps:
 
         Extraction runs outside the lock. Selected inputs are revalidated before
         staged lessons, graph changes and handled acknowledgements commit in one
-        transaction. Empty/failed routes stay pending until retry or retention.
+        transaction. Empty/failed routes stay pending and are re-offered for
+        ``signal_retry_days``; after that they are kept but not offered, and
+        retention deletes them later.
         """
         import time as _t
         cfg = self.config.memory.lessons
@@ -408,7 +410,13 @@ class DreamOps:
             return {"signals": 0, "lessons": 0, "skipped": "no-storage"}
         if not (cfg.enabled and cfg.synthesize_in_dream):
             return {"signals": 0, "lessons": 0, "skipped": "disabled"}
-        cutoff = _t.time() - cfg.signal_retention_days * 86400
+        now = _t.time()
+        cutoff = now - cfg.signal_retention_days * 86400
+        # Retry eligibility is bounded apart from retention, so a cap-full
+        # batch that never lands cannot hold newer signals back for the whole
+        # retention window (see LessonsConfig.signal_retry_days).
+        retry_days = cfg.signal_retry_days
+        since = now - retry_days * 86400 if retry_days > 0 else None
         # One sweep drains at most ``synthesis_max_signals``: the whole batch
         # commits under the service lock, so an unbounded backlog would set
         # the length of a single daemon pause. The remainder stays pending
@@ -417,7 +425,7 @@ class DreamOps:
         with self._lock:
             self._ensure_init()
             self._storage.prune_signals(cutoff)
-            signals = self._storage.pending_signals(limit=cap)
+            signals = self._storage.pending_signals(limit=cap, since_ts=since)
         if not signals:
             return {"signals": 0, "lessons": 0}
         all_inferred = bool(signals) and all(

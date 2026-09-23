@@ -16,10 +16,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shown default moved with it, and a new test pins every Console knob
   default to the config dataclass. Existing installs that never set the
   knob pick up the new window on upgrade; one that set it keeps its own
-  value. The window also bounds how long a signal whose extraction never
-  lands is retried, now ten years instead of thirty days. The config comment
+  value. The config comment
   and Console help for `synthesize_in_dream` said signals are still pruned
   when synthesis is off; nothing prunes them then, and they now say so.
+- New `memory.lessons.signal_retry_days` (default **30**) bounds how long a
+  pending signal is offered to lesson synthesis, apart from retention. A
+  batch that lands no lesson stays pending, and the dream reads pending
+  signals oldest-first up to `synthesis_max_signals`. Under a ten-year
+  retention, a full batch of permanently failing signals would have been
+  re-offered on every sweep and no newer signal would ever reach synthesis
+  (Codex review of this change). Past the retry window a pending signal is
+  kept as evidence but no longer offered. `0` retries for the whole
+  retention window.
 - The session-start briefing labels a lesson `avoid:` only when its polarity
   is `-`. It used to label every `failure` or `correction` lesson `avoid:`
   too, but synthesis writes a correction (and often a failure) as `+`,

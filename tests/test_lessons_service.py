@@ -100,7 +100,7 @@ def test_empty_synthesis_leaves_signals_pending(svc):
     every lesson_write failed) must not drain the signal queue — outcome
     signals are the only feeder for procedural memory, so consuming them
     with nothing written silently loses them. Leave them for the next sweep;
-    signal retention pruning bounds the retry window."""
+    signal_retry_days bounds the retry window."""
     svc.record_outcome("some task", "failure", about="thing", polarity="-")
     rep = svc.synthesize_lessons(StubExtractor([]))
     assert rep["lessons"] == 0
@@ -112,19 +112,20 @@ def test_default_retention_keeps_old_outcome_evidence(svc):
     deletes consumed and pending rows alike once they pass
     signal_retention_days. Under the old 30-day default, 760 of the live
     bank's 1,618 current lessons had already lost every signal they came
-    from (2026-09-23). A signal over a year old survives the default sweep."""
+    from (2026-09-23). A signal synthesised over a year ago survives the
+    default sweep."""
     import time
+    long_ago = time.time() - 400 * 86400
     svc.record_outcome("deploy engine to host", "success", about="tar")
     old_id = svc._storage.add_signal("deploy engine to host", "failure",
-                                     about="tar --same-owner",
-                                     now=time.time() - 400 * 86400)
+                                     about="tar --same-owner", now=long_ago)
+    svc._storage.consume_signals([old_id], now=long_ago)
     rep = svc.synthesize_lessons(StubExtractor([_lesson()]))
-    assert rep["signals"] == 2 and rep["lessons"] == 1
-    svc.synthesize_lessons(StubExtractor([]))      # a later sweep prunes again
+    assert rep["signals"] == 1 and rep["lessons"] == 1   # the sweep ran
     row = svc._storage.conn.execute(
         "SELECT consumed_at FROM outcome_signals WHERE id = %s",
         (old_id,)).fetchone()
-    assert row is not None and row[0] is not None   # kept, and consumed
+    assert row is not None and row[0] == long_ago   # kept, still consumed
 
 
 def test_no_extractor_leaves_signals_pending(svc):

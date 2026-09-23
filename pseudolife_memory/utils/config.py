@@ -674,9 +674,17 @@ class LessonsConfig:
     # lesson, and on the live bank 760 of 1,618 current lessons predated every
     # retained signal, with ~14-21 more rows deleted a day. The log grows
     # ~800 rows a month (the 30-day window held 787 rows in 792 kB on disk,
-    # indexes included). The same window also bounds how long a signal whose
-    # extraction never lands is retried.
+    # indexes included). Retries are bounded separately, below.
     signal_retention_days: int = 3650
+    # How long a PENDING signal stays eligible for synthesis. A batch that
+    # lands no lesson stays pending, and the dream reads pending signals
+    # oldest-first under synthesis_max_signals. Bounded only by retention, a
+    # cap-full batch of permanent failures was re-offered every sweep and no
+    # newer signal was ever synthesised (Codex review of PR #337, 2026-09-23).
+    # Past this age a pending signal is kept as evidence but no longer
+    # offered. 30 is a CHOSEN bound, not a measured one: the retry lifetime
+    # the old 30-day retention implied. 0 retries for the whole retention.
+    signal_retry_days: int = 30
     # When False (or enabled=False), the dream skips signal drain / lesson
     # synthesis and the retention prune with it: signals are kept, not pruned.
     synthesize_in_dream: bool = True
