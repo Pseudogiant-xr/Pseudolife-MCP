@@ -193,6 +193,29 @@ def _fault_cost(mb: int = 256, repeats: int = 5) -> dict:
             "wall_us_per_fault_min": min(r["wall_us_per_fault"] for r in runs)}
 
 
+def _run_threads(target, args_list) -> None:
+    """One fresh thread per args tuple, all started, then all joined. The
+    first worker error is re-raised once every thread has finished: a raw
+    thread's exception only reaches threading.excepthook, and a burst that
+    lost a worker would otherwise be measured as if it had run (PR #347
+    review, 2026-09-24)."""
+    errors: list[BaseException] = []
+
+    def run(*args) -> None:
+        try:
+            target(*args)
+        except BaseException as exc:  # noqa: BLE001 — re-raised below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run, args=a) for a in args_list]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    if errors:
+        raise errors[0]
+
+
 def _loadavg() -> list[float]:
     with open("/proc/loadavg") as fh:
         return [float(x) for x in fh.read().split()[:3]]
@@ -284,24 +307,17 @@ def _inner() -> int:
     result["base_mallinfo"] = mallinfo()
     log(f"base {result['base']} {result['base_mallinfo']}")
 
-    def run_threads(target, args_list) -> None:
-        threads = [threading.Thread(target=target, args=a) for a in args_list]
-        for th in threads:
-            th.start()
-        for th in threads:
-            th.join()
-
     def enc_threads() -> None:
         def work(k: int) -> None:
             pipe.encode([(f"concurrent request text {k}-{i} ") * 40
                          for i in range(8)])
-        run_threads(work, [(k,) for k in range(4)])
+        _run_threads(work, [(k,) for k in range(4)])
 
     def query_threads() -> None:
         def work(k: int) -> None:
             for i in range(8):
                 pipe.encode_query(f"{QUERIES[(k + i) % len(QUERIES)]} {k}")
-        run_threads(work, [(k,) for k in range(4)])
+        _run_threads(work, [(k,) for k in range(4)])
 
     def encode_n(n: int):
         return lambda: pipe.encode([f"{i} {CHUNK}" for i in range(n)])
@@ -480,6 +496,10 @@ def _run_one(image: str, src: str, dtype: str, workload: str, arm: str,
     if log_path is not None:
         log_path.write_text(f"$ {' '.join(cmd)}\n--- stderr\n{stderr}"
                             f"\n--- stdout\n{stdout}", encoding="utf-8")
+    if proc.returncode != 0:
+        # A result line from a process that then failed is not a result.
+        raise RuntimeError(f"{dtype}/{workload}/{arm}: container failed "
+                           f"(exit {proc.returncode}): {stderr[-2000:]}")
     for line in stdout.splitlines():
         if line.startswith(RESULT_MARK):
             return json.loads(line[len(RESULT_MARK):])
