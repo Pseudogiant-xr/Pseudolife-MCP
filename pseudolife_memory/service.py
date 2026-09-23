@@ -1242,15 +1242,17 @@ class MemoryService(DreamOps):
         self._carry_over_listing_spelling()
 
     def _carry_over_listing_spelling(self) -> None:
-        """Caller holds the lock. First call in a process with storage: move
-        human curation dismissals from the folded to the escaped listing
-        spelling, once per bank (see
+        """Caller holds the lock. First call in a process with storage and
+        the lesson/world stores loaded (nothing lists slot pairs before
+        that): move human curation dismissals from the folded to the escaped
+        listing spelling, once per bank (see
         curation_safety.migrate_folded_dismissals). A failure costs those
         dismissals' pairs a return to the listing, never a call; it is
         retried a minute later, because until it lands a new dismissal of a
         pipe-free twin reads as a folded row that attempt would copy."""
         import time as _t
         if (self._listing_spelling_checked or self._storage is None
+                or self._lessons is None or self._world is None
                 or _t.monotonic() < self._listing_spelling_retry_at):
             return
         from pseudolife_memory import curation_safety
