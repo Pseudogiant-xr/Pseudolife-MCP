@@ -9402,6 +9402,56 @@ for _cid, _doc, _needle, _val, _stated, _places in [
         value=_val, stated=_stated, places=_places))
 
 
+# ── the lazy reference-bank client (2026-09-23) ──────────────────────────
+# A ChromaDB client per service start leaked ~19 threads and ~3 MB for the
+# life of the process. The per-start numbers come from 50 isolated starts on
+# each code path, the slice numbers from the same 218 PG-backed tests under
+# each, run back to back on the same host at the same system load.
+INIT_EAGER = RESULTS + "service-init-reference-bank-eager-master.json"
+INIT_LAZY = RESULTS + "service-init-reference-bank-lazy.json"
+SLICE_EAGER = RESULTS + "suite-cost-reference-bank-slice-eager-master.json"
+SLICE_LAZY = RESULTS + "suite-cost-reference-bank-slice-lazy.json"
+_START = "a service start drops from 0.068 s to 0.002 s,"
+_STARTS = "and 50 starts leave 34 threads instead of 988"
+_SLICE = "a slice of 218 PG-backed tests runs in 91.2 s instead of 107.5 s"
+_PEAK = "and peaks at 61 threads instead of 3,743 and 3.92 GB instead of 4.54 GB"
+_PER = "process-wide cache until the process exits, each with about 19 threads and"
+_PER_MB = "~3 MB on a 16-CPU host, so a process that builds many services, like the"
+for _cid, _needle, _arts, _val, _stated, _places in [
+    ("refbank-start-eager-s", _START, (INIT_EAGER,),
+     lambda d: d["mean_start_s"], 0.068, 3),
+    ("refbank-start-lazy-s", _START, (INIT_LAZY,),
+     lambda d: d["mean_start_s"], 0.002, 3),
+    ("refbank-starts-n", _STARTS, (INIT_LAZY,), lambda d: d["n"], 50, 0),
+    ("refbank-starts-threads-lazy", _STARTS, (INIT_LAZY,),
+     lambda d: d["threads_after"], 34, 0),
+    ("refbank-starts-threads-eager", _STARTS, (INIT_EAGER,),
+     lambda d: d["threads_after"], 988, 0),
+    ("refbank-threads-per-start", _PER, (INIT_EAGER, INIT_LAZY),
+     lambda e, l: (e["threads_after"] - l["threads_after"]) / e["n"], 19, 0),
+    ("refbank-mb-per-start", _PER_MB, (INIT_EAGER, INIT_LAZY),
+     lambda e, l: (e["private_mb_after"] - l["private_mb_after"]) / e["n"],
+     3, 0),
+    ("refbank-slice-tests", _SLICE, (SLICE_LAZY,),
+     lambda d: d["counts"]["passed"], 218, 0),
+    ("refbank-slice-wall-lazy", _SLICE, (SLICE_LAZY,),
+     lambda d: d["wall_s"], 91.2, 1),
+    ("refbank-slice-wall-eager", _SLICE, (SLICE_EAGER,),
+     lambda d: d["wall_s"], 107.5, 1),
+    ("refbank-slice-threads-lazy", _PEAK, (SLICE_LAZY,),
+     lambda d: d["peak_pytest_threads"], 61, 0),
+    ("refbank-slice-threads-eager", _PEAK, (SLICE_EAGER,),
+     lambda d: d["peak_pytest_threads"], 3743, 0),
+    ("refbank-slice-gb-lazy", _PEAK, (SLICE_LAZY,),
+     lambda d: d["peak_pytest_private_gb"], 3.92, 2),
+    ("refbank-slice-gb-eager", _PEAK, (SLICE_EAGER,),
+     lambda d: d["peak_pytest_private_gb"], 4.54, 2),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=_arts,
+        value=_val, stated=_stated, places=_places))
+
+
 
 # ── the daemon's idle heap trim (2026-09-23) ─────────────────────────────
 # The CHANGELOG and the configuration guide publish how much memory glibc
