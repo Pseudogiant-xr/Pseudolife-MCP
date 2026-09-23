@@ -6,6 +6,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — the memory daemon OOM-restarted under ordinary load)
+- The Docker daemon was cgroup OOM-killed (exit 137) at 15:12 AEST on
+  2026-09-23 by an ordinary burst of concurrent requests. It had been living
+  at 3.84–3.90 GB of its 4 GiB cap: ~3.1 GB anon plus ~0.7 GB of
+  file-backed torch/python library pages, ~200 MB of headroom, with
+  `memory.events` `max` reaching 8,021 within ~27 minutes of the restart
+  as reclaim squeezed hot library pages (15.8 s searches). Sizing, not a
+  leak: the 4g cap (2026-08-20) was set against 2.8 GB / 2.7 GB steady
+  states on a smaller bank and missed the file pages, the fp32 embedder's
+  3.8 GB load peak, bank growth, and ~256 MB held in 25 per-thread malloc
+  arenas.
+- `ops/docker-compose.yml`: the daemon cap defaults to `6g`
+  (`PSEUDOLIFE_DAEMON_MEM_LIMIT`; memory+swap still pinned equal, so no
+  swap), and the daemon runs with `MALLOC_ARENA_MAX=2` (after a concurrent
+  encode burst, 2,841 MB vs 3,274 MB with the default arenas; the peak is
+  unchanged). The compose comment's claim that the 2026-08-04 21 GB
+  balloon's root cause was "still open" is corrected: it was found and
+  fixed that day (4df20ef2).
+- New `embedding.cpu_dtype` (`auto` / `fp32` / `bf16`, default `auto`):
+  the torch embedder on a CPU loads straight into bf16 when the CPU has
+  native bf16 (x86 AVX512_BF16 / AMX_BF16, from torch's cpuinfo probe or
+  `/proc/cpuinfo`) and stays fp32 otherwise, since emulated bf16 is slow
+  (the 2026-09-20 CI finding behind the fp32 cast). Qwen3-Embedding-0.6B on
+  a Ryzen 7 9800X3D, bf16 vs fp32: ~1.4 GB vs ~2.85 GB steady, load peak
+  537 MB vs 3,808 MB, a short query ~88 ms vs ~160 ms. On 400 live bank
+  entries and 60 real queries, bf16 queries against the stored fp32
+  vectors kept top-8 overlap 0.996 (min 0.875) and rank-0 60/60 (max score
+  delta 0.0056). The model is loaded in bf16, not cast after an fp32 load
+  (which keeps the 3.8 GB load peak), using `dtype` or `torch_dtype` by
+  Transformers version (the rename landed in 4.56); a sentence-transformers
+  too old for `model_kwargs`, or a loader that ignores the kwarg, falls
+  back to load-then-cast with a warning. Embeddings still leave the
+  pipeline as float32, so stored vectors and cosine math are unchanged in
+  type. GPU and ONNX backends are untouched. `PSEUDOLIFE_EMBEDDING_CPU_DTYPE`
+  overrides the config value (forwarded by compose, so `fp32` in
+  `ops/.env` rolls a deployment back without a rebuild), and the test suite
+  pins it to `fp32` in conftest, daemons it spawns included. The
+  `Embedding backend:` log line gains `dtype=`.
+- `document_ingest` encodes a document in slices of 8 chunks instead of one
+  call over the whole chunk list (batched at the daemon's
+  `embedding.batch_size` 16). A 104-chunk document peaked +2,565 MB over
+  steady state in fp32 the old way, past the old cap on its own; sliced it
+  peaks +1,028 MB at the same speed. Production held no documents, so the
+  path had never run there.
+- `/health` gains `memory` (cgroup v2 usage, limit, `used_fraction`,
+  `near_limit` at 90%, anon/file split, `memory.events` max/oom/oom_kill,
+  process RSS and peak; process RSS only without a cgroup limit;
+  `source: "unavailable"` rather than silence) and `embedder` (backend,
+  device, resident dtype). Near the limit the daemon logs a WARNING at most
+  every 10 minutes. `status` is never touched: a 503 would have the
+  healthcheck and `ops/update.*` treat a daemon that is still serving as
+  dead.
+- Deploying needs the container recreated for the new cap and environment
+  (`ops/update.ps1` does). Verify live: `/health` `embedder.dtype` is
+  `bf16` on this host, `memory.limit_bytes` is 6 GiB, and
+  `memory.events.max` stops climbing.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

@@ -90,19 +90,34 @@ services:
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
     logging: *default-logging
-    # Hard memory cap. Steady state is ~2.8 GB with the default embedder
-    # loaded (measured 2026-08-04 post-restart on the reference deployment,
-    # re-confirmed 2026-08-19/20 on a capped standby holding 2.7 GB across a
-    # day of serving); the cap exists because the daemon once ballooned to
-    # 21 GB RSS within minutes of boot (2026-08-04 incident, root cause
-    # still open) and an uncapped container takes the whole host with it.
-    # 4g clears every measured steady state with headroom — raise it via
-    # PSEUDOLIFE_DAEMON_MEM_LIMIT in ops/.env for very large banks.
+    # Hard memory cap. Measured 2026-09-23 on the reference deployment
+    # (0.15.0, ~2,160-entry bank, fp32 embedder): steady state ~3.1 GB anon
+    # plus ~0.7 GB of file-backed torch/python library pages, 3.84-3.90 GB of
+    # the then 4g cap. With ~200 MB of headroom an ordinary request burst
+    # was an OOM kill (docker events: oom, exit 137), and after the restart
+    # memory.events "max" reached 8,021 within ~27 minutes as reclaim
+    # squeezed hot library pages (15.8 s searches). The 4g figure had been
+    # sized against steady RSS of 2.8 GB (2026-08-04) and 2.7 GB (a standby,
+    # 2026-08-19/20) on a smaller bank, and missed the file pages, the fp32
+    # embedder's load transient (a 3.8 GB peak on its own) and bank growth,
+    # plus ~256 MB the idle daemon holds in 25 per-thread malloc arenas
+    # (read from /proc/1/smaps, 2026-09-23). 6g leaves ~2 GB over that
+    # fp32 steady state; with the bf16 embedder (embedding.cpu_dtype "auto"
+    # on a CPU with native bf16) steady state drops by ~1.4 GB and encode
+    # transients roughly halve. /health's "memory" block reports use against
+    # this cap. Raise it via PSEUDOLIFE_DAEMON_MEM_LIMIT in ops/.env for very
+    # large banks.
+    # The cap also fences a runaway allocation from the host: on 2026-08-04
+    # the daemon ballooned to 21 GB RSS within minutes of boot. That cause
+    # was found and fixed the same day in 4df20ef2 (MemoryService._ensure_init
+    # re-loaded the embedder on every failed init retry while Postgres was
+    # still recovering), but an uncapped container takes the whole host with
+    # it.
     # memswap_limit is the memory+swap TOTAL; setting it equal to the
     # memory limit disallows swap entirely, so hitting the cap is a clean
     # OOM restart (restart: unless-stopped), not host swap thrash.
-    mem_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-4g}
-    memswap_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-4g}
+    mem_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-6g}
+    memswap_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-6g}
     # No depends_on for the extractor: dream extraction is runtime HTTP with
     # per-sweep retry (a probe against a still-loading extractor just fails
     # and retries next sweep), and the sidecar must be disableable via a
@@ -150,6 +165,19 @@ services:
       CUDA_VISIBLE_DEVICES: "-1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
+      # glibc gives threads their own malloc arenas (up to 8 per core) and
+      # hands little of them back; every request runs on a different
+      # threadpool thread. The idle daemon held ~256 MB in 25 secondary 64 MB
+      # arena heaps across 46 threads (/proc/1/smaps, 2026-09-23). Right
+      # after a concurrent encode burst (4 threads x 8 x ~256 tokens, fp32
+      # embedder, probe in a throwaway container from the 0.15.0 image) RSS
+      # was 2,841 MB with two arenas vs 3,274 MB with the default. The peak
+      # is unchanged; this trims what the daemon keeps between bursts.
+      MALLOC_ARENA_MAX: "2"
+      # Embedder precision on this CPU: empty = config.yaml's
+      # embedding.cpu_dtype (default "auto": bf16 when the CPU has native
+      # bf16, else fp32). Set fp32 to roll back without a rebuild.
+      PSEUDOLIFE_EMBEDDING_CPU_DTYPE: ${PSEUDOLIFE_EMBEDDING_CPU_DTYPE:-}
       # Single-writer cortex: the LLM dream pass is the sole automatic cortex
       # writer, so the extractor sidecar (below) is a default stack member and
       # dream consolidation routes to it. To use a BIGGER local model instead

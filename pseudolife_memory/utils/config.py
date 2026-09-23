@@ -49,6 +49,18 @@ class EmbeddingConfig:
     # with), never a raise: a model whose native default is already shorter
     # is left alone.
     max_seq_length: int = 512
+    # Precision of the torch embedder on a CPU device: "auto" / "fp32" /
+    # "bf16". GPU and ONNX backends ignore it. "auto" = bf16 only when the
+    # CPU reports native bf16 (x86 AVX512_BF16 / AMX_BF16), fp32 otherwise;
+    # bf16 on a CPU without it is slow (the 2026-09-20 CI diagnostics).
+    # Measured 2026-09-23, Qwen3-Embedding-0.6B in a throwaway container from
+    # the 0.15.0 daemon image on a Ryzen 7 9800X3D (avx512_bf16), bf16 loaded
+    # directly vs fp32: steady RSS ~1.4 GB vs ~2.85 GB, load peak 537 MB vs
+    # 3,808 MB, a single short query encode ~88 ms vs ~160 ms. Parity on 400
+    # live bank entries + 60 real queries: bf16 queries against the stored
+    # fp32 vectors keep top-8 overlap 0.996 (min 0.875), rank-0 60/60, max
+    # score delta 0.0056. PSEUDOLIFE_EMBEDDING_CPU_DTYPE overrides this.
+    cpu_dtype: str = "auto"
 
 
 @dataclass

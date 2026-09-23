@@ -19,6 +19,13 @@ from typing import TYPE_CHECKING
 # Silence torch.dynamo before any import. Mirrors the production server.
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
+# Pin the CPU embedder to fp32 for the whole suite. EmbeddingConfig.cpu_dtype
+# defaults to "auto", which picks bf16 on a CPU with native bf16, so without
+# this the suite's numerics would follow the host. Set outright (an exported
+# developer value must not flip it), and as an env var rather than a fixture
+# because the daemons the suite spawns inherit os.environ too.
+os.environ["PSEUDOLIFE_EMBEDDING_CPU_DTYPE"] = "fp32"
+
 # Allow `from pseudolife_memory...` from the test files without an editable
 # install. Keeps CI/setup minimal.
 ROOT = Path(__file__).resolve().parent.parent

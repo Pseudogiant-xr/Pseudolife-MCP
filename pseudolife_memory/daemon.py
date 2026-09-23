@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 
 logger = logging.getLogger("pseudolife-mcp.daemon")
 
@@ -27,6 +28,12 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+# The near-limit memory warning fires at most once per interval: the image's
+# Docker healthcheck polls /health every 15 s.
+_MEMORY_WARNING_INTERVAL_S = 600.0
+_last_memory_warning: float | None = None
+_monotonic = time.monotonic
 
 
 # (AuthHealthASGI and its _json_response helper were removed in the
@@ -67,6 +74,23 @@ def _extractor_status(svc) -> str | None:
     configured = (r.get("primary_url") and r.get("primary_model")) or (
         r.get("fallback_url") and r.get("fallback_model"))
     return "configured" if configured else "none"
+
+
+def _warn_near_memory_limit(memory: dict) -> None:
+    global _last_memory_warning
+    now = _monotonic()
+    if (_last_memory_warning is not None
+            and now - _last_memory_warning < _MEMORY_WARNING_INTERVAL_S):
+        return
+    _last_memory_warning = now
+    events = memory.get("events") or {}
+    logger.warning(
+        "daemon memory is near its limit: %.0f%% of %d MiB in use "
+        "(memory.events max=%s oom_kill=%s). An OOM kill restarts the "
+        "daemon; raise PSEUDOLIFE_DAEMON_MEM_LIMIT or find the growth.",
+        100 * memory["used_fraction"], memory["limit_bytes"] // 2**20,
+        events.get("max", "n/a"), events.get("oom_kill", "n/a"),
+    )
 
 
 def _build_health_payload(svc, token_present: bool) -> dict:
@@ -146,6 +170,22 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     # look at. The loudness lives in the ERROR log this flag mirrors.
     if getattr(svc, "_lesson_synthesis_recovery", None) is not None:
         payload["lesson_reconciliation_required"] = True
+    # Memory headroom (2026-09-23 OOM kill): the daemon lived at ~95% of its
+    # cgroup cap for weeks while this payload said "ok". Same deliberate
+    # choice as migration_partial: near_limit never touches `status`, since
+    # a 503 would have the healthcheck and ops/update.* treat a daemon that
+    # is still serving as dead. The loudness is the rate-limited WARNING.
+    from pseudolife_memory.utils import memory_headroom
+
+    memory = memory_headroom.read_memory_headroom()
+    payload["memory"] = memory
+    if memory.get("near_limit"):
+        _warn_near_memory_limit(memory)
+    # What is actually embedding (backend, device, resident dtype), so a
+    # deploy can be verified live. Absent until the embedder is built.
+    embedder = getattr(svc, "_embedder", None)
+    if embedder is not None and hasattr(embedder, "describe"):
+        payload["embedder"] = embedder.describe()
     # Honest DB liveness (2026-07-02 review fix): /health used to say
     # "ok" while a restarted Postgres had every memory tool failing.
     # ping() uses a dedicated short-lived connection so the probe can't

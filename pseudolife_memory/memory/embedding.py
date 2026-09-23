@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
+import os
 import sys
 import threading
 from collections import OrderedDict
@@ -21,9 +23,111 @@ from pseudolife_memory.utils.config import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
+# Overrides EmbeddingConfig.cpu_dtype when set to a non-empty value. An env
+# var as well as a config key because the test suite must pin fp32 in the
+# daemons it spawns, not only in-process, and because an operator can then
+# roll a deployed daemon back to fp32 without a rebuild or an edit inside
+# the state volume.
+CPU_DTYPE_ENV = "PSEUDOLIFE_EMBEDDING_CPU_DTYPE"
+_CPU_DTYPES = {"fp32": torch.float32, "bf16": torch.bfloat16}
+_DTYPE_LABELS = {
+    torch.float32: "fp32", torch.bfloat16: "bf16", torch.float16: "fp16",
+}
+_NATIVE_BF16_FLAGS = frozenset({"avx512_bf16", "amx_bf16"})
+
 
 def _native_windows() -> bool:
     return sys.platform == "win32"
+
+
+def cpu_has_native_bf16(cpuinfo_path: str = "/proc/cpuinfo") -> bool:
+    """True when this CPU executes bf16 natively (x86 AVX512_BF16/AMX_BF16).
+
+    torch's cpuinfo-backed probe answers on every OS that has it; Linux's
+    ``/proc/cpuinfo`` flags stand in for a torch too old to carry it.
+    Anything else answers no, keeping ``cpu_dtype="auto"`` on fp32. That
+    includes aarch64, which advertises bf16 too, because CPU bf16 speed
+    there has never been measured for this embedder.
+    """
+    probe = getattr(getattr(torch, "cpu", None), "_is_avx512_bf16_supported", None)
+    if probe is not None:
+        try:
+            return bool(probe())
+        except Exception:  # noqa: BLE001 — fall through to /proc/cpuinfo
+            logger.debug("torch's bf16 CPU probe failed", exc_info=True)
+    try:
+        with open(cpuinfo_path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if (line.startswith("flags")
+                        and _NATIVE_BF16_FLAGS & set(line.partition(":")[2].split())):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def _requested_cpu_dtype(config: EmbeddingConfig) -> str:
+    """The configured CPU precision, env override first; validated so a
+    typo fails at construction on every device, not only on a CPU host."""
+    env = os.environ.get(CPU_DTYPE_ENV, "").strip().lower()
+    raw = env or str(getattr(config, "cpu_dtype", "auto")).strip().lower()
+    if raw != "auto" and raw not in _CPU_DTYPES:
+        source = CPU_DTYPE_ENV if env else "embedding.cpu_dtype"
+        raise ValueError(
+            f"embedding cpu_dtype must be 'auto', 'fp32' or 'bf16', got "
+            f"{raw!r} (from {source})",
+        )
+    return raw
+
+
+def _resolve_cpu_dtype(requested: str) -> torch.dtype:
+    if requested == "auto":
+        return torch.bfloat16 if cpu_has_native_bf16() else torch.float32
+    if requested == "bf16" and not cpu_has_native_bf16():
+        logger.warning(
+            "embedding cpu_dtype=bf16 was requested on a CPU without native "
+            "bf16 support: encodes will be slow ('auto' picks fp32 here).",
+        )
+    return _CPU_DTYPES[requested]
+
+
+def _dtype_kwarg_name(version: str | None = None) -> str:
+    """``from_pretrained``'s dtype keyword. Transformers 4.56 renamed
+    ``torch_dtype`` to ``dtype`` (PR #39782); older releases know only
+    ``torch_dtype``. An unparseable version is taken to be current."""
+    if version is None:
+        try:
+            import transformers  # noqa: PLC0415
+
+            version = transformers.__version__
+        except Exception:  # noqa: BLE001
+            return "dtype"
+    try:
+        major, minor = (int(part) for part in version.split(".")[:2])
+    except ValueError:
+        return "dtype"
+    return "dtype" if (major, minor) >= (4, 56) else "torch_dtype"
+
+
+def _accepts_model_kwargs(factory) -> bool:
+    """Whether this SentenceTransformer takes ``model_kwargs``; the
+    declared sentence-transformers 2.2 floor predates it."""
+    try:
+        params = inspect.signature(factory).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        p.name == "model_kwargs" or p.kind is inspect.Parameter.VAR_KEYWORD
+        for p in params
+    )
+
+
+def _param_dtype(model) -> torch.dtype | None:
+    """The resident dtype of a torch model; None for ONNX or a stub."""
+    try:
+        return next(model.parameters()).dtype
+    except (AttributeError, StopIteration, TypeError):
+        return None
 
 
 def _cached_hf_file(
@@ -142,6 +246,7 @@ class EmbeddingPipeline:
             raise ValueError(
                 f"embedding backend must be 'torch' or 'onnx', got {requested!r}",
             )
+        cpu_dtype = _requested_cpu_dtype(config)
         self.model = None
         self.backend = "torch"
         if requested == "onnx":
@@ -192,19 +297,52 @@ class EmbeddingPipeline:
                     exc,
                 )
         if self.model is None:
-            self.model = SentenceTransformer(
-                config.model_name,
-                device=device,
-            )
-            if torch.device(device).type == "cpu":
-                # Preserve the FP32 CPU inference used by the validated 4.x
-                # stack. Transformers 5 defaults to the checkpoint dtype;
-                # the 2026-09-20 full-suite CI diagnostics and subsequent
-                # Qwen probe exposed slow BF16 on CPUs lacking native support.
-                # Module.float() also supports the sentence-transformers 2.x
-                # floor, unlike newer constructor model_kwargs. GPU and ONNX
-                # retain their backend's precision.
-                self.model.float()
+            target = (_resolve_cpu_dtype(cpu_dtype)
+                      if torch.device(device).type == "cpu" else None)
+            if target is torch.bfloat16 and _accepts_model_kwargs(SentenceTransformer):
+                # Load straight into bf16. Casting after an fp32 load keeps
+                # the fp32 load peak: 3,808 MB vs 537 MB for the Qwen default
+                # (2026-09-23 probe), which alone crowded the old 4g cap.
+                dtype_kwarg = _dtype_kwarg_name()
+                self.model = SentenceTransformer(
+                    config.model_name,
+                    device=device,
+                    model_kwargs={dtype_kwarg: torch.bfloat16},
+                )
+                loaded = _param_dtype(self.model)
+                if loaded not in (None, torch.bfloat16):
+                    logger.warning(
+                        "The model loader ignored %s=bfloat16 and loaded "
+                        "%s; casting to bf16 after load (the fp32 load peak "
+                        "was not avoided).", dtype_kwarg, loaded,
+                    )
+                    self.model.to(torch.bfloat16)
+            elif target is torch.bfloat16:
+                logger.warning(
+                    "This sentence-transformers predates model_kwargs: "
+                    "loading fp32 and casting to bf16 (the fp32 load peak "
+                    "is not avoided).",
+                )
+                self.model = SentenceTransformer(config.model_name, device=device)
+                self.model.to(torch.bfloat16)
+            else:
+                self.model = SentenceTransformer(
+                    config.model_name,
+                    device=device,
+                )
+                if target is torch.float32:
+                    # Preserve the FP32 CPU inference used by the validated
+                    # 4.x stack. Transformers 5 defaults to the checkpoint
+                    # dtype; the 2026-09-20 full-suite CI diagnostics and
+                    # subsequent Qwen probe exposed slow BF16 on CPUs lacking
+                    # native support. Module.float() also supports the
+                    # sentence-transformers 2.x floor, unlike newer
+                    # constructor model_kwargs. GPU and ONNX retain their
+                    # backend's precision.
+                    self.model.float()
+        # The resident precision, read back rather than assumed. None for
+        # ONNX, whose precision is the configured artifact's.
+        self.dtype: str | None = _DTYPE_LABELS.get(_param_dtype(self.model))
         # Cap the tokenizer's max sequence length. Applies to both backends:
         # SentenceTransformer.max_seq_length delegates to the underlying
         # Transformer module regardless of which runtime (torch/onnx) does
@@ -222,8 +360,9 @@ class EmbeddingPipeline:
         # container would silently revert to torch while /health stays
         # green. "verify live" = grep the daemon log for this.
         logger.info(
-            "Embedding backend: %s (model=%s, dim=%d, device=%s)",
+            "Embedding backend: %s (model=%s, dim=%d, device=%s, dtype=%s)",
             self.backend, config.model_name, self._dim, self._device,
+            self.dtype or "n/a",
         )
 
         self._cache_size = max(0, int(getattr(config, "cache_size", 0) or 0))
@@ -234,6 +373,11 @@ class EmbeddingPipeline:
     def embedding_dim(self) -> int:
         """Dimensionality of the output embeddings."""
         return self._dim
+
+    def describe(self) -> dict[str, str | None]:
+        """What is actually serving: backend, device, resident dtype."""
+        return {"backend": self.backend, "device": self._device,
+                "dtype": self.dtype}
 
     def encode(
         self,
@@ -273,14 +417,22 @@ class EmbeddingPipeline:
             misses = list(range(len(texts)))
 
         if misses:
+            # Tensors, not numpy: older sentence-transformers (the declared
+            # 2.2 floor among them) convert with emb.numpy(), which cannot
+            # represent a bf16 model's output.
+            # Whatever the model computes in, rows leave as float32, so
+            # stored vectors and every cosine stay fp32.
             embeddings = self.model.encode(
                 [texts[i] for i in misses],
                 batch_size=self.config.batch_size,
                 normalize_embeddings=normalize,
-                convert_to_numpy=True,
+                convert_to_tensor=True,
                 show_progress_bar=False,
             )
-            fresh = torch.from_numpy(np.array(embeddings)).float()
+            if isinstance(embeddings, torch.Tensor):
+                fresh = embeddings.detach().to(device="cpu", dtype=torch.float32)
+            else:
+                fresh = torch.from_numpy(np.array(embeddings)).float()
             for row, i in enumerate(misses):
                 rows[i] = fresh[row]
             if self._cache_size:

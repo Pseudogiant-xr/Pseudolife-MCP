@@ -24,7 +24,8 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
 | `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` | _(unset)_ | Set `1` to restore the retired `mcp-session-id` transport-session fallback for one release (rollback hatch; logs a warning on first use). The header names the HTTP *connection*, not the session — concurrent sessions share it — and the MCP 2026-07-28 revision removes it from the protocol. Session identity rides the hook-registered episode handle and `X-PL-Session` instead — see [Episodes](episodes.md). |
-| `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `4g` | Docker tier only (read by compose, not the daemon): hard memory cap on the daemon container, with the memory+swap total pinned to the same value — no swap, so exceeding the cap is a clean container restart rather than a host-wide memory event. Steady state is ~2.8 GB with the default embedder; raise for very large banks. |
+| `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `6g` | Docker tier only (read by compose, not the daemon): hard memory cap on the daemon container, with the memory+swap total pinned to the same value — no swap, so exceeding the cap is a clean container restart rather than a host-wide memory event. Measured 2026-09-23, steady state was ~3.9 GB with the fp32 embedder counting file-backed library pages (the old `4g` default OOM-killed it under an ordinary request burst), ~1.4 GB less with bf16. `/health`'s `memory` block reports use against the cap. Raise for very large banks. |
+| `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` | _(unset)_ | Overrides `embedding.cpu_dtype` (`auto` / `fp32` / `bf16`) — the torch embedder's precision on a CPU. Set `fp32` to roll a daemon back from bf16 without a rebuild; `/health`'s `embedder` block shows the resident dtype. |
 
 For the Docker stack, set these in `ops/.env`
 (`cp ops/.env.example ops/.env` — the install/update scripts scaffold it too;
@@ -332,7 +333,16 @@ for delivery-state and host-verification contracts.
 ## Built-in defaults (tuned for Claude's use case)
 
 - **Embedding backbone `Qwen/Qwen3-Embedding-0.6B`** (`EmbeddingConfig.model_name`,
-  default since schema v25) — fp32 torch, no GPU sidecar. It's
+  default since schema v25) — torch on the CPU, no GPU sidecar, in the
+  precision `EmbeddingConfig.cpu_dtype` picks: `auto` (the default) loads
+  the model straight into bf16 when the CPU has native bf16 (x86
+  AVX512_BF16 / AMX_BF16) and uses fp32 otherwise, since bf16 without
+  native support is slow; `fp32` / `bf16` force one. Measured 2026-09-23 on
+  the production image, bf16 held ~1.4 GB steady vs ~2.85 GB for fp32, and
+  on 400 real bank entries bf16 queries against stored fp32 vectors kept
+  top-8 overlap 0.996 and rank-0 60/60. Vectors are stored as float32
+  either way. `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` overrides the config value;
+  `/health` reports the resident `embedder.dtype`. It's
   instruction-asymmetric: query-side text (search/recall probes) is encoded
   with `EmbeddingConfig.query_prefix`'s instruction prefix via
   `encode_query()`; everything stored (entries, fact/world/lesson claim
@@ -938,15 +948,17 @@ of truth — see the volume note above.)
 
 Docker Desktop's WSL2 VM (`Vmmem`) claims up to **~50% of host RAM** by
 default, which is far more than the stack needs. Under dream load the whole
-stack wants ~6–7 GB with the default extractor sidecar, or ~2 GB in
-`sonnet-only` mode — where the Qwen3 embedding backbone is the bulk of it.
+stack wants ~6–7 GB with the default extractor sidecar, or roughly 3 GB in
+`sonnet-only` mode with the bf16 embedder (~4 GB with fp32) — where the
+Qwen3 embedding backbone is the bulk of it.
 Cap the VM by copying `ops/wslconfig.example` to
 `%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
 
-The daemon container is separately hard-capped at 4 GB, with memory+swap
+The daemon container is separately hard-capped at 6 GB, with memory+swap
 pinned to the same value so exceeding it is a clean container restart rather
 than a host-wide memory event. `PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env`
-raises it for very large banks.
+raises it for very large banks; `/health`'s `memory` block shows how close
+the daemon runs to it (`near_limit` at 90%).
 
 After `wsl --shutdown` the host port forward is gone; `docker restart
 pseudolife-mcp-daemon` re-establishes it.
