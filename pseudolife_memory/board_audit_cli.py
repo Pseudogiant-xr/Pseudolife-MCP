@@ -53,7 +53,7 @@ def _time(value: str) -> float:
 
 def _head(value: str) -> tuple[int, str]:
     seq, sep, digest = value.partition(":")
-    if (not sep or not seq.isdigit() or len(digest) != 64
+    if (not sep or not seq.isdigit() or int(seq) < 1 or len(digest) != 64
             or any(c not in "0123456789abcdef" for c in digest)):
         raise argparse.ArgumentTypeError("expected SEQ:HASH as verify prints them")
     return int(seq), digest
@@ -97,6 +97,14 @@ def _bank():
             own_instance.stop()
 
 
+def _write_error(target, exc):
+    """Stdout failing is a reader that went away (EPIPE on POSIX, EINVAL on
+    Windows); a file failing is the file's problem, never the bank's."""
+    if target is None:
+        return _ReaderClosed()
+    return AuditCliError(f"cannot write {target}: {exc.strerror}")
+
+
 def _export(args) -> int:
     target = Path(args.out) if args.out else None
     if target is not None and target.exists():
@@ -117,21 +125,19 @@ def _export(args) -> int:
                     line = json.dumps(row, ensure_ascii=True, separators=(",", ":")) + "\n"
                     try:
                         stream.write(line)
-                    except OSError:
-                        # EPIPE on POSIX, EINVAL on Windows.
-                        if target is None:
-                            raise _ReaderClosed() from None
-                        raise
+                    except OSError as exc:
+                        raise _write_error(target, exc) from None
                 try:
                     stream.flush()
-                except OSError:
-                    if target is None:
-                        raise _ReaderClosed() from None
-                    raise
+                except OSError as exc:
+                    raise _write_error(target, exc) from None
             except BaseException:
                 rows.close()
                 if target is not None:
-                    stream.close()
+                    try:
+                        stream.close()  # re-raises a failed flush, but closes
+                    except OSError:
+                        pass
                     target.unlink(missing_ok=True)  # this run created it exclusively
                 raise
     return EXIT_OK

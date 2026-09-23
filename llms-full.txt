@@ -3779,7 +3779,9 @@ writers on separate connections.
 Retention is separate from the mailbox. The prune pass that expires bodies also
 removes the log's oldest rows once they are older than `audit_retention_days`.
 It cuts on UTC day boundaries, so an event stays at least the window and at most
-a day longer, with at most one cut a day. The cut is always a prefix, recorded
+a day longer (a cut takes a whole prefix, so after the daemon's clock steps
+backwards it can take rows younger than the window by up to that step), with
+at most one cut a day. The cut is always a prefix, recorded
 as an `audit_prune` event naming the last removed row, and the surviving chain
 starts from that anchor. `0` never prunes. The pass runs at most once a minute
 and only while the board is in use (registration, sending or heartbeats on an
@@ -3835,13 +3837,16 @@ time, and no surviving row older than that cutoff). What it cannot show on its
 own, because no secret is involved: that the newest rows were not dropped; that
 the table was not rewritten with every hash recomputed; and that the oldest
 rows were not removed by someone who also appended a consistent cut record.
-Record `head_seq:head_hash` and `head_created_at` from a `verify` somewhere
+Record `head_seq:head_hash` and `head_created_at` from each `verify` somewhere
 outside the bank, and later run `verify --expect-head SEQ:HASH`. That catches
-the first two. For the third, `head_pruned` on a head created less than
-`audit_retention_days` ago, or a `start_cut` whose `retention_days` is not the
-window you configured, means rows went that retention would have kept. For
-history you must be able to prove, keep periodic `--out` exports (privately)
-and check them with `verify --input`. The log records mutations made through
+the first two. The third needs a series of recorded heads: retention never
+removes a row created at or after its cutoff, so a recorded head that comes
+back `head_pruned` although its `head_created_at` is at or after
+`start_cut.cutoff` means rows went that retention would have kept (unless the
+daemon's clock stepped backwards, or the window was raised since). A forged
+cut stamped with the current time and your configured window passes
+everything else. For history you must be able to prove, keep periodic `--out`
+exports (privately) and check them with `verify --input`. The log records mutations made through
 the coordination store; a direct SQL edit of the mailbox tables leaves no event.
 It proves what was sent and by which verified principal, not that a message was
 true.

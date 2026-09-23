@@ -415,9 +415,14 @@ def _forged_prefix_cut(store, *, actor="daemon", created_at, cutoff, retention_d
 @pytest.mark.parametrize("forgery", [
     # A cutoff its own time and window cannot produce (they give 0).
     dict(created_at=1000.0 + 7 * DAY, cutoff=500, retention_days=7),
-    # A window that never prunes, or is not a whole number of days.
-    dict(created_at=1000.0 + 7 * DAY, cutoff=0, retention_days=0),
+    # A window that never prunes (its cutoff arithmetic alone would pass),
+    # or is not a whole number of days.
+    dict(created_at=2000.0, cutoff=0, retention_days=0),
     dict(created_at=1000.0 + 7 * DAY, cutoff=0, retention_days=7.0),
+    # Values no clock or config can produce must fail, not crash verify.
+    dict(created_at=float("inf"), cutoff=0, retention_days=7),
+    dict(created_at=float("nan"), cutoff=0, retention_days=7),
+    dict(created_at=1000.0 + 7 * DAY, cutoff=0, retention_days=10 ** 400),
     # Not the daemon's own maintenance.
     dict(actor="agent", created_at=1000.0 + 7 * DAY, cutoff=0, retention_days=7),
     # A real cut at that cutoff would have removed the first surviving row too.
@@ -430,21 +435,23 @@ def test_a_cut_record_that_does_not_add_up_does_not_anchor_the_chain(store, forg
     assert verify(store) == {"ok": False, "seq": 4, "reason": "unanchored_start"}
 
 
-def test_a_careful_forged_cut_hides_a_removed_prefix_which_only_its_record_reveals(store):
+def test_a_careful_forged_cut_passes_verify_and_only_an_earlier_recorded_head_exposes_it(store):
     """The documented limit: with no secret, someone who can write the table
     can remove the oldest rows and append a consistent cut record, and verify
-    passes, even against a head recorded after those rows. What it can do is
-    name the cut the log starts from, so an operator who knows the window
-    can see a cut that removed rows younger than it."""
+    passes, even against a head recorded after those rows. An earlier
+    recorded head exposes it: it comes back ``head_pruned`` although it was
+    created at or after the cut's cutoff, and retention never removes a row
+    at or after its cutoff."""
     created = 1000.0 + 7 * DAY
     rows = _forged_prefix_cut(store, created_at=created, cutoff=0, retention_days=7)
     report = verify(store, expect_head=(rows[-1]["seq"], rows[-1]["hash"]))
     assert report["ok"] and report["first_seq"] == 4
     assert report["start_cut"] == {"seq": 6, "created_at": created, "cutoff": 0,
                                    "retention_days": 7, "through_seq": 3}
-    pruned = verify(store, expect_head=(2, rows[1]["hash"]))
-    assert (pruned["ok"], pruned["reason"], pruned["start_cut"]["seq"]) == (
-        False, "head_pruned", 6)
+    earlier = rows[1]
+    pruned = verify(store, expect_head=(earlier["seq"], earlier["hash"]))
+    assert (pruned["ok"], pruned["reason"]) == (False, "head_pruned")
+    assert earlier["created_at"] >= pruned["start_cut"]["cutoff"]
 
 
 def test_a_malformed_cut_record_fails_verification_instead_of_crashing(store):

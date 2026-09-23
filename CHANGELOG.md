@@ -31,8 +31,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   retention cut whose own fields add up. With no secret, the chain cannot on
   its own see its newest rows dropped, a rewrite with every hash recomputed, or
   its oldest rows removed behind a forged but consistent cut record;
-  `verify --expect-head` catches the first two, and the report names the cut
-  the log starts from so an operator can judge the third.
+  `verify --expect-head` catches the first two, and a series of recorded
+  heads, checked against the cut the report says the log starts from,
+  exposes the third.
 - The log keeps events for `coordination.audit_retention_days` (default 90;
   `0` keeps it forever), separate from the mailbox TTL. The prune pass cuts
   only a prefix, on UTC day boundaries so at most once a day (a cutoff that

@@ -88,6 +88,7 @@ def test_export_never_replaces_an_existing_file(store, cli, tmp_path):
 
 
 @pytest.mark.parametrize("args", [("verify", "--expect-head", "three:abc"),
+                                  ("verify", "--expect-head", "0:" + "0" * 64),
                                   ("export", "--since", "yesterday"),
                                   ("export", "--until", "nan")])
 def test_malformed_arguments_are_refused_before_connecting(cli, args):
@@ -151,6 +152,71 @@ def test_a_failed_export_removes_the_file_it_created(store, cli, tmp_path, monke
     target = tmp_path / "board-audit.jsonl"
     code, output = cli("export", "--out", str(target))
     assert code == 2 and not target.exists()
+
+
+def test_a_write_that_fails_midway_removes_the_file_and_says_so(store, cli, tmp_path, monkeypatch):
+    """A full disk or a dropped share: the first close re-raises the failed
+    flush, which must not skip the cleanup or be blamed on the bank."""
+    import errno
+    from pathlib import Path
+    pair(store)
+    real_open = Path.open
+
+    class Failing:
+        def __init__(self, real):
+            self.real = real
+
+        def write(self, text):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        flush = write
+
+        def close(self):
+            if not self.real.closed:
+                self.real.close()
+                raise OSError(errno.ENOSPC, "No space left on device")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.close()
+
+    def opening(self, mode="r", *args, **kwargs):
+        handle = real_open(self, mode, *args, **kwargs)
+        return Failing(handle) if mode == "x" else handle
+
+    monkeypatch.setattr(Path, "open", opening)
+    target = tmp_path / "board-audit.jsonl"
+    code, output = cli("export", "--out", str(target))
+    assert code == 2 and not target.exists()
+    assert "cannot write" in output.err and "database" not in output.err
+
+
+def test_the_lite_bank_is_used_and_its_instance_stopped_on_every_path(store, cli, pg_url,
+                                                                      monkeypatch):
+    from pseudolife_memory import transfer_cli
+    stopped = []
+
+    class Instance:
+        def stop(self):
+            stopped.append(1)
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL")
+    monkeypatch.setattr(transfer_cli, "_resolve_dsn", lambda data_dir: (pg_url, Instance()))
+    pair(store)
+    assert cli("verify")[0] == 0
+    store.storage.conn.execute("DROP TABLE coordination_events")
+    code, output = cli("verify")
+    assert code == 2 and "no audit log" in output.err
+    assert stopped == [1, 1]
+
+
+def test_an_archive_that_is_not_utf8_is_named(cli, tmp_path):
+    archive = tmp_path / "board-audit.jsonl"
+    archive.write_text('{"seq": 1}\n', encoding="utf-16")
+    code, output = cli("verify", "--input", str(archive))
+    assert code == 2 and "not UTF-8" in output.err
 
 
 def test_an_output_directory_that_does_not_exist_is_named_not_blamed_on_the_bank(

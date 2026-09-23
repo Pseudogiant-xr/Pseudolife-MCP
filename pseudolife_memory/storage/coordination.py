@@ -280,10 +280,15 @@ def _cut(row):
         return None
     through_seq, through_hash = cut.get("through_seq"), cut.get("through_hash")
     cutoff, days = cut.get("cutoff"), cut.get("retention_days")
+    created_at = row["created_at"]
+    # No clock or config produces a non-finite time or a window beyond a
+    # century; refusing them here keeps audit_cutoff from overflowing.
     if (type(through_seq) is not int or not isinstance(through_hash, str)
-            or type(cutoff) not in (int, float) or type(days) is not int):
+            or type(cutoff) not in (int, float) or type(days) is not int
+            or not 0 <= days <= 36500
+            or type(created_at) not in (int, float) or not math.isfinite(created_at)):
         return None
-    return {"seq": row["seq"], "created_at": float(row["created_at"]), "cutoff": cutoff,
+    return {"seq": row["seq"], "created_at": float(created_at), "cutoff": cutoff,
             "retention_days": days, "through_seq": through_seq,
             "through_hash": through_hash, "actor": row["actor"]}
 
