@@ -670,7 +670,12 @@ class LessonsConfig:
     min_confidence: float = 0.0
     # Unconsumed (and consumed) signals older than this are pruned on the dream
     # sweep so the append-only log can't grow unbounded when no extractor drains it.
-    signal_retention_days: int = 30
+    # 3650 (was 30) since 2026-09-23: signals are the only evidence behind a
+    # lesson, and on the live bank 760 of 1,618 current lessons predated every
+    # retained signal, with ~14-21 more rows deleted a day. The log grows
+    # ~800 rows (~0.5 MB) a month (784 rows in the first 30 days). The same
+    # window also bounds how long a signal no extraction lands is retried.
+    signal_retention_days: int = 3650
     # When False, the dream skips signal drain / lesson synthesis (signals still
     # pruned by retention).
     synthesize_in_dream: bool = True

@@ -13,6 +13,9 @@ _AVOID_OUTCOMES = {"failure", "correction"}
 
 
 def _is_avoid(e: dict) -> bool:
+    # Ordering only (select_lessons): a failure or correction is surfaced
+    # first whatever its polarity. The printed label is _fmt_lesson's, and
+    # that one reads polarity alone.
     return e.get("polarity") == "-" or e.get("outcome") in _AVOID_OUTCOMES
 
 
@@ -39,7 +42,10 @@ def _fmt_question(q: dict) -> str:
 
 
 def _fmt_lesson(e: dict) -> str:
-    marker = "avoid" if _is_avoid(e) else "prefer"
+    # Polarity is the lesson's own do/avoid phrasing. Synthesis writes a
+    # correction as "+" (the now-correct behaviour), so labelling by outcome
+    # printed "avoid: <what to do>".
+    marker = "avoid" if e.get("polarity") == "-" else "prefer"
     text = (e.get("lesson") or "").strip()
     if not text:
         return ""

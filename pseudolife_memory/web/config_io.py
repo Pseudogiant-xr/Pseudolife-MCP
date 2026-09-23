@@ -528,9 +528,10 @@ KNOBS: list[dict[str, Any]] = [
      "type": "int", "default": 5, "min": 1, "max": 50, "step": 1,
      "restart": False, "help": "Default lessons returned by lesson search."},
     {"path": "memory.lessons.signal_retention_days", "group": "Lessons",
-     "label": "Signal retention (days)", "type": "int", "default": 30, "min": 1,
+     "label": "Signal retention (days)", "type": "int", "default": 3650, "min": 1,
      "max": 3650, "step": 1, "restart": False,
-     "help": "Outcome signals older than this are pruned on the dream sweep."},
+     "help": "Outcome signals older than this are pruned on the dream sweep. "
+             "They are the only evidence behind a lesson."},
     {"path": "memory.lessons.synthesize_in_dream", "group": "Lessons",
      "label": "Synthesize in dream", "type": "bool", "default": True,
      "restart": False,

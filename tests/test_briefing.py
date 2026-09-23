@@ -29,6 +29,23 @@ def test_format_briefing_renders_both_sections_ascii():
     assert md.isascii()
 
 
+def test_fmt_lesson_labels_by_polarity_not_outcome():
+    # The synthesis prompt writes a correction (and usually a failure) as
+    # polarity "+", phrased as the now-correct behaviour to follow. Labelling
+    # by outcome printed "avoid: <the thing to do>" for 303 of the 1,618
+    # current lessons on the live bank (2026-09-23). The label is polarity
+    # only; outcome still drives select_lessons' ordering.
+    from pseudolife_memory.memory.briefing import _fmt_lesson
+    assert _fmt_lesson({"lesson": "pin the version", "polarity": "+",
+                        "outcome": "correction"}) == "- prefer: pin the version"
+    assert _fmt_lesson({"lesson": "retry with backoff", "polarity": "+",
+                        "outcome": "failure"}) == "- prefer: retry with backoff"
+    assert _fmt_lesson({"lesson": "avoid down -v", "polarity": "-",
+                        "outcome": "success"}) == "- avoid: avoid down -v"
+    assert _fmt_lesson({"lesson": "avoid down -v", "polarity": "-",
+                        "outcome": "failure"}) == "- avoid: avoid down -v"
+
+
 def test_format_briefing_empty_when_nothing():
     assert format_briefing([], [], []) == ""
 

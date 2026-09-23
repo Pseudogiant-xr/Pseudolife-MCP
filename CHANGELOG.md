@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — lessons keep their evidence, and "do this" lessons stop reading as "avoid")
+- `memory.lessons.signal_retention_days` now defaults to **3650** (was 30).
+  The dream sweep deletes `memory_outcome` signals, consumed or pending, past
+  this window, and those signals are the only evidence behind a lesson. On
+  the live bank on 2026-09-23, 760 of 1,618 current lessons predated every
+  retained signal, and 14-21 more rows were being deleted a day. The log
+  grows about 800 rows (~0.5 MB) a month. The Console knob's shown default
+  moved with it, and a new test pins every Console knob default to the
+  config dataclass. Existing installs that never set the knob pick up the
+  new window on upgrade; one that set it keeps its own value. The window
+  also bounds how long a signal whose extraction never lands is retried,
+  now ten years instead of thirty days.
+- The session-start briefing labels a lesson `avoid:` only when its polarity
+  is `-`. It also labelled every `failure` or `correction` lesson `avoid:`,
+  but synthesis writes a correction (and often a failure) as `+`, phrased as
+  the behaviour to follow. So 303 of those 1,618 lessons (236 `+ correction`,
+  67 `+ failure`) would have printed "avoid: <what to do>". Failures and
+  corrections are still listed first. The Console already labelled by
+  polarity.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.
