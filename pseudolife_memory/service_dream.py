@@ -3611,7 +3611,7 @@ class DreamOps:
             apply_auto_distinct, capture_pair_evidence,
             can_auto_fold, curation_bound_action,
             curation_bound_observed_model,
-            curation_judgment_bindings,
+            curation_judgment_bindings, curation_judgment_saved,
             curation_judgment_state, curation_observed_model,
             curation_policy_fingerprint, record_bound_curation_judgment,
             has_auto_dismissals, refresh_auto_dismissals,
@@ -3882,10 +3882,15 @@ class DreamOps:
                 and getattr(ex, "served_model", None) == response_served_model)
             for store, c, pair_evidence, v in actions:
                 conf = float(v["confidence"])
+                # Evaluated under the apply's service lock: review_rejudge
+                # deletes the saved opinion under that lock, and an opinion
+                # it forgot while this tick ran unlocked must not be acted on.
+                guard = (lambda pair_evidence=pair_evidence: policy_guard()
+                         and curation_judgment_saved(self, pair_evidence))
                 if (v["verdict"] == "distinct" and mode in ("auto-distinct", "auto")
                         and conf >= cfg.curation_distinct_min_confidence):
                     res = apply_auto_distinct(
-                        self, pair_evidence, policy_guard=policy_guard,
+                        self, pair_evidence, policy_guard=guard,
                         settle_judgment=True)
                     applied += bool(res.get("dismissed"))
                 elif (v["verdict"] == "duplicate" and mode == "auto"
@@ -3898,7 +3903,7 @@ class DreamOps:
                     applied += bool(self._apply_slot_duplicate(
                         store, c, v.get("keep"), v.get("fold"),
                         reason=v.get("note") or None,
-                        evidence=pair_evidence, policy_guard=policy_guard,
+                        evidence=pair_evidence, policy_guard=guard,
                         settle_judgment=True))
             return {"judged": judged, "applied": applied,
                     "pending_unjudged": max(0, len(todo) - judged),
@@ -4013,6 +4018,7 @@ class DreamOps:
                 self._ensure_init()
                 memo = self._storage.get_meta("deep_candidate_verdicts") or {}
             pairs = dict(memo.get("pairs") or {})
+            read_keys = set(pairs)
             now = _t.time()
             horizon = float(cfg.candidate_rejudge_days) * 86400.0
 
@@ -4046,10 +4052,15 @@ class DreamOps:
             if not todo:
                 if mark is not None:
                     with self._lock:
-                        self._storage.set_meta("deep_candidates_judged",
-                                               {"ts": mark["ts"], "complete": True,
-                                                "policy": policy, "generation": generation,
-                                                "served_model": memo_model})
+                        live = (self._storage.get_meta("deep_candidate_verdicts")
+                                or {}).get("pairs") or {}
+                        # review_rejudge may have forgotten an opinion since
+                        # the read; its complete=False must stand.
+                        if all(key(c) in live for c in candidates):
+                            self._storage.set_meta("deep_candidates_judged",
+                                                   {"ts": mark["ts"], "complete": True,
+                                                    "policy": policy, "generation": generation,
+                                                    "served_model": memo_model})
                 return {"judged": 0, "reason": "all_judged", "reconsideration": reconsidered}
             cap = max(1, int(limit if limit is not None else cfg.judge_batch))
             chunk = todo[:cap]
@@ -4060,10 +4071,11 @@ class DreamOps:
                      "src_snippets": c.get("src_snippets") or [],
                      "dst_snippets": c.get("dst_snippets") or []}
                     for i, c in enumerate(chunk)]
-            new_rows, new_indices, verdicts = [], [], []
+            new_rows, new_indices, verdicts, replayed = [], [], [], {}
             for row, candidate in zip(rows, chunk):
                 saved = pairs.get(key(candidate), {})
                 if fresh(candidate) and saved.get("reply") and current_model:
+                    replayed[row["n"]] = saved
                     verdicts.append({**saved["reply"], "n": row["n"]})
                 else:
                     new_indices.append(row["n"])
@@ -4089,6 +4101,12 @@ class DreamOps:
                 if policy != fingerprint(
                         judging_policy(self, ex, _CANDIDATE_JUDGE_SYSTEM_PROMPT)):
                     return {"judged": 0, "reason": "stale_evidence"}
+                # The lock was released for the model call: merge into the
+                # LIVE memo, so an opinion review_rejudge forgot meanwhile
+                # stays forgotten instead of being written back.
+                pairs = dict((self._storage.get_meta("deep_candidate_verdicts")
+                              or {}).get("pairs") or {})
+                forgotten = read_keys - set(pairs)
                 decision_evidence = candidate_evidence_fingerprints(self, chunk)
                 entity_ids = {}
                 for entity in self._storage.load_graph()["entities"]:
@@ -4097,6 +4115,8 @@ class DreamOps:
                 changed_entities = set()
                 for v in verdicts:
                     c = chunk[v["n"] - 1]
+                    if v["n"] in replayed and pairs.get(key(c)) != replayed[v["n"]]:
+                        continue    # the saved reply was forgotten or replaced
                     endpoints = {c.get(field + "_id") or entity_ids.get(_nn(c[field]))
                                  for field in ("src", "dst")}
                     if (source_evidence[key(c)] != decision_evidence[v["n"] - 1]
@@ -4160,13 +4180,16 @@ class DreamOps:
                             left += 1
                             pairs[key(c)]["complete"] = True
                         self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
-            # Bounded memo: newest 500 pairs.
-            if len(pairs) > 500:
-                keep = sorted(pairs.items(), key=lambda kv: -float(kv[1].get("ts", 0)))[:500]
-                pairs = dict(keep)
-            remaining = max(0, len(todo) - len(chunk)) + sum(
-                not pairs.get(key(c), {}).get("complete") for c in chunk)
-            with self._lock:
+                # Bounded memo: newest 500 pairs.
+                if len(pairs) > 500:
+                    keep = sorted(pairs.items(), key=lambda kv: -float(kv[1].get("ts", 0)))[:500]
+                    pairs = dict(keep)
+                # A candidate outside this slice whose opinion was forgotten
+                # during the call is unjudged again.
+                todo_keys = {key(c) for c in todo}
+                remaining = max(0, len(todo) - len(chunk)) + sum(
+                    not pairs.get(key(c), {}).get("complete") for c in chunk) + sum(
+                    key(c) in forgotten and key(c) not in todo_keys for c in candidates)
                 self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
                 if mark is not None:
                     self._storage.set_meta(

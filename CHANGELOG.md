@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — a rejudge that lands during a judge call is no longer undone)
+- `review_rejudge('candidate')` forgets opinions in the
+  `deep_candidate_verdicts` memo, but the candidate judge read that memo
+  before its unlocked model call and wrote its copy back afterwards, so a
+  rejudge landing during the call restored every requeued pair and did
+  nothing. The judge now re-reads the live memo under the lock hold that
+  writes it and updates only the pairs it judged in this tick. A saved reply is
+  replayed only while its memo entry is unchanged, so a requeued saved
+  `dismiss` is not applied in `auto` mode. A fresh model verdict for a pair
+  requeued during the call still lands: the requeue forgot the older opinion.
+  The per-apply watermark stays incomplete when a requeue forgets a
+  candidate's opinion during the tick and this tick does not re-judge it,
+  including on the "all judged" path that makes no model call. The 500-pair
+  bound is unchanged.
+- The curation judge had the same gap. `review_rejudge('curation')` deletes
+  the `curation_judgments` row but keeps the evidence binding, and the
+  automatic distinct dismissal and duplicate fold checked only the binding.
+  A saved pending action replayed after a mid-call requeue, and a fresh
+  verdict requeued between being recorded and being applied, were therefore
+  still acted on. Both actions now also require the pair's judgment row to
+  exist. The row is looked up under the key it is stored with, and the check
+  runs under the service lock that both the apply and the requeue hold.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

@@ -958,6 +958,101 @@ def test_pending_action_cannot_starve_other_store_judgment(svc, monkeypatch):
     assert actions == ["world", "lesson"]
 
 
+def test_requeue_during_model_call_forgets_a_pending_saved_action(
+        svc, monkeypatch):
+    import pseudolife_memory.curation_safety as safety
+
+    lesson_pair(svc)
+    cfg = svc.config.memory.deep_dream
+    cfg.curation_judge_mode = "auto-distinct"
+    cfg.curation_distinct_min_confidence = 0.9
+    apply = safety.apply_auto_distinct
+    monkeypatch.setattr(
+        safety, "apply_auto_distinct",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("lesson action remains pending")))
+    assert "error" in svc.deep_dream_judge_curation(SlotJudge(), limit=1)
+    monkeypatch.setattr(safety, "apply_auto_distinct", apply)
+
+    common = dict(
+        value="Jane Doe", confidence=0.9,
+        source_url="https://example.test/report",
+        source_quote="Jane Doe is CEO", freshness_class="slow",
+        retrieved_at=100.0)
+    svc.world_write("Acme", "CEO", **common)
+    svc.world_write("Acme Corp", "chief executive", **common)
+
+    class RequeueDuringCall(SlotJudge):
+        def judge_slot_pairs(self, rows):
+            # The saved lesson verdict replays; only the world pair is sent.
+            assert [row["store"] for row in rows] == ["world"]
+            assert svc.review_rejudge("curation", limit=1)["queues"] == {
+                "curation": 1}
+            assert svc._storage.curation_judgments("lesson") == {}
+            return super().judge_slot_pairs(rows)
+
+    out = svc.deep_dream_judge_curation(RequeueDuringCall(), limit=2)
+    assert out["judged"] == 1 and out["applied"] == 1      # the world pair only
+    assert len(svc.curation_duplicates()["lesson_duplicates"]) == 1
+
+    rejudge = SlotJudge()
+    assert svc.deep_dream_judge_curation(rejudge, limit=1)["judged"] == 1
+    assert rejudge.seen[0]["store"] == "lesson"
+
+
+@pytest.mark.parametrize("mode,verdict,keep,action", [
+    ("auto-distinct", "distinct", None, "apply_auto_distinct"),
+    ("auto", "duplicate", "a", "apply_slot_duplicate"),
+])
+def test_requeue_before_a_fresh_action_forgets_that_opinion(
+        svc, monkeypatch, mode, verdict, keep, action):
+    import pseudolife_memory.curation_safety as safety
+
+    lesson_pair(svc)
+    cfg = svc.config.memory.deep_dream
+    cfg.curation_judge_mode = mode
+    cfg.curation_distinct_min_confidence = 0.9
+    cfg.curation_forget_min_confidence = 0.9
+    apply = getattr(safety, action)
+    calls = []
+
+    def requeue_then_apply(*args, **kwargs):
+        # The action runs outside the lock the verdict was recorded under.
+        calls.append(action)
+        assert svc.review_rejudge("curation", limit=1)["requeued"] == 1
+        return apply(*args, **kwargs)
+
+    monkeypatch.setattr(safety, action, requeue_then_apply)
+    out = svc.deep_dream_judge_curation(SlotJudge(verdict=verdict, keep=keep))
+    assert calls == [action]
+    assert out["judged"] == 1 and out["applied"] == 0
+    assert len(svc._lessons.current_records()) == 2
+    assert len(svc.curation_duplicates()["lesson_duplicates"]) == 1
+
+
+@pytest.mark.parametrize("mode,verdict,keep", [
+    ("auto-distinct", "distinct", None),
+    ("auto", "duplicate", "a"),
+])
+def test_saved_opinion_guard_finds_a_slot_whose_name_contains_a_pipe(
+        svc, mode, verdict, keep):
+    # Listing keys fold "|" to "-"; the judgment row keeps the evidence key.
+    svc.lesson_write(
+        "ci|cd deploy", "approach", "Pin the runner image.", about="ci",
+        outcome="correction", polarity="+", confidence=0.8, origin="agent")
+    svc.lesson_write(
+        "ci|cd service", "pitfall", "Pin the runner image.", about="ci",
+        outcome="correction", polarity="+", confidence=0.9, origin="agent")
+    cfg = svc.config.memory.deep_dream
+    cfg.curation_judge_mode = mode
+    cfg.curation_distinct_min_confidence = 0.9
+    cfg.curation_forget_min_confidence = 0.9
+    judge = SlotJudge(verdict=verdict, keep=keep)
+    out = svc.deep_dream_judge_curation(judge)
+    assert ["|" in row["a"]["entity_norm"] for row in judge.seen] == [True]
+    assert out["judged"] == 1 and out["applied"] == 1
+
+
 def test_served_model_probe_is_outside_lock_once_per_judge_phase(
         svc, monkeypatch):
     from pseudolife_memory.memory import dream

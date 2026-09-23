@@ -375,6 +375,17 @@ def curation_bound_action(
     return str(binding.get("action") or "settled")
 
 
+def curation_judgment_saved(service, evidence: PairEvidence) -> bool:
+    """Caller holds the service lock. False once ``review_rejudge`` deleted
+    the pair's judgment row, so an opinion it forgot is not acted on.
+
+    The row is keyed by the evidence keys, which keep a literal ``|`` that
+    the duplicate listing's ``a_key``/``b_key`` fold to ``-``.
+    """
+    key = tuple(sorted((evidence.a["key"], evidence.b["key"])))
+    return key in service._storage.curation_judgments(evidence.store)
+
+
 def record_bound_curation_judgment(
         service, evidence: PairEvidence, *, verdict: Mapping[str, Any],
         policy_fingerprint: str, model: str | None, at: float,

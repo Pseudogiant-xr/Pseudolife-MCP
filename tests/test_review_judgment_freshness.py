@@ -154,6 +154,122 @@ def test_candidate_retries_saved_action_without_new_model_call(svc, monkeypatch)
     assert svc.deep_dream_judge_candidates(judge, candidates=rows)['dismissed'] == 1
 
 
+class _RequeueingCandidateJudge(_CandidateJudge):
+    """A human's review_rejudge lands while the model call is in flight."""
+
+    def __init__(self, svc, verdicts):
+        super().__init__(verdicts)
+        self.svc = svc
+
+    def judge_candidates(self, rows):
+        assert self.svc.review_rejudge('candidate', limit=1)['requeued'] == 1
+        return super().judge_candidates(rows)
+
+
+def test_candidate_requeue_during_model_call_is_not_written_back(svc):
+    svc.config.memory.deep_dream.candidate_judge_mode = 'shadow'
+    verdicts = {('alpha', 'beta'): ('leave', .9, None, None, None),
+                ('gamma', 'delta'): ('leave', .9, None, None, None)}
+    first = [{'src': 'alpha', 'dst': 'beta', 'similarity': .8}]
+    assert svc.deep_dream_judge_candidates(
+        _CandidateJudge(verdicts), candidates=first)['judged'] == 1
+    assert 'alpha|beta' in svc._storage.get_meta('deep_candidate_verdicts')['pairs']
+
+    class Judge(_RequeueingCandidateJudge):
+        def judge_candidates(self, rows):
+            out = super().judge_candidates(rows)
+            assert 'alpha|beta' not in svc._storage.get_meta(
+                'deep_candidate_verdicts')['pairs']
+            return out
+
+    other = [{'src': 'gamma', 'dst': 'delta', 'similarity': .8}]
+    assert svc.deep_dream_judge_candidates(
+        Judge(svc, verdicts), candidates=other)['judged'] == 1
+    pairs = svc._storage.get_meta('deep_candidate_verdicts')['pairs']
+    assert 'alpha|beta' not in pairs and 'delta|gamma' in pairs
+    # The human's rejudge takes effect: the pair goes back to the model.
+    assert svc.deep_dream_judge_candidates(
+        _CandidateJudge(verdicts), candidates=first)['judged'] == 1
+
+
+def test_candidate_requeue_during_model_call_blocks_saved_dismiss_replay(svc, monkeypatch):
+    svc.config.memory.deep_dream.candidate_judge_mode = 'auto'
+    for name in ('alpha', 'beta', 'gamma', 'delta'):
+        svc._storage.ensure_entity(name, display=name)
+    rows = [{'src': 'alpha', 'dst': 'beta', 'similarity': .8},
+            {'src': 'gamma', 'dst': 'delta', 'similarity': .8}]
+    verdicts = {('alpha', 'beta'): ('dismiss', .99, None, None, None),
+                ('gamma', 'delta'): ('leave', .9, None, None, None)}
+    original = svc._graph_dismiss_duplicate_locked
+    def fail(*args, **kwargs):
+        raise RuntimeError('injected action failure')
+    monkeypatch.setattr(svc, '_graph_dismiss_duplicate_locked', fail)
+    assert 'error' in svc.deep_dream_judge_candidates(
+        _CandidateJudge(verdicts), candidates=rows[:1])
+    saved = svc._storage.get_meta('deep_candidate_verdicts')['pairs']['alpha|beta']
+    assert saved['reply'] and not saved['complete']
+    monkeypatch.setattr(svc, '_graph_dismiss_duplicate_locked', original)
+
+    class Judge(_RequeueingCandidateJudge):
+        def judge_candidates(self, rows):
+            # alpha/beta replays its saved reply; only gamma/delta is sent.
+            assert [(r['src'], r['dst']) for r in rows] == [('gamma', 'delta')]
+            return super().judge_candidates(rows)
+
+    result = svc.deep_dream_judge_candidates(Judge(svc, verdicts), candidates=rows)
+    assert result['dismissed'] == 0 and result['remaining'] == 1
+    assert not svc._storage.dismissed_pairs()
+    assert 'alpha|beta' not in svc._storage.get_meta('deep_candidate_verdicts')['pairs']
+
+
+def _scan_candidates(svc, monkeypatch, rows, ts):
+    """Route the watermark path: a deep apply at ``ts`` whose scan finds ``rows``."""
+    monkeypatch.setattr(svc, 'deep_dream', lambda apply=False: {'candidates': rows})
+    svc._storage.set_meta('deep_last_apply', {'ts': ts})
+
+
+def test_candidate_watermark_stays_open_after_a_requeue_during_the_model_call(
+        svc, monkeypatch):
+    svc.config.memory.deep_dream.candidate_judge_mode = 'shadow'
+    verdicts = {('alpha', 'beta'): ('leave', .9, None, None, None),
+                ('gamma', 'delta'): ('leave', .9, None, None, None)}
+    first = {'src': 'alpha', 'dst': 'beta', 'similarity': .8}
+    _scan_candidates(svc, monkeypatch, [first], 1.0)
+    assert svc.deep_dream_judge_candidates(_CandidateJudge(verdicts))['judged'] == 1
+    assert svc._storage.get_meta('deep_candidates_judged')['complete']
+    _scan_candidates(svc, monkeypatch,
+                     [first, {'src': 'gamma', 'dst': 'delta', 'similarity': .8}], 2.0)
+    result = svc.deep_dream_judge_candidates(_RequeueingCandidateJudge(svc, verdicts))
+    assert result['judged'] == 1 and result['remaining'] == 1
+    assert not svc._storage.get_meta('deep_candidates_judged')['complete']
+    assert svc.deep_dream_judge_candidates(_CandidateJudge(verdicts))['judged'] == 1
+
+
+def test_candidate_all_judged_watermark_respects_a_requeue_after_the_read(
+        svc, monkeypatch):
+    import pseudolife_memory.graph as graph
+    svc.config.memory.deep_dream.candidate_judge_mode = 'shadow'
+    rows = [{'src': 'alpha', 'dst': 'beta', 'similarity': .8}]
+    judge = _CandidateJudge({('alpha', 'beta'): ('leave', .9, None, None, None)})
+    _scan_candidates(svc, monkeypatch, rows, 1.0)
+    assert svc.deep_dream_judge_candidates(judge)['judged'] == 1
+    _scan_candidates(svc, monkeypatch, rows, 2.0)
+    # No model call on this tick: the requeue lands in the first unlocked
+    # step after the memo read (norm_name keys every candidate).
+    original, armed = graph.norm_name, [True]
+    def requeue_once_unlocked(name):
+        if armed[0] and not svc._lock.locked():
+            armed[0] = False
+            assert svc.review_rejudge('candidate', limit=1)['requeued'] == 1
+        return original(name)
+    monkeypatch.setattr(graph, 'norm_name', requeue_once_unlocked)
+    assert svc.deep_dream_judge_candidates(judge)['reason'] == 'all_judged'
+    assert not armed[0]
+    monkeypatch.setattr(graph, 'norm_name', original)
+    assert not svc._storage.get_meta('deep_candidates_judged')['complete']
+    assert svc.deep_dream_judge_candidates(judge)['judged'] == 1
+
+
 def test_legacy_analyzer_entity_rejection_is_reconciled(svc):
     pid = _propose(svc, 'old service', 'old svc')
     svc._storage.conn.execute(
