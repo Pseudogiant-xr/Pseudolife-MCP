@@ -441,6 +441,7 @@ def main() -> int:
         return 0
     if args.run:
         import tempfile
+        import embedder_stamp
         from ladder_sweep import build_service
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="plmemcot_",
@@ -448,6 +449,7 @@ def main() -> int:
             svc = build_service(Path(td))
             seed_bench(svc)
             results = run_all(svc, top_k=args.top_k, hop_cap=args.hop_cap)
+            results["embedder"] = embedder_stamp.describe(svc)
         (RESULTS_DIR / "memcot.json").write_text(json.dumps(results, indent=2))
         report(results)
         return 0

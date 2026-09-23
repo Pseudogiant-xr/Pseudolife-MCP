@@ -48,6 +48,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
+import embedder_stamp  # noqa: E402 — stdlib only
+
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 WINDOW = 0   # --window: known-facts window size applied to every bench service
@@ -748,6 +751,7 @@ def run_rung(name: str) -> dict:
         svc = build_service(Path(td))
         result["bench_env"] = rung_bench_env(svc.config.memory.dream)
         ingest(svc)
+        result["embedder"] = embedder_stamp.describe(svc)
         if rung["kind"] == "naive":
             result.update(measure_naive(svc))
             result["extract_seconds"] = 0.0
@@ -809,6 +813,7 @@ def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80),
                     "false_abstain_answerable": round(wrong / len(PAIRS), 3),
                 })
     return {"rung": name, "status": "ok", "curve": curve,
+            "embedder": embedder_stamp.describe(svc),
             **endpoint_stamp(rung)}
 
 
@@ -821,6 +826,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 **endpoint_stamp(rung)}
     import tempfile
     curve = []
+    embedder = None
     for thr in thresholds:
         with tempfile.TemporaryDirectory(prefix=f"plsup_{name}_",
                                          ignore_cleanup_errors=True) as td:
@@ -831,6 +837,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 svc.store(pair["a_text"], source="bench")
                 svc.store(pair["b_text"], source="bench")
             _, tally = consolidate(svc, make_extractor(rung))
+            embedder = embedder_stamp.describe(svc)
             m = measure_cortex(svc)
             false_merge = 0
             for pair in NO_MERGE:
@@ -846,7 +853,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 "false_merge": false_merge,
             })
     return {"rung": name, "status": "ok", "curve": curve,
-            **endpoint_stamp(rung)}
+            "embedder": embedder, **endpoint_stamp(rung)}
 
 
 # ---------------------------------------------------------------------------

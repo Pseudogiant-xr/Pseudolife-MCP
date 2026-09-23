@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))      # repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
 
 from pseudolife_memory.memory import freshness                    # noqa: E402
+import embedder_stamp  # noqa: E402
 
 DAY = 86400.0
 PREREG = "docs/superpowers/specs/2026-08-08-retention-interval-eval-design.md"
@@ -237,6 +238,7 @@ def run_study_a(rung: str, offsets_days=OFFSETS_DAYS) -> dict:
     stales = {v["stale_leak"] for v in per_offset.values()}
     return {
         "rung": rung,
+        "embedder": embedder_stamp.describe(svc),
         "consolidate_seconds": round(elapsed, 1),
         "tally": tally,
         "offsets": per_offset,
@@ -367,6 +369,9 @@ def run_study_b(answer_url: str | None) -> dict:
         seeded_at = _seed(svc, STUDY_B_FACTS)
         now = seeded_at + QUERY_OFFSET_DAYS * DAY
         rows = _render_contexts(svc, STUDY_B_FACTS, now)
+    # One process, one resolved precision: the control bank's embedder
+    # below resolves identically.
+    out["embedder"] = embedder_stamp.describe(svc)
 
     # Evergreen control: identical values, no decay anywhere — bounds the
     # answerer's base-rate hedging with no staleness signal in play.
@@ -467,6 +472,9 @@ def run_study_h3(answer_url: str | None) -> dict:
             svc.config.memory.search.stale_policy = policy
             rows_by_policy[policy] = _render_contexts(svc, STUDY_B_FACTS, now)
         svc.config.memory.search.stale_policy = "annotate"
+    # One process, one resolved precision: the control bank's embedder
+    # below resolves identically.
+    out["embedder"] = embedder_stamp.describe(svc)
 
     # Evergreen control rendered under the strongest policy: the policy
     # must never touch never-stale records, so these bytes double as the

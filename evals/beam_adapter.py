@@ -49,6 +49,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ladder_sweep import build_service, probe  # noqa: E402
 import answerability_probe  # noqa: E402
+import embedder_stamp  # noqa: E402
 import leak_check  # noqa: E402
 import longmemeval_bench as lme  # noqa: E402
 import nomem_arm  # noqa: E402
@@ -582,6 +583,7 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                    # serving-knob reruns and re-judges recompose from these
                    # instead of re-paying the ingest/extraction phase.
                    "contexts": {}, "parts": parts}
+            embedder_stamp.stamp_row(row, "extract", svc)
             for arm in arms:
                 answer_arm(row, arm, q, contexts.get(arm, ""),
                            judge_prompt)
@@ -662,6 +664,11 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
     ans_block = answerability_probe.report_block(rows)
     if ans_block:
         summary["answerability"] = ans_block
+    # Which embedder built the contexts (its precision follows the host);
+    # legacy rows carry none and their summaries keep their shape.
+    embedder = embedder_stamp.merge_rows(rows)
+    if embedder:
+        summary["embedder"] = embedder
     for arm in arms:
         summary["arms"][arm] = {
             "score": round(sum(r[f"{arm}_score"] for r in rows)

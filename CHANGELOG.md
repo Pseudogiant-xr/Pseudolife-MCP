@@ -6,6 +6,60 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-23 — eval results say which embedder precision produced them)
+- `embedding.cpu_dtype` defaults to `auto`, which is bf16 on a CPU with
+  native bf16 and fp32 elsewhere (GitHub runners, most Intel CPUs), and
+  `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` overrides it per process. A bf16 run on
+  one host and an fp32 run on another could therefore differ, and no eval
+  result file recorded which precision produced it. Every eval harness that
+  builds an embedder now stamps `EmbeddingPipeline.describe()` (`backend`,
+  `device`, `dtype`) into what it writes, through the new stdlib-only
+  `evals/embedder_stamp.py`.
+- LongMemEval and BEAM rows record one description per stage that embedded
+  their contexts: `extract`, and `rebuild_contexts` / `rag_lite_rebuild` /
+  `band_ablation` for the offline rebuilds. The stages are kept apart
+  because a rebuilt row's cortex facts and its rag block come from
+  different embedders. `--report` summaries, `replicate.py agg` files and a
+  newly established gate baseline carry the merged stamp. A file whose rows
+  mix precisions says so, with the row count of each variant in that file.
+  Re-judged and ablated rows (`lme_rejudge`, `beam_rejudge`,
+  `beam_attrib_ablation`) carry the stamp of the contexts they re-read.
+  The single-run harnesses (`ladder_sweep`, `graph_ablation`,
+  `retrieval_replay`, `recall_fanout_bench`, `live_replay_flat_ab`,
+  `retention_interval_eval`, `quarantine_gate`, `memcot_bench`,
+  `seed_bench`, `warm_cache_probe`, `epistemic_bench`, `lme_v2_smoke`,
+  `beam_reader_sweep`, `retrieval_pool_probe`) stamp their result file.
+  `embedder_recall`'s bake-off arms, which load a bare SentenceTransformer
+  outside `cpu_dtype`, record the dtype read back from their parameters.
+  The two stdout-only probes (`retrieval_sweep`, `window_echo_check`) print
+  it.
+- `replicate.py compare` and `gate-check` warn, like the nondeterminism
+  warning, when the two sides embedded at different precisions. The warning
+  never fails the gate. Stages are compared one by one, and a side that
+  never ran a later stage is compared through its `extract` stage, which
+  built that part of its contexts. So a `diag-knobs` tag rebuilt in bf16
+  warns against its own fp32 `diag` source. `rag_lite_rebuild` is recorded
+  but never compared: it refuses to write unless its ranking is
+  byte-identical to the judged control's. compare writes the warning to
+  stderr and records `a_embedder` / `b_embedder` / `embedder_warnings` in
+  its `--out` artifact; `recall_fanout_bench --combine` does the same for
+  its two arms. A missing stamp reads as `unknown` and is never a mismatch,
+  so every artifact written before this change (the committed gate
+  baseline included) compares silently. `gate-check` prints both sides'
+  precision so an unknown side is visible rather than mistaken for a
+  match.
+- Pinned by `tests/test_eval_embedder_stamp.py`,
+  `tests/test_eval_embedder_stamp_writers.py` and tests beside each
+  consumer. The writers file holds a static guard over `evals/` that
+  follows calls across modules and has two rules:
+  - Every function that calls a constructor, or a `build_service`-style
+    factory that returns one, must itself call a stamp-WRITING helper. The
+    merge and report helpers do not count, so a `report()` cannot stand in
+    for a deleted row stamp.
+  - Every module that reaches a constructor through any chain of calls
+    (`warm_cache_probe` → `ladder_sweep.run_rung` → `build_service` →
+    `MemoryService`) must write a stamp.
+
 ### Fixed (2026-09-23 — the memory daemon OOM-restarted under ordinary load)
 - The Docker daemon was cgroup OOM-killed (exit 137) at 15:12 AEST on
   2026-09-23 by an ordinary burst of concurrent requests. It had been living

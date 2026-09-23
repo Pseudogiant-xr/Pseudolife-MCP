@@ -64,6 +64,7 @@ def main() -> int:
     from pseudolife_memory.utils.config import EmbeddingConfig
 
     emb = EmbeddingPipeline(EmbeddingConfig(device="cpu"))
+    import embedder_stamp
 
     # Pre-embed once per bank; the knob grid then costs nothing.
     prepared = []
@@ -86,6 +87,8 @@ def main() -> int:
     print(f"{len(banks)} banks from {banks_dir.name}; "
           f"{len(with_gold)} have the gold answer in a current fact "
           f"({len(with_gold) / len(banks):.0%} extraction ceiling)")
+    # No result file: the table below is the output, so the stamp is too.
+    print(f"embedder: {json.dumps(embedder_stamp.describe(emb))}")
     print(f"{'top_k':>6} {'min_score':>10} {'starved%':>9} "
           f"{'mean facts':>11} {'gold-hit%':>10}")
     for top_k in TOP_KS:

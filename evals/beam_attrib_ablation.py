@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import longmemeval_bench as lme                       # noqa: E402
 from longmemeval_bench import _chat, QWEN_URL, load_rows, probe  # noqa: E402
+import embedder_stamp                                 # noqa: E402
 from beam_adapter import (                            # noqa: E402
     _BEAM_ANSWER_SYSTEM, judge_response, load_judge_prompt)
 
@@ -97,6 +98,7 @@ def ablate_row(src: dict, judge_prompt: str, chat) -> dict:
            "rag_top_k": src.get("rag_top_k"),
            "hybrid_top_k": src.get("hybrid_top_k"),
            "answer_system": "pre-phase1 (44366163)"}
+    embedder_stamp.carry(src, row)       # same contexts, same embedder
     for arm, ctx in contexts.items():
         prompt = (f"Question: {src['question']}\n\n"
                   f"Memory context:\n{ctx or '(empty)'}")

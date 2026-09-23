@@ -1186,6 +1186,7 @@ def run_synthetic(args) -> int:
                 raise SystemExit(f"refusing to overwrite {p}; tag the run "
                                  "differently or pass --force")
 
+    import embedder_stamp
     import longmemeval_bench as lmb                      # noqa: F401
     from ladder_sweep import build_service
 
@@ -1257,6 +1258,7 @@ def run_synthetic(args) -> int:
             "cortex_top_k": lmb.CORTEX_TOP_K,
             "cortex_min_score": lmb.CORTEX_MIN_SCORE,
             "selectivity": selectivity,
+            "embedder": embedder_stamp.describe(svc),
             "wall_seconds": round(time.perf_counter() - t0, 1),
             **corpus.meta,
         },
@@ -1335,6 +1337,7 @@ def run_lme(args) -> int:
 
     import tempfile
 
+    import embedder_stamp
     import longmemeval_bench as lmb
     from ladder_sweep import build_service
 
@@ -1378,6 +1381,7 @@ def run_lme(args) -> int:
             consolidation=tally, cortex_slots_in_bank=slots,
             stale_policy=stale_policy,
             wall_seconds=round(time.perf_counter() - t_q, 1)))
+        embedder_stamp.stamp_row(row, "extract", svc)
         # Appended per question: this IS the resume point.
         with rows_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -1448,6 +1452,10 @@ def run_lme(args) -> int:
         "arms": per_arm,
     }
     payload["caveats"].update(LME_CAVEATS)
+    # Per-question rows can come from several resumed processes.
+    embedder = embedder_stamp.merge_rows(rows)
+    if embedder:
+        payload["meta"]["embedder"] = embedder
     # Only the summary is written here — deliberately NOT through
     # write_artifact, which also rewrites the rows file. That file is this
     # run's append-only resume log: rewriting it from the summarised slice
@@ -1644,6 +1652,12 @@ def run_rescore(args) -> int:
         "rescore path is verified by reproducing the source run's own "
         "summary exactly when it is run against the source derivation "
         "(tests/test_epistemic_bench.py).")
+    # The contexts rescored here were built by the source run's embedder;
+    # each rescored row is a copy of its source row, stamp included.
+    import embedder_stamp
+    embedder = embedder_stamp.merge_rows(rows)
+    if embedder:
+        payload["meta"]["embedder"] = embedder
     write_artifact(out, payload, rows, force=args.force)
     _print_table(payload)
     print(f"\nrescored {len(rows)} of {len(source_rows)} persisted rows "

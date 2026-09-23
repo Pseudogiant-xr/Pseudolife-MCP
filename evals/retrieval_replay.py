@@ -70,6 +70,8 @@ from typing import Any, Callable, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import embedder_stamp  # noqa: E402
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -334,6 +336,7 @@ def main(argv: list[str] | None = None) -> int:
                         else "(dataclass defaults)"),
         "top_k": args.top_k,
         "limit": args.limit,
+        "embedder": embedder_stamp.describe(svc),
         "n_logged_events": len(events),
         "n_use_rows": len(uses),
         "results": results,

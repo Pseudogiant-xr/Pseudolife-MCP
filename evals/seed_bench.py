@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ladder_sweep import build_service  # noqa: E402
+import embedder_stamp  # noqa: E402
 from pseudolife_memory.memory.recall import _mentions, run_recall  # noqa: E402
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -208,6 +209,8 @@ def run(top_k: int = 5, hops: int = 3) -> dict:
                 "mean_graph_calls": round(sum(gcalls) / n, 2),
                 "mean_latency_ms": round(sum(lat) / n, 1),
             }
+        # Beside the strategy rows (_report reads them by name).
+        rows["embedder"] = embedder_stamp.describe(svc)
     return rows
 
 

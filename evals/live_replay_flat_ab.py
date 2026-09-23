@@ -49,6 +49,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import embedder_stamp  # noqa: E402
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -205,6 +207,8 @@ def cmd_replay(args) -> int:
         "n_queries": n,
         "top_k": k,
         "flat_cap": cap,
+        "embedder": {"banded": embedder_stamp.describe(svc_a),
+                     "flat": embedder_stamp.describe(svc_b)},
         "divergence_rate_topk": round(n_div_topk / n, 4),
         "divergence_rate_top3": round(n_div_top3 / n, 4),
         "mean_jaccard_topk": round(

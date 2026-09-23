@@ -1906,6 +1906,28 @@ Convention, updated:
   `replicate.py` prints a nondeterminism WARNING if replicates of
   byte-identical contexts ever disagree, which means the run was served by
   the fast fork.
+- **The embedder's precision is recorded, and compared.**
+  `EmbeddingConfig.cpu_dtype` defaults to `auto` (bf16 on a CPU with native
+  bf16, fp32 elsewhere, including GitHub runners and most Intel CPUs), and
+  `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` overrides it per process, so one command
+  embeds differently on different hosts. Every harness that builds an
+  embedder stamps `EmbeddingPipeline.describe()` (`backend`, `device`,
+  `dtype`) into what it writes (`evals/embedder_stamp.py`). LongMemEval and
+  BEAM rows record one description per stage that embedded their contexts
+  (`extract`, `rebuild_contexts`, `rag_lite_rebuild`, `band_ablation`);
+  summaries, `.agg.json` files and the gate baseline carry the merge.
+  `replicate.py compare` and `gate-check` print a WARNING when the two
+  sides embedded at different precisions. Stages are compared one by one,
+  and a side that never ran a later stage is compared through its
+  `extract` stage, so a tag rebuilt in bf16 warns against its fp32 source.
+  `rag_lite_rebuild` is recorded but not compared, because its output is
+  byte-identical to the judged control by construction. It is a caveat,
+  not a failure: bf16
+  and fp32 scored every gate arm identically on 2026-09-23
+  (`results/embedder-cpu-bf16-probe-20260923.json`). Artifacts written
+  before the stamp existed read as `unknown`, never as a mismatch. That
+  includes the committed gate baseline until it is next re-established with
+  `-Establish`.
 - **Question-sampling variance does not go away** and is the real limit on
   small effects. A deterministic judge makes a measured difference *real*,
   not *significant*: config-vs-config claims still need the paired

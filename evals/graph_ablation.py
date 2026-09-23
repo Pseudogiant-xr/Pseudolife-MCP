@@ -51,6 +51,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import embedder_stamp  # noqa: E402
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -520,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
                         else "(dataclass defaults)"),
         "top_k": args.top_k,
         "hub_degree_p95": hub_threshold,
+        "embedder": embedder_stamp.describe(svc),
         "graph_shape": shape,
         "ablation": {
             "relational_questions": {
