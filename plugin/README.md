@@ -67,9 +67,12 @@ appends to tool results, so the two paths never repeat each other. SessionStart
 on `resume` or `compact` clears the marker so the current digest prints afresh;
 the bash hooks do the same on `clear`. Under Claude Code, `/clear` and an
 in-session `/resume` give the hooks a new `session_id` while the shim keeps
-the one it was launched with, so SessionStart records the shim's key once per
-Claude Code process (`claude-<CLAUDE_PID>.host` in the same directory) and the
-prompt hook reads through it.
+the one it was launched with, so the session hooks keep the shim's key once
+per Claude Code process (`claude-<CLAUDE_PID>.host` in the same directory).
+The prompt hook reads through it while it is confirmed for the current
+session. It passes to the next session only through a SessionEnd handoff bound
+to the process's creation time, so a record a dead process left is never
+followed.
 Override the directory with `PSEUDOLIFE_DIGEST_DIR` in *both* the MCP env block
 and the hook's environment; they must agree. `ledger.log` in that directory
 records one line per hook firing (time, session prefix, watermark, bytes added)

@@ -32,12 +32,44 @@ REASON=$(printf '%s' "$INPUT" | sed -n 's/.*"reason"[[:space:]]*:[[:space:]]*"\(
 
 # Coordination digest key, first: Claude Code gives a plugin SessionEnd hook
 # 1.5s, whatever hooks.json says, and the connection checks and curl below
-# can use all of it. An in-session /clear or /resume keeps this process's
-# shim, so session-start.sh keeps its record of the shim's key (see there).
-# A session launched under older hooks has no record yet; the session ending
-# here then names the key, correctly unless an earlier /clear under those
-# hooks already moved it. A /resume also leaves a marker, because
-# session-start.sh cannot otherwise tell it from a launch.
+# can use all of it. /clear or /resume inside a running process keeps its
+# shim, so the session ending here hands the process's record (see
+# session-start.sh) to the next one: time, this process's creation identity
+# and the ending session's key. A record not confirmed for the ending
+# session (none yet under older hooks, or another process's) is first
+# replaced by that session's own key, which is right unless an earlier
+# /clear under older hooks already moved it. Without a creation identity no
+# handoff is written, and the next session starts from its own key.
+# Same helpers as session-start.sh.
+sha256_of() {  # $1 = text
+    printf '%s' "$1" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
+}
+write_lines() {  # $1 = path, then its lines; atomic replace, best effort
+    local path="$1"
+    shift
+    printf '%s\n' "$@" 2>/dev/null > "$path.$$" && mv -f "$path.$$" "$path" 2>/dev/null ||
+        rm -f "$path.$$" 2>/dev/null
+}
+process_identity() {
+    local stat boot="" fields line=""
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            line=$(ps -W 2>/dev/null |
+                awk -v p="$1" '$4 == p || ($1 ~ /^[A-Za-z]$/ && $5 == p) { print; exit }')
+            ;;
+        linux*)
+            if IFS= read -r stat 2>/dev/null < "/proc/$1/stat"; then
+                IFS= read -r boot 2>/dev/null < /proc/sys/kernel/random/boot_id
+                read -r -a fields <<< "${stat##*) }"
+                [ -n "${fields[19]:-}" ] && line="$boot ${fields[19]}"
+            fi
+            ;;
+        *)
+            line=$(ps -o lstart= -p "$1" 2>/dev/null)
+            ;;
+    esac
+    [ -n "$line" ] && printf '%s' "$line"
+}
 case "$REASON" in
     clear|resume)
         DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
@@ -45,19 +77,21 @@ case "$REASON" in
             ''|*[!0-9]*) ;;
             *)
                 if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
+                    KEY=$(sha256_of "$SID")
                     RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
-                    HELD=""
-                    [ -f "$RECORD" ] && [ ! -L "$RECORD" ] && IFS= read -r HELD 2>/dev/null < "$RECORD"
-                    case "$HELD" in *[!0-9a-f]*) HELD="" ;; esac
-                    if [ "${#HELD}" -ne 64 ]; then
-                        KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
-                        [ -n "$KEY" ] && { printf '%s\n' "$KEY" 2>/dev/null > "$RECORD.$$" &&
-                            mv -f "$RECORD.$$" "$RECORD" 2>/dev/null || rm -f "$RECORD.$$" 2>/dev/null; }
+                    SWITCH="$DIGEST_DIR/claude-$CLAUDE_PID.switch"
+                    LINE1="" LINE2=""
+                    if [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
+                        { IFS= read -r LINE1; IFS= read -r LINE2; } 2>/dev/null < "$RECORD"
                     fi
-                    if [ "$REASON" = resume ]; then
-                        SWITCH="$DIGEST_DIR/claude-$CLAUDE_PID.switch"
-                        { date +%s 2>/dev/null > "$SWITCH.$$" &&
-                            mv -f "$SWITCH.$$" "$SWITCH" 2>/dev/null || rm -f "$SWITCH.$$" 2>/dev/null; }
+                    case "$LINE1" in ''|*[!0-9a-f]*) LINE1="" ;; esac
+                    if [ -n "$KEY" ]; then
+                        if [ "${#LINE1}" -ne 64 ] || [ "$LINE2" != "$KEY" ]; then
+                            write_lines "$RECORD" "$KEY" "$KEY"
+                        fi
+                        IDENTITY=$(process_identity "$CLAUDE_PID")
+                        [ -n "$IDENTITY" ] &&
+                            write_lines "$SWITCH" "$(date +%s 2>/dev/null)" "$(sha256_of "$IDENTITY")" "$KEY"
                     fi
                 fi
                 ;;

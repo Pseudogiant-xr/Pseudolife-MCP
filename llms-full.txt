@@ -3632,12 +3632,16 @@ Code, whose per-session stdio shim does receive the id.
 
 Claude Code hooks see the current session id, which `/clear` and an
 in-session `/resume` change, while the shim keeps the id it was launched with.
-The plugin's SessionStart hook therefore records the shim's digest key once
-per Claude Code process, in `claude-<CLAUDE_PID>.host` beside the digests,
-and the prompt hook reads through that record. `CLAUDE_PID` is the Claude Code
-process id, which Claude Code v2.1.214 and later export to hooks; older
-versions keep the per-session key. After `/clear`, compaction or a resume,
-the current digest prints once more. A `--continue` launch whose shim got the
+The plugin's session hooks therefore keep the shim's digest key once per
+Claude Code process, in `claude-<CLAUDE_PID>.host` beside the digests, and
+the prompt hook reads through that record while it is confirmed for the
+current session. `CLAUDE_PID` is the Claude Code process id, which Claude
+Code v2.1.214 and later export to hooks; older versions keep the per-session
+key. The record passes to the next session only through a handoff that the
+SessionEnd hook binds to the process's creation time. A record left by a
+process that exited, even one whose PID was reused, is never followed, and a
+host that cannot report a creation time falls back to the per-session key.
+After `/clear`, compaction or a resume, the current digest prints once more. A `--continue` launch whose shim got the
 startup id cannot be mapped, since no hook ever sees that id; such a session
 gets hints only.
 
