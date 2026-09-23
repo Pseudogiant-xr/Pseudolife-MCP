@@ -27,15 +27,16 @@ RECALL — at the start of any task:
   `replaced_by` names the note recorded as replacing it. `verified: false`
   marks a link from the retired automatic detector (about 4 in 10 point at an
   unrelated note): treat the entry as possibly still valid and `memory_get`
-  the replacement only if its `preview` is on the same subject. Never follow
-  chains. Pass `verbose=true` only when debugging retrieval.
+  the replacement only if its `preview` is on the same subject.
+  `current: false` = itself replaced or unresolved: search again. Never
+  follow chains. Pass `verbose=true` only when debugging retrieval.
 - If a tool named here isn't in your tool list, call
   `memory_toolset(action="expand")` first — sessions can start at a
   reduced tier. A harness notice that some `mcp__pseudolife-memory__*`
   tools were REMOVED means the same tier filtering, not an outage — make
   one `memory_search` call before reporting memory as offline.
 
-RECALL AGAIN mid-session — once at the start is not enough. Search when:
+RECALL AGAIN mid-session. Search when:
 - the user refers to work you weren't part of ("last time…", "in another
   session…", "we decided…") — that is a memory question by definition;
 - you are about to propose a design → `memory_lesson_search` first;
@@ -55,7 +56,7 @@ relevant memory can still frame the wrong problem, so check it against
 the task in front of you before letting it steer.
 For anything live (deployed version, config, what's running), read the
 config/code and say where you read it. A memory records what was true when
-it was WRITTEN: cortex facts now carry `asserted_at` / `age`, so check them
+it was WRITTEN: cortex facts carry `asserted_at` / `age`, so check them
 before relying on one; a fact marked `stale: true` is a lead, not truth —
 re-verify before acting on it (a stale fact may arrive with its `value`
 quarantined and the original preserved in `last_known_value` — that is
@@ -107,7 +108,7 @@ CAPTURE — as durable things arise (one claim per call):
   `memory_episode_end(episode=<handle>)` pops back. The handle anchors
   both to YOUR session when several run concurrently.
 - Route verbose status/progress/logs under `source="status"` — searchable,
-  but excluded from fact/graph extraction so they don't pollute the graph.
+  but excluded from fact/graph extraction.
 - Never store secrets: no tokens, API keys, passwords, or credentials.
 
 REFLECT — at task end, or the moment an outcome lands:

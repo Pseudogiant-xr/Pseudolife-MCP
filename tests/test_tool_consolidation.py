@@ -369,6 +369,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # on a minimal-tier tool, so minimal is 5,196 and full 17,454. Both
     # caps move deliberately rather than cut another sentence of the same
     # description; core (11,146) still fits.
+    # 2026-09-23 follow-up (replaced_by.current, memory_get's pointer):
+    # paid for inside the same descriptions, caps unchanged — minimal
+    # 5,239, core 11,202, full 17,490.
     budgets = {"minimal": 5250, "core": 11500, "full": 17500}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))

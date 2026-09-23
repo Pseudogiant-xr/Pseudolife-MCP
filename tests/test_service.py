@@ -249,6 +249,7 @@ class TestSupersede:
             assert old["superseded_by_text"] == "Sky is blue", surface
             assert old["superseded_by_id"] is None, surface
             assert old["supersession_verified"] is True, surface
+            assert old["superseded_by_current"] is True, surface
             new = next(e for e in entries if e["text"] == "Sky is blue")
             assert new["superseded_at"] is None, surface
             assert "superseded_by_id" not in new, surface
@@ -354,6 +355,43 @@ class TestSupersessionSuccessor:
         assert d["superseded_at"] is None
         assert "superseded_by_id" not in d
         assert "supersession_verified" not in d
+        assert "superseded_by_current" not in d
+
+    def test_a_successor_that_was_itself_replaced_is_not_current(
+        self,
+    ) -> None:
+        """``superseded_by_current`` says whether the named successor is
+        still live. On the live bank the recorded successor was itself
+        superseded in 529 of 730 served superseded slots (2026-09-23
+        review), so without it a pointer to a chain link reads exactly
+        like a pointer to the answer."""
+        v1 = self._entry("port is 5431", 1, superseded_at=100.0,
+                         superseded_by_text="port is 5432")
+        v2 = self._entry("port is 5432", 2, source="correction",
+                         superseded_at=200.0,
+                         superseded_by_text="port is 5433")
+        v3 = self._entry("port is 5433", 3, source="correction")
+        d1, d2 = self._annotated([v1, v2], [v1, v2, v3])
+        # Named, verified, but a chain link: the helper never walks on.
+        assert (d1["superseded_by_id"], d1["supersession_verified"],
+                d1["superseded_by_current"]) == (2, True, False)
+        assert (d2["superseded_by_id"], d2["superseded_by_current"]) == (
+            3, True)
+
+    def test_an_unresolved_successor_is_not_current(self) -> None:
+        """No resolved successor means nothing to call current — evicted,
+        or ambiguous between several live notes with the same text."""
+        gone = self._entry("old", 1, superseded_at=100.0,
+                           superseded_by_text="evicted replacement")
+        twin = self._entry("older", 2, superseded_at=100.0,
+                           superseded_by_text="dup")
+        a = self._entry("dup", 3, source="correction")
+        b = self._entry("dup", 4, source="correction")
+        d_gone, d_twin = self._annotated([gone, twin], [gone, twin, a, b])
+        assert (d_gone["superseded_by_id"],
+                d_gone["superseded_by_current"]) == (None, False)
+        assert (d_twin["superseded_by_id"],
+                d_twin["superseded_by_current"]) == (None, False)
 
 
 # ---------------------------------------------------------------------------
@@ -965,6 +1003,24 @@ class TestEpisodes:
         assert tag_dist.get("b") == 1
         # Recent entries surfaces text+source for each.
         assert len(summary["recent_entries"]) == 2
+
+    def test_episode_summary_names_the_successor_of_a_superseded_entry(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """``recent_entries`` get the same successor annotation as search
+        and recent, so the MCP tool can serve the ``replaced_by`` pointer
+        instead of the uncapped replacement text. File mode has no row
+        ids, so the id is None here."""
+        ep = pristine_service.episode_start("supersede-session")
+        pristine_service.store("port is 5432", source="notes")
+        pristine_service.supersede("port is 5432", "port is 5433")
+        summary = pristine_service.episode_summary(ep["id"])
+        by_text = {e["text"]: e for e in summary["recent_entries"]}
+        old = by_text["port is 5432"]
+        assert old["superseded_by_text"] == "port is 5433"
+        assert (old["superseded_by_id"], old["supersession_verified"],
+                old["superseded_by_current"]) == (None, True, True)
+        assert "superseded_by_id" not in by_text["port is 5433"]
 
     def test_episode_summary_for_missing_id_returns_not_found(
         self, pristine_service: MemoryService,

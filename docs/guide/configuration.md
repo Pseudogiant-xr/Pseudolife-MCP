@@ -689,16 +689,21 @@ for delivery-state and host-verification contracts.
   *back* from a tool call, shaped for its context window: a
   `memory_search` hit's `text` is truncated to `entry_text_chars` and
   marked `truncated: true` (`memory_get` returns the full text); a
-  superseded hit carries `replaced_by: {id, at, preview, verified}` — the
-  successor's row id when one entry (or one current entry) has the
-  replacement's text, the supersession date, the replacement's first 120
-  chars, and whether an explicit correction (`memory_supersede` /
-  `memory_consolidate`, successor source `correction` / `consolidation`;
-  a custom consolidate `source` reads unverified) made the link — instead
-  of the replacement's full text, which `verbose=true` still serves
+  superseded hit carries `replaced_by: {id, at, preview, verified,
+  current}` — the successor's row id when one entry (or one current
+  entry) has the replacement's text, the supersession date, the
+  replacement's first 120 chars, whether an explicit correction
+  (`memory_supersede` / `memory_consolidate`, successor source
+  `correction` / `consolidation`; a custom consolidate `source` reads
+  unverified) made the link, and whether that successor is itself still
+  live (`current: false` marks a chain link or an unresolved successor)
+  — instead of the replacement's full text, which `verbose=true` still serves
   (2026-09-23: about 4 in 10 links the automatic contradiction detector
   left before it stopped superseding point at an unrelated note, so the
-  full text must not arrive framed as the answer);
+  full text must not arrive framed as the answer). `memory_get` serves
+  the same pointer when the fetched entry is superseded, and
+  `memory_episode_summary` compacts its `recent_entries` like
+  `memory_recent`;
   the cortex block serves `min(5, top_k)` facts,
   so a narrow search stops paying for five;
   and `memory_fact_get` serves the acting subset — value, kind/members,

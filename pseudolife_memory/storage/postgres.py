@@ -3202,11 +3202,10 @@ class PostgresStorage:
 
     def get_entry(self, entry_id: int) -> dict | None:
         cols = ("id", "text", "source", "ts", "reinforcements",
-                "explicit_reinforcements", "access_count")
+                "explicit_reinforcements", "access_count", "superseded_at",
+                "superseded_by_text")
         row = self.conn.execute(
-            "SELECT id, text, source, ts, reinforcements, "
-            "explicit_reinforcements, access_count "
-            "FROM entries WHERE id = %s",
+            f"SELECT {', '.join(cols)} FROM entries WHERE id = %s",
             (entry_id,)).fetchone()
         return dict(zip(cols, row)) if row else None
 

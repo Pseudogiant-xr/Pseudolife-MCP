@@ -264,7 +264,9 @@ def test_memory_loop_block_leaves_briefing_headroom():
     2026-09-05: the `used_ids` clause funded itself by three trims of
     text the block already said elsewhere (`one claim per call` in the
     CAPTURE header, `heed polarity:-` in the RECALL bullet, and
-    `rather than silently picking one`)."""
+    `rather than silently picking one`). 7,479 then 7,475 on 2026-09-23:
+    the `replaced_by` pointer text and its `current` clause were both
+    funded by dropping restatements."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
                                                     MEMORY_LOOP_BLOCK)
     assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000
@@ -396,3 +398,13 @@ def test_memory_loop_block_does_not_trust_replacement_text():
     assert "`replaced_by`" in text and "`verified: false`" in text
     assert "possibly still valid" in text
     assert "Never follow chains" in text
+
+
+def test_memory_loop_block_explains_replacement_currency():
+    """``replaced_by.current`` is false when the replacement was itself
+    replaced — on the live bank, 529 of 730 served superseded slots
+    (2026-09-23 review). "Never follow chains" is only actionable if the
+    block says what a chain link looks like and what to do instead."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "`current: false`" in text and "search again" in text

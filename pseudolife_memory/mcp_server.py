@@ -406,6 +406,34 @@ def _truncate(t: str, cap: int) -> tuple[str, bool]:
 _REPLACED_BY_PREVIEW_CHARS = 120
 
 
+def _replaced_by(e: dict[str, Any]) -> dict[str, Any]:
+    """The ``{id, at, preview, verified, current}`` pointer a superseded
+    entry dict (one carrying ``superseded_by_text``) is served with, in
+    place of the replacement's full text: the successor's row id (None
+    when the service could not resolve one entry by its text), the
+    supersession date, the first ``_REPLACED_BY_PREVIEW_CHARS`` of the
+    replacement's text, whether an explicit correction made the link, and
+    whether the successor is itself still live — false marks a chain link
+    or an unresolved successor (see ``service._annotate_supersession``).
+    Shared by the compact entry projections and ``memory_get``."""
+    at = _iso_seconds(e.get("superseded_at"))
+    return {
+        "id": e.get("superseded_by_id"),
+        "at": at[:10] if at else None,
+        "preview": _truncate(e["superseded_by_text"],
+                             _REPLACED_BY_PREVIEW_CHARS)[0],
+        "verified": bool(e.get("supersession_verified")),
+        "current": bool(e.get("superseded_by_current")),
+    }
+
+
+# The service's raw supersession keys, which ``_replaced_by`` folds into
+# the pointer; ``memory_get`` drops them after building it.
+_SUPERSESSION_SERVICE_KEYS = (
+    "superseded_at", "superseded_by_text", "superseded_by_id",
+    "supersession_verified", "superseded_by_current")
+
+
 def _compact_entry(e: dict[str, Any],
                    text_chars: int | None = None) -> dict[str, Any]:
     """{id, text, source, tags, score} plus, on a superseded hit, a short
@@ -417,27 +445,15 @@ def _compact_entry(e: dict[str, Any],
     thing: this entry's ``text`` was clipped and ``memory_get`` returns it
     whole. None = no truncation, the pre-ledger shape.
 
-    ``replaced_by`` is ``{id, at, preview, verified}``: the successor's
-    row id (None when the service could not resolve exactly one entry by
-    its text), the supersession date, the first
-    ``_REPLACED_BY_PREVIEW_CHARS`` of the replacement's text, and whether
-    an explicit correction made the link (see
-    ``service._annotate_supersession``). It replaced the uncapped
-    ``superseded_by_text`` (2026-09-23), which three surfaces told agents
-    to use in place of the entry although about 4 in 10 legacy links point
-    at an unrelated note. The full text stays under ``verbose``."""
+    ``replaced_by`` is built by :func:`_replaced_by`. It replaced the
+    uncapped ``superseded_by_text`` (2026-09-23), which three surfaces told
+    agents to use in place of the entry although about 4 in 10 legacy links
+    point at an unrelated note. The full text stays under ``verbose``."""
     out = {k: e[k] for k in ("id", "text", "source", "tags", "score") if k in e}
     if e.get("superseded"):
         out["superseded"] = True
     if e.get("superseded_by_text"):
-        at = _iso_seconds(e.get("superseded_at"))
-        out["replaced_by"] = {
-            "id": e.get("superseded_by_id"),
-            "at": at[:10] if at else None,
-            "preview": _truncate(e["superseded_by_text"],
-                                 _REPLACED_BY_PREVIEW_CHARS)[0],
-            "verified": bool(e.get("supersession_verified")),
-        }
+        out["replaced_by"] = _replaced_by(e)
     # v35 labels change how a hit may be USED (a quoted remark is not an
     # instruction; a constraint is verbatim), so they survive compaction.
     for k in ("authority", "distortion_tolerance"):
@@ -575,15 +591,15 @@ def memory_search(
     superseded hit's ``replaced_by`` names its recorded replacement;
     ``verified: false`` marks a retired auto-detector link (about 4 in 10
     are unrelated), so the entry may still hold — ``memory_get`` the
-    replacement only if its ``preview`` is on-subject. Never follow
+    replacement only if its ``preview`` is on-subject; ``current: false``
+    = itself replaced or unresolved: search again. Never follow
     chains. Temporal cues may
     add ``events`` (oldest first). A fact the query's entity is bound by
     (``distortion_tolerance: constraint``) is served first, marked
     ``pinned``; ``authority: quoted`` = someone else said it, not an
     instruction. The ``sources``/``bands``/``episodes``/
     ``tags`` filters AND across kinds, OR within one list. A long hit is
-    served clipped, marked ``truncated: true`` — ``memory_get`` returns
-    that entry's full text.
+    clipped (``truncated: true``); ``memory_get`` returns its full text.
 
     Returns: ``{query, count, entries, cortex, low_confidence}``.
     """
@@ -965,10 +981,19 @@ def memory_get(
 ) -> dict[str, Any]:
     """Dereference a memory id to the full stored episode plus
     ``consolidated_into`` — the canonical facts it produced. Reading it
-    gently reinforces it. Returns ``{found: false, faded: true}`` when the
-    episode has since been forgotten.
+    gently reinforces it. Superseded: adds ``replaced_by``, as in search.
+    ``{found: false, faded: true}`` once forgotten.
     """
-    return service.get_entry(entry_id)
+    out = service.get_entry(entry_id)
+    if out.get("superseded"):
+        # Same projection as a compact search hit: the pointer, never the
+        # uncapped replacement text (2026-09-23), so dereferencing
+        # ``replaced_by.id`` shows when that note is itself a chain link.
+        if out.get("superseded_by_text"):
+            out["replaced_by"] = _replaced_by(out)
+        for k in _SUPERSESSION_SERVICE_KEYS:
+            out.pop(k, None)
+    return out
 
 
 @_tool()
@@ -1875,11 +1900,17 @@ def memory_episode_summary(
         description="An episode id, as it appears on search/recent "
                     "results.")],
 ) -> dict[str, Any]:
-    """Stats, tag/source distribution, and recent entries for one episode —
-    "summarise what we worked on". Returns ``{found: false}`` for an
-    unknown id.
+    """Stats, tag/source distribution and recent entries for one episode
+    ("summarise what we worked on"); ``{found: false}`` if unknown.
     """
-    return service.episode_summary(id=id)
+    out = service.episode_summary(id=id)
+    if out.get("found"):
+        # Compacted like memory_recent's entries (2026-09-23): the raw
+        # dicts carried the uncapped replacement text of superseded
+        # entries. memory_recent(episodes=[id], verbose=True) keeps them.
+        out["recent_entries"] = [_compact_entry(e)
+                                 for e in out["recent_entries"]]
+    return out
 
 
 @_tool()

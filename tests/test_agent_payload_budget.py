@@ -205,12 +205,14 @@ def test_superseded_hit_serves_a_capped_pointer_not_the_replacement(
                           "superseded_at": 1_790_000_000.0,
                           "superseded_by_text": _LONG,
                           "superseded_by_id": 7,
-                          "supersession_verified": False}]},
+                          "supersession_verified": False,
+                          "superseded_by_current": True}]},
             text_chars=text_chars)
         e = out["entries"][0]
         assert "superseded_by_text" not in e
         rb = e["replaced_by"]
         assert rb["id"] == 7 and rb["verified"] is False
+        assert rb["current"] is True
         assert rb["preview"] == _LONG[:120] + "…"
         assert len(rb["at"]) == 10
     # The entry's OWN text is still capped, and the flag still fires.
@@ -225,9 +227,11 @@ def test_superseded_hit_serves_a_capped_pointer_not_the_replacement(
     # replacement preview.
     assert e["truncated"] is True
     # A dict the service did not annotate degrades to an unnamed,
-    # unverified pointer rather than a KeyError or a false "verified".
+    # unverified, not-current pointer rather than a KeyError or a false
+    # "verified" / "current".
     assert e["replaced_by"]["id"] is None
     assert e["replaced_by"]["verified"] is False
+    assert e["replaced_by"]["current"] is False
     assert e["replaced_by"]["at"] is None
 
 

@@ -248,6 +248,85 @@ def test_superseded_hit_names_its_successor_row_after_restart(
         assert isinstance(old["superseded_at"], float)
 
 
+def test_memory_get_reports_supersession_only_on_a_superseded_entry(
+    pg_conn, pg_url, tmp_path,
+):
+    """``memory_get`` is how an agent dereferences ``replaced_by.id``, so
+    the fetched entry must say when it is itself superseded — with the
+    same successor annotation search serves, one link at a time. A live
+    entry's payload keeps exactly its pre-existing keys."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    v1, v2, v3 = "Sky is green", "Sky is teal", "Sky is blue"
+    svc.store(v1, source="wt-test")
+    svc.supersede(v1, v2)
+    svc.supersede(v2, v3)
+    ids = {e["text"]: e["id"] for e in svc.recent(n=10)["entries"]}
+
+    live = svc.get_entry(ids[v3])
+    assert set(live) == {"found", "entry_id", "text", "source",
+                         "reinforcements", "explicit_reinforcements",
+                         "access_count", "consolidated_into"}
+
+    first = svc.get_entry(ids[v1])
+    assert first["superseded"] is True
+    assert isinstance(first["superseded_at"], float)
+    assert first["superseded_by_text"] == v2
+    # Names the middle link, not the end of the chain, and says so.
+    assert (first["superseded_by_id"], first["supersession_verified"],
+            first["superseded_by_current"]) == (ids[v2], True, False)
+    middle = svc.get_entry(ids[v2])
+    assert (middle["superseded_by_id"], middle["superseded_by_current"]) == (
+        ids[v3], True)
+
+
+def test_memory_get_reads_supersession_from_the_row_it_serves(
+    pg_conn, pg_url, tmp_path,
+):
+    """``memory_get`` serves a Postgres row, so its supersession state
+    comes from that row too: a superseded row the CMS does not hold (a
+    failed eviction write-through, or reinstatement recovery mid-flight)
+    must not be served as live. The successor is still resolved over the
+    resident entries, like search."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    svc.store("Sky is green", source="wt-test")
+    svc.supersede("Sky is green", "Sky is blue")
+    ids = {e["text"]: e["id"] for e in svc.recent(n=10)["entries"]}
+    for band in svc._cms.bands:
+        band.entries = [e for e in band.entries
+                        if e.db_id != ids["Sky is green"]]
+    got = svc.get_entry(ids["Sky is green"])
+    assert got["superseded"] is True
+    assert (got["superseded_by_id"], got["superseded_by_current"]) == (
+        ids["Sky is blue"], True)
+
+
+def test_memory_get_never_names_the_entry_itself_as_its_successor(
+    pg_conn, pg_url, tmp_path,
+):
+    """A verbatim re-assertion (superseded by its own text) that was later
+    corrected leaves two retired entries with one text. The fetched entry
+    is excluded from its own candidates by id, so the re-assertion is named
+    (and marked not current) instead of the pair reading as ambiguous."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    svc.store("Sky is green", source="wt-test")
+    svc.supersede("Sky is green", "Sky is green")
+    rows = svc._storage.conn.execute(
+        "SELECT id, superseded_at FROM entries WHERE text = %s ORDER BY id",
+        ("Sky is green",)).fetchall()
+    (original, retired_at), (reassertion, live_at) = rows
+    assert retired_at is not None and live_at is None
+    svc.supersede(entry_id=reassertion, new_text="Sky is blue")
+    got = svc.get_entry(original)
+    assert (got["superseded_by_id"], got["superseded_by_current"]) == (
+        reassertion, False)
+
+
 @pytest.mark.parametrize('operation', ['supersede', 'consolidate'])
 def test_explicit_replacement_bypasses_surprise_and_survives_restart(
     operation, pg_conn, pg_url, tmp_path, monkeypatch,

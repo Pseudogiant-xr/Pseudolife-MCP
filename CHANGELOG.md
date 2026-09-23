@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — a superseded hit's pointer says whether its replacement was itself replaced)
+- `replaced_by` gains `current`: true only when the successor was resolved
+  and is itself still live. The 2026-09-23 live-bank review found the
+  recorded successor itself superseded in 529 of 730 served superseded
+  slots (161 entries chain up to 44 links into one note), so "never follow
+  chains" gave an agent no way to see a chain link before stepping onto
+  it. The service's entry dicts gain `superseded_by_current` beside
+  `superseded_by_id`; the successor is still resolved one link at a time,
+  never walked.
+- `memory_get` on a superseded entry now serves `superseded: true` and the
+  same `replaced_by` pointer, so dereferencing `replaced_by.id` shows when
+  that note is itself a chain link. The state is read from the Postgres
+  row being served (two existing columns added to its `SELECT`, no schema
+  change), so a row the CMS does not hold is not served as live. A live
+  entry's payload is unchanged. The service / REST payload (`/api/entry`)
+  gains `superseded_at`, `superseded_by_text` and the successor annotation
+  on superseded entries only.
+- `memory_episode_summary` compacts `recent_entries` the way
+  `memory_recent` compacts its entries: the raw dicts carried every
+  superseded entry's uncapped `superseded_by_text`.
+  `memory_recent(episodes=[id], verbose=true)` still serves the full
+  dicts, and the service (Console, REST) keeps them, now annotated.
+- The `memory_search` description, the served session-start block and
+  `examples/CLAUDE.memory.md` say what `current: false` means: the
+  replacement was itself replaced or is unresolved, so search again. No
+  cap moved. The block shrinks 7,479 → 7,475 chars by dropping two
+  restatements ("once at the start is not enough" beside "RECALL AGAIN
+  mid-session"; "so they don't pollute the graph" beside "excluded from
+  fact/graph extraction") and a filler "now". The tool manifests measure
+  minimal 5,239 / core 11,202 / full 17,490 against 5,250 / 11,500 /
+  17,500, paid for by compressing `memory_search`'s clipped-hit sentence
+  and the `memory_get` / `memory_episode_summary` descriptions. Ranking,
+  the retrieval log, the schema and every eval number are unchanged.
+  **Upgrading:** a copied instruction block gains one sentence.
+
 ### Fixed (2026-09-23 — search stops handing agents an often-unrelated "replacement" as the answer)
 - A superseded hit in compact `memory_search` / `memory_recent` output now
   carries `replaced_by: {id, at, preview, verified}` instead of the

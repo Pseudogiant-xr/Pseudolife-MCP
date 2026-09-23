@@ -203,13 +203,22 @@ def _annotate_supersession(
     Entries store only the replacement's text, so the successor is resolved
     by exact text over ``resident`` (every entry the CMS holds), once per
     call and only when a served entry is superseded. Adds
-    ``superseded_by_id`` and ``supersession_verified`` to each superseded
-    dict, in place. The id names the one other entry carrying the text;
-    when several do, the only one still current wins (a retired twin, as
+    ``superseded_by_id``, ``supersession_verified`` and
+    ``superseded_by_current`` to each superseded dict, in place. The id
+    names the one other entry carrying the text; when several do, the only
+    one still current wins (a retired twin, as
     ``consolidate(replaces=[A, B], new_text=A)`` leaves, cannot be what
     replaced B); otherwise None, as when evicted or in file mode. Never
     follows a chain: on the live bank 161 entries chain up to 44 links
-    into one note.
+    into one note. ``superseded_by_current`` says whether the successor
+    was resolved and is itself still live, so a caller can see it would be
+    standing on a chain link (the successor was itself superseded in 529
+    of 730 served superseded slots, 2026-09-23 review).
+
+    ``served`` items need only ``superseded_at`` / ``superseded_by_text``
+    attributes; an item is excluded from its own candidates by identity,
+    so a caller whose subject is not a resident entry filters it out of
+    ``resident`` instead (see ``get_entry``).
     """
     pending = [(e, d) for e, d in served if e.superseded_at is not None]
     if not pending:
@@ -229,6 +238,8 @@ def _annotate_supersession(
         d["superseded_by_id"] = one.db_id if one is not None else None
         d["supersession_verified"] = (
             one is not None and one.source in _VERIFIED_SUPERSEDER_SOURCES)
+        d["superseded_by_current"] = (
+            one is not None and one.superseded_at is None)
 
 
 # Serving-side staleness policy (memory.search.stale_policy; spec
@@ -5416,7 +5427,15 @@ class MemoryService(DreamOps):
     def get_entry(self, entry_id: int) -> dict[str, Any]:
         """Dereference a trace pointer: the dense episode + the facts it formed.
         Bumps access_count (ambient reinforcement). {found: False, faded: True}
-        when the episode has evicted."""
+        when the episode has evicted.
+
+        A superseded entry also carries ``superseded``, ``superseded_at``,
+        ``superseded_by_text`` and the successor annotation search serves
+        (``_annotate_supersession``), so dereferencing a ``replaced_by.id``
+        shows when that note is itself a chain link. The state is read
+        from the row being served, not the resident copy: a row the CMS
+        does not hold must not be served as live. A live entry's payload
+        is unchanged."""
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -5429,12 +5448,33 @@ class MemoryService(DreamOps):
                 self._cms.bump_entry_access_count(int(entry_id), 1)
             facts = self._storage.facts_for_entry(int(entry_id))
             self._record_retrieval_use(int(entry_id), "get")
+            supersession: dict[str, Any] = {}
+            if row.get("superseded_at") is not None:
+                from types import SimpleNamespace
+
+                eid = int(entry_id)
+                supersession = {
+                    "superseded": True,
+                    "superseded_at": row["superseded_at"],
+                    "superseded_by_text": row["superseded_by_text"],
+                }
+                # The subject is the row, not a resident object, so the
+                # helper's identity-based self-exclusion cannot apply; the
+                # entry is filtered out of the candidates by id instead.
+                _annotate_supersession(
+                    [(SimpleNamespace(
+                        superseded_at=row["superseded_at"],
+                        superseded_by_text=row["superseded_by_text"]),
+                      supersession)],
+                    (r for band in (self._cms.bands if self._cms else ())
+                     for r in band.entries if r.db_id != eid))
         return {"found": True, "entry_id": row["id"], "text": row["text"],
                 "source": row.get("source"),
                 "reinforcements": row.get("reinforcements", 0),
                 "explicit_reinforcements": row.get("explicit_reinforcements", 0),
                 "access_count": row.get("access_count", 0) + 1,  # +1 for the bump just applied
-                "consolidated_into": facts}
+                "consolidated_into": facts,
+                **supersession}
 
     def reinforce(self, entry_id: int) -> dict[str, Any]:
         """The 'this episode was useful' signal — bump reinforcements (Phase-2
@@ -6427,16 +6467,24 @@ class MemoryService(DreamOps):
                 key=lambda r: (-r["count"], r["source"]),
             )
 
+            # Cap recent entries — even a small dict times N entries
+            # gets unwieldy on long episodes. Use ``memory_recent``
+            # filtered by episode for the full list. Annotated like
+            # search/recent hits; a successor may sit outside this
+            # episode, so it is resolved over every resident entry.
+            recent = entries[:20]
+            recent_out = [_entry_to_dict(e) for e in recent]
+            _annotate_supersession(
+                list(zip(recent, recent_out)),
+                (r for band in self._cms.bands for r in band.entries))
+
             return {
                 "found": True,
                 **self._episode_to_dict(ep),
                 "entry_count": len(entries),
                 "tag_distribution": tag_rows,
                 "source_distribution": source_rows,
-                # Cap recent entries — even a small dict times N entries
-                # gets unwieldy on long episodes. Use ``memory_recent``
-                # filtered by episode for the full list.
-                "recent_entries": [_entry_to_dict(e) for e in entries[:20]],
+                "recent_entries": recent_out,
             }
 
     # ------------------------------------------------------------------

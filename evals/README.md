@@ -5022,10 +5022,12 @@ those ~2,400 chars unlabelled between the block total and text + metadata
 
 **Superseded 2026-09-23 — the `superseded_by_text` rows in both tables
 price a field compact payloads no longer carry.** A superseded hit now
-serves `replaced_by: {id, at, preview, verified}` instead: the successor's
-row id (so `memory_get` is the recovery path the paragraph above said was
-missing), the date, a 120-char preview, and whether an explicit correction
-made the link. The 2026-09-23 review found that about 4 in 10 links the
+serves `replaced_by: {id, at, preview, verified, current}` instead: the
+successor's row id (so `memory_get` is the recovery path the paragraph
+above said was missing), the date, a 120-char preview, whether an explicit
+correction made the link, and whether the successor is itself still live
+(`current`, added by a same-day follow-up). The 2026-09-23 review found
+that about 4 in 10 links the
 automatic contradiction detector left before it stopped superseding point
 at an unrelated note, so the three
 surfaces that told agents to prefer the replacement text now describe the
