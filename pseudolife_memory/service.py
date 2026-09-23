@@ -153,6 +153,7 @@ def _entry_to_dict(
         "access_count": entry.access_count,
         "surprise_score": round(entry.surprise_score, 4),
         "superseded": entry.superseded_at is not None,
+        "superseded_at": entry.superseded_at,
         "superseded_by_text": entry.superseded_by_text,
         # Tier C (schema v6) — None / [] for entries stored before
         # episodes / tags existed, so MCP responses never crash on legacy
@@ -177,6 +178,57 @@ def _entry_to_dict(
     if include_embedding:
         out["embedding"] = entry.embedding.detach().cpu().tolist()
     return out
+
+
+# Successor sources an explicit correction writes: ``memory_supersede``
+# always stores its replacement as "correction", and ``memory_consolidate``
+# defaults to "consolidation". Links with any other successor source came
+# from the automatic contradiction detector before it stopped superseding
+# (PR #294) or from a consolidate call with a custom ``source``; on the
+# live bank about 4 in 10 of the 562 such links point at an unrelated note
+# (2026-09-23 review, sampled by stratum). The inference is approximate
+# both ways: a custom-source consolidate reads unverified, and before
+# PR #294 / 270c21c9 an explicit correction could itself be mis-targeted
+# (a top-1 embedding fallback) or trip the detector when its replacement
+# was stored. Exact provenance needs a schema column.
+_VERIFIED_SUPERSEDER_SOURCES = frozenset({"correction", "consolidation"})
+
+
+def _annotate_supersession(
+    served: list[tuple[MemoryEntry, dict[str, Any]]],
+    resident,
+) -> None:
+    """Name the successor of each superseded entry in ``served``.
+
+    Entries store only the replacement's text, so the successor is resolved
+    by exact text over ``resident`` (every entry the CMS holds), once per
+    call and only when a served entry is superseded. Adds
+    ``superseded_by_id`` and ``supersession_verified`` to each superseded
+    dict, in place. The id names the one other entry carrying the text;
+    when several do, the only one still current wins (a retired twin, as
+    ``consolidate(replaces=[A, B], new_text=A)`` leaves, cannot be what
+    replaced B); otherwise None, as when evicted or in file mode. Never
+    follows a chain: on the live bank 161 entries chain up to 44 links
+    into one note.
+    """
+    pending = [(e, d) for e, d in served if e.superseded_at is not None]
+    if not pending:
+        return
+    wanted = {e.superseded_by_text for e, _ in pending if e.superseded_by_text}
+    matches: dict[str, list[MemoryEntry]] = {}
+    if wanted:
+        for r in resident:
+            if r.text in wanted:
+                matches.setdefault(r.text, []).append(r)
+    for e, d in pending:
+        found = [m for m in matches.get(e.superseded_by_text or "", ())
+                 if m is not e]
+        if len(found) > 1:
+            found = [m for m in found if m.superseded_at is None]
+        one = found[0] if len(found) == 1 else None
+        d["superseded_by_id"] = one.db_id if one is not None else None
+        d["supersession_verified"] = (
+            one is not None and one.source in _VERIFIED_SUPERSEDER_SOURCES)
 
 
 # Serving-side staleness policy (memory.search.stale_policy; spec
@@ -1574,6 +1626,9 @@ class MemoryService(DreamOps):
                     d["via"] = via
                 entries_out.append(d)
                 served_components.append(comp)
+            _annotate_supersession(
+                [(e, d) for (e, _, _, _), d in zip(ranked, entries_out)],
+                (r for band in self._cms.bands for r in band.entries))
             # Chronicle events (schema v28): a temporally-cued query also
             # serves matching live events, chronologically ascending.
             # Needs no knob — an empty table (chronicle extraction
@@ -1755,9 +1810,13 @@ class MemoryService(DreamOps):
             # within one tick — same-tick stores must still list newest-first.
             all_entries.sort(key=lambda e: (e.timestamp, e.seq), reverse=True)
             limited = all_entries[: max(0, int(n))]
+            entries_out = [_entry_to_dict(e) for e in limited]
+            _annotate_supersession(
+                list(zip(limited, entries_out)),
+                (r for band in self._cms.bands for r in band.entries))
             return {
                 "count": len(limited),
-                "entries": [_entry_to_dict(e) for e in limited],
+                "entries": entries_out,
             }
 
     # ------------------------------------------------------------------

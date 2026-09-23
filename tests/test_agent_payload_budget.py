@@ -14,7 +14,8 @@ agent_token_ledger.py`` measures it; these tests pin the cuts it justified:
   session, tx/valid time, supersession chain) behind ``verbose=True``.
 
 All three ride ONE knob, ``memory.mcp.compact_payloads`` (default True);
-False restores the pre-cut payloads verbatim. Ranking, ``min_score`` and
+False restores the pre-cut payloads verbatim, except that a superseded hit
+keeps its ``replaced_by`` pointer (2026-09-23). Ranking, ``min_score`` and
 the service layer are untouched — the eval harness calls ``service.*``, not
 these projections.
 """
@@ -181,34 +182,53 @@ def test_verbose_search_keeps_the_whole_text(
     assert e["text"] == _LONG and "truncated" not in e
 
 
-def test_superseded_by_text_is_never_truncated(
+def test_superseded_hit_serves_a_capped_pointer_not_the_replacement(
         tmp_path: Path, monkeypatch) -> None:
-    """The correction an agent is told to ACT ON must arrive whole.
+    """A compact superseded hit names its replacement in a short dated
+    pointer instead of carrying the replacement's whole text.
 
-    A compact entry carries no id for the superseding entry, and nothing
-    stores a pointer to it: ``memory_get(entry.id)`` returns the
-    SUPERSEDED entry's own text, so a clipped ``superseded_by_text`` is
-    unrecoverable by any tool call in any tier. Three surfaces —
-    ``web/session_hook.MEMORY_LOOP_BLOCK``, ``examples/CLAUDE.memory.md``
-    and this tool's own docstring — instruct agents to prefer it over the
-    entry's text, so it is exempt from the cap (2026-09-04 review
-    finding). Cost is bounded: mean 2,406 chars per top_k=8 query on the
-    measured bank.
+    The whole text used to ride along uncapped because nothing could
+    recover it (no successor id) and three surfaces told agents to prefer
+    it. Measured on the live bank (2026-09-23 review): it was ~31% of
+    served entry payload chars, about 4 in 10 legacy links point at an
+    unrelated note, and the successor is co-served in the same search
+    only 14% of the time. The service now resolves the successor's row id
+    so ``memory_get`` recovers the rest, and the preview is capped at 120
+    chars, which in all 11 clear progressions sampled still carried the
+    state word (COMPLETE / SHIPPED / DEPLOYED). The cap holds with
+    ``text_chars=None`` too — the pointer's size is not a payload knob.
     """
     mod = _reload(tmp_path, monkeypatch)
-    mod.service.config.memory.mcp.entry_text_chars = 50
+    for text_chars in (50, None):
+        out = mod._compact_entries(
+            {"entries": [{"text": _LONG, "superseded": True,
+                          "superseded_at": 1_790_000_000.0,
+                          "superseded_by_text": _LONG,
+                          "superseded_by_id": 7,
+                          "supersession_verified": False}]},
+            text_chars=text_chars)
+        e = out["entries"][0]
+        assert "superseded_by_text" not in e
+        rb = e["replaced_by"]
+        assert rb["id"] == 7 and rb["verified"] is False
+        assert rb["preview"] == _LONG[:120] + "…"
+        assert len(rb["at"]) == 10
+    # The entry's OWN text is still capped, and the flag still fires.
     out = mod._compact_entries(
         {"entries": [{"text": _LONG, "superseded": True,
                       "superseded_by_text": _LONG}]},
         text_chars=50)
     e = out["entries"][0]
-    assert e["superseded_by_text"] == _LONG
-    # The entry's OWN text is still capped, and the flag still fires.
     assert len(e["text"]) == 51 and e["text"].endswith("…")
     # ``truncated`` means exactly one thing: this entry's ``text`` was
-    # clipped and ``memory_get`` returns it whole. It never refers to
-    # ``superseded_by_text``, which is served in full.
+    # clipped and ``memory_get`` returns it whole. It never refers to the
+    # replacement preview.
     assert e["truncated"] is True
+    # A dict the service did not annotate degrades to an unnamed,
+    # unverified pointer rather than a KeyError or a false "verified".
+    assert e["replaced_by"]["id"] is None
+    assert e["replaced_by"]["verified"] is False
+    assert e["replaced_by"]["at"] is None
 
 
 def test_a_long_supersession_alone_does_not_mark_the_entry_truncated(
@@ -216,14 +236,15 @@ def test_a_long_supersession_alone_does_not_mark_the_entry_truncated(
     """The flag's contract is ``memory_get`` recovers the rest. That is
     only true of ``text``, so an entry whose short text was NOT clipped
     must not carry a flag pointing at a call that would return the wrong
-    field."""
+    field — a clipped preview is marked by its own ellipsis."""
     mod = _reload(tmp_path, monkeypatch)
     out = mod._compact_entries(
         {"entries": [{"text": "short", "superseded": True,
                       "superseded_by_text": _LONG}]},
         text_chars=50)
     e = out["entries"][0]
-    assert e["superseded_by_text"] == _LONG and e["text"] == "short"
+    assert e["replaced_by"]["preview"].endswith("…")
+    assert e["text"] == "short"
     assert "truncated" not in e
 
 
@@ -451,6 +472,24 @@ def _ledger():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def test_ledger_meters_the_replacement_pointer_in_its_own_column() -> None:
+    """Since 2026-09-23 a compact superseded hit carries ``replaced_by``
+    instead of ``superseded_by_text``. The ledger must price the pointer
+    as its own part, or it silently lands in "entry metadata" and a rerun
+    reads as a metadata regression beside a vanished supersession row."""
+    led = _ledger()
+    rb = {"id": 7, "at": "2026-09-11", "preview": "x" * 121,
+          "verified": False}
+    split = led._split_search({"entries": [
+        {"id": 1, "text": "old", "superseded": True, "replaced_by": rb}]})
+    assert split["entries_replaced_by_chars"] == len(led.wire(rb))
+    assert split["entries_superseded_text_chars"] == 0
+    assert split["entries_other_chars"] == (
+        split["entries_chars"] - split["entries_text_chars"]
+        - split["entries_replaced_by_chars"])
+    assert split["entries_other_chars"] < split["entries_replaced_by_chars"]
 
 
 def test_safe_label_redacts_this_machines_hostname(monkeypatch) -> None:

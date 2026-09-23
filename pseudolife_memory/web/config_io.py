@@ -137,7 +137,8 @@ KNOBS: list[dict[str, Any]] = [
              "entry text truncated (memory_get returns it whole), the "
              "cortex block sized to the caller's top_k, and "
              "memory_fact_get's bookkeeping keys behind verbose=True. Off "
-             "restores the pre-2026-09-04 payloads. Projection only — "
+             "restores the pre-2026-09-04 payloads, except that superseded "
+             "hits keep their short replaced_by pointer. Projection only — "
              "ranking and every eval number are unaffected."},
     {"path": "memory.mcp.entry_text_chars", "group": "MCP payloads",
      "label": "Search entry text cap", "type": "int", "default": 600,
@@ -147,8 +148,8 @@ KNOBS: list[dict[str, Any]] = [
              "Ignored when compact payloads are off. 600 (~150 tokens) "
              "clipped 88% of hits on the 2026-09-04 ledger bank and halved "
              "the served entry text; raise it for long-form notes whose "
-             "tail carries the answer. Never applies to superseded_by_text, "
-             "which is served whole."},
+             "tail carries the answer. Does not size a superseded hit's "
+             "replaced_by preview, which is fixed at 120 chars."},
     # ── Cortex ─────────────────────────────────────────────────────────────
     {"path": "memory.cortex.search_first", "group": "Cortex",
      "label": "Cortex-first search", "type": "bool", "default": True,

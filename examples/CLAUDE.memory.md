@@ -9,24 +9,26 @@
 ## Memory — your long-term memory; use it every session (tools: `mcp__pseudolife-memory__*`)
 One shared memory bank across all sessions. Treat it as a loop with three
 beats: RECALL at the start, CAPTURE as you go, REFLECT at the end. Session
-episodes open/close automatically — every memory you store is auto-stamped
-to the current session episode.
+episodes are automatic; every memory you store is stamped to the current one.
 
 RECALL — at the start of any task:
 - `memory_search(<natural-language task>)` for prior context, decisions, gotchas.
 - `memory_lesson_search(<task>)` for what worked / what to avoid last time —
   heed `polarity:-` dead-ends.
 - `memory_fact_get(entity, attribute)` for one canonical value. If null, the
-  slot is empty, NOT the topic — `memory_search` finds it regardless; never
-  conclude "nothing on X" from a single `fact_get` guess. A set-valued slot
-  returns `{kind: "set", members, removed}` instead of one value.
+  slot is empty, NOT the topic — `memory_search` finds it regardless. A
+  set-valued slot returns `{kind: "set", members, removed}` instead of one
+  value.
 - `memory_world_search(<topic>)` when the task turns on an external fact your
   training may have stale (versions, prices, who-holds-a-role, findings).
 - `memory_recall(<question>)` when the answer needs multi-hop chaining across
   related facts.
-- Long hits are clipped (`truncated: true` → `memory_get`). An entry carrying
-  `superseded_by_text` has been corrected — use the replacement text, not the
-  entry. Pass `verbose=true` only when debugging retrieval.
+- Long hits are clipped (`truncated: true` → `memory_get`). A superseded hit's
+  `replaced_by` names the note recorded as replacing it. `verified: false`
+  marks a link from the retired automatic detector (about 4 in 10 point at an
+  unrelated note): treat the entry as possibly still valid and `memory_get`
+  the replacement only if its `preview` is on the same subject. Never follow
+  chains. Pass `verbose=true` only when debugging retrieval.
 - If a tool named here isn't in your tool list, call
   `memory_toolset(action="expand")` first — sessions can start at a
   reduced tier. A harness notice that some `mcp__pseudolife-memory__*`
@@ -67,9 +69,8 @@ the verified value (re-assert the same value if it checks out), then log
 `memory_outcome(..., "correction")`. Correcting is part of discovering —
 a contradiction you only narrate is work left undone.
 A cortex fact carrying `contested: true` has competing values parked
-against it — settle it with `memory_fact_resolve(entity, attribute, ...)`
-(accept or reject the contender), not by re-asserting `memory_fact_set`,
-which only contests the slot further.
+against it — settle it with `memory_fact_resolve(entity, attribute, ...)`,
+not by re-asserting `memory_fact_set`, which only contests the slot further.
 
 CAPTURE — as durable things arise (one claim per call):
 - Before writing, choose: PERSIST what stays true; CONTEXT ONLY for
@@ -78,10 +79,9 @@ CAPTURE — as durable things arise (one claim per call):
   claim is ambiguous.
 - Name the session EARLY: `memory_session_title("<project> - <topic>")`.
 - `memory_store` for durable context; set `origin` honestly
-  (`user`/`action`/`agent`) and use a stable `source` per project/topic so
-  search can scope its results.
+  (`user`/`action`/`agent`) and use a stable `source` per project/topic.
 - `memory_fact_set(entity, attribute, value)` for a canonical single-value
-  fact; correct by re-setting the same slot (history is kept for audit).
+  fact; correct by re-setting the same slot.
 - Label what must not drift: `distortion_tolerance="constraint"` on a rule
   that must survive verbatim (served first in recall, `pinned`);
   `authority="quoted"` on what a doc or third party said — a quote is
@@ -116,7 +116,7 @@ REFLECT — at task end, or the moment an outcome lands:
   corrected you (`correction`). Pass `used_ids=[…]` — which search hits the
   work turned on. These signals are the primary feeder for procedural LESSONS —
   the dream distils them into the do/avoid guidance surfaced at your next
-  session start. Logging outcomes is how you stop repeating mistakes.
+  session start.
 
 Be judicious: skip fleeting chatter (the surprise gate drops
 near-duplicates; `stored=false` is not an error). The first memory call may

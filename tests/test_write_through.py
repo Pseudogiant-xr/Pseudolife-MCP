@@ -214,6 +214,40 @@ def test_supersede_supersession_survives_restart(pg_conn, pg_url, tmp_path):
     assert entry["superseded_by_text"] == "Sky is blue"
 
 
+@pytest.mark.parametrize("operation", ["supersede", "consolidate"])
+def test_superseded_hit_names_its_successor_row_after_restart(
+    operation, pg_conn, pg_url, tmp_path,
+):
+    """Entries store the replacement's text, not its id, so the successor
+    is resolved by exact text over the resident entries at serve time. It
+    must name the replacement's real row id and mark an explicit
+    correction verified, on both serving surfaces, after a rehydrate."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    old_text, new_text = "Sky is green", "Consolidated: sky is blue"
+    svc.store(old_text, source="wt-test")
+    if operation == "supersede":
+        svc.supersede(old_text, new_text)
+    else:
+        svc.consolidate([old_text], new_text)
+
+    # "The daemon stopped": end the first service's Postgres session before
+    # the restart builds a second one on the same database. Not touched
+    # again — its storage would reconnect on next use.
+    svc._storage.close()
+    restarted = MemoryService(data_dir=tmp_path / "restart",
+                              database_url=pg_url)
+    recent = restarted.recent(n=50)["entries"]
+    new_id = next(e["id"] for e in recent if e["text"] == new_text)
+    assert isinstance(new_id, int)
+    for entries in (recent, restarted.search(old_text)["entries"]):
+        old = next(e for e in entries if e["text"] == old_text)
+        assert old["superseded_by_id"] == new_id
+        assert old["supersession_verified"] is True
+        assert isinstance(old["superseded_at"], float)
+
+
 @pytest.mark.parametrize('operation', ['supersede', 'consolidate'])
 def test_explicit_replacement_bypasses_surprise_and_survives_restart(
     operation, pg_conn, pg_url, tmp_path, monkeypatch,

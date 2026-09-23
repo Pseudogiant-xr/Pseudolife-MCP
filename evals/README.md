@@ -5020,6 +5020,21 @@ here rather than left inside "entries block" because the r2 breakdown left
 those ~2,400 chars unlabelled between the block total and text + metadata
 (2026-09-04 review finding).
 
+**Superseded 2026-09-23 — the `superseded_by_text` rows in both tables
+price a field compact payloads no longer carry.** A superseded hit now
+serves `replaced_by: {id, at, preview, verified}` instead: the successor's
+row id (so `memory_get` is the recovery path the paragraph above said was
+missing), the date, a 120-char preview, and whether an explicit correction
+made the link. The 2026-09-23 review found that about 4 in 10 links the
+automatic contradiction detector left before it stopped superseding point
+at an unrelated note, so the three
+surfaces that told agents to prefer the replacement text now describe the
+pointer instead. The ledger meters the pointer in its own column
+(`entries_replaced_by_chars`) but has not been rerun, which needs the live
+daemon; until it is, the rows above describe the 2026-09-04 shape. The same
+change re-priced the manifest (the `memory_search` description, +216
+chars in every tier) and the session-start block (7,488 → 7,479 raw chars).
+
 One approximation, named: the narrow arm slices the width-5 cortex list
 `/api/search` returns rather than re-running `cortex_search` at width 3, so
 it would diverge from a real call on a bank where constraint pinning

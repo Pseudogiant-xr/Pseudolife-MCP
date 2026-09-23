@@ -396,10 +396,20 @@ def _truncate(t: str, cap: int) -> tuple[str, bool]:
     return t[:cap] + "…", True
 
 
+# Chars of a replacement's text served in a superseded hit's
+# ``replaced_by.preview``. 120 because each of the 11 clear progressions
+# the 2026-09-23 review sampled from the live bank carried its state word
+# (COMPLETE / SHIPPED / DEPLOYED) in the first 120 chars, which is what a
+# reader needs to judge whether the link is on-subject.
+# Fixed, not a payload knob: the uncapped text it replaces averaged ~1,055
+# chars per served superseded slot (~31% of entry payload chars).
+_REPLACED_BY_PREVIEW_CHARS = 120
+
+
 def _compact_entry(e: dict[str, Any],
                    text_chars: int | None = None) -> dict[str, Any]:
-    """{id, text, source, tags, score} plus the supersession signal when
-    set — ``superseded_by_text`` changes answers, so it always survives.
+    """{id, text, source, tags, score} plus, on a superseded hit, a short
+    ``replaced_by`` pointer to the note recorded as replacing it.
 
     ``text_chars`` caps the entry's own ``text`` (2026-09-04 agent token
     ledger: it alone was 64% of a served ``memory_search`` payload, mean
@@ -407,28 +417,33 @@ def _compact_entry(e: dict[str, Any],
     thing: this entry's ``text`` was clipped and ``memory_get`` returns it
     whole. None = no truncation, the pre-ledger shape.
 
-    ``superseded_by_text`` is EXEMPT from the cap. It has no recovery
-    path: a compact entry carries no id for the superseding entry, and
-    nothing stores a pointer to one, so ``memory_get(entry.id)`` returns
-    this (superseded) entry's text rather than the replacement. Clipping
-    it would destroy the correction three surfaces tell agents to prefer
-    over the entry's own text (``web/session_hook.MEMORY_LOOP_BLOCK``,
-    ``examples/CLAUDE.memory.md``, ``memory_search``'s docstring). The
-    cost is bounded and measured — mean 2,406 chars per ``top_k=8`` query
-    on the 2026-09-04 ledger bank — and the remaining cut still stands."""
+    ``replaced_by`` is ``{id, at, preview, verified}``: the successor's
+    row id (None when the service could not resolve exactly one entry by
+    its text), the supersession date, the first
+    ``_REPLACED_BY_PREVIEW_CHARS`` of the replacement's text, and whether
+    an explicit correction made the link (see
+    ``service._annotate_supersession``). It replaced the uncapped
+    ``superseded_by_text`` (2026-09-23), which three surfaces told agents
+    to use in place of the entry although about 4 in 10 legacy links point
+    at an unrelated note. The full text stays under ``verbose``."""
     out = {k: e[k] for k in ("id", "text", "source", "tags", "score") if k in e}
     if e.get("superseded"):
         out["superseded"] = True
     if e.get("superseded_by_text"):
-        out["superseded_by_text"] = e["superseded_by_text"]
+        at = _iso_seconds(e.get("superseded_at"))
+        out["replaced_by"] = {
+            "id": e.get("superseded_by_id"),
+            "at": at[:10] if at else None,
+            "preview": _truncate(e["superseded_by_text"],
+                                 _REPLACED_BY_PREVIEW_CHARS)[0],
+            "verified": bool(e.get("supersession_verified")),
+        }
     # v35 labels change how a hit may be USED (a quoted remark is not an
     # instruction; a constraint is verbatim), so they survive compaction.
     for k in ("authority", "distortion_tolerance"):
         if e.get(k):
             out[k] = e[k]
     if text_chars is not None and isinstance(out.get("text"), str):
-        # ``superseded_by_text`` is deliberately absent from this loop —
-        # see the exemption in the docstring above.
         out["text"], cut = _truncate(out["text"], text_chars)
         if cut:
             out["truncated"] = True
@@ -556,9 +571,12 @@ def memory_search(
     facts arrive AHEAD of ``entries`` — the current, deduped answer
     (``contested: true`` awaits ``memory_fact_resolve``). ``top_k``
     sizes both blocks: ``min(5, top_k)`` facts.
-    ``low_confidence=True``: no confident match, prefer abstaining. On a
-    superseded entry, prefer ``superseded_by_text`` (never
-    clipped). Temporal cues may
+    ``low_confidence=True``: no confident match, prefer abstaining. A
+    superseded hit's ``replaced_by`` names its recorded replacement;
+    ``verified: false`` marks a retired auto-detector link (about 4 in 10
+    are unrelated), so the entry may still hold — ``memory_get`` the
+    replacement only if its ``preview`` is on-subject. Never follow
+    chains. Temporal cues may
     add ``events`` (oldest first). A fact the query's entity is bound by
     (``distortion_tolerance: constraint``) is served first, marked
     ``pinned``; ``authority: quoted`` = someone else said it, not an

@@ -713,16 +713,50 @@ def test_memory_search_explain_implies_verbose_entries(tmp_path: Path, monkeypat
         assert k in e, f"explain entry missing {k!r}"
 
 
-def test_compact_search_keeps_supersession_signal(tmp_path: Path, monkeypatch) -> None:
-    """superseded_by_text changes answers — it must survive compaction."""
+def test_compact_search_serves_a_replacement_pointer(tmp_path: Path, monkeypatch) -> None:
+    """A superseded hit keeps its flag and gains a short dated pointer to
+    the note recorded as replacing it — never the replacement's full text.
+    About 4 in 10 legacy links point at an unrelated note (2026-09-23
+    review), so the full text must not ride along as if it were the
+    answer; ``verified`` says whether an explicit correction made the link.
+    ``verbose`` still serves the whole text."""
+    import re
+
     _reload_mod(tmp_path, monkeypatch)
     _invoke("memory_store", {"text": "the api key lives in .env", "source": "notes"})
     _invoke("memory_supersede", {"old_text": "the api key lives in .env",
                                  "new_text": "the api key lives in the vault now"})
-    out = _invoke("memory_search", {"query": "where does the api key live"})
-    old = next(e for e in out["entries"] if e["text"] == "the api key lives in .env")
-    assert old["superseded"] is True
-    assert old["superseded_by_text"] == "the api key lives in the vault now"
+    for tool, args in (("memory_search", {"query": "where does the api key live"}),
+                       ("memory_recent", {"n": 5})):
+        out = _invoke(tool, args)
+        old = next(e for e in out["entries"]
+                   if e["text"] == "the api key lives in .env")
+        assert old["superseded"] is True, tool
+        assert "superseded_by_text" not in old, tool
+        rb = old["replaced_by"]
+        assert list(rb) == ["id", "at", "preview", "verified"], tool
+        assert rb["preview"] == "the api key lives in the vault now", tool
+        assert rb["verified"] is True, tool     # memory_supersede = explicit
+        assert rb["id"] is None, tool           # file mode: no row ids
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", rb["at"]), tool
+        full = _invoke(tool, {**args, "verbose": True})
+        old = next(e for e in full["entries"]
+                   if e["text"] == "the api key lives in .env")
+        assert old["superseded_by_text"] == "the api key lives in the vault now"
+        assert "replaced_by" not in old, tool
+
+
+def test_memory_search_docstring_does_not_trust_replacement_text() -> None:
+    """The docstring used to tell agents to prefer the (uncapped)
+    replacement text. It must now describe the pointer honestly: an
+    unverified link may point at an unrelated note, and chains are never
+    followed (161 live entries chain up to 44 links into one note)."""
+    from pseudolife_memory import mcp_server
+
+    doc = " ".join((mcp_server.memory_search.__doc__ or "").split())
+    assert "superseded_by_text" not in doc
+    assert "replaced_by" in doc and "verified: false" in doc
+    assert "Never follow chains" in doc
 
 
 def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monkeypatch) -> None:

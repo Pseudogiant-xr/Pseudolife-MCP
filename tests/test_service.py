@@ -228,6 +228,133 @@ class TestSupersede:
         assert result["superseded_count"] == 0
         assert result["reason"] == "empty_input"
 
+    def test_superseded_hit_carries_its_successor_link(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """search and recent both name the successor of a superseded hit:
+        when it was retired, which entry replaced it, and whether that link
+        came from an explicit correction. File mode has no row ids, so the
+        id is None here (the Postgres test in test_write_through.py pins
+        the resolved id); the full ``superseded_by_text`` stays in the
+        service dict for the Console and verbose callers."""
+        pristine_service.store("Sky is green", source="wrong")
+        pristine_service.supersede("Sky is green", "Sky is blue")
+        hits = {
+            "search": pristine_service.search("Sky is green")["entries"],
+            "recent": pristine_service.recent(n=10)["entries"],
+        }
+        for surface, entries in hits.items():
+            old = next(e for e in entries if e["text"] == "Sky is green")
+            assert isinstance(old["superseded_at"], float), surface
+            assert old["superseded_by_text"] == "Sky is blue", surface
+            assert old["superseded_by_id"] is None, surface
+            assert old["supersession_verified"] is True, surface
+            new = next(e for e in entries if e["text"] == "Sky is blue")
+            assert new["superseded_at"] is None, surface
+            assert "superseded_by_id" not in new, surface
+
+
+class TestSupersessionSuccessor:
+    """``_annotate_supersession`` resolves a superseded entry's successor by
+    exact text over the resident entries. Entries carry no successor id
+    (no schema column), and about 4 in 10 legacy links from the retired
+    automatic detector point at an unrelated note (2026-09-23 review), so
+    the resolution must never guess: an ambiguous text yields no id, and
+    only a successor written by an explicit correction counts as verified.
+    """
+
+    @staticmethod
+    def _entry(text: str, db_id: int, source: str = "notes", **kw):
+        import torch
+
+        from pseudolife_memory.memory.titans_memory import MemoryEntry
+
+        return MemoryEntry(text=text, embedding=torch.zeros(4),
+                           source=source, db_id=db_id, **kw)
+
+    def _annotated(self, served, resident):
+        from pseudolife_memory.service import (_annotate_supersession,
+                                               _entry_to_dict)
+
+        dicts = [_entry_to_dict(e) for e in served]
+        _annotate_supersession(list(zip(served, dicts)), resident)
+        return dicts
+
+    def test_unique_explicit_successor_is_named_and_verified(self) -> None:
+        old = self._entry("port is 5432", 1, superseded_at=100.0,
+                          superseded_by_text="port is 5433")
+        new = self._entry("port is 5433", 2, source="correction")
+        (d,) = self._annotated([old], [old, new])
+        assert d["superseded_by_id"] == 2
+        assert d["supersession_verified"] is True
+        assert d["superseded_at"] == 100.0
+
+    def test_consolidation_successor_is_verified(self) -> None:
+        old = self._entry("fact A v1", 1, superseded_at=100.0,
+                          superseded_by_text="Consolidated: A")
+        new = self._entry("Consolidated: A", 2, source="consolidation")
+        (d,) = self._annotated([old], [old, new])
+        assert (d["superseded_by_id"], d["supersession_verified"]) == (2, True)
+
+    def test_detector_era_successor_is_named_but_unverified(self) -> None:
+        old = self._entry("launch note", 1, superseded_at=100.0,
+                          superseded_by_text="unrelated status note")
+        new = self._entry("unrelated status note", 2, source="status")
+        (d,) = self._annotated([old], [old, new])
+        assert (d["superseded_by_id"], d["supersession_verified"]) == (
+            2, False)
+
+    def test_ambiguous_successor_text_names_no_id(self) -> None:
+        old = self._entry("old", 1, superseded_at=100.0,
+                          superseded_by_text="dup")
+        a = self._entry("dup", 2, source="correction")
+        b = self._entry("dup", 3, source="correction")
+        (d,) = self._annotated([old], [old, a, b])
+        assert (d["superseded_by_id"], d["supersession_verified"]) == (
+            None, False)
+
+    def test_same_text_replacement_resolves_to_the_new_row(self) -> None:
+        """Superseding a note with its own text (a re-assertion) leaves two
+        entries with that text; the retired one must not count itself as
+        a candidate and make the link look ambiguous."""
+        old = self._entry("same", 1, superseded_at=100.0,
+                          superseded_by_text="same")
+        new = self._entry("same", 2, source="correction")
+        (d,) = self._annotated([old], [old, new])
+        assert (d["superseded_by_id"], d["supersession_verified"]) == (
+            2, True)
+
+    def test_retired_twin_does_not_make_a_correction_ambiguous(self) -> None:
+        """``consolidate(replaces=[A, B], new_text=A)`` retires A and B and
+        stores a fresh A, so two entries carry the text "A": the retired
+        original and the live replacement. The retired twin cannot be the
+        note that replaced B, so the only current match wins (2026-09-23
+        review finding; the A->B->A correction has the same shape)."""
+        a_old = self._entry("A", 1, superseded_at=100.0,
+                            superseded_by_text="A")
+        b = self._entry("B", 2, superseded_at=100.0,
+                        superseded_by_text="A")
+        a_new = self._entry("A", 3, source="consolidation")
+        d_a, d_b = self._annotated([a_old, b], [a_old, b, a_new])
+        assert (d_b["superseded_by_id"], d_b["supersession_verified"]) == (
+            3, True)
+        assert (d_a["superseded_by_id"], d_a["supersession_verified"]) == (
+            3, True)
+
+    def test_unresolvable_successor_names_no_id(self) -> None:
+        old = self._entry("old", 1, superseded_at=100.0,
+                          superseded_by_text="evicted replacement")
+        (d,) = self._annotated([old], [old])
+        assert (d["superseded_by_id"], d["supersession_verified"]) == (
+            None, False)
+
+    def test_live_entries_are_left_untouched(self) -> None:
+        live = self._entry("live", 1)
+        (d,) = self._annotated([live], [live])
+        assert d["superseded_at"] is None
+        assert "superseded_by_id" not in d
+        assert "supersession_verified" not in d
+
 
 # ---------------------------------------------------------------------------
 # stats / save

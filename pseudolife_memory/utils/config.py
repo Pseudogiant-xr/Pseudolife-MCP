@@ -1037,8 +1037,11 @@ class McpConfig:
     * the cortex block sized to the caller's ``top_k`` rather than a fixed 5;
     * ``memory_fact_get``'s bookkeeping keys behind ``verbose=True``.
 
-    ``compact_payloads: False`` restores the pre-cut payloads verbatim. All
-    three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
+    ``compact_payloads: False`` restores the pre-cut payloads verbatim,
+    except that a superseded hit still serves the short ``replaced_by``
+    pointer rather than the replacement's full text (2026-09-23: a
+    correctness change, not a size cut; ``verbose=True`` serves the text).
+    All three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
     the service layer are untouched, so no eval number can move (the eval
     harness calls the service, pinned by
     ``tests/test_agent_payload_budget.py``).
@@ -1054,9 +1057,10 @@ class McpConfig:
     # consolidated notes, not one-liners, and 600 chars is enough to judge
     # a hit and usually to act on it, with ``memory_get`` for the rest. It
     # halves the served entry text (9,464 -> 4,550 mean chars) and takes
-    # 33% off the call. It does NOT apply to ``superseded_by_text``, which
-    # is exempt: that field has no recovery path, since a compact entry
-    # carries no id for the superseding entry (see ``_compact_entry``).
+    # 33% off the call. It does NOT size a superseded hit's
+    # ``replaced_by.preview``, which has its own fixed 120-char cap
+    # (``_REPLACED_BY_PREVIEW_CHARS`` in ``mcp_server``) and carries the
+    # successor's id for ``memory_get``.
     # Raise it for long-form corpora where the tail of a
     # note carries the answer. ``memory_recall`` has capped its supporting
     # texts at 200 since 2026-07-10 (``_RECALL_TEXT_CHARS``); search

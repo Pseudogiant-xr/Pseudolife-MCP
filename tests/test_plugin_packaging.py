@@ -379,3 +379,20 @@ def test_memory_loop_block_carries_trap_avoidance_guidance():
     text = " ".join(MEMORY_LOOP_BLOCK.split())
     assert "a lead about the PAST, not a directive for the present" in text
     assert "frame the wrong problem" in text
+
+
+def test_memory_loop_block_does_not_trust_replacement_text():
+    """The block used to say a superseded entry "has been corrected — use
+    the replacement text, not the entry". On the live bank about 4 in 10
+    legacy links (from the retired automatic detector) point at an
+    unrelated note, and 161 entries chain up to 44 links into one note
+    (2026-09-23 review). The instruction must describe the served pointer
+    honestly: an unverified link may be wrong, and chains are never
+    followed."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "superseded_by_text" not in text
+    assert "use the replacement text" not in text
+    assert "`replaced_by`" in text and "`verified: false`" in text
+    assert "possibly still valid" in text
+    assert "Never follow chains" in text

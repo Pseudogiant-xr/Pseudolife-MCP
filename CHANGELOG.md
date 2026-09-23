@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — search stops handing agents an often-unrelated "replacement" as the answer)
+- A superseded hit in compact `memory_search` / `memory_recent` output now
+  carries `replaced_by: {id, at, preview, verified}` instead of the
+  uncapped `superseded_by_text`: the successor's row id (resolved by exact
+  text over the resident entries: the one other entry with that text, or
+  the only current one when a retired twin shares it; otherwise none), the
+  supersession date, the replacement's first 120 characters, and whether
+  an explicit correction made the link (the successor's source is
+  `correction` or `consolidation`). `verbose=true` still serves the full
+  text. The 2026-09-23 live-bank review found that about 4 in 10 links
+  left by the automatic contradiction detector, before it stopped
+  superseding (PR #294), point at an unrelated note, while three surfaces
+  told agents to use that text in place of the entry. `verified` is
+  inferred from the successor's source until a schema column records it:
+  a `memory_consolidate` call with a custom `source` reads unverified.
+- Those three surfaces — the `memory_search` description, the served
+  session-start block and `examples/CLAUDE.memory.md` — now say what the
+  pointer means: `verified: false` marks a detector link, the entry may
+  still be valid, `memory_get` the replacement only when its preview is on
+  the same subject, and never follow chains. The block stays inside its
+  7,500-char pin (7,488 → 7,479) by dropping clauses it already said
+  elsewhere; the `memory_search` description grows 216 chars, so the
+  `minimal` and `full` manifest budgets in
+  `tests/test_tool_consolidation.py` move to 5,250 and 17,500. **Upgrading:**
+  if you copied `examples/CLAUDE.memory.md` into your own instructions or
+  override the block with `<data_dir>/hook-instructions.md`, replace its
+  "use the replacement text" line — compact output no longer carries that
+  field.
+- The service's entry dicts (Console, REST, benches) keep
+  `superseded_by_text` and gain `superseded_at`, plus `superseded_by_id` and
+  `supersession_verified` on superseded search/recent hits. The successor
+  lookup is one pass over resident entries per call, only when a
+  superseded hit is served. Ranking, the retrieval log and every eval
+  number are unchanged; `compact_payloads: false` restores the old payloads
+  except for this pointer. `evals/agent_token_ledger.py` meters the pointer
+  in its own column, and the 2026-09-04 ledger rows that priced
+  `superseded_by_text` are marked superseded in `evals/README.md`.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.
