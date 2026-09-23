@@ -62,12 +62,29 @@ Two models are load-bearing, and a missing one is a hard failure under those
 env vars: `Qwen/Qwen3-Embedding-0.6B` (the default since schema v25) and
 `all-MiniLM-L6-v2` (still pinned by the tests that guard the symmetric/ONNX
 paths). A first run *without* the offline vars downloads both — budget about
-1.2 GB. Budget for a slow suite too: real CPU embeds put a warm local run at
-~437s, up from 238s on the pre-v25 ONNX path.
+1.2 GB.
+
+Most tests do not depend on what the embedding model thinks is similar, so
+by default they embed through `tests/fake_embedder.py`: a deterministic,
+weight-free stand-in (hashed words and character trigrams, 1024-d like the
+real model) that keeps identical text identical and unrelated text apart.
+Real CPU forward passes were the suite's largest single cost. A test whose
+assertions depend on the real model's geometry (paraphrase similarity,
+dense ranking, cosine thresholds between differently worded texts,
+published retrieval floors, the model path itself) carries
+`@pytest.mark.real_model` and gets the real weights. Mark a new test the
+same way when it needs them; `tests/conftest.py` fails a `real_model` test
+that ends up embedding through a fake built by an earlier test in its
+module. `PSEUDOLIFE_TEST_EMBEDDER=real` gives every test the real weights;
+use it locally for changes to retrieval, ranking or embedding, since the
+default run exercises those only in the marked tests (CI's `test` lane
+always runs them on the real weights).
 
 All tests must pass. CI's two full-suite lanes run this exact invocation
 (`-n 2 --dist loadfile` shards whole files across two workers so
-module-scoped fixtures keep their semantics); a third lane
+module-scoped fixtures keep their semantics): the `test` lane with
+`PSEUDOLIFE_TEST_EMBEDDER=real`, so every test also runs on the real
+weights for each PR, and `test-lite-linux` with the default. A third lane
 (`test-lite-windows`) runs a narrower fixed file list. If you add
 behavior, add a test; if you fix a bug, add the test that would have
 caught it.
