@@ -236,7 +236,12 @@ def test_settled_analyzer_pair_does_not_recur_after_service_restart(
                and {p["src"], p["dst"]} == set(names))
     assert svc.graph_reject_proposal(row["id"])["rejected"]
 
-    st.close()  # the first daemon exits, releasing the bank
+    # The first daemon exits: it releases the bank, and its resident copy
+    # goes with it (the fixture's teardown flush would otherwise try to
+    # write that stale copy over the restarted daemon's bank, which the
+    # writer lease now refuses).
+    st.close()
+    svc._cms = None
     restarted = MemoryService(data_dir=tmp_path / "restart", database_url=pg_url)
     try:
         with restarted._lock:

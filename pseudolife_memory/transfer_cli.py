@@ -104,6 +104,10 @@ _META_SKIP_KEYS = {
     "coordination_hlc_highwater",
     # Mailbox authority belongs to the destination, not imported knowledge.
     "coordination_bank_id",
+    # The writer-lease handover counter belongs to the target bank: an
+    # imported value could move it backwards under a writer that
+    # remembers a higher one, hiding a handover.
+    "writer_lease_epoch",
 }
 
 

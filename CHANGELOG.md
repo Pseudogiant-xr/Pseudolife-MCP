@@ -55,6 +55,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     it serves anything. While another writer holds it, calls keep failing:
     from a cached refusal for 5 s between attempts. `/health` reports
     `degraded` until that writer has gone.
+  - Winning the lease back is not enough if another lease-holding writer
+    held the bank in the gap. Its saves could have been overwritten by this
+    process's stale resident copy, per slot or by a flush (Codex review of
+    this change).
+    - Every lease acquisition now bumps a `writer_lease_epoch` row in
+      `meta`. A reconnect that finds another writer's epoch refuses every
+      storage call (`BankChangedHands`), including the rest of an operation
+      already under way, such as a flush.
+    - The service then drops its resident stores and meta-backed state and
+      re-reads the bank before serving or saving anything. It logs any
+      pending recovery or unsaved write it discards.
+    - Each operation starts with a `SELECT 1` on the writer session, so a
+      dead session is caught before a stale copy is served.
+    - A reconnect with no other writer in between keeps the resident copy.
+    - The counter stays out of logical exports, so an import cannot move it
+      backwards.
+    - Only lease-holding writers are detected. Raw `psycopg` scripts,
+      `writer_lease=False` peers and `import --force` bump nothing.
+    - A daemon serving only mailbox traffic notices a handover at the
+      session reaper's next tick, because mailbox calls deliberately skip
+      the service lock.
+  - During a database outage, reads served from memory (such as `search`)
+    keep working, because nothing else can write a bank this process cannot
+    reach. Anything that needs the database fails as before. A failed
+    reconnect is retried at most every 5 s rather than on every call under
+    the service lock.
   - The lease session sets server-side TCP keepalives (60 s + 3 × 10 s). A
     writer that vanishes without closing its socket now frees the bank in
     about 90 s. The server defaults would take over 2 h (7200 s + 9 × 75 s,

@@ -258,6 +258,164 @@ def test_lease_retries_collect_no_garbage(pg_conn, pg_url, tmp_path,
         holder.close()
 
 
+def _slot_rows(conn, table: str, entity: str, attribute: str) -> list[tuple]:
+    rows = conn.execute(
+        f"SELECT value, status FROM {table} "  # noqa: S608 — fixed table names
+        "WHERE entity = %s AND attribute = %s ORDER BY value",
+        (entity, attribute)).fetchall()
+    conn.commit()
+    return rows
+
+
+def _attempt(fn, *args, **kwargs):
+    try:
+        fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — the outcome is the assertion
+        return exc
+    return None
+
+
+_B_URL = "https://example.com/pg-release"
+
+
+@pytest.mark.parametrize("a_next", ["serve", "write", "flush"])
+def test_a_writer_that_lost_the_bank_rehydrates_before_it_serves_or_writes(
+        pg_conn, pg_url, tmp_path, a_next):
+    """A holds the bank and loses its session. B takes the lease, writes
+    the same slot and unrelated canonical rows, and leaves. When A comes
+    back, a silent reconnect must not let A serve or save its stale
+    resident copy: a slot sync would DELETE-reinsert B's slot, and a flush
+    would rewrite whole tables (Codex review of #343, 2026-09-23).
+
+    "serve" and "write" are A's next operation; each must first re-read the
+    bank. "flush" is the exit path, which never runs ``_ensure_init``: it
+    meets the dead session inside the operation and reconnects later in
+    the same operation, and must refuse rather than write its copy."""
+    from pseudolife_memory.service import MemoryService
+
+    a = MemoryService(data_dir=tmp_path / "a", database_url=pg_url)
+    a.store("a note A holds in its bank", source="t")
+    a.cortex_write("svc", "port", "8080")
+    _kill(pg_conn, a._storage.conn.info.backend_pid)  # noqa: SLF001
+
+    b = MemoryService(data_dir=tmp_path / "b", database_url=pg_url)
+    b.cortex_write("svc", "port", "9090")
+    b.cortex_write("svc", "owner", "team-b")
+    b.world_write("postgres", "latest major", "18", source_url=_B_URL,
+                  source_quote="18 is out")
+    b._storage.close()  # noqa: SLF001 — B leaves; the lease is free again
+    b_port = _slot_rows(pg_conn, "facts", "svc", "port")
+    assert b_port == [("8080", "superseded"), ("9090", "current")]
+
+    if a_next == "flush":
+        assert _attempt(a.flush) is not None  # refused, not written
+        assert _slot_rows(pg_conn, "facts", "svc", "port") == b_port
+        assert _slot_rows(pg_conn, "facts", "svc", "owner") == [
+            ("team-b", "current")]
+        assert len(_slot_rows(pg_conn, "world_facts", "postgres",
+                              "latest major")) == 1
+        # Until A has re-read the bank, its probe reports the handover.
+        with pytest.raises(RuntimeError, match="another writer"):
+            a._storage.ping()  # noqa: SLF001
+    if a_next == "write":
+        a.cortex_write("svc", "port", "7070")  # re-reads, then writes
+    else:
+        # A re-reads the bank before it serves: B's value, not A's copy.
+        assert a.cortex_lookup("svc", "port")["value"] == "9090"
+        a.cortex_write("svc", "port", "7070")
+    assert a._storage.ping() is True  # noqa: SLF001
+    # A's write landed on top of B's history, not in place of it.
+    assert _slot_rows(pg_conn, "facts", "svc", "port") == [
+        ("7070", "current"), ("8080", "superseded"), ("9090", "superseded")]
+    a._storage.close()  # noqa: SLF001
+
+    fresh = MemoryService(data_dir=tmp_path / "c", database_url=pg_url)
+    try:
+        assert fresh.cortex_lookup("svc", "owner")["value"] == "team-b"
+        assert fresh.world_lookup("postgres", "latest major")["value"] == "18"
+        assert _slot_rows(pg_conn, "facts", "svc", "port") == [
+            ("7070", "current"), ("8080", "superseded"), ("9090", "superseded")]
+    finally:
+        fresh._storage.close()  # noqa: SLF001
+
+
+def test_reconnecting_with_no_other_writer_keeps_the_resident_bank(
+        pg_conn, pg_url, tmp_path):
+    """The common case, a database restart or a dropped link with nobody
+    else writing, must not cost a rehydration: the same process simply
+    takes the bank back and carries on from its resident copy."""
+    from pseudolife_memory.service import MemoryService
+
+    a = MemoryService(data_dir=tmp_path / "a", database_url=pg_url)
+    a.cortex_write("svc", "port", "8080")
+    resident = a._cms  # noqa: SLF001
+    _kill(pg_conn, a._storage.conn.info.backend_pid)  # noqa: SLF001
+
+    a.cortex_write("svc", "port", "9090")  # reconnects; no one else wrote
+
+    assert a._cms is resident  # noqa: SLF001
+    assert _slot_rows(pg_conn, "facts", "svc", "port") == [
+        ("8080", "superseded"), ("9090", "current")]
+    a._storage.close()  # noqa: SLF001
+
+
+def test_an_unreachable_bank_still_serves_reads_from_memory(
+        pg_conn, pg_url, tmp_path, monkeypatch):
+    """Nothing can write a bank this process cannot reach either, so the
+    resident copy stays servable through an outage. The per-call session
+    check must not turn every read into a failure, or every call into a
+    fresh connect attempt under the service lock."""
+    from pseudolife_memory.service import MemoryService
+
+    a = MemoryService(data_dir=tmp_path / "a", database_url=pg_url)
+    a.store("the relay listens on port 4001", source="t")
+    a.cortex_write("svc", "port", "8080")
+    _kill(pg_conn, a._storage.conn.info.backend_pid)  # noqa: SLF001
+    attempts: list[int] = []
+
+    def unreachable():
+        attempts.append(1)
+        raise psycopg.OperationalError("simulated: server unreachable")
+
+    monkeypatch.setattr(a._storage, "_connect", unreachable)  # noqa: SLF001
+    # search is served from memory (its retrieval-log write is best
+    # effort); cortex_lookup is not, it reads slot traces from storage.
+    for _ in range(3):
+        hits = a.search("which port does the relay listen on")["entries"]
+        assert any("4001" in e["text"] for e in hits)
+    assert len(attempts) == 1  # one connect per retry window, not per call
+    with pytest.raises(Exception):  # a write still needs the bank
+        a.cortex_write("svc", "port", "9090")
+    assert len(attempts) == 1
+
+
+def test_a_mangled_lease_epoch_row_does_not_lock_the_bank_out(pg_conn, pg_url):
+    PostgresStorage(pg_url).close()
+    pg_conn.execute("UPDATE meta SET value = '\"not a number\"'::jsonb "
+                    "WHERE key = 'writer_lease_epoch'")
+    pg_conn.commit()
+    PostgresStorage(pg_url).close()  # opens, and repairs the counter
+
+
+def test_a_reread_after_a_handover_forgets_what_the_other_writer_cleared(
+        pg_conn, pg_url, tmp_path):
+    """The re-read reloads meta-backed state too. Init only overwrites it
+    when the row holds a value, so without a reset, a session pointer the
+    other writer cleared would survive in this process."""
+    from pseudolife_memory.service import MemoryService
+
+    a = MemoryService(data_dir=tmp_path / "a", database_url=pg_url)
+    a.set_active_session("session-a")
+    _kill(pg_conn, a._storage.conn.info.backend_pid)  # noqa: SLF001
+    b = PostgresStorage(pg_url)
+    b.set_meta("active_session_pointer", None)  # as a SessionEnd would
+    b.close()
+
+    assert a.cortex_lookup("svc", "port") is None  # any call re-reads
+    assert a._active_session is None  # noqa: SLF001
+    a._storage.close()  # noqa: SLF001
+
+
 def test_a_holder_that_is_exiting_is_waited_out_not_refused(pg_conn, pg_url):
     """A session that is closing still holds the lease until its server
     process exits (a daemon restart, or the reconnect after a closed

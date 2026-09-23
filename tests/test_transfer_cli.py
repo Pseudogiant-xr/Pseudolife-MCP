@@ -567,7 +567,8 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "INSERT INTO meta (key, value) VALUES "
             "('dream_ack_secret_v1', '\"bank-local-secret\"'::jsonb), "
             "('coordination_hlc_highwater', '[10000, 1]'::jsonb), "
-            "('coordination_bank_id', '\"11111111-1111-4111-8111-111111111111\"'::jsonb) "
+            "('coordination_bank_id', '\"11111111-1111-4111-8111-111111111111\"'::jsonb), "
+            "('writer_lease_epoch', '7'::jsonb) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
         conn.commit()
@@ -589,6 +590,10 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert "dream_ack_secret_v1" not in meta_keys
         assert "coordination_hlc_highwater" not in meta_keys
         assert "coordination_bank_id" not in meta_keys
+        # The writer-lease handover counter belongs to the target bank: an
+        # imported value could move it backwards under a writer that
+        # remembers a higher one.
+        assert "writer_lease_epoch" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["format_version"] == 1

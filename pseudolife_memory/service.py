@@ -1074,6 +1074,10 @@ class MemoryService(DreamOps):
         return self._storage
 
     def _ensure_init(self) -> None:
+        storage = self._storage
+        if storage is not None and hasattr(storage, "verify_writer_session"):
+            storage.verify_writer_session()
+        self._rehydrate_if_bank_changed_hands()
         self._recover_correction_locked()
         self._recover_entry_reinstatement_locked()
         from pseudolife_memory.curation_safety import recover_slot_curation
@@ -1155,6 +1159,65 @@ class MemoryService(DreamOps):
             INIT_RETRY_MAX_SECONDS,
             INIT_RETRY_BASE_SECONDS * 2 ** min(self._init_failures - 1, 16))
         self._init_retry_at = time.monotonic() + self._init_backoff_s
+
+    def _rehydrate_if_bank_changed_hands(self) -> None:
+        """Re-read the bank when another writer held it while this process
+        was disconnected (Codex review of #343, 2026-09-23).
+
+        The writer lease keeps one writer at a time, but the storage layer
+        reconnects on its own. It detects the handover by the lease epoch
+        and then refuses every call (``BankChangedHands``), because this
+        process's resident stores may predate the other writer's changes,
+        and its per-slot saves and flushes would write that stale copy
+        back. ``_ensure_init`` first round-trips the writer session
+        (``verify_writer_session``), so a session that died is replaced and
+        checked before anything is served. Then the resident stores are
+        dropped here so the rest of ``_ensure_init`` hydrates them afresh.
+        The pending recoveries only reconcile the resident copy with durable
+        state, which a full re-read supersedes. A reconnect with no other
+        writer in between keeps the resident copy (nothing is flagged).
+        """
+        storage = self._storage
+        reason = getattr(storage, "resident_invalidated", None)
+        if not reason:
+            return
+        # Name what is discarded. Callers of the unsaved writes were already
+        # told those writes failed, but a pending recovery may have been
+        # the only record of an outcome a caller never learned.
+        dropped = [name for name, pending in (
+            ("correction", self._correction_recovery),
+            ("entry reinstatement", self._entry_reinstatement_recovery),
+            ("slot curation", self._slot_curation_recovery),
+            ("lesson synthesis", self._lesson_synthesis_recovery),
+        ) if pending is not None]
+        unsaved = sum(len(getattr(store, "dirty_slots", None) or ())
+                      for store in (self._cortex, self._world, self._lessons)
+                      if store is not None)
+        unpersisted = sum(1 for band in (self._cms.bands if self._cms else ())
+                          for entry in band.entries if entry.db_id is None)
+        logger.warning(
+            "%s: dropping the resident stores and re-reading the bank before "
+            "serving (discarding pending recoveries: %s; unsaved slots: %d; "
+            "entries never persisted: %d)", reason,
+            ", ".join(dropped) or "none", unsaved, unpersisted)
+        self._cms = None
+        self._cortex = None
+        self._world = None
+        self._lessons = None
+        self._collect_before_retry = True
+        self._correction_recovery = None
+        self._entry_reinstatement_recovery = None
+        self._slot_curation_recovery = None
+        self._lesson_synthesis_recovery = None
+        self._entity_kind_cache = None
+        self._last_saved_fingerprint = None
+        # Meta-backed state init reloads only when its row holds a value: a
+        # row the other writer cleared must not leave this process's copy.
+        self._active_session = None
+        self._episode_tombstones = {}
+        self._deferred_empty_roots = {}
+        self._dream_batch_failures = {}
+        storage.acknowledge_rehydration()
 
     def _refuse_while_backing_off(self) -> None:
         """Refuse at once while a failed init's retry window is open, so a

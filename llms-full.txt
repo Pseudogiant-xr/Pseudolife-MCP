@@ -4352,7 +4352,10 @@ The daemon owns its bank alone. It holds a Postgres advisory-lock *writer
 lease* for as long as it runs. A second daemon, a stdio-embedded server, or
 a maintenance script or eval that opens the same bank through the service
 refuses to start, and names the process that holds it. Stop the daemon for
-offline maintenance such as `ops/dedup_cortex.py`. If loading the bank fails
+offline maintenance such as `ops/dedup_cortex.py`. If the daemon loses its
+database session and another lease-holding writer used the bank
+meanwhile, the daemon re-reads the bank before it serves or saves
+anything. If loading the bank fails
 at startup, the daemon serves nothing rather than a partly loaded bank:
 - `/health` reports `status: "degraded"` with the reason in `not_ready`. A
   daemon refused the lease reads the same way.
