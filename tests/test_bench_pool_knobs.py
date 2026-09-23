@@ -220,3 +220,7 @@ def test_off_turns_the_reranker_off_on_a_config_that_has_it_on(
     ladder.apply_rerank_env(memory_cfg)
     assert memory_cfg.reranker.enabled is False
     assert ladder.rerank_env_knobs() == {"enabled": False, "top_n": None}
+    # Off applied to a config that is already off stays off (a toggle
+    # would pass the on->off step above).
+    ladder.apply_rerank_env(memory_cfg)
+    assert memory_cfg.reranker.enabled is False

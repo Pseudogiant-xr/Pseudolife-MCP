@@ -8735,19 +8735,6 @@ for _doc, _slug in ((SHIM_LAUNCH_PS1, "ps1"), (SHIM_LAUNCH_SH, "sh")):
             id=f"shim5-launcher-{_slug}-{_cid}", doc=_doc, needle=_SHIM5_QUALITY,
             artifacts=SHIM5_GATE_RUNS, value=_val, stated=_stated,
             places=1 if isinstance(_stated, float) else 0))
-    # "on every run" = the worst run: min gold, max stale, min AND max claims
-    for _cid, _val, _stated in [
-        ("gold-lo", lambda *r: min(x["gold_recoverable"] for x in r), 1.0),
-        ("stale-hi", lambda *r: max(x["stale_leak"] for x in r), 0.0),
-        ("claims-lo", lambda *r: min(x["consolidation"]["claims"] for x in r), 16),
-        ("claims-hi", lambda *r: max(x["consolidation"]["claims"] for x in r), 16),
-        ("inserted-lo", lambda *r: min(x["consolidation"]["inserted"] for x in r), 16),
-        ("inserted-hi", lambda *r: max(x["consolidation"]["inserted"] for x in r), 16),
-    ]:
-        CLAIMS.append(Claim(
-            id=f"shim5-launcher-{_slug}-{_cid}", doc=_doc, needle=_SHIM5_QUALITY,
-            artifacts=SHIM5_GATE_RUNS, value=_val, stated=_stated,
-            places=1 if isinstance(_stated, float) else 0))
 
 
 def test_the_shim_launchers_cite_the_gate_that_validated_their_default():

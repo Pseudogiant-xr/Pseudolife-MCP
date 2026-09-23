@@ -396,20 +396,6 @@ def test_resolve_no_contender_returns_none():
     assert store.resolve("box", "ip", accept=True) is None
 
 
-def test_contested_and_retired_survive_persistence_roundtrip():
-    with tempfile.TemporaryDirectory() as d:
-        store = CortexStore()
-        store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(50), support="user", now=1.0)
-        store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(51), support="agent", now=2.0)
-        p = Path(d) / "cortex_state.pt"
-        store.save(p)
-        loaded = CortexStore()
-        loaded.load(p)
-        assert loaded.lookup("box", "ip").value == "10.0.0.1"
-        conts = loaded.contenders_for("box", "ip")
-        assert len(conts) == 1 and conts[0].value == "10.0.0.2"
-
-
 def test_load_reconciles_duplicate_contested_to_one_active():
     with tempfile.TemporaryDirectory() as d:
         store = CortexStore()

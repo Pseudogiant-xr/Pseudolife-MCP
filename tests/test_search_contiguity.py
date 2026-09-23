@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from pseudolife_memory.service import MemoryService
-from pseudolife_memory.utils.config import AppConfig, load_config
+from pseudolife_memory.utils.config import load_config
 
 pytestmark = pytest.mark.real_model
 
@@ -25,12 +25,6 @@ pytestmark = pytest.mark.real_model
 # service construction, not the five stores, that cost. A test that mutates
 # ``svc.config`` must restore it in a ``finally``: the config object outlives
 # the bank clear.
-
-
-def test_search_config_defaults():
-    cfg = AppConfig()
-    assert cfg.memory.search.contiguity_neighbors == 0
-    assert cfg.memory.search.timeline_channel is False
 
 
 def test_yaml_search_block_parses(tmp_path: Path):

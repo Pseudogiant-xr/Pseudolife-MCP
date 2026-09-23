@@ -38,6 +38,7 @@ def test_mcp_defaults_apply_when_no_config_file(tmp_path):
     assert svc.config.memory.surprise_threshold == 0.0
     assert svc.config.memory.traces.retention_boost == 1.0
     assert svc.config.memory.meta_filter.enabled is False
+    assert svc.config.memory.recency_base_half_life_s == 86400.0
 
 
 def test_onnx_backend_defaults_on_when_optimum_installed(tmp_path, monkeypatch):

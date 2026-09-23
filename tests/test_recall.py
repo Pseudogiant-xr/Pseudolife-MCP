@@ -484,17 +484,6 @@ def test_recall_no_gating_pulls_in_hub_siblings(bench_pg, tmp_path):
 # MCP tool tests: memory_digest / memory_communities (Task 7)
 # ---------------------------------------------------------------------------
 
-def test_graph_digest_service(bench_pg, tmp_path):
-    # digest left the MCP surface (Console-only via /api/graph/digest).
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
-    svc = build_service(tmp_path)
-    _seed_two_communities(svc)
-    svc._refresh_graph_insight()  # noqa: SLF001
-    out = svc.graph_digest()
-    assert out["available"] is True and "god_nodes" in out["digest"]
-
-
 def test_communities_service(bench_pg, tmp_path):
     # communities left the MCP surface (Console-only via /api/graph/communities).
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))

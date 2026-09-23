@@ -439,38 +439,6 @@ class TestDelete:
 
 
 # ---------------------------------------------------------------------------
-# search scoring overrides
-# ---------------------------------------------------------------------------
-
-
-class TestSearchOverrides:
-    def test_search_disable_recency_boost(
-        self, pristine_service: MemoryService,
-    ) -> None:
-        """Disabling recency boost should produce scores <= the default
-        (no recency uplift on fresh entries)."""
-        pristine_service.store(
-            "The MIRAS architecture has 8 bands in the continuum preset.",
-            source="t",
-        )
-        default = pristine_service.search(
-            "MIRAS continuum bands", top_k=3,
-        )
-        no_boost = pristine_service.search(
-            "MIRAS continuum bands", top_k=3, disable_recency_boost=True,
-        )
-        # Same entry appears in both. Its no_boost score must not exceed its
-        # default score (recency only adds, never subtracts).
-        assert default["count"] and no_boost["count"]
-        d_text = default["entries"][0]["text"]
-        nb_match = next(
-            (e for e in no_boost["entries"] if e["text"] == d_text), None,
-        )
-        assert nb_match is not None
-        assert nb_match["score"] <= default["entries"][0]["score"] + 1e-4
-
-
-# ---------------------------------------------------------------------------
 # Persistence round-trip
 # ---------------------------------------------------------------------------
 

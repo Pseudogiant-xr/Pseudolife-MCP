@@ -56,9 +56,9 @@ def shared_daemon(tmp_path_factory):
     daemon boot per module instead of one per test (~7.7 s each). Same shape
     as tests/test_daemon_http.py's module fixture.
 
-    ``test_shim_autostarts_daemon_and_proxies`` deliberately does NOT use
-    this: spawning is its subject. Neither does the ``TOOLSET=minimal`` test,
-    which needs a daemon booted with a different toolset tier.
+    ``test_shim_forwards_list_changed_on_toolset_expand`` deliberately does
+    NOT use this: it needs a daemon booted at the minimal toolset tier, and
+    the shim's own spawn of that daemon is also the autostart test.
     """
     url = resolve_test_db_url()
     if not _pg_reachable(url):
@@ -73,41 +73,6 @@ def shared_daemon(tmp_path_factory):
         yield {"port": port, "data_dir": data_dir}
     finally:
         _stop_daemon(proc)
-
-
-def test_shim_autostarts_daemon_and_proxies(tmp_path):
-    """Keeps its own free port and lets the shim START the daemon — that
-    spawn is the subject, so this one must never see ``shared_daemon``."""
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-
-    port = _free_port()
-    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=url)
-
-    async def _drive():
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
-
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
-            env=env,
-        )
-        async with stdio_client(params) as (r, w):
-            async with ClientSession(r, w) as s:
-                await s.initialize()
-                tools = {t.name for t in (await s.list_tools()).tools}
-                assert "memory_store" in tools and "memory_stats" in tools
-                res = await s.call_tool("memory_stats", {})
-                text = " ".join(getattr(c, "text", "") for c in res.content)
-                assert "bands" in text
-
-    import asyncio
-    try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
-    finally:
-        _reap_daemon(port)
 
 
 def test_shim_forwards_initialize_instructions_and_tool_annotations(shared_daemon):
@@ -288,7 +253,8 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
     shim itself must (a) advertise tools.listChanged downstream and (b) emit
     the notification when memory_toolset reports changed=true. The final
     list_tools also proves the session override survives per-call reconnects
-    (X-PL-Session keying)."""
+    (X-PL-Session keying). The shim spawns its own daemon here, so this is
+    also the autostart test: it proxies memory_stats through that daemon."""
     import asyncio
 
     url = resolve_test_db_url()
@@ -336,6 +302,10 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
 
                 tools = {t.name for t in (await s.list_tools()).tools}
                 assert "memory_world_search" in tools  # core tier now
+                assert "memory_store" in tools and "memory_stats" in tools
+                res = await s.call_tool("memory_stats", {})
+                text = " ".join(getattr(c, "text", "") for c in res.content)
+                assert "bands" in text  # proxied through the spawned daemon
 
     try:
         asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))

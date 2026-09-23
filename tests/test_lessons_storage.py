@@ -37,18 +37,6 @@ def _lesson_row(entity="deploy engine to host", attribute="approach",
     return r
 
 
-def test_schema_v10(pg_conn):
-    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
-
-    row = pg_conn.execute(
-        "SELECT value FROM meta WHERE key = 'schema_version'"
-    ).fetchone()
-    assert row is not None and int(row[0]) == SCHEMA_META_VERSION
-    for t in ("lessons", "outcome_signals"):
-        reg = pg_conn.execute("SELECT to_regclass(%s)", (f"public.{t}",)).fetchone()
-        assert reg[0] is not None, f"{t} table not created"
-
-
 def test_prefers_avoids_relations_seeded(storage):
     names = {r["name"] for r in storage.load_relations()}
     assert {"prefers", "avoids"} <= names

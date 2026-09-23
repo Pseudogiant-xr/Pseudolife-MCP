@@ -97,6 +97,9 @@ def test_dream_run_records_a_run_row(svc):
     runs = _runs(svc)
     assert len(runs) == 1
     run = runs[0]
+    assert {"id", "started_at", "finished_at", "cursor_before",
+            "cursor_after", "pulled", "claims", "tallies", "status",
+            "extractor"} <= set(run)
     assert run["status"] == "committed"
     assert run["pulled"] == 1 and run["claims"] == 1
     assert run["cursor_after"] is not None
@@ -256,15 +259,6 @@ def test_prune_dream_runs_keeps_newest_n(svc, pg_conn):
     total = pg_conn.execute(
         "SELECT count(*) FROM dream_run_slots").fetchone()[0]
     assert total == 2
-
-
-def test_runs_listing_is_compact(svc):
-    svc.store("the mascot is a fox", source="notes")
-    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
-    run = _runs(svc)[0]
-    assert {"id", "started_at", "finished_at", "cursor_before",
-            "cursor_after", "pulled", "claims", "tallies", "status",
-            "extractor"} <= set(run)
 
 
 # ── rollback ─────────────────────────────────────────────────────────────

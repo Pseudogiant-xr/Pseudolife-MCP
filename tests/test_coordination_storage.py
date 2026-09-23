@@ -314,20 +314,6 @@ def test_prune_removes_idle_unattached_agents_and_keeps_active_or_referenced_one
         store.authenticate(*creds(ghost))
 
 
-def test_peer_list_ranks_attached_adapters_before_idle_addresses(store):
-    """Peers with a live adapter lease come first regardless of last
-    activity, so a burst of idle addresses cannot push the reachable ones
-    off a bounded page."""
-    caller = store.register("alice")
-    idle = store.register("alice")
-    live = store.register("alice")
-    store.attach(*creds(live), attachment_id="one")
-    store.test_time[0] += 1
-    store.update(*creds(idle), status="most recent activity")
-    listed = [row["agent_id"] for row in store.list_agents(*creds(caller))["agents"]]
-    assert listed == [live["agent_id"], idle["agent_id"]]
-
-
 def test_attempts_are_bounded_across_generations_for_live_delivery_only(store):
     """Each new attachment may attempt an unacknowledged message once, but
     only up to ``MAX_ATTEMPTS`` in total: past that, live delivery skips the

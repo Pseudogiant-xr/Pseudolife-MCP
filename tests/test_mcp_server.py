@@ -152,6 +152,7 @@ def test_search_explain_attaches_trace_and_default_does_not(tmp_path: Path, monk
     explained = _invoke("memory_search", {"query": "gadget port", "explain": True})
     assert "trace" not in plain
     assert "trace" in explained and isinstance(explained["trace"], dict)
+    assert "tiers" in explained["trace"]
 
 
 def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
@@ -464,18 +465,6 @@ def test_memory_stats_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     stats = _invoke("memory_stats", {})
     assert "bands" in stats
     assert stats["total_memories"] >= 1
-
-
-def test_memory_search_explain_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-
-    _invoke("memory_store", {"text": "Trace dispatch fact", "source": "t"})
-    out = _invoke("memory_search", {"query": "Trace dispatch", "top_k": 3, "explain": True})
-    assert "trace" in out
-    assert "tiers" in out["trace"]
 
 
 # ---------------------------------------------------------------------------

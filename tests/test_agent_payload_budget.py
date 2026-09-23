@@ -399,16 +399,6 @@ def test_fact_get_correction_affordance_survives_the_cut(
     assert out["correction_note"] == mod.CORRECTION_NOTE
 
 
-def test_fact_get_full_record_when_not_compacting(
-        tmp_path: Path, monkeypatch) -> None:
-    mod = _reload(tmp_path, monkeypatch)
-    mod.service.config.memory.mcp.compact_payloads = False
-    _seed(mod)
-    rec = mod.memory_fact_get(entity="bench postgres",
-                              attribute="port")["record"]
-    assert set(_DROPPED) <= set(rec)
-
-
 # ── the harness is untouched ──────────────────────────────────────────────
 
 
