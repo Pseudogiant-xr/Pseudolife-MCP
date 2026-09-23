@@ -93,6 +93,17 @@ class _ReplacementRejected(RuntimeError):
     """Internal rollback signal for a deliberately refused replacement."""
 
 
+class _CorrectionLockSessionLost(RuntimeError):
+    """Internal signal: the correction's pinned lock session died with its
+    outcome in flight, so recovery must leave that session and reconcile on
+    a fresh one. ``original`` is the storage failure to re-raise if the
+    correction turns out not to have committed."""
+
+    def __init__(self, original: BaseException | None) -> None:
+        super().__init__("correction lock session lost")
+        self.original = original
+
+
 @dataclass(frozen=True)
 class PendingCorrectionRecovery:
     original: ContinuumMemorySystem
@@ -2376,11 +2387,58 @@ class MemoryService(DreamOps):
             if hasattr(self._storage, "entry_mutation_lock")
             else nullcontext()
         )
-        with mutation_lock:
-            return self._apply_correction_under_mutation_lock_locked(
-                entries, new_text, source=source, tags=tags,
-                report_derivations=report_derivations,
-            )
+        try:
+            with mutation_lock:
+                return self._apply_correction_under_mutation_lock_locked(
+                    entries, new_text, source=source, tags=tags,
+                    report_derivations=report_derivations,
+                )
+        except _CorrectionLockSessionLost as signal:
+            lost = signal
+        # Outside the handler, so a re-raised storage failure keeps its own
+        # traceback instead of chaining onto the internal signal.
+        return self._recover_correction_after_session_loss_locked(lost)
+
+    def _correction_lock_session_lost_locked(self) -> bool:
+        """Inside a correction's mutation lock: has its pinned session died?"""
+        if not hasattr(self._storage, "entry_mutation_lock"):
+            return False
+        conn = self._storage.conn  # the pinned lock session
+        return bool(getattr(conn, "closed", False)
+                    or getattr(conn, "broken", False))
+
+    def _recover_correction_after_session_loss_locked(
+        self, lost: _CorrectionLockSessionLost,
+    ) -> dict[str, Any]:
+        """Reconcile a correction whose lock session died with its outcome.
+
+        That session took its advisory locks with it, and recovery cannot run
+        on it. Leaving recovery to the next call would expose the before/after
+        classification to peer writes for that whole interval, and one that
+        changes the source can make the outcome permanently unclassifiable.
+        So reconcile now, on a fresh session under fresh locks, exactly as
+        the next call would. A peer can still act in the moment between the
+        session dying and the fresh lock; that gap is narrowed, not closed.
+        """
+        pending = self._correction_recovery
+        if pending is None:
+            raise CorrectionReconciliationError(
+                "correction lock session was lost without a pending recovery")
+        try:
+            state = self._recover_correction_locked()
+        except CorrectionReconciliationError as exc:
+            retained = self._correction_recovery
+            if retained is not None and retained.durable_outcome == "committed":
+                raise CorrectionReconciliationError(
+                    "correction committed; resident publication still "
+                    f"pending: {exc}") from exc
+            raise
+        if state == "committed":
+            return pending.response
+        if lost.original is not None:
+            raise lost.original
+        raise CorrectionReconciliationError(
+            "correction lock session was lost before a proven outcome")
 
     def _apply_correction_under_mutation_lock_locked(
         self,
@@ -2488,7 +2546,12 @@ class MemoryService(DreamOps):
                 original, staged, source_ids, source_dream_ids,
                 source_fingerprints, replacement.db_id,
                 replacement.dream_id, stamp, new_text, None, None, response)
-            state = self._recover_correction_locked()
+            try:
+                state = self._recover_correction_locked()
+            except CorrectionReconciliationError:
+                if self._correction_lock_session_lost_locked():
+                    raise _CorrectionLockSessionLost(exc)
+                raise
             if state == "committed":
                 return response
             raise exc
@@ -2540,8 +2603,11 @@ class MemoryService(DreamOps):
                     self._publish_recovery_locked(
                         original, staged, publication_locks)
             except Exception as exc:
+                if self._correction_lock_session_lost_locked():
+                    raise _CorrectionLockSessionLost(None) from exc
                 raise CorrectionReconciliationError(
-                    f"correction publication reconciliation required: {exc}"
+                    "correction committed; publication reconciliation "
+                    f"required: {exc}"
                 ) from exc
         else:
             self._preserve_correction_entry_identity(original, staged)

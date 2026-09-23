@@ -108,6 +108,7 @@ CALLER_HOLDS_LOCK = {
     "_stage_correction_locked",
     "_apply_correction_locked",
     "_apply_correction_under_mutation_lock_locked",
+    "_correction_lock_session_lost_locked",
     # Constraint pinning (schema v35) — cortex_search's per-fact dict builder
     # and the TypeRetrieve pin step, both reached only from inside
     # cortex_search's lock (the fixpoint verifies the callers).

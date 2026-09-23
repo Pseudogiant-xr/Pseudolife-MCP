@@ -477,9 +477,10 @@ def test_correction_publication_loss_restores_resident_and_retries(
             peer_storage.close()
 
 
+@pytest.mark.parametrize("fresh_retry", ["succeeds", "fails"])
 @pytest.mark.parametrize("loss_mode", ["client_close", "terminate_backend"])
-def test_successful_correction_publication_loss_keeps_recovery_pending(
-    tmp_path, monkeypatch, pg_conn, pg_url, loss_mode,
+def test_successful_correction_publication_loss_retries_then_stays_pending(
+    tmp_path, monkeypatch, pg_conn, pg_url, loss_mode, fresh_retry,
 ):
     storage = PostgresStorage(pg_url)
     svc = correction_service(
@@ -491,9 +492,14 @@ def test_successful_correction_publication_loss_keeps_recovery_pending(
     peer = _service(tmp_path / "peer", monkeypatch, peer_storage,
                     embedding_dim=1024)
     publish = svc._preserve_correction_entry_identity
+    load = storage.load_entries
+    losses = []
 
     def lose_during_publication(*args):
         publish(*args)
+        if losses:
+            return
+        losses.append(loss_mode)
         durable = _row(peer_storage, old.db_id)
         _lose_lock_session(storage, pg_conn, loss_mode)
         result = peer.reinstate(**_request(
@@ -505,16 +511,35 @@ def test_successful_correction_publication_loss_keeps_recovery_pending(
                 _sha(durable["superseded_by_text"]),
         ))
         assert result["current_state"] == "live"
+        if fresh_retry == "fails":
+            monkeypatch.setattr(
+                storage, "load_entries",
+                lambda: (_ for _ in ()).throw(
+                    RuntimeError("synthetic recovery read failure")),
+            )
 
     monkeypatch.setattr(svc, "_preserve_correction_entry_identity",
                         lose_during_publication)
     try:
-        with pytest.raises(CorrectionReconciliationError):
+        if fresh_retry == "succeeds":
+            # The commit is proven, so the call reconciles on a fresh session
+            # and reports it; the peer's later reinstatement stays visible.
+            result = correction_call(svc, "supersede", ids=[old.db_id])
+            assert result["superseded_count"] == 1
+            assert svc._correction_recovery is None
+            assert old.superseded_at is None
+            assert any(
+                entry.text == NEW_TEXT
+                for band in svc._cms.bands for entry in band.entries
+            )
+            return
+        with pytest.raises(CorrectionReconciliationError, match="committed"):
             correction_call(svc, "supersede", ids=[old.db_id])
         assert svc._cms is prior_cms
         _assert_entry_state(old, prior_entry)
         assert svc._correction_recovery is not None
         assert svc._correction_recovery.durable_outcome == "committed"
+        monkeypatch.setattr(storage, "load_entries", load)
         monkeypatch.setattr(svc, "_preserve_correction_entry_identity", publish)
         monkeypatch.delattr(svc, "_ensure_init")
         recent = svc.recent(n=10)
@@ -524,6 +549,64 @@ def test_successful_correction_publication_loss_keeps_recovery_pending(
     finally:
         storage.close()
         peer_storage.close()
+
+
+@pytest.mark.parametrize("outcome", ["committed", "rolled_back"])
+@pytest.mark.parametrize("loss_mode", ["client_close", "terminate_backend"])
+def test_correction_lock_session_loss_reconciles_on_fresh_session(
+    tmp_path, monkeypatch, pg_conn, pg_url, loss_mode, outcome,
+):
+    """The correction's own lock session dies with its outcome in flight.
+
+    Recovery cannot run on that pinned, dead session, so the call reconciles
+    on a fresh one before returning. Leaving it for the next call instead
+    exposes the classification to any peer write in between, which can make
+    the outcome permanently unclassifiable.
+    """
+    storage = PostgresStorage(pg_url)
+    svc = correction_service(
+        tmp_path / "primary", monkeypatch, storage, embedding_dim=1024)
+    old = correction_seed(svc)
+    transaction = storage.transaction
+
+    @contextmanager
+    def outcome_lost_with_session():
+        try:
+            with transaction():
+                yield
+                if outcome == "rolled_back":
+                    raise RuntimeError("synthetic failure before commit")
+        finally:
+            _lose_lock_session(storage, pg_conn, loss_mode)
+        raise RuntimeError("synthetic lost commit response")
+
+    monkeypatch.setattr(storage, "transaction", outcome_lost_with_session)
+    fresh = PostgresStorage(pg_url)
+    try:
+        if outcome == "committed":
+            result = correction_call(svc, "supersede", ids=[old.db_id])
+            assert result["superseded_count"] == 1
+            assert old.superseded_by_text == NEW_TEXT
+            assert any(
+                entry.text == NEW_TEXT
+                for band in svc._cms.bands for entry in band.entries
+            )
+            assert _row(fresh, old.db_id)["superseded_by_text"] == NEW_TEXT
+        else:
+            with pytest.raises(
+                RuntimeError, match="synthetic failure before commit",
+            ):
+                correction_call(svc, "supersede", ids=[old.db_id])
+            assert old.superseded_at is None
+            assert all(
+                entry.text != NEW_TEXT
+                for band in svc._cms.bands for entry in band.entries
+            )
+            assert _row(fresh, old.db_id)["superseded_at"] is None
+        assert svc._correction_recovery is None
+    finally:
+        fresh.close()
+        storage.close()
 
 
 def _request_for_durable_row(row):
