@@ -35,6 +35,36 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 # Cortex Console landed, leaving this wrapper dead code.)
 
 
+def _last_backup(svc) -> dict | None:
+    """How old the newest backup is, read from the record ops/backup.ps1|.sh
+    copy into ``<data_dir>/last-backup.json`` (that dump's manifest).
+
+    The host's backup folder is invisible to the container, and an age no
+    one can see is how 2026-09-14..20 went six days without a dump
+    unnoticed. ``None`` (key omitted) when no backup has been recorded or
+    the record is unreadable: /health must never fail on this, and a
+    half-parsed age would be worse than none.
+    """
+    data_dir = getattr(svc, "data_dir", None)
+    if data_dir is None:
+        return None
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    try:
+        record = json.loads(
+            (Path(data_dir) / "last-backup.json").read_text(encoding="utf-8-sig"))
+        at = str(record["created_at"])
+        created = datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    age = (datetime.now(timezone.utc) - created).total_seconds() / 3600
+    return {"at": at, "age_hours": round(age, 1),
+            "rotation": str(record.get("rotation", "unknown"))}
+
+
 def _extractor_status(svc) -> str | None:
     """One word for "can this bank fill its own cortex?".
 
@@ -160,6 +190,13 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         except Exception as exc:  # noqa: BLE001 — surface, don't raise
             payload["status"] = "degraded"
             payload["db"] = f"error: {exc}"
+    # The newest backup's age and rotation state (2026-09-23 review), with
+    # the same deliberate refusal to touch `status` as migration_partial: an
+    # old backup is no reason for the 503 that has the Docker healthcheck
+    # restart a daemon that is serving fine.
+    last_backup = _last_backup(svc)
+    if last_backup is not None:
+        payload["last_backup"] = last_backup
     return payload
 
 
