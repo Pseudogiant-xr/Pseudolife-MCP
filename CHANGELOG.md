@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-23 — backups run daily, and a wiped bank can no longer rotate the good ones away)
+- `ops/backup.ps1|.sh` write a `pseudolife_manifest-<stamp>.json` beside
+  each dump with its per-table row counts, read from the dump in the same
+  pass as the end-of-dump check. If `entries`, `facts` or `lessons` fell by
+  more than 25% (`-MaxRowDropPercent` / `--max-row-drop-percent`) against
+  the newest manifest that was not itself held, in the backup folder or the
+  mirror, the new dump is kept, local rotation and mirror pruning are
+  skipped with a loud warning, and the run still exits 0. The hold repeats
+  on every run until `-AcceptRowDrop` / `--accept-row-drop`. Before, a
+  logical wipe followed by `PSEUDOLIFE_BACKUP_MIRROR_KEEP` backups rotated
+  every good copy off the mirror.
+- The end-of-dump marker now counts only outside COPY data. A dump cut off
+  right after a stored memory that quoted the marker used to pass.
+- New `ops/install-backup-task.ps1` registers a daily `ops/backup.ps1` run
+  from the main checkout, even when installed from a worktree
+  (StartWhenAvailable, battery-tolerant, one-hour limit, runs as the
+  logged-on user; `-At`, `-Uninstall`). Each run is appended to
+  `data/backups/backup-task.log`. Nothing backed up on a schedule before:
+  from 2026-09-14 13:28 to 09-20 12:18 no dump existed anywhere.
+- `/health` gains `last_backup` (`at`, `age_hours`, `rotation`), read from
+  the manifest the backup scripts copy into the daemon as
+  `/data/last-backup.json`. It is informational and never changes
+  `status`. The memory-status command reports it and flags an age over
+  36 hours or a held rotation.
+
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
   through resident publication, including reinstatement admission and replay.

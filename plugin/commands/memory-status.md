@@ -23,4 +23,11 @@ Report the state of the Pseudolife memory stack:
    timing live here and in the Console, not in `memory_stats()`.
 4. If `/health` reports `degraded` (or any component `error`), surface the
    failing component verbatim — do not summarize it away.
-5. Mention the Cortex Console for browsing: http://127.0.0.1:8765/ui/
+5. Report the backup from `/health`'s `last_backup`: its `age_hours`, and
+   flag it when older than 36 hours (backups have stopped) or when
+   `rotation` is `held` (entries, facts or lessons fell sharply, so the
+   backup script kept every older copy — check for a wipe before anyone
+   re-runs it with `-AcceptRowDrop`). If the key is absent, no backup has
+   been recorded for this daemon: on the Docker tier, suggest
+   `ops/backup.ps1` and the daily `ops/install-backup-task.ps1`.
+6. Mention the Cortex Console for browsing: http://127.0.0.1:8765/ui/

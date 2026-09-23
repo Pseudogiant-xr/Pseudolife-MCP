@@ -968,6 +968,35 @@ live bank with an explicit `-Apply` / `--apply`; add
 restore the state volume (opt-in, so a DB-only restore never clobbers
 current state).
 
+Each dump also gets a `pseudolife_manifest-<stamp>.json` beside it: the
+per-table row counts, read from the dump itself. The manifests drive a
+**row-count gate**. If `entries`, `facts` or `lessons` fell by more than
+25% (`-MaxRowDropPercent` / `--max-row-drop-percent`) against the newest
+manifest that was not itself held, the script keeps the new dump but skips
+local rotation and mirror pruning and says so loudly. It looks for that
+baseline in both the backup folder and the mirror. A logical wipe therefore
+cannot rotate the good copies away. The hold repeats on every run until
+one passes `-AcceptRowDrop` / `--accept-row-drop`, which rotates and makes
+that dump the new baseline. The manifest is also copied into the daemon,
+and `/health` reports it as `last_backup` (`at`, `age_hours`,
+`rotation`). The key is absent until a backup script has run; the pip
+tiers' `pseudolife-mcp backup` does not record one yet.
+
+Deploys back up first, but nothing else backs up on a schedule. On
+Windows, register a daily run once:
+
+```powershell
+ops\install-backup-task.ps1              # daily 03:00
+ops\install-backup-task.ps1 -At 02:15
+ops\install-backup-task.ps1 -Uninstall   # remove it
+```
+
+The task runs the main checkout's `ops\backup.ps1`, even when installed
+from a worktree. It catches up at the next boot or logon if the machine
+was off, and it runs as you, so `PSEUDOLIFE_BACKUP_MIRROR` applies. Each
+run is appended to `data\backups\backup-task.log`. On Linux/macOS, a cron
+entry that runs `ops/backup.sh` does the same job.
+
 The pip tiers (lite / host-process) use `pseudolife-mcp backup` instead:
 same shape — a `pg_dump | gzip` of the bank (`--no-owner --no-acl`, so
 the artifact restores under any role — rehearsed in the test suite

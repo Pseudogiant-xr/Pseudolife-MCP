@@ -1126,7 +1126,9 @@
    "p": "ops/backup.ps1",
    "d": [
     "gzip -9 in-container → data/backups/; 7-day rotation",
-    "Optional off-disk mirror with independent retention"
+    "Optional off-disk mirror with independent retention",
+    "Row-count manifest per dump; a >25% drop in entries/facts/lessons holds all rotation",
+    "Manifest copied into the daemon → /health last_backup; install-backup-task.ps1 runs it daily"
    ]
   },
   {
