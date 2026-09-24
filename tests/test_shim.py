@@ -112,6 +112,12 @@ def test_shim_forwards_initialize_instructions_and_tool_annotations(shared_daemo
             async with ClientSession(r, w) as client:
                 downstream = await client.initialize()
                 assert upstream.instructions and "memory_search" in upstream.instructions
+                # Hookless clients need the same explicit startup check-in.
+                assert "memory_agents" in upstream.instructions
+                assert "project, task, and status" in upstream.instructions
+                assert "memory_message" in upstream.instructions
+                assert "acknowledge" in upstream.instructions
+                assert len(upstream.instructions) <= 512
                 assert downstream.instructions == upstream.instructions
                 proxied = {t.name: t.annotations for t in (await client.list_tools()).tools}
                 assert proxied == {t.name: t.annotations for t in direct_tools}

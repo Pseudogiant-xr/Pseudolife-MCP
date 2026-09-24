@@ -105,7 +105,7 @@ digest is written to `~/.pseudolife-mcp/digests/<sha256(id)>.txt`
 hook's environment, which cannot see the MCP env block; `PSEUDOLIFE_PLUGIN_DIR`
 is the daemon-side counterpart, naming the plugin tree whose hook scripts
 `/health` digests — the image sets it to its own copy). The plugin's
-UserPromptSubmit hook prints the digest only when the watermark passed the
+coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
 unchanged, a one-line reminder rides every tenth tool result. The file is

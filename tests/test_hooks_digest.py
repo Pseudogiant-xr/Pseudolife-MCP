@@ -30,8 +30,8 @@ from tests.test_codex_hooks import (
     ROOT, _hook_env, _recording_daemon, bash_run, pwsh_run,
 )
 
-SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh",
-           "stop-wake.sh")
+SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
+           "coordination-start.sh", "coordination-prompt.sh", "session-end.sh", "stop-wake.sh")
 REPO_DIGEST = plugin_hooks.hooks_digest(ROOT / "plugin/hooks")
 
 
@@ -246,7 +246,7 @@ def test_a_copy_of_the_scripts_sends_the_same_digest_in_either_line_ending(tmp_p
 
 @pytest.mark.parametrize("hook", ["bash", "native"])
 def test_a_manual_codex_bundle_sends_no_digest(tmp_path, hook):
-    """ops/setup-codex-hooks.py copies four scripts, not stop-wake.sh (manual
+    """ops/setup-codex-hooks.py copies six scripts, not stop-wake.sh (manual
     installs have no Stop hook), so the bundle has no digest to send. It
     sends no plugin version either, so the notice was never live there."""
     from tests.test_codex_hook_setup import setup as codex_setup

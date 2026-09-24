@@ -55,12 +55,20 @@ checks for known duplicates. Keep a single MCP transport registration, and follo
 [Codex setup and verification guide](../docs/guide/providers.md#codex-specifics)
 for startup budgets, standing instructions and runtime diagnostics.
 
-## Per-turn coordination digest
+## Startup check-in and per-turn coordination
+
+Memory and coordination have separate SessionStart and UserPromptSubmit
+handlers. The coordination startup handler asks the agent to update its
+project, task and status with `memory_agents`, list relevant peers, and read
+pending `memory_message` mail. It runs independently of the daemon briefing;
+neither handler depends on the other running first. Coordination identity
+and credentials remain owned by the existing shim adapter. If coordination
+is unavailable, the agent reports that once and continues ordinary memory work.
 
 When the shim's coordination adapter is enabled (`PSEUDOLIFE_AGENT_COORDINATION=1`
 in the MCP server's env block), it keeps a small digest file per session under
 `~/.pseudolife-mcp/digests/` — the pending addressed messages, rendered once,
-behind a watermark that moves only when they change. The UserPromptSubmit hook
+behind a watermark that moves only when they change. The coordination UserPromptSubmit hook
 reads that file by the `session_id` it receives and prints the digest only when
 the watermark passed the `.seen` marker, so a quiet turn adds nothing to the
 context and a change appears once. The same marker gates the hint the shim
@@ -79,6 +87,12 @@ and the hook's environment; they must agree. `ledger.log` in that directory
 records one line per hook firing (time, session prefix, watermark, bytes added)
 for measuring the cost.
 
+The hook carries bounded previews, not complete handoffs. Use
+`memory_message(action="receive")` for full messages and acknowledge only
+after reading. A message can contain up to 8,192 UTF-8 bytes; larger handoffs
+should reference an artifact the recipient can access. Delivery hints and
+acknowledgments do not establish that requested work is complete.
+
 ## Why no bundled MCP server?
 
 Earlier versions shipped an HTTP server entry in the plugin. Claude Code
@@ -91,15 +105,15 @@ the plugin stays hooks-only.
 
 ## What it replaces
 
-The plugin supersedes two of the wiring steps of `ops/install.sh` /
-`ops/install.ps1`:
+The plugin replaces installer hook wiring and provides concise startup
+guidance. Keep the full standing memory policy when detailed guidance is needed:
 
 | Installer step | Plugin equivalent |
 |---|---|
 | Session hooks in `settings.json` | bundled hooks (curl, no pip package needed) |
-| Memory-loop block appended to `~/.claude/CLAUDE.md` | served as session context by the same hook |
+| Memory-loop block appended to `~/.claude/CLAUDE.md` | concise core served at startup; full standing policy remains a separate reference |
 
-The third step — `claude mcp add` — is **not** replaced: the installer (or
+The transport step — `claude mcp add` — is **not** replaced: the installer (or
 the one-liner above) still owns the MCP transport.
 
 **Migrating from installer hook wiring?** Remove the old pieces so they
@@ -110,20 +124,26 @@ don't double up:
 2. Delete the `mid-session discipline` UserPromptSubmit entry from
    `~/.claude/settings.json` (the plugin echoes the same line — keeping
    both injects it twice per turn)
-3. Remove the "Memory — use it every session" block from `~/.claude/CLAUDE.md`
+3. Remove any installer-added `Pseudolife coordination:` SessionStart entry
+   from `~/.claude/settings.json`; the plugin supplies its own check-in hook.
+   Keep the full standing memory policy if you rely on its detailed guidance.
 
 (Keep your `claude mcp` registration — the plugin doesn't provide one.)
 
 ## Contents
 
-- **SessionStart hook** — curls the daemon's `/api/hook/session-start` for
-  the memory-loop instructions + briefing (lessons, unsure-abouts, world
-  facts), and registers the session's episode identity. Needs `bash` on PATH
+- **Memory SessionStart hook** — curls the daemon's `/api/hook/session-start`
+  for concise memory guidance and a bounded briefing, and registers the
+  session's episode identity. Needs `bash` on PATH
   (Git Bash on Windows) and `curl` — both ship with git / the OS.
-- **UserPromptSubmit hook** — echoes a one-line mid-session memory
+- **Coordination SessionStart hook** — requests agent check-in and preserves
+  the local digest mapping across supported session changes, without a daemon call.
+- **Memory UserPromptSubmit hook** — echoes a one-line mid-session memory
   discipline on every turn (recall before reviewing code/docs/PRs, then
   compare memory against the files; status questions are memory questions;
   log outcomes). Static — no daemon call, works offline.
+- **Coordination UserPromptSubmit hook** — reads changed local mailbox previews
+  independently of the memory reminder, without a daemon call.
 - **SessionEnd hook** — closes the session's episode and clears the
   active-session pointer when the session ends.
 - **Stop hook** (opt-in, `PSEUDOLIFE_AGENT_WAKE_HOOK=1`) — waits in the

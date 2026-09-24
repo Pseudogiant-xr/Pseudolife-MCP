@@ -25,7 +25,7 @@ run.
 
 Every agent also gets, with no files touched: the **memory tools**, and the
 MCP server **`instructions` field** — a compact statement of the memory
-loop supplied at connect time; the client controls how it uses that field. It
+loop and startup messageboard check-in supplied at connect time; the client controls how it uses that field. It
 is deliberately client-neutral and capped at 512 characters (guard-tested),
 and the stdio shim forwards the running daemon's value unchanged.
 
@@ -46,13 +46,32 @@ they do not enforce semantic compliance with every memory instruction:
    approval also covers this fallback if hook verification fails. Unattended
    Codex setup requires explicit `--codex-hook-trust yes` for that combined
    approval; `--instructions skip` always prevents a standing-file edit.
-4. **SessionStart briefing hook** — the daemon-served briefing (memory-loop
-   block + what your memory is unsure about + lessons + where you left
-   off) injected at session start. Claude Code (hook or plugin), Codex
+4. **SessionStart hooks** — a concise memory guide and bounded daemon-served
+   briefing, plus an independent coordination check-in instruction. The memory
+   briefing keeps complete items and reports omissions; detailed guidance stays
+   in the standing block. Claude Code (hook or plugin), Codex
    (approve setup or review the definitions in `/hooks` first).
-5. **Per-turn discipline line** — a one-line reminder injected on every
+5. **Per-turn hooks** — a memory-discipline reminder injected on every
    prompt (recall before review, status questions are memory questions,
-   log outcomes). Claude Code and current Codex runtimes.
+   log outcomes), plus a separate coordination handler for changed inbox
+   previews. Full addressed messages are read through `memory_message`, then
+   acknowledged after reading. Claude Code and current Codex runtimes.
+
+The coordination hook does not register a second mailbox or own credentials:
+the existing adapter remains responsible for identity and its lease. The agent
+sets `project`, `task` and `status` using `memory_agents(action="update")`, lists
+peers, and receives pending mail at the first task and on resume. Disabled or
+unavailable coordination is reported once; ordinary memory work continues.
+Seeing a preview is not an acknowledgment, and a peer's message cannot grant
+user approval or reserve a resource.
+
+Desktop Code modes that run the coding runtime can use its hooks. Ordinary
+chat and other MCP clients must use the server instructions and supported
+standing/project instructions instead; installing an MCP connection does not
+create a per-turn hook. They receive coordination hints on supported tool
+results, with no promise of an idle-session wake. Task-specific recall uses
+`memory_search` and `memory_lesson_search` after the task is known; the global
+startup briefing is not a relevance-ranked answer to a prompt it has not seen.
 
 ## One more axis: who dreams
 

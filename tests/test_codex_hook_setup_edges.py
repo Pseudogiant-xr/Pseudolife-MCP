@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import importlib.util
 import json
 from pathlib import Path
+import re
 import shutil
 
 import pytest
@@ -27,17 +28,20 @@ def user_config(home, **features):
 
 
 def plugin_hooks(home):
-    """What Codex lists for the plugin: one hook per event in the shipped
+    """What Codex lists for the plugin: one entry per handler in the shipped
     hooks.json (read from the file, not from setup's own constants, so a new
     event there cannot hide from these tests)."""
     directory = home / "plugin/hooks"
     shutil.copytree(ROOT / "plugin/hooks", directory)
     events = json.loads((directory / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    return [{"key": "plugin-" + event, "currentHash": "sha256:" + "a" * 64,
+    return [{"key": f"plugin-{event}-{group_index}-{hook_index}", "currentHash": "sha256:" + "a" * 64,
              "eventName": event[0].lower() + event[1:], "enabled": True, "trustStatus": "untrusted",
              "isManaged": False, "sourcePath": str(directory / "hooks.json"), "source": "plugin",
-             "pluginId": setup.PLUGIN_ID, "handlerType": "command"}
-            for event in events]
+             "pluginId": setup.PLUGIN_ID, "handlerType": "command",
+             "command": handler["commandWindows"]}
+            for event, groups in events.items()
+            for group_index, group in enumerate(groups)
+            for hook_index, handler in enumerate(group["hooks"])]
 
 
 def mock_runtime(monkeypatch, home, config, hooks):
@@ -127,8 +131,8 @@ def test_unexpected_plugin_is_not_trusted_or_replaced(tmp_path, monkeypatch, pro
 
 # --- the plugin's Stop entry (Claude Code's opt-in wake hook) ---------------
 # Codex loads the plugin's hooks.json too, so it lists the Stop entry beside
-# the three lifecycle hooks. It is a no-op in Codex, and setup approves it with
-# them; manual installs keep the three lifecycle events.
+# the memory and coordination lifecycle hooks. It is a no-op in Codex, and
+# setup approves it with them; manual installs omit Stop.
 
 def approving_runtime(monkeypatch, home, hooks):
     """A runtime that accepts one trust write and then lists every hook trusted."""
@@ -166,10 +170,46 @@ def test_setup_knows_every_event_the_plugin_ships():
     assert set(setup.EVENTS.values()) < set(shipped)
 
 
+def test_plugin_runtime_commands_must_keep_their_manifest_event_roles(tmp_path):
+    hooks = plugin_hooks(tmp_path)
+    start = next(h for h in hooks if h["eventName"] == "sessionStart")
+    prompt = next(h for h in hooks if h["eventName"] == "userPromptSubmit")
+    start["command"], prompt["command"] = prompt["command"], start["command"]
+    with pytest.raises(setup.SetupError, match="differ"):
+        setup.vet_plugin(hooks)
+
+
+def test_plugin_runtime_requires_each_role_once_across_platform_spellings(tmp_path):
+    hooks = plugin_hooks(tmp_path)
+    starts = [h for h in hooks if h["eventName"] == "sessionStart"]
+    manifest = json.loads((tmp_path / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    starts[1]["command"] = manifest["SessionStart"][0]["hooks"][0]["command"]
+    assert setup.complete_set(hooks, "plugin")  # Distinct strings still name one semantic role.
+    with pytest.raises(setup.SetupError, match="differ"):
+        setup.vet_plugin(hooks)
+
+
+@pytest.mark.parametrize("field,expand", [("commandWindows", False), ("command", False),
+                                           ("commandWindows", True), ("command", True)])
+def test_plugin_runtime_accepts_both_manifest_platform_commands_and_root_expansion(
+        tmp_path, field, expand):
+    hooks = plugin_hooks(tmp_path)
+    manifest = json.loads((tmp_path / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    for hook in hooks:
+        event = hook["eventName"][0].upper() + hook["eventName"][1:]
+        group, handler = map(int, hook["key"].rsplit("-", 2)[1:])
+        command = manifest[event][group]["hooks"][handler][field]
+        if expand:
+            command = command.replace("${CLAUDE_PLUGIN_ROOT}", str(tmp_path / "plugin"))
+            command = command.replace("$env:CLAUDE_PLUGIN_ROOT", str(tmp_path / "plugin"))
+        hook["command"] = command
+    setup.vet_plugin(hooks)
+
+
 @pytest.mark.parametrize("listed", ["all", "without-stop"])
 def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, listed):
     """Codex 0.148+ lists the plugin's async Stop hook; older Codex skips
-    async hooks outside SessionEnd and lists three. Both reach ready."""
+    async hooks outside SessionEnd and omit Stop. Both reach ready."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     if listed == "without-stop":
@@ -184,7 +224,7 @@ def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, l
 
 def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     """A user who disabled the no-op Stop entry in /hooks keeps that choice;
-    the three lifecycle hooks are still approved."""
+    the five memory and coordination hooks are still approved."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     [stop] = [h for h in hooks if h["eventName"] == "stop"]
@@ -192,7 +232,7 @@ def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
-    assert len(writes[0]["edits"]) == 3
+    assert len(writes[0]["edits"]) == 5
     assert all(stop["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
 
 
@@ -229,7 +269,9 @@ def test_verification_counts_every_selected_hook(tmp_path, monkeypatch):
         events = [{"method": "hook/completed", "params": {"run": {
             "eventName": event, "status": "completed", "entries": [{"text": text}]}}}
             for event, text in (("sessionStart", "Session episode: fixture"),
-                                ("userPromptSubmit", "memory_lesson_search"))]
+                                ("sessionStart", "memory_agents(action=list)"),
+                                ("userPromptSubmit", "memory_lesson_search"),
+                                ("userPromptSubmit", ""))]
 
         def rpc(self, method, params):
             answers = {"config/read": {"config": {}},
@@ -270,9 +312,31 @@ def test_legacy_migration_removes_exact_commands_and_preserves_lookalikes(tmp_pa
     data = json.loads(path.read_bytes())
     groups = data["hooks"]["SessionStart"]
     assert groups[0] == {"matcher": "startup", "hooks": custom}
-    assert len(groups) == 2
+    assert len(groups) == 3
     assert data["description"] == "User configuration"
     assert Path(result["backups"][0]).read_bytes() == original
+
+
+@pytest.mark.parametrize("client", ["bash", "powershell"])
+@pytest.mark.parametrize("source", ["manual", "plugin"])
+def test_lightweight_coordination_hook_migrates_without_touching_other_hooks(tmp_path, client, source):
+    bash_line = re.search(r'^COORDINATION_LINE="(.*)"$',
+                          (ROOT / "ops/install-hook.sh").read_text(encoding="utf-8"), re.M)[1]
+    ps_line = re.search(r'^\$coordinationLine = "(.*)"$',
+                        (ROOT / "ops/install-hook.ps1").read_text(encoding="utf-8"), re.M)[1]
+    assert bash_line == ps_line
+    command = ("echo" if client == "bash" else "Write-Output") + f" '{bash_line}'"
+    unrelated = {"type": "command", "command": "echo user-owned"}
+    path = tmp_path / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [
+        {"type": "command", "command": command}, unrelated]}]}}))
+    result = {"backups": []}
+    setup.install_manual(tmp_path, result, plugin=source == "plugin")
+    hooks = json.loads(path.read_text())["hooks"]
+    starts = [h["command"] for group in hooks["SessionStart"] for h in group["hooks"]]
+    assert command not in starts
+    assert unrelated["command"] in starts
+    assert len(starts) == (1 if source == "plugin" else 3)
 
 
 @pytest.mark.parametrize("custom_field", ["command", "commandWindows"])

@@ -8066,10 +8066,12 @@ class MemoryService(DreamOps):
 
     def session_briefing(self, max_unsure: int = 3, max_lessons: int = 3,
                          max_world: int = 3, *,
-                         session_id: str | None = None) -> dict[str, Any]:
+                         session_id: str | None = None,
+                         include_coordination: bool = True) -> dict[str, Any]:
         """Assemble the session-start briefing: graph 'unsure-about' + avoid-first
         lessons + fresh world facts + a one-line recap of the last closed session.
-        Read-only; no LLM. Each sub-call takes the lock itself, so this
+        The memory startup hook skips coordination; its separate hook owns
+        that output. Read-only; no LLM. Each sub-call takes the lock itself, so this
         orchestrator must not hold it."""
         from pseudolife_memory.memory.briefing import format_briefing, select_lessons
         dg = self.graph_digest()
@@ -8105,7 +8107,8 @@ class MemoryService(DreamOps):
                 break
 
         coordination = (self.coordination_awareness(session_id=session_id)
-                        if self.config.coordination.enabled else None)
+                        if include_coordination and self.config.coordination.enabled
+                        else None)
         markdown = format_briefing(surprises, questions, lessons,
                                    world=world, recap=recap,
                                    coordination=coordination)

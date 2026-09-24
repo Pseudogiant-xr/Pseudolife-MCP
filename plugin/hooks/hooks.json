@@ -11,6 +11,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/coordination-prompt.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event CoordinationPrompt",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -21,6 +31,16 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
             "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SessionStart",
             "timeout": 15
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/coordination-start.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event CoordinationStart",
+            "timeout": 5
           }
         ]
       }

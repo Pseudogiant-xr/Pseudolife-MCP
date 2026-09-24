@@ -167,7 +167,7 @@ def test_plugin_hook_wiring():
     assert "memory_stats" in script
     assert "before treating memory as offline" in script
     assert re.search(r"^exit 0\s*$", script, re.M)  # must never block session start
-    _assert_curl_fits_hook_budget(script, hooks["hooks"]["SessionStart"])
+    _assert_curl_fits_hook_budget(script, [groups[0]])
     # Pin bearer-token forwarding in the actual curl call
     assert '"${AUTH[@]}"' in script
     # Pin query-string construction and forwarding to curl (session_id/source)
@@ -227,6 +227,22 @@ def test_plugin_hook_wiring_user_prompt_submit():
     assert re.search(r"^exit 0\s*$", script, re.M)   # must never block a turn
 
 
+def test_coordination_has_independent_start_and_prompt_handlers():
+    hooks = json.loads(_read("plugin/hooks/hooks.json"))["hooks"]
+    for event, script, native_event in (("SessionStart", "coordination-start.sh", "CoordinationStart"),
+                                        ("UserPromptSubmit", "coordination-prompt.sh", "CoordinationPrompt")):
+        handlers = [h for group in hooks[event] for h in group["hooks"]]
+        assert len(handlers) == 2
+        assert any(script in h["command"] and native_event in h["commandWindows"]
+                   for h in handlers)
+        assert "curl" not in _read("plugin/hooks/" + script)
+    start = _read("plugin/hooks/coordination-start.sh")
+    assert "memory_agents(action=list)" in start
+    assert "memory_agents(action=update" in start
+    assert "memory_message(action=receive)" in start
+    assert "memory_message(action=ack" in start
+
+
 # ── content sync ────────────────────────────────────────────────────────────
 
 def test_discipline_line_synced_across_plugin_and_installers():
@@ -252,25 +268,12 @@ def test_discipline_line_synced_across_plugin_and_installers():
 
 
 def test_memory_loop_block_leaves_briefing_headroom():
-    """The session-start payload is instructions + briefing, sliced to
-    HOOK_CONTEXT_MAX_CHARS with the briefing LAST — every char the block
-    grows is silently cut from the briefing tail (lessons, unsure-abouts,
-    where-we-left-off). Reserve 2,000 chars for the briefing (the block
-    measured 6,663 on 2026-08-28, 7,316 on 2026-09-02 after the
-    write-policy and trap-avoidance text, and 7,491 later that day after
-    the v35 label line — which funded itself by two trims and left 9
-    chars of reserve, so the next addition trims first or the cap moves
-    deliberately; a truncated briefing has no other alarm). 7,488 on
-    2026-09-05: the `used_ids` clause funded itself by three trims of
-    text the block already said elsewhere (`one claim per call` in the
-    CAPTURE header, `heed polarity:-` in the RECALL bullet, and
-    `rather than silently picking one`). 7,479, 7,491 and then 7,498 on
-    2026-09-23/24: the `replaced_by` pointer text, its Codex-review
-    `verified` correction, then its `current` clause, the last funded by
-    dropping restatements — 2 chars of reserve left."""
+    """The concise startup core leaves room for the dynamic briefing."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
-                                                    MEMORY_LOOP_BLOCK)
-    assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000
+                                                    MEMORY_LOOP_BLOCK, STARTUP_MEMORY_CORE)
+    assert len(STARTUP_MEMORY_CORE) < 2_000
+    assert len(STARTUP_MEMORY_CORE) < HOOK_CONTEXT_MAX_CHARS - 2_000
+    assert len(MEMORY_LOOP_BLOCK) > len(STARTUP_MEMORY_CORE)
 
 
 def test_memory_loop_block_carries_recall_before_review_trigger():

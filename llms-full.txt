@@ -815,10 +815,12 @@ daemon:
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
 The server's value depends on the agent using it. The MCP server advertises
-the core loop through protocol-level `instructions`; the SessionStart hook
-delivers the full memory policy with a live briefing. The default hook policy
-and bundled standing memory block contain the same instructions. Hooks add
-per-prompt reminders and session bookkeeping; neither delivery method
+the core loop and messageboard check-in through protocol-level `instructions`.
+The memory SessionStart hook delivers a short operating guide and a bounded
+briefing; a separate coordination hook asks the agent to set its project,
+task and status, discover peers, and read pending messages. Detailed memory
+guidance remains in the bundled standing block. Hooks add per-prompt reminders
+and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
 
 With verified hooks, a standing copy is optional. If you want it instead —
@@ -3447,8 +3449,8 @@ the higher value, as it always has. Kill switch:
 
 ## Installing the briefing hook
 
-One command installs the briefing hook (and, for the Claude client, a
-static per-turn memory-discipline hook on `UserPromptSubmit`):
+One command installs the briefing, per-turn memory guidance, and a separate
+startup instruction for coordination check-in:
 
 ```powershell
 .\ops\install-hook.ps1     # Windows (PowerShell 7)
@@ -3483,8 +3485,28 @@ start. Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
 `--max-world N` (default 3 each). The briefing content is also available on
 demand via the CLI or the Console's `/api/briefing` route.
 
-This installs the *briefing* and the per-turn discipline line — not the
-identity registration. `pseudolife-mcp briefing` reads `/api/briefing` and
+The plugin's daemon-served memory hook uses a short operating guide rather
+than repeating the full standing memory policy. Its bounded briefing retains
+complete items, prioritizes lessons and recap over global uncertainties, and
+reports omitted content. Full standing guidance is in
+[`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md). A custom
+`hook-instructions.md` in the daemon's data directory is also bounded: an
+omission notice means the complete custom instructions must be obtained before
+relying on the partial copy. That path belongs to the daemon host and may not
+be readable from a remote client; `/api/briefing` returns the briefing, not
+the custom instruction file.
+
+The plugin additionally supplies independent startup and per-turn coordination
+handlers for check-in and local inbox previews. The startup handler asks the agent to set its project, task
+and status, discover peers, and receive pending mail. Full messages are read
+with `memory_message`, then acknowledged after reading. The existing adapter
+owns the mailbox; this handler does not create another identity or grant
+permissions. The memory and coordination hooks have independent output budgets
+and do not depend on execution order.
+
+The lightweight `install-hook` scripts install the briefing, coordination
+check-in instruction, and per-turn discipline line; they do not register an
+agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing` reads `/api/briefing` and
 forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven
 episode close: the idle reaper closes the episode instead, and the
@@ -3639,7 +3661,7 @@ digest is written to `~/.pseudolife-mcp/digests/<sha256(id)>.txt`
 hook's environment, which cannot see the MCP env block; `PSEUDOLIFE_PLUGIN_DIR`
 is the daemon-side counterpart, naming the plugin tree whose hook scripts
 `/health` digests — the image sets it to its own copy). The plugin's
-UserPromptSubmit hook prints the digest only when the watermark passed the
+coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
 unchanged, a one-line reminder rides every tenth tool result. The file is
@@ -5304,7 +5326,7 @@ run.
 
 Every agent also gets, with no files touched: the **memory tools**, and the
 MCP server **`instructions` field** — a compact statement of the memory
-loop supplied at connect time; the client controls how it uses that field. It
+loop and startup messageboard check-in supplied at connect time; the client controls how it uses that field. It
 is deliberately client-neutral and capped at 512 characters (guard-tested),
 and the stdio shim forwards the running daemon's value unchanged.
 
@@ -5325,13 +5347,32 @@ they do not enforce semantic compliance with every memory instruction:
    approval also covers this fallback if hook verification fails. Unattended
    Codex setup requires explicit `--codex-hook-trust yes` for that combined
    approval; `--instructions skip` always prevents a standing-file edit.
-4. **SessionStart briefing hook** — the daemon-served briefing (memory-loop
-   block + what your memory is unsure about + lessons + where you left
-   off) injected at session start. Claude Code (hook or plugin), Codex
+4. **SessionStart hooks** — a concise memory guide and bounded daemon-served
+   briefing, plus an independent coordination check-in instruction. The memory
+   briefing keeps complete items and reports omissions; detailed guidance stays
+   in the standing block. Claude Code (hook or plugin), Codex
    (approve setup or review the definitions in `/hooks` first).
-5. **Per-turn discipline line** — a one-line reminder injected on every
+5. **Per-turn hooks** — a memory-discipline reminder injected on every
    prompt (recall before review, status questions are memory questions,
-   log outcomes). Claude Code and current Codex runtimes.
+   log outcomes), plus a separate coordination handler for changed inbox
+   previews. Full addressed messages are read through `memory_message`, then
+   acknowledged after reading. Claude Code and current Codex runtimes.
+
+The coordination hook does not register a second mailbox or own credentials:
+the existing adapter remains responsible for identity and its lease. The agent
+sets `project`, `task` and `status` using `memory_agents(action="update")`, lists
+peers, and receives pending mail at the first task and on resume. Disabled or
+unavailable coordination is reported once; ordinary memory work continues.
+Seeing a preview is not an acknowledgment, and a peer's message cannot grant
+user approval or reserve a resource.
+
+Desktop Code modes that run the coding runtime can use its hooks. Ordinary
+chat and other MCP clients must use the server instructions and supported
+standing/project instructions instead; installing an MCP connection does not
+create a per-turn hook. They receive coordination hints on supported tool
+results, with no promise of an idle-session wake. Task-specific recall uses
+`memory_search` and `memory_lesson_search` after the task is known; the global
+startup briefing is not a relevance-ranked answer to a prompt it has not seen.
 
 ## One more axis: who dreams
 
