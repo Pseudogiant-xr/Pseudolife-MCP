@@ -11,6 +11,7 @@ def test_client_environment_removes_inherited_credentials_and_uses_disposable_ho
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://live.example:8765",
         "PSEUDOLIFE_CODEX_SERVER_URL": "ws://live.example:8766",
         "PSEUDOLIFE_AGENT_COORDINATION": "1", "PSEUDOLIFE_AGENT_WAKE": "1",
+        "PSEUDOLIFE_CODEX_DOORBELL": "1", "PSEUDOLIFE_CODEX_BIN": "real-codex",
         "PATH": "unchanged", "HF_HOME": "unchanged-model-cache"}
     isolate_client_environment(environment, tmp_path)
     assert environment == {"CODEX_HOME": str(tmp_path), "PATH": "unchanged",

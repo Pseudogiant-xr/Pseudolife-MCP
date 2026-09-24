@@ -30,6 +30,7 @@ import pytest
 from pseudolife_memory.storage.schema import (
     BENCH_RESET_TABLES,
     SCHEMA_META_VERSION,
+    assert_disposable_database,
     ensure_schema,
 )
 from pseudolife_memory.storage.postgres import PostgresStorage
@@ -64,6 +65,7 @@ def _bank(pg_url):
     """
     await_background_dreams()
     with psycopg.connect(pg_url) as conn:
+        assert_disposable_database(conn)  # first: before the reap below
         conn.execute("SET search_path TO public")
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
@@ -77,6 +79,7 @@ def _bank(pg_url):
 
 
 def _truncate_all(conn) -> None:
+    assert_disposable_database(conn)
     conn.execute(
         "TRUNCATE " + ", ".join(BENCH_RESET_TABLES)
         + " RESTART IDENTITY CASCADE"
@@ -545,6 +548,45 @@ def test_current_export_empty_invalidation_member_is_authoritative(
     assert count == 0
 
 
+_SPELLING_FLAG = "curation_listing_spelling_v2"
+
+
+def _spelling_flag(pg_url):
+    with psycopg.connect(pg_url) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = %s", (_SPELLING_FLAG,)).fetchone()
+    return row[0] if row else None
+
+
+@pytest.mark.parametrize("exported_flag", [None, {"copied": 2, "at": 160.0}])
+def test_import_leaves_the_curation_spelling_flag_to_the_export(
+        pg_url, tmp_path, exported_flag):
+    # A daemon started on the fresh target sets the one-time carry-over flag
+    # of folded curation dismissals (curation_safety.migrate_folded_
+    # dismissals) with nothing to carry. An export from before that flag
+    # existed brings folded dismissals the next start must still carry over;
+    # one that carries the flag has already been through it.
+    from pseudolife_memory.curation_safety import _LISTING_SPELLING_META
+    assert _LISTING_SPELLING_META == _SPELLING_FLAG
+
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+        conn.execute(
+            "INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) VALUES "
+            "('lesson:ci-cd-deploy|approach', 'lesson:release-train|pitfall', 150.0)")
+        if exported_flag is not None:
+            conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb)",
+                         (_SPELLING_FLAG, json.dumps(exported_flag)))
+    archive = tmp_path / "bank.zip"
+    perform_export(pg_url, archive)
+
+    with _bank(pg_url) as conn:
+        conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb)",
+                     (_SPELLING_FLAG, json.dumps({"copied": 0, "at": 900.0})))
+    perform_import(pg_url, archive)
+    assert _spelling_flag(pg_url) == exported_flag
+
+
 def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
     with _bank(pg_url) as conn:
         _seed_bank(conn)
@@ -567,7 +609,8 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "INSERT INTO meta (key, value) VALUES "
             "('dream_ack_secret_v1', '\"bank-local-secret\"'::jsonb), "
             "('coordination_hlc_highwater', '[10000, 1]'::jsonb), "
-            "('coordination_bank_id', '\"11111111-1111-4111-8111-111111111111\"'::jsonb) "
+            "('coordination_bank_id', '\"11111111-1111-4111-8111-111111111111\"'::jsonb), "
+            "('writer_lease_epoch', '7'::jsonb) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
         conn.commit()
@@ -589,6 +632,10 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert "dream_ack_secret_v1" not in meta_keys
         assert "coordination_hlc_highwater" not in meta_keys
         assert "coordination_bank_id" not in meta_keys
+        # The writer-lease handover counter belongs to the target bank: an
+        # imported value could move it backwards under a writer that
+        # remembers a higher one.
+        assert "writer_lease_epoch" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["format_version"] == 1

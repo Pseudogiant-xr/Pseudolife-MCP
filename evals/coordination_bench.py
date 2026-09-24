@@ -137,7 +137,9 @@ async def run_arm(storage, arm, samples, trace):
     from pseudolife_memory.web.fixtures import FixtureService
     from tests.asgi_helpers import stub_mcp
 
-    storage.conn.execute("TRUNCATE coordination_messages, coordination_agents")
+    from pseudolife_memory.storage.schema import assert_disposable_database
+    assert_disposable_database(storage.conn)
+    storage.conn.execute("TRUNCATE coordination_messages, coordination_agents, coordination_events")
     service = FixtureService()
     service.config.coordination.enabled = arm != "disabled"
     service.config.coordination.allowed_principals = ["default"]

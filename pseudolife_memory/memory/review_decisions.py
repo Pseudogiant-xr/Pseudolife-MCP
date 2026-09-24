@@ -242,7 +242,8 @@ def record_candidate_dismissal(service, candidate: dict, *,
         "dismissed_at": pair_at})
 
 
-def candidate_evidence_fingerprints(service, candidates: list[dict]) -> list[str]:
+def candidate_evidence_fingerprints(service, candidates: list[dict],
+                                    inputs: dict | None = None) -> list[str]:
     """Fingerprint pair-local candidate evidence from one bank snapshot.
 
     Trace IDs take precedence exactly as in ``entity_context_vectors``;
@@ -250,19 +251,27 @@ def candidate_evidence_fingerprints(service, candidates: list[dict]) -> list[str
     entry is included even below the candidate generator's minimum-mention
     threshold so crossing that threshold invalidates the decision. Access and
     other serving-only metadata are deliberately absent.
+
+    Pure over ``inputs`` (from ``review_judgments.candidate_inputs``);
+    without them the caller holds the lock and the snapshot is read here.
+    No candidates, no read.
     """
     from pseudolife_memory.graph import norm_name
     from pseudolife_memory.memory.graph_review import _token_set
-    from pseudolife_memory.memory.review_judgments import fingerprint
+    from pseudolife_memory.memory.review_judgments import (
+        candidate_inputs, fingerprint)
 
-    storage = service._storage
-    graph = storage.load_graph()
-    entries = storage.load_entries()
-    scopes = storage.entity_sources_map()
-    traces = storage.traces_by_entity_norm()
-    fact_counts = storage.entity_fact_counts()
-    pending_edges = storage.pending_proposals()
-    pending_entities = storage.pending_entity_proposals()
+    if not candidates:
+        return []
+    if inputs is None:
+        inputs = candidate_inputs(service)
+    graph = inputs["graph"]
+    entries = inputs["entries"]
+    scopes = inputs["scopes"]
+    traces = inputs["traces"]
+    fact_counts = inputs["facts"]
+    pending_edges = inputs["pending_links"]
+    pending_entities = inputs["pending_entities"]
     by_id = {e["id"]: e for e in graph["entities"]}
     by_norm = {}
     for entity in graph["entities"]:

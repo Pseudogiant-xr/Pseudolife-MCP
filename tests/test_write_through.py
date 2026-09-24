@@ -130,6 +130,7 @@ def test_service_restart_roundtrip(pg_conn, pg_url, tmp_path):
     svc.cortex_write("quorvax", "owner", "alice", support="user")
     svc.episode_start("restart check")
     svc.flush()
+    svc._storage.close()  # the first daemon exits, releasing the bank
 
     svc2 = MemoryService(data_dir=tmp_path, database_url=pg_url)
     s = svc2.search("what is the quorvax timeout?")
@@ -149,11 +150,17 @@ def test_service_restart_roundtrip(pg_conn, pg_url, tmp_path):
 # that is the restart the loss actually manifests in.
 
 
-def _rehydrated(tmp_path, pg_url, text):
+def _rehydrated(live, tmp_path, pg_url, text):
+    """Stop ``live`` (a bank has one writer) and read ``text`` back through
+    a restarted service, which releases the bank again afterwards."""
     from pseudolife_memory.service import MemoryService
 
+    live._storage.close()
     svc = MemoryService(data_dir=tmp_path / "restart", database_url=pg_url)
-    recent = svc.recent(n=50)
+    try:
+        recent = svc.recent(n=50)
+    finally:
+        svc._storage.close()
     return next(e for e in recent["entries"] if e["text"] == text)
 
 
@@ -169,11 +176,12 @@ def test_consolidate_supersession_survives_restart(pg_conn, pg_url, tmp_path):
     )
     assert out["superseded_count"] == 1
 
-    entry = _rehydrated(tmp_path, pg_url, "fact A v1")
+    entry = _rehydrated(svc, tmp_path, pg_url, "fact A v1")
     assert entry["superseded"] is True
     assert entry["superseded_by_text"] == "Consolidated: fact A current"
 
 
+@pytest.mark.real_model
 def test_consolidate_paraphrase_refusal_survives_restart(
     pg_conn, pg_url, tmp_path,
 ):
@@ -193,7 +201,7 @@ def test_consolidate_paraphrase_refusal_survives_restart(
     assert len(svc._storage.load_entries()) == 1
 
     entry = _rehydrated(
-        tmp_path, pg_url, "the deploy target is the staging cluster",
+        svc, tmp_path, pg_url, "the deploy target is the staging cluster",
     )
     assert entry["superseded"] is False
     assert entry["superseded_by_text"] is None
@@ -209,9 +217,122 @@ def test_supersede_supersession_survives_restart(pg_conn, pg_url, tmp_path):
     out = svc.supersede("Sky is green", "Sky is blue")
     assert out["superseded_count"] == 1
 
-    entry = _rehydrated(tmp_path, pg_url, "Sky is green")
+    entry = _rehydrated(svc, tmp_path, pg_url, "Sky is green")
     assert entry["superseded"] is True
     assert entry["superseded_by_text"] == "Sky is blue"
+
+
+@pytest.mark.parametrize("operation", ["supersede", "consolidate"])
+def test_superseded_hit_names_its_successor_row_after_restart(
+    operation, pg_conn, pg_url, tmp_path,
+):
+    """Entries store the replacement's text, not its id, so the successor
+    is resolved by exact text over the resident entries at serve time. It
+    must name the replacement's real row id and mark an explicit
+    correction verified, on both serving surfaces, after a rehydrate."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    old_text, new_text = "Sky is green", "Consolidated: sky is blue"
+    svc.store(old_text, source="wt-test")
+    if operation == "supersede":
+        svc.supersede(old_text, new_text)
+    else:
+        svc.consolidate([old_text], new_text)
+
+    # "The daemon stopped": end the first service's Postgres session before
+    # the restart builds a second one on the same database. Not touched
+    # again — its storage would reconnect on next use.
+    svc._storage.close()
+    restarted = MemoryService(data_dir=tmp_path / "restart",
+                              database_url=pg_url)
+    recent = restarted.recent(n=50)["entries"]
+    new_id = next(e["id"] for e in recent if e["text"] == new_text)
+    assert isinstance(new_id, int)
+    for entries in (recent, restarted.search(old_text)["entries"]):
+        old = next(e for e in entries if e["text"] == old_text)
+        assert old["superseded_by_id"] == new_id
+        assert old["supersession_verified"] is True
+        assert isinstance(old["superseded_at"], float)
+
+
+def test_memory_get_reports_supersession_only_on_a_superseded_entry(
+    pg_conn, pg_url, tmp_path,
+):
+    """``memory_get`` is how an agent dereferences ``replaced_by.id``, so
+    the fetched entry must say when it is itself superseded — with the
+    same successor annotation search serves, one link at a time. A live
+    entry's payload keeps exactly its pre-existing keys."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    v1, v2, v3 = "Sky is green", "Sky is teal", "Sky is blue"
+    svc.store(v1, source="wt-test")
+    svc.supersede(v1, v2)
+    svc.supersede(v2, v3)
+    ids = {e["text"]: e["id"] for e in svc.recent(n=10)["entries"]}
+
+    live = svc.get_entry(ids[v3])
+    assert set(live) == {"found", "entry_id", "text", "source",
+                         "reinforcements", "explicit_reinforcements",
+                         "access_count", "consolidated_into"}
+
+    first = svc.get_entry(ids[v1])
+    assert first["superseded"] is True
+    assert isinstance(first["superseded_at"], float)
+    assert first["superseded_by_text"] == v2
+    # Names the middle link, not the end of the chain, and says so.
+    assert (first["superseded_by_id"], first["supersession_verified"],
+            first["superseded_by_current"]) == (ids[v2], True, False)
+    middle = svc.get_entry(ids[v2])
+    assert (middle["superseded_by_id"], middle["superseded_by_current"]) == (
+        ids[v3], True)
+
+
+def test_memory_get_reads_supersession_from_the_row_it_serves(
+    pg_conn, pg_url, tmp_path,
+):
+    """``memory_get`` serves a Postgres row, so its supersession state
+    comes from that row too: a superseded row the CMS does not hold (a
+    failed eviction write-through, or reinstatement recovery mid-flight)
+    must not be served as live. The successor is still resolved over the
+    resident entries, like search."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    svc.store("Sky is green", source="wt-test")
+    svc.supersede("Sky is green", "Sky is blue")
+    ids = {e["text"]: e["id"] for e in svc.recent(n=10)["entries"]}
+    for band in svc._cms.bands:
+        band.entries = [e for e in band.entries
+                        if e.db_id != ids["Sky is green"]]
+    got = svc.get_entry(ids["Sky is green"])
+    assert got["superseded"] is True
+    assert (got["superseded_by_id"], got["superseded_by_current"]) == (
+        ids["Sky is blue"], True)
+
+
+def test_memory_get_never_names_the_entry_itself_as_its_successor(
+    pg_conn, pg_url, tmp_path,
+):
+    """A verbatim re-assertion (superseded by its own text) that was later
+    corrected leaves two retired entries with one text. The fetched entry
+    is excluded from its own candidates by id, so the re-assertion is named
+    (and marked not current) instead of the pair reading as ambiguous."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path / "live", database_url=pg_url)
+    svc.store("Sky is green", source="wt-test")
+    svc.supersede("Sky is green", "Sky is green")
+    rows = svc._storage.conn.execute(
+        "SELECT id, superseded_at FROM entries WHERE text = %s ORDER BY id",
+        ("Sky is green",)).fetchall()
+    (original, retired_at), (reassertion, live_at) = rows
+    assert retired_at is not None and live_at is None
+    svc.supersede(entry_id=reassertion, new_text="Sky is blue")
+    got = svc.get_entry(original)
+    assert (got["superseded_by_id"], got["superseded_by_current"]) == (
+        reassertion, False)
 
 
 @pytest.mark.parametrize('operation', ['supersede', 'consolidate'])
@@ -237,8 +358,8 @@ def test_explicit_replacement_bypasses_surprise_and_survives_restart(
 
     assert result['superseded_count'] == 1
     assert result['new_memory_stored'] is True
-    assert _rehydrated(tmp_path, pg_url, old_text)['superseded'] is True
-    replacement = _rehydrated(tmp_path, pg_url, new_text)
+    assert _rehydrated(svc, tmp_path, pg_url, old_text)['superseded'] is True
+    replacement = _rehydrated(svc, tmp_path, pg_url, new_text)
     assert replacement['superseded'] is False
 
 

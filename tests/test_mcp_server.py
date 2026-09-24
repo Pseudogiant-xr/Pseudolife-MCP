@@ -152,6 +152,7 @@ def test_search_explain_attaches_trace_and_default_does_not(tmp_path: Path, monk
     explained = _invoke("memory_search", {"query": "gadget port", "explain": True})
     assert "trace" not in plain
     assert "trace" in explained and isinstance(explained["trace"], dict)
+    assert "tiers" in explained["trace"]
 
 
 def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
@@ -435,6 +436,7 @@ def test_memory_fact_get_on_a_fully_emptied_set_slot_reads_as_empty(
     assert "candidates" in got
 
 
+@pytest.mark.real_model
 def test_store_auto_promotes_and_search_surfaces_cortex(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
@@ -463,18 +465,6 @@ def test_memory_stats_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     stats = _invoke("memory_stats", {})
     assert "bands" in stats
     assert stats["total_memories"] >= 1
-
-
-def test_memory_search_explain_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-
-    _invoke("memory_store", {"text": "Trace dispatch fact", "source": "t"})
-    out = _invoke("memory_search", {"query": "Trace dispatch", "top_k": 3, "explain": True})
-    assert "trace" in out
-    assert "tiers" in out["trace"]
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +516,7 @@ def test_memory_episode_summary_via_mcp_dispatch(
     assert out["found"] is True and out["id"] == ep["id"]
 
 
+@pytest.mark.real_model
 def test_memory_consolidation_candidates_via_mcp_dispatch(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -713,16 +704,189 @@ def test_memory_search_explain_implies_verbose_entries(tmp_path: Path, monkeypat
         assert k in e, f"explain entry missing {k!r}"
 
 
-def test_compact_search_keeps_supersession_signal(tmp_path: Path, monkeypatch) -> None:
-    """superseded_by_text changes answers — it must survive compaction."""
+@pytest.mark.real_model
+def test_compact_search_serves_a_replacement_pointer(tmp_path: Path, monkeypatch) -> None:
+    """A superseded hit keeps its flag and gains a short dated pointer to
+    the note recorded as replacing it — never the replacement's full text.
+    About 4 in 10 legacy links point at an unrelated note (2026-09-23
+    review), so the full text must not ride along as if it were the
+    answer; ``verified`` says whether an explicit correction made the link.
+    ``verbose`` still serves the whole text."""
+    import re
+
     _reload_mod(tmp_path, monkeypatch)
     _invoke("memory_store", {"text": "the api key lives in .env", "source": "notes"})
     _invoke("memory_supersede", {"old_text": "the api key lives in .env",
                                  "new_text": "the api key lives in the vault now"})
-    out = _invoke("memory_search", {"query": "where does the api key live"})
-    old = next(e for e in out["entries"] if e["text"] == "the api key lives in .env")
-    assert old["superseded"] is True
-    assert old["superseded_by_text"] == "the api key lives in the vault now"
+    for tool, args in (("memory_search", {"query": "where does the api key live"}),
+                       ("memory_recent", {"n": 5})):
+        out = _invoke(tool, args)
+        old = next(e for e in out["entries"]
+                   if e["text"] == "the api key lives in .env")
+        assert old["superseded"] is True, tool
+        assert "superseded_by_text" not in old, tool
+        rb = old["replaced_by"]
+        assert list(rb) == ["id", "at", "preview", "verified", "current"], tool
+        assert rb["preview"] == "the api key lives in the vault now", tool
+        assert rb["verified"] is True, tool     # memory_supersede = explicit
+        assert rb["current"] is True, tool      # the vault note is live
+        assert rb["id"] is None, tool           # file mode: no row ids
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", rb["at"]), tool
+        full = _invoke(tool, {**args, "verbose": True})
+        old = next(e for e in full["entries"]
+                   if e["text"] == "the api key lives in .env")
+        assert old["superseded_by_text"] == "the api key lives in the vault now"
+        assert "replaced_by" not in old, tool
+
+
+def test_memory_search_docstring_does_not_trust_replacement_text() -> None:
+    """The docstring used to tell agents to prefer the (uncapped)
+    replacement text. It must now describe the pointer honestly: an
+    unverified link may point at an unrelated note, and chains are never
+    followed (161 live entries chain up to 44 links into one note)."""
+    from pseudolife_memory import mcp_server
+
+    doc = " ".join((mcp_server.memory_search.__doc__ or "").split())
+    assert "superseded_by_text" not in doc
+    assert "replaced_by" in doc and "verified: false" in doc
+    assert "Never follow chains" in doc
+    # False is "not confirmed", never proof of a detector link: an evicted
+    # or ambiguous successor and a custom-source consolidation read false
+    # too (Codex review P2 on PR #336).
+    assert "not confirmed as an explicit correction" in doc
+    assert "marks a retired auto-detector link" not in doc
+
+
+def test_replacement_pointer_marks_a_chain_link_not_current(
+        tmp_path: Path, monkeypatch) -> None:
+    """``replaced_by.current`` says whether the replacement is itself still
+    live. The 2026-09-23 review found the recorded successor itself
+    superseded in 529 of 730 served superseded slots; without the flag an
+    agent could not see that ``memory_get`` on it lands on a chain link.
+    The service never walks the chain, so the first link names the middle
+    note (not the end of the chain) and says it is not current."""
+    _reload_mod(tmp_path, monkeypatch)
+    v1, v2, v3 = ("the api key lives in .env",
+                  "the api key lives in the vault now",
+                  "the api key lives in the secrets manager now")
+    _invoke("memory_store", {"text": v1, "source": "notes"})
+    _invoke("memory_supersede", {"old_text": v1, "new_text": v2})
+    _invoke("memory_supersede", {"old_text": v2, "new_text": v3})
+    for tool, args in (("memory_search", {"query": "where does the api key live"}),
+                       ("memory_recent", {"n": 5})):
+        by_text = {e["text"]: e for e in _invoke(tool, args)["entries"]}
+        first, middle = by_text[v1]["replaced_by"], by_text[v2]["replaced_by"]
+        assert (first["preview"], first["current"]) == (v2, False), tool
+        assert (middle["preview"], middle["current"]) == (v3, True), tool
+
+
+def test_memory_search_docstring_explains_replacement_currency() -> None:
+    """The pointer's ``current`` flag is only actionable if the served
+    contract says what to do when it is false: the replacement is itself
+    a chain link, and chains are never followed, so search again."""
+    from pseudolife_memory import mcp_server
+
+    doc = " ".join((mcp_server.memory_search.__doc__ or "").split())
+    assert "current: false" in doc and "search again" in doc
+
+
+_LIVE_GET = {"found": True, "entry_id": 5, "text": "port is 5433",
+             "source": "correction", "reinforcements": 0,
+             "explicit_reinforcements": 0, "access_count": 1,
+             "consolidated_into": []}
+
+
+def test_memory_get_on_a_live_entry_is_byte_identical(
+        tmp_path: Path, monkeypatch) -> None:
+    """A live entry's ``memory_get`` payload is exactly the service's —
+    the supersession fields appear only on a superseded entry."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod.service, "get_entry",
+                        lambda entry_id: dict(_LIVE_GET))
+    assert _invoke("memory_get", {"entry_id": 5}) == _LIVE_GET
+
+
+def test_memory_get_on_a_superseded_entry_serves_the_pointer(
+        tmp_path: Path, monkeypatch) -> None:
+    """Dereferencing ``replaced_by.id`` must say when the target is itself
+    superseded, with the same pointer search serves — never the uncapped
+    replacement text (PR #336 review finding 4: "never follow chains" was
+    not actionable while ``memory_get`` hid the state)."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    long_text = "port is 5434 " * 20
+    superseded = {**_LIVE_GET, "text": "port is 5432", "source": "notes",
+                  "superseded": True, "superseded_at": 1_790_000_000.0,
+                  "superseded_by_text": long_text, "superseded_by_id": 9,
+                  "supersession_verified": True,
+                  "superseded_by_current": False}
+    monkeypatch.setattr(mod.service, "get_entry",
+                        lambda entry_id: dict(superseded))
+    out = _invoke("memory_get", {"entry_id": 5})
+    rb = out.pop("replaced_by")
+    assert out == {**_LIVE_GET, "text": "port is 5432", "source": "notes",
+                   "superseded": True}
+    assert rb == mod._compact_entry(superseded)["replaced_by"]
+    assert list(rb) == ["id", "at", "preview", "verified", "current"]
+    assert (rb["id"], rb["verified"], rb["current"]) == (9, True, False)
+    assert rb["preview"] == long_text[:120] + "…"
+
+
+def test_memory_get_on_a_superseded_entry_without_replacement_text(
+        tmp_path: Path, monkeypatch) -> None:
+    """A row retired before replacement text was recorded (pre-schema-v5)
+    is still flagged superseded but has nothing to point at — the same
+    rule ``_compact_entry`` applies — and no raw service key leaks."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    legacy = {**_LIVE_GET, "superseded": True,
+              "superseded_at": 1_790_000_000.0, "superseded_by_text": None,
+              "superseded_by_id": None, "supersession_verified": False,
+              "superseded_by_current": False}
+    monkeypatch.setattr(mod.service, "get_entry",
+                        lambda entry_id: dict(legacy))
+    assert _invoke("memory_get", {"entry_id": 5}) == {
+        **_LIVE_GET, "superseded": True}
+
+
+def test_memory_get_faded_payload_is_unchanged(
+        tmp_path: Path, monkeypatch) -> None:
+    mod = _reload_mod(tmp_path, monkeypatch)
+    assert _invoke("memory_get", {"entry_id": 123}) == {
+        "found": False, "faded": True}
+    assert mod.service.get_entry(123) == {"found": False, "faded": True}
+
+
+def test_memory_episode_summary_serves_compact_entries_with_the_pointer(
+        tmp_path: Path, monkeypatch) -> None:
+    """``recent_entries`` are compacted exactly as ``memory_recent``
+    compacts its entries: no uncapped ``superseded_by_text``, the
+    ``replaced_by`` pointer instead, and none of the bookkeeping keys.
+    ``memory_recent(episodes=[id], verbose=true)`` keeps the full dicts.
+    The summary's own keys are untouched."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    ep = _invoke("memory_episode_start", {"title": "supersede session"})
+    old, new = "the api key lives in .env", "the api key lives in the vault now"
+    _invoke("memory_store", {"text": old, "source": "notes"})
+    _invoke("memory_supersede", {"old_text": old, "new_text": new})
+    raw = mod.service.episode_summary(ep["id"])
+    out = _invoke("memory_episode_summary", {"id": ep["id"]})
+    assert {k: v for k, v in out.items() if k != "recent_entries"} == {
+        k: v for k, v in raw.items() if k != "recent_entries"}
+    assert out["recent_entries"] == [
+        mod._compact_entry(e) for e in raw["recent_entries"]]
+    by_text = {e["text"]: e for e in out["recent_entries"]}
+    assert set(by_text) == {old, new}
+    assert "superseded_by_text" not in by_text[old]
+    rb = by_text[old]["replaced_by"]
+    assert (rb["preview"], rb["verified"], rb["current"]) == (new, True, True)
+    for e in out["recent_entries"]:
+        assert not set(e) & set(_ENTRY_NOISE)
+
+
+def test_memory_episode_summary_missing_id_is_unchanged(
+        tmp_path: Path, monkeypatch) -> None:
+    _reload_mod(tmp_path, monkeypatch)
+    assert _invoke("memory_episode_summary", {"id": "no-such-id"}) == {
+        "found": False, "id": "no-such-id"}
 
 
 def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monkeypatch) -> None:

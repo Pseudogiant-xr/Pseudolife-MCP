@@ -481,6 +481,33 @@ def test_tracked_tree_carries_no_stray_control_bytes(
     assert hits == [], f"stray control bytes in tracked files: {hits}"
 
 
+def test_every_ops_env_variant_but_the_template_is_git_ignored() -> None:
+    """``ops/.env`` holds the database password and the principal tokens. A
+    timestamped backup copy of it sat in a checkout untracked and NOT
+    ignored — ``.env`` and ``*.bak`` match neither ``.env.bak-<ts>`` shape —
+    one ``git add .`` away from a public push (2026-09-23 review). The
+    identifier guard above cannot see it: it scans tracked files only.
+    Every ``ops/.env*`` variant is ignored except the tracked template."""
+    repo = _README.parent
+
+    def ignored(rel: str) -> bool:
+        try:
+            proc = subprocess.run(
+                ["git", "check-ignore", "--no-index", "-q", rel],
+                cwd=repo, capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            pytest.skip("not a git checkout")
+        if proc.returncode not in (0, 1):
+            pytest.skip("not a git checkout")
+        return proc.returncode == 0
+
+    for rel in ("ops/.env", "ops/.env.bak-x", "ops/.env.bak-20990101-000000",
+                "ops/.env.local", "ops/.env.old", "ops/.env~"):
+        assert ignored(rel), f"{rel} is not git-ignored"
+    assert not ignored("ops/.env.example"), (
+        "ops/.env.example is the tracked template; it must stay unignored")
+
+
 def test_changelog_mentions_current_schema_version() -> None:
     """A schema bump must be chronicled: v22 initially shipped with no
     CHANGELOG entry (2026-07-12), caught only in post-deploy review. Every

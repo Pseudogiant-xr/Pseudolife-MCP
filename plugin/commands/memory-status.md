@@ -10,8 +10,12 @@ Report the state of the Pseudolife memory stack:
 2. Call `memory_stats()` and summarize: `total_memories`, store occupancy
    as a capacity meter (`bands[0].size` / `capacity` under the default
    flat preset — multi-band presets get a per-band table instead), the
-   `preset`, `true_drops` (non-zero means real capacity pressure —
-   flag it), the reference bank (`reference_bank_size` /
+   `preset`, and capacity pressure. A non-null `capacity_warning` means
+   the store is within 20% of the point where every new memory
+   permanently deletes an old one: lead the report with its `message`.
+   `true_drops_total` counts those deletions all-time (`last_true_drop`
+   names the most recent; `true_drops` counts only since the daemon
+   started) — flag any non-zero. Then the reference bank (`reference_bank_size` /
    `reference_document_count`), and `communities`. Flag
    `weights_reset: true` if present — it means the store's counters
    restarted fresh. If `read_audit` is present, note its
@@ -23,4 +27,11 @@ Report the state of the Pseudolife memory stack:
    timing live here and in the Console, not in `memory_stats()`.
 4. If `/health` reports `degraded` (or any component `error`), surface the
    failing component verbatim — do not summarize it away.
-5. Mention the Cortex Console for browsing: http://127.0.0.1:8765/ui/
+5. Report the backup from `/health`'s `last_backup`: its `age_hours`, and
+   flag it when older than 36 hours (backups have stopped) or when
+   `rotation` is `held` (entries, facts or lessons fell sharply, so the
+   backup script kept every older copy — check for a wipe before anyone
+   re-runs it with `-AcceptRowDrop`). If the key is absent, no backup has
+   been recorded for this daemon: on the Docker tier, suggest
+   `ops/backup.ps1` and the daily `ops/install-backup-task.ps1`.
+6. Mention the Cortex Console for browsing: http://127.0.0.1:8765/ui/

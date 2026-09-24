@@ -118,19 +118,6 @@ def test_events_from_parsed_handles_absent_key():
 
 # ── the dream write path ─────────────────────────────────────────────────
 
-def test_chronicle_on_by_default_writes_events(svc):
-    # Default-on since 2026-08-12: ev2 gates all passed
-    # (evals/results/ev2-separate-pass-verdict.json) and the 08-05..08-12
-    # production soak reviewed clean (188 events, 0 wrong dates).
-    assert svc.config.memory.dream.chronicle is True
-    svc.store("[2023/05/14 (Sun) 10:02] user: adopted the kitten yesterday",
-              source="notes")
-    out = svc.dream_run(_Stub([
-        _event("adopted a kitten", date="2023-05-13", phrase="yesterday")]))
-    assert out["events_inserted"] == 1
-    assert len(_chronicle_rows(svc)) == 1
-
-
 def test_chronicle_explicit_off_ignores_events(svc):
     svc.config.memory.dream.chronicle = False
     svc.store("[2023/05/14 (Sun) 10:02] user: adopted the kitten yesterday",
@@ -142,7 +129,10 @@ def test_chronicle_explicit_off_ignores_events(svc):
 
 
 def test_event_written_journaled_and_counted(svc):
-    svc.config.memory.dream.chronicle = True
+    # Default-on since 2026-08-12: ev2 gates all passed
+    # (evals/results/ev2-separate-pass-verdict.json) and the 08-05..08-12
+    # production soak reviewed clean (188 events, 0 wrong dates).
+    assert svc.config.memory.dream.chronicle is True
     svc.store("[2023/05/14 (Sun) 10:02] user: adopted the kitten yesterday",
               source="notes")
     out = svc.dream_run(_Stub([

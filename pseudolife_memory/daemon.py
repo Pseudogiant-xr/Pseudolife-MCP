@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 
 logger = logging.getLogger("pseudolife-mcp.daemon")
 
@@ -28,11 +29,47 @@ DEFAULT_PORT = 8765
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
+# The near-limit memory warning fires at most once per interval: the image's
+# Docker healthcheck polls /health every 15 s.
+_MEMORY_WARNING_INTERVAL_S = 600.0
+_last_memory_warning: float | None = None
+_monotonic = time.monotonic
+
 
 # (AuthHealthASGI and its _json_response helper were removed in the
 # 2026-07-02 zombie sweep: run_daemon has served the composed Console app
 # from web/api.py — which owns /health and the token gate — since the
 # Cortex Console landed, leaving this wrapper dead code.)
+
+
+def _last_backup(svc) -> dict | None:
+    """How old the newest backup is, read from the record ops/backup.ps1|.sh
+    copy into ``<data_dir>/last-backup.json`` (that dump's manifest).
+
+    The host's backup folder is invisible to the container, and an age no
+    one can see is how 2026-09-14..20 went six days without a dump
+    unnoticed. ``None`` (key omitted) when no backup has been recorded or
+    the record is unreadable: /health must never fail on this, and a
+    half-parsed age would be worse than none.
+    """
+    data_dir = getattr(svc, "data_dir", None)
+    if data_dir is None:
+        return None
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    try:
+        record = json.loads(
+            (Path(data_dir) / "last-backup.json").read_text(encoding="utf-8-sig"))
+        at = str(record["created_at"])
+        created = datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    age = (datetime.now(timezone.utc) - created).total_seconds() / 3600
+    return {"at": at, "age_hours": round(age, 1),
+            "rotation": str(record.get("rotation", "unknown"))}
 
 
 def _extractor_status(svc) -> str | None:
@@ -67,6 +104,23 @@ def _extractor_status(svc) -> str | None:
     configured = (r.get("primary_url") and r.get("primary_model")) or (
         r.get("fallback_url") and r.get("fallback_model"))
     return "configured" if configured else "none"
+
+
+def _warn_near_memory_limit(memory: dict) -> None:
+    global _last_memory_warning
+    now = _monotonic()
+    if (_last_memory_warning is not None
+            and now - _last_memory_warning < _MEMORY_WARNING_INTERVAL_S):
+        return
+    _last_memory_warning = now
+    events = memory.get("events") or {}
+    logger.warning(
+        "daemon memory is near its limit: working set %.0f%% of %d MiB "
+        "(memory.events max=%s oom_kill=%s). An OOM kill restarts the "
+        "daemon; raise PSEUDOLIFE_DAEMON_MEM_LIMIT or find the growth.",
+        100 * memory["used_fraction"], memory["limit_bytes"] // 2**20,
+        events.get("max", "n/a"), events.get("oom_kill", "n/a"),
+    )
 
 
 def _build_health_payload(svc, token_present: bool) -> dict:
@@ -113,6 +167,15 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     if init_refusal:
         payload["status"] = "degraded"
         payload["init_refusal"] = init_refusal
+    # The retryable counterpart (2026-09-23): a failed store build backing
+    # off, or the bank writer lease held by another process. Degraded, so
+    # the Docker healthcheck and ops/update.* see a daemon that serves
+    # nothing yet, but under its own key: the shim exits on init_refusal,
+    # and a client that starts during a retry window must still attach.
+    not_ready = getattr(svc, "_not_ready", None)
+    if not_ready:
+        payload["status"] = "degraded"
+        payload["not_ready"] = not_ready
     # A legacy .pt import that stopped part-way leaves a bank that serves
     # normally but is SHORT (#187). Nothing else on this payload would show
     # it, so it surfaces here — but deliberately WITHOUT touching `status`:
@@ -135,6 +198,19 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     dream_tracking_error = getattr(svc, "_dream_tracking_error", None)
     if dream_tracking_error:
         payload["dream_tracking_error"] = dream_tracking_error.split(":", 1)[0]
+    # The bank is within 20% of the capacity where every new memory
+    # permanently deletes an old one. A flag only: this probe is
+    # unauthenticated, so the counts stay in memory_stats. Same deliberate
+    # choice as migration_partial — NOT `degraded`, which would have the
+    # healthcheck restart a daemon that is serving correctly.
+    capacity_warning = getattr(getattr(svc, "_cms", None),
+                               "capacity_warning", None)
+    if capacity_warning is not None:
+        try:
+            if capacity_warning():
+                payload["capacity_warning"] = True
+        except Exception:  # noqa: BLE001 — /health must never fail on this
+            pass
     # An uncertain lesson commit latches until a durable recheck resolves it
     # (service._recover_lesson_synthesis): lesson reads and the lesson
     # snapshot fail meanwhile, and nothing else here would show it. Same
@@ -146,6 +222,26 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     # look at. The loudness lives in the ERROR log this flag mirrors.
     if getattr(svc, "_lesson_synthesis_recovery", None) is not None:
         payload["lesson_reconciliation_required"] = True
+    # Memory headroom (2026-09-23 OOM kill): the daemon lived at ~95% of its
+    # cgroup cap for weeks while this payload said "ok". Same deliberate
+    # choice as migration_partial: near_limit never touches `status`, since
+    # a 503 would have the healthcheck and ops/update.* treat a daemon that
+    # is still serving as dead. The loudness is the rate-limited WARNING.
+    from pseudolife_memory.utils import memory_headroom
+
+    try:
+        memory = memory_headroom.read_memory_headroom()
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        logger.debug("memory headroom read failed", exc_info=True)
+        memory = {"source": "unavailable"}
+    payload["memory"] = memory
+    if memory.get("near_limit"):
+        _warn_near_memory_limit(memory)
+    # What is actually embedding (backend, device, resident dtype), so a
+    # deploy can be verified live. Absent until the embedder is built.
+    embedder = getattr(svc, "_embedder", None)
+    if embedder is not None and hasattr(embedder, "describe"):
+        payload["embedder"] = embedder.describe()
     # Honest DB liveness (2026-07-02 review fix): /health used to say
     # "ok" while a restarted Postgres had every memory tool failing.
     # ping() uses a dedicated short-lived connection so the probe can't
@@ -160,6 +256,13 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         except Exception as exc:  # noqa: BLE001 — surface, don't raise
             payload["status"] = "degraded"
             payload["db"] = f"error: {exc}"
+    # The newest backup's age and rotation state (2026-09-23 review), with
+    # the same deliberate refusal to touch `status` as migration_partial: an
+    # old backup is no reason for the 503 that has the Docker healthcheck
+    # restart a daemon that is serving fine.
+    last_backup = _last_backup(svc)
+    if last_backup is not None:
+        payload["last_backup"] = last_backup
     return payload
 
 
@@ -267,6 +370,10 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
     mcp_server.start_session_reaper()
+    # Returns what glibc keeps resident after encode bursts (Linux only).
+    from pseudolife_memory.utils import heap_trim
+
+    heap_trim.start()
 
     # DNS-rebinding policy for /mcp (see mcp_server.transport_security_for).
     # MUST precede streamable_http_app() below — the SDK caches these settings

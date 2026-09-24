@@ -43,7 +43,8 @@ When loaded by a current Codex runtime, the plugin's lifecycle hooks use the
 same events. On Windows, `commandWindows` runs native PowerShell 7 helpers;
 Claude keeps the Bash commands. With the daemon running, use
 `python ops/setup-codex-hooks.py` from the repository, or the Docker installer,
-to approve the three PseudoLife hook definitions and verify their lifecycle.
+to approve the PseudoLife hook definitions and verify their lifecycle (the
+`Stop` entry is Claude Code's opt-in wake hook and a no-op in Codex).
 Automatic detection reuses a recognized, enabled plugin bundle. If the
 runtime cannot support automatic trust, setup gives `/hooks` review guidance
 and uses standing instructions when approved. A plugin installation or a
@@ -64,7 +65,15 @@ reads that file by the `session_id` it receives and prints the digest only when
 the watermark passed the `.seen` marker, so a quiet turn adds nothing to the
 context and a change appears once. The same marker gates the hint the shim
 appends to tool results, so the two paths never repeat each other. SessionStart
-on `resume` or `compact` clears the marker so the current digest prints afresh.
+on `resume` or `compact` clears the marker so the current digest prints afresh;
+the bash hooks do the same on `clear`. Under Claude Code, `/clear` and an
+in-session `/resume` give the hooks a new `session_id` while the shim keeps
+the one it was launched with, so the session hooks keep the shim's key once
+per Claude Code process (`claude-<CLAUDE_PID>.host` in the same directory).
+The prompt hook reads through it while it is confirmed for the current
+session. It passes to the next session only through a SessionEnd handoff bound
+to the process's creation time, so a record a dead process left is never
+followed.
 Override the directory with `PSEUDOLIFE_DIGEST_DIR` in *both* the MCP env block
 and the hook's environment; they must agree. `ledger.log` in that directory
 records one line per hook firing (time, session prefix, watermark, bytes added)
@@ -117,6 +126,10 @@ don't double up:
   log outcomes). Static — no daemon call, works offline.
 - **SessionEnd hook** — closes the session's episode and clears the
   active-session pointer when the session ends.
+- **Stop hook** (opt-in, `PSEUDOLIFE_AGENT_WAKE_HOOK=1`) — waits in the
+  background after each turn and wakes the idle session when new addressed
+  board mail arrives; off by default. See
+  [Configuration](../docs/guide/configuration.md#waking-an-idle-claude-code-session-the-stop-hook).
 - **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)
 - **`/memory-status`** — daemon health + bank stats readout
 

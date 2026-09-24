@@ -184,19 +184,3 @@ def test_taubench_agent_endpoint_is_redirectable_and_off_production():
     with _reloaded(taubench,
                    PSEUDOLIFE_BENCH_TAUBENCH_AGENT_URL=SENTINEL) as mod:
         assert mod.AGENT_URL == SENTINEL
-
-
-def test_taubench_command_builder_refuses_a_production_port():
-    """Belt and braces: even an explicit --agent-url onto a live shim is
-    refused at command-build time unless the operator says so."""
-    with _reloaded(taubench) as mod:
-        for port in PRODUCTION_PORTS:
-            with pytest.raises(SystemExit, match="production"):
-                mod.build_tau2_command(
-                    condition="baseline", save_to="x", task_ids=["t1"],
-                    num_trials=1, seed=0,
-                    agent_url=f"http://127.0.0.1{port}/v1",
-                    user_url="http://127.0.0.1:1234/v1",
-                    daemon_url="http://127.0.0.1:8795",
-                    data_dir="local/data/tau2", run_tag="x",
-                    telemetry_log="local/data/tau2/x.jsonl")

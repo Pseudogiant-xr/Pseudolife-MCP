@@ -327,11 +327,22 @@ def svc(pg_url, tmp_path_factory):
     """Module-scoped service against a wiped DB — embedder loads once."""
     import psycopg as _psy
     from pseudolife_memory.storage.schema import (BENCH_RESET_TABLES,
+                                                  assert_disposable_database,
                                                   ensure_schema)
 
+    from tests.pg_fixtures import await_background_dreams
+
+    await_background_dreams()
     with _psy.connect(pg_url) as conn:
+        assert_disposable_database(conn)  # first: before the DDL + TRUNCATE
         # Pin to public first (see pg_fixtures.pg_conn) — mirrors PostgresStorage.
         conn.execute("SET search_path TO public")
+        conn.commit()
+        # Reap backends earlier tests leaked on this run's database, as
+        # pg_conn does: a leaked storage still holds the bank writer lease.
+        conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                     "WHERE datname = current_database() "
+                     "AND pid <> pg_backend_pid()")
         conn.commit()
         ensure_schema(conn)
         with conn.cursor() as cur:

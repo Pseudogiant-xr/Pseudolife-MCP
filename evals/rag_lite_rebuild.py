@@ -59,6 +59,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 from ladder_sweep import build_service  # noqa: E402
 import longmemeval_bench as lmb  # noqa: E402
 from replicate import is_judge_field  # noqa: E402
+import embedder_stamp  # noqa: E402
 
 
 def question_turns(q: dict) -> list[str]:
@@ -72,8 +73,9 @@ def question_turns(q: dict) -> list[str]:
     return [r.text for r in lmb.archive_from_lme_question(q).records]
 
 
-def rederive_raw_texts(q: dict) -> list[str]:
-    """The rag control's ranked turns for one question, re-derived offline.
+def rederive_raw_texts(q: dict) -> tuple[list[str], dict | None]:
+    """The rag control's ranked turns for one question, re-derived offline,
+    and the description of the embedder that ranked them.
 
     Same pinned search call ``build_contexts`` makes for the control
     (Phase-1 knobs off), over a fresh bench service holding the same
@@ -86,7 +88,8 @@ def rederive_raw_texts(q: dict) -> list[str]:
             svc.store(text, source="bench")
         got = svc.search(q["question"], top_k=lmb.RAG_TOP_K,
                          contiguity_neighbors=0, timeline=False)
-        return [e.get("text", "") for e in got.get("entries", [])]
+        return ([e.get("text", "") for e in got.get("entries", [])],
+                embedder_stamp.describe(svc))
     finally:
         svc.flush()
         # One bank per question, and a 500-row rebuild would otherwise
@@ -165,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
         q = by_id.get(qid)
         if q is None:
             raise SystemExit(f"{qid} is not in the {args.dataset} dataset")
-        raw_texts = rederive_raw_texts(q)
+        raw_texts, embedder = rederive_raw_texts(q)
         if "\n\n".join(raw_texts) != row["contexts"]["rag"]:
             # Fail on the FIRST mismatch rather than tallying: one row that
             # re-derives differently already means the retrieval stack has
@@ -179,6 +182,9 @@ def main(argv: list[str] | None = None) -> int:
                 lmb.rag_lite_contexts(raw_texts, (), budget))
         for key in [k for k in row if is_judge_field(k)]:
             row.pop(key)                 # every arm re-judged in one pass
+        # The added arms are this re-ingest's ranking (byte-identical to
+        # the judged control's, or nothing is written).
+        embedder_stamp.record_stage(row, "rag_lite_rebuild", embedder)
         if args.limit:
             # A limited rebuild writes a SHORT file under a perfectly
             # normal name; nothing downstream could otherwise tell it

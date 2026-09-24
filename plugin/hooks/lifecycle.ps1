@@ -1,6 +1,6 @@
 #Requires -Version 7
 # Native Windows override for Codex. Claude keeps the existing Bash commands.
-param([ValidateSet('SessionStart', 'UserPromptSubmit', 'SessionEnd')][string]$Event)
+param([ValidateSet('SessionStart', 'UserPromptSubmit', 'SessionEnd', 'Stop')][string]$Event)
 $ErrorActionPreference = 'Stop'
 
 function Write-Context([string]$text) {
@@ -31,12 +31,12 @@ function Get-PluginVersion {
     return ''
 }
 
-# A digest of the four hook scripts beside this one, so the daemon can tell
+# A digest of the hook scripts beside this one, so the daemon can tell
 # a cached plugin at its own version apart from its own hooks (the version
 # only moves with a release). Same function as pseudolife_memory.plugin_hooks
 # and session-start.sh: SHA-256 over `name NUL bytes NUL`, CRLF read as LF.
 function Get-PluginHooksDigest {
-    $names = @('lifecycle.ps1', 'session-start.sh', 'user-prompt-submit.sh', 'session-end.sh')
+    $names = @('lifecycle.ps1', 'session-start.sh', 'user-prompt-submit.sh', 'session-end.sh', 'stop-wake.sh')
     $stream = New-Object IO.MemoryStream
     try {
         foreach ($name in $names) {
@@ -188,6 +188,10 @@ function Get-PseudolifeConnection {
 }
 
 $rawInput = [Console]::In.ReadToEnd()
+# Stop carries Claude Code's opt-in wake hook (stop-wake.sh), which Claude
+# runs through the bash command. Codex loads the same hooks.json and runs
+# this one instead: for Codex it is a silent no-op.
+if ($Event -eq 'Stop') { exit 0 }
 $sessionId = ''
 $startReason = ''
 try {

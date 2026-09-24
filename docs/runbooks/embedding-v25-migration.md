@@ -306,7 +306,8 @@ gate; this step only proves the container runs.
   docker logs pseudolife-mcp-daemon | grep "Embedding backend:"
   ```
 
-  Expect `Embedding backend: torch (model=Qwen/Qwen3-Embedding-0.6B, dim=1024, device=cpu)`
+  Expect `Embedding backend: torch (model=Qwen/Qwen3-Embedding-0.6B, dim=1024, device=cpu, dtype=bf16)`
+  (`dtype=fp32` on a CPU without native bf16; the dtype field arrived after v25)
   — this is the positive confirmation that the live daemon actually loaded
   the new backbone (Qwen3-Embedding-0.6B has no ONNX export, so `torch` is
   the correct backend here, not a fallback failure).

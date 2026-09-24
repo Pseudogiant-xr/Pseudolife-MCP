@@ -1,7 +1,9 @@
 """Durable instance identities and addressed mail, separate from retrieval.
 
 Mutation paths: bank identity establishment, register, update, attach, heartbeat,
-detach, send, acknowledge, attempt, prune, restore recovery and operator rebind.
+detach, send, receive (first read), acknowledge, attempt, prune, restore
+recovery and operator rebind. Every one of them except heartbeat appends to the
+audit log (``coordination_events``) in its own transaction; see ``_append``.
 There is no derived cache.
 Callers serialize access to the mailbox connection with the coordination lock,
 never the service lock (``CoordinationConnection`` below). SQL row locks also
@@ -142,12 +144,30 @@ MAX_ATTEMPTS = 3
 ATTACHMENT_LEASE = 60
 SEND_RATE = 60
 HLC_META_KEY = "coordination_hlc_highwater"
+WRITER_EPOCH_META_KEY = "writer_lease_epoch"
 BANK_ID_META_KEY = "coordination_bank_id"
 # Every message a recipient reads is agent-origin collaboration, never the
 # operator's authority; the label rides on the row so no consumer infers it.
 MESSAGE_ORIGIN = "agent"
-
-
+# The audit log (schema v42): one append-only row per board mutation, written
+# in the mutation's own transaction and chained by sha256(prev_hash ||
+# canonical row), so an edited, inserted, reordered or removed row fails
+# ``verify_audit_chain``. Heartbeats are lease renewals, not board events, and
+# are not logged: at the shim's 20 s cadence a single session would add about
+# 4,300 rows a day, and attach/detach already bracket each lease.
+AUDIT_FORMAT = "pseudolife-coordination-audit-v1"
+GENESIS_HASH = "0" * 64
+# Serializes chain appends across connections (the daemon's mailbox connection,
+# the offline recovery CLI, any second process). Always taken after every
+# board-row lock a mutation takes: its holder then only reads, inserts new log
+# rows and (in prune) deletes old ones nobody else locks, so it never waits on
+# anything and cannot close a deadlock cycle.
+AUDIT_LOCK_KEY = "coordination-audit-chain"
+AUDIT_COLUMNS = ("seq", "event", "actor", "principal", "agent_id", "recipient_agent_id",
+                 "project", "task", "message_id", "payload", "created_at", "hlc",
+                 "prev_hash", "hash")
+_AUDIT_INSERT = ("INSERT INTO coordination_events (" + ",".join(AUDIT_COLUMNS)
+                 + ") VALUES (" + ",".join(["%s"] * len(AUDIT_COLUMNS)) + ")")
 
 
 class CoordinationError(ValueError):
@@ -156,6 +176,10 @@ class CoordinationError(ValueError):
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
+
+
+class CoordinationClockChanged(RuntimeError):
+    """The bank's writer changed since the service clock was reseeded."""
 
 
 def _string(value: Any, limit: int, field: str, *, empty: bool = True) -> str:
@@ -216,6 +240,168 @@ def _hash(credential: str) -> str:
     return hashlib.sha256(credential.encode()).hexdigest()
 
 
+def _canonical(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def audit_hash(prev_hash: str, row) -> str:
+    """sha256(prev_hash || canonical row), over every column but the two
+    hashes. ``payload`` is hashed as the stored text; a parsed payload (a
+    JSON-lines export read back) is re-canonicalized to that same text."""
+    payload = row["payload"]
+    if not isinstance(payload, str):
+        payload = _canonical(payload)
+    material = json.dumps(
+        [AUDIT_FORMAT, row["seq"], row["event"], row["actor"], row["principal"],
+         row["agent_id"], row["recipient_agent_id"], row["project"], row["task"],
+         row["message_id"], float(row["created_at"]), row["hlc"], payload],
+        ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256((prev_hash + material).encode("utf-8")).hexdigest()
+
+
+def _broken(seq, reason, **detail):
+    return {"ok": False, "seq": seq, "reason": reason, **detail}
+
+
+def audit_cutoff(now: float, retention_days: int) -> int:
+    """The newest time retention removes: the UTC day boundary at or before
+    ``now - retention_days``. Cutting on day boundaries makes at most one
+    cut, and one ``audit_prune`` row, a day. A cutoff that moved with every
+    once-a-minute prune pass cut again on almost every pass, and each cut's
+    own record aged out a window later and fed the next one (review of
+    15f31aec, 2026-09-24: 30 cutting passes a day from 31 events)."""
+    return math.floor((now - retention_days * 86400) / 86400) * 86400
+
+
+def _cut(row):
+    """The fields of an ``audit_prune`` row, or None when they are not shaped
+    like the ones prune writes."""
+    payload = row["payload"]
+    try:
+        cut = json.loads(payload) if isinstance(payload, str) else payload
+    except ValueError:
+        return None
+    if not isinstance(cut, dict):
+        return None
+    through_seq, through_hash = cut.get("through_seq"), cut.get("through_hash")
+    cutoff, days = cut.get("cutoff"), cut.get("retention_days")
+    created_at = row["created_at"]
+    # No clock or config produces a non-finite time or a window beyond a
+    # century; refusing them here keeps audit_cutoff from overflowing.
+    if (type(through_seq) is not int or not isinstance(through_hash, str)
+            or type(cutoff) not in (int, float) or type(days) is not int
+            or not 0 <= days <= 36500
+            or type(created_at) not in (int, float) or not math.isfinite(created_at)):
+        return None
+    return {"seq": row["seq"], "created_at": float(created_at), "cutoff": cutoff,
+            "retention_days": days, "through_seq": through_seq,
+            "through_hash": through_hash, "actor": row["actor"]}
+
+
+def verify_audit_chain(rows, *, expect_head=None) -> dict:
+    """Walk rows in ``seq`` order and report the first break.
+
+    A row fails as ``sequence_gap`` (a missing seq), ``broken_link`` (its
+    prev_hash is not the previous row's hash) or ``hash_mismatch`` (its
+    content changed). A log whose oldest rows were removed must start right
+    after a cut recorded later in the same chain (an ``audit_prune`` naming
+    the last removed row) whose own fields add up: written by the daemon, a
+    window of at least a day, the cutoff that window gives at its time, and
+    a first surviving row no older than that cutoff. Otherwise the start is
+    ``unanchored_start``. ``expect_head=(seq, hash)``, a head recorded
+    elsewhere earlier, fails as ``head_missing``, ``head_mismatch``, or
+    ``head_pruned`` when the log now starts after it.
+
+    What this cannot see, with no secret involved: the newest rows dropped,
+    a rewrite that recomputes every hash, or the oldest rows removed by
+    someone who also appends a consistent cut record. An expected head
+    catches the first two, not the third. The report names the cut the log
+    starts from (``start_cut``) so an operator can check it against the
+    retention window they configured.
+
+    Returns ``{ok: True, events, first_seq, head_seq, head_hash,
+    head_created_at, start_cut}``
+    or ``{ok: False, seq, reason}`` (plus ``start_cut`` on ``head_pruned``).
+    """
+    first = prev = None
+    count = 0
+    cuts = {}
+    expected = None
+    for row in rows:
+        seq = row["seq"]
+        if prev is None:
+            first = row
+            if seq == 1 and row["prev_hash"] != GENESIS_HASH:
+                return _broken(seq, "broken_link")
+        elif seq != prev["seq"] + 1:
+            return _broken(seq, "sequence_gap")
+        elif row["prev_hash"] != prev["hash"]:
+            return _broken(seq, "broken_link")
+        if audit_hash(row["prev_hash"], row) != row["hash"]:
+            return _broken(seq, "hash_mismatch")
+        if row["event"] == "audit_prune" and (cut := _cut(row)) is not None:
+            cuts[(cut["through_seq"], cut["through_hash"])] = cut
+        if expect_head is not None and seq == expect_head[0]:
+            expected = row["hash"]
+        prev = row
+        count += 1
+    start_cut = None
+    if first is not None and first["seq"] != 1:
+        cut = cuts.get((first["seq"] - 1, first["prev_hash"]))
+        if (cut is None or cut["actor"] != "daemon" or cut["retention_days"] < 1
+                or cut["cutoff"] != audit_cutoff(cut["created_at"], cut["retention_days"])
+                or float(first["created_at"]) < cut["cutoff"]):
+            return _broken(first["seq"], "unanchored_start")
+        start_cut = {key: cut[key] for key in
+                     ("seq", "created_at", "cutoff", "retention_days", "through_seq")}
+    if expect_head is not None:
+        seq, digest = expect_head
+        if expected is None:
+            if first is not None and seq < first["seq"]:
+                return _broken(seq, "head_pruned", start_cut=start_cut)
+            return _broken(seq, "head_missing")
+        if expected != digest:
+            return _broken(seq, "head_mismatch")
+    return {"ok": True, "events": count,
+            "first_seq": first["seq"] if first else None,
+            "head_seq": prev["seq"] if prev else None,
+            "head_hash": prev["hash"] if prev else None,
+            "head_created_at": float(prev["created_at"]) if prev else None,
+            "start_cut": start_cut}
+
+
+def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, until=None):
+    """Stream the audit log in chain order through a server-side cursor.
+
+    ``agent_id`` matches the acting agent or a message's recipient; ``since``
+    is inclusive and ``until`` exclusive, in epoch seconds. A filtered stream
+    is a slice for reading, not a chain ``verify_audit_chain`` can check."""
+    clauses, params = [], []
+    for column, value in (("project", project), ("task", task)):
+        if value is not None:
+            clauses.append(f"{column}=%s")
+            params.append(value)
+    if agent_id is not None:
+        clauses.append("(agent_id=%s OR recipient_agent_id=%s)")
+        params += [agent_id, agent_id]
+    if since is not None:
+        clauses.append("created_at>=%s")
+        params.append(since)
+    if until is not None:
+        clauses.append("created_at<%s")
+        params.append(until)
+    sql = ("SELECT " + ",".join(AUDIT_COLUMNS) + " FROM coordination_events"
+           + (" WHERE " + " AND ".join(clauses) if clauses else "") + " ORDER BY seq")
+    with conn.transaction():
+        # created_at is hashed as the float written; a server configured for
+        # rounded float output would make every row read back as tampered.
+        conn.execute("SET LOCAL extra_float_digits = 3")
+        with conn.cursor(name="coordination_audit", row_factory=dict_row) as cur:
+            cur.itersize = 1000
+            cur.execute(sql, params)
+            yield from cur
+
+
 class CoordinationStore:
     def __init__(self, storage, *, clock=time.time):
         self.storage = storage
@@ -230,6 +416,53 @@ class CoordinationStore:
         with self.storage.conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             return cur.fetchall()
+
+    @staticmethod
+    def _event(event, payload, *, actor="agent", principal="", agent_id="", recipient=None,
+               project="", task="", message_id=None, hlc=""):
+        """One audit row before its chain position. ``principal`` is the
+        bearer principal the transport verified, empty for the daemon's own
+        maintenance and for the offline operator; never a credential."""
+        return {"event": event, "actor": actor, "principal": principal, "agent_id": agent_id,
+                "recipient_agent_id": recipient, "project": project, "task": task,
+                "message_id": message_id, "hlc": hlc, "payload": _canonical(payload)}
+
+    def _chain_head(self):
+        """Take the chain lock, then read the head ``(seq, hash)``.
+
+        Transaction-scoped, so it must run inside the mutation's transaction:
+        outside one the lock would end with the statement and two writers
+        could read the same head."""
+        conn = self.storage.conn
+        if conn.info.transaction_status != psycopg.pq.TransactionStatus.INTRANS:
+            raise RuntimeError("audit events are appended inside the mutation's transaction")
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (AUDIT_LOCK_KEY,))
+        row = self._one("SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1")
+        return (row["seq"], row["hash"]) if row else (0, GENESIS_HASH)
+
+    def _append(self, events, now, *, head=None):
+        """Chain and insert ``events`` as the mutation's last statements, so
+        they commit or roll back with it and the log cannot diverge from the
+        board. ``head`` comes from a ``_chain_head`` the caller already took
+        (prune reads it before removing old rows, so the chain continues from
+        a removed head instead of restarting at genesis)."""
+        if not events:
+            return
+        seq, prev = self._chain_head() if head is None else head
+        rows = []
+        for event in events:
+            seq += 1
+            row = {**event, "seq": seq, "created_at": float(now), "prev_hash": prev}
+            row["hash"] = prev = audit_hash(prev, row)
+            rows.append(tuple(row[column] for column in AUDIT_COLUMNS))
+        with self.storage.conn.cursor() as cur:
+            cur.executemany(_AUDIT_INSERT, rows)
+
+    def _audit_present(self):
+        """Whether the log exists. Only the offline recovery paths ask: they
+        can run on a restored pre-v42 backup before any schema pass."""
+        return self._one("SELECT to_regclass('coordination_events') IS NOT NULL "
+                         "AS present")["present"]
 
     @staticmethod
     def _bank_id(value):
@@ -255,12 +488,15 @@ class CoordinationStore:
                 raise CoordinationError(f"invalid_{field}")
         candidate = str(uuid.uuid4())
         with self.storage._txn():
-            self.storage.conn.execute(
+            created = self.storage.conn.execute(
                 "INSERT INTO meta (key,value) VALUES (%s,%s) "
                 "ON CONFLICT (key) DO NOTHING",
-                (BANK_ID_META_KEY, Jsonb(candidate)))
+                (BANK_ID_META_KEY, Jsonb(candidate))).rowcount
             bank_id = self._bank_id(self._one(
                 "SELECT value FROM meta WHERE key=%s", (BANK_ID_META_KEY,))["value"])
+            if created:
+                self._append([self._event("bank_identity", {"bank_id": bank_id},
+                                          principal=principal)], self.clock())
             result = {"bank_id": bank_id, "principal": principal}
             if agent_id is None:
                 return result
@@ -322,6 +558,8 @@ class CoordinationStore:
                 (agent_id, principal, _hash(credential), fields["label"], fields["project"],
                  fields["task"], fields["episode"], fields["status"], Jsonb(fields["capabilities"]),
                  fields["wake_enabled"], now, now))
+            self._append([self._event("register", fields, principal=principal, agent_id=agent_id,
+                                      project=fields["project"], task=fields["task"])], now)
             out = self.authenticate(principal, agent_id, credential)
         return {**out, "credential": credential}
 
@@ -352,12 +590,20 @@ class CoordinationStore:
     def update(self, principal, agent_id, credential, **fields):
         fields = self._fields(**fields)
         with self.storage._txn():
-            self._auth(principal, agent_id, credential, lock=True)
+            row = self._auth(principal, agent_id, credential, lock=True)
+            now = self.clock()
             assignments = [f"{key}=%s" for key in fields]
             values = [Jsonb(v) if k == "capabilities" else v for k, v in fields.items()]
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET " + ",".join(assignments + ["last_activity=%s"])
-                + " WHERE agent_id=%s", (*values, self.clock(), agent_id))
+                + " WHERE agent_id=%s", (*values, now, agent_id))
+            # The live row keeps only the newest value; the log keeps each one
+            # and what it replaced, which is the status history.
+            self._append([self._event(
+                "update", {"fields": fields, "before": {key: row[key] for key in fields}},
+                principal=principal, agent_id=agent_id,
+                project=fields.get("project", row["project"]),
+                task=fields.get("task", row["task"]))], now)
             return self.authenticate(principal, agent_id, credential)
 
     def list_agents(self, principal, agent_id, credential, *, project=None, task=None, limit=50):
@@ -424,6 +670,11 @@ class CoordinationStore:
                 "last_activity=%s,wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
                 (attachment_id, generation, now + ATTACHMENT_LEASE, now, wake_enabled, agent_id))
             mailbox = self._mailbox_state(agent_id)
+            self._append([self._event(
+                "attach", {"generation": generation, "lease_until": now + ATTACHMENT_LEASE,
+                           "wake_enabled": wake_enabled, "renewed": alive},
+                principal=principal, agent_id=agent_id, project=row["project"],
+                task=row["task"])], now)
         return {"agent_id": agent_id, "generation": generation, "lease_until": now + ATTACHMENT_LEASE,
                 **mailbox}
 
@@ -466,6 +717,9 @@ class CoordinationStore:
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET attachment_id=NULL,lease_until=NULL,"
                 "generation=generation+1,lifecycle='detached' WHERE agent_id=%s", (agent_id,))
+            self._append([self._event("detach", {"generation": generation}, principal=principal,
+                                      agent_id=agent_id, project=row["project"],
+                                      task=row["task"])], self.clock())
         return {"detached": True}
 
     def _receipt(self, row):
@@ -477,7 +731,8 @@ class CoordinationStore:
                 "acknowledged_at": row["acknowledged_at"]}
 
     def send(self, principal, agent_id, credential, *, to, text, request_id,
-             reply_to=None, expires_at=None, hlc=""):
+             reply_to=None, expires_at=None, hlc="", expected_writer_epoch=None,
+             enforce_writer_epoch=False):
         _string(to, 120, "recipient", empty=False)
         _string(request_id, 120, "request_id", empty=False)
         _string(hlc, 120, "hlc")
@@ -514,6 +769,22 @@ class CoordinationStore:
                 if existing["fingerprint"] != fingerprint:
                     raise CoordinationError("request_conflict")
                 return self._receipt(existing)
+            if enforce_writer_epoch:
+                if (type(expected_writer_epoch) is not int
+                        or expected_writer_epoch < 1):
+                    raise CoordinationClockChanged("service clock is not ready")
+                # Hold this row lock through the message commit. A new writer
+                # cannot complete its epoch bump (and start canonical writes)
+                # between this comparison and the committed HLC high-water.
+                epoch_row = self.storage.conn.execute(
+                    "SELECT value FROM meta WHERE key=%s FOR SHARE",
+                    (WRITER_EPOCH_META_KEY,),
+                ).fetchone()
+                if (epoch_row is None or type(epoch_row[0]) is not int
+                        or epoch_row[0] < 1):
+                    raise RuntimeError("invalid writer lease epoch")
+                if epoch_row[0] != expected_writer_epoch:
+                    raise CoordinationClockChanged("writer lease epoch changed")
             recipient = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s "
                                   "AND credential_hash IS NOT NULL", (to,))
             if recipient is None:
@@ -552,6 +823,12 @@ class CoordinationStore:
                     "((meta.value->>0)::bigint,(meta.value->>1)::bigint) < "
                     "((EXCLUDED.value->>0)::bigint,(EXCLUDED.value->>1)::bigint)",
                     (HLC_META_KEY, Jsonb(stamp)))
+            # The body lives on here after prune blanks the live copy.
+            self._append([self._event(
+                "send", {"text": text, "reply_to": reply_to, "request_id": request_id,
+                         "recipient_sequence": seq, "expires_at": expiry},
+                principal=principal, agent_id=agent_id, recipient=to, project=sender["project"],
+                task=sender["task"], message_id=message_id, hlc=hlc)], now)
         return self._receipt(row)
 
     @staticmethod
@@ -563,7 +840,9 @@ class CoordinationStore:
                 for_delivery=False):
         """Page pending mail. ``for_delivery`` is the adapter's live path: it
         skips messages whose attempts are exhausted, which an explicit receive
-        still returns."""
+        still returns. The first time a message is served, by either path, its
+        ``first_read_at`` is stamped and a ``read`` event logged; a replay of
+        unacknowledged mail writes nothing."""
         row = self._auth(principal, agent_id, credential)
         self._limit(limit)
         seq = 0
@@ -576,10 +855,31 @@ class CoordinationStore:
             except (AttributeError, ValueError):
                 raise CoordinationError("invalid_cursor") from None
         attempt_clause = " AND attempts<%s" if for_delivery else ""
-        params = [agent_id, seq, self.clock()] + ([MAX_ATTEMPTS] if for_delivery else []) + [limit]
+        now = self.clock()
+        params = [agent_id, seq, now] + ([MAX_ATTEMPTS] if for_delivery else []) + [limit]
         rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
                          "AND recipient_sequence>%s AND acknowledged_at IS NULL AND expires_at>%s"
                          + attempt_clause + " ORDER BY recipient_sequence LIMIT %s", params)
+        unread = [r["message_id"] for r in rows if r["first_read_at"] is None]
+        # Only a first read writes, so an empty poll or a replay stays one
+        # autocommit read. The IS NULL guard stamps and logs each message
+        # once even when two receives race on the same page.
+        if unread:
+            with self.storage._txn():
+                # The mailbox row first, as ack and mark_attempt take it, so
+                # a first read and an acknowledgment on separate connections
+                # lock message rows in the same order.
+                self._one("SELECT 1 FROM coordination_agents WHERE agent_id=%s FOR UPDATE",
+                          (agent_id,))
+                first = {r["message_id"] for r in self._all(
+                    "UPDATE coordination_messages SET first_read_at=%s WHERE message_id=ANY(%s) "
+                    "AND first_read_at IS NULL RETURNING message_id", (now, unread))}
+                self._append([self._event(
+                    "read", {"path": "delivery" if for_delivery else "pull",
+                             "sender_agent_id": r["sender_agent_id"]},
+                    principal=principal, agent_id=agent_id, recipient=agent_id,
+                    project=r["project"], task=r["task"], message_id=r["message_id"])
+                    for r in rows if r["message_id"] in first], now)
         keys = ("message_id", "sender_agent_id", "sender_principal", "recipient_agent_id",
                 "project", "task", "text", "reply_to", "recipient_sequence", "hlc", "created_at", "expires_at")
         return {"messages": [{**{k: r[k] for k in keys}, "origin": MESSAGE_ORIGIN} for r in rows],
@@ -598,10 +898,7 @@ class CoordinationStore:
             # The agent row lock serializes acknowledgements per mailbox, so
             # two overlapping batches cannot deadlock on message rows.
             self._auth(principal, agent_id, credential, lock=True)
-            # An acknowledgment is activity for retention: a client that only
-            # reads and acknowledges, holding no lease, must not count as idle.
-            self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
-                                      "WHERE agent_id=%s", (self.clock(), agent_id))
+            now = self.clock()
             # Two statements for the whole batch: the calls run under the
             # coordination lock, which heartbeats wait on.
             found = {row["message_id"]: row for row in self._all(
@@ -609,12 +906,20 @@ class CoordinationStore:
                 "AND message_id = ANY(%s) FOR UPDATE", (agent_id, ids))}
             pending = [one for one in ids if one in found and found[one]["acknowledged_at"] is None]
             if pending:
+                # New acknowledgments count as activity. Replays leave both
+                # the mailbox and its audit trail unchanged.
+                self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
+                                          "WHERE agent_id=%s", (now, agent_id))
                 for row in self._all("UPDATE coordination_messages SET acknowledged_at=%s "
-                                     "WHERE message_id = ANY(%s) RETURNING *", (self.clock(), pending)):
+                                     "WHERE message_id = ANY(%s) RETURNING *", (now, pending)):
                     found[row["message_id"]] = row
             missing = [one for one in ids if one not in found]
             if not batch and missing:
-                raise CoordinationError("message_not_found")  # rolls the activity bump back
+                raise CoordinationError("message_not_found")
+            self._append([self._event(
+                "ack", {"sender_agent_id": found[one]["sender_agent_id"]}, principal=principal,
+                agent_id=agent_id, recipient=agent_id, project=found[one]["project"],
+                task=found[one]["task"], message_id=one) for one in pending], now)
         receipts = [self._receipt(found[one]) for one in ids if one in found]
         return {"receipts": receipts, "missing": missing} if batch else receipts[0]
 
@@ -632,12 +937,18 @@ class CoordinationStore:
             if row["attempt_generation"] != generation:
                 if row["attempts"] >= MAX_ATTEMPTS:
                     raise CoordinationError("attempts_exhausted")
+                now = self.clock()
                 row = self._one("UPDATE coordination_messages SET attempt_at=%s,attempt_generation=%s,"
                                 "attempts=attempts+1 WHERE message_id=%s RETURNING *",
-                                (self.clock(), generation, message_id))
+                                (now, generation, message_id))
+                self._append([self._event(
+                    "attempt", {"generation": generation, "attempts": row["attempts"],
+                                "sender_agent_id": row["sender_agent_id"]},
+                    principal=principal, agent_id=agent_id, recipient=agent_id,
+                    project=row["project"], task=row["task"], message_id=message_id)], now)
         return self._receipt(row)
 
-    def prune(self):
+    def prune(self, *, audit_retention_days=0):
         """Expire bodies, discard terminal retry metadata after seven days, and
         remove addresses that are idle, unleased and referenced by no retained
         message (the message rows go first, so a referenced address outlives
@@ -647,31 +958,82 @@ class CoordinationStore:
         during a daemon restart keeps its address, because the first
         heartbeat after the restart prunes before it is served and the
         adapter re-attaches within a minute. Any other address goes after
-        AGENT_RETENTION of inactivity."""
+        AGENT_RETENTION of inactivity.
+
+        The pass logs what it blanked (``expire``) and removed (``prune``).
+        With ``audit_retention_days`` > 0 it also removes the audit log's
+        prefix older than that window, cut on a UTC day boundary
+        (``audit_cutoff``), and logs the cut (``audit_prune``, naming the last
+        removed row, which anchors the surviving chain); 0 keeps the log
+        forever."""
+        if (type(audit_retention_days) is not int or audit_retention_days < 0):
+            raise ValueError("audit_retention_days must be a whole number of days, 0 or more")
         now = self.clock()
         ephemeral = "a.capabilities->>'resumable'='false'"
         with self.storage._txn():
-            bodies = self.storage.conn.execute("UPDATE coordination_messages SET text=NULL "
-                "WHERE expires_at<=%s AND text IS NOT NULL", (now,)).rowcount
-            removed = self.storage.conn.execute("DELETE FROM coordination_messages WHERE created_at<=%s "
-                "AND expires_at<=%s", (now - DEDUPE_RETENTION, now)).rowcount
-            agents = self.storage.conn.execute(
+            expired = sorted(r["message_id"] for r in self._all(
+                "UPDATE coordination_messages SET text=NULL "
+                "WHERE expires_at<=%s AND text IS NOT NULL RETURNING message_id", (now,)))
+            removed = sorted(r["message_id"] for r in self._all(
+                "DELETE FROM coordination_messages WHERE created_at<=%s "
+                "AND expires_at<=%s RETURNING message_id", (now - DEDUPE_RETENTION, now)))
+            agents = sorted(r["agent_id"] for r in self._all(
                 "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR "
                 f"a.lease_until<=CASE WHEN {ephemeral} THEN %s ELSE %s END) "
                 f"AND a.last_activity<=CASE WHEN {ephemeral} THEN %s ELSE %s END "
                 "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
-                "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id)",
+                "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id) "
+                "RETURNING a.agent_id",
                 (now - EPHEMERAL_AGENT_RETENTION, now,
-                 now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION)).rowcount
-        return {"bodies_expired": bodies, "removed": removed, "agents_removed": agents}
+                 now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION)))
+            events = []
+            if expired:
+                events.append(self._event("expire", {"message_ids": expired}, actor="daemon"))
+            if removed or agents:
+                events.append(self._event("prune", {"message_ids": removed, "agent_ids": agents},
+                                          actor="daemon"))
+            head, audit_removed = None, 0
+            if audit_retention_days:
+                cutoff = audit_cutoff(now, audit_retention_days)
+                # The head is read before the cut: when every row is older than
+                # the window the head itself goes, and the chain must continue
+                # from it rather than restart at genesis.
+                head = self._chain_head()
+                # Writers sample time before taking the chain lock, so
+                # timestamps need not follow sequence order. Only remove an
+                # expired prefix; an older row after a recent one must wait.
+                cut = self._one(
+                    "WITH retained AS (SELECT min(seq) AS first_seq FROM coordination_events "
+                    "WHERE created_at>=%s) SELECT seq,hash FROM coordination_events,retained "
+                    "WHERE retained.first_seq IS NULL OR seq<retained.first_seq "
+                    "ORDER BY seq DESC LIMIT 1", (cutoff,))
+                if cut is not None:
+                    audit_removed = self.storage.conn.execute(
+                        "DELETE FROM coordination_events WHERE seq<=%s", (cut["seq"],)).rowcount
+                    events.append(self._event(
+                        "audit_prune", {"through_seq": cut["seq"], "through_hash": cut["hash"],
+                                        "removed": audit_removed, "cutoff": cutoff,
+                                        "retention_days": audit_retention_days},
+                        actor="daemon"))
+            self._append(events, now, head=head)
+        return {"bodies_expired": len(expired), "removed": len(removed),
+                "agents_removed": len(agents), "audit_removed": audit_removed}
 
     def recover(self):
-        """Operator-only restore reset; never call on an ordinary restart."""
+        """Operator-only restore reset; never call on an ordinary restart.
+
+        ``audited`` is False when the restored bank predates the audit log;
+        the revocation still happens, unrecorded."""
         with self.storage._txn():
-            count = self.storage.conn.execute("UPDATE coordination_agents SET credential_hash=NULL,"
+            revoked = sorted(r["agent_id"] for r in self._all(
+                "UPDATE coordination_agents SET credential_hash=NULL,"
                 "wake_enabled=FALSE,attachment_id=NULL,lease_until=NULL,generation=generation+1,"
-                "lifecycle='revoked'").rowcount
-        return {"revoked": count}
+                "lifecycle='revoked' RETURNING agent_id"))
+            audited = self._audit_present()
+            if audited:
+                self._append([self._event("recover", {"agent_ids": revoked}, actor="operator")],
+                             self.clock())
+        return {"revoked": len(revoked), "audited": audited}
 
     def rebind(self, agent_id, principal):
         """Operator-only reissue to the same owner, retaining pending mail."""
@@ -682,5 +1044,10 @@ class CoordinationStore:
                 raise CoordinationError("invalid_rebind")
             self.storage.conn.execute("UPDATE coordination_agents SET credential_hash=%s,"
                                       "lifecycle='registered' WHERE agent_id=%s", (_hash(credential), agent_id))
+            audited = self._audit_present()
+            if audited:
+                self._append([self._event("rebind", {"principal": principal}, actor="operator",
+                                          agent_id=agent_id, project=row["project"],
+                                          task=row["task"])], self.clock())
             result = self.authenticate(principal, agent_id, credential)
-        return {**result, "credential": credential}
+        return {**result, "credential": credential, "audited": audited}

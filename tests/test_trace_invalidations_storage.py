@@ -261,7 +261,8 @@ def test_trace_and_supersession_serialize_on_the_source_row(pg_conn, pg_url, fir
     from pseudolife_memory.storage.postgres import PostgresStorage
 
     a = PostgresStorage(pg_url)
-    b = PostgresStorage(pg_url)
+    # The racing peer is an out-of-contract second writer on purpose.
+    b = PostgresStorage(pg_url, writer_lease=False)
     try:
         eid = a.insert_entry(_entry())
         locked = threading.Event()

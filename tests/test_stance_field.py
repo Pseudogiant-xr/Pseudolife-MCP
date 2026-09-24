@@ -206,7 +206,7 @@ def test_serving_dict_includes_stance_only_when_set(svc):
 # PG-backed; skips without the bench server.
 
 
-def test_stance_round_trips_through_storage(pg_url):  # noqa: F811
+def test_stance_round_trips_through_storage(pg_conn, pg_url):  # noqa: F811
     from pseudolife_memory.storage.postgres import PostgresStorage
 
     storage = PostgresStorage(pg_url)
@@ -227,7 +227,7 @@ def test_stance_round_trips_through_storage(pg_url):  # noqa: F811
     assert facts and facts[-1]["stance"] == "probably"
 
 
-def test_stance_null_on_unhedged_insert(pg_url):  # noqa: F811
+def test_stance_null_on_unhedged_insert(pg_conn, pg_url):  # noqa: F811
     """A row inserted without the key stores NULL — pre-v29 writer code and
     plainly asserted facts are indistinguishable, by design."""
     from pseudolife_memory.storage.postgres import PostgresStorage

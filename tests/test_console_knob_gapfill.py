@@ -183,6 +183,28 @@ def test_registry_paths_all_resolve_against_appconfig():
             cur = getattr(cur, part)
 
 
+def test_registry_defaults_match_appconfig():
+    # The Console shows each knob's "default" beside its live value, and that
+    # copy is hand-kept apart from the dataclass. A drifted copy tells the
+    # operator the wrong shipped behaviour (both moved together when
+    # signal_retention_days went 30 -> 3650, 2026-09-23). An unset string
+    # knob is None here and "" on some dataclass fields: both mean unset.
+    from pseudolife_memory.utils.config import AppConfig
+    cfg = AppConfig()
+    for knob in KNOBS:
+        if "default" not in knob:
+            continue
+        cur = cfg
+        for part in knob["path"].split("."):
+            cur = getattr(cur, part)
+        want = knob["default"]
+        if knob["type"] == "string":
+            want, cur = want or None, cur or None
+        assert cur == want, (
+            f"{knob['path']}: registry default {knob['default']!r} "
+            f"!= AppConfig {cur!r}")
+
+
 def test_extractor_reasoning_effort_knob():
     # Applies at the next dream (build_extractor constructs fresh from
     # config per invocation), hence restart False; provider-specific extras

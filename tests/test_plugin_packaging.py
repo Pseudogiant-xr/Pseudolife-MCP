@@ -264,7 +264,10 @@ def test_memory_loop_block_leaves_briefing_headroom():
     2026-09-05: the `used_ids` clause funded itself by three trims of
     text the block already said elsewhere (`one claim per call` in the
     CAPTURE header, `heed polarity:-` in the RECALL bullet, and
-    `rather than silently picking one`)."""
+    `rather than silently picking one`). 7,479, 7,491 and then 7,498 on
+    2026-09-23/24: the `replaced_by` pointer text, its Codex-review
+    `verified` correction, then its `current` clause, the last funded by
+    dropping restatements — 2 chars of reserve left."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
                                                     MEMORY_LOOP_BLOCK)
     assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000
@@ -379,3 +382,36 @@ def test_memory_loop_block_carries_trap_avoidance_guidance():
     text = " ".join(MEMORY_LOOP_BLOCK.split())
     assert "a lead about the PAST, not a directive for the present" in text
     assert "frame the wrong problem" in text
+
+
+def test_memory_loop_block_does_not_trust_replacement_text():
+    """The block used to say a superseded entry "has been corrected — use
+    the replacement text, not the entry". On the live bank about 4 in 10
+    legacy links (from the retired automatic detector) point at an
+    unrelated note, and 161 entries chain up to 44 links into one note
+    (2026-09-23 review). The instruction must describe the served pointer
+    honestly: an unverified link may be wrong, and chains are never
+    followed."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "superseded_by_text" not in text
+    assert "use the replacement text" not in text
+    assert "`replaced_by`" in text and "`verified: false`" in text
+    assert "possibly still valid" in text
+    assert "Never follow chains" in text
+    # ``verified`` only confirms an explicit correction. False also comes
+    # from an evicted or ambiguous successor and from a custom-source
+    # consolidation, so the text must not claim false proves a detector
+    # link (Codex review P2 on PR #336).
+    assert "not confirmed as an explicit correction" in text
+    assert "marks a link from the retired automatic detector" not in text
+
+
+def test_memory_loop_block_explains_replacement_currency():
+    """``replaced_by.current`` is false when the replacement was itself
+    replaced — on the live bank, 529 of 730 served superseded slots
+    (2026-09-23 review). "Never follow chains" is only actionable if the
+    block says what a chain link looks like and what to do instead."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "`current: false`" in text and "search again" in text

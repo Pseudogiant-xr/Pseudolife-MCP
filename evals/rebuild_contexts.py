@@ -49,6 +49,7 @@ from longmemeval_bench import (  # noqa: E402
 )
 from context_format import FACTS_HEADER, MEMS_HEADER  # noqa: E402
 from replicate import is_judge_field  # noqa: E402
+import embedder_stamp  # noqa: E402
 
 
 def strip_verdicts(row: dict) -> dict:
@@ -238,6 +239,9 @@ def main() -> int:
         row["contexts"]["hybrid"] = (FACTS_HEADER + "\n".join(fact_lines)
                                      + MEMS_HEADER + raw_block)
         strip_verdicts(row)              # every arm -> answer phase re-runs
+        # The cortex arm is now this embedder's ranking; the rag block and
+        # the hybrid raw-memory block keep the source run's extract stamp.
+        embedder_stamp.stamp_row(row, "rebuild_contexts", emb)
         out_rows.append(row)
 
     rewrite_rows(dst, out_rows)

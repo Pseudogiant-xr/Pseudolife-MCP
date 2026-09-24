@@ -20,6 +20,7 @@ ALL_MODES = (
     "briefing",
     "episode-start",
     "episode-end",
+    "wait-mail",
 )
 
 

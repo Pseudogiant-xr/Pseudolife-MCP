@@ -6,6 +6,648 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-24 — integration safety checks)
+- Coordination sends validate the writer epoch before committing. After a
+  writer handover they reload durable clock history before stamping new mail.
+- The regression gate only stops the benchmark server it launched; helper
+  processes start with hidden windows.
+- Audit retention now removes only a fully expired prefix. A writer whose
+  timestamp precedes an earlier append cannot cause a newer event to be
+  deleted inside its retention window. Repeating an acknowledgment leaves
+  activity unchanged when it appends no audit event.
+- Coordination benchmark resets use the server-verified production-bank
+  guard before truncating; the reset tripwire also covers literal table lists.
+- The curation rejudge guard reads escaped listing keys, preserving saved
+  judgments for names containing a pipe while still honoring requeue.
+
+### Fixed (2026-09-23 — test and bench resets refuse the production bank)
+- Every reset that opens its own connection now asks the server which
+  database it reached, as its first statement. It raises
+  `ProductionDatabaseError` before reaping backends, running DDL or
+  truncating when that database is `pseudolife_memory` or the one
+  `PSEUDOLIFE_MCP_DATABASE_URL` names (case-folded). Covered: the `pg_conn`
+  fixture, `evals/ladder_sweep.py` `reset_bench` (shared by 12 eval
+  harnesses), and the transfer, graph, dream-ack and lesson test resets. The
+  bundled stack's server holds the bank beside the test and bench databases
+  under the same owning role. Until now, a mistyped
+  `PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_BENCH_DB` in a
+  single-process run would have killed the daemon's connections and emptied
+  all 31 tables. The same names are also refused where the test and bench
+  database names resolve, before anything connects.
+  `pseudolife_memory_bench`, the per-run names and CI's names are unaffected.
+- The test suite removes `PSEUDOLIFE_MCP_DATABASE_URL` from its environment
+  at start-up. It records only that DSN's database name (the default bank's
+  when none was exported), so the guard still refuses it. Inside the suite
+  the guard checks that record, not the live variable, which tests point at
+  their own per-run databases. With the DSN exported, file-mode fixtures
+  bound to that bank, and `pristine_service.save()` would have run
+  `DELETE FROM facts` there. The exit-time drop of the per-run bench
+  database now drops the name it pinned, not whatever
+  `PSEUDOLIFE_BENCH_DB` holds by then.
+- A daemon DSN that leaves its database implicit fails closed. That covers
+  the user-name default, as in `postgresql://live_bank@host` or an explicit
+  empty `dbname`, and a `service=` entry. libpq picks a bank the guard cannot
+  name, so the test
+  suite now stops at start-up and every reset refuses. It is no longer
+  recorded as the default bank, which let a reset reach that bank (Codex
+  review of this change).
+- The five eval harnesses that refuse the live and shared-bench databases by
+  DSN now read the name with libpq's own parser, through the shared helper
+  in `storage/schema.py`. Two exact-match copies let a keyword DSN, a
+  trailing slash or an upper-case name through. The three hardened copies
+  still missed a `?dbname=` query override and a percent-encoded name. A DSN
+  that names no database is checked against `PGDATABASE` when no service is
+  in play, as libpq would resolve it; otherwise the harness refuses it.
+- `.gitignore` now covers every `ops/.env*` copy except the tracked
+  `ops/.env.example`. A timestamped backup of `ops/.env` matched neither
+  `.env` nor `*.bak`.
+
+### Added (2026-09-23 — one full test suite at a time per machine, CPU-only)
+- A full test run (`pytest tests/`, or bare `pytest` from the root) takes a
+  machine-wide exclusive lock, `~/.pseudolife-mcp/locks/full-suite.lock`,
+  before it loads the embedder. A second full run from any worktree or agent
+  waits for it and prints the holder's worktree, pid and start time about
+  once a minute. The OS holds the lock (`msvcrt.locking` on Windows,
+  `fcntl.flock` elsewhere), so a holder that crashes frees it; no pid file
+  can go stale. `PSEUDOLIFE_SUITE_LOCK=fail` exits with a usage error
+  instead of waiting, and `=off` skips the lock. `off` is the default on
+  GitHub Actions, where each job has its own VM. Runs naming half or more of
+  the test files, or selecting with a `-k`/`-m` that only excludes
+  (`not slow`), count as full. Targeted runs are never locked: a few named
+  files or node ids, other `-k`/`-m` selections, `--collect-only` and the
+  other listings. xdist workers leave the lock to their controller. A lock
+  error other than contention is a usage error, never an endless wait.
+  Measured 2026-09-23 on the maintainer's Windows host, one full CPU suite
+  commits ~20 GB, and two concurrent suites crossed the commit limit: test
+  daemons died with os error 1455 (`tests/suite_lock.py` has the numbers).
+  The Windows CI lane now runs `tests/test_suite_lock.py`, so both lock
+  backends are tested in CI.
+- The test session hides the GPU with `CUDA_VISIBLE_DEVICES=-1` unless
+  `PSEUDOLIFE_TEST_CUDA=1` is set. An empty value does not work here: on
+  Windows it left `torch.cuda.is_available()` true, so the embedder still
+  loaded on the GPU.
+
+### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
+- **Hydration fails closed.** If loading cortex facts, world facts or lessons
+  from Postgres failed at startup, the daemon logged a warning and carried on
+  with that store empty. Its next write to a pre-existing slot then replaced
+  the slot's durable history with a single row, because a slot save deletes
+  the slot's rows and re-inserts the resident ones. An explicit save rewrote
+  the whole table from the empty copy. A failed entry load was a different
+  failure: it left the half-built store in place, and startup never ran
+  again. `tests/test_fail_closed_hydration.py` reproduces the history loss
+  against real Postgres; before this it had only been shown on fake storage.
+  Now any failure while building the resident stores drops all of them and
+  raises. Nothing is served, autosaved or flushed until an attempt completes.
+  - `/health` reports `status: "degraded"` with the reason under a new key,
+    `not_ready`, and the first init that completes clears it.
+    `init_refusal` stays reserved for permanent refusals (the embedding-dim
+    guards). The stdio shim exits on `init_refusal`, but a client that
+    starts during a retry window still attaches.
+  - Retries back off exponentially, from 5 s doubling to 60 s. A call inside
+    the window is refused at once without touching storage.
+  - A failure during the daemon's startup warmup is retried each time the
+    window expires, until the window reaches its cap (about two minutes),
+    so a daemon nobody is calling still recovers from a transient cause.
+    After that, callers and the session reaper (every 5 minutes) retry, so
+    a failure that never clears is not re-attempted every minute forever.
+  - A storage connect failure, such as a database that is still starting,
+    never opens a window.
+  - The embedder is still built once and reused across attempts (the
+    2026-08-04 boot balloon). The abandoned attempt's stores are
+    garbage-collected when the next attempt starts, not inside the failed
+    one, where the exception in flight still referenced them.
+- **One writer per bank, enforced.** The single-writer rule was documented
+  but nothing enforced it.
+  - `PostgresStorage` now holds a Postgres session advisory lock, the bank
+    writer lease, on its shared connection for as long as it lives. It is
+    taken before any schema DDL, keyed by
+    `hashtextextended('pseudolife-bank-writer', 0)`, a key space apart from
+    the per-entry mutation locks.
+  - A second instance on the same database waits up to 2 s for the lease,
+    long enough for a holder that is exiting (a restart) to go, then refuses
+    with `WriterLeaseHeld`. The error names the holder's backend pid and
+    `application_name`, which is now `pseudolife-mcp pid=<os pid> <program>
+    [<subcommand>]` unless the DSN sets one. A daemon refused this way reports
+    `degraded` with the reason in `not_ready`, and retries on the same
+    backoff as a failed load, so a burst of calls pays the 2 s wait once per
+    window, not once per call under the service lock.
+  - After a lost connection, the replacement must win the lease back before
+    it serves anything. While another writer holds it, calls keep failing:
+    from a cached refusal for 5 s between attempts. `/health` reports
+    `degraded` until that writer has gone.
+  - Winning the lease back is not enough if another lease-holding writer
+    held the bank in the gap. Its saves could have been overwritten by this
+    process's stale resident copy, per slot or by a flush (Codex review of
+    this change).
+    - Every lease acquisition now bumps a `writer_lease_epoch` row in
+      `meta`. A reconnect that finds another writer's epoch refuses every
+      storage call (`BankChangedHands`), including the rest of an operation
+      already under way, such as a flush.
+    - The service then drops its resident stores and meta-backed state and
+      re-reads the bank before serving or saving anything. It logs any
+      pending recovery or unsaved write it discards.
+    - Operations probe the writer session (`SELECT 1`) at most once a
+      second, so a dead session is caught before a stale copy is served.
+      The measured probe cost on the bench PG was 0.72 ms median. Probing
+      on every call cost +1.0 ms on a fact lookup, and took `recent(5)`
+      from 34 µs to 673 µs. With the 1 s gate, a burst costs +65 µs and
+      +3 µs respectively; on store/search it is below the noise.
+    - A reconnect with no other writer in between keeps the resident copy.
+    - The counter stays out of logical exports, so an import cannot move it
+      backwards.
+    - Only lease-holding writers are detected. Raw `psycopg` scripts,
+      `writer_lease=False` peers and `import --force` bump nothing.
+    - A daemon serving only mailbox traffic notices a handover at the
+      session reaper's next tick, because mailbox calls deliberately skip
+      the service lock.
+  - During a database outage, reads served from memory (such as `search`)
+    keep working, because nothing else can write a bank this process cannot
+    reach. Anything that needs the database fails as before. A failed
+    reconnect is retried at most every 5 s rather than on every call under
+    the service lock.
+  - The lease session sets server-side TCP keepalives (60 s + 3 × 10 s). A
+    writer that vanishes without closing its socket now frees the bank in
+    about 90 s. The server defaults would take over 2 h (7200 s + 9 × 75 s,
+    read from the bench server's settings, not timed).
+  - `PostgresStorage(dsn, writer_lease=False)` is the explicit opt-out. Only
+    the test probes that build a racing peer on purpose use it.
+- **Behaviour change, intended: a second writer now refuses to start.**
+  Anything that opens a `MemoryService` or `PostgresStorage` on a bank a
+  running daemon holds now refuses instead of silently becoming a second
+  writer. That covers `ops/dedup_cortex.py`, `ops/restore_from_pt.py`, the
+  eval harnesses when pointed at a live bank DSN, a stdio-embedded server,
+  and a second daemon. Stop the daemon first, or point them at a restored
+  copy. Anything that does not open the bank through `PostgresStorage` takes
+  no lease and is unchanged:
+  - `pseudolife-mcp export`, which only reads.
+  - `import`, which already refuses a bank other sessions are connected to.
+  - `backup` (`pg_dump`).
+  - The coordination mailbox's own connection.
+  - The `/health` ping.
+  - Ops scripts that write through plain `psycopg`, such as
+    `ops/retire_by_writer.py` and `ops/backfill_edge_confidence.py`. These
+    still rely on their own safeguards.
+- **`ops/dedup_cortex.py --dry-run` no longer rewrites the bank.** Every run
+  ended with `svc.flush()`, a full snapshot that deletes and re-inserts every
+  fact, world fact and lesson from the script's own copy. Against a bank a
+  daemon was serving, that silently reverted everything the daemon wrote
+  after the script started. Now:
+  - A dry run saves nothing. Opening the bank still runs the startup
+    bookkeeping that every service start does.
+  - `--apply` persists per slot, like the daemon's autosave: the slots it
+    retired, plus the weights file and entry access counts that every
+    autosave writes. It never rewrites a whole table.
+  - While a daemon holds the bank, the script exits 2 and names the holder.
+
+### Added (2026-09-23 — the daemon hands memory freed by encode bursts back to the OS)
+- After concurrent embedder encodes, glibc kept the memory they freed
+  resident, and much of it was still there once the burst was over.
+  Measured in throwaway containers from the 0.15.0 image with four
+  persistent worker threads (the daemon's threadpool shape) and
+  `MALLOC_ARENA_MAX=2`: concurrent encodes left up to 3,158 MiB of freed
+  memory resident with the fp32 embedder (1,693 MiB bf16), and
+  1,007-1,433 MiB of it (bf16 897-1,476 MiB) was still resident at idle;
+  with glibc's default arenas, 2,616-2,739 MiB (bf16 1,462-1,523 MiB). A
+  daemon thread now calls glibc's `malloc_trim(0)` every
+  `PSEUDOLIFE_MALLOC_TRIM_SECONDS` (default 60; `0` disables; Linux/glibc
+  only, so the Docker tier). With a trim after each burst, resident memory
+  stayed at or below its starting level (within 14 MiB above it with
+  default arenas). Trims returning 1,387-3,030 MiB after a concurrent
+  burst took 21-54 ms; across the single-burst sweep a trim took a median
+  7 ms (at most 141 ms, returning 1,381 MiB), and in paired runs the next
+  fp32 encode was no slower (+0.01 s against a 0.23 s noise floor). It
+  lowers what the daemon holds after a burst, not the peak of the burst
+  itself.
+- Measured and not shipped: a fixed `MALLOC_MMAP_THRESHOLD_=131072` also
+  removes the retention and cuts burst peaks by 228-1,238 MiB, but it
+  multiplies the embedder's page faults 3.4-4.9x and slows a bf16 encode
+  ~26% (fp32 ~10%). Evidence: `evals/results/allocator-trim-pool-20260923.json`,
+  `allocator-trim-probe-20260923.json` and
+  `allocator-trim-latency-20260923.json`, harness
+  `evals/allocator_trim_probe.py`.
+
+### Fixed (2026-09-23 — a superseded hit's pointer says whether its replacement was itself replaced)
+- `replaced_by` gains `current`: true only when the successor was resolved
+  and is itself still live. The 2026-09-23 live-bank review found the
+  recorded successor itself superseded in 529 of 730 served superseded
+  slots (161 entries chain up to 44 links into one note), so "never follow
+  chains" gave an agent no way to see a chain link before stepping onto
+  it. The service's entry dicts gain `superseded_by_current` beside
+  `superseded_by_id`; the successor is still resolved one link at a time,
+  never walked.
+- `memory_get` on a superseded entry now serves `superseded: true` and the
+  same `replaced_by` pointer, so dereferencing `replaced_by.id` shows when
+  that note is itself a chain link. The state is read from the Postgres
+  row being served (two existing columns added to its `SELECT`, no schema
+  change), so a row the CMS does not hold is not served as live. A live
+  entry's payload is unchanged. The service / REST payload (`/api/entry`)
+  gains `superseded: true`, `superseded_at`, `superseded_by_text` and the
+  successor annotation on superseded entries only.
+- `memory_episode_summary` compacts `recent_entries` the way
+  `memory_recent` compacts its entries: the raw dicts carried every
+  superseded entry's uncapped `superseded_by_text`. The MCP entries also
+  lose `timestamp`, `episode_id`, `episode_title`, `bank`,
+  `access_count`, `surprise_score` and `slots`, as `memory_recent`'s do;
+  `memory_recent(episodes=[id], verbose=true)` still serves the full
+  dicts, and the service (Console, REST) keeps them, now annotated. None
+  of this follows `compact_payloads`.
+- The `memory_search` description, the served session-start block and
+  `examples/CLAUDE.memory.md` say what `current: false` means: the
+  replacement was itself replaced or is unresolved, so search again
+  instead (even when its preview is on-subject). No cap moved. The block
+  grows 7,491 → 7,498 of its 7,500 chars; the sentence is funded by
+  dropping two restatements ("once at the start is not enough" beside
+  "RECALL AGAIN mid-session"; "so they don't pollute the graph" beside
+  "excluded from fact/graph extraction"), a filler "now", and saying the
+  briefing arrives "via a hook, not MCP" instead of "via a hook, a
+  separate channel". The tool manifests measure minimal 5,215 / core
+  11,178 / full 17,466 against 5,250 / 11,500 / 17,500, paid for by
+  compressing `memory_search`'s clipped-hit sentence, moving its
+  `min(5, top_k)` cortex-width rule into the `top_k` parameter
+  description (where the 2026-08-25 restructure puts argument contracts),
+  and tightening the `memory_get` / `memory_episode_summary` descriptions
+  — the next addition to the block trims first. Ranking, the retrieval
+  log, the schema and every eval number are unchanged.
+  **Upgrading:** a copied instruction block gains one sentence.
+
+### Fixed (2026-09-23 — search stops handing agents an often-unrelated "replacement" as the answer)
+- A superseded hit in compact `memory_search` / `memory_recent` output now
+  carries `replaced_by: {id, at, preview, verified}` instead of the
+  uncapped `superseded_by_text`: the successor's row id (resolved by exact
+  text over the resident entries: the one other entry with that text, or
+  the only current one when a retired twin shares it; otherwise none), the
+  supersession date, the replacement's first 120 characters, and whether
+  an explicit correction made the link (the successor's source is
+  `correction` or `consolidation`). `verbose=true` still serves the full
+  text. The 2026-09-23 live-bank review found that about 4 in 10 links
+  left by the automatic contradiction detector, before it stopped
+  superseding (PR #294), point at an unrelated note, while three surfaces
+  told agents to use that text in place of the entry. `verified` is
+  inferred from the successor's source until a schema column records it:
+  a `memory_consolidate` call with a custom `source` reads unverified.
+- Those three surfaces — the `memory_search` description, the served
+  session-start block and `examples/CLAUDE.memory.md` — now say what the
+  pointer means: `verified: false` means only that the link is not
+  confirmed as an explicit correction (often an old detector link, but an
+  evicted or ambiguous successor or a custom-source consolidation reads
+  false too), so the entry may still be valid; `memory_get` the replacement
+  only when its preview is on the same subject, and never follow chains.
+  The block stays inside its 7,500-char pin (7,488 → 7,491) by dropping
+  clauses it already said elsewhere; the `memory_search` description grows
+  242 chars, so the
+  `minimal` and `full` manifest budgets in
+  `tests/test_tool_consolidation.py` move to 5,250 and 17,500. **Upgrading:**
+  if you copied `examples/CLAUDE.memory.md` into your own instructions or
+  override the block with `<data_dir>/hook-instructions.md`, replace its
+  "use the replacement text" line — compact output no longer carries that
+  field.
+- The service's entry dicts (Console, REST, benches) keep
+  `superseded_by_text` and gain `superseded_at`, plus `superseded_by_id` and
+  `supersession_verified` on superseded search/recent hits. The successor
+  lookup is one pass over resident entries per call, only when a
+  superseded hit is served. Ranking, the retrieval log and every eval
+  number are unchanged; `compact_payloads: false` restores the old payloads
+  except for this pointer. `evals/agent_token_ledger.py` meters the pointer
+  in its own column, and the 2026-09-04 ledger rows that priced
+  `superseded_by_text` are marked superseded in `evals/README.md`.
+
+### Fixed (2026-09-23 — lessons keep their evidence, and "do this" lessons stop reading as "avoid")
+- `memory.lessons.signal_retention_days` now defaults to **3650** (was 30).
+  The dream sweep deletes `memory_outcome` signals, consumed or pending, past
+  this window, and those signals are the only evidence behind a lesson. On
+  the live bank on 2026-09-23, 760 of 1,618 current lessons predated every
+  retained signal, and 14-21 more rows were being deleted a day. The log
+  grows about 800 rows (under 1 MB on disk) a month. The Console knob's
+  shown default moved with it, and a new test pins every Console knob
+  default to the config dataclass. Existing installs that never set the
+  knob pick up the new window on upgrade; one that set it keeps its own
+  value. The config comment and Console help for `synthesize_in_dream` said
+  signals are still pruned when synthesis is off; nothing prunes them then,
+  and they now say so.
+- New `memory.lessons.signal_retry_days` (default **30**) bounds how long a
+  pending signal is offered to lesson synthesis, apart from retention. A
+  batch that lands no lesson stays pending, and the dream reads pending
+  signals oldest-first up to `synthesis_max_signals`. Under a ten-year
+  retention, a full batch of permanently failing signals would have been
+  re-offered on every sweep and no newer signal would ever reach synthesis
+  (Codex review of this change). Past the retry window a pending signal is
+  kept as evidence but no longer offered. The age counts from when the
+  signal was recorded, so signals never offered (synthesis off, a long
+  extractor outage) age out of eligibility too; raising the value offers
+  them again. `0` retries for the whole retention window. The Console's
+  loop-health tile now counts pending signals inside the window as "next
+  dream distils" and those past it separately (`pending_signals_expired`
+  in `/api/loop-health`), instead of counting every unconsumed row.
+- The session-start briefing labels a lesson `avoid:` only when its polarity
+  is `-`. It used to label every `failure` or `correction` lesson `avoid:`
+  too, but synthesis writes a correction (and often a failure) as `+`,
+  phrased as the behaviour to follow. So 303 of those 1,618 lessons (236
+  `+ correction`, 67 `+ failure`) would have printed "avoid: <what to do>".
+  Failures and corrections are still listed first. The Console already
+  labelled by polarity.
+
+### Fixed (2026-09-23 — the review judges stop holding the service lock for seconds every sweep)
+- The merge, link and junk judges no longer rebuild the evidence for their
+  whole pending queue under the service lock on every sweep tick. In ~23.5 h
+  of daemon logs the judge stages held the lock for 1 s or more 636 times
+  (879 s in total, up to 3.13 s), and every store and search waited behind
+  them. A tick now reads its evidence under the lock, builds and signs the
+  evidence packs with the lock released, and takes the lock again only to
+  clear stale verdicts and, after the model call, to re-check the judged
+  batch together with the writes that check guards. It signs the rows that
+  carry a verdict (each still gets its freshness check every tick) and the
+  first `judge_batch` unjudged rows, which covers any batch the tick can
+  take; the rest of the queue is neither read nor signed. The stale check
+  reads the last observed judge identity once per tick, not once per
+  verdict row (up to ~490 reads under the lock).
+- The model is shown the packs that were signed, instead of a second pack
+  built under the lock just before the call. A write that lands while the
+  packs are built is caught by the batch re-check, like a write during the
+  model call.
+- The evidence reads skip entry embeddings, which none of the three packs
+  uses (new `load_entry_texts`: 23 ms against 650 ms for `load_entries` on
+  the 2,239-entry live bank). Merge mentions are resolved for the rows' own
+  entities, not all 7,473 graph entities, which was ~1.1 s of every ~1.3 s
+  merge enrichment. The link pack tokenizes the entries once instead of once
+  per row (~140 ms a row). Measured from the host against the live bank,
+  read-only: the merge judge's locked read takes ~50 ms and its batch
+  re-check ~270 ms, where each hold took ~1.3-1.7 s before.
+- The candidate judge reads the bank once per lock hold instead of up to
+  three times, and computes the scan-generation fingerprints with the lock
+  released. When no automatic dismissal is due for reconsideration it skips
+  that evidence read entirely. The fingerprints themselves are unchanged, so
+  no stored generation or memo resets on deploy. Its locked read (~480 ms)
+  still loads embeddings, because the candidate evidence fingerprints them.
+- `tests/test_judge_lock_budget.py` pins each tick's work by counting rows,
+  entities, reads and tokenizations, never by timing.
+
+### Fixed (2026-09-23 — dream stages stop freezing the daemon; the shadow merge judge records again)
+- The contested-facts scan behind the graph digest's "unsure" questions no
+  longer holds the service lock for 42-78 s on every dream, empty dreams
+  included. It paired each current fact with its contenders through one
+  whole-store `contenders_for` scan per fact, normalising every record's
+  slot key (46M key evaluations on the 7,162-fact live bank). It now
+  buckets contenders by slot in one pass, as `cortex_dump` already did;
+  the output and its order are unchanged.
+- `contenders_for` and `_active_contender` test a record's status before
+  its slot key, which normalises on every evaluation: 13 ms to 0.13 ms per
+  lookup on the live bank, for `cortex_search`, the dream claim path and
+  every contended write.
+- The dream alias screen no longer embeds entity names while holding the
+  service lock. On a dream that minted a new entity it re-encoded
+  ~1,000-2,050 existing names on CPU inside the lock (55-171 s holds, the
+  embedder's 1,024-entry LRU being smaller than the name set). Names are now
+  read under the lock, embedded outside it, and proposals filed under it
+  again. A per-process memo (at most 4,096 names, ~8 MB for today's ~2,050)
+  means later screens encode only names they have not seen. This is the
+  first embedder call made outside the service lock; a concurrent
+  four-thread probe of the real model matched serial output (fp32 and bf16,
+  cosine >= 0.9999998, no errors), and a cold screen right after a restart
+  now slows concurrent searches by CPU contention instead of blocking them.
+- The alias screen no longer re-mints a deleted entity. It resolved both
+  names with create-on-miss, so an endpoint deleted while the names were
+  being embedded (`graph_delete_entity`, an accepted junk review) came back
+  with a merge queued against it (Codex review, P1). The same path already
+  resurrected such names at any later dream, because deleting a graph
+  entity keeps its facts and so its name. The screen now only looks
+  entities up (aliases included, so a merged-away name lands on its
+  survivor) and skips a match whose endpoint is gone. Fact writes mint
+  their subject's node, so the names skipped are ones the graph never kept
+  or has dropped: deleted entities, junk-shaped subjects, facts older than
+  that rule (2026-06-11), and new names whose claim wrote nothing (which the
+  old code turned into orphan nodes).
+- The shadow merge judge records verdicts again. A row's review fingerprint
+  included the evidence pack's `group` (the endpoint it shares with other
+  pending rows), which is computed over whatever list is enriched: the
+  whole queue at refresh, only the judged batch at validation. Any row
+  sharing an endpoint with a row outside its batch therefore never
+  validated, and from 2026-09-22 17:56 the judge re-sent the same 8 rows to
+  the extractor ~125 times a day and recorded nothing. The fingerprint now
+  signs that cross-row field, which the judge never sees, as None. Rows that
+  never shared an endpoint keep their existing fingerprints, so their
+  verdicts and automatic decisions carry over; only rows that carried a
+  group re-judge once. The same field also reopened automatic merge rejects
+  that shared an endpoint whenever reconsideration re-signed them apart,
+  deleting their dismissed pairs. The link, junk, candidate and curation
+  judges bind per-row evidence and were not affected; a test now pins batch
+  independence for every review queue.
+
+### Fixed (2026-09-24 — a slot named with a `|` no longer shares its curation listing with its separator twin)
+- Two different lesson or world slots whose names differ only by a literal
+  `|` against a separator (`ci|cd deploy` and `ci cd deploy`) were listed for
+  duplicate curation under one key, because the key folded the pipe to `-`
+  (`ci-cd-deploy|approach`). The two twins were never listed as a pair; their
+  pairs with any third slot came out under one name, so the judge took one
+  twin's record as the evidence for both and judged the other pair on it or
+  not at all; a memo, dismissal or automatic dismissal of either pair applied
+  to both; and a retired pipe slot's listed key could not restore it. The key
+  now escapes a literal `|` as `%7C` (`ci%7Ccd-deploy|approach`). Normalized
+  names are casefolded, so none contains an upper-case `C` and the key is
+  injective. Every pipe-free key is unchanged, so nothing stored for any other
+  pair moves.
+- `memory_graph_review` decodes a listed key (`dismiss_slot_pair` `src`/`dst`,
+  `restore_slot` `src`) instead of splitting it at the first `|`: normalizing
+  an escaped half would casefold `%7C` to `%7c`, a name no slot has. A key
+  with more than one bare `|` is refused rather than split by guess, and the
+  refusal says how a pipe is spelled. The Console posts display names and
+  needed no change.
+- Human dismissals made under the folded spelling (every one since
+  2026-07-19) are carried over once, on the first start of this version
+  (`curation_listing_spelling_v2` meta key): each is copied, with its date,
+  to every pair of a pipe slot it hid, and stays where it is, because its name
+  is also the twin's own. A fallback that also read the folded name would
+  not do: a dismissal of the pipe-free twin made after the upgrade is
+  byte-identical to a folded row, so it would go on hiding the pipe slot's
+  pair. A failed carry-over is retried a minute later, and `import` into a
+  fresh bank clears the flag unless the export carries it, so an older
+  export's dismissals are carried over on the next start.
+- Automatic dismissals are not carried over; the judge re-derives them. A
+  pipe pair that one hid (its own, under the folded spelling, which only a
+  bank that ran the 2026-09-23 fix below without this one has; or its
+  twin's, which shared the name) is judged once more: the refresh withdraws
+  a folded marker together with its row, and the twin's own dismissal stays.
+  A memo row under the folded spelling is left in place when the pipe pair
+  is judged again, because the name is also the twin pair's own.
+
+### Fixed (2026-09-23 — the curation judge stops re-judging a slot pair whose name contains a `|`)
+- A lesson or world slot with a literal `|` in its entity or attribute was
+  listed under a key that folds the pipe to `-`, but the store-curation judge
+  saved its memo, its automatic distinct dismissal and that dismissal's marker
+  under the raw key. Nothing that reads them found them: the pair went back to
+  the model on every tick that reached it instead of once per
+  `curation_rejudge_days`, `review_rejudge('curation')` could not
+  forget it, and an automatic "distinct" never hid it. All three are now
+  written under the listing's spelling (`curation_safety.curation_pair_keys`,
+  built on `service._slot_key`). The fingerprinted evidence keeps its raw key,
+  so no memo binding, marker fingerprint or retire audit changes and no other
+  pair is re-judged.
+- Rows written under the old spelling retire on their next touch rather than
+  through a migration: the first auto-dismissal refresh (the Console listing or
+  a judge tick) withdraws a raw-spelled marker together with the dismissal row
+  it owns, and the pair's next judgment, which the missed memo now triggers
+  once, deletes the raw-spelled memo row it replaces. A raw memo row whose
+  pair is never judged again (dismissed by a human, one side retired, or no
+  longer similar enough to list) stays behind unread; its key has at least two
+  `|` and cannot match a listing key, which has exactly one.
+
+### Fixed (2026-09-23 — the per-turn mail notice survives /clear under Claude Code)
+- The plugin's prompt hook stopped printing the coordination digest after
+  `/clear` or an in-session `/resume`. Claude Code gives hooks the new session
+  id, while a stdio MCP server keeps the id it was launched with, and the shim
+  writes the digest under that launch id. The plugin's session hooks now keep
+  one record per Claude Code process, `claude-<CLAUDE_PID>.host` beside the
+  digests. Line 1 holds the shim's key and line 2 the session the record is
+  confirmed for. The prompt hook follows the record only while line 2 names
+  its own session. Claude Code v2.1.214 and later export `CLAUDE_PID` to hooks
+  but not to MCP servers.
+- A record passes from one session to the next only through a handoff the
+  SessionEnd hook writes first, before its connection checks and network
+  call. The handoff carries the time, the process's creation identity (start
+  time from `/proc` on Linux, `ps -o lstart=` on macOS, the `ps -W` row in Git
+  Bash) and the ending session's key. SessionStart accepts it only if it is
+  under a minute old, names this process and matches the record. Compaction
+  keeps a record only when it is already confirmed for the session. Anything
+  unproven, including a host that offers no creation identity, fails closed to
+  the session's own key. So a record or handoff left by a dead process whose
+  PID a new one reused is never followed (Codex review of this change,
+  2026-09-24).
+- Every step needs `CLAUDE_PID` and a hook `CLAUDE_CODE_SESSION_ID` equal to
+  its stdin `session_id`. A host run from a Claude Bash command inherits both
+  variables, so it neither writes nor follows the outer session's record. A
+  session launched under the previous hooks, or before the plugin was enabled,
+  names its key on its first `/clear`. A startup sweeps records and stray temp
+  files untouched for more than 30 days, and only those. After `/clear` the
+  current digest prints once more, as it already does after resume and
+  compaction.
+- An in-session `/resume` to a conversation whose earlier shim left a digest
+  behind no longer prints that dead shim's stale mail.
+- Docs: the configuration guide and the shim no longer claim that every resumed
+  session keeps its coordination address. That holds for `--resume <id>`;
+  `--continue`, or `--resume` without an id, may launch the shim with the
+  startup id, which gets a new address and no prompt-hook digest (tool-result
+  hints still arrive). Claude Desktop's Code tab does pass the session id to
+  its per-session shim; only the app-level servers from
+  `claude_desktop_config.json` get none.
+
+### Added (2026-09-23 — `pseudolife-mcp wait-mail` wakes an idle session when addressed mail arrives)
+- Addressed mail reached a recipient only on its next Pseudolife tool call or
+  prompt, so an idle session sat on it until someone typed. `pseudolife-mcp
+  wait-mail` is a supported, cross-platform command (native Windows needs no
+  Git Bash) that an agent arms as a background command: it exits when new
+  mail shows up, and Claude Code reports the exit as a notification that
+  starts a turn in an idle session. It replaces a hand-rolled watcher script
+  used in the 2026-09-23 coordination trial. It blocks on the coordination
+  digest file the shim's adapter already writes, keyed like the shim
+  (`--session-id`, else `CLAUDE_CODE_SESSION_ID`; `--digest` names a
+  `<64 hex>.txt` digest outright), and needs no daemon connection, token or
+  network. The new `coordination_identity.resolve_digest_path` follows a
+  per-process `claude-<CLAUDE_PID>.host` record of the shim's spawn-time key
+  after `/clear` when one exists and its second line confirms it for the
+  current session (the SHA-256 of its id; a one-line record is never
+  followed), and falls back to the plain id key otherwise; nothing in this
+  release writes that record yet.
+- It fires only for mail nothing has shown yet: the digest watermark past the
+  shared `.seen` marker, with pending mail in the body. Mail that arrived
+  while the agent was busy fires at once, instead of being absorbed into an
+  arm-time baseline (the trial's watcher missed a message exactly that way).
+  On firing it prints the digest body verbatim, then advances `.seen` (in
+  that order, so a killed waiter duplicates rather than loses a wake) and
+  logs a `wait` line to `ledger.log`, so the prompt hook and tool-result hint
+  do not repeat it and a re-arm over unread mail waits. Exit 0 mail, 3
+  timeout (default 4 h, at most 24 h), 2 nothing to wait on. Polling is a
+  `stat` every 2 s; the file is read only after a rewrite, so a waiter fires
+  within about one 20 s adapter heartbeat of the send. A daemon outage
+  leaves the digest untouched, so a restart wakes nobody. The docs recommend
+  a narrow `Bash(pseudolife-mcp wait-mail *)` allow rule for auto mode.
+
+### Fixed (2026-09-23 — a long-idle session no longer loses its coordination digest)
+- Each adapter's first write sweeps digest and `.seen` files a day old, and a
+  live adapter rewrote its digest only when the text changed, so a session
+  whose mailbox stayed quiet for a day had its file swept by the next
+  session to start, and nothing ever put it back: its prompt hook and any
+  waiter went blind. The adapter now rewrites an unchanged digest hourly
+  (`DIGEST_REFRESH_SECONDS`) and touches its marker, puts a missing file
+  back at the next heartbeat, and never moves the watermark for either.
+- A digest write whose atomic replace failed (on Windows, a reader holding
+  the file open refuses it) still counted as written, so the file kept its
+  old text until the next text change and the temp file was left behind.
+  The write now counts only when it lands, is retried at the next heartbeat,
+  and removes its temp file.
+- A new adapter continues above a `.seen` marker its predecessor left without
+  a digest, so new mail is not treated as already shown.
+
+### Added (2026-09-23 — board mail can wake an idle Codex task, opt-in)
+- With `PSEUDOLIFE_CODEX_DOORBELL=1` in its environment, the Codex shim runs
+  `codex queue --thread <task id> --message <notice>` when new addressed mail
+  arrives for a task that has gone quiet. Codex's app-servers, the desktop
+  app's included, dispatch the queued notice once the task is idle. Without it,
+  an idle task sees mail only at its next Pseudolife call. Default off;
+  `PSEUDOLIFE_CODEX_BIN` names the CLI by absolute path when it is not on PATH.
+  The PATH lookup skips relative entries and never the working directory, the
+  task's checkout, so a repository cannot supply its own `codex`.
+- Codex delivers queued text as a user message, so the notice is fixed text
+  carrying only the pending count. Peer text, labels and excerpts never go
+  there; the woken model reads the mail with `memory_message receive`, framed
+  as agent-origin as before.
+- One doorbell per batch: it rings only after 30 s with no Pseudolife call,
+  only for mail no hint or prompt hook has shown, and never again until a
+  receive succeeds or the mailbox empties. The CLI runs in the background with
+  a 20 s timeout and no `PSEUDOLIFE_*` variables; a timeout kills its whole
+  process tree. Any failure turns the doorbell off for that shim process with
+  one stderr line, and pull delivery is unchanged. Tasks served by the
+  WebSocket bridge are not rung until the bridge stops for them.
+
+### Added (2026-09-24 — the agent board keeps a durable, tamper-evident record)
+- Schema **v42** adds `coordination_events`, an append-only audit log of the
+  agent board (`memory_agents` / `memory_message`). Before this, a message
+  body was blanked 24 hours after sending, message rows went after seven days,
+  idle addresses were removed, and each status update overwrote the last, so
+  nothing could say afterwards who reported what, or when. Every board
+  mutation now appends one row in the mutation's own transaction: register,
+  update (with the values it replaced, which is the status history), attach,
+  detach, send (with the full body), first read, acknowledgment, delivery
+  attempt, the prune pass's body expiry and row removal, bank identity, and the
+  operator's restore `recover` and `rebind`. Lease heartbeats are not logged.
+  The live mailbox keeps its 24-hour body TTL, and `memory_message`'s
+  description now tells agents the operator's audit log keeps a copy.
+- The first time a receive returns a message, explicitly or to the recipient's
+  live-delivery adapter, is stamped as `coordination_messages.first_read_at`
+  and logged as a `read` event; the push transport previously left only a
+  delivery attempt, and the pull path left nothing. The per-turn digest's
+  preview is not a read.
+- Rows are chained by sha256 over the previous hash and the row's canonical
+  content, in a dense sequence allocated under a transaction-scoped advisory
+  lock taken after every board-row lock, so edited, inserted or reordered rows
+  fail verification, and so do removed rows other than the oldest behind a
+  retention cut whose own fields add up. With no secret, the chain cannot on
+  its own see its newest rows dropped, a rewrite with every hash recomputed, or
+  its oldest rows removed behind a forged but consistent cut record;
+  `verify --expect-head` catches the first two, and a series of recorded
+  heads, checked against the cut the report says the log starts from,
+  exposes the third.
+- The log keeps events for `coordination.audit_retention_days` (default 90;
+  `0` keeps it forever), separate from the mailbox TTL. The prune pass cuts
+  only a prefix, on UTC day boundaries so at most once a day (a cutoff that
+  moved every minute re-cut its own records on nearly every pass), logs the
+  cut as the surviving chain's anchor, and runs only while the board is in
+  use. A synthetic replay at the scale of the 2026-09-23/24 fifteen-session
+  trial left 2,671 events in 1.6 MB with indexes, and
+  the append added 1.3 to 2.2 ms to median send, receive and acknowledgment
+  against a control arm whose own runs differed by up to 0.6 ms
+  (`evals/results/coordination-audit-volume-20260924.json`,
+  `evals/coordination_audit_volume.py`).
+- `pseudolife-mcp board-audit export` (JSON lines, filterable by project, task,
+  agent and time) and `pseudolife-mcp board-audit verify` (prints the chain
+  head and the cut it starts from; `--expect-head` checks a recorded head,
+  `--input` checks an archived export) are operator-only and read-only. They
+  read the bank through `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's
+  embedded instance; there is no MCP tool or REST route. The log holds bodies
+  verbatim, lives only in the bank and its full backups, and is excluded from
+  portable exports. Offline restore recovery handles a restored backup that
+  predates the log: it still revokes and rebinds, and says the operation went
+  unrecorded.
+
 ### Fixed (2026-09-23 — starting a service no longer opens a document store it may never use)
 - The reference (document) bank opens its ChromaDB client on the first
   document ingest, or on the first read once a store exists on disk, instead
@@ -25,6 +667,318 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   affecting memory search, and document ingest still refuses. The daemon is
   effectively unchanged: an existing store (every install so far) still
   opens during its start-up warmup search.
+
+### Fixed (2026-09-23 — daemon boots no longer warn about an ONNX backend nobody asked for)
+- The MCP defaults selected the ONNX embedding backend whenever the optional
+  ONNX stack was installed, whether or not the configured model had an ONNX
+  artifact. The daemon image installs that stack, and the default
+  Qwen3-Embedding-0.6B has no artifact, so every daemon boot logged "ONNX
+  embedding backend failed to load … falling back to torch". The defaults
+  now select ONNX only when the configured artifact already resolves in the
+  local model or Hub cache, using the loader's own local-only preflight
+  (about 1–3 ms in the daemon image). Otherwise they choose torch up front
+  and log one INFO line naming the model. MiniLM, whose `onnx/model.onnx`
+  the image bakes, still gets ONNX. An explicit `embedding.backend` is never
+  overridden, so `backend: onnx` without an artifact still warns and falls
+  back at load. An invalid `onnx_file_name` also stays on the ONNX path, so
+  the loader's warning names the bad path instead of hiding it. The loader
+  and the defaults share one normalize-and-resolve helper, so a
+  backslash-separated `onnx_file_name` resolves the same way in both.
+- The same applies on native Windows to a model whose Transformer module
+  loads from a nested subfolder. The pinned Optimum stack mis-detects that
+  artifact there, so the loader refuses it and falls back with a warning.
+  The defaults now choose torch up front for such a model, with an INFO line
+  naming the reason, through the same helper the loader's fallback uses. A
+  flat layout, and any layout on Linux or in the daemon image, still gets
+  ONNX.
+
+### Added (2026-09-23 — eval results say which embedder precision produced them)
+- `embedding.cpu_dtype` defaults to `auto`, which is bf16 on a CPU with
+  native bf16 and fp32 elsewhere (GitHub runners, most Intel CPUs), and
+  `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` overrides it per process. A bf16 run on
+  one host and an fp32 run on another could therefore differ, and no eval
+  result file recorded which precision produced it. Every eval harness that
+  builds an embedder now stamps `EmbeddingPipeline.describe()` (`backend`,
+  `device`, `dtype`) into what it writes, through the new stdlib-only
+  `evals/embedder_stamp.py`.
+- LongMemEval and BEAM rows record one description per stage that embedded
+  their contexts: `extract`, and `rebuild_contexts` / `rag_lite_rebuild` /
+  `band_ablation` for the offline rebuilds. The stages are kept apart
+  because a rebuilt row's cortex facts and its rag block come from
+  different embedders. `--report` summaries, `replicate.py agg` files and a
+  newly established gate baseline carry the merged stamp. A file whose rows
+  mix precisions says so, with the row count of each variant in that file.
+  Re-judged and ablated rows (`lme_rejudge`, `beam_rejudge`,
+  `beam_attrib_ablation`) carry the stamp of the contexts they re-read.
+  The single-run harnesses (`ladder_sweep`, `graph_ablation`,
+  `retrieval_replay`, `recall_fanout_bench`, `live_replay_flat_ab`,
+  `retention_interval_eval`, `quarantine_gate`, `memcot_bench`,
+  `seed_bench`, `warm_cache_probe`, `epistemic_bench`, `lme_v2_smoke`,
+  `beam_reader_sweep`, `retrieval_pool_probe`) stamp their result file.
+  `embedder_recall`'s bake-off arms, which load a bare SentenceTransformer
+  outside `cpu_dtype`, record the dtype read back from their parameters.
+  The two stdout-only probes (`retrieval_sweep`, `window_echo_check`) print
+  it.
+- `replicate.py compare` and `gate-check` warn, like the nondeterminism
+  warning, when the two sides embedded at different precisions. The warning
+  never fails the gate. Stages are compared one by one, and a side that
+  never ran a later stage is compared through its `extract` stage, which
+  built that part of its contexts. So a `diag-knobs` tag rebuilt in bf16
+  warns against its own fp32 `diag` source. A stage that ran but was
+  recorded as unknown never inherits: `describe()` fails soft to None, and
+  a `band_ablation` rebuild over pre-stamp dumps records None.
+  `rag_lite_rebuild` is recorded
+  but never compared: it refuses to write unless its ranking is
+  byte-identical to the judged control's. compare writes the warning to
+  stderr and records `a_embedder` / `b_embedder` / `embedder_warnings` in
+  its `--out` artifact; `recall_fanout_bench --combine` does the same for
+  its two arms. A missing stamp reads as `unknown` and is never a mismatch,
+  so every artifact written before this change (the committed gate
+  baseline included) compares silently. `gate-check` prints both sides'
+  precision so an unknown side is visible rather than mistaken for a
+  match.
+- Pinned by `tests/test_eval_embedder_stamp.py`,
+  `tests/test_eval_embedder_stamp_writers.py` and tests beside each
+  consumer. The writers file holds a static guard over `evals/` that
+  follows calls across modules and has two rules:
+  - Every function that calls a constructor, or a `build_service`-style
+    factory that returns one, must itself call a stamp-WRITING helper. The
+    merge and report helpers do not count, so a `report()` cannot stand in
+    for a deleted row stamp.
+  - Every module that reaches a constructor through any chain of calls
+    (`warm_cache_probe` → `ladder_sweep.run_rung` → `build_service` →
+    `MemoryService`) must write a stamp.
+
+### Fixed (2026-09-23 — the memory daemon OOM-restarted under ordinary load)
+- The Docker daemon was cgroup OOM-killed (exit 137) at 15:12 AEST on
+  2026-09-23 by an ordinary burst of concurrent requests. At rest it held
+  ~3.1–3.3 GiB anon (RssFile only ~80–165 MB; most of the cgroup's ~0.7 GB
+  `file` charge was reclaimable page cache) under a 4 GiB cap with no
+  burst allowance, and a ~30–34-search burst grew anon ~0.8 GB to the
+  limit (kernel memcg kill at 4,169,120 kB anon-rss). What grew is not
+  pinned down: the idle daemon held ~256 MB in 25 per-thread malloc
+  arenas, but that is a partial contributor at most. After the restart
+  `memory.events` `max` reached 8,021 within ~27 minutes (model load and
+  early load), then stayed flat. Sizing, not a leak: the 4g cap
+  (2026-08-20) was set against 2.8 GB / 2.7 GB steady states on a smaller
+  bank and missed the fp32 embedder's 3.8 GB load peak, burst growth and
+  bank growth. By ~19:45 the same evening the live fp32 daemon (cap
+  already raised to 6 GiB) held 4.48 GB anon.
+- `ops/docker-compose.yml`: the daemon cap defaults to `6g`
+  (`PSEUDOLIFE_DAEMON_MEM_LIMIT`; memory+swap still pinned equal, so no
+  swap), and the daemon runs with `MALLOC_ARENA_MAX=2` (after a concurrent
+  encode burst, 2,841 MB vs 3,274 MB with the default arenas; the peak is
+  unchanged). The compose comment's claim that the 2026-08-04 21 GB
+  balloon's root cause was "still open" is corrected: it was found and
+  fixed that day (4df20ef2). `ops/wslconfig.example` and the Windows / WSL2
+  memory section are re-sized to match (they still assumed a ~400 MiB
+  daemon): ~9–10 GiB for the full stack under dream load, and a default VM
+  of 10 GB so the VM does not run out before the daemon's own cap trips.
+- New `embedding.cpu_dtype` (`auto` / `fp32` / `bf16`, default `auto`):
+  the torch embedder on a CPU loads straight into bf16 when the CPU has
+  native bf16 (x86 AVX512_BF16 / AMX_BF16, from torch's cpuinfo probe or
+  `/proc/cpuinfo`) and stays fp32 otherwise, since emulated bf16 is slow
+  (the 2026-09-20 CI finding behind the fp32 cast). Qwen3-Embedding-0.6B on
+  a Ryzen 7 9800X3D, bf16 vs fp32: ~1.4 GB vs ~2.85 GB steady, peak RSS
+  while loading 537 MB vs 3,808 MB (bf16 weights page in on first use), a
+  short query ~88 ms vs ~160 ms. Through the new pipeline on 400 live bank
+  entries and 60 real queries, bf16 queries against the stored fp32
+  vectors kept top-8 overlap 0.994 (min 0.875) and rank-0 60/60 (max score
+  delta 0.0058), and `evals/regression_gate.ps1` run in bf16 passed with
+  every arm identical to its fp32 baseline (rag 0.5897, cortex 0.6923,
+  hybrid 0.7692, cascade 0.7692; evidence:
+  `evals/results/embedder-cpu-bf16-probe-20260923.json`). The default is
+  deliberately library-wide, so evals on a native-bf16 CPU now embed in
+  bf16 too. The model is loaded in bf16, not cast after an fp32 load
+  (which keeps the 3.8 GB load peak), using `dtype` or `torch_dtype` by
+  Transformers version (the rename landed in 4.56); a sentence-transformers
+  too old for `model_kwargs`, or a loader that leaves any parameter
+  outside bf16 (sentence-transformers 3.0.x left a Dense head fp32), falls
+  back to casting after load with a warning. Embeddings still leave the
+  pipeline as float32, so stored vectors and cosine math are unchanged in
+  type. GPU and ONNX backends are untouched. `PSEUDOLIFE_EMBEDDING_CPU_DTYPE`
+  overrides the config value (forwarded by compose, so `fp32` in
+  `ops/.env` rolls a deployment back without a rebuild), and the test suite
+  pins it to `fp32` in conftest, daemons it spawns included. The
+  `Embedding backend:` log line gains `dtype=`.
+- `document_ingest` encodes a document in slices of 8 chunks instead of one
+  call over the whole chunk list (batched at the daemon's
+  `embedding.batch_size` 16). A 104-chunk document peaked +2,565 MB over
+  steady state in fp32 the old way, past the old cap on its own; sliced it
+  peaks +1,028 MB at the same speed. Production held no documents, so the
+  path had never run there.
+- `/health` gains `memory` (cgroup v2 usage, limit, working set,
+  `used_fraction` and `near_limit` at 90% on the working set so reclaimable
+  page cache cannot trip it, anon/file split, `memory.events`
+  max/oom/oom_kill, process RSS and peak; process RSS only when no cgroup
+  v2 `memory.current` is readable; `source: "unavailable"` rather than
+  silence, and a failed read never breaks `/health`) and `embedder` (backend,
+  device, resident dtype). Near the limit the daemon logs a WARNING at most
+  every 10 minutes. `status` is never touched: a 503 would have the
+  healthcheck and `ops/update.*` treat a daemon that is still serving as
+  dead.
+- Deploying needs the container recreated for the new cap and environment
+  (`ops/update.ps1` does). Verify live: `/health` `embedder.dtype` is
+  `bf16` on this host, `memory.limit_bytes` is 6 GiB, and
+  `memory.events.max` stops climbing.
+
+### Fixed (2026-09-23 — backups run daily, and a wiped bank can no longer rotate the good ones away)
+- `ops/backup.ps1|.sh` write a `pseudolife_manifest-<stamp>.json` beside
+  each dump with its per-table row counts, read from the dump in the same
+  pass as the end-of-dump check. If `entries`, `facts` or `lessons` fell by
+  more than 25% (`-MaxRowDropPercent` / `--max-row-drop-percent`) against
+  the newest manifest that was not itself held, in the backup folder or the
+  mirror, the new dump is kept, local rotation and mirror pruning are
+  skipped with a loud warning, and the run still exits 0. The warning names
+  the last good dump and the `restore -BackupFile` command for it. The gate
+  fails closed: it also holds when manifests exist but none is usable, or a
+  backup folder cannot be listed (which no longer aborts the run). With no
+  manifest anywhere (the first run after upgrading), the newest complete
+  date-stamped dump is read as the baseline, so an already-wiped bank is
+  not marked "ok". The hold repeats on every run until `-AcceptRowDrop` /
+  `--accept-row-drop`.
+  Before, a logical wipe followed by `PSEUDOLIFE_BACKUP_MIRROR_KEEP`
+  backups rotated every good copy off the mirror.
+- `ops/restore.ps1|.sh` with no file named skip dumps the gate held (after
+  a wipe, the newest dump is the wiped one, and its rehearsal passed
+  because both sides were wiped) and refuse if every dump is held;
+  `-BackupFile` / `--backup-file` overrides.
+- The end-of-dump marker now counts only outside COPY data. A dump cut off
+  right after a stored memory that quoted the marker used to pass.
+- New `ops/install-backup-task.ps1` registers a daily `ops/backup.ps1` run
+  from the main checkout, even when installed from a worktree
+  (StartWhenAvailable, battery-tolerant, one-hour limit, runs as the
+  logged-on user; `-At`, `-Uninstall`). Each run waits up to 10 minutes
+  for Docker (`-DockerWaitSeconds`), since a catch-up run fires at logon,
+  and is appended to `data/backups/backup-task.log`. The installer warns
+  when the main checkout's `backup.ps1` predates the gate. Nothing backed
+  up on a schedule before: from 2026-09-14 13:28 to 09-20 12:18 no dump
+  existed anywhere.
+- `/health` gains `last_backup` (`at`, `age_hours`, `rotation`), read from
+  the manifest the backup scripts copy into the daemon as
+  `/data/last-backup.json`. It is informational and never changes
+  `status`. The memory-status command reports it and flags an age over
+  36 hours or a held rotation.
+
+### Added (2026-09-23 — warning before capacity eviction deletes history, and a durable record of every drop)
+- Under the flat default every capacity eviction permanently deletes an
+  entry (a Postgres `DELETE`; its `memory_traces` cascade), superseded
+  entries first. On the production bank's measured growth of 36-65
+  entries/day the 5,250-entry cap would be reached between about 9 Nov and
+  18 Dec 2026, with nothing to say so beforehand: `true_drops` was a
+  per-process counter that every restart reset, and a drop left only an
+  INFO log line.
+- `memory_stats()` now carries `capacity_warning` (band, size, capacity,
+  fill and a message) once the terminal band — the only band whose
+  evictions are true drops — reaches 80% of its capacity, and `null` below
+  that. On a multi-band preset a full upper band demotes into the next and
+  loses nothing, so it does not warn. `/health` carries
+  `capacity_warning: true` at the same point; counts stay out of the
+  unauthenticated probe, and `status` is untouched, so a filling bank never
+  turns into a 503 restart loop.
+- Each true drop logs a WARNING naming the entry id, source, superseded flag
+  and band. On Postgres the row is deleted by the new
+  `delete_evicted_entry`, which counts the drop in the `meta` row
+  `capacity_true_drops` in the same transaction: a row is never deleted
+  without being counted, and a drop inside a correction that rolls back is
+  neither. `memory_stats()` reports the all-time `true_drops_total` and
+  `last_true_drop` (time, entry id, source, superseded) across restarts.
+  The record travels with a logical export, like the entry ids it explains.
+  A malformed record (hand-edited or imported: not a number, negative, or
+  without room below the bigint maximum for the increment) restarts the
+  count instead of blocking the delete, and never breaks `memory_stats()`.
+  No schema change.
+- The plugin's `/memory-status` command leads with `capacity_warning` and
+  reports `true_drops_total` / `last_true_drop` instead of the per-process
+  `true_drops` alone.
+
+### Fixed (2026-09-23 — a merge second opinion cannot pair with a requeued first verdict)
+- A `review_rejudge` (or `/api/graph/rejudge`) that cleared a merge row's
+  first verdict while its second opinion was in flight no longer lets that
+  second vote land. The second-opinion pass paired the new vote with the
+  first verdict it read before the model call, and the evidence check it
+  re-ran afterwards ignores every `judge*` column. So the vote was recorded
+  on a row with no first verdict, and in `auto-reject` (or `auto`) mode two
+  rejects auto-rejected the row on the verdict a human had just requeued.
+  Before recording, the pass now requires the live row's `judge_verdict`
+  and `judge_confidence` to match the pair it read, under the same lock
+  hold and transaction as the write. A requeued row is left to a fresh
+  first opinion on the next tick. The link and junk judges take one vote
+  per row and never read an earlier one, so they were not affected.
+
+### Fixed (2026-09-23 — the curation judge stops re-judging a slot pair whose name contains a `|`)
+- A lesson or world slot with a literal `|` in its entity or attribute was
+  listed under a key that folds the pipe to `-`, but the store-curation judge
+  saved its memo, its automatic distinct dismissal and that dismissal's marker
+  under the raw key. Nothing that reads them found them: the pair went back to
+  the model on every tick that reached it instead of once per
+  `curation_rejudge_days`, `review_rejudge('curation')` could not
+  forget it, and an automatic "distinct" never hid it. All three are now
+  written under the listing's spelling (`curation_safety.curation_pair_keys`,
+  built on `service._slot_key`). The fingerprinted evidence keeps its raw key,
+  so no memo binding, marker fingerprint or retire audit changes and no other
+  pair is re-judged.
+- Rows written under the old spelling retire on their next touch rather than
+  through a migration: the first auto-dismissal refresh (the Console listing or
+  a judge tick) withdraws a raw-spelled marker together with the dismissal row
+  it owns, and the pair's next judgment, which the missed memo now triggers
+  once, deletes the raw-spelled memo row it replaces. A raw memo row whose
+  pair is never judged again (dismissed by a human, one side retired, or no
+  longer similar enough to list) stays behind unread; its key has at least two
+  `|` and cannot match a listing key, which has exactly one.
+
+### Fixed (2026-09-23 — a rejudge that lands during a judge call is no longer undone)
+- `review_rejudge('candidate')` forgets opinions in the
+  `deep_candidate_verdicts` memo, but the candidate judge read that memo
+  before its unlocked model call and wrote its copy back afterwards, so a
+  rejudge landing during the call restored every requeued pair and did
+  nothing. The judge now re-reads the live memo under the lock hold that
+  writes it and updates only the pairs it judged in this tick. A saved reply is
+  replayed only while its memo entry is unchanged, so a requeued saved
+  `dismiss` is not applied in `auto` mode. A fresh model verdict for a pair
+  requeued during the call still lands: the requeue forgot the older opinion.
+  The per-apply watermark stays incomplete when a requeue forgets a
+  candidate's opinion during the tick and this tick does not re-judge it,
+  including on the "all judged" path that makes no model call. The 500-pair
+  bound is unchanged.
+- The curation judge had the same gap. `review_rejudge('curation')` deletes
+  the `curation_judgments` row but keeps the evidence binding, and the
+  automatic distinct dismissal and duplicate fold checked only the binding.
+  A saved pending action replayed after a mid-call requeue, and a fresh
+  verdict requeued between being recorded and being applied, were therefore
+  still acted on. Both actions now also require the pair's judgment row to
+  exist. The row is looked up under the key it is stored with, and the check
+  runs under the service lock that both the apply and the requeue hold.
+
+### Added (2026-09-23 — board mail can wake an idle Claude Code session)
+- The plugin ships an opt-in `Stop` hook (`plugin/hooks/stop-wake.sh`, off
+  unless the hook environment sets `PSEUDOLIFE_AGENT_WAKE_HOOK=1`, checked in
+  the hook's command before bash reads the script) that waits on the
+  session's coordination digest after each turn and wakes the idle session
+  when new addressed mail arrives. It is registered with `async` and
+  `asyncRewake`, so exit code 2 starts a new turn even when the session is
+  idle: under a second from exit to turn in the Desktop Code tab on Claude
+  Code 2.1.280 (2026-09-23 probe). It fires when the watermark is past
+  `.seen` and the digest lists mail, so mail that landed during the turn
+  fires at once and a digest already shown does not fire at the next turn
+  end; firing advances `.seen` (no wake if it cannot) and logs a `wait`
+  ledger line. A lease file keeps one watcher per session, wakes are capped
+  at 20 an hour per session (mail over the cap is delayed, not dropped), and
+  a digest absent at arm time is waited for, while one that vanishes
+  mid-watch (the shim exited) ends it. The wait ends at 3540 s, under the
+  hook's enforced 3600 s timeout; `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` shortens
+  it. The plugin hooks digest now covers `stop-wake.sh` too; a manual Codex
+  bundle (four scripts, no `Stop` hook) therefore sends no digest, which
+  changes nothing, since it sends no plugin version either.
+- Codex loads the same `hooks.json`, so the `Stop` entry is a no-op there:
+  `lifecycle.ps1 -Event Stop` exits at once and the bash script exits
+  outside Claude Code. `ops/setup-codex-hooks.py` accepts the plugin's fourth
+  definition, byte-checks `stop-wake.sh`, approves it with the other three,
+  treats it as optional for Codex before 0.148 (which does not list async
+  `Stop` hooks), and no longer refuses setup over a disabled `Stop` entry.
+  Manual installs keep the three lifecycle events. An existing Codex plugin
+  install lists the new entry in Codex's startup hook review until setup
+  reruns.
 
 ### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
 - Correction and reinstatement recovery hold the target's mutation protection
@@ -139,7 +1093,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The plugin's version string is pinned to the package version, so a
   plugin-only change on master left `/plugin update` saying "already
   latest" and the version handshake seeing two equal strings. `/health`
-  now carries `hooks_digest` (SHA-256 over the four hook scripts the daemon
+  now carries `hooks_digest` (SHA-256 over the hook scripts the daemon
   image shipped with, `pseudolife_memory/plugin_hooks.py`; the image copies
   `plugin/hooks` and sets `PSEUDOLIFE_PLUGIN_DIR`), the SessionStart hooks
   send `plugin_hooks_digest` computed the same way over the scripts beside

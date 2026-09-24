@@ -816,6 +816,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
     async def _call_tool(ctx, params):
         call_headers = {}
         call_hint = coordination_hint
+        noted_thread = None
         attempt = _UpstreamAttempt(phase="initialize")
         try:
             with anyio.fail_after(_operation_timeout_seconds()):
@@ -852,6 +853,9 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                                     if name in adapter.instance_headers
                                 })
                                 adapter.note_turn()
+                                coordination_registry.note_call(
+                                    thread_id, params.name, params.arguments)
+                                noted_thread = thread_id
                             # Fetched once, at result time: the adapter's hint
                             # marks the digest delivered when read.
                             call_hint = lambda: coordination_registry.unread_hint(
@@ -878,6 +882,10 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             raise
         except Exception as exc:
             raise _transport_error(exc, attempt, "call") from None
+        if noted_thread is not None and not result.is_error:
+            # Only a receive that succeeded has read the mailbox.
+            coordination_registry.note_call(
+                noted_thread, params.name, params.arguments, succeeded=True)
         # The daemon's tools/list_changed lands on the per-call upstream
         # session above and dies with it, so a tier change would be invisible
         # to the real client — re-emit it downstream on BOTH eras: the
@@ -1008,9 +1016,13 @@ def _session_state_path(url: str):
     """Key the adapter's state file by the host session, so a resumed Claude
     Code session keeps its address instead of minting one per launch.
 
-    Claude Code exports ``CLAUDE_CODE_SESSION_ID`` to the MCP servers it
-    launches and keeps it across resume (seen 2026-09-20 in a running
-    shim's environment). It applies only with ``PSEUDOLIFE_AGENT_STATE_DIR``
+    Claude Code exports ``CLAUDE_CODE_SESSION_ID`` to the stdio MCP servers it
+    launches (seen 2026-09-20 in a running shim's environment). The value is
+    fixed for the process: ``/clear`` and an in-session ``/resume`` keep this
+    shim and its address, and ``--resume <id>`` launches it with the resumed
+    id. ``--continue``, or ``--resume`` without an id, may launch it with the
+    startup id instead, which then gets a new address (Claude Code env-vars
+    docs, checked 2026-09-23). It applies only with ``PSEUDOLIFE_AGENT_STATE_DIR``
     configured and a canonical UUID; anything else means a fresh address
     per launch, as before. An unusable directory is reported and falls
     back the same way rather than taking the memory proxy down."""
@@ -1096,10 +1108,28 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                                   "authenticated bridge with a separate host credential; "
                                   "using pull coordination.",
                                   file=sys.stderr)
+                    if os.environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower() in {
+                            "1", "true", "yes", "on"}:
+                        from pseudolife_memory.codex_doorbell import (
+                            CodexDoorbell, resolve_codex_command)
+                        command = resolve_codex_command()
+                        if command is not None:
+                            registry_options["doorbell"] = CodexDoorbell(command)
+                        else:
+                            reason = ("PSEUDOLIFE_CODEX_BIN is not an absolute path to an "
+                                      "existing file"
+                                      if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip()
+                                      else "no codex CLI found on PATH")
+                            print(f"pseudolife-mcp: Codex board doorbell off ({reason}); "
+                                  "using pull coordination.", file=sys.stderr)
                     registry = CodexCoordinationRegistry(
                         url, token, provider=provider, **registry_options)
                     stack.push_async_callback(registry.aclose)
                     kwargs["coordination_registry"] = registry
+            elif os.environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower() in {
+                    "1", "true", "yes", "on"}:
+                print("pseudolife-mcp: PSEUDOLIFE_CODEX_DOORBELL needs "
+                      "PSEUDOLIFE_AGENT_COORDINATION=1; doorbell off.", file=sys.stderr)
             await _proxy(url, token, session_uid, provider=provider, **kwargs)
             return
 
@@ -1118,8 +1148,10 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                     wake_enabled=wake, label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "agent"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
                     task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid,
-                    # The prompt hook reads this file by the same session id
-                    # it receives on stdin; a host without one gets hints only.
+                    # Keyed by the launch-time session id. The plugin hooks
+                    # map later sessions of this Claude Code process (after
+                    # /clear or /resume) back to it; a host without an id
+                    # gets hints only.
                     digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")))),
                     timeout=_ADAPTER_STARTUP_SECONDS)
             except (AdapterError, CredentialError, TimeoutError):
@@ -1208,8 +1240,8 @@ def run_shim(*, channel: bool = False) -> None:
     # (opened/closed here) and per-store stamping (rides every call as
     # X-PL-Session), so lifecycle and attribution always agree. It stays the
     # shim's own: Claude Code does export CLAUDE_CODE_SESSION_ID, which keys
-    # only the coordination state file (_session_state_path); other hosts
-    # export nothing comparable.
+    # only the coordination state file (_session_state_path) and the turn
+    # digest; other hosts export nothing comparable.
     session_uid = uuid.uuid4().hex
     _post_episode(url, None, "/api/episode/start", {
         "session_key": session_uid,

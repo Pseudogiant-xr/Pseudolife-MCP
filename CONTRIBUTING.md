@@ -27,12 +27,29 @@ finds it at `127.0.0.1:5433` on its own, reading the role password from
 `ops/.env` (`POSTGRES_PASSWORD`; `PSEUDOLIFE_TEST_PG_PASSWORD` overrides it).
 A server that answers but rejects the credentials makes the PG-backed tests
 **error**, not skip — only an absent server skips them — so a rotated
-password can never produce a green run by accident. Point at a different
-server with `PSEUDOLIFE_TEST_DATABASE_URL` (it wins whenever set):
+password can never produce a green run by accident.
+
+That instance is also the server holding your real bank (`pseudolife_memory`),
+so for it **set nothing**: the suite provisions its own per-run database
+there (see below). `PSEUDOLIFE_TEST_DATABASE_URL` exists to point the suite
+at a *different*, disposable server — CI's service container, or a throwaway
+Postgres of your own — and wins whenever set:
 
 ```bash
-export PSEUDOLIFE_TEST_DATABASE_URL="postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test"
+export PSEUDOLIFE_TEST_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:55432/pseudolife_memory_test"
 ```
+
+An override is used verbatim: its database is reset at the start of every
+PG-backed test (other connections to it terminated, then every table
+truncated) and is not dropped afterwards. The test and bench fixtures refuse
+a production bank — `pseudolife_memory`, or whichever database
+`PSEUDOLIFE_MCP_DATABASE_URL` names — before connecting, and ask the server
+which database they reached before resetting it. The suite also removes
+`PSEUDOLIFE_MCP_DATABASE_URL` from its own environment, so an exported daemon
+DSN never binds a test fixture to your bank. If that DSN leaves its database
+implicit (no `dbname`, so libpq would use the user name or a service file),
+the suite refuses to start, and the eval harnesses refuse to reset or
+replay anything: unset it — tests never need it — or name the database.
 
 URI query options and keyword connection strings are preserved when selecting
 isolated test databases. Eval-backed tests use the same server unless
@@ -62,12 +79,29 @@ Two models are load-bearing, and a missing one is a hard failure under those
 env vars: `Qwen/Qwen3-Embedding-0.6B` (the default since schema v25) and
 `all-MiniLM-L6-v2` (still pinned by the tests that guard the symmetric/ONNX
 paths). A first run *without* the offline vars downloads both — budget about
-1.2 GB. Budget for a slow suite too: real CPU embeds put a warm local run at
-~437s, up from 238s on the pre-v25 ONNX path.
+1.2 GB.
+
+Most tests do not depend on what the embedding model thinks is similar, so
+by default they embed through `tests/fake_embedder.py`: a deterministic,
+weight-free stand-in (hashed words and character trigrams, 1024-d like the
+real model) that keeps identical text identical and unrelated text apart.
+Real CPU forward passes were the suite's largest single cost. A test whose
+assertions depend on the real model's geometry (paraphrase similarity,
+dense ranking, cosine thresholds between differently worded texts,
+published retrieval floors, the model path itself) carries
+`@pytest.mark.real_model` and gets the real weights. Mark a new test the
+same way when it needs them; `tests/conftest.py` fails a `real_model` test
+that ends up embedding through a fake built by an earlier test in its
+module. `PSEUDOLIFE_TEST_EMBEDDER=real` gives every test the real weights;
+use it locally for changes to retrieval, ranking or embedding, since the
+default run exercises those only in the marked tests (CI's `test` lane
+always runs them on the real weights).
 
 All tests must pass. CI's two full-suite lanes run this exact invocation
 (`-n 2 --dist loadfile` shards whole files across two workers so
-module-scoped fixtures keep their semantics); a third lane
+module-scoped fixtures keep their semantics): the `test` lane with
+`PSEUDOLIFE_TEST_EMBEDDER=real`, so every test also runs on the real
+weights for each PR, and `test-lite-linux` with the default. A third lane
 (`test-lite-windows`) runs a narrower fixed file list. If you add
 behavior, add a test; if you fix a bug, add the test that would have
 caught it.

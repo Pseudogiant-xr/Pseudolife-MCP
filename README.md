@@ -444,7 +444,14 @@ LAN agent ────────┘  or stdio shim         (single writer)    
 
 This kills two v0.1 hazards by construction: a single writer means
 concurrent sessions can't clobber each other, and entries are transactional
-so a crash can't wipe the bank. On top of the associative store sit the
+so a crash can't wipe the bank. The single writer is enforced: the daemon
+holds a Postgres advisory-lock *writer lease* on its bank. A second daemon,
+or a script or eval that opens the live bank through the service, refuses
+to start and names the process that holds it. Stop the daemon before
+offline maintenance such as `ops/dedup_cortex.py`. If the bank fails to
+load at startup, the daemon serves nothing rather than a partly loaded
+bank, and `/health` reports `degraded` with the reason until a retry
+succeeds. On top of the associative store sit the
 canonical layers — cortex, world facts, lessons, temporal/HLC stamps
 ([the memory model](docs/guide/memory-model.md)) — joined to a typed
 knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
@@ -862,9 +869,11 @@ If `[features] hooks = false` is intentional, keep it and use the standing
 `AGENTS.md` block. Windows plugin hooks use native PowerShell 7 commands.
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
-**Codex hook trust:** setup approval is limited to PseudoLife's three current
-hook definitions. It does not approve other plugins or bypass future trust
-checks. Changed definitions need approval again. If automatic setup cannot
+**Codex hook trust:** setup approval is limited to PseudoLife's current hook
+definitions: the three lifecycle hooks, plus the plugin's `Stop` entry (Claude
+Code's opt-in wake hook, a no-op in Codex). It does not approve other
+plugins or bypass future trust checks. Changed definitions need approval
+again. If automatic setup cannot
 use the installed runtime's trust interface, it reports the problem and
 asks you to open `/hooks` to review and trust the definitions. Approved standing
 instructions remain available as fallback. Installed files alone do not
@@ -1039,9 +1048,9 @@ bank.
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only and auto-selected when installed, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder fall back to torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v41 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v42 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 

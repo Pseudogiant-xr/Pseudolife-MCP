@@ -49,6 +49,22 @@ class EmbeddingConfig:
     # with), never a raise: a model whose native default is already shorter
     # is left alone.
     max_seq_length: int = 512
+    # Precision of the torch embedder on a CPU device: "auto" / "fp32" /
+    # "bf16". GPU and ONNX backends ignore it. "auto" = bf16 only when the
+    # CPU reports native bf16 (x86 AVX512_BF16 / AMX_BF16), fp32 otherwise;
+    # bf16 on a CPU without it is slow (the 2026-09-20 CI diagnostics).
+    # Measured 2026-09-23, Qwen3-Embedding-0.6B in a throwaway container from
+    # the 0.15.0 daemon image on a Ryzen 7 9800X3D (avx512_bf16), bf16 loaded
+    # directly vs fp32: steady RSS ~1.4 GB vs ~2.85 GB, peak RSS while
+    # loading 537 MB vs 3,808 MB (bf16 weights page in on first use), a
+    # single short query encode ~88 ms vs ~160 ms. Parity through this
+    # pipeline on 400 live bank entries + 60 real queries: bf16 queries
+    # against the stored fp32 vectors keep top-8 overlap 0.994 (min 0.875),
+    # rank-0 60/60, max score delta 0.0058; the regression gate scored every
+    # arm identically to its fp32 baseline. Evidence:
+    # evals/results/embedder-cpu-bf16-probe-20260923.json.
+    # PSEUDOLIFE_EMBEDDING_CPU_DTYPE overrides this.
+    cpu_dtype: str = "auto"
 
 
 @dataclass
@@ -670,9 +686,28 @@ class LessonsConfig:
     min_confidence: float = 0.0
     # Unconsumed (and consumed) signals older than this are pruned on the dream
     # sweep so the append-only log can't grow unbounded when no extractor drains it.
-    signal_retention_days: int = 30
-    # When False, the dream skips signal drain / lesson synthesis (signals still
-    # pruned by retention).
+    # 3650 (was 30) since 2026-09-23: signals are the only evidence behind a
+    # lesson, and on the live bank 760 of 1,618 current lessons predated every
+    # retained signal, with ~14-21 more rows deleted a day. The log grows
+    # ~800 rows a month (the 30-day window held 787 rows in 792 kB on disk,
+    # indexes included). Retries are bounded separately, below.
+    signal_retention_days: int = 3650
+    # How long a PENDING signal stays eligible for synthesis. A batch that
+    # lands no lesson stays pending, and the dream reads pending signals
+    # oldest-first under synthesis_max_signals. Bounded only by retention, a
+    # cap-full batch of permanent failures was re-offered every sweep and no
+    # newer signal was ever synthesised (Codex review of PR #337, 2026-09-23).
+    # Past this age a pending signal is kept as evidence but no longer
+    # offered. 30 is a CHOSEN bound, not a measured one: the retry lifetime
+    # the old 30-day retention implied. 0 retries for the whole retention.
+    # The age counts from when the signal was recorded, not from its first
+    # attempt: signals never offered (synthesis off, an extractor outage or
+    # backlog longer than this) age out of eligibility too. They stay in
+    # the table, and raising this value offers them again.
+    signal_retry_days: int = 30
+    # When False (or enabled=False), the dream skips signal drain / lesson
+    # synthesis and the retention prune with it: signals are kept, not pruned.
+    # Only those younger than signal_retry_days are offered once it is back on.
     synthesize_in_dream: bool = True
     # Auto-outcome inference (spec 2026-07-18): infer signals for episodes
     # that close with entries but zero explicit outcomes. origin="inferred";
@@ -1037,8 +1072,11 @@ class McpConfig:
     * the cortex block sized to the caller's ``top_k`` rather than a fixed 5;
     * ``memory_fact_get``'s bookkeeping keys behind ``verbose=True``.
 
-    ``compact_payloads: False`` restores the pre-cut payloads verbatim. All
-    three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
+    ``compact_payloads: False`` restores the pre-cut payloads verbatim,
+    except that a superseded hit still serves the short ``replaced_by``
+    pointer rather than the replacement's full text (2026-09-23: a
+    correctness change, not a size cut; ``verbose=True`` serves the text).
+    All three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
     the service layer are untouched, so no eval number can move (the eval
     harness calls the service, pinned by
     ``tests/test_agent_payload_budget.py``).
@@ -1054,9 +1092,10 @@ class McpConfig:
     # consolidated notes, not one-liners, and 600 chars is enough to judge
     # a hit and usually to act on it, with ``memory_get`` for the rest. It
     # halves the served entry text (9,464 -> 4,550 mean chars) and takes
-    # 33% off the call. It does NOT apply to ``superseded_by_text``, which
-    # is exempt: that field has no recovery path, since a compact entry
-    # carries no id for the superseding entry (see ``_compact_entry``).
+    # 33% off the call. It does NOT size a superseded hit's
+    # ``replaced_by.preview``, which has its own fixed 120-char cap
+    # (``_REPLACED_BY_PREVIEW_CHARS`` in ``mcp_server``) and carries the
+    # successor's id for ``memory_get``.
     # Raise it for long-form corpora where the tail of a
     # note carries the answer. ``memory_recall`` has capped its supporting
     # texts at 200 since 2026-07-10 (``_RECALL_TEXT_CHARS``); search
@@ -1188,12 +1227,27 @@ class CoordinationConfig:
     # Initial context limit, not a measured throughput tuning constant.
     awareness_limit: int = 5
     allowed_principals: list[str] = field(default_factory=list)
+    # Days the board's audit log (coordination_events, schema v42) keeps an
+    # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
+    # still blank after 24 h. Measured 2026-09-24
+    # (evals/results/coordination-audit-volume-20260924.json): a synthetic
+    # replay at the scale of the 2026-09-23/24 fifteen-session trial (40
+    # agents, 623 messages, with assumed status-update and attach counts)
+    # leaves 2,671 events in 1.6 MB with indexes, so 90 such nights would be
+    # 144.5 MB. Ninety days outlives the 7-day backup rotation
+    # (ops/backup.ps1) by a quarter of retrospectives while keeping growth
+    # bounded. The log is cut on UTC day boundaries, so an event stays up to
+    # a day longer than this.
+    audit_retention_days: int = 90
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
             raise ValueError("coordination.enabled must be a boolean")
         if type(self.awareness_limit) is not int or not 1 <= self.awareness_limit <= 20:
             raise ValueError("coordination.awareness_limit must be an integer in 1..20")
+        if type(self.audit_retention_days) is not int or self.audit_retention_days < 0:
+            raise ValueError("coordination.audit_retention_days must be a whole number of "
+                             "days, 0 or more (0 keeps the audit log forever)")
         if not isinstance(self.allowed_principals, list) or any(
             not isinstance(p, str) or not p.strip() for p in self.allowed_principals
         ):

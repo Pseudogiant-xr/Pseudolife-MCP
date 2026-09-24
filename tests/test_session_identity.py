@@ -103,6 +103,7 @@ def test_pointer_legacy_shape_hydration_from_meta(pg_service, tmp_path):
 
     pg_service._storage.set_meta(
         "active_session_pointer", {"session_id": "preTtlSess"})  # no "ts"
+    pg_service._storage.close()  # the first daemon exits, releasing the bank
     svc2 = MemoryService(data_dir=tmp_path / "second")
     try:
         svc2._ensure_init()  # env still points at the test PG (fixture-set)
@@ -472,6 +473,7 @@ def test_tombstone_survives_daemon_restart(pg_service, tmp_path):
     svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 30_000)
     assert ep["id"] not in svc._cms.episodes.episodes       # close+sweep, one pass
     from pseudolife_memory.service import MemoryService
+    svc._storage.close()  # the first daemon exits, releasing the bank
     svc2 = MemoryService(data_dir=tmp_path / "restart")
     svc2._ensure_init()
     res = svc2.store("write after restart", source="t", episode=ep["id"][:12])

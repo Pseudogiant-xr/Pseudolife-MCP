@@ -16,7 +16,7 @@ print(json.dumps({
     "environment": {name: os.environ.get(name) for name in (
         "ImageOS", "ImageVersion", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
         "OPENBLAS_NUM_THREADS", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE",
-        "PSEUDOLIFE_REQUIRE_TEST_POSTGRES",
+        "PSEUDOLIFE_REQUIRE_TEST_POSTGRES", "PSEUDOLIFE_TEST_EMBEDDER",
     )},
     "packages": {name: importlib.metadata.version(name) for name in (
         "pytest", "pytest-xdist", "torch", "sentence-transformers",

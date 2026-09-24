@@ -595,3 +595,180 @@ def test_cli_compare_accepts_cascade_arm(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["arm"] == "cascade"
     assert out["delta"] == pytest.approx(0.5)   # a: 1/2 vs b: 0/2
+
+
+# ── embedder precision (cpu_dtype "auto" differs by host) ─────────────────
+_BF16 = {"backend": "torch", "device": "cpu", "dtype": "bf16"}
+_FP32 = {"backend": "torch", "device": "cpu", "dtype": "fp32"}
+
+
+def _stamped(rows: list[dict], desc: dict,
+             stage: str = "rebuild_contexts") -> list[dict]:
+    return [{**r, "embedder": {stage: desc}} for r in rows]
+
+
+def _seed_stamped(tmp_path, tag: str, desc: dict | None,
+                  correct: bool = True) -> None:
+    rows = [_row("q0", correct=correct), _row("q1"), _row("q2")]
+    if desc is not None:
+        rows = _stamped(rows, desc)
+    for t in (tag, f"{tag}-r2"):
+        _write_jsonl(replicate.result_file("oracle", "e4b-ft", t, tmp_path),
+                     rows)
+
+
+def test_strip_judged_keeps_the_embedder_stamp():
+    """A spawned replicate re-judges the same contexts, so it inherits the
+    stamp of the embedder that built them."""
+    stripped = replicate.strip_judged(_stamped([_row("q1")], _BF16))[0]
+    assert stripped["embedder"] == {"rebuild_contexts": _BF16}
+
+
+def test_aggregate_carries_the_rows_embedder_stamp():
+    agg = replicate.aggregate({"t": _stamped([_row("q0"), _row("q1")],
+                                             _BF16)})
+    assert agg["embedder"] == {"rebuild_contexts": _BF16}
+
+
+def test_aggregate_of_legacy_rows_has_no_embedder_key():
+    assert "embedder" not in replicate.aggregate({"t": [_row("q0")]})
+
+
+def test_make_baseline_records_the_embedder_it_was_measured_with():
+    agg = {**_agg(0.7), "embedder": {"rebuild_contexts": _FP32}}
+    base = replicate.make_baseline(agg, commit="abc")
+    assert base["embedder"] == {"rebuild_contexts": _FP32}
+    assert "embedder" not in replicate.make_baseline(_agg(0.7), commit="abc")
+
+
+def _gate(tmp_path, run_desc, base_desc, capsys) -> tuple[int, str]:
+    _seed_stamped(tmp_path, "arm1-gate", run_desc)
+    baseline_path = tmp_path / "regression_gate.baseline.json"
+    baseline = replicate.make_baseline(_agg(1.0), commit="abc")
+    if base_desc is not None:
+        baseline["embedder"] = {"rebuild_contexts": base_desc}
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    capsys.readouterr()
+    rc = replicate.main(["gate-check", "--extractor", "e4b-ft",
+                         "--tag", "arm1-gate",
+                         "--baseline", str(baseline_path),
+                         "--results-dir", str(tmp_path)])
+    return rc, capsys.readouterr().out
+
+
+def test_gate_check_warns_when_the_run_and_baseline_precisions_differ(
+        tmp_path, capsys):
+    """Warn, not fail: bf16 and fp32 scored identically on the gate, so a
+    precision change is a caveat on the verdict, not a regression."""
+    rc, out = _gate(tmp_path, _BF16, _FP32, capsys)
+    assert rc == 0
+    warnings = [ln for ln in out.splitlines() if ln.startswith("WARNING")]
+    assert len(warnings) == 1
+    assert "bf16" in warnings[0] and "fp32" in warnings[0]
+    assert "REGRESSION GATE: PASS" in out
+
+
+def test_gate_check_is_silent_when_precisions_match(tmp_path, capsys):
+    rc, out = _gate(tmp_path, _BF16, _BF16, capsys)
+    assert rc == 0
+    assert "WARNING" not in out
+
+
+def test_gate_check_reads_an_unstamped_baseline_as_unknown(tmp_path, capsys):
+    """The committed baseline predates stamping. Unknown is not a
+    mismatch — but the output says it was not compared."""
+    rc, out = _gate(tmp_path, _BF16, None, capsys)
+    assert rc == 0
+    assert "WARNING" not in out
+    assert "baseline unknown" in out
+    # both sides legacy: nothing to compare, nothing to warn about
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    rc, out = _gate(legacy, None, None, capsys)
+    assert rc == 0 and "WARNING" not in out
+
+
+def test_cli_baseline_writes_the_embedder_stamp(tmp_path):
+    _seed_stamped(tmp_path, "arm1-gate", _FP32)
+    out = tmp_path / "baseline.json"
+    assert replicate.main(["baseline", "--extractor", "e4b-ft",
+                           "--tag", "arm1-gate", "--out", str(out),
+                           "--results-dir", str(tmp_path)]) == 0
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert saved["embedder"] == {"rebuild_contexts": _FP32}
+
+
+def test_cli_agg_writes_the_embedder_stamp(tmp_path):
+    _seed_stamped(tmp_path, "arm1", _BF16)
+    assert replicate.main(["agg", "--extractor", "e4b-ft", "--tag", "arm1",
+                           "--results-dir", str(tmp_path)]) == 0
+    agg = json.loads((tmp_path / "longmemeval-ku-oracle-e4b-ft-arm1.agg.json"
+                      ).read_text(encoding="utf-8"))
+    assert agg["embedder"] == {"rebuild_contexts": _BF16}
+
+
+def test_cli_compare_warns_when_the_two_runs_precisions_differ(
+        tmp_path, capsys):
+    _seed_stamped(tmp_path, "a", _BF16)
+    _seed_stamped(tmp_path, "b", _FP32, correct=False)
+    out = tmp_path / "cmp.json"
+    assert replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "a",
+                           "--b-tag", "b", "--arm", "cortex",
+                           "--out", str(out),
+                           "--results-dir", str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    # stdout stays one JSON document; the warning goes to stderr
+    printed = json.loads(captured.out)
+    assert "WARNING" in captured.err
+    assert "bf16" in captured.err and "fp32" in captured.err
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert saved == printed
+    assert len(saved["embedder_warnings"]) == 1
+    assert saved["a_embedder"] == {"rebuild_contexts": _BF16}
+    assert saved["b_embedder"] == {"rebuild_contexts": _FP32}
+
+
+def test_cli_compare_reads_unstamped_runs_as_unknown(tmp_path, capsys):
+    _seed_stamped(tmp_path, "a", _BF16)
+    _seed_stamped(tmp_path, "b", None, correct=False)
+    out = tmp_path / "cmp.json"
+    assert replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "a",
+                           "--b-tag", "b", "--arm", "cortex",
+                           "--out", str(out),
+                           "--results-dir", str(tmp_path)]) == 0
+    assert "WARNING" not in capsys.readouterr().err
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert saved["embedder_warnings"] == []
+    assert saved["a_embedder"] == {"rebuild_contexts": _BF16}
+    assert saved["b_embedder"] == "unknown"
+
+
+def test_cli_compare_warns_on_a_rebuilt_run_against_its_source(tmp_path,
+                                                               capsys):
+    """rebuild_contexts.py's own workflow: `diag` extracted in fp32, rebuilt
+    into `diag-knobs` on a bf16 host, compared on the default cortex arm.
+    The source's cortex ranking came from its (known) extract stage."""
+    source = [{**_row(f"q{i}"), "embedder": {"extract": _FP32}}
+              for i in range(3)]
+    rebuilt = [{**r, "embedder": {"extract": _FP32,
+                                  "rebuild_contexts": _BF16}}
+               for r in source]
+    for tag, rows in (("diag", source), ("diag-knobs", rebuilt)):
+        for t in (tag, f"{tag}-r2"):
+            _write_jsonl(replicate.result_file("oracle", "e4b-ft", t,
+                                               tmp_path), rows)
+    assert replicate.main(["compare", "--extractor", "e4b-ft",
+                           "--tag", "diag-knobs", "--b-tag", "diag",
+                           "--results-dir", str(tmp_path)]) == 0
+    err = capsys.readouterr().err
+    assert "WARNING embedder rebuild_contexts" in err
+
+
+def test_aggregate_counts_rows_once_not_once_per_replicate():
+    """Replicates are copies of one file's rows; a mixed stage's row
+    counts must describe that file, not rows x replicates."""
+    rows = [{**_row("q0"), "embedder": {"extract": _BF16}},
+            {**_row("q1"), "embedder": {"extract": _FP32}}]
+    agg = replicate.aggregate({"t": rows, "t-r2": [dict(r) for r in rows]})
+    assert agg["embedder"]["extract"]["mixed"] == [
+        {"embedder": _BF16, "rows": 1}, {"embedder": _FP32, "rows": 1}]

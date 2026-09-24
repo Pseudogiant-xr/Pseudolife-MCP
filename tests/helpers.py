@@ -9,9 +9,11 @@ about what it depends on. Dream-specific doubles live in
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import importlib
 import json
 import os
+import re
 import socket
 
 import torch
@@ -97,6 +99,42 @@ def pg_reachable(url: str, timeout: float = 3.0) -> bool:
         raise PostgresSetupError(
             setup_failure_message(url.host, exc, url)
         ) from None
+
+
+@contextmanager
+def private_bank(url: str, label: str):
+    """A private database on the test server, for a daemon of its own.
+
+    A bank has exactly one writer (the writer lease), so a daemon that runs
+    beside another one, or that may outlive its test (a shim-autostarted
+    daemon is only reaped on Windows), needs a bank of its own, as it would
+    in any real deployment. Yields the bank's URL. On exit the database is
+    dropped ``WITH (FORCE)``, which also cuts off a daemon that outlived its
+    test. Locally the name keeps the run's pid as its last ``_`` part, so a
+    hard-killed run's leftover is pruned like the run's own database
+    (``pg_fixtures._prune_dead_run_dbs``).
+    """
+    import psycopg
+
+    from tests.pg_defaults import (
+        RedactedUrl, conninfo_dbname, conninfo_with_dbname)
+
+    base = conninfo_dbname(url)
+    name = (re.sub(r"_(\d+)$", rf"_{label}_\1", base)
+            if re.search(r"_\d+$", base) else f"{base}_{label}")
+    admin = RedactedUrl(conninfo_with_dbname(url, "postgres"))
+    with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
+        conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        conn.execute(f'CREATE DATABASE "{name}"')
+    try:
+        yield RedactedUrl(conninfo_with_dbname(url, name))
+    finally:
+        try:
+            with psycopg.connect(admin, autocommit=True,
+                                 connect_timeout=5) as conn:
+                conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        except Exception:  # noqa: BLE001 — best effort; pruning covers leftovers
+            pass
 
 
 def spawn_serve(port: int, data_dir, database_url: str, *,

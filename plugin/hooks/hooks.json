@@ -1,5 +1,5 @@
 {
-  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory discipline + end-of-session episode close",
+  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory discipline + end-of-session episode close + opt-in Stop hook that wakes an idle session on board mail",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -33,6 +33,20 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.sh\"",
             "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SessionEnd",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ \"$PSEUDOLIFE_AGENT_WAKE_HOOK\" != 1 ] || bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event Stop",
+            "async": true,
+            "asyncRewake": true,
+            "timeout": 3600
           }
         ]
       }

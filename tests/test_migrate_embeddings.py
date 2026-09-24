@@ -490,7 +490,7 @@ def test_apply_crash_after_two_tables_keeps_entries_armed_then_resumes(
     ).fetchone()
     # Literal pin, bump alongside SCHEMA_META_VERSION -- see the other
     # tests/test_schema_version.py CURRENT_SCHEMA pin, same convention.
-    assert meta[0] == 41
+    assert meta[0] == 42
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +541,7 @@ def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
     assert cos_doc > 0.99, f"cos_doc {cos_doc:.6f} for text={text!r}"
 
 
+@pytest.mark.real_model
 def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
     pg_conn = v24_bank
     # Keep entries.embedding NOT NULL going into the migration -- the
@@ -604,7 +605,7 @@ def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
     meta = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
-    assert meta[0] == 41
+    assert meta[0] == 42
 
     # Write-path fidelity, at least one row per table (MINOR 4): the real
     # pipeline test above spent its cost without collecting this evidence

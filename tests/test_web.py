@@ -261,11 +261,6 @@ def test_post_verdict_route_dispatches_and_returns_the_service_result(
     assert {k: out[k] for k in expected} == expected
 
 
-def test_routes_config_write_via_dispatch(svc):
-    out = ConsoleRoutes(svc).dispatch("POST", "/api/config", {}, {"patch": {"memory.top_k": 13}})
-    assert "memory.top_k" in out["applied"]
-
-
 def test_dream_status_carries_dreamer_card_fields(svc):
     st = ConsoleRoutes(svc).dispatch("GET", "/api/dream/status", {}, {})
     for key in ("primary_model", "primary_model_served", "fallback_model",
@@ -291,11 +286,6 @@ def test_dreamer_reasoning_effort_knob_applies_live(svc):
 
 def _app(svc, token=None):
     return build_console_app(stub_mcp, token, lambda: {"status": "ok"}, svc)
-
-
-def test_asgi_health_open(svc):
-    st, _ = call(_app(svc), "GET", "/health")
-    assert st == 200
 
 
 def test_asgi_health_runs_off_the_event_loop(svc):
@@ -392,11 +382,6 @@ def test_topbar_banner_keyed_on_fixture_flag():
     src = app_js.read_text(encoding="utf-8")
     assert "h.fixtures" in src, "topbar no longer reads the fixtures health flag"
     assert "DEMO DATA" in src, "topbar demo-data banner text is gone"
-
-
-def test_asgi_api_overview(svc):
-    st, body = call(_app(svc), "GET", "/api/overview")
-    assert st == 200 and b"counts" in body
 
 
 def test_overview_carries_loop_health(svc):

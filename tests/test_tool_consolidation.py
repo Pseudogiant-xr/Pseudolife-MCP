@@ -362,7 +362,19 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Measured 2026-09-22 after adding the full-tier memory_reinstate
     # contract: full is 17,238 chars across 38 tools. The 17,250 cap leaves
     # 12 chars and keeps the minimal/core ceilings unchanged.
-    budgets = {"minimal": 5000, "core": 11500, "full": 17250}
+    # Measured 2026-09-23 after memory_search's supersession sentence
+    # changed from "prefer superseded_by_text" (a contract the review
+    # found wrong for ~4 in 10 legacy links) to the replaced_by pointer
+    # contract (field, verified flag, preview test, no chains): +242 chars
+    # on a minimal-tier tool, so minimal is 5,222 and full 17,480. Both
+    # caps move deliberately rather than cut another sentence of the same
+    # description; core (11,172) still fits.
+    # 2026-09-23 follow-up (replaced_by.current, memory_get's pointer):
+    # paid for inside the same descriptions (memory_search's min(5, top_k)
+    # rule moved into its top_k param description), caps unchanged —
+    # minimal 5,215, core 11,178, full 17,466.
+    # The audit-log notice adds five characters to core/full descriptions.
+    budgets = {"minimal": 5250, "core": 11500, "full": 17500}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
@@ -402,6 +414,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # full stood at 8398 before the fix.
     # Measured 2026-09-22 after memory_reinstate's nine exact-input
     # descriptions: full is 8,832 chars. The 8,925 cap leaves 93 chars.
+    # 2026-09-24: memory_search's top_k gained the min(5, top_k) rule its
+    # description dropped (+13): minimal 2,494, core 5,248, full 8,845 —
+    # core has 2 chars left.
     param_budgets = {"minimal": 2600, "core": 5250, "full": 8925}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
@@ -432,8 +447,9 @@ def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkey
     # Step-3c driver verb: an agent triaging the deep response's
     # lesson_duplicates / world_duplicates must be able to record "these
     # slots are distinct" over MCP (parity with dismiss_pair). src/dst are
-    # the listed "entity|attribute" keys; the MCP layer splits at the FIRST
-    # "|" (listing keys fold literal pipes, so the split is unambiguous).
+    # the listed "entity|attribute" keys; the MCP layer decodes them
+    # (service._parse_slot_key: listing keys spell a literal "|" in a name
+    # as "%7C", so each has exactly one bare "|").
     mod = _reload(tmp_path, monkeypatch)
     calls: list[tuple] = []
     monkeypatch.setattr(
@@ -444,10 +460,21 @@ def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkey
                   {"action": "dismiss_slot_pair", "store": "lesson",
                    "src": "deploy-daemon|approach", "dst": "deploy-host|pitfall"})
     assert out == {"dismissed": True}
+    out = mod.memory_graph_review("dismiss_slot_pair", store="lesson",
+                                  src="ci%7Ccd-deploy|approach",
+                                  dst="ci-cd-deploy|approach")
+    assert out == {"dismissed": True}
     assert calls == [("lesson", "deploy-daemon", "approach",
-                      "deploy-host", "pitfall")]
+                      "deploy-host", "pitfall"),
+                     ("lesson", "ci|cd-deploy", "approach",
+                      "ci-cd-deploy", "approach")]
     bad = mod.memory_graph_review("dismiss_slot_pair", store="lesson", src="no-pipe")
     assert bad.get("error") == "store_src_dst_required"
+    # Two bare pipes are not a listed key: refuse rather than guess a split.
+    bad = mod.memory_graph_review("dismiss_slot_pair", store="lesson",
+                                  src="ci|cd deploy|approach", dst="x|y")
+    assert bad.get("error") == "store_src_dst_required"
+    assert len(calls) == 2
 
 
 def test_graph_review_restore_slot_routes_to_service(tmp_path: Path, monkeypatch) -> None:
@@ -471,12 +498,22 @@ def test_graph_review_restore_slot_routes_to_service(tmp_path: Path, monkeypatch
     out = _invoke("memory_graph_review",
                   {"action": "restore_slot", "store": "world", "src": "acme"})
     assert out == {"restored": 1}
+    # A literal "|" in a name is listed as "%7C", in a key or its entity half.
+    for src in ("ci%7Ccd-deploy|approach", "ci%7Ccd-deploy"):
+        assert mod.memory_graph_review(
+            "restore_slot", store="lesson", src=src) == {"restored": 1}
     assert calls == [("lesson", "deploy-daemon", "approach", {"decided_by": "agent"}),
-                     ("world", "acme", None, {"decided_by": "agent"})]
+                     ("world", "acme", None, {"decided_by": "agent"}),
+                     ("lesson", "ci|cd-deploy", "approach", {"decided_by": "agent"}),
+                     ("lesson", "ci|cd-deploy", None, {"decided_by": "agent"})]
     bad = mod.memory_graph_review("restore_slot", store="fact", src="x|y")
     assert bad.get("error") == "store_src_required"
     bad = mod.memory_graph_review("restore_slot", store="lesson")
     assert bad.get("error") == "store_src_required"
+    bad = mod.memory_graph_review("restore_slot", store="lesson",
+                                  src="ci|cd deploy|approach")
+    assert bad.get("error") == "store_src_required"
+    assert len(calls) == 4
 
 
 # ── served policy text (2026-09-02) ───────────────────────────────────────

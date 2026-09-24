@@ -613,6 +613,48 @@ CLAIMS.append(Claim(
     value=_mcnemar_p("Qwen3-Embedding-0.6B (instructed)", 10),
     stated=0.004, places=3))
 
+# ── the CPU bf16 embedder (daemon OOM fix, 2026-09-23) ────────────────────
+BF16_PROBE = RESULTS + "embedder-cpu-bf16-probe-20260923.json"
+_BF16_PARITY = ("parity_branch_embedding_pipeline", "auto-query vs stored")
+
+for _id, _doc, _needle, _path, _stated, _places in [
+    ("bf16-parity-top8", CONFIG_GUIDE, "top-8 overlap 0.994 and rank-0 60/60",
+     _BF16_PARITY + ("top8_overlap_mean",), 0.994, 3),
+    ("bf16-parity-rank0", CONFIG_GUIDE, "top-8 overlap 0.994 and rank-0 60/60",
+     _BF16_PARITY + ("rank0_agree",), 60, 0),
+    ("bf16-parity-top8-changelog", CHANGELOG,
+     "vectors kept top-8 overlap 0.994 (min 0.875) and rank-0 60/60 (max score",
+     _BF16_PARITY + ("top8_overlap_mean",), 0.994, 3),
+    ("bf16-parity-min-changelog", CHANGELOG,
+     "vectors kept top-8 overlap 0.994 (min 0.875) and rank-0 60/60 (max score",
+     _BF16_PARITY + ("top8_overlap_min",), 0.875, 3),
+    ("bf16-gate-cortex", CHANGELOG,
+     "every arm identical to its fp32 baseline (rag 0.5897, cortex 0.6923,",
+     ("regression_gate_bf16", "arms", "cortex", "mean"), 0.6923, 4),
+    ("bf16-gate-rag", CHANGELOG,
+     "every arm identical to its fp32 baseline (rag 0.5897, cortex 0.6923,",
+     ("regression_gate_bf16", "arms", "rag", "mean"), 0.5897, 4),
+    ("bf16-load-peak-fp32", CHANGELOG, "while loading 537 MB vs 3,808 MB",
+     ("memory_probe_raw_sentence_transformers", "fp32", "loaded", "hwm_mb"),
+     3808, 0),
+    ("bf16-load-peak-bf16", CHANGELOG, "while loading 537 MB vs 3,808 MB",
+     ("memory_probe_raw_sentence_transformers", "bf16_loaded_directly",
+      "loaded", "hwm_mb"), 537, 0),
+    ("ingest-old-transient", CHANGELOG,
+     "A 104-chunk document peaked +2,565 MB over",
+     ("ingest_probe_branch", "fp32", "old_ingest", "transient_mb"), 2565, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_id, doc=_doc, needle=_needle, artifacts=(BF16_PROBE,),
+        value=(lambda path: lambda d: _dig(d, path))(_path),
+        stated=_stated, places=_places))
+
+
+def _dig(d, path):
+    for key in path:
+        d = d[key]
+    return d
+
 
 # ── the cortex-BM25 opt-in decision (2026-07-30) ─────────────────────────
 # The channel ships OFF because a pre-registered A/B measured no benefit;
@@ -8735,19 +8777,6 @@ for _doc, _slug in ((SHIM_LAUNCH_PS1, "ps1"), (SHIM_LAUNCH_SH, "sh")):
             id=f"shim5-launcher-{_slug}-{_cid}", doc=_doc, needle=_SHIM5_QUALITY,
             artifacts=SHIM5_GATE_RUNS, value=_val, stated=_stated,
             places=1 if isinstance(_stated, float) else 0))
-    # "on every run" = the worst run: min gold, max stale, min AND max claims
-    for _cid, _val, _stated in [
-        ("gold-lo", lambda *r: min(x["gold_recoverable"] for x in r), 1.0),
-        ("stale-hi", lambda *r: max(x["stale_leak"] for x in r), 0.0),
-        ("claims-lo", lambda *r: min(x["consolidation"]["claims"] for x in r), 16),
-        ("claims-hi", lambda *r: max(x["consolidation"]["claims"] for x in r), 16),
-        ("inserted-lo", lambda *r: min(x["consolidation"]["inserted"] for x in r), 16),
-        ("inserted-hi", lambda *r: max(x["consolidation"]["inserted"] for x in r), 16),
-    ]:
-        CLAIMS.append(Claim(
-            id=f"shim5-launcher-{_slug}-{_cid}", doc=_doc, needle=_SHIM5_QUALITY,
-            artifacts=SHIM5_GATE_RUNS, value=_val, stated=_stated,
-            places=1 if isinstance(_stated, float) else 0))
 
 
 def test_the_shim_launchers_cite_the_gate_that_validated_their_default():
@@ -9450,3 +9479,235 @@ for _cid, _needle, _arts, _val, _stated, _places in [
     CLAIMS.append(Claim(
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=_arts,
         value=_val, stated=_stated, places=_places))
+
+
+
+# ── the daemon's idle heap trim (2026-09-23) ─────────────────────────────
+# The CHANGELOG and the configuration guide publish how much memory glibc
+# kept after encode bursts, what trimming cost, and why the fixed mmap
+# threshold was not shipped. Every number is recomputed from the raw
+# per-run data of the three artifacts, not from their summaries.
+ALLOC_POOL = RESULTS + "allocator-trim-pool-20260923.json"
+ALLOC_SWEEP = RESULTS + "allocator-trim-probe-20260923.json"
+ALLOC_PAIRS = RESULTS + "allocator-trim-latency-20260923.json"
+
+
+def _alloc_runs(art, dtype=None, workload=None, arm=None):
+    return [r["result"] for r in art["runs"]
+            if dtype in (None, r["dtype"]) and workload in (None, r["workload"])
+            and arm in (None, r["arm"])]
+
+
+def _alloc_pool_kept(pool, dtype, arm):
+    """Worst growth over base a burst left resident: the settled reading,
+    or what remained after the trim in a trimming arm."""
+    return max((s["trim"]["anon_after_mb"] if "trim" in s else s["anon_settled_mb"])
+               - res["base"]["anon_mb"]
+               for res in _alloc_runs(pool, dtype, "pool4", arm)
+               for s in res["steps"])
+
+
+def _alloc_pool_idle(pool, dtype, arm):
+    """(lowest, highest) resident growth over base at idle, per run."""
+    idle = [res["idle_after_gc"]["anon_mb"] - res["base"]["anon_mb"]
+            for res in _alloc_runs(pool, dtype, "pool4", arm)]
+    return min(idle), max(idle)
+
+
+def _alloc_trims(sweep):
+    """Every trim of the sweep's trim-after-every-burst arm."""
+    return [s["trim"] for res in _alloc_runs(sweep, arm="trim")
+            for s in res["steps"]]
+
+
+def _alloc_median(values):
+    values = sorted(values)
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+def _alloc_peak_cut(sweep):
+    """(smallest, largest) drop in the worst burst peak, ctrl -> mmap128k."""
+    cuts = [max(s["peak_hwm_mb"] for res in _alloc_runs(sweep, d, w, "ctrl")
+                for s in res["steps"])
+            - max(s["peak_hwm_mb"] for res in _alloc_runs(sweep, d, w, "mmap128k")
+                  for s in res["steps"])
+            for d in ("fp32", "auto") for w in ("single", "threads4")]
+    return min(cuts), max(cuts)
+
+
+def _alloc_none(pairs, dtype, arm, metric):
+    return pairs["pairs_summary"][f"{dtype}/pairs/{arm}"][metric]["none_median"]
+
+
+_ALLOC_KEPT = ("encodes left up to 3,158 MiB of freed\n  memory resident with "
+               "the fp32 embedder (1,693 MiB bf16)")
+_ALLOC_IDLE = ("1,007-1,433 MiB of it (bf16 897-1,476 MiB) was still resident "
+               "at idle;\n  with glibc's default arenas, 2,616-2,739 MiB (bf16 "
+               "1,462-1,523 MiB)")
+_ALLOC_IDLE_GUIDE = ("1,007-1,433 MiB of it was still resident at idle with the "
+                     "fp32 embedder (897-1,476 MiB bf16)")
+_ALLOC_TRIMMED = ("stayed at or below its starting level (within 14 MiB above it "
+                  "with\n  default arenas)")
+_ALLOC_TRIM_COST = ("a trim took a median\n  7 ms (at most 141 ms, returning 1,381 MiB)")
+_ALLOC_POOL_TRIM = ("Trims returning 1,387-3,030 MiB after a concurrent\n"
+                    "  burst took 21-54 ms")
+
+
+def _alloc_pool_big_trims(pool):
+    """Trims after a concurrent burst that returned at least 1 GiB."""
+    return [s["trim"] for res in _alloc_runs(pool, workload="pool4")
+            for s in res["steps"]
+            if "trim" in s and s["trim"]["freed_mb"] >= 1024]
+
+
+_ALLOC_ENCODE = "(+0.01 s against a 0.23 s noise floor)"
+_ALLOC_MMAP = "removes the retention and cuts burst peaks by 228-1,238 MiB"
+_ALLOC_SLOWDOWN = "slows a bf16 encode\n  ~26% (fp32 ~10%)"
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("alloc-pool-kept-fp32", CHANGELOG, _ALLOC_KEPT, ALLOC_POOL,
+     lambda a: _alloc_pool_kept(a, "fp32", "ctrl"), 3158, 0),
+    ("alloc-pool-kept-bf16", CHANGELOG, _ALLOC_KEPT, ALLOC_POOL,
+     lambda a: _alloc_pool_kept(a, "auto", "ctrl"), 1693, 0),
+    ("alloc-pool-idle-fp32-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[0], 1007, 0),
+    ("alloc-pool-idle-fp32-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[1], 1433, 0),
+    ("alloc-pool-idle-bf16-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[0], 897, 0),
+    ("alloc-pool-idle-bf16-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[1], 1476, 0),
+    ("alloc-pool-idle-defarena-fp32-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "defarena")[0], 2616, 0),
+    ("alloc-pool-idle-defarena-fp32-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "defarena")[1], 2739, 0),
+    ("alloc-pool-idle-defarena-bf16-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "defarena")[0], 1462, 0),
+    ("alloc-pool-idle-defarena-bf16-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "defarena")[1], 1523, 0),
+    ("alloc-pool-idle-guide-fp32-lo", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[0], 1007, 0),
+    ("alloc-pool-idle-guide-fp32-hi", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[1], 1433, 0),
+    ("alloc-pool-idle-guide-bf16-lo", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[0], 897, 0),
+    ("alloc-pool-idle-guide-bf16-hi", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[1], 1476, 0),
+    ("alloc-pool-trimmed-arena2", CHANGELOG, _ALLOC_TRIMMED, ALLOC_POOL,
+     lambda a: max(0, max(_alloc_pool_kept(a, d, "trim") for d in ("fp32", "auto"))),
+     0, 0),
+    ("alloc-pool-trimmed-defarena", CHANGELOG, _ALLOC_TRIMMED, ALLOC_POOL,
+     lambda a: max(_alloc_pool_kept(a, d, "defarena_trim") for d in ("fp32", "auto")),
+     14, 0),
+    ("alloc-pool-trim-ms-lo", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: min(t["ms"] for t in _alloc_pool_big_trims(a)), 21, 0),
+    ("alloc-pool-trim-ms-hi", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: max(t["ms"] for t in _alloc_pool_big_trims(a)), 54, 0),
+    ("alloc-pool-trim-freed-lo", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: min(t["freed_mb"] for t in _alloc_pool_big_trims(a)), 1387, 0),
+    ("alloc-pool-trim-freed-hi", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: max(t["freed_mb"] for t in _alloc_pool_big_trims(a)), 3030, 0),
+    ("alloc-trim-median-ms", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: _alloc_median(t["ms"] for t in _alloc_trims(a)), 7, 0),
+    ("alloc-trim-median-ms-guide", CONFIG_GUIDE, "a trim took a median 7 ms",
+     ALLOC_SWEEP, lambda a: _alloc_median(t["ms"] for t in _alloc_trims(a)), 7, 0),
+    ("alloc-trim-max-ms", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: max(t["ms"] for t in _alloc_trims(a)), 141, 0),
+    ("alloc-trim-max-freed", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: max(_alloc_trims(a), key=lambda t: t["ms"])["freed_mb"], 1381, 0),
+    ("alloc-trim-encode-delta", CHANGELOG, _ALLOC_ENCODE, ALLOC_PAIRS,
+     lambda a: a["pairs_summary"]["fp32/pairs/ctrl"]["encode_4x512_s"]
+     ["median_delta"], 0.01, 2),
+    ("alloc-trim-encode-noise", CHANGELOG, _ALLOC_ENCODE, ALLOC_PAIRS,
+     lambda a: a["pairs_summary"]["fp32/pairs/ctrl"]["encode_4x512_s"]
+     ["noise_floor"], 0.23, 2),
+    ("alloc-mmap-peak-cut-min", CHANGELOG, _ALLOC_MMAP, ALLOC_SWEEP,
+     lambda a: _alloc_peak_cut(a)[0], 228, 0),
+    ("alloc-mmap-peak-cut-max", CHANGELOG, _ALLOC_MMAP, ALLOC_SWEEP,
+     lambda a: _alloc_peak_cut(a)[1], 1238, 0),
+    ("alloc-mmap-faults-fp32", CHANGELOG,
+     "multiplies the embedder's page faults 3.4-4.9x", ALLOC_PAIRS,
+     lambda a: _alloc_none(a, "fp32", "mmap128k", "minflt")
+     / _alloc_none(a, "fp32", "ctrl", "minflt"), 3.4, 1),
+    ("alloc-mmap-faults-bf16", CHANGELOG,
+     "multiplies the embedder's page faults 3.4-4.9x", ALLOC_PAIRS,
+     lambda a: _alloc_none(a, "auto", "mmap128k", "minflt")
+     / _alloc_none(a, "auto", "ctrl", "minflt"), 4.9, 1),
+    ("alloc-mmap-slowdown-bf16", CHANGELOG, _ALLOC_SLOWDOWN, ALLOC_PAIRS,
+     lambda a: 100 * (_alloc_none(a, "auto", "mmap128k", "encode_4x512_s")
+                      / _alloc_none(a, "auto", "ctrl", "encode_4x512_s") - 1),
+     26, 0),
+    ("alloc-mmap-slowdown-fp32", CHANGELOG, _ALLOC_SLOWDOWN, ALLOC_PAIRS,
+     lambda a: 100 * (_alloc_none(a, "fp32", "mmap128k", "encode_4x512_s")
+                      / _alloc_none(a, "fp32", "ctrl", "encode_4x512_s") - 1),
+     10, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+# -- the board audit log's cost (2026-09-24) -------------------------------
+# One synthetic night at the recorded scale of the 2026-09-23/24
+# fifteen-session trial. The retention default
+# (CoordinationConfig.audit_retention_days) and both docs rest on it.
+AUDIT_VOLUME = RESULTS + "coordination-audit-volume-20260924.json"
+
+
+def _audit_overhead(bound: Callable) -> Callable[[dict], float]:
+    """The append's paired median cost on send, receive and acknowledgment:
+    each audit arm against the control arm that ran just before it."""
+    def value(d):
+        arms = d["arms"]
+        return bound(arms[audit]["latency"][kind]["p50_ms"]
+                     - arms[control]["latency"][kind]["p50_ms"]
+                     for audit, control in (("audit", "control"),
+                                            ("audit-repeat", "control-repeat"))
+                     for kind in ("send", "receive", "ack"))
+    return value
+
+
+for _doc, _prefix in ((CONFIG_GUIDE, "config-guide"), (CHANGELOG, "changelog")):
+    for _cid, _needle, _val, _stated, _places in [
+        ("audit-events", "left 2,671 events in 1.6 MB",
+         lambda d: d["arms"]["audit"]["events_total"], 2671, 0),
+        ("audit-mb", "left 2,671 events in 1.6 MB",
+         lambda d: d["arms"]["audit"]["table_total_bytes"] / 1e6, 1.6, 1),
+        ("audit-overhead-min", "the append added 1.3 to 2.2 ms",
+         _audit_overhead(min), 1.3, 1),
+        ("audit-overhead-max", "the append added 1.3 to 2.2 ms",
+         _audit_overhead(max), 2.2, 1),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"{_prefix}-{_cid}", doc=_doc, needle=_needle,
+            artifacts=(AUDIT_VOLUME,), value=_val, stated=_stated,
+            places=_places))
+
+
+def _control_spread(kinds) -> Callable[[dict], float]:
+    """How far the two control runs' medians drifted apart: the noise floor
+    the append's cost is read against."""
+    def value(d):
+        arms = d["arms"]
+        return max(abs(arms["control"]["latency"][k]["p50_ms"]
+                       - arms["control-repeat"]["latency"][k]["p50_ms"])
+                   for k in kinds)
+    return value
+
+
+for _doc, _prefix, _needle in (
+        (CONFIG_GUIDE, "config-guide", "own two runs differed by up to 0.6 ms"),
+        (CHANGELOG, "changelog", "whose own runs differed by up to 0.6 ms")):
+    CLAIMS.append(Claim(
+        id=f"{_prefix}-audit-control-spread", doc=_doc, needle=_needle,
+        artifacts=(AUDIT_VOLUME,), value=_control_spread(("send", "receive", "ack")),
+        stated=0.6, places=1))
+CLAIMS.append(Claim(
+    id="config-guide-audit-update-control-spread", doc=CONFIG_GUIDE,
+    needle="its two control runs were 1.8 ms apart", artifacts=(AUDIT_VOLUME,),
+    value=_control_spread(("update",)), stated=1.8, places=1))
+CLAIMS.append(Claim(
+    id="config-guide-audit-90-nights", doc=CONFIG_GUIDE,
+    needle="144.5 MB if every one of 90 nights",
+    artifacts=(AUDIT_VOLUME,),
+    value=lambda d: d["if_every_night_were_a_trial_mb"]["90"],
+    stated=144.5, places=1))

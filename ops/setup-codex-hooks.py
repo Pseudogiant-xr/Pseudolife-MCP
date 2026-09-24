@@ -42,7 +42,15 @@ from pseudolife_memory.credentials import (
 PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
 EVENTS = {"sessionStart": "SessionStart", "userPromptSubmit": "UserPromptSubmit",
           "sessionEnd": "SessionEnd"}
+# The plugin's hooks.json also carries Claude Code's opt-in Stop wake hook,
+# which Codex lists too. In Codex it is a no-op (lifecycle.ps1 -Event Stop
+# exits at once; stop-wake.sh exits unless Claude Code started it), approved
+# with the three lifecycle hooks. Optional: Codex before 0.148 skips async
+# hooks outside SessionEnd and lists three. Manual installs keep EVENTS.
+PLUGIN_EVENTS = {**EVENTS, "stop": "Stop"}
+# A manual bundle copies SCRIPTS; it has no Stop hook, so no stop-wake.sh.
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
+PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh",)
 RECOVERY = "Open Codex /hooks to review PseudoLife hooks; rerun setup after correcting the reported problem."
 
 
@@ -313,9 +321,17 @@ def inventory(client, cwd):
     return config, hooks
 
 
-def bundle_bytes(directory):
+def bundle_bytes(directory, names=SCRIPTS):
     return {name: (directory / name).read_text(encoding="utf-8").replace("\r\n", "\n").encode()
-            for name in SCRIPTS}
+            for name in names}
+
+
+def complete_set(hooks, source):
+    """One hook per event: the three lifecycle events, plus the plugin's
+    optional Stop entry."""
+    events = [h["eventName"] for h in hooks]
+    allowed = PLUGIN_EVENTS if source == "plugin" else EVENTS
+    return len(events) == len(set(events)) and set(EVENTS) <= set(events) <= set(allowed)
 
 
 def bundle_digest(files):
@@ -374,7 +390,10 @@ def is_legacy(hook, home):
 
 
 def select_hooks(hooks, home, source):
-    plugin = [h for h in hooks if h.get("pluginId") == PLUGIN_ID]
+    # A Stop entry the user disabled in /hooks is a no-op there anyway: keep
+    # that choice instead of refusing setup over it.
+    plugin = [h for h in hooks if h.get("pluginId") == PLUGIN_ID
+              and (h["enabled"] or h["eventName"] != "stop")]
     manual = [h for h in hooks if owned_manual(h, home)]
     legacy = [h for h in hooks if is_legacy(h, home)]
     other_legacy = [h for h in hooks if h not in legacy and h not in plugin
@@ -390,14 +409,15 @@ def select_hooks(hooks, home, source):
 
 
 def vet_plugin(hooks):
-    if len(hooks) != 3 or {h["eventName"] for h in hooks} != set(EVENTS):
+    if not complete_set(hooks, "plugin"):
         raise SetupError("The enabled PseudoLife plugin is missing or has unexpected hooks; update it and retry.")
     expected = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
     for h in hooks:
         path = Path(h["sourcePath"])
         try:
             actual = json.loads(path.read_text(encoding="utf-8"))["hooks"]
-            files_match = bundle_bytes(path.parent) == bundle_bytes(ROOT / "plugin/hooks")
+            files_match = (bundle_bytes(path.parent, PLUGIN_SCRIPTS)
+                           == bundle_bytes(ROOT / "plugin/hooks", PLUGIN_SCRIPTS))
         except (OSError, ValueError):
             files_match = False
             actual = None
@@ -746,7 +766,7 @@ def verify(executable, home, cwd, config, hooks, selected):
         if any(server.get("enabled", True) for server in isolated_config["config"].get("mcp_servers", {}).values()):
             raise SetupError("Cannot isolate hook verification from configured MCP servers.")
         own = [h for h in active if h["key"] in own_keys]
-        if len(own) != 3 or any(not h["enabled"] or h["trustStatus"] != "trusted" for h in own):
+        if len(own) != len(selected) or any(not h["enabled"] or h["trustStatus"] != "trusted" for h in own):
             raise SetupError("PseudoLife hooks are not all enabled and trusted in a fresh Codex runtime.")
         if any(h["enabled"] and h["trustStatus"] == "trusted" for h in active if h["key"] not in own_keys):
             raise SetupError("Cannot isolate PseudoLife's verification from other trusted hooks.")
@@ -805,13 +825,13 @@ def consent(args):
     if args.trust == "no" or args.non_interactive or not sys.stdin.isatty():
         return False, args.instructions == "append"
     if args.instructions != "auto":
-        print("Approve PseudoLife's three current hook scripts (briefing, reminders, cleanup) "
+        print("Approve PseudoLife's current hook scripts (briefing, reminders, cleanup) "
               "to run outside the sandbox? [y/N] ", end="", file=sys.stderr, flush=True)
         approved = sys.stdin.readline().strip().lower() in ("y", "yes")
         return approved, args.instructions == "append"
     print("PseudoLife memory setup:\n"
           "  1. Enable automatic briefings, reminders, and session cleanup (recommended).\n"
-          "     Approves only PseudoLife's current three scripts to run outside the sandbox;\n"
+          "     Approves only PseudoLife's current hook scripts to run outside the sandbox;\n"
           "     adds standing memory instructions if verification fails.\n"
           "  2. Standing memory instructions only.\n"
           "  3. Skip both.\nChoose [1/2/3, default 1]: ", end="", file=sys.stderr, flush=True)
@@ -870,8 +890,8 @@ def setup(args):
                     with codex(executable, home, cwd) as client:
                         config, hooks = inventory(client, cwd)
                         _, selected, _ = select_hooks(hooks, home, source)
-                        if len(selected) != 3 or {h["eventName"] for h in selected} != set(EVENTS):
-                            raise SetupError("Codex did not discover the three installed PseudoLife hooks.")
+                        if not complete_set(selected, source):
+                            raise SetupError("Codex did not discover the installed PseudoLife hooks.")
                         if source == "manual":
                             vet_manual(selected, home)
                         else:
@@ -879,7 +899,7 @@ def setup(args):
                         trust_hooks(client, config, selected, home, report)
                 if obsolete and not approved:
                     raise SetupError("Duplicate PseudoLife hooks need migration. Rerun setup with approval or remove duplicates in /hooks.")
-                if len(selected) != 3:
+                if not complete_set(selected, source):
                     report["recovery"] = "Hooks are not installed. Rerun setup interactively or pass --trust yes; --instructions append enables the fallback."
                 else:
                     with codex(executable, home, cwd) as client:

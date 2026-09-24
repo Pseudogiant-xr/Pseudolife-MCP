@@ -31,12 +31,16 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "evals"))
 
 from suite_cost import provenance  # noqa: E402
+import embedder_stamp  # noqa: E402
 
 
 class _Embedding:
     """Stands in for EmbeddingPipeline: start-up reads only the dimension."""
 
     embedding_dim = 1024
+
+    def describe(self) -> dict:
+        return {"backend": "stub", "device": "none", "dtype": None}
 
 
 def main() -> int:
@@ -70,6 +74,7 @@ def main() -> int:
         "note": args.note,
         "n": args.n,
         **provenance(),
+        "embedder": embedder_stamp.describe(svc),
         "first_start_s": round(seconds[0], 4),
         "mean_start_s": round(sum(later) / len(later), 4),
         "threads_before": threads_before,

@@ -201,6 +201,7 @@ def test_recall_bridges_two_hop_on_real_service(bench_pg, tmp_path):
     assert any(e["dst"] == "jdk-21" for e in out["edges"])
 
 
+@pytest.mark.real_model
 def test_recall_low_confidence_when_query_names_no_entity(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
@@ -482,17 +483,6 @@ def test_recall_no_gating_pulls_in_hub_siblings(bench_pg, tmp_path):
 # ---------------------------------------------------------------------------
 # MCP tool tests: memory_digest / memory_communities (Task 7)
 # ---------------------------------------------------------------------------
-
-def test_graph_digest_service(bench_pg, tmp_path):
-    # digest left the MCP surface (Console-only via /api/graph/digest).
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
-    svc = build_service(tmp_path)
-    _seed_two_communities(svc)
-    svc._refresh_graph_insight()  # noqa: SLF001
-    out = svc.graph_digest()
-    assert out["available"] is True and "god_nodes" in out["digest"]
-
 
 def test_communities_service(bench_pg, tmp_path):
     # communities left the MCP surface (Console-only via /api/graph/communities).

@@ -105,6 +105,7 @@ def test_lessons_config_rule_mode_defaults_off():
 
 # ── service routing ──────────────────────────────────────────────────────────
 
+@pytest.mark.real_model
 def test_rule_signals_route_to_extract_rules_and_bypass_the_dedup_gate(svc):
     """Two rules for look-alike situations that differ in one decision-
     critical value must BOTH survive: the cross-key cosine dedup gate (0.88)

@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import tempfile
 import time
@@ -49,6 +48,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import embedder_stamp  # noqa: E402
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -122,9 +123,19 @@ def cmd_harvest(args) -> int:
 # ══════════════════════════════════════════════════════════════════════════
 
 def _guard_dsn(dsn: str) -> None:
-    db = re.sub(r"\?.*$", "", dsn).rsplit("/", 1)[-1]
-    if db in FORBIDDEN_DBS:
-        sys.exit(f"refusing to run against {db!r} — restore a dedicated "
+    """Refuse the live and shared-bench banks by name, in any DSN spelling
+    libpq accepts and regardless of case. The name comes from libpq's own
+    parser, shared with the test/bench resets (storage/schema.py); the
+    rsplit('/') this replaced let a ``dbname=`` keyword DSN, a trailing
+    slash or an upper-cased name through (2026-09-23)."""
+    from pseudolife_memory.storage.schema import (
+        dsn_database_name, is_production_database,
+    )
+
+    db = dsn_database_name(dsn)
+    if db is None or is_production_database(db, extra=FORBIDDEN_DBS):
+        target = repr(db) if db else "a database the DSN leaves implicit"
+        sys.exit(f"refusing to run against {target} — restore a dedicated "
                  "replay copy instead (see module docstring)")
 
 
@@ -205,6 +216,8 @@ def cmd_replay(args) -> int:
         "n_queries": n,
         "top_k": k,
         "flat_cap": cap,
+        "embedder": {"banded": embedder_stamp.describe(svc_a),
+                     "flat": embedder_stamp.describe(svc_b)},
         "divergence_rate_topk": round(n_div_topk / n, 4),
         "divergence_rate_top3": round(n_div_top3 / n, 4),
         "mean_jaccard_topk": round(

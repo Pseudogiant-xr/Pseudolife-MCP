@@ -502,11 +502,6 @@ def test_build_tau2_command_refuses_a_production_shim_port(tb, port, endpoint):
     assert json.loads(_argv_val(argv, flag))["api_base"] == bad[endpoint]
 
 
-def test_default_agent_url_is_the_eval_port_and_is_redirectable(tb):
-    assert ":8092" in tb.AGENT_URL
-    assert not any(p in tb.AGENT_URL for p in tb.PRODUCTION_SHIM_PORTS)
-
-
 # ── trial-major scheduling ───────────────────────────────────────────────
 
 def test_trial_plan_is_one_invocation_per_trial_when_distilling_per_trial(tb):

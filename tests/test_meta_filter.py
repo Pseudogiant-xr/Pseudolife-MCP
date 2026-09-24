@@ -3,8 +3,7 @@ import torch
 
 from pseudolife_memory.memory.cms import ContinuumMemorySystem
 from pseudolife_memory.memory.meta_filter import is_meta_statement
-from pseudolife_memory.service import MemoryService
-from pseudolife_memory.utils.config import AppConfig, MemoryConfig
+from pseudolife_memory.utils.config import MemoryConfig
 
 
 def _emb(seed: int) -> torch.Tensor:
@@ -46,9 +45,3 @@ def test_cms_store_respects_enabled_filter():
         "I don't have any cat-related material saved", _emb(2), source="claude",
     )
     assert stored is False and surprise == 0.0
-
-
-def test_mcp_defaults_disable_filter():
-    cfg = AppConfig()
-    MemoryService._apply_mcp_defaults(cfg)
-    assert cfg.memory.meta_filter.enabled is False

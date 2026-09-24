@@ -239,7 +239,10 @@ function loopHealthPanel(loop) {
         `${by.success || 0}✓ ${by.failure || 0}✗ ${by.correction || 0}↺`))],
     ["sessions", fmtNum(loop.sessions ?? 0)],
     ["per session", `${loop.stores_per_session ?? "—"} stores · ${loop.outcomes_per_session ?? "—"} outcomes`],
-    ["pending signals", fmtNum(loop.pending_signals ?? 0) + " (next dream distils)"],
+    ["pending signals", fmtNum(loop.pending_signals ?? 0) + " (next dream distils)"
+      + (loop.pending_signals_expired
+        ? ` · ${fmtNum(loop.pending_signals_expired)} past the retry window (kept, not retried)`
+        : "")],
     ["last lesson", loop.last_lesson_at ? fmtAge(loop.last_lesson_at) : "never"],
   ];
   return el("div", { class: "panel" }, head,

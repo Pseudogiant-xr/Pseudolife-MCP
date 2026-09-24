@@ -58,6 +58,7 @@ def _seed(svc):
                      support="user")                      # constraint, out of scope
 
 
+@pytest.mark.real_model
 def test_in_scope_constraint_outranks_a_higher_cosine_fact(svc):
     _seed(svc)
     out = svc.cortex_search(QUERY, top_k=5, min_score=0.0)["entries"]
@@ -95,6 +96,7 @@ def test_unlabelled_bank_is_served_byte_identically(svc):
     assert not any("pinned" in e for e in with_pins["entries"])
 
 
+@pytest.mark.real_model
 def test_knob_off_restores_plain_ranking(svc):
     _seed(svc)
     svc.config.memory.cortex.pin_constraints = False
@@ -106,6 +108,7 @@ def test_knob_off_restores_plain_ranking(svc):
     assert not any("pinned" in e for e in out)
 
 
+@pytest.mark.real_model
 def test_pins_take_at_most_half_the_budget_best_cosine_first(svc):
     """Peer review major (2026-09-02): the first cut let >= k in-scope
     constraints displace the ENTIRE ranked block. Pins now get at most
@@ -126,6 +129,7 @@ def test_pins_take_at_most_half_the_budget_best_cosine_first(svc):
     assert not any(e.get("pinned") for e in out[2:])
 
 
+@pytest.mark.real_model
 def test_pins_respect_the_callers_relevance_floor(svc):
     """memory_search passes guard_min_score so weak facts are never
     asserted as canonical; a pin must clear the same floor — pinning is

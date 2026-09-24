@@ -25,6 +25,8 @@ import pytest
 
 from pseudolife_memory.service import MemoryService
 
+pytestmark = pytest.mark.real_model
+
 # Filler facts so the BM25 index has a corpus with real IDF spread.
 # Fillers are deliberately spread across semantic distance from the test
 # queries (one ops-adjacent, the rest remote): three ops-flavored fillers

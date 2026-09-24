@@ -97,3 +97,13 @@ def test_summarize_reports_paired_deltas_per_arm_and_type():
     assert s["types"]["abstention"]["rag_delta"] == 0.5
     assert s["source_run"] == "p1-b16"
     assert s["n_questions"] == 2
+
+
+def test_ablate_row_carries_the_embedder_stamp():
+    """The ablation re-answers the source row's persisted contexts; the
+    embedder that built them is still the provenance of the result."""
+    stamp = {"extract": {"backend": "torch", "device": "cpu", "dtype": "bf16"}}
+    chat = lambda system, user, **_: "a" if system else '{"score": 1.0}'  # noqa: E731
+    out = aba.ablate_row({**_source_row(), "embedder": stamp}, "j", chat)
+    assert out["embedder"] == stamp
+    assert "embedder" not in aba.ablate_row(_source_row(), "j", chat)

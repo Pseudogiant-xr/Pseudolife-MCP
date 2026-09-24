@@ -2,7 +2,9 @@
 
 Resolution order for the test server:
 
-1. ``PSEUDOLIFE_TEST_DATABASE_URL`` env var (any reachable PG 16+vector).
+1. ``PSEUDOLIFE_TEST_DATABASE_URL`` env var (any reachable PG 16+vector;
+   refused if it names a production bank — see
+   ``storage.schema.assert_disposable_database``).
 2. The repo's dev container at ``127.0.0.1:5433`` (ops/docker-compose.yml).
 
 If neither is reachable, PG-backed tests skip cleanly so the pure-logic
@@ -64,6 +66,8 @@ _TEST_DB = f"pseudolife_memory_test_{os.getpid()}"
 # tests/test_bench_reset_tables.py.
 from pseudolife_memory.storage.schema import (  # noqa: E402
     BENCH_RESET_TABLES as _ALL_TABLES,
+    assert_disposable_database,
+    refuse_production_database,
 )
 from pseudolife_memory.service_dream import (  # noqa: E402
     SESSION_END_DREAM_THREAD_NAME,
@@ -96,11 +100,23 @@ def _with_worker_suffix(db: str) -> str:
     return f"{db}_{worker}" if worker else db
 
 
+def _override_db_name(url: str) -> str:
+    """The override's database name, refused if it is a production bank.
+
+    Checked on the base name, before any xdist suffix: a single-process run
+    (the full-suite form, every single-file run) would use it verbatim, and
+    the bundled stack's server also hosts the production bank.
+    """
+    db = conninfo_dbname(url)
+    refuse_production_database(db)
+    return db
+
+
 def _target_db_name() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
         url = RedactedUrl(url)
-        return _with_worker_suffix(conninfo_dbname(url))
+        return _with_worker_suffix(_override_db_name(url))
     return _TEST_DB
 
 
@@ -113,7 +129,7 @@ def resolve_test_db_url() -> str:
         # (CI relies on that) — no connection attempts from a mere resolve.
         # Under an xdist worker the database name gets the worker id appended;
         # see _with_worker_suffix for why.
-        db = _with_worker_suffix(conninfo_dbname(url))
+        db = _with_worker_suffix(_override_db_name(url))
         return RedactedUrl(conninfo_with_dbname(url, db))
     # Best-effort creation so direct consumers (daemon/shim fixtures,
     # single-file runs) get an existing per-run database without depending
@@ -373,6 +389,10 @@ def _pg_conn_session(pg_url):
     await_background_dreams()
 
     with psycopg.connect(pg_url) as conn:
+        # FIRST, before the reap below kills anyone's connections: the
+        # server, not the DSN, says which database this is — and it must not
+        # be a production bank (tests/test_disposable_database_guard.py).
+        assert_disposable_database(conn)
         # Pin to public BEFORE any schema/truncate work — mirrors
         # PostgresStorage.__init__. The DB role `pseudolife` can clash with
         # schema names, so the default ("$user", public) search_path could
