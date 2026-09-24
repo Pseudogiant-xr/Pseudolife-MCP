@@ -233,7 +233,8 @@ class FixtureService:
     def lessons_dump(self, limit=120):
         return {"count": len(_LESSONS), "entries": [_lesson_dict(t) for t in _LESSONS][:limit]}
 
-    def session_briefing(self, max_unsure=3, max_lessons=3, max_world=3):
+    def session_briefing(self, max_unsure=3, max_lessons=3, max_world=3, *,
+                         include_coordination=True):
         return {"markdown": "## Memory briefing (fixture)\n- lesson: prefer bar over foo"}
 
     def loop_health(self, window_days=7, now=None):

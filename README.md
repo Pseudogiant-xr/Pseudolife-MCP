@@ -809,10 +809,12 @@ daemon:
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
 The server's value depends on the agent using it. The MCP server advertises
-the core loop through protocol-level `instructions`; the SessionStart hook
-delivers the full memory policy with a live briefing. The default hook policy
-and bundled standing memory block contain the same instructions. Hooks add
-per-prompt reminders and session bookkeeping; neither delivery method
+the core loop and messageboard check-in through protocol-level `instructions`.
+The memory SessionStart hook delivers a short operating guide and a bounded
+briefing; a separate coordination hook asks the agent to set its project,
+task and status, discover peers, and read pending messages. Detailed memory
+guidance remains in the bundled standing block. Hooks add per-prompt reminders
+and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
 
 With verified hooks, a standing copy is optional. If you want it instead —

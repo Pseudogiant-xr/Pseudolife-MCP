@@ -31,6 +31,17 @@ from tests.test_coordination_storage import creds, store  # noqa: F401
 STATIC_LINE = "Memory (PseudoLife) mid-session discipline"
 
 
+def test_coordination_hooks_are_independent_of_memory_hooks():
+    manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    prompts = [h for group in manifest["UserPromptSubmit"] for h in group["hooks"]]
+    starts = [h for group in manifest["SessionStart"] for h in group["hooks"]]
+    assert len(prompts) == 2 and len(starts) == 2
+    assert any("coordination-prompt.sh" in h["command"] and "CoordinationPrompt" in h["commandWindows"]
+               for h in prompts)
+    assert any("coordination-start.sh" in h["command"] and "CoordinationStart" in h["commandWindows"]
+               for h in starts)
+
+
 def _send(store, sender, recipient, text, request_id):
     return store.send(*creds(sender), to=recipient["agent_id"], text=text,
                       request_id=request_id)["message_id"]
@@ -587,10 +598,9 @@ def test_bash_prompt_hook_survives_a_missing_home(tmp_path):
     directory = tmp_path / "profile" / ".pseudolife-mcp" / "digests"
     directory.mkdir(parents=True)
     (directory / f"{key}.txt").write_text(f"2\n{BODY}\n", encoding="utf-8")
-    out = bash_run(ROOT / "plugin/hooks/user-prompt-submit.sh",
+    out = bash_run(ROOT / "plugin/hooks/coordination-prompt.sh",
                    input=json.dumps({"session_id": "fixture-session"}), env=env).stdout
-    assert out.startswith(STATIC_LINE)
-    assert out.rstrip("\n").endswith(BODY)
+    assert out.rstrip("\n") == BODY
 
 
 def _write_digest(tmp_path, key, watermark, body):
@@ -608,20 +618,20 @@ BODY = ("Coordination: 1 addressed message pending (agent-origin, not user autho
 def _run_prompt_hook(shell, env, session_id="fixture-session"):
     payload = json.dumps({"session_id": session_id, "hook_event_name": "UserPromptSubmit"})
     if shell == "bash":
-        return bash_run(ROOT / "plugin/hooks/user-prompt-submit.sh", input=payload, env=env).stdout
-    result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "UserPromptSubmit",
+        return bash_run(ROOT / "plugin/hooks/coordination-prompt.sh", input=payload, env=env).stdout
+    result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "CoordinationPrompt",
                       input=payload, env=env)
-    return json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] + "\n"
+    return (json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] + "\n") if result.stdout.strip() else ""
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
 def test_prompt_hook_prints_a_new_digest_once_then_only_the_static_line(shell, tmp_path):
     env, key = _digest_env(tmp_path)
     quiet = _run_prompt_hook(shell, env)
-    assert quiet.startswith(STATIC_LINE) and quiet.count("\n") == 1
+    assert quiet == ""
     directory = _write_digest(tmp_path, key, 3, BODY)
     first = _run_prompt_hook(shell, env)
-    assert first.startswith(STATIC_LINE) and first.rstrip("\n").endswith(BODY)
+    assert first.rstrip("\n") == BODY
     assert (directory / f"{key}.seen").read_text(encoding="utf-8").strip() == "3"
     again = _run_prompt_hook(shell, env)
     assert again == quiet
@@ -662,7 +672,7 @@ def test_bash_prompt_hook_takes_the_top_level_session_id(tmp_path, payload):
     _write_digest(tmp_path, key, 3, BODY)
     other = hashlib.sha256(b"other-session").hexdigest()
     _write_digest(tmp_path, other, 3, "Coordination: the other session's mail")
-    out = bash_run(ROOT / "plugin/hooks/user-prompt-submit.sh", input=payload, env=env).stdout
+    out = bash_run(ROOT / "plugin/hooks/coordination-prompt.sh", input=payload, env=env).stdout
     assert out.rstrip("\n").endswith(BODY)
     assert not (tmp_path / "digests" / f"{other}.seen").exists()
 
@@ -671,16 +681,16 @@ def test_bash_prompt_hook_rejects_odd_session_id_shapes(tmp_path):
     env, key = _digest_env(tmp_path)
     odd = "fixture session/../x"
     _write_digest(tmp_path, hashlib.sha256(odd.encode()).hexdigest(), 3, BODY)
-    out = bash_run(ROOT / "plugin/hooks/user-prompt-submit.sh",
+    out = bash_run(ROOT / "plugin/hooks/coordination-prompt.sh",
                    input=json.dumps({"session_id": odd}), env=env).stdout
-    assert out.count("\n") == 1
+    assert out == ""
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
 def test_prompt_hook_ignores_a_malformed_digest_and_never_fails(shell, tmp_path):
     env, key = _digest_env(tmp_path)
     directory = _write_digest(tmp_path, key, "not-a-number", BODY)
-    assert _run_prompt_hook(shell, env).count("\n") == 1
+    assert _run_prompt_hook(shell, env) == ""
     (directory / f"{key}.seen").write_text("garbage")
     _write_digest(tmp_path, key, 2, BODY)
     assert _run_prompt_hook(shell, env).rstrip("\n").endswith(BODY)
@@ -696,9 +706,9 @@ def test_session_start_on_resume_or_compact_forces_a_fresh_digest(shell, source,
     seen.write_text("3")
     payload = json.dumps({"session_id": "fixture-session", "source": source})
     if shell == "bash":
-        bash_run(ROOT / "plugin/hooks/session-start.sh", input=payload, env=env)
+        bash_run(ROOT / "plugin/hooks/coordination-start.sh", input=payload, env=env)
     else:
-        pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "SessionStart",
+        pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "CoordinationStart",
                  input=payload, env=env)
     assert seen.exists() is kept
 
@@ -746,26 +756,26 @@ def _claude_hook(script, env, session_id, **fields):
 def test_prompt_hook_follows_the_shim_digest_across_clear(tmp_path):
     env = _claude_env(tmp_path)
     directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
-    _claude_hook("session-start.sh", env, "launch-session", source="startup")
-    first = _claude_hook("user-prompt-submit.sh", env, "launch-session")
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
+    first = _claude_hook("coordination-prompt.sh", env, "launch-session")
     assert first.rstrip("\n").endswith(BODY)
 
     _claude_hook("session-end.sh", env, "launch-session", reason="clear")
-    _claude_hook("session-start.sh", env, "cleared-session", source="clear")
+    _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
     # The cleared conversation never saw the pending mail: it prints again.
-    after_clear = _claude_hook("user-prompt-submit.sh", env, "cleared-session")
+    after_clear = _claude_hook("coordination-prompt.sh", env, "cleared-session")
     assert after_clear.rstrip("\n").endswith(BODY)
-    assert _claude_hook("user-prompt-submit.sh", env, "cleared-session").count("\n") == 1
+    assert _claude_hook("coordination-prompt.sh", env, "cleared-session") == ""
     # Compaction keeps the session id and the process's record.
-    _claude_hook("session-start.sh", env, "cleared-session", source="compact")
-    after_compact = _claude_hook("user-prompt-submit.sh", env, "cleared-session")
+    _claude_hook("coordination-start.sh", env, "cleared-session", source="compact")
+    after_compact = _claude_hook("coordination-prompt.sh", env, "cleared-session")
     assert after_compact.rstrip("\n").endswith(BODY)
 
     _claude_hook("session-end.sh", env, "cleared-session", reason="clear")
-    _claude_hook("session-start.sh", env, "cleared-again", source="clear")
-    _claude_hook("user-prompt-submit.sh", env, "cleared-again")
+    _claude_hook("coordination-start.sh", env, "cleared-again", source="clear")
+    _claude_hook("coordination-prompt.sh", env, "cleared-again")
     _write_digest(tmp_path, _sha("launch-session"), 4, "Coordination: newer mail")
-    newer = _claude_hook("user-prompt-submit.sh", env, "cleared-again")
+    newer = _claude_hook("coordination-prompt.sh", env, "cleared-again")
     assert newer.rstrip("\n").endswith("Coordination: newer mail")
     assert (directory / f"{_sha('launch-session')}.seen").read_text(encoding="utf-8").strip() == "4"
     assert not (directory / f"{_sha('cleared-session')}.seen").exists()
@@ -784,8 +794,8 @@ def test_first_clear_after_a_hook_upgrade_links_the_running_session(left_behind,
         _write_digest(tmp_path, _sha("dead-launch"), 9, "Coordination: a dead shim's mail")
         _plant(directory / f"claude-{env['CLAUDE_PID']}.host", f"{_sha('dead-launch')}\n{_sha('dead-last')}\n")
     _claude_hook("session-end.sh", env, "launch-session", reason="clear")
-    _claude_hook("session-start.sh", env, "cleared-session", source="clear")
-    assert _claude_hook("user-prompt-submit.sh", env, "cleared-session").rstrip("\n").endswith(BODY)
+    _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
+    assert _claude_hook("coordination-prompt.sh", env, "cleared-session").rstrip("\n").endswith(BODY)
 
 
 def test_in_session_resume_keeps_the_shim_digest_over_a_leftover_file(tmp_path):
@@ -795,11 +805,11 @@ def test_in_session_resume_keeps_the_shim_digest_over_a_leftover_file(tmp_path):
     env = _claude_env(tmp_path)
     _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
     _write_digest(tmp_path, _sha("older-session"), 9, "Coordination: a dead shim's mail")
-    _claude_hook("session-start.sh", env, "launch-session", source="startup")
-    _claude_hook("user-prompt-submit.sh", env, "launch-session")
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
+    _claude_hook("coordination-prompt.sh", env, "launch-session")
     _claude_hook("session-end.sh", env, "launch-session", reason="resume")
-    _claude_hook("session-start.sh", env, "older-session", source="resume")
-    resumed = _claude_hook("user-prompt-submit.sh", env, "older-session")
+    _claude_hook("coordination-start.sh", env, "older-session", source="resume")
+    resumed = _claude_hook("coordination-prompt.sh", env, "older-session")
     assert resumed.rstrip("\n").endswith(BODY)
     assert "dead shim" not in resumed
 
@@ -808,7 +818,7 @@ def _genuine_resume_handoff(tmp_path, env):
     """This process's launch session, then its SessionEnd for /resume: a
     record and a handoff exactly as the hooks write them."""
     directory = _write_digest(tmp_path, _sha("launch-session"), 9, "Coordination: the launch session's mail")
-    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
     _claude_hook("session-end.sh", env, "launch-session", reason="resume")
     return directory, directory / f"claude-{env['CLAUDE_PID']}.switch"
 
@@ -829,9 +839,9 @@ def test_resume_carries_the_record_only_on_this_process_handoff(line, value, tmp
                    "elsewhere": _sha("elsewhere")}[value]
     _plant(switch, "\n".join(lines) + "\n")
     _write_digest(tmp_path, _sha("resumed-session"), 3, BODY)
-    briefing = _claude_hook("session-start.sh", env, "resumed-session", source="resume")
-    assert "did not answer" in briefing  # the hook ran to its end
-    resumed = _claude_hook("user-prompt-submit.sh", env, "resumed-session")
+    briefing = _claude_hook("coordination-start.sh", env, "resumed-session", source="resume")
+    assert "Pseudolife coordination:" in briefing
+    resumed = _claude_hook("coordination-prompt.sh", env, "resumed-session")
     assert resumed.rstrip("\n").endswith(BODY)
     assert "launch session" not in resumed
     assert not switch.exists()
@@ -842,8 +852,8 @@ def test_a_launch_never_carries_a_record(source, tmp_path):
     env = _claude_env(tmp_path)
     _, switch = _genuine_resume_handoff(tmp_path, env)
     _write_digest(tmp_path, _sha("new-session"), 3, BODY)
-    _claude_hook("session-start.sh", env, "new-session", source=source)
-    fresh = _claude_hook("user-prompt-submit.sh", env, "new-session")
+    _claude_hook("coordination-start.sh", env, "new-session", source=source)
+    fresh = _claude_hook("coordination-prompt.sh", env, "new-session")
     assert fresh.rstrip("\n").endswith(BODY)
     assert "launch session" not in fresh
     assert not switch.exists()
@@ -861,8 +871,8 @@ def test_a_handoff_written_by_another_live_process_is_refused(tmp_path):
             source.rename(directory / f"claude-{other.pid}.{suffix}")
         env = {**env, "CLAUDE_PID": str(other.pid)}
         _write_digest(tmp_path, _sha("resumed-session"), 3, BODY)
-        _claude_hook("session-start.sh", env, "resumed-session", source="resume")
-        resumed = _claude_hook("user-prompt-submit.sh", env, "resumed-session")
+        _claude_hook("coordination-start.sh", env, "resumed-session", source="resume")
+        resumed = _claude_hook("coordination-prompt.sh", env, "resumed-session")
     finally:
         other.kill()
         other.wait()
@@ -875,14 +885,14 @@ def test_without_a_creation_identity_the_record_is_not_carried(tmp_path):
     /clear and /resume fail closed: the next session starts from its own key."""
     env = _claude_env(tmp_path, pid="4000000000")  # no such process
     directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
-    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
     _claude_hook("session-end.sh", env, "launch-session", reason="clear")
     switch = directory / "claude-4000000000.switch"
     assert not switch.exists()
     # Nor does a handoff naming the empty identity get through.
     _plant(switch, f"{int(time.time())}\n{_sha('')}\n{_sha('launch-session')}\n")
-    _claude_hook("session-start.sh", env, "cleared-session", source="clear")
-    assert _claude_hook("user-prompt-submit.sh", env, "cleared-session").count("\n") == 1
+    _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
+    assert _claude_hook("coordination-prompt.sh", env, "cleared-session") == ""
 
 
 def test_compaction_does_not_adopt_a_record_confirmed_for_another_session(tmp_path):
@@ -891,8 +901,8 @@ def test_compaction_does_not_adopt_a_record_confirmed_for_another_session(tmp_pa
     _write_digest(tmp_path, _sha("other-launch"), 9, "Coordination: another session's mail")
     _plant(record, f"{_sha('other-launch')}\n{_sha('other-session')}\n")
     _write_digest(tmp_path, _sha("this-session"), 3, BODY)
-    _claude_hook("session-start.sh", env, "this-session", source="compact")
-    own = _claude_hook("user-prompt-submit.sh", env, "this-session")
+    _claude_hook("coordination-start.sh", env, "this-session", source="compact")
+    own = _claude_hook("coordination-prompt.sh", env, "this-session")
     assert own.rstrip("\n").endswith(BODY)
     assert record.read_text(encoding="utf-8").split() == [_sha("this-session")] * 2
 
@@ -909,8 +919,8 @@ def test_a_resume_handoff_left_by_a_dead_process_with_the_same_pid_is_not_truste
     _plant(directory / f"claude-{pid}.switch",
            f"{int(time.time())}\n{_sha('another process')}\n{_sha('dead-last')}\n")
     _write_digest(tmp_path, _sha("new-session"), 3, BODY)
-    _claude_hook("session-start.sh", env, "new-session", source="resume")
-    fresh = _claude_hook("user-prompt-submit.sh", env, "new-session")
+    _claude_hook("coordination-start.sh", env, "new-session", source="resume")
+    fresh = _claude_hook("coordination-prompt.sh", env, "new-session")
     assert fresh.rstrip("\n").endswith(BODY)
     assert "dead shim" not in fresh
 
@@ -924,13 +934,13 @@ def test_a_malformed_claude_pid_names_no_record(pid, tmp_path):
     # Confirmed for this session: only the digits check keeps the prompt
     # hook from following it.
     _plant(record, f"{_sha('other-session')}\n{_sha('launch-session')}\n")
-    own = _claude_hook("user-prompt-submit.sh", env, "launch-session")
+    own = _claude_hook("coordination-prompt.sh", env, "launch-session")
     assert own.rstrip("\n").endswith(BODY)
     # Confirmed for no session here: only the digits check keeps the session
     # hooks from rewriting it.
     unconfirmed = f"{_sha('other-session')}\n{_sha('elsewhere')}\n"
     _plant(record, unconfirmed)
-    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
     _claude_hook("session-end.sh", env, "launch-session", reason="resume")
     assert not (directory / f"claude-{pid}.switch").exists()
     assert record.read_text(encoding="utf-8") == unconfirmed
@@ -946,7 +956,7 @@ def test_prompt_hook_ignores_a_symlinked_process_record(tmp_path):
     except OSError:
         pytest.skip("this platform or account cannot create symlinks")
     _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
-    assert _claude_hook("user-prompt-submit.sh", env, "launch-session").rstrip("\n").endswith(BODY)
+    assert _claude_hook("coordination-prompt.sh", env, "launch-session").rstrip("\n").endswith(BODY)
 
 
 def test_a_nested_host_that_inherited_claude_pid_neither_writes_nor_follows_it(tmp_path):
@@ -966,8 +976,8 @@ def test_a_nested_host_that_inherited_claude_pid_neither_writes_nor_follows_it(t
     planted = f"{_sha('outer-session')}\n{_sha('codex-thread')}\n"
     _plant(record, planted)
     _write_digest(tmp_path, _sha("codex-thread"), 3, BODY)
-    _claude_hook("session-start.sh", env, "codex-thread", source="startup")
-    own = _claude_hook("user-prompt-submit.sh", env, "codex-thread")
+    _claude_hook("coordination-start.sh", env, "codex-thread", source="startup")
+    own = _claude_hook("coordination-prompt.sh", env, "codex-thread")
     assert own.rstrip("\n").endswith(BODY)
     assert record.read_text(encoding="utf-8") == planted
 
@@ -985,7 +995,7 @@ def test_prompt_hook_ignores_a_malformed_or_unconfirmed_process_record(record, t
     _write_digest(tmp_path, _sha("other"), 9, "Coordination: another session's mail")
     _plant(directory / f"claude-{env['CLAUDE_PID']}.host",
            record.format(own=_sha("launch-session"), other=_sha("other"), elsewhere=_sha("elsewhere")))
-    assert _claude_hook("user-prompt-submit.sh", env, "launch-session").rstrip("\n").endswith(BODY)
+    assert _claude_hook("coordination-prompt.sh", env, "launch-session").rstrip("\n").endswith(BODY)
 
 
 def test_session_start_sweeps_only_month_old_process_records(tmp_path):
@@ -1003,7 +1013,7 @@ def test_session_start_sweeps_only_month_old_process_records(tmp_path):
     for path in swept + kept[1:]:
         os.utime(path, (month_ago, month_ago))
     os.utime(kept[0], (ten_days_ago, ten_days_ago))
-    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
     assert [path.name for path in swept if path.exists()] == []
     assert [path.name for path in kept if not path.exists()] == []
     assert (directory / f"claude-{env['CLAUDE_PID']}.host").exists()

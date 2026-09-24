@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
+- Startup memory context preserves its essential guidance and complete briefing
+  items within its output budget, with explicit notices when content is omitted.
+  Detailed memory instructions remain available as standing guidance.
+- Separate coordination hooks prompt messageboard setup at the first task and
+  on resume, and deliver changed inbox previews independently of memory reminders.
+  Full messages continue through the existing receive/acknowledge tools; mailbox
+  identity, credentials and optional wake behavior remain with the existing adapter.
+- MCP initialization instructions also request the startup check-in, so clients
+  without lifecycle hooks receive the same core workflow guidance.
+
 ### Fixed (2026-09-24 — integration safety checks)
 - Coordination sends validate the writer epoch before committing. After a
   writer handover they reload durable clock history before stamping new mail.

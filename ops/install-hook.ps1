@@ -73,6 +73,24 @@ if (-not $hasBriefing) {
     Write-Host "Briefing hook already present in $SettingsPath - skipping."
 }
 
+# Keep board setup separate from the daemon-backed memory briefing.
+$coordinationLine = "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+$hasCoordination = $false
+foreach ($group in @($obj.hooks.SessionStart)) {
+    foreach ($h in @($group.hooks)) {
+        if ($h.command -like "*Pseudolife coordination:*") { $hasCoordination = $true }
+    }
+}
+if (-not $hasCoordination) {
+    $coordinationHook = [pscustomobject]@{ type = 'command'; command = "echo '$coordinationLine'" }
+    if ($Client -eq 'codex') {
+        $coordinationHook | Add-Member commandWindows "Write-Output '$coordinationLine'"
+        $coordinationHook | Add-Member timeout 5
+    }
+    $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + [pscustomobject]@{ hooks = @($coordinationHook) }
+    Write-Host "Installed SessionStart coordination hook -> $SettingsPath"
+}
+
 # Every-turn memory-discipline line (UserPromptSubmit), both clients.
 # Codex requires review and trust before newly installed hooks run. Static echo
 # (no daemon call): the one-shot session-start briefing loses salience over

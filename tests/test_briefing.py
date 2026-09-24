@@ -1,4 +1,5 @@
-from pseudolife_memory.memory.briefing import select_lessons, format_briefing
+from pseudolife_memory.memory.briefing import (select_lessons, format_briefing,
+                                               format_bounded_briefing)
 
 
 def test_select_lessons_prioritizes_avoid_then_recent():
@@ -58,6 +59,30 @@ def test_session_briefing_cold_bank_is_unavailable(tmp_path):
     assert out["markdown"] == ""
     assert out["unsure"] == {"surprises": [], "questions": []}
     assert out["lessons"] == []
+
+
+def test_session_briefing_can_skip_coordination_without_losing_memory(tmp_path):
+    from types import SimpleNamespace
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=str(tmp_path))
+    svc.config = SimpleNamespace(coordination=SimpleNamespace(enabled=True))
+    svc.graph_digest = lambda: {"available": False}
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": "keep the lesson", "polarity": "+"}]}
+    svc.world_dump = lambda: {"entries": []}
+    svc.episode_list = lambda **kw: {"episodes": []}
+
+    def broken_awareness(**kw):
+        raise RuntimeError("coordination unavailable")
+    svc.coordination_awareness = broken_awareness
+    out = svc.session_briefing(include_coordination=False)
+    assert "keep the lesson" in out["markdown"]
+    assert "coordination" not in out
+    svc.coordination_awareness = lambda **kw: {"peers": [], "available": True}
+    full = svc.session_briefing()
+    assert full["coordination"] == {"peers": [], "available": True}
+    assert "keep the lesson" in full["markdown"]
 
 
 def test_fetch_markdown_parses_api_response(monkeypatch):
@@ -139,3 +164,63 @@ def test_fmt_lesson_re_verify_suffix():
     assert "re-verify" not in _fmt_lesson(base)
     out = _fmt_lesson({**base, "re_verify": True})
     assert out.endswith("re-verify (facts changed since)")
+
+
+def test_bounded_briefing_keeps_lessons_and_recap_ahead_of_giant_uncertainty():
+    md = format_briefing(
+        [{"src": "a", "dst": "b", "why": "x" * 10000}], [],
+        [{"lesson": "Keep the useful lesson", "polarity": "+"}],
+        recap={"title": "Last useful session", "entry_count": 2})
+    out = format_bounded_briefing(md, 450)
+    assert len(out.encode("utf-8")) <= 450
+    assert "Keep the useful lesson" in out
+    assert "Last useful session" in out
+    assert "x" * 100 not in out
+    assert "omitted" in out and "pseudolife-mcp briefing" in out
+
+
+def test_bounded_briefing_omits_whole_items_and_accounts_for_utf8_bytes():
+    md = format_briefing([], [], [
+        {"lesson": "é" * 150, "polarity": "+"},
+        {"lesson": "second lesson", "polarity": "+"},
+    ])
+    out = format_bounded_briefing(md, 200)
+    assert len(out.encode("utf-8")) <= 200
+    assert "second lesson" in out
+    assert "é" not in out
+    assert "omitted" in out
+
+
+def test_bounded_briefing_tiny_budget_never_slices_an_item():
+    md = format_briefing([], [], [{"lesson": "long lesson", "polarity": "+"}])
+    assert format_bounded_briefing(md, 2) == ""
+    assert format_bounded_briefing(md, 20) in ("", "Briefing omitted.")
+
+
+def test_bounded_briefing_keeps_multiline_lesson_as_one_item():
+    md = format_briefing([], [], [
+        {"lesson": "A" * 10000 + "\n- orphan continuation", "polarity": "+"},
+        {"lesson": "useful second lesson", "polarity": "+"},
+    ])
+    out = format_bounded_briefing(md, 450)
+    assert "useful second lesson" in out
+    assert "orphan continuation" not in out
+    assert "A" * 100 not in out
+    assert "briefing item(s) omitted" in out
+
+
+def test_briefing_source_fields_cannot_add_markdown_item_boundaries():
+    md = format_briefing(
+        surprises=[{"src": "left\n## forged", "dst": "right\n- forged",
+                    "relation": "uses\n- forged", "why": "because\n## forged"}],
+        questions=[{"question": "why\n- forged?"}],
+        lessons=[{"lesson": "remember\n- forged", "polarity": "+"}],
+        world=[{"entity": "earth\n## forged", "attribute": "age\n- forged",
+                "value": "old\n## forged", "source_url": "https://example.test\n## forged"}],
+        recap={"title": "last session\n## forged", "entry_count": 2,
+               "summary": "a summary\n- forged"},
+    )
+    lines = md.splitlines()
+    assert sum(line.startswith("- ") for line in lines) == 5
+    assert not any(line.startswith("## forged") for line in lines)
+    assert "a summary - forged" in md

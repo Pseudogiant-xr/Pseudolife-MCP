@@ -518,6 +518,52 @@ def test_hook_session_start_capped_under_hook_stdout_limit(svc):
     assert len(body.decode("utf-8")) <= 9_500
 
 
+def test_hook_session_start_preserves_notice_core_and_late_briefing_items(svc):
+    from pseudolife_memory.memory.briefing import format_briefing
+    from pseudolife_memory.web.session_hook import hook_session_start
+    svc.episode_start_session = lambda *a: {"id": "episode-123456789"}
+    svc.set_active_session = lambda *a: None
+    md = format_briefing(
+        [{"src": "a", "dst": "b", "why": "x" * 20000}], [],
+        [{"lesson": "Keep this lesson", "polarity": "+"}],
+        recap={"title": "Previous useful work", "entry_count": 3})
+    svc.session_briefing = lambda **kw: {"markdown": md}
+    out = hook_session_start(svc, "session-1", plugin_version="0.0.1")
+    assert len(out.encode("utf-8")) <= 9500
+    assert "plugin 0.0.1 and daemon" in out
+    assert "Session episode: episode-123" in out
+    assert "memory_search" in out and "memory_lesson_search" in out
+    assert "Keep this lesson" in out and "Previous useful work" in out
+    assert "x" * 100 not in out
+    assert "briefing item(s) omitted" in out
+
+
+def test_hook_session_start_large_override_is_complete_blocks_with_warning(svc):
+    from pseudolife_memory.web.session_hook import session_start_context
+    (svc.data_dir / "hook-instructions.md").write_text(
+        "## Long custom block\n" + "x" * 9000 +
+        "\n\n## Short custom block\nRead the local runbook.", encoding="utf-8")
+    out = session_start_context(svc, True)
+    assert len(out.encode("utf-8")) <= 9500
+    assert "memory_search" in out and "memory_outcome" in out
+    assert "Read the local runbook." in out
+    assert "x" * 100 not in out
+    assert "daemon-side" in out and "hook-instructions.md" in out
+    assert "Obtain the complete" in out
+    assert "(fixture)" in out
+
+
+def test_hook_session_start_unauthorized_does_not_reveal_private_override(svc):
+    (svc.data_dir / "hook-instructions.md").write_text(
+        "Private override sentinel", encoding="utf-8")
+    app = _app(svc, token="secret")
+    st, body = call(app, "GET", "/api/hook/session-start")
+    assert st == 200
+    assert b"memory_search" in body
+    assert b"Private override sentinel" not in body
+    assert b"(fixture)" not in body
+
+
 def test_hook_session_start_post_rejected(svc):
     st, _ = call(_app(svc), "POST", "/api/hook/session-start")
     assert st == 405

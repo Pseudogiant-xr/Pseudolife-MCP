@@ -36,6 +36,8 @@ COMMAND="${2:-pseudolife-mcp briefing --hook-json}"
 # mechanical. Keep the line free of quote characters (it nests in JSON+sh).
 DISCIPLINE_LINE="Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
 UPS_COMMAND="echo '$DISCIPLINE_LINE'"
+COORDINATION_LINE="Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+COORDINATION_COMMAND="echo '$COORDINATION_LINE'"
 
 # Prefer python3 but accept python (verified runnable — Windows ships a
 # python3 Store stub that "exists" yet exits with an install nag).
@@ -54,12 +56,13 @@ else
 fi
 
 SETTINGS_PATH="$SETTINGS_PATH" BRIEFING_COMMAND="$COMMAND" \
-  UPS_COMMAND="$UPS_COMMAND" "$PYBIN" - <<'PY'
+  UPS_COMMAND="$UPS_COMMAND" COORDINATION_COMMAND="$COORDINATION_COMMAND" "$PYBIN" - <<'PY'
 import json, os
 
 path = os.environ["SETTINGS_PATH"]
 briefing_cmd = os.environ["BRIEFING_COMMAND"]
 ups_cmd = os.environ.get("UPS_COMMAND", "")
+coordination_cmd = os.environ["COORDINATION_COMMAND"]
 
 obj = {}
 if os.path.exists(path):
@@ -86,6 +89,10 @@ else:
     add_group(hooks["SessionStart"], briefing_cmd)
     print(f"Installed SessionStart briefing hook -> {path}")
     print(f"  command: {briefing_cmd}")
+
+if not has_command(hooks["SessionStart"], "Pseudolife coordination:"):
+    add_group(hooks["SessionStart"], coordination_cmd)
+    print(f"Installed SessionStart coordination hook -> {path}")
 
 if ups_cmd:
     hooks.setdefault("UserPromptSubmit", [])

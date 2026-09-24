@@ -1,5 +1,6 @@
 """Scoped consent, preservation, and real runtime coverage for hook setup."""
 import argparse
+import hashlib
 import hmac
 import importlib.util
 import io
@@ -123,12 +124,79 @@ def test_read_only_rerun_rejects_modified_trusted_manual_scripts(tmp_path, monke
     setup.install_manual(tmp_path, report())
     installed = next((tmp_path / "pseudolife/hooks").glob("*/lifecycle.ps1"))
     definitions = setup.manual_definitions(installed.parent)
-    hooks = [hook(tmp_path, event, command=definitions[name]["commandWindows"], trustStatus="trusted")
-             for event, name in setup.EVENTS.items()]
+    hooks = [hook(tmp_path, event, key=name, command=definitions[name]["commandWindows"], trustStatus="trusted")
+             for event, name in [*setup.EVENTS.items(),
+                                 ("sessionStart", "CoordinationStart"),
+                                 ("userPromptSubmit", "CoordinationPrompt")]]
     setup.vet_manual(hooks, tmp_path)
     installed.write_text("modified by user")
     with pytest.raises(setup.SetupError, match="modified"):
         setup.vet_manual(hooks, tmp_path)
+
+
+def test_manual_set_rejects_duplicate_handler_in_place_of_coordination(tmp_path):
+    setup.install_manual(tmp_path, report())
+    directory = next((tmp_path / "pseudolife/hooks").glob("*/lifecycle.ps1")).parent
+    definitions = setup.manual_definitions(directory)
+    roles = [*setup.EVENTS.items(),
+             ("sessionStart", "CoordinationStart"),
+             ("userPromptSubmit", "CoordinationPrompt")]
+    hooks = [hook(tmp_path, event, key=name, command=definitions[name]["commandWindows"])
+             for event, name in roles]
+    assert setup.complete_set(hooks, "manual")
+    hooks[-1]["command"] = definitions["UserPromptSubmit"]["commandWindows"]
+    assert not setup.owned_manual(hooks[-1] | {"eventName": "sessionStart"}, tmp_path)
+    with pytest.raises(setup.SetupError, match="incomplete"):
+        setup.vet_manual(hooks, tmp_path)
+
+
+def test_approved_upgrade_accepts_exact_legacy_four_script_bundle(tmp_path):
+    """A trusted pre-split bundle must pass vetting before it can be replaced."""
+    old_names = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
+    bodies = {name: f"# legacy {name}\n".encode() for name in old_names}
+    digest = hashlib.sha256()
+    for name in old_names:
+        digest.update(name.encode() + b"\0" + bodies[name] + b"\0")
+    directory = tmp_path / "pseudolife" / "hooks" / digest.hexdigest()[:20]
+    directory.mkdir(parents=True)
+    for name, body in bodies.items():
+        (directory / name).write_bytes(body)
+    definitions = setup.manual_definitions(directory)
+    hooks = [hook(tmp_path, event, key=role, command=definitions[role]["commandWindows"])
+             for event, role in setup.EVENTS.items()]
+    setup.vet_manual(hooks, tmp_path, complete=False)
+    manifest = tmp_path / "hooks.json"
+    manifest.write_text(json.dumps({"hooks": {
+        event: [{"hooks": [definitions[role]]}]
+        for event, role in setup.EVENTS.items()}}))
+    setup.install_manual(tmp_path, report())
+    installed = json.loads(manifest.read_text())["hooks"]
+    assert len(installed["SessionStart"]) == 2
+    assert len(installed["UserPromptSubmit"]) == 2
+    assert len(installed["SessionEnd"]) == 1
+    assert all((directory / name).read_bytes() == body for name, body in bodies.items())
+
+
+@pytest.mark.parametrize("damage", ["changed-script", "extra-file"])
+def test_approved_upgrade_rejects_nonexact_legacy_bundle(tmp_path, damage):
+    old_names = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
+    bodies = {name: f"# legacy {name}\n".encode() for name in old_names}
+    digest = hashlib.sha256()
+    for name in old_names:
+        digest.update(name.encode() + b"\0" + bodies[name] + b"\0")
+    directory = tmp_path / "pseudolife" / "hooks" / digest.hexdigest()[:20]
+    directory.mkdir(parents=True)
+    for name, body in bodies.items():
+        (directory / name).write_bytes(body)
+    if damage == "changed-script":
+        (directory / "session-start.sh").write_text("changed\n")
+    else:
+        (directory / "unexpected.sh").write_text("extra\n")
+    definitions = setup.manual_definitions(directory)
+    hooks = [hook(tmp_path, event, key=role, command=definitions[role]["commandWindows"])
+             for event, role in setup.EVENTS.items()]
+    with pytest.raises(setup.SetupError, match="modified"):
+        setup.vet_manual(hooks, tmp_path, complete=False)
 
 
 def test_manual_bash_hooks_mark_codex_context_and_recognize_legacy_commands(tmp_path):
@@ -393,12 +461,12 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
     monkeypatch.setenv("CODEX_CLI_PATH", codex)
     try:
         result = setup.setup(options(trust="yes", non_interactive=True))
-        assert result["status"] == "ready", result
+        assert result["status"] == "ready", result.get("recovery")
         assert result["verified"] == {"session_start": True, "user_prompt_submit": True, "session_end": True}
         assert result["instructions"] == "covered-by-hooks"
         assert seen == ["start", "end"] and not sessions
         text = (home / "config.toml").read_text()
-        assert text.count("trusted_hash") == 3
+        assert text.count("trusted_hash") == 5
         if existing_config:
             assert text.startswith("# User comment must survive")
         assert "dangerously-bypass" not in text

@@ -119,8 +119,8 @@ the higher value, as it always has. Kill switch:
 
 ## Installing the briefing hook
 
-One command installs the briefing hook (and, for the Claude client, a
-static per-turn memory-discipline hook on `UserPromptSubmit`):
+One command installs the briefing, per-turn memory guidance, and a separate
+startup instruction for coordination check-in:
 
 ```powershell
 .\ops\install-hook.ps1     # Windows (PowerShell 7)
@@ -155,8 +155,28 @@ start. Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
 `--max-world N` (default 3 each). The briefing content is also available on
 demand via the CLI or the Console's `/api/briefing` route.
 
-This installs the *briefing* and the per-turn discipline line — not the
-identity registration. `pseudolife-mcp briefing` reads `/api/briefing` and
+The plugin's daemon-served memory hook uses a short operating guide rather
+than repeating the full standing memory policy. Its bounded briefing retains
+complete items, prioritizes lessons and recap over global uncertainties, and
+reports omitted content. Full standing guidance is in
+[`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md). A custom
+`hook-instructions.md` in the daemon's data directory is also bounded: an
+omission notice means the complete custom instructions must be obtained before
+relying on the partial copy. That path belongs to the daemon host and may not
+be readable from a remote client; `/api/briefing` returns the briefing, not
+the custom instruction file.
+
+The plugin additionally supplies independent startup and per-turn coordination
+handlers for check-in and local inbox previews. The startup handler asks the agent to set its project, task
+and status, discover peers, and receive pending mail. Full messages are read
+with `memory_message`, then acknowledged after reading. The existing adapter
+owns the mailbox; this handler does not create another identity or grant
+permissions. The memory and coordination hooks have independent output budgets
+and do not depend on execution order.
+
+The lightweight `install-hook` scripts install the briefing, coordination
+check-in instruction, and per-turn discipline line; they do not register an
+agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing` reads `/api/briefing` and
 forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven
 episode close: the idle reaper closes the episode instead, and the

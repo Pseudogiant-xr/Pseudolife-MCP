@@ -1,10 +1,15 @@
 #Requires -Version 7
 # Native Windows override for Codex. Claude keeps the existing Bash commands.
-param([ValidateSet('SessionStart', 'UserPromptSubmit', 'SessionEnd', 'Stop')][string]$Event)
+param([ValidateSet('SessionStart', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop')][string]$Event)
 $ErrorActionPreference = 'Stop'
 
 function Write-Context([string]$text) {
-    @{ hookSpecificOutput = @{ hookEventName = $Event; additionalContext = $text } } |
+    $hookEvent = switch ($Event) {
+        'CoordinationStart' { 'SessionStart' }
+        'CoordinationPrompt' { 'UserPromptSubmit' }
+        default { $Event }
+    }
+    @{ hookSpecificOutput = @{ hookEventName = $hookEvent; additionalContext = $text } } |
         # Redirected stdout can inherit an OEM console code page. Escaping
         # Unicode keeps the JSON bytes valid regardless of that encoding.
         ConvertTo-Json -Depth 4 -Compress -EscapeHandling EscapeNonAscii
@@ -36,7 +41,7 @@ function Get-PluginVersion {
 # only moves with a release). Same function as pseudolife_memory.plugin_hooks
 # and session-start.sh: SHA-256 over `name NUL bytes NUL`, CRLF read as LF.
 function Get-PluginHooksDigest {
-    $names = @('lifecycle.ps1', 'session-start.sh', 'user-prompt-submit.sh', 'session-end.sh', 'stop-wake.sh')
+    $names = @('lifecycle.ps1', 'session-start.sh', 'user-prompt-submit.sh', 'coordination-start.sh', 'coordination-prompt.sh', 'session-end.sh', 'stop-wake.sh')
     $stream = New-Object IO.MemoryStream
     try {
         foreach ($name in $names) {
@@ -203,22 +208,29 @@ try {
 
 if ($Event -eq 'UserPromptSubmit') {
     $disciplineLine = "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
-    $text = $disciplineLine
-    try {
-        $digest = Read-TurnDigest $sessionId
-        if ($digest) { $text = $disciplineLine + "`n" + $digest }
-    } catch {}
-    Write-Context $text
+    Write-Context $disciplineLine
     exit 0
 }
 
-if ($Event -eq 'SessionStart' -and $startReason -in 'resume', 'compact' -and $sessionId) {
+if ($Event -eq 'CoordinationPrompt') {
+    try {
+        $digest = Read-TurnDigest $sessionId
+        if ($digest) { Write-Context $digest }
+    } catch {}
+    exit 0
+}
+
+if ($Event -eq 'CoordinationStart') {
+    if ($startReason -in 'resume', 'compact', 'clear' -and $sessionId) {
     # A resumed or compacted session lost the digest it saw; clearing the
     # marker makes the next prompt print the current one afresh.
     try {
         $seenPath = Join-Path (Get-DigestDir) ((Get-DigestKey $sessionId) + '.seen')
         if (Test-Path -LiteralPath $seenPath -PathType Leaf) { Remove-Item -LiteralPath $seenPath -Force }
     } catch {}
+    }
+    Write-Context 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list) to check peers and memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show your current scope. Then use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. Changed-message alerts are brief; receive is the source of full messages. If coordination tools are unavailable, say so and continue independently.'
+    exit 0
 }
 
 $headers = @{}

@@ -28,7 +28,7 @@ def test_awareness_refresh_uses_request_headers_and_resets_context():
     assert status == 401
 
 
-def test_hook_passes_its_own_session_for_awareness():
+def test_memory_hook_skips_coordination_awareness():
     from pseudolife_memory.web.session_hook import hook_session_start
     service = FixtureService()
     service.config = SimpleNamespace(coordination=SimpleNamespace(enabled=True))
@@ -36,13 +36,14 @@ def test_hook_passes_its_own_session_for_awareness():
     service.set_active_session = lambda *a: None
     service.session_briefing = lambda **kw: {"markdown": repr(kw)}
     text = hook_session_start(service, "own-session")
-    assert "'session_id': 'own-session'" in text
+    assert "'include_coordination': False" in text
+    assert "'session_id'" not in text
 
 
-def test_hook_route_binds_request_headers_for_the_awareness_gate():
+def test_hook_route_binds_request_headers_for_authorized_briefing():
     """The session-start hook route binds its request headers like
-    /api/agents does, so the briefing's awareness section can resolve the
-    caller's principal instead of denying every hook-driven briefing."""
+    /api/agents does, so authorized briefing calls see the request's
+    identity without a previous caller's headers leaking across requests."""
     from pseudolife_memory.writer_context import _http_request_headers
     service = FixtureService()
     service.config = SimpleNamespace(coordination=SimpleNamespace(enabled=True))

@@ -300,9 +300,9 @@ def test_session_handoff_record_routes_waiter_and_shares_seen_with_prompt_hook(
         return bash_run(ROOT / "plugin/hooks" / script, input=payload,
                         env={**env, "CLAUDE_CODE_SESSION_ID": session_id}).stdout
 
-    hook("session-start.sh", spawn, source="startup")
+    hook("coordination-start.sh", spawn, source="startup")
     hook("session-end.sh", spawn, reason=reason)
-    hook("session-start.sh", current, source=reason)
+    hook("coordination-start.sh", current, source=reason)
     record = digests / f"claude-{os.getpid()}.host"
     assert record.read_bytes() == f"{_key(spawn)}\n{_key(current)}\n".encode()
     assert not (digests / f"claude-{os.getpid()}.switch").exists()
@@ -313,7 +313,7 @@ def test_session_handoff_record_routes_waiter_and_shares_seen_with_prompt_hook(
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     assert capsysbinary.readouterr().out == MAIL.encode()
     assert _seen(digest).read_text().strip() == "2"
-    assert MAIL.strip() not in hook("user-prompt-submit.sh", current)
+    assert MAIL.strip() not in hook("coordination-prompt.sh", current)
     assert run_wait_mail(["--timeout", "0.1", *FAST]) == 3
     assert capsysbinary.readouterr().out == b""
 
@@ -330,10 +330,12 @@ def test_prompt_hook_and_waiter_share_the_marker_in_both_hook_runtimes(
 
     def prompt():
         if shell == "bash":
-            return bash_run(ROOT / "plugin/hooks/user-prompt-submit.sh",
+            return bash_run(ROOT / "plugin/hooks/coordination-prompt.sh",
                             input=payload, env=env).stdout
         result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event",
-                          "UserPromptSubmit", input=payload, env=env)
+                          "CoordinationPrompt", input=payload, env=env)
+        if not result.stdout.strip():
+            return ""
         return json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
 
     assert MAIL.strip() in prompt()

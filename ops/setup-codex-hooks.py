@@ -42,6 +42,9 @@ from pseudolife_memory.credentials import (
 PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
 EVENTS = {"sessionStart": "SessionStart", "userPromptSubmit": "UserPromptSubmit",
           "sessionEnd": "SessionEnd"}
+MANUAL_ROLES = {"sessionStart": ("SessionStart", "CoordinationStart"),
+                "userPromptSubmit": ("UserPromptSubmit", "CoordinationPrompt"),
+                "sessionEnd": ("SessionEnd",)}
 # The plugin's hooks.json also carries Claude Code's opt-in Stop wake hook,
 # which Codex lists too. In Codex it is a no-op (lifecycle.ps1 -Event Stop
 # exits at once; stop-wake.sh exits unless Claude Code started it), approved
@@ -49,7 +52,9 @@ EVENTS = {"sessionStart": "SessionStart", "userPromptSubmit": "UserPromptSubmit"
 # hooks outside SessionEnd and lists three. Manual installs keep EVENTS.
 PLUGIN_EVENTS = {**EVENTS, "stop": "Stop"}
 # A manual bundle copies SCRIPTS; it has no Stop hook, so no stop-wake.sh.
-SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
+SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
+           "coordination-start.sh", "coordination-prompt.sh", "session-end.sh")
+LEGACY_SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
 PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh",)
 RECOVERY = "Open Codex /hooks to review PseudoLife hooks; rerun setup after correcting the reported problem."
 
@@ -327,29 +332,36 @@ def bundle_bytes(directory, names=SCRIPTS):
 
 
 def complete_set(hooks, source):
-    """One hook per event: the three lifecycle events, plus the plugin's
-    optional Stop entry."""
-    events = [h["eventName"] for h in hooks]
-    allowed = PLUGIN_EVENTS if source == "plugin" else EVENTS
-    return len(events) == len(set(events)) and set(EVENTS) <= set(events) <= set(allowed)
+    """Memory and coordination each have independent start and prompt hooks."""
+    from collections import Counter
+    counts = Counter(h["eventName"] for h in hooks)
+    required = Counter(sessionStart=2, userPromptSubmit=2, sessionEnd=1)
+    if source == "plugin" and counts.get("stop") == 1:
+        del counts["stop"]
+    return (counts == required
+            and len({h.get("command") for h in hooks}) == len(hooks)
+            and len({h.get("key") for h in hooks}) == len(hooks))
 
 
-def bundle_digest(files):
+def bundle_digest(files, names=SCRIPTS):
     digest = hashlib.sha256()
-    for name in SCRIPTS:
+    for name in names:
         digest.update(name.encode() + b"\0" + files[name] + b"\0")
     return digest.hexdigest()[:20]
 
 
 def manual_definitions(directory, codex_marker=True):
     mapping = {"SessionStart": "session-start.sh", "UserPromptSubmit": "user-prompt-submit.sh",
+               "CoordinationStart": "coordination-start.sh", "CoordinationPrompt": "coordination-prompt.sh",
                "SessionEnd": "session-end.sh"}
     # Literal single quotes protect $, backticks, and spaces in native paths.
     ps = str(directory / "lifecycle.ps1").replace("'", "''")
     bash_prefix = "env PSEUDOLIFE_CODEX_HOOK=1 bash " if codex_marker else "bash "
     return {event: {"type": "command", "command": bash_prefix + shlex.quote(str(directory / script)),
                     "commandWindows": f"pwsh -NoProfile -File '{ps}' -Event {event}",
-                    "timeout": {"SessionStart": 15, "UserPromptSubmit": 5, "SessionEnd": 3}[event]}
+                    "timeout": {"SessionStart": 15, "UserPromptSubmit": 5,
+                                "CoordinationStart": 5, "CoordinationPrompt": 5,
+                                "SessionEnd": 3}[event]}
             for event, script in mapping.items()}
 
 
@@ -366,9 +378,9 @@ def owned_manual(hook, home):
         definitions = manual_definitions(directory)
         legacy_definitions = manual_definitions(directory, codex_marker=False)
         command = hook.get("command")
-        event = EVENTS.get(hook.get("eventName"))
-        if event and command in (definitions[event]["command"], definitions[event]["commandWindows"],
-                                 legacy_definitions[event]["command"]):
+        if any(command in (definitions[role]["command"], definitions[role]["commandWindows"],
+                           legacy_definitions[role]["command"])
+               for role in MANUAL_ROLES.get(hook.get("eventName"), ())):
             return True
     return False
 
@@ -378,9 +390,12 @@ def legacy_commands():
     # silently remove or approve arbitrary user code.
     line = re.search(r'\$disciplineLine = "(.*)"',
                      (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8"))[1]
+    coordination = re.search(r'\$coordinationLine = "(.*)"',
+                             (ROOT / "ops/install-hook.ps1").read_text(encoding="utf-8"))[1]
     return {"pseudolife-mcp briefing --hook-json",
             "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json",
-            f"echo '{line}'", f"Write-Output '{line}'"}
+            f"echo '{line}'", f"Write-Output '{line}'",
+            f"echo '{coordination}'", f"Write-Output '{coordination}'"}
 
 
 def is_legacy(hook, home):
@@ -412,6 +427,9 @@ def vet_plugin(hooks):
     if not complete_set(hooks, "plugin"):
         raise SetupError("The enabled PseudoLife plugin is missing or has unexpected hooks; update it and retry.")
     expected = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    roles = {event: [handler for group in groups for handler in group["hooks"]]
+             for event, groups in expected.items()}
+    seen = {event: set() for event in roles}
     for h in hooks:
         path = Path(h["sourcePath"])
         try:
@@ -423,26 +441,64 @@ def vet_plugin(hooks):
             actual = None
         if actual != expected or not files_match or h.get("handlerType") != "command":
             raise SetupError("Installed PseudoLife hooks differ from this installer. Update them together or review manually in /hooks.")
+        event = PLUGIN_EVENTS[h["eventName"]]
+        roots = (str(path.parent.parent), path.parent.parent.as_posix())
+        matches = []
+        for index, handler in enumerate(roles[event]):
+            commands = set()
+            for field in ("command", "commandWindows"):
+                command = handler[field]
+                commands.add(command)
+                for root in roots:
+                    commands.add(command.replace("${CLAUDE_PLUGIN_ROOT}", root)
+                                 .replace("$env:CLAUDE_PLUGIN_ROOT", root))
+            if h.get("command") in commands:
+                matches.append(index)
+        if len(matches) != 1 or matches[0] in seen[event]:
+            raise SetupError("Installed PseudoLife hooks differ from this installer. Update them together or review manually in /hooks.")
+        seen[event].add(matches[0])
+    if any(len(seen[event]) != len(roles[event]) for event in seen if event != "Stop" or seen[event]):
+        raise SetupError("Installed PseudoLife hooks differ from this installer. Update them together or review manually in /hooks.")
 
 
 def vet_manual(hooks, home, complete=True):
-    if complete and (len(hooks) != 3 or {h["eventName"] for h in hooks} != set(EVENTS)):
+    if complete and not complete_set(hooks, "manual"):
         raise SetupError("The manual PseudoLife hook set is incomplete; rerun setup with approval to repair it.")
     directories = []
     for directory in (home / "pseudolife/hooks").glob("*"):
         current = manual_definitions(directory)
         legacy = manual_definitions(directory, codex_marker=False)
-        if all(h.get("command") in (current[EVENTS[h["eventName"]]]["command"],
-                                     current[EVENTS[h["eventName"]]]["commandWindows"],
-                                     legacy[EVENTS[h["eventName"]]]["command"])
+        if all(any(h.get("command") in (current[role]["command"], current[role]["commandWindows"],
+                                        legacy[role]["command"])
+                   for role in MANUAL_ROLES.get(h.get("eventName"), ()))
                for h in hooks):
             directories.append(directory)
     if len(directories) != 1:
         raise SetupError("Manual PseudoLife hooks reference mixed or unknown script bundles; review /hooks.")
+    if complete:
+        current = manual_definitions(directories[0])
+        for event, roles in MANUAL_ROLES.items():
+            seen = [h.get("command") for h in hooks if h.get("eventName") == event]
+            if len(seen) != len(roles) or any(
+                    not any(command in (current[role]["command"], current[role]["commandWindows"])
+                            for command in seen)
+                    for role in roles):
+                raise SetupError("The manual PseudoLife hook roles are incomplete; rerun setup with approval to repair them.")
     try:
         matches = bundle_digest(bundle_bytes(directories[0])) == directories[0].name
     except (OSError, UnicodeError):
         matches = False
+    if not matches and not complete:
+        try:
+            # Only an approved upgrade may accept the exact pre-split bundle.
+            # Its directory name still authenticates all four original bytes.
+            legacy = list(directories[0].iterdir())
+            if ({p.name for p in legacy} == set(LEGACY_SCRIPTS)
+                    and all(p.is_file() and not p.is_symlink() for p in legacy)):
+                matches = (bundle_digest(bundle_bytes(directories[0], LEGACY_SCRIPTS),
+                                         LEGACY_SCRIPTS) == directories[0].name)
+        except (OSError, UnicodeError):
+            pass
     if not matches:
         raise SetupError("An installed PseudoLife script was modified; restore or review it before running verification.")
 
@@ -489,8 +545,10 @@ def install_manual(home, report, plugin=False):
                     or (h.get("commandWindows") and h["commandWindows"] not in known)]
             if kept:
                 groups.append({**group, "hooks": kept})
-        if event in definitions:
-            groups.append({"hooks": [definitions[event]]})
+        for name in (event, {"SessionStart": "CoordinationStart",
+                             "UserPromptSubmit": "CoordinationPrompt"}.get(event)):
+            if name in definitions:
+                groups.append({"hooks": [definitions[name]]})
         hooks[event] = groups
     data = (json.dumps(obj, indent=2) + "\n").encode()
     # Compare parsed values so formatting changes alone never create backups.
@@ -776,18 +834,25 @@ def verify(executable, home, cwd, config, hooks, selected):
         client.rpc("turn/start", {"threadId": thread, "input": [{"type": "text",
                    "text": "Local hook verification.", "text_elements": []}]})
         deadline = time.monotonic() + 25
-        completed = {}
+        completed = []
         while time.monotonic() < deadline:
-            completed = {e["params"]["run"]["eventName"]: e["params"]["run"]
-                         for e in client.events if e.get("method") == "hook/completed"}
-            if all(event in completed for event in ("sessionStart", "userPromptSubmit")):
+            completed = [e["params"]["run"] for e in client.events
+                         if e.get("method") == "hook/completed"]
+            if all(sum(run.get("eventName") == event for run in completed) >= 2
+                   for event in ("sessionStart", "userPromptSubmit")):
                 break
             client.receive(deadline - time.monotonic())
         for event, text in (("sessionStart", "Session episode:"),
                             ("userPromptSubmit", "memory_lesson_search")):
-            run = completed.get(event, {})
-            if run.get("status") != "completed" or not any(text in e.get("text", "") for e in run.get("entries", [])):
-                raise SetupError(f"{EVENTS[event]} did not return the expected memory context. Check daemon access and /hooks.")
+            runs = [run for run in completed if run.get("eventName") == event]
+            if len(runs) != 2 or any(run.get("status") != "completed" for run in runs) or not any(
+                    text in entry.get("text", "") for run in runs for entry in run.get("entries", [])):
+                raise SetupError(f"{EVENTS[event]} did not return the expected memory context "
+                                 f"({len(runs)} completed events, memory={any(text in entry.get('text', '') for run in runs for entry in run.get('entries', []))}). Check daemon access and /hooks.")
+        if not any("memory_agents(action=list)" in entry.get("text", "")
+                   for run in completed if run.get("eventName") == "sessionStart"
+                   for entry in run.get("entries", [])):
+            raise SetupError("CoordinationStart did not return board setup guidance. Check /hooks.")
         if not episode_open(thread):
             raise SetupError("SessionStart did not open a verifiable memory episode. Check daemon access.")
     if episode_open(thread):

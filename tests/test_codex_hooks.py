@@ -106,8 +106,12 @@ def test_codex_hook_install_preserves_existing_hooks_and_is_idempotent(tmp_path)
     hooks = json.loads(settings.read_text(encoding="utf-8"))["hooks"]
     starts = [h for g in hooks["SessionStart"] for h in g["hooks"]]
     assert starts[0] == original
-    assert len(starts) == 2
+    assert len(starts) == 3
     assert starts[1]["commandWindows"] == starts[1]["command"]
+    assert "pseudolife-mcp briefing" in starts[1]["command"]
+    board = pwsh_run("-Command", starts[2]["commandWindows"])
+    assert "memory_agents(action=list)" in board.stdout
+    assert "memory_message(action=receive)" in board.stdout
     prompts = [h for g in hooks["UserPromptSubmit"] for h in g["hooks"]]
     assert len(prompts) == 1
     result = pwsh_run("-Command", prompts[0]["commandWindows"])
