@@ -175,6 +175,49 @@ def test_batch_cap_leaves_the_rest_for_the_next_sweep(svc):
     assert pending(svc) == [ids[2]]
 
 
+def _stuck_batch_then_fresh(svc):
+    """A cap-full batch of 40-day-old signals no extraction ever lands,
+    then one fresh signal behind it."""
+    import time
+    svc.config.memory.lessons.synthesis_max_signals = 2
+    old = time.time() - 40 * 86400
+    stuck = [svc._storage.add_signal("stuck", "failure", about="x",
+                                     origin="action", now=old)
+             for _ in range(2)]
+    fresh = signal(svc, "release")
+    seen = []
+
+    class Recording(Extractor):
+        def extract_lessons(self, signals):
+            ids = [s["id"] for s in signals]
+            seen.append(ids)
+            return [] if set(ids) & set(stuck) else self.claims
+
+    return stuck, fresh, seen, Recording([claim()])
+
+
+def test_permanently_failing_batch_stops_blocking_newer_signals(svc):
+    """A batch that lands no lesson stays pending, and pending_signals reads
+    oldest-first under the cap. With ten-year retention, a cap-full batch of
+    permanent failures was re-offered on every sweep and no newer signal ever
+    reached synthesis (Codex review of PR #337, 2026-09-23). Retry
+    eligibility is bounded apart from retention. Past signal_retry_days a
+    pending signal is kept as evidence but no longer offered."""
+    stuck, fresh, seen, extractor = _stuck_batch_then_fresh(svc)
+    for _ in range(2):
+        svc.synthesize_lessons(extractor)
+    assert seen == [[fresh]]
+    assert pending(svc) == stuck       # kept, not retried, not deleted
+
+
+def test_zero_retry_days_retries_for_the_whole_retention(svc):
+    stuck, fresh, seen, extractor = _stuck_batch_then_fresh(svc)
+    svc.config.memory.lessons.signal_retry_days = 0
+    svc.synthesize_lessons(extractor)
+    assert seen == [stuck]
+    assert pending(svc) == stuck + [fresh]
+
+
 def test_claim_embeddings_are_computed_before_the_transaction_opens(svc, monkeypatch):
     """Embedding is pure CPU work; running it inside the batch transaction
     held the shared connection (and the service lock) for a model pass per
@@ -616,7 +659,9 @@ def test_file_mode_still_skips_synthesis(tmp_path):
 
 
 def test_export_import_preserves_committed_and_pending_partition(svc, tmp_path, pg_conn, pg_url):
-    from pseudolife_memory.storage.schema import BENCH_RESET_TABLES, SCHEMA_META_VERSION
+    from pseudolife_memory.storage.schema import (
+        BENCH_RESET_TABLES, SCHEMA_META_VERSION, assert_disposable_database,
+    )
     from pseudolife_memory.transfer_cli import perform_export, perform_import
 
     pending_id = signal(svc)
@@ -632,6 +677,7 @@ def test_export_import_preserves_committed_and_pending_partition(svc, tmp_path, 
     svc._storage.close()
     # Both connections belong to this test's private database. Empty it and
     # import the snapshot, with only the inert fixture connection left open.
+    assert_disposable_database(pg_conn)
     pg_conn.execute("TRUNCATE " + ", ".join(BENCH_RESET_TABLES)
                     + " RESTART IDENTITY CASCADE")
     pg_conn.execute("INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)",

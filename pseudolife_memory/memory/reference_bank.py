@@ -22,6 +22,17 @@ from pseudolife_memory.utils.config import ReferenceConfig
 
 logger = logging.getLogger(__name__)
 
+# Chunks per encode() call while ingesting a document. Every chunk is ~512
+# tokens, and the encode's activation memory grows with the batch. Ingest
+# used to hand the whole document to one encode(), batched at
+# embedding.batch_size (16 in the daemon). Measured 2026-09-23 with the
+# Qwen3-Embedding-0.6B default in a throwaway container from the 0.15.0
+# image, a 104-chunk document: one fp32 encode peaked 5,397 MB (+2,565 MB
+# over steady state, past the then 4g cap on its own); slices of 8 peaked
+# 3,886 MB (+1,028 MB) at the same speed (167 s vs 171 s). bf16 single
+# encodes of 4/8/16 chunks: +372/+519/+1,000 MB.
+INGEST_ENCODE_BATCH = 8
+
 
 def cosine_similarity_from_distance(dist: float) -> float:
     """ChromaDB cosine *distance* is ``1 − cos`` (range [0, 2]), so the
@@ -177,10 +188,13 @@ class ReferenceBank:
         # Open (or refuse) before spending the embedding work.
         collection = self._open(create=True)
 
-        # Embed all chunks
-        embeddings = embedder.encode(chunks)  # (N, dim) tensor
-        if isinstance(embeddings, torch.Tensor):
-            embeddings = embeddings.cpu().numpy().tolist()
+        # Embed in bounded slices, never the whole document in one call.
+        embeddings: list = []
+        for start in range(0, len(chunks), INGEST_ENCODE_BATCH):
+            batch = embedder.encode(chunks[start:start + INGEST_ENCODE_BATCH])
+            if isinstance(batch, torch.Tensor):
+                batch = batch.cpu().numpy().tolist()
+            embeddings.extend(batch)
 
         # Build IDs, documents, metadatas
         ids = []

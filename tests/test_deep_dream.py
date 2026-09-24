@@ -172,6 +172,7 @@ def test_apply_survives_junk_delete_of_a_mentioned_entity(svc):
     assert audited
 
 
+@pytest.mark.real_model
 def test_dream_alias_proposal_folds_thin_side_into_evidence_bearing(svc):
     # The alias screen compares a freshly-minted name against existing cortex
     # entities. When the NEW side carries the evidence (facts/edges) and the
@@ -201,6 +202,196 @@ def test_dream_alias_proposal_folds_thin_side_into_evidence_bearing(svc):
     assert prop and prop[0]["entity_id"] == thin and prop[0]["into_id"] == rich
 
 
+def _record_encodes(svc, monkeypatch):
+    """Wrap the service's embedder so every encode records whether the
+    service lock was held and which texts it embedded."""
+    real = svc._embedder.encode
+    calls = []
+
+    def encode(texts, *args, **kwargs):
+        calls.append((svc._lock.locked(),
+                      [texts] if isinstance(texts, str) else list(texts)))
+        return real(texts, *args, **kwargs)
+
+    monkeypatch.setattr(svc._embedder, "encode", encode)
+    return calls
+
+
+def test_dream_alias_screen_encodes_outside_the_service_lock(svc, monkeypatch):
+    """The screen embeds every existing entity name to compare it with the
+    names a dream just minted: ~1,000-2,050 CPU encodes that held the
+    service lock 55-171 s per new-entity dream on the live bank (2026-09-23
+    lock-stalls review). The encode runs unlocked, the proposal is still
+    filed, and a name an earlier screen embedded is not re-encoded."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")
+    svc.cortex_write("release train", "cadence", "weekly", support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    # The cycle's own claim write, as in a dream: it mints the new node.
+    svc.cortex_write("deploy pipeline", "stage", "build then test",
+                     support="user")
+    calls = _record_encodes(svc, monkeypatch)
+    assert svc._propose_dream_alias_candidates(
+        {nn("deploy pipeline"): "deploy pipeline"}, known) == 1
+    screened = [c for c in calls if "deployment pipeline" in c[1]]
+    assert screened and not any(locked for locked, _ in screened)
+    calls.clear()
+    svc._propose_dream_alias_candidates(
+        {nn("ship pipeline"): "ship pipeline"}, known)
+    assert [texts for _, texts in calls] == [["ship pipeline"]]
+
+
+def test_dream_alias_name_memo_is_bounded(svc, monkeypatch):
+    """The name memo holds at most ``_ALIAS_MEMO_MAX`` vectors (the live
+    bank's ~2,050 names are ~8 MB at 1,024 dims); names past the cap are
+    re-encoded each screen instead of growing it."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")
+    svc.cortex_write("release train", "cadence", "weekly", support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    svc.cortex_write("deploy pipeline", "stage", "build then test",
+                     support="user")
+    monkeypatch.setattr(svc, "_ALIAS_MEMO_MAX", 2, raising=False)
+    assert svc._propose_dream_alias_candidates(
+        {nn("deploy pipeline"): "deploy pipeline"}, known) == 1
+    assert len(svc._alias_name_memo) == 2
+    calls = _record_encodes(svc, monkeypatch)
+    svc._propose_dream_alias_candidates(
+        {nn("ship pipeline"): "ship pipeline"}, known)
+    [(_, encoded)] = calls
+    assert "ship pipeline" in encoded and "release train" in encoded
+
+
+def test_dream_alias_screen_never_raises_on_an_encode_failure(svc, monkeypatch):
+    """The screen is best-effort: an embedder failure outside the lock files
+    nothing and returns 0 instead of breaking the dream."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("embedder down")
+
+    monkeypatch.setattr(svc._embedder, "encode", boom)
+    assert svc._propose_dream_alias_candidates(
+        {nn("deploy pipeline"): "deploy pipeline"}, known) == 0
+    assert not svc._lock.locked()
+
+
+def _alias_screen_setup(svc):
+    """A standing entity with facts, then this cycle's claim about a new
+    near-duplicate name: the screen will match 'deploy pipeline' to
+    'deployment pipeline'. Both writes mint graph nodes."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")
+    svc.cortex_write("release train", "cadence", "weekly", support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    svc.cortex_write("deploy pipeline", "stage", "build then test",
+                     support="user")
+    return {nn("deploy pipeline"): "deploy pipeline"}, known
+
+
+def _during_encode(svc, monkeypatch, action):
+    """Run ``action`` once, from inside the screen's unlocked encode: a
+    concurrent Console or judge-sweep call landing mid-screen."""
+    real = svc._embedder.encode
+
+    def encode(texts, *args, **kwargs):
+        # Guard, not a hang: action takes the non-reentrant service lock.
+        assert not svc._lock.locked(), "alias screen encoded under the lock"
+        if not getattr(encode, "fired", False):
+            encode.fired = True
+            action()
+        return real(texts, *args, **kwargs)
+
+    monkeypatch.setattr(svc._embedder, "encode", encode)
+
+
+def _merge_rows_touching(svc, eid):
+    return [p for p in svc._storage.pending_entity_proposals()
+            if p.get("kind") == "merge" and eid in (p["entity_id"], p["into_id"])]
+
+
+def test_alias_screen_skips_an_endpoint_deleted_during_the_encode(
+        svc, monkeypatch):
+    """The screen reads names under the lock, embeds them without it, and
+    files under it again. An endpoint deleted in between (graph_delete_entity
+    from the Console) must not be re-minted by the filing step, and no merge
+    may be queued against it (Codex review of #338, P1)."""
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    _during_encode(svc, monkeypatch,
+                   lambda: svc.graph_delete_entity("deployment pipeline"))
+    assert svc._propose_dream_alias_candidates(new, known) == 0
+    assert svc._storage.find_entity(nn("deployment pipeline")) is None
+
+
+def test_alias_screen_skips_an_endpoint_junk_deleted_during_the_encode(
+        svc, monkeypatch):
+    """Same race through an accepted junk review, whose tombstone does not
+    guard the screen's entity resolution."""
+    import time
+
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    st = svc._storage
+    pid = st.insert_entity_proposal(
+        "junk", st.find_entity(nn("deployment pipeline"))["id"], None, None,
+        "list-artifact", time.time())
+    _during_encode(svc, monkeypatch,
+                   lambda: svc.graph_accept_entity_junk(pid))
+    assert svc._propose_dream_alias_candidates(new, known) == 0
+    assert st.find_entity(nn("deployment pipeline")) is None
+
+
+def test_alias_screen_skips_a_deleted_new_name_and_files_the_rest(
+        svc, monkeypatch):
+    """The new side can vanish too. A skipped match must not end the
+    screen: a later match in the same screen is still filed (an unchecked
+    None would raise into the catch-all and file nothing)."""
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    svc.cortex_write("release trains", "cadence", "biweekly", support="user")
+    new[nn("release trains")] = "release trains"      # screened second
+    st = svc._storage
+    _during_encode(svc, monkeypatch,
+                   lambda: svc.graph_delete_entity("deploy pipeline"))
+    assert svc._propose_dream_alias_candidates(new, known) == 1
+    assert st.find_entity(nn("deploy pipeline")) is None
+    assert _merge_rows_touching(svc, st.find_entity(nn("release trains"))["id"])
+
+
+def test_alias_screen_follows_an_endpoint_merged_during_the_encode(
+        svc, monkeypatch):
+    """A merge in the window leaves the old name as an alias of the
+    survivor, so the proposal lands on the survivor, not a re-minted node."""
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    st = svc._storage
+    survivor = st.find_entity(nn("release train"))["id"]
+    _during_encode(svc, monkeypatch,
+                   lambda: svc.graph_merge("deployment pipeline", "release train"))
+    assert svc._propose_dream_alias_candidates(new, known) == 1
+    assert st.find_entity(nn("deployment pipeline"))["id"] == survivor
+    assert _merge_rows_touching(svc, survivor)
+
+
+def test_alias_screen_never_mints_a_node_for_a_deleted_cortex_name(svc):
+    """Deleting a graph entity keeps its cortex facts, so its name stays a
+    screen candidate. The screen files only between entities that exist
+    and never re-mints the deleted one (the fully locked screen before #338
+    did, at any later dream)."""
+    from pseudolife_memory.graph import norm_name as nn
+    new, known = _alias_screen_setup(svc)
+    assert svc.graph_delete_entity("deployment pipeline")["deleted"]
+    svc._propose_dream_alias_candidates(new, known)
+    assert svc._storage.find_entity(nn("deployment pipeline")) is None
+
+
 def _stage_link_pair(svc):
     """Two similar-context entities with NO memory_traces rows, no shared edge
     and no name containment -> a deep-dream LINK candidate whose evidence can
@@ -226,6 +417,7 @@ def _find_candidate(out, a="atlas queue", b="review workbench"):
     return None
 
 
+@pytest.mark.real_model
 def test_candidate_snippets_fall_back_to_mention_scan(svc):
     _stage_link_pair(svc)
     out = svc.deep_dream(apply=False)
@@ -237,6 +429,7 @@ def test_candidate_snippets_fall_back_to_mention_scan(svc):
     assert "low_differential" not in c and "evidence_overlap" not in c
 
 
+@pytest.mark.real_model
 def test_candidates_respect_dismissed_pairs(svc):
     _stage_link_pair(svc)
     assert _find_candidate(svc.deep_dream(apply=False)) is not None
@@ -295,6 +488,7 @@ def test_apply_prunes_old_snapshots(svc):
     assert out["snapshot"] in names                # the fresh one survives
 
 
+@pytest.mark.real_model
 def test_candidate_snippets_are_truncated(svc):
     _stage_link_pair(svc)
     svc.config.memory.deep_dream.snippet_max_chars = 40
@@ -305,6 +499,7 @@ def test_candidate_snippets_are_truncated(svc):
     assert snips and all(len(s) <= 40 for s in snips)
 
 
+@pytest.mark.real_model
 def test_deep_dream_can_omit_snippets(svc):
     _stage_link_pair(svc)
     out = svc.deep_dream(apply=False, include_snippets=False)
@@ -589,6 +784,7 @@ def _lesson_dup_pair(out):
     return None
 
 
+@pytest.mark.real_model
 def test_dry_run_lists_cross_key_lesson_duplicates(svc):
     _stage_lesson_dups(svc)
     out = svc.deep_dream(apply=False)
@@ -602,6 +798,7 @@ def test_dry_run_lists_cross_key_lesson_duplicates(svc):
     assert len(svc._lessons.current_records()) == 3
 
 
+@pytest.mark.real_model
 def test_dry_run_lists_world_slot_duplicates(svc):
     svc.world_write("MCP spec 2026-07-28", "session identity",
                     "protocol sessions are removed; explicit state handles are required",
@@ -617,6 +814,7 @@ def test_dry_run_lists_world_slot_duplicates(svc):
     assert c["a"]["source_url"].startswith("https://example.com")
 
 
+@pytest.mark.real_model
 def test_lesson_duplicate_dismissal_persists(svc):
     _stage_lesson_dups(svc)
     assert _lesson_dup_pair(svc.deep_dream(apply=False)) is not None
@@ -634,6 +832,7 @@ def test_curation_dismiss_rejects_unknown_store_and_self_pair(svc):
     assert same["dismissed"] is False and same["reason"] == "bad_pair"
 
 
+@pytest.mark.real_model
 def test_curation_duplicates_standing_listing(svc):
     """The Console review drawer's standing listing: the same lesson/world
     pairs the deep dream reports, without the graph-wide dream pass, and
@@ -653,6 +852,7 @@ def test_curation_duplicates_standing_listing(svc):
     assert _lesson_dup_pair(svc.curation_duplicates()) is None
 
 
+@pytest.mark.real_model
 def test_curation_duplicates_world_side_carries_source_url(svc):
     svc.world_write("MCP spec 2026-07-28", "session identity",
                     "protocol sessions are removed; explicit state handles are required",
@@ -667,6 +867,7 @@ def test_curation_duplicates_world_side_carries_source_url(svc):
                                                     "value", "source_url"}
 
 
+@pytest.mark.real_model
 def test_apply_lists_store_duplicates_but_never_deletes(svc):
     _stage_lesson_dups(svc)
     svc.world_write("MCP spec 2026-07-28", "session identity",
@@ -684,13 +885,49 @@ def test_apply_lists_store_duplicates_but_never_deletes(svc):
     assert len(svc._world.current_records()) == 2
 
 
-def test_slot_key_folds_literal_pipes():
+def test_slot_key_is_injective_and_round_trips():
     # _norm_key does NOT strip "|" (its separator class is whitespace ._-/),
     # so the "|" slot-key joiner would be ambiguous: ("a|b","c") and
-    # ("a","b|c") would join identically. _slot_key folds literal pipes in
-    # the components, keeping the encoding injective for both the listing
-    # and the dismissal side.
-    from pseudolife_memory.service import _slot_key
-    assert _slot_key("a-b", "c") == "a-b|c"
-    assert _slot_key("a|b", "c") == "a-b|c"          # folded, not ambiguous
-    assert _slot_key("a|b", "c") != _slot_key("a", "b|c")
+    # ("a","b|c") would join identically. Folding the pipe to "-" (the
+    # pre-2026-09 spelling) traded that for ("a|b","c") == ("a-b","c").
+    # _slot_key escapes it as "%7C", which no normalized component contains
+    # (_norm_key casefolds), and _parse_slot_key takes a key back.
+    from pseudolife_memory.memory.cortex import _norm_key
+    from pseudolife_memory.service import _parse_slot_key, _slot_key
+    assert _slot_key("a-b", "c") == "a-b|c"          # pipe-free: unchanged
+    assert _slot_key("a|b", "c") == "a%7Cb|c"
+    names = [("a|b", "c"), ("a", "b|c"), ("a-b", "c"), ("a%7cb", "c"),
+             ("a|", "|b"), ("|", "|"), ("a%7|b", "c")]
+    slots = [(_norm_key(e), _norm_key(a)) for e, a in names]
+    keys = [_slot_key(*slot) for slot in slots]
+    assert len(set(slots)) == len(names)
+    assert len(set(keys)) == len(keys)               # injective
+    assert [_parse_slot_key(k) for k in keys] == slots
+    assert all(k.count("|") == 1 for k in keys)
+    assert _parse_slot_key("no-pipe") is None
+    assert _parse_slot_key("a|b|c") is None
+
+
+def test_first_boot_carries_folded_dismissals_over_before_any_listing(
+        svc, pg_url, tmp_path_factory):
+    # A human dismissal stored under the pre-2026-09 folded key must be
+    # carried over by the call that initialises the service, not the next
+    # one — a first call that lists would otherwise show the pair again.
+    from pseudolife_memory.service import MemoryService
+    svc.lesson_write("ci|cd deploy", "approach", "Pin the runner image.")
+    svc._storage.dismiss_pair("lesson:ci-cd-deploy|approach",
+                              "lesson:release-train|pitfall")
+    svc._storage.conn.execute(
+        "DELETE FROM meta WHERE key = 'curation_listing_spelling_v2'")
+    svc._storage.close()  # Release the writer lease before the next boot.
+    booted = MemoryService(data_dir=tmp_path_factory.mktemp("dd-boot"),
+                           database_url=pg_url)
+    try:
+        booted.curation_retired("lesson")      # first call: full init
+        assert ("lesson:ci%7Ccd-deploy|approach",
+                "lesson:release-train|pitfall") in booted._storage.dismissed_pairs()
+        assert booted._storage.get_meta(
+            "curation_listing_spelling_v2")["copied"] == 1
+    finally:
+        if booted._storage is not None:
+            booted._storage.close()

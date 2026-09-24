@@ -13,6 +13,8 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -258,6 +260,143 @@ def test_reminder_is_silent_when_the_count_is_unknown(tmp_path):
     asyncio.run(asyncio.wait_for(drive(), 5))
 
 
+def _signature(path):
+    info = os.stat(path)
+    return info.st_ino, info.st_mtime_ns, info.st_size
+
+
+def test_an_unchanged_digest_is_rewritten_before_the_stale_sweep_can_take_it(monkeypatch, tmp_path):
+    """Other adapters sweep digest files a day old, and a quiet mailbox renders
+    the same text for days: the live adapter rewrites its unchanged digest
+    (and touches its marker) periodically so a long-idle session keeps it.
+    The watermark does not move; only a text change moves it."""
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        monkeypatch.setattr(CoordinationAdapter, "DIGEST_REFRESH_SECONDS", 0.05)
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        digest = tmp_path / "d" / "k.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            assert instance.deliver_hint() is not None
+            seen = tmp_path / "d" / "k.seen"
+            os.utime(seen, (1000, 1000))
+            first = _signature(digest)
+            await _wait_for(lambda: _signature(digest) != first)
+            await _wait_for(lambda: seen.stat().st_mtime > 1000)
+            assert digest.read_text(encoding="utf-8").split("\n", 1)[0] == "1"
+            assert instance.digest_watermark == 1
+            assert instance.deliver_hint() is None  # the rewrite is not a new change
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_lost_digest_file_is_put_back_at_the_next_heartbeat(monkeypatch, tmp_path):
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        digest = tmp_path / "d" / "k.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            expected = digest.read_bytes()
+            digest.unlink()
+            await _wait_for(digest.exists)
+            assert digest.read_bytes() == expected
+            assert instance.digest_watermark == 1
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_refused_replace_is_retried_and_leaves_no_temp_file(monkeypatch, tmp_path):
+    """On Windows a reader holding the digest open (a prompt hook, a waiter)
+    makes the atomic replace fail. The write must count as not done, so the
+    next heartbeat writes it (the old file is still there, so nothing else
+    would), and the temp file must not be left behind."""
+    async def drive():
+        from pseudolife_memory import coordination_adapter
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        digest = tmp_path / "d" / "k.txt"
+        real_replace = os.replace
+        refused = []
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(dst) == digest and digest.exists() and not refused:
+                refused.append(dst)  # a rewrite while a reader has the file open
+                raise PermissionError(5, "Access is denied", str(dst))
+            return real_replace(src, dst, *args, **kwargs)
+        monkeypatch.setattr(coordination_adapter.os, "replace", replace)
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)},
+                               {"count": 2, "preview": _preview(2)}])
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            await _wait_for(lambda: refused)
+            await _wait_for(lambda: digest.read_text(encoding="utf-8").startswith("2\n"))
+            assert "- m1 from codex" in digest.read_text(encoding="utf-8")
+            assert instance.digest_watermark == 2
+            assert not [p.name for p in digest.parent.iterdir() if p.name.startswith(".tmp-")]
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_an_unstattable_digest_never_stops_the_heartbeat(monkeypatch, tmp_path):
+    """The keep-alive looks at the file on every heartbeat. A refused stat
+    must not escape into the heartbeat task: that would end the lease renewal
+    while the hints kept saying all is well."""
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        digest = tmp_path / "d" / "k.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            real_stat = os.stat
+
+            def refusing(path, *args, **kwargs):
+                if isinstance(path, (str, os.PathLike)) and Path(path) == digest:
+                    raise PermissionError(13, "Permission denied", str(path))
+                return real_stat(path, *args, **kwargs)
+            monkeypatch.setattr(os, "stat", refusing)
+            beats = len(_heartbeats(daemon))
+            await _wait_for(lambda: len(_heartbeats(daemon)) >= beats + 3)
+            monkeypatch.setattr(os, "stat", real_stat)
+            assert instance._heartbeat_task is not None and not instance._heartbeat_task.done()
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_refresh_after_close_does_not_bring_the_file_back(tmp_path):
+    async def drive():
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        digest = tmp_path / "d" / "k.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            pass
+        assert not digest.exists()
+        instance._refresh_digest()  # a late mailbox update after close
+        assert not digest.exists()
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_marker_left_behind_keeps_new_mail_above_it(tmp_path):
+    """A marker can outlive its digest (a waiter marking as the shim exits,
+    or a delete Windows refused). A new adapter starts above it, or the hook,
+    the hint and a waiter would all treat new mail as already shown."""
+    async def drive():
+        directory = tmp_path / "d"
+        directory.mkdir()
+        (directory / "k.seen").write_text("5\n", encoding="utf-8")
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        client, instance = adapter(daemon, digest_path=directory / "k.txt")
+        async with client, instance:
+            assert instance.digest_watermark == 6
+            assert instance.deliver_hint() is not None
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
 def test_codex_tool_result_carries_the_digest_exactly_once(monkeypatch):
     """The registry's hint is consumed once per tool call: the failure text
     for a missing adapter must not be fetched through the delivering path."""
@@ -279,6 +418,7 @@ def test_codex_tool_result_carries_the_digest_exactly_once(monkeypatch):
         async def get(self, thread_id, snapshot=None): return self.adapter
         def unread_hint(self, thread_id, adapter):
             return adapter.deliver_hint() if adapter is not None else "Coordination: unavailable"
+        def note_call(self, thread_id, name, arguments, **options): pass
 
     texts = []
 
@@ -561,6 +701,312 @@ def test_session_start_on_resume_or_compact_forces_a_fresh_digest(shell, source,
         pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "SessionStart",
                  input=payload, env=env)
     assert seen.exists() is kept
+
+
+# --- Claude Code: the digest key survives /clear and in-session /resume -----
+#
+# Claude Code keeps a stdio MCP server's CLAUDE_CODE_SESSION_ID for the life
+# of the process, while hooks get the current session id, which /clear and
+# /resume change (code.claude.com/docs/en/env-vars.md, verified 2026-09-23).
+# The shim writes its digest under its spawn-time id, so the hooks map every
+# later session of the same process back to that key through a record named
+# by CLAUDE_PID, which Claude Code exports to hooks but not to MCP servers.
+
+def _sha(session_id):
+    return hashlib.sha256(session_id.encode()).hexdigest()
+
+
+def _plant(path, text):
+    """A record or marker as the bash hooks write one: LF line ends, which a
+    Windows text-mode write would turn into CRLF (and the hooks reject)."""
+    path.write_bytes(text.encode("utf-8"))
+
+
+def _claude_env(tmp_path, pid=None):
+    """A live PID by default (this test process), so the hooks can read the
+    process creation identity a /clear or /resume handoff is bound to."""
+    pid = str(os.getpid()) if pid is None else pid
+    env, _ = _digest_env(tmp_path)
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:9"  # session hooks' curl fails fast
+    env["CLAUDE_PID"] = pid
+    # A suite run from a Claude Code session inherits that session's id.
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    return env
+
+
+def _claude_hook(script, env, session_id, **fields):
+    """Run one plugin hook the way Claude Code does: the env id matches the
+    stdin session_id unless a test overrides it."""
+    env = {**env}
+    env.setdefault("CLAUDE_CODE_SESSION_ID", session_id)
+    payload = json.dumps({"session_id": session_id, **fields})
+    return bash_run(ROOT / f"plugin/hooks/{script}", input=payload, env=env).stdout
+
+
+def test_prompt_hook_follows_the_shim_digest_across_clear(tmp_path):
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    first = _claude_hook("user-prompt-submit.sh", env, "launch-session")
+    assert first.rstrip("\n").endswith(BODY)
+
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    _claude_hook("session-start.sh", env, "cleared-session", source="clear")
+    # The cleared conversation never saw the pending mail: it prints again.
+    after_clear = _claude_hook("user-prompt-submit.sh", env, "cleared-session")
+    assert after_clear.rstrip("\n").endswith(BODY)
+    assert _claude_hook("user-prompt-submit.sh", env, "cleared-session").count("\n") == 1
+    # Compaction keeps the session id and the process's record.
+    _claude_hook("session-start.sh", env, "cleared-session", source="compact")
+    after_compact = _claude_hook("user-prompt-submit.sh", env, "cleared-session")
+    assert after_compact.rstrip("\n").endswith(BODY)
+
+    _claude_hook("session-end.sh", env, "cleared-session", reason="clear")
+    _claude_hook("session-start.sh", env, "cleared-again", source="clear")
+    _claude_hook("user-prompt-submit.sh", env, "cleared-again")
+    _write_digest(tmp_path, _sha("launch-session"), 4, "Coordination: newer mail")
+    newer = _claude_hook("user-prompt-submit.sh", env, "cleared-again")
+    assert newer.rstrip("\n").endswith("Coordination: newer mail")
+    assert (directory / f"{_sha('launch-session')}.seen").read_text(encoding="utf-8").strip() == "4"
+    assert not (directory / f"{_sha('cleared-session')}.seen").exists()
+    assert not (directory / f"{_sha('cleared-again')}.seen").exists()
+
+
+@pytest.mark.parametrize("left_behind", [False, True])
+def test_first_clear_after_a_hook_upgrade_links_the_running_session(left_behind, tmp_path):
+    """A session launched under the previous hooks (or before the plugin was
+    enabled) has no record of its own; its first /clear names the shim's key
+    from the session that is ending, replacing any record another process
+    with this PID left behind."""
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    if left_behind:
+        _write_digest(tmp_path, _sha("dead-launch"), 9, "Coordination: a dead shim's mail")
+        _plant(directory / f"claude-{env['CLAUDE_PID']}.host", f"{_sha('dead-launch')}\n{_sha('dead-last')}\n")
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    _claude_hook("session-start.sh", env, "cleared-session", source="clear")
+    assert _claude_hook("user-prompt-submit.sh", env, "cleared-session").rstrip("\n").endswith(BODY)
+
+
+def test_in_session_resume_keeps_the_shim_digest_over_a_leftover_file(tmp_path):
+    """/resume inside a running session switches the hook's session id; the
+    resumed conversation's own digest, left by the shim of the process that
+    last ran it, is stale."""
+    env = _claude_env(tmp_path)
+    _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _write_digest(tmp_path, _sha("older-session"), 9, "Coordination: a dead shim's mail")
+    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    _claude_hook("user-prompt-submit.sh", env, "launch-session")
+    _claude_hook("session-end.sh", env, "launch-session", reason="resume")
+    _claude_hook("session-start.sh", env, "older-session", source="resume")
+    resumed = _claude_hook("user-prompt-submit.sh", env, "older-session")
+    assert resumed.rstrip("\n").endswith(BODY)
+    assert "dead shim" not in resumed
+
+
+def _genuine_resume_handoff(tmp_path, env):
+    """This process's launch session, then its SessionEnd for /resume: a
+    record and a handoff exactly as the hooks write them."""
+    directory = _write_digest(tmp_path, _sha("launch-session"), 9, "Coordination: the launch session's mail")
+    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    _claude_hook("session-end.sh", env, "launch-session", reason="resume")
+    return directory, directory / f"claude-{env['CLAUDE_PID']}.switch"
+
+
+@pytest.mark.parametrize("line,value", [
+    (0, "stale"),       # older than a minute
+    (0, "future"),      # dated ahead of the clock
+    (0, "08"),          # not a date +%s stamp; bash would abort on it as octal
+    (1, "elsewhere"),   # written by another process with this PID (Codex review, 2026-09-24)
+    (2, "elsewhere"),   # handed off from a session the record is not confirmed for
+])
+def test_resume_carries_the_record_only_on_this_process_handoff(line, value, tmp_path):
+    env = _claude_env(tmp_path)
+    directory, switch = _genuine_resume_handoff(tmp_path, env)
+    lines = switch.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+    lines[line] = {"stale": "1000000000", "future": str(int(time.time()) + 3600), "08": "08",
+                   "elsewhere": _sha("elsewhere")}[value]
+    _plant(switch, "\n".join(lines) + "\n")
+    _write_digest(tmp_path, _sha("resumed-session"), 3, BODY)
+    briefing = _claude_hook("session-start.sh", env, "resumed-session", source="resume")
+    assert "did not answer" in briefing  # the hook ran to its end
+    resumed = _claude_hook("user-prompt-submit.sh", env, "resumed-session")
+    assert resumed.rstrip("\n").endswith(BODY)
+    assert "launch session" not in resumed
+    assert not switch.exists()
+
+
+@pytest.mark.parametrize("source", ["startup", "fork"])
+def test_a_launch_never_carries_a_record(source, tmp_path):
+    env = _claude_env(tmp_path)
+    _, switch = _genuine_resume_handoff(tmp_path, env)
+    _write_digest(tmp_path, _sha("new-session"), 3, BODY)
+    _claude_hook("session-start.sh", env, "new-session", source=source)
+    fresh = _claude_hook("user-prompt-submit.sh", env, "new-session")
+    assert fresh.rstrip("\n").endswith(BODY)
+    assert "launch session" not in fresh
+    assert not switch.exists()
+
+
+def test_a_handoff_written_by_another_live_process_is_refused(tmp_path):
+    """PID reuse as the creation identity sees it: a record and handoff this
+    process wrote, presented under another live process's PID."""
+    env = _claude_env(tmp_path)
+    directory, switch = _genuine_resume_handoff(tmp_path, env)
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        for suffix in ("host", "switch"):
+            source = directory / f"claude-{env['CLAUDE_PID']}.{suffix}"
+            source.rename(directory / f"claude-{other.pid}.{suffix}")
+        env = {**env, "CLAUDE_PID": str(other.pid)}
+        _write_digest(tmp_path, _sha("resumed-session"), 3, BODY)
+        _claude_hook("session-start.sh", env, "resumed-session", source="resume")
+        resumed = _claude_hook("user-prompt-submit.sh", env, "resumed-session")
+    finally:
+        other.kill()
+        other.wait()
+    assert resumed.rstrip("\n").endswith(BODY)
+    assert "launch session" not in resumed
+
+
+def test_without_a_creation_identity_the_record_is_not_carried(tmp_path):
+    """Where this process cannot be told apart from a later one with its PID,
+    /clear and /resume fail closed: the next session starts from its own key."""
+    env = _claude_env(tmp_path, pid="4000000000")  # no such process
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    switch = directory / "claude-4000000000.switch"
+    assert not switch.exists()
+    # Nor does a handoff naming the empty identity get through.
+    _plant(switch, f"{int(time.time())}\n{_sha('')}\n{_sha('launch-session')}\n")
+    _claude_hook("session-start.sh", env, "cleared-session", source="clear")
+    assert _claude_hook("user-prompt-submit.sh", env, "cleared-session").count("\n") == 1
+
+
+def test_compaction_does_not_adopt_a_record_confirmed_for_another_session(tmp_path):
+    env = _claude_env(tmp_path)
+    record = tmp_path / "digests" / f"claude-{env['CLAUDE_PID']}.host"
+    _write_digest(tmp_path, _sha("other-launch"), 9, "Coordination: another session's mail")
+    _plant(record, f"{_sha('other-launch')}\n{_sha('other-session')}\n")
+    _write_digest(tmp_path, _sha("this-session"), 3, BODY)
+    _claude_hook("session-start.sh", env, "this-session", source="compact")
+    own = _claude_hook("user-prompt-submit.sh", env, "this-session")
+    assert own.rstrip("\n").endswith(BODY)
+    assert record.read_text(encoding="utf-8").split() == [_sha("this-session")] * 2
+
+
+def test_a_resume_handoff_left_by_a_dead_process_with_the_same_pid_is_not_trusted(tmp_path):
+    """Codex review of #351 (2026-09-24): a process that wrote its /resume
+    handoff and exited, then a new process that reused the PID and launched
+    with --resume within the minute, kept the dead process's record and
+    printed its mail. Files as the bash hooks write them (LF)."""
+    env = _claude_env(tmp_path)
+    pid = env["CLAUDE_PID"]
+    directory = _write_digest(tmp_path, _sha("dead-launch"), 9, "Coordination: a dead shim's mail")
+    _plant(directory / f"claude-{pid}.host", f"{_sha('dead-launch')}\n{_sha('dead-last')}\n")
+    _plant(directory / f"claude-{pid}.switch",
+           f"{int(time.time())}\n{_sha('another process')}\n{_sha('dead-last')}\n")
+    _write_digest(tmp_path, _sha("new-session"), 3, BODY)
+    _claude_hook("session-start.sh", env, "new-session", source="resume")
+    fresh = _claude_hook("user-prompt-submit.sh", env, "new-session")
+    assert fresh.rstrip("\n").endswith(BODY)
+    assert "dead shim" not in fresh
+
+
+@pytest.mark.parametrize("pid", ["12x", "4242 "])
+def test_a_malformed_claude_pid_names_no_record(pid, tmp_path):
+    env = _claude_env(tmp_path, pid=pid)
+    directory = _write_digest(tmp_path, _sha("other-session"), 3, "Coordination: another process's mail")
+    record = directory / f"claude-{pid}.host"
+    _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    # Confirmed for this session: only the digits check keeps the prompt
+    # hook from following it.
+    _plant(record, f"{_sha('other-session')}\n{_sha('launch-session')}\n")
+    own = _claude_hook("user-prompt-submit.sh", env, "launch-session")
+    assert own.rstrip("\n").endswith(BODY)
+    # Confirmed for no session here: only the digits check keeps the session
+    # hooks from rewriting it.
+    unconfirmed = f"{_sha('other-session')}\n{_sha('elsewhere')}\n"
+    _plant(record, unconfirmed)
+    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    _claude_hook("session-end.sh", env, "launch-session", reason="resume")
+    assert not (directory / f"claude-{pid}.switch").exists()
+    assert record.read_text(encoding="utf-8") == unconfirmed
+
+
+def test_prompt_hook_ignores_a_symlinked_process_record(tmp_path):
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("other-session"), 3, "Coordination: another process's mail")
+    target = tmp_path / "elsewhere.host"
+    _plant(target, f"{_sha('other-session')}\n{_sha('launch-session')}\n")
+    try:
+        (directory / f"claude-{env['CLAUDE_PID']}.host").symlink_to(target)
+    except OSError:
+        pytest.skip("this platform or account cannot create symlinks")
+    _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    assert _claude_hook("user-prompt-submit.sh", env, "launch-session").rstrip("\n").endswith(BODY)
+
+
+def test_a_nested_host_that_inherited_claude_pid_neither_writes_nor_follows_it(tmp_path):
+    """A Codex run started from a Claude Bash command inherits CLAUDE_PID and
+    CLAUDE_CODE_SESSION_ID from the outer session; its own session_id differs,
+    so the outer session's record is left alone and not followed."""
+    env = _claude_env(tmp_path)
+    env["CLAUDE_CODE_SESSION_ID"] = "outer-session"
+    record = tmp_path / "digests" / f"claude-{env['CLAUDE_PID']}.host"
+    directory = _write_digest(tmp_path, _sha("outer-session"), 3, "Coordination: the outer session's mail")
+    _claude_hook("session-end.sh", env, "codex-thread", reason="clear")
+    _claude_hook("session-end.sh", env, "codex-thread", reason="resume")
+    assert not record.exists()
+    assert not (directory / f"claude-{env['CLAUDE_PID']}.switch").exists()
+    # Confirmed for the nested session's id, so only the env==stdin guard
+    # keeps it from being followed.
+    planted = f"{_sha('outer-session')}\n{_sha('codex-thread')}\n"
+    _plant(record, planted)
+    _write_digest(tmp_path, _sha("codex-thread"), 3, BODY)
+    _claude_hook("session-start.sh", env, "codex-thread", source="startup")
+    own = _claude_hook("user-prompt-submit.sh", env, "codex-thread")
+    assert own.rstrip("\n").endswith(BODY)
+    assert record.read_text(encoding="utf-8") == planted
+
+
+@pytest.mark.parametrize("record", [
+    "../../escape\n{own}\n", "\n{own}\n", "ABCDEF" * 11 + "\n{own}\n", "abc\n{own}\n",
+    "../" + "a" * 61 + "\n{own}\n",  # 64 characters, not all hex
+    # Well formed, but confirmed for another session: the state a record
+    # left by a dead process with this PID is in until a hook replaces it.
+    "{other}\n{elsewhere}\n",
+])
+def test_prompt_hook_ignores_a_malformed_or_unconfirmed_process_record(record, tmp_path):
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _write_digest(tmp_path, _sha("other"), 9, "Coordination: another session's mail")
+    _plant(directory / f"claude-{env['CLAUDE_PID']}.host",
+           record.format(own=_sha("launch-session"), other=_sha("other"), elsewhere=_sha("elsewhere")))
+    assert _claude_hook("user-prompt-submit.sh", env, "launch-session").rstrip("\n").endswith(BODY)
+
+
+def test_session_start_sweeps_only_month_old_process_records(tmp_path):
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    stale_key = _sha("stale-session")
+    _write_digest(tmp_path, stale_key, 1, "Coordination: old")
+    swept = [directory / name for name in (
+        "claude-1.host", "claude-1.switch", "claude-1.host.777", "claude-1.switch.778")]
+    kept = [directory / name for name in (
+        "claude-2.host", f"{stale_key}.txt", f"{stale_key}.seen", "ledger.log")]
+    for path in swept + kept[:1] + kept[2:]:
+        _plant(path, _sha("x") + "\n")
+    month_ago, ten_days_ago = time.time() - 40 * 86400, time.time() - 10 * 86400
+    for path in swept + kept[1:]:
+        os.utime(path, (month_ago, month_ago))
+    os.utime(kept[0], (ten_days_ago, ten_days_ago))
+    _claude_hook("session-start.sh", env, "launch-session", source="startup")
+    assert [path.name for path in swept if path.exists()] == []
+    assert [path.name for path in kept if not path.exists()] == []
+    assert (directory / f"claude-{env['CLAUDE_PID']}.host").exists()
 
 
 def test_both_hook_scripts_render_the_same_digest(tmp_path):

@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from urllib.parse import quote, unquote
 
 from pseudolife_memory.principals import parse_token_map, resolve_principal
+from pseudolife_memory.storage.coordination import CoordinationClockChanged
 
 
 _PARAMETERS = {
@@ -251,7 +252,7 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
         if action in {"register", "send", "heartbeat"}:
             now = time.monotonic()
             if now - getattr(service, "_coordination_pruned_at", float("-inf")) >= 60:
-                store.prune()
+                store.prune(audit_retention_days=cfg.audit_retention_days)
                 service._coordination_pruned_at = now
         if action == "register":
             return store.register(principal, **parameters)
@@ -262,6 +263,10 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
             # them for the recipient to read and acknowledge.
             parameters["for_delivery"] = True
         if action == "send":
+            epoch = getattr(service, "_coordination_hlc_epoch", None)
+            if hasattr(service, "_coordination_hlc_epoch"):
+                parameters["enforce_writer_epoch"] = True
+                parameters["expected_writer_epoch"] = epoch
             parameters["hlc"] = ":".join(map(str, service._hlc.tick()))
         method = {"agents": "list_agents", "attempt": "mark_attempt"}.get(action, action)
         result = getattr(store, method)(principal, agent_id, credential, **parameters)
@@ -278,7 +283,19 @@ def dispatch(service, action: str, parameters: dict, *, headers=None,
              principal: str | None = None) -> dict:
     """Share the same redacted error boundary across MCP and REST callers."""
     try:
-        return _dispatch(service, action, parameters, headers=headers, principal=principal)
+        try:
+            return _dispatch(service, action, parameters, headers=headers, principal=principal)
+        except CoordinationClockChanged:
+            if action != "send":
+                raise
+            # The mailbox transaction has rolled back and released its lock.
+            # An epoch mismatch proves the cached session check is stale.
+            # Reprobe under the service lock even inside its normal probe
+            # interval, then make one fresh attempt with the reseeded clock.
+            with service._lock:
+                service._storage._session_ok_at = 0.0
+                service._ensure_init()
+            return _dispatch(service, action, parameters, headers=headers, principal=principal)
     except Exception as exc:
         raise ValueError(public_error(exc)) from None
 

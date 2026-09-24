@@ -70,7 +70,10 @@ extraction quality per model.
 Full parity. The [plugin](../../plugin/README.md) is the recommended
 hooks/commands layer — it is the only path that registers the session
 identity with the daemon (SessionStart forwards Claude Code's own
-`session_id`) and closes the episode on SessionEnd. `ops/install-hook.*`
+`session_id`) and closes the episode on SessionEnd. Its opt-in `Stop` hook can
+also wake an idle session when board mail arrives (see
+[Configuration](configuration.md#waking-an-idle-claude-code-session-the-stop-hook)).
+`ops/install-hook.*`
 is the non-plugin fallback: it installs the SessionStart briefing
 (`pseudolife-mcp briefing --hook-json`) and the per-turn discipline line,
 but no SessionEnd hook and no identity registration — those sessions fall
@@ -183,6 +186,15 @@ to avoid duplicate PseudoLife events; unrelated hooks are preserved. An
 incomplete or unrecognized plugin bundle requires review rather than
 automatically granting trust. Disabled hooks and intentional feature or
 policy restrictions remain in place.
+
+The plugin's `hooks.json` also carries Claude Code's opt-in wake hook on
+`Stop`, so Codex 0.148 and later lists a fourth PseudoLife hook (earlier
+releases skip async hooks there). It is a no-op in Codex: the native command
+exits at once, and the bash command stops at its opt-in check or the script
+exits unless Claude Code started it. Setup approves it with the other three, and disabling it in
+`/hooks` does not block setup. After a plugin update, Codex's startup hook
+review lists it until setup reruns. Manual installs keep the three lifecycle
+events.
 
 For authenticated stdio connections, setup prepares a private bearer file and
 records the same daemon URL and file path for the shim and lifecycle hooks.

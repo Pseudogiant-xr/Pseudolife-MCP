@@ -119,6 +119,7 @@ def test_cold_service_pays_full_init_only_for_send(pg_service, tmp_path, monkeyp
     the first send pays the full initialization once, for the HLC reseed."""
     from pseudolife_memory.service import MemoryService
 
+    pg_service._storage.close()  # the cold daemon is the bank's one writer
     cold = MemoryService(data_dir=tmp_path / "cold")
     cold.config.coordination.enabled = True
     cold.config.coordination.allowed_principals = [PRINCIPAL]
@@ -163,6 +164,7 @@ def test_send_during_initial_hydration_waits_for_clock_history(
     from pseudolife_memory.storage import sync
     from pseudolife_memory.storage.coordination import HLC_META_KEY
 
+    pg_service._storage.close()  # the cold daemon is the bank's one writer
     cold = MemoryService(data_dir=tmp_path / "clock-startup")
     cold.config.coordination.enabled = True
     cold.config.coordination.allowed_principals = [PRINCIPAL]
@@ -221,3 +223,98 @@ def test_send_during_initial_hydration_waits_for_clock_history(
             mailbox.close()
         if cold._storage is not None:
             cold._storage.close()
+
+
+def test_send_during_handover_hydration_waits_for_clock_history(
+    coordinating, pg_conn, pg_url, monkeypatch,
+):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    from pseudolife_memory.storage import sync
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    agent = dispatch(coordinating, "register", {}, headers={}, principal=PRINCIPAL)
+    creds = {"x-pl-agent": agent["agent_id"], "x-pl-agent-key": agent["credential"]}
+    pg_conn.execute("SELECT pg_terminate_backend(%s)",
+                    (coordinating._storage.conn.info.backend_pid,))
+    pg_conn.commit()
+    other = PostgresStorage(pg_url)
+    try:
+        other.set_meta("coordination_hlc_highwater", [10**15, 7])
+    finally:
+        other.close()
+    coordinating._storage._session_ok_at = 0.0
+    coordinating._storage.verify_writer_session()
+    assert coordinating._storage.resident_invalidated
+
+    hydration_started = threading.Event()
+    release_hydration = threading.Event()
+    original_hydrate = sync.hydrate_cms
+
+    def paused_hydrate(*args, **kwargs):
+        hydration_started.set()
+        assert release_hydration.wait(10), "hydration was not released"
+        return original_hydrate(*args, **kwargs)
+
+    monkeypatch.setattr(sync, "hydrate_cms", paused_hydrate)
+
+    def initialize():
+        with coordinating._lock:
+            coordinating._ensure_init()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            initializing = pool.submit(initialize)
+            try:
+                assert hydration_started.wait(10)
+                assert not coordinating.coordination_tier_ready()
+                sending = pool.submit(lambda: dispatch(
+                    coordinating, "send", {"to": agent["agent_id"],
+                                           "text": "after handover",
+                                           "request_id": "handover-hydration"},
+                    headers=creds, principal=PRINCIPAL))
+                with pytest.raises(TimeoutError):
+                    sending.result(timeout=0.2)
+            finally:
+                release_hydration.set()
+            initializing.result(timeout=10)
+            assert sending.result(timeout=10)["state"] == "queued"
+        stamp = pg_conn.execute(
+            "SELECT hlc FROM coordination_messages WHERE request_id='handover-hydration'"
+        ).fetchone()[0]
+        pg_conn.commit()
+        assert tuple(map(int, stamp.split(":"))) > (10**15, 7)
+    finally:
+        release_hydration.set()
+
+
+def test_send_rechecks_clock_when_handover_starts_after_readiness_check(
+    coordinating, monkeypatch,
+):
+    from pseudolife_memory import coordination
+    from pseudolife_memory.memory.hlc import HybridLogicalClock
+
+    agent = dispatch(coordinating, "register", {}, headers={}, principal=PRINCIPAL)
+    creds = {"x-pl-agent": agent["agent_id"], "x-pl-agent-key": agent["credential"]}
+    coordinating._hlc = HybridLogicalClock(now_ms=lambda: 100)
+    coordinating._storage.set_meta("coordination_hlc_highwater", [10000, 7])
+    original_store = coordination._store
+    injected = False
+
+    def handover_between_checks(service):
+        nonlocal injected
+        if not injected:
+            injected = True
+            service._hlc_reseed_pending = True
+            service._coordination_hlc_epoch = None
+        return original_store(service)
+
+    monkeypatch.setattr(coordination, "_store", handover_between_checks)
+    assert dispatch(coordinating, "send", {"to": agent["agent_id"],
+                                           "text": "after clock reseed",
+                                           "request_id": "readiness-race"},
+                    headers=creds, principal=PRINCIPAL)["state"] == "queued"
+    row = coordinating._coordination_storage.conn.execute(
+        "SELECT hlc FROM coordination_messages WHERE request_id='readiness-race'"
+    ).fetchone()
+    assert tuple(map(int, row[0].split(":"))) > (10000, 7)

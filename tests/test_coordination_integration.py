@@ -5,7 +5,7 @@ import threading
 
 import httpx
 
-from tests.pg_fixtures import pg_url  # noqa: F401
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 from tests.asgi_helpers import stub_mcp
 from pseudolife_memory.memory.hlc import HybridLogicalClock
 from pseudolife_memory.storage.postgres import PostgresStorage
@@ -13,7 +13,7 @@ from pseudolife_memory.web.fixtures import FixtureService
 from pseudolife_memory.web.api import build_console_app
 
 
-def test_two_adapters_mail_reply_ack_and_resume(pg_url, tmp_path):
+def test_two_adapters_mail_reply_ack_and_resume(pg_conn, pg_url, tmp_path):
     from pseudolife_memory.coordination_adapter import CoordinationAdapter
     storage = PostgresStorage(pg_url)
     service = FixtureService()

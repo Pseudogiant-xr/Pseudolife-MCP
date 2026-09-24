@@ -13,6 +13,7 @@ import pytest
 from pseudolife_memory import shim as _shim
 from tests.helpers import (free_port as _free_port,
                            pg_reachable as _pg_reachable,
+                           private_bank as _private_bank,
                            spawn_serve as _spawn_serve,
                            stop_daemon as _stop_daemon)
 from tests.pg_fixtures import resolve_test_db_url
@@ -56,9 +57,9 @@ def shared_daemon(tmp_path_factory):
     daemon boot per module instead of one per test (~7.7 s each). Same shape
     as tests/test_daemon_http.py's module fixture.
 
-    ``test_shim_autostarts_daemon_and_proxies`` deliberately does NOT use
-    this: spawning is its subject. Neither does the ``TOOLSET=minimal`` test,
-    which needs a daemon booted with a different toolset tier.
+    ``test_shim_forwards_list_changed_on_toolset_expand`` deliberately does
+    NOT use this: it needs a daemon booted at the minimal toolset tier, and
+    the shim's own spawn of that daemon is also the autostart test.
     """
     url = resolve_test_db_url()
     if not _pg_reachable(url):
@@ -75,39 +76,20 @@ def shared_daemon(tmp_path_factory):
         _stop_daemon(proc)
 
 
-def test_shim_autostarts_daemon_and_proxies(tmp_path):
-    """Keeps its own free port and lets the shim START the daemon — that
-    spawn is the subject, so this one must never see ``shared_daemon``."""
+@pytest.fixture()
+def own_bank():
+    """A private bank for a test whose shim autostarts its own daemon.
+
+    A bank has one writer (the writer lease): this daemon would otherwise
+    contend with ``shared_daemon`` for the run's database, and off Windows
+    ``_reap_daemon`` cannot kill it, so it would outlive its test holding
+    that database. Dropping the private bank cuts it off instead.
+    """
     url = resolve_test_db_url()
     if not _pg_reachable(url):
         pytest.skip("no test Postgres reachable")
-
-    port = _free_port()
-    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=url)
-
-    async def _drive():
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
-
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
-            env=env,
-        )
-        async with stdio_client(params) as (r, w):
-            async with ClientSession(r, w) as s:
-                await s.initialize()
-                tools = {t.name for t in (await s.list_tools()).tools}
-                assert "memory_store" in tools and "memory_stats" in tools
-                res = await s.call_tool("memory_stats", {})
-                text = " ".join(getattr(c, "text", "") for c in res.content)
-                assert "bands" in text
-
-    import asyncio
-    try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
-    finally:
-        _reap_daemon(port)
+    with _private_bank(url, "shim") as bank_url:
+        yield bank_url
 
 
 def test_shim_forwards_initialize_instructions_and_tool_annotations(shared_daemon):
@@ -281,24 +263,21 @@ def test_shim_survives_idle_gap(shared_daemon):
     asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 
 
-def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
+def test_shim_forwards_list_changed_on_toolset_expand(tmp_path, own_bank):
     """The 2026-07-16 morning-brief regression: a tier expansion must reach
     the REAL client. The shim's per-call upstream design means the daemon's
     tools/list_changed lands on an ephemeral session and dies there — the
     shim itself must (a) advertise tools.listChanged downstream and (b) emit
     the notification when memory_toolset reports changed=true. The final
     list_tools also proves the session override survives per-call reconnects
-    (X-PL-Session keying)."""
+    (X-PL-Session keying). The shim spawns its own daemon here, so this is
+    also the autostart test: it proxies memory_stats through that daemon."""
     import asyncio
 
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-
-    # Its own daemon on purpose: the tier expansion needs one booted at the
-    # minimal toolset, which ``shared_daemon`` is not.
+    # Its own daemon (and bank) on purpose: the tier expansion needs one
+    # booted at the minimal toolset, which ``shared_daemon`` is not.
     port = _free_port()
-    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=url,
+    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=own_bank,
                     PSEUDOLIFE_MCP_TOOLSET="minimal")  # world tools hidden
     env.pop("PSEUDOLIFE_MCP_TIER_MAP", None)
 
@@ -336,6 +315,10 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
 
                 tools = {t.name for t in (await s.list_tools()).tools}
                 assert "memory_world_search" in tools  # core tier now
+                assert "memory_store" in tools and "memory_stats" in tools
+                res = await s.call_tool("memory_stats", {})
+                text = " ".join(getattr(c, "text", "") for c in res.content)
+                assert "bands" in text  # proxied through the spawned daemon
 
     try:
         asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))

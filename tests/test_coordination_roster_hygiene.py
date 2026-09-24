@@ -358,6 +358,7 @@ def test_codex_tool_calls_note_a_turn_on_the_thread_adapter(monkeypatch):
             assert thread_id == thread
             return Adapter()
         def unread_hint(self, thread_id, adapter): return None
+        def note_call(self, thread_id, name, arguments, **options): pass
 
     async def serve(server, *args, **kwargs):
         handler = server.get_request_handler("tools/call")

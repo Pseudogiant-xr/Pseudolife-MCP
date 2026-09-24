@@ -83,6 +83,11 @@ class _DeleteRecorder:
         self.deleted.extend(ids)
         return len(ids)
 
+    def delete_evicted_entry(self, entry_id, *, source, superseded):
+        # The audited eviction path (tests/test_capacity_guard.py).
+        self.deleted.append(entry_id)
+        return len(self.deleted)
+
     def __getattr__(self, name):
         # Any other write-through hook is a no-op for this test.
         return lambda *a, **k: None

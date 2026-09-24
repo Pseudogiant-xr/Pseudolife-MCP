@@ -59,6 +59,7 @@ def consolidate_with_counters(svc, extractor) -> tuple[dict, dict]:
 
 
 def run_arm_with_counters(rung: str, quarantine: bool) -> dict:
+    import embedder_stamp
     import ladder_sweep as ls
 
     with tempfile.TemporaryDirectory(prefix="plqgate_",
@@ -74,6 +75,7 @@ def run_arm_with_counters(rung: str, quarantine: bool) -> dict:
         elapsed = time.perf_counter() - t0
         metrics = ls.measure_cortex(svc)
         return {"quarantine": quarantine,
+                "embedder": embedder_stamp.describe(svc),
                 "consolidate_seconds": round(elapsed, 1),
                 "tally": tally, **qt,
                 "gold_recoverable": metrics["gold_recoverable"],

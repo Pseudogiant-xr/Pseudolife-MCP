@@ -467,6 +467,7 @@ def _alias_props(svc):
             if (p["reason"] or "").startswith("dream-alias:")]
 
 
+@pytest.mark.real_model
 def test_dream_alias_candidate_files_semantic_merge_proposal(svc):
     """A dreamed paraphrase of an existing cortex entity (near-zero token
     overlap, so the Jaccard write-dedup can't see it) files a merge proposal
@@ -486,6 +487,7 @@ def test_dream_alias_candidate_files_semantic_merge_proposal(svc):
     assert len(_alias_props(svc)) == 1
 
 
+@pytest.mark.real_model
 def test_dream_alias_candidate_ignores_unrelated_entities(svc):
     svc.cortex_write("Pseudolife-MCP default extractor sidecar", "version",
                      "e4b", support="user")
@@ -494,6 +496,7 @@ def test_dream_alias_candidate_ignores_unrelated_entities(svc):
     assert _alias_props(svc) == []
 
 
+@pytest.mark.real_model
 def test_dream_alias_candidate_respects_dismissed_and_disable(svc):
     from pseudolife_memory.graph import norm_name
     svc.cortex_write("Pseudolife-MCP default extractor sidecar", "version",
@@ -518,6 +521,7 @@ def test_dream_alias_candidate_respects_dismissed_and_disable(svc):
         svc.config.memory.dream.alias_candidate_min_cosine = old
 
 
+@pytest.mark.real_model
 def test_dream_alias_candidate_blocks_variant_conflict(svc):
     """E4B vs E2B names embed nearly identically but denote different models —
     the alias post-pass must not file a merge proposal for them."""

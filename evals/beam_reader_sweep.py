@@ -51,6 +51,7 @@ from beam_adapter import (  # noqa: E402
 )
 from beam_rejudge import CliJudge, DEFAULT_CLI  # noqa: E402
 from longmemeval_bench import RESULTS_DIR, load_rows  # noqa: E402
+import embedder_stamp  # noqa: E402
 
 BUDGETS = (6, 16, 48)
 SERVE_TOP_K = max(BUDGETS)
@@ -120,6 +121,7 @@ def serve(beam_root: Path, tier: str, tag: str,
                    "difficulty": q["difficulty"], "rubric": q["rubric"],
                    "serve_top_k": SERVE_TOP_K, "build_seconds": build_s,
                    "raw_entries": [e.get("text", "") for e in entries]}
+            embedder_stamp.stamp_row(row, "serve", svc)
             with out.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         svc.flush()
@@ -135,6 +137,7 @@ def process_row(row: dict, budgets: tuple[int, ...], answer_system: str,
     lesson)."""
     out = {k: row[k] for k in ("chat_id", "tier", "type", "index",
                                "question", "difficulty", "rubric")}
+    embedder_stamp.carry(row, out)
     raw = row["raw_entries"]
     for b in budgets:
         if b > row.get("serve_top_k", SERVE_TOP_K):
@@ -258,6 +261,9 @@ def answer(beam_root: Path, tag: str, budgets: tuple[int, ...],
     summary["cli_errors"] = (getattr(answerer, "errors", 0)
                              + getattr(judge, "errors", 0))
     summary["date"] = time.strftime("%Y-%m-%d")
+    embedder = embedder_stamp.merge_rows(all_rows)
+    if embedder:
+        summary["embedder"] = embedder
     sp = out.with_name(out.name.removesuffix(".jsonl") + ".summary.json")
     sp.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2))

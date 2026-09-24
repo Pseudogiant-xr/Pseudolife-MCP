@@ -23,6 +23,8 @@ modes:
   (no arg)       stdio shim: find/start the daemon and proxy to it
   channel        experimental Claude channel transport (requires explicit opt-in)
   coordination-recovery  offline mailbox recovery after a database restore
+  board-audit    export or verify the agent board's audit log (operator-only,
+                 read-only; reads PSEUDOLIFE_MCP_DATABASE_URL)
   serve          run the HTTP memory daemon (deployment mode)
   embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
   briefing       print the session-start briefing (for a SessionStart hook;
@@ -35,6 +37,9 @@ modes:
   import         load a logical export into a fresh, empty bank
   episode-start  open a session episode (legacy hook helper)
   episode-end    close it
+  wait-mail      block until new addressed agent mail, print it and exit
+                 (arm as a background command to wake an idle session;
+                 exit 0 mail, 3 timeout, 2 setup; --help for options)
   help           show this message (also -h / --help)
 
 credentials (token-gated daemon): PSEUDOLIFE_MCP_TOKEN=<bearer>, or
@@ -66,6 +71,9 @@ def main() -> None:
     elif mode == "coordination-recovery":
         from pseudolife_memory.coordination_recovery import main as recover_main
         sys.exit(recover_main(sys.argv[2:]))
+    elif mode == "board-audit":
+        from pseudolife_memory.board_audit_cli import main as audit_main
+        sys.exit(audit_main(sys.argv[2:]))
     elif mode == "briefing":
         from pseudolife_memory.briefing_cli import run_briefing
         run_briefing()
@@ -81,6 +89,9 @@ def main() -> None:
     elif mode in ("episode-start", "episode-end"):
         from pseudolife_memory.episode_cli import run_episode
         run_episode(mode)
+    elif mode == "wait-mail":
+        from pseudolife_memory.wait_mail_cli import run_wait_mail
+        sys.exit(run_wait_mail(sys.argv[2:]))
     else:
         print(
             f"unknown mode {mode!r}; see: pseudolife-mcp --help",

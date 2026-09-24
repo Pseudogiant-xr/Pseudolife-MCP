@@ -5,6 +5,11 @@ writer and ``MemoryService``'s coarse lock already serializes calls,
 so no pooling is needed. Every mutating method commits before
 returning — a store that returned to the caller is durable.
 
+The single writer is enforced, not just assumed: each instance holds the
+bank's writer lease (a session advisory lock) on its connection, and a
+second instance on the same database refuses to start. See
+:meth:`PostgresStorage._acquire_writer_lease`.
+
 Embeddings ride pgvector (numpy float32 in/out via ``register_vector``).
 ``tags`` / ``slots`` / ``support`` / ``provenance`` are JSONB.
 """
@@ -15,7 +20,10 @@ import json
 import hashlib
 import logging
 import math
+import os
+import re
 import secrets
+import sys
 import time
 import uuid
 from contextlib import contextmanager
@@ -29,6 +37,13 @@ from psycopg.types.json import Jsonb
 from pseudolife_memory.storage.schema import ensure_schema
 
 logger = logging.getLogger(__name__)
+
+# meta row holding the durable record of capacity-eviction true drops:
+# {"count", "last_at", "last_entry_id", "last_source", "last_superseded"}.
+# Written only by ``delete_evicted_entry``, in the same transaction as the
+# DELETE it counts. It travels with a logical export: it is audit history
+# of this bank's entries, whose ids transfer verbatim.
+CAPACITY_DROPS_META_KEY = "capacity_true_drops"
 
 _ENTRY_COLS = (
     "band", "text", "embedding", "surprise", "ts", "access_count", "source",
@@ -146,19 +161,309 @@ def _embedding_out(value: Any):
     return np.asarray(value, dtype=np.float32)
 
 
+# The bank writer lease: a session advisory lock keyed in its own space
+# (seed 0), apart from the per-entry mutation locks (seed 41), so the two
+# can never collide on a key.
+WRITER_LEASE_KEY = "pseudolife-bank-writer"
+
+# Server-side TCP keepalive for the lease-holding session. A client that
+# vanishes without closing its socket (host sleep, a dropped link to a
+# remote server) otherwise keeps its session, and with it the lease, until
+# the server's own keepalive gives up: 7200 s idle + 9 x 75 s probes in the
+# bench server's settings (PG 18, read from pg_settings 2026-09-23, not
+# timed), over two hours of every restarted writer refusing. These bound it
+# to ~90 s. All three are user-settable GUCs; ignored on Unix-socket
+# connections, which have no such failure mode.
+_LEASE_KEEPALIVE = (
+    ("tcp_keepalives_idle", 60),
+    ("tcp_keepalives_interval", 10),
+    ("tcp_keepalives_count", 3),
+)
+
+# How long a new writer waits for the lease before refusing. A session that
+# is closing keeps its locks until its server process exits (a daemon
+# restart, the reconnect after this process closed its own connection, a
+# backend a test fixture just terminated), which can lag the client on a
+# loaded host. A live holder is refused after this. Not measured: long
+# enough for a backend exit, short enough that a refused call stays prompt.
+_LEASE_WAIT = "2s"
+
+# After a reconnect is refused the lease, calls inside this window are
+# refused from the cached message instead of each waiting out _LEASE_WAIT
+# under the service lock (a burst of 30 calls would otherwise hold it ~60 s).
+_LEASE_RETRY_SECONDS = 5.0
+
+# After a reconnect fails (the server is unreachable), calls inside this
+# window fail from the cached error instead of each paying another connect
+# attempt (up to connect_timeout) under the service lock. Not measured: it
+# bounds a burst to one attempt, and recovery waits at most this long.
+_RECONNECT_RETRY_SECONDS = 5.0
+
+# How long a writer session verified alive stays trusted before
+# verify_writer_session probes it again. Measured 2026-09-23 on the bench PG
+# (Windows host -> Docker): the probe (SELECT 1) costs 0.72 ms median,
+# 1.8 ms p95. Probing on every call cost +1.0 ms (+17%) on cortex_lookup and
+# took recent(5) from 34 us to 673 us; on store/search (~200 ms with the CPU
+# embedder) it was below the noise. At most one probe per interval keeps a
+# burst of cheap calls cheap. The stale-read window it leaves needs another
+# writer to take, write and release the bank within this interval of the
+# last good probe, after this session died. Writes are not exposed: every
+# reconnect re-checks the lease epoch.
+_SESSION_PROBE_INTERVAL = 1.0
+
+# A meta row counting lease acquisitions. Each writer bumps it when it takes
+# the lease and remembers the value; after a reconnect, a different value
+# means another writer held the bank in the gap (see PostgresStorage.conn).
+_LEASE_EPOCH_KEY = "writer_lease_epoch"
+
+
+class WriterLeaseHeld(RuntimeError):
+    """Another session holds this bank's writer lease.
+
+    ``MemoryService`` records it as retryable (``/health`` reports
+    ``degraded`` with the message under ``not_ready``) and retries after a
+    backoff, since the holder may leave. A ``RuntimeError`` subclass, so
+    callers that only know the generic refusal still fail loudly."""
+
+
+class BankChangedHands(RuntimeError):
+    """Another writer held this bank while this instance was disconnected.
+
+    The lease guarantees one writer at a time, not that this one kept the
+    bank throughout. The owner's resident copy may predate the other
+    writer's changes, and its per-slot saves and flushes write that copy
+    back, so every call refuses until the owner has re-read the bank and
+    called :meth:`PostgresStorage.acknowledge_rehydration`."""
+
+
+def _application_name() -> str:
+    """How this process appears in ``pg_stat_activity``, so a refused
+    writer can say who holds the bank: the daemon, a script, a test run.
+    Only a fallback: an ``application_name`` in the DSN still wins."""
+    argv = sys.argv or []
+    prog = os.path.basename(argv[0]) if argv and argv[0] else "python"
+    # A subcommand word (``serve``) says which process this is. Any other
+    # argument may be a path or a secret (``--dsn postgresql://...``), and
+    # pg_stat_activity shows this name to every role on the server.
+    if len(argv) > 1 and re.fullmatch(r"[a-z][a-z-]{0,19}", argv[1]):
+        prog = f"{prog} {argv[1]}"
+    return f"pseudolife-mcp pid={os.getpid()} {prog}"[:63]
+
+
 class PostgresStorage:
     """Durable layer under the in-memory bands / cortex (single writer)."""
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, *, writer_lease: bool = True) -> None:
+        """Connect, take the bank's writer lease, and ensure the schema.
+
+        ``writer_lease=False`` is for a caller that deliberately opens a
+        second connection to a bank another instance owns (the test probes
+        that build a racing peer). Such an instance never takes, or waits
+        for, the lease. Anything that writes a live bank leaves it on.
+        """
         self.dsn = dsn
+        self._writer_lease = writer_lease
+        # Set while a reconnect is refused because another writer took the
+        # lease; ping() reports it (see there). Until _lease_retry_at, calls
+        # are refused from it without another lease wait.
+        self._lease_lost: str | None = None
+        self._lease_retry_at = 0.0
+        self._reconnect_error: str | None = None
+        self._reconnect_retry_at = 0.0
+        # The lease-epoch value this instance last wrote, and the sticky
+        # refusal set when a reconnect finds another writer's epoch.
+        self._lease_epoch: int | None = None
+        self.resident_invalidated: str | None = None
+        # When the writer session was last known alive and continuous (a
+        # probe, or a fresh epoch-checked session); see verify_writer_session.
+        self._session_ok_at = 0.0
         self._transaction_connection = None
         self._lesson_transaction_connection = None
         self._entry_import_connection = None
         self._entry_mutation_connection = None
-        self._conn = self._connect()
-        ensure_schema(self._conn)
-        register_vector(self._conn)
-        self._seed_relations()
+        self._conn = self._open_session()
+        try:
+            ensure_schema(self._conn)
+            register_vector(self._conn)
+            self._seed_relations()
+            if self._writer_lease:
+                self._lease_epoch = self._bump_lease_epoch(self._conn)
+            self._session_ok_at = time.monotonic()
+        except BaseException:
+            # Release the lease now, not when this half-built instance is
+            # garbage-collected: the caller's retry would otherwise refuse
+            # against its own earlier attempt.
+            self._conn.close()
+            raise
+
+    def _open_session(self) -> psycopg.Connection:
+        """A configured connection holding the writer lease (unless this
+        instance opted out). Closed again on any failure, so a refused
+        attempt never leaves a session behind."""
+        conn = self._connect()
+        try:
+            if self._writer_lease:
+                self._acquire_writer_lease(conn)
+        except BaseException:
+            conn.close()
+            raise
+        return conn
+
+    def _acquire_writer_lease(self, conn: psycopg.Connection) -> None:
+        """Take this database's writer lease on ``conn``'s session, or raise
+        :class:`WriterLeaseHeld` naming the session that holds it.
+
+        The service keeps a resident copy of every canonical store and saves
+        each slot by DELETE-then-insert from that copy, so a second writer on
+        the same bank does not merely race: whichever saves a slot last
+        erases the other's history for it. The single-writer rule was
+        documented but never enforced (fresh-eyes review 2026-09-23). Now a
+        second writer is refused.
+
+        The lease lives on the same session every read and write goes
+        through, never on a side connection. If that session dies, the lease
+        dies with it, and :attr:`conn` must win it back before the
+        replacement serves anything. It is a session-level lock, so a
+        rolled-back transaction does not release it; closing the session
+        does.
+        """
+        for name, value in _LEASE_KEEPALIVE:
+            # SET takes no bind parameters; names and values are constants.
+            conn.execute(f"SET {name} = {int(value)}")
+        # Wait (event-driven, not polled) up to _LEASE_WAIT for a holder that
+        # is exiting, then restore the session's own lock_timeout.
+        previous = conn.execute("SHOW lock_timeout").fetchone()[0]
+        conn.execute("SELECT set_config('lock_timeout', %s, false)",
+                     (_LEASE_WAIT,))
+        try:
+            conn.execute("SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+                         (WRITER_LEASE_KEY,))
+        except psycopg.errors.LockNotAvailable:
+            raise WriterLeaseHeld(self._describe_lease_holder(conn)) from None
+        conn.execute("SELECT set_config('lock_timeout', %s, false)",
+                     (previous,))
+
+    @staticmethod
+    def _bump_lease_epoch(conn: psycopg.Connection) -> int:
+        """Record this lease acquisition in the bank and return its number.
+        Runs on the lease-holding session, so no other writer can bump in
+        between."""
+        # A value that is not a number (a hand edit, a bad import) restarts
+        # the count rather than failing every open of the bank.
+        return conn.execute(
+            """
+            INSERT INTO meta (key, value) VALUES (%s, '1'::jsonb)
+            ON CONFLICT (key) DO UPDATE
+              SET value = to_jsonb(COALESCE(
+                CASE WHEN jsonb_typeof(meta.value) = 'number'
+                     THEN (meta.value #>> '{}')::numeric::bigint END, 0) + 1)
+            RETURNING (value #>> '{}')::bigint
+            """,
+            (_LEASE_EPOCH_KEY,),
+        ).fetchone()[0]
+
+    @staticmethod
+    def _read_lease_epoch(conn: psycopg.Connection) -> int | None:
+        row = conn.execute(
+            "SELECT CASE WHEN jsonb_typeof(value) = 'number' "
+            "THEN (value #>> '{}')::numeric::bigint END "
+            "FROM meta WHERE key = %s",
+            (_LEASE_EPOCH_KEY,),
+        ).fetchone()
+        return None if row is None else row[0]
+
+    def verify_writer_session(self) -> None:
+        """Round-trip on the writer session before its owner serves from a
+        resident copy (MemoryService calls this at the start of every
+        operation).
+
+        A live session still holds the lease it took, since a session-level
+        lock ends only with its session, so no other writer can have run.
+        A dead one is replaced here, not at the next storage call, which runs
+        the handover check: the owner learns from ``resident_invalidated``
+        before it serves a copy another writer may have made stale.
+
+        An unreachable server is tolerated: nothing else can write a bank
+        this process cannot reach either (short of a network partition), so
+        the resident copy stays servable, while every storage call still
+        fails on its own. Raises only if another writer holds the lease.
+        """
+        if not self._writer_lease or self._pinned():
+            return
+        c = self._conn
+        if (not (c.closed or c.broken) and time.monotonic()
+                - self._session_ok_at < _SESSION_PROBE_INTERVAL):
+            return  # verified alive moments ago (see _SESSION_PROBE_INTERVAL)
+        try:
+            try:
+                conn = self.conn
+                self._probe_session(conn)
+                self._session_ok_at = time.monotonic()
+                return
+            except psycopg.OperationalError:
+                if self._reconnect_error:
+                    return  # the reconnect itself failed: unreachable
+            self.conn  # noqa: B018 — the session died unnoticed; replace it
+        except BankChangedHands:
+            return  # flagged: the owner re-reads the bank next
+        except psycopg.OperationalError:
+            return  # unreachable; retried after _RECONNECT_RETRY_SECONDS
+
+    @staticmethod
+    def _probe_session(conn: psycopg.Connection) -> None:
+        conn.execute("SELECT 1")
+
+    def _pinned(self) -> bool:
+        return any(c is not None for c in (
+            self._transaction_connection, self._entry_mutation_connection,
+            self._entry_import_connection, self._lesson_transaction_connection))
+
+    def acknowledge_rehydration(self) -> None:
+        """The owner has dropped its resident copy and re-reads the bank from
+        here on: lift the refusal :class:`BankChangedHands` imposed."""
+        self.resident_invalidated = None
+
+    @staticmethod
+    def _lease_holders(conn: psycopg.Connection) -> list[tuple]:
+        """``(pid, application_name)`` of every session holding this
+        database's writer lease. A bigint advisory key shows in
+        ``pg_locks`` split into ``classid`` (high half) and ``objid`` (low
+        half), with ``objsubid`` 1."""
+        return conn.execute(
+            """
+            WITH k AS (SELECT hashtextextended(%s, 0) AS key)
+            SELECT a.pid, a.application_name
+            FROM pg_locks l
+            JOIN pg_stat_activity a ON a.pid = l.pid
+            CROSS JOIN k
+            WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+              AND l.database = (SELECT oid FROM pg_database
+                                WHERE datname = current_database())
+              AND l.classid = ((k.key >> 32) & 4294967295)::oid
+              AND l.objid = (k.key & 4294967295)::oid
+            """,
+            (WRITER_LEASE_KEY,),
+        ).fetchall()
+
+    @classmethod
+    def _describe_lease_holder(cls, conn: psycopg.Connection) -> str:
+        """The refusal message: which session holds the lease, and what to
+        do about it."""
+        rows = cls._lease_holders(conn)
+        bank = conn.execute("SELECT current_database()").fetchone()[0]
+        if rows:
+            holder = ", ".join(
+                f"backend pid {pid} (application_name {(app or '')!r})"
+                for pid, app in rows)
+        else:
+            holder = "a session that released it a moment ago (retry)"
+        return (
+            f"another process holds the writer lease on bank {bank!r}: "
+            f"{holder}. A bank has exactly one writer, because two would "
+            "each save slots from their own resident copy and erase each "
+            "other's history. Stop that process first (for the Docker "
+            "daemon: `docker compose -f ops/docker-compose.yml stop "
+            "pseudolife-daemon`), or point this one at a different database.")
 
     def _connect(self) -> psycopg.Connection:
         """Open + session-configure a connection (shared by init and the
@@ -169,7 +474,8 @@ class PostgresStorage:
         autovacuum on the churny canonical tables) and held ACCESS SHARE
         locks that blocked any concurrent DDL. Mutations get explicit
         transaction blocks via :meth:`_txn`."""
-        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True)
+        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True,
+                               fallback_application_name=_application_name())
         # Never block forever on a lock — a stuck/orphaned writer should
         # raise here, not hang the whole daemon. (Session-level GUCs; they
         # apply immediately under autocommit.)
@@ -189,7 +495,14 @@ class PostgresStorage:
         daemon until manual restart). Heal-on-next-use: the call that hits
         the dead connection still raises; the *next* one reconnects.
         Schema is NOT re-ensured (it exists); the vector adapter is
-        per-connection and must be re-registered."""
+        per-connection and must be re-registered. The writer lease died with
+        the old session, so the replacement must win it back before it
+        serves anything. If another writer took the bank in the gap, this
+        raises, and keeps raising on every later call while the other holds
+        it (fail closed). Winning it back is not enough either: if another
+        writer held it meanwhile (the lease epoch moved), this instance's
+        owner may hold a stale resident copy, so every call refuses with
+        :class:`BankChangedHands` until the owner has re-read the bank."""
         # A lesson batch must not silently reconnect halfway through its
         # transaction: later helpers would then commit outside that batch.
         if self._transaction_connection is not None:
@@ -202,19 +515,67 @@ class PostgresStorage:
             return self._lesson_transaction_connection
         c = self._conn
         if c.closed or c.broken:
+            if self._lease_lost and time.monotonic() < self._lease_retry_at:
+                raise WriterLeaseHeld(self._lease_lost)
+            if (self._reconnect_error
+                    and time.monotonic() < self._reconnect_retry_at):
+                raise psycopg.OperationalError(self._reconnect_error)
             logger.warning("postgres connection lost (closed=%s broken=%s); "
                            "reconnecting", c.closed, c.broken)
-            self._conn = self._connect()
-            register_vector(self._conn)
+            try:
+                conn = self._open_session()
+            except WriterLeaseHeld as exc:
+                self._lease_lost = str(exc)
+                self._lease_retry_at = time.monotonic() + _LEASE_RETRY_SECONDS
+                raise
+            except psycopg.OperationalError as exc:
+                self._reconnect_error = f"reconnect failed: {exc}"
+                self._reconnect_retry_at = (
+                    time.monotonic() + _RECONNECT_RETRY_SECONDS)
+                raise
+            self._reconnect_error = None
+            handed_over = None
+            try:
+                register_vector(conn)
+                if self._writer_lease:
+                    found = self._read_lease_epoch(conn)
+                    if found != self._lease_epoch:
+                        handed_over = (self._lease_epoch, found)
+                    self._lease_epoch = self._bump_lease_epoch(conn)
+            except BaseException:
+                conn.close()
+                raise
+            self._conn = conn
+            self._lease_lost = None
+            self._session_ok_at = time.monotonic()  # fresh, epoch-checked
+            if handed_over is not None:
+                self.resident_invalidated = (
+                    "another writer held this bank while this process was "
+                    f"disconnected (lease epoch {handed_over[0]} -> "
+                    f"{handed_over[1]}); its resident copy may be stale, so "
+                    "nothing is served or saved until it re-reads the bank")
+                logger.warning("%s", self.resident_invalidated)
+        if self.resident_invalidated:
+            raise BankChangedHands(self.resident_invalidated)
         return self._conn
 
     def ping(self) -> bool:
         """Cheap liveness probe for /health on a DEDICATED short-lived
         connection, so it can't interleave with — or leave an idle
         transaction on — the shared connection another thread is using.
-        Raises on an unreachable server."""
+        Raises on an unreachable server, and while the last reconnect was
+        refused because another writer holds the lease and that writer is
+        still there: a healthy server would otherwise report a daemon whose
+        every call fails as fine. Once the holder is gone the next call
+        reconnects and takes the lease, so the probe stops reporting it.
+        Also raises while the owner has yet to re-read a bank another writer
+        held in the meantime (:class:`BankChangedHands`)."""
         with psycopg.connect(self.dsn, connect_timeout=2) as c:
             c.execute("SELECT 1")
+            if self._lease_lost and self._lease_holders(c):
+                raise WriterLeaseHeld(self._lease_lost)
+        if self.resident_invalidated:
+            raise BankChangedHands(self.resident_invalidated)
         return True
 
     def _seed_relations(self) -> None:
@@ -667,6 +1028,49 @@ class PostgresStorage:
             cur = self.conn.execute("DELETE FROM entries WHERE id = ANY(%s)", (ids,))
         return cur.rowcount
 
+    def delete_evicted_entry(
+        self, entry_id: int | None, *, source: str, superseded: bool,
+    ) -> int:
+        """Delete a capacity-evicted entry and count the drop durably.
+
+        The DELETE and the ``meta`` counter share one transaction, so a
+        drop is never deleted without being counted, and a drop inside a
+        correction that rolls back is neither deleted nor counted.
+        ``entry_id=None`` (an entry whose insert write-through failed, so no
+        row exists) is still counted: its text left the bank all the same.
+        Returns the all-time drop count.
+        """
+        record = {
+            "count": 1, "last_at": time.time(), "last_entry_id": entry_id,
+            "last_source": source, "last_superseded": bool(superseded),
+        }
+        conn = self.conn
+        with self._txn():
+            if entry_id is not None:
+                conn.execute("DELETE FROM entries WHERE id = %s", (entry_id,))
+            # A malformed prior count (hand-edited or imported: not a
+            # number, negative, or without room below bigint max for the
+            # increment) restarts at 1 rather than failing the cast or the
+            # increment: a failure here would roll the DELETE back on every
+            # drop, leaving rows in Postgres past the cap that all return on
+            # the next restart. Nested CASE, not AND: Postgres does not fix
+            # the evaluation order of AND operands, and the numeric cast
+            # must only see a JSON number.
+            row = conn.execute(
+                "INSERT INTO meta (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value "
+                "|| jsonb_build_object('count', CASE "
+                "WHEN jsonb_typeof(meta.value->'count') "
+                "IS DISTINCT FROM 'number' THEN 0 "
+                "WHEN (meta.value->>'count')::numeric >= 0 "
+                "AND (meta.value->>'count')::numeric < 9223372036854775807 "
+                "THEN floor((meta.value->>'count')::numeric)::bigint "
+                "ELSE 0 END + 1) "
+                "RETURNING (value->>'count')::bigint",
+                (CAPACITY_DROPS_META_KEY, Jsonb(record)),
+            ).fetchone()
+        return int(row[0])
+
     def load_entries(self) -> list[dict]:
         cols = ("id",) + _ENTRY_COLS + ("reinforcements",)
         rows = self.conn.execute(
@@ -678,6 +1082,16 @@ class PostgresStorage:
             d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
+
+    def load_entry_texts(self) -> list[dict]:
+        """``id``/``text``/``source`` of every entry, in :meth:`load_entries`
+        order, for readers that never touch an embedding (the review-judge
+        evidence packs). Transferring and decoding the vectors is ~96% of
+        a full load: 650 ms vs 23 ms for 2,239 entries, live bank,
+        2026-09-23."""
+        return [{"id": r[0], "text": r[1], "source": r[2]}
+                for r in self.conn.execute(
+                    "SELECT id, text, source FROM entries ORDER BY id").fetchall()]
 
     def load_entry_row(self, entry_id: int) -> dict | None:
         """One entries row in the :meth:`load_entries` shape, or None."""
@@ -1185,15 +1599,21 @@ class PostgresStorage:
         ).fetchone()
         return int(row[0])
 
-    def pending_signals(self, limit: int | None = None) -> list[dict]:
+    def pending_signals(self, limit: int | None = None,
+                        since_ts: float | None = None) -> list[dict]:
+        """Unconsumed signals, oldest first. ``since_ts`` keeps only those
+        created at or after it (the synthesis retry window)."""
         cols = ("id",) + _SIGNAL_COLS
-        sql = (
-            f"SELECT {', '.join(cols)} FROM outcome_signals "
-            "WHERE consumed_at IS NULL ORDER BY created_at, id"
-        )
+        sql = (f"SELECT {', '.join(cols)} FROM outcome_signals "
+               "WHERE consumed_at IS NULL")
+        params: tuple = ()
+        if since_ts is not None:
+            sql += " AND created_at >= %s"
+            params = (float(since_ts),)
+        sql += " ORDER BY created_at, id"
         if limit is not None:
             sql += f" LIMIT {int(limit)}"
-        rows = self.conn.execute(sql).fetchall()
+        rows = self.conn.execute(sql, params).fetchall()
         return [dict(zip(cols, r)) for r in rows]
 
     def consume_signals(self, ids: list[int], now: float | None = None) -> int:
@@ -1651,14 +2071,17 @@ class PostgresStorage:
             },
         }
 
-    def loop_health(self, window_s: float, now: float | None = None) -> dict:
+    def loop_health(self, window_s: float, now: float | None = None,
+                    pending_since_ts: float | None = None) -> dict:
         """Windowed loop-activity counts for the Console tile: current vs the
         immediately preceding window of stores + outcome signals, session
         episodes (parent_id IS NULL), pending signals, lesson recency.
         Read-only, all on indexed timestamp columns. Consumed signals still
         count as outcomes — consumption is the dream's drain cursor, not a
         judgement; the caveat is upstream retention (signal_retention_days)
-        deleting rows older than its cutoff."""
+        deleting rows older than its cutoff. ``pending_since_ts`` splits the
+        unconsumed signals at the synthesis retry window: older ones are
+        reported as ``pending_signals_expired`` (kept, never offered)."""
         t = time.time() if now is None else float(now)
         cutoff, prev_cutoff = t - window_s, t - 2 * window_s
 
@@ -1679,14 +2102,24 @@ class PostgresStorage:
             "SELECT COUNT(*) FROM episodes "
             "WHERE started_at >= %s AND parent_id IS NULL",
             (cutoff,)).fetchone()[0]
-        pending = self.conn.execute(
-            "SELECT COUNT(*) FROM outcome_signals WHERE consumed_at IS NULL"
-        ).fetchone()[0]
+        if pending_since_ts is None:
+            pending, expired = self.conn.execute(
+                "SELECT COUNT(*) FROM outcome_signals WHERE consumed_at IS NULL"
+            ).fetchone()[0], 0
+        else:
+            since = float(pending_since_ts)
+            pending, expired = self.conn.execute(
+                "SELECT COUNT(*) FILTER (WHERE created_at >= %s), "
+                "COUNT(*) FILTER (WHERE created_at < %s) "
+                "FROM outcome_signals WHERE consumed_at IS NULL",
+                (since, since)).fetchone()
         last_lesson, lessons_current = self.conn.execute(
             "SELECT MAX(asserted_at), COUNT(*) FILTER (WHERE status = 'current') "
             "FROM lessons").fetchone()
         return {"stores": stores, "outcomes": outcomes, "sessions": sessions,
-                "pending_signals": pending, "last_lesson_at": last_lesson,
+                "pending_signals": pending,
+                "pending_signals_expired": expired,
+                "last_lesson_at": last_lesson,
                 "lessons_current": lessons_current}
 
     # ── meta ────────────────────────────────────────────────────────────
@@ -3202,11 +3635,10 @@ class PostgresStorage:
 
     def get_entry(self, entry_id: int) -> dict | None:
         cols = ("id", "text", "source", "ts", "reinforcements",
-                "explicit_reinforcements", "access_count")
+                "explicit_reinforcements", "access_count", "superseded_at",
+                "superseded_by_text")
         row = self.conn.execute(
-            "SELECT id, text, source, ts, reinforcements, "
-            "explicit_reinforcements, access_count "
-            "FROM entries WHERE id = %s",
+            f"SELECT {', '.join(cols)} FROM entries WHERE id = %s",
             (entry_id,)).fetchone()
         return dict(zip(cols, row)) if row else None
 

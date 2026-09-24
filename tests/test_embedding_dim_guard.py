@@ -149,6 +149,7 @@ def svc(pg_conn, pg_url):  # noqa: F811
                 s._storage.close()
 
 
+@pytest.mark.real_model
 def test_service_round_trip_at_dim_1024(svc):
     stored = svc.store(
         "the bench postgres for schema v25 runs on port 5433", source="test",

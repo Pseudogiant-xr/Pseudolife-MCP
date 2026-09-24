@@ -243,6 +243,7 @@ class FixtureService:
                              "by_outcome": {"success": 4, "failure": 1,
                                             "correction": 1}},
                 "sessions": 9, "pending_signals": 2,
+                "pending_signals_expired": 1,
                 "last_lesson_at": _NOW - 26 * _H, "lessons_current": 14,
                 "stores_per_session": 4.67, "outcomes_per_session": 0.67}
 

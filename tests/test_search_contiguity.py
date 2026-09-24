@@ -12,8 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pseudolife_memory.service import MemoryService
-from pseudolife_memory.utils.config import AppConfig, load_config
+from pseudolife_memory.utils.config import load_config
+
+pytestmark = pytest.mark.real_model
 
 # Every service-backed test here only stores and searches, so they share
 # conftest's module-scoped ``warm_service`` via ``pristine_service`` (bank
@@ -21,12 +25,6 @@ from pseudolife_memory.utils.config import AppConfig, load_config
 # service construction, not the five stores, that cost. A test that mutates
 # ``svc.config`` must restore it in a ``finally``: the config object outlives
 # the bank clear.
-
-
-def test_search_config_defaults():
-    cfg = AppConfig()
-    assert cfg.memory.search.contiguity_neighbors == 0
-    assert cfg.memory.search.timeline_channel is False
 
 
 def test_yaml_search_block_parses(tmp_path: Path):

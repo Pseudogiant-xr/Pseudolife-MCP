@@ -4,8 +4,7 @@ continuum preset — plus the recency half-life those knobs actually drive.
 import torch
 
 from pseudolife_memory.memory.cms import ContinuumMemorySystem
-from pseudolife_memory.service import MemoryService
-from pseudolife_memory.utils.config import AppConfig, MemoryConfig, load_config
+from pseudolife_memory.utils.config import MemoryConfig, load_config
 
 
 def _emb(seed: int) -> torch.Tensor:
@@ -102,9 +101,3 @@ def test_half_life_uses_config_base():
     tiers = [t for t in trace["tiers"] if not t.get("filtered_out")]
     assert tiers[0]["half_life_s"] == 7200.0
     assert tiers[1]["half_life_s"] == 14400.0  # doubles per depth
-
-
-def test_mcp_default_is_one_day():
-    cfg = AppConfig()
-    MemoryService._apply_mcp_defaults(cfg)
-    assert cfg.memory.recency_base_half_life_s == 86400.0

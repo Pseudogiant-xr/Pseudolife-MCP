@@ -60,6 +60,21 @@ credentials and requires deliberate rebinds.
 The Python module is also callable directly with the same arguments:
 `python -m pseudolife_memory.coordination_recovery`.
 
+## The audit log across a restore
+
+The board's [audit log](configuration.md#audit-log) (`coordination_events`,
+schema v42) is restored with the database, as of the backup, so everything the
+board did after the backup is gone from it too. The restored chain still
+verifies, because the chain alone cannot see that its newest rows are missing.
+If you recorded a head earlier, `pseudolife-mcp board-audit verify --expect-head
+SEQ:HASH` shows whether that head survived. `recover` and each `rebind` append
+operator events (`actor: operator`) to the restored log in the same transaction
+as the change.
+
+A backup taken before v42 restores without the log. Recovery never migrates a
+schema, so both commands still revoke and rebind, print that the operation is
+not recorded, and the next daemon start creates an empty log.
+
 ## Failure and retention
 
 A failed private-state write rolls back credential issuance. A crash or uncertain
@@ -74,7 +89,9 @@ rebound credentials too, so update every affected adapter deliberately.
 Body expiry still applies to restored mail: receiving never returns expired or
 acknowledged messages. Message bodies expire after 24 hours, while request keys
 and terminal metadata remain for seven days from creation. Maintenance purges
-expired bodies and old metadata during coordination activity. Pending capacity
+expired bodies and old metadata during coordination activity. The audit log
+keeps its own copy of each body for `coordination.audit_retention_days`
+(default 90 days), and restoring a backup restores that copy too. Pending capacity
 errors never silently discard mail. The mailbox clock high-water mark survives
 message pruning, so restart with a backward wall clock cannot regress its stamps.
 
@@ -114,8 +131,8 @@ an older backup alone does not cover writes made after that backup.
    wall clock moved backward. Verify initialization succeeds before restarting
    the adapters. Retain the backup and repair evidence.
 
-Portable knowledge exports exclude agent mailboxes, credentials, bank identity
-and operational metadata. Import also ignores any bank identity in an archive,
+Portable knowledge exports exclude agent mailboxes, credentials, the audit log,
+bank identity and operational metadata. Import also ignores any bank identity in an archive,
 preserving the destination's identity. Full database backups retain it. See
 [configuration](configuration.md#experimental-agent-coordination) for the
 default-off feature and [the experimental design](../specs/2026-09-11-agent-coordination-design.md)

@@ -70,6 +70,7 @@ from ladder_sweep import (approx_tokens, build_service,  # noqa: E402
                           rerank_env_knobs)
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 import answerability_probe  # noqa: E402
+import embedder_stamp  # noqa: E402
 import leak_check  # noqa: E402
 import nomem_arm  # noqa: E402
 import refind_arm  # noqa: E402
@@ -1123,6 +1124,9 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
                if refind_trace is not None else {}),
             **diagnose_bank(facts, q["answer"]),
         }
+        # Which embedder built these contexts: its precision follows the
+        # host (cpu_dtype "auto"), and a resumed run can span two hosts.
+        embedder_stamp.stamp_row(row, "extract", svc)
         marks = "extracted"
         if do_answer:
             row = answer_and_judge(row)
@@ -1175,6 +1179,16 @@ def report(dataset: str, extractor_name: str, tag: str = "",
         summary["partial"] = True
         print(f"PARTIAL run: {n} rows carry partial=true — a limited "
               "rebuild, not a complete run")
+    # Which embedder built the judged contexts, per stage (extract,
+    # rebuild_contexts, ...). Rows written before stamping carry none, and
+    # their summaries keep their shape.
+    embedder = embedder_stamp.merge_rows(rows)
+    if embedder:
+        summary[embedder_stamp.KEY] = embedder
+        print(embedder_stamp.summary_line(("run", embedder)))
+        for w in embedder_stamp.precision_warnings(embedder, None,
+                                                   a_label="run"):
+            print(f"WARNING {w}")
     # Variant arms (hybrid_ctg etc.) are detected from the rows so old
     # three-arm artifacts report identically.
     extra_arms = tuple(sorted(

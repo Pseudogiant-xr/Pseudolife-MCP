@@ -35,6 +35,7 @@ from collections import Counter
 from contextlib import ExitStack, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, replace
+import gc
 import hashlib
 import heapq
 import logging
@@ -72,6 +73,15 @@ from pseudolife_memory.utils.config import AppConfig, load_config
 from pseudolife_memory.utils.locks import SLOW_LOCK_SECONDS, MonitoredLock
 
 logger = logging.getLogger(__name__)
+
+# Retry backoff after a failed store build (fail-closed hydration,
+# 2026-09-23). Not tuned against a measurement; sized from the incidents it
+# guards. The 2026-08-04 boot balloon re-ran init ~0.9 s apart on every
+# queued call, and the 2026-09-23 OOM followed a burst of ~30 searches. The
+# 5 s floor collapses such a burst into one attempt. The 60 s cap bounds how
+# long a cleared cause keeps the bank refused to callers.
+INIT_RETRY_BASE_SECONDS = 5.0
+INIT_RETRY_MAX_SECONDS = 60.0
 
 
 class PersistenceError(RuntimeError):
@@ -153,6 +163,7 @@ def _entry_to_dict(
         "access_count": entry.access_count,
         "surprise_score": round(entry.surprise_score, 4),
         "superseded": entry.superseded_at is not None,
+        "superseded_at": entry.superseded_at,
         "superseded_by_text": entry.superseded_by_text,
         # Tier C (schema v6) — None / [] for entries stored before
         # episodes / tags existed, so MCP responses never crash on legacy
@@ -177,6 +188,68 @@ def _entry_to_dict(
     if include_embedding:
         out["embedding"] = entry.embedding.detach().cpu().tolist()
     return out
+
+
+# Successor sources an explicit correction writes: ``memory_supersede``
+# always stores its replacement as "correction", and ``memory_consolidate``
+# defaults to "consolidation". Links with any other successor source came
+# from the automatic contradiction detector before it stopped superseding
+# (PR #294) or from a consolidate call with a custom ``source``; on the
+# live bank about 4 in 10 of the 562 such links point at an unrelated note
+# (2026-09-23 review, sampled by stratum). The inference is approximate
+# both ways: a custom-source consolidate reads unverified, and before
+# PR #294 / 270c21c9 an explicit correction could itself be mis-targeted
+# (a top-1 embedding fallback) or trip the detector when its replacement
+# was stored. Exact provenance needs a schema column.
+_VERIFIED_SUPERSEDER_SOURCES = frozenset({"correction", "consolidation"})
+
+
+def _annotate_supersession(
+    served: list[tuple[MemoryEntry, dict[str, Any]]],
+    resident,
+) -> None:
+    """Name the successor of each superseded entry in ``served``.
+
+    Entries store only the replacement's text, so the successor is resolved
+    by exact text over ``resident`` (every entry the CMS holds), once per
+    call and only when a served entry is superseded. Adds
+    ``superseded_by_id``, ``supersession_verified`` and
+    ``superseded_by_current`` to each superseded dict, in place. The id
+    names the one other entry carrying the text; when several do, the only
+    one still current wins (a retired twin, as
+    ``consolidate(replaces=[A, B], new_text=A)`` leaves, cannot be what
+    replaced B); otherwise None, as when evicted or in file mode. Never
+    follows a chain: on the live bank 161 entries chain up to 44 links
+    into one note. ``superseded_by_current`` says whether the successor
+    was resolved and is itself still live, so a caller can see it would be
+    standing on a chain link (the successor was itself superseded in 529
+    of 730 served superseded slots, 2026-09-23 review).
+
+    ``served`` items need only ``superseded_at`` / ``superseded_by_text``
+    attributes; an item is excluded from its own candidates by identity,
+    so a caller whose subject is not a resident entry filters it out of
+    ``resident`` instead (see ``get_entry``).
+    """
+    pending = [(e, d) for e, d in served if e.superseded_at is not None]
+    if not pending:
+        return
+    wanted = {e.superseded_by_text for e, _ in pending if e.superseded_by_text}
+    matches: dict[str, list[MemoryEntry]] = {}
+    if wanted:
+        for r in resident:
+            if r.text in wanted:
+                matches.setdefault(r.text, []).append(r)
+    for e, d in pending:
+        found = [m for m in matches.get(e.superseded_by_text or "", ())
+                 if m is not e]
+        if len(found) > 1:
+            found = [m for m in found if m.superseded_at is None]
+        one = found[0] if len(found) == 1 else None
+        d["superseded_by_id"] = one.db_id if one is not None else None
+        d["supersession_verified"] = (
+            one is not None and one.source in _VERIFIED_SUPERSEDER_SOURCES)
+        d["superseded_by_current"] = (
+            one is not None and one.superseded_at is None)
 
 
 # Serving-side staleness policy (memory.search.stale_policy; spec
@@ -374,14 +447,34 @@ _CURATION_STORES = ("lesson", "world")
 DERIVED_FLAGGED_CAP = 50
 
 
+# A literal "|" inside a normalized component, as spelled in a slot key.
+# _norm_key casefolds, so an upper-case "C" never occurs in a component: every
+# "%7C" in a key is an escaped pipe, and the one bare "|" is the joiner.
+_SLOT_KEY_PIPE = "%7C"
+
+
 def _slot_key(entity_norm: str, attribute_norm: str) -> str:
     """Identity string for a slot: normalized components joined with ``|``.
-    ``_norm_key`` does NOT strip ``|``, so a literal pipe in a component would
-    make the joined form ambiguous (("a|b","c") vs ("a","b|c")); fold pipes to
-    ``-`` first. Both the listing (_curation_records) and the dismissal
-    (curation_dismiss_duplicate) must build keys through this helper so a
-    dismissal always matches the listing that produced it."""
-    return f"{entity_norm.replace('|', '-')}|{attribute_norm.replace('|', '-')}"
+    ``_norm_key`` does NOT strip ``|``, so a literal pipe in a component is
+    escaped as ``%7C``. That is injective, so ("ci|cd","x") and ("ci-cd","x")
+    never share a key, and it leaves every pipe-free key as it was. (Folding
+    the pipe to ``-`` until 2026-09 merged those two slots' listings.) The
+    listing (_curation_records), the human dismissal
+    (curation_dismiss_duplicate) and the curation judge's stored names
+    (curation_safety.curation_pair_keys) must all build keys through this
+    helper so a dismissal or memo always matches the listing that produced
+    it; :func:`_parse_slot_key` is the inverse the key-taking tools use."""
+    return (f"{entity_norm.replace('|', _SLOT_KEY_PIPE)}|"
+            f"{attribute_norm.replace('|', _SLOT_KEY_PIPE)}")
+
+
+def _parse_slot_key(key: str) -> tuple[str, str] | None:
+    """``(entity_norm, attribute_norm)`` for a key :func:`_slot_key` built,
+    or None when ``key`` has no single bare ``|`` to split on."""
+    parts = key.split("|")
+    if len(parts) != 2:
+        return None
+    return tuple(p.replace(_SLOT_KEY_PIPE, "|") for p in parts)
 
 
 # Junk KEEP tombstones (2026-09-03): a junk proposal rejected as "keep" is
@@ -584,6 +677,38 @@ def _onnx_embedding_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
 
 
+def _onnx_auto_select_blocker(config: AppConfig) -> str | None:
+    """Why the MCP defaults must not auto-select ONNX, or None when they may.
+
+    Runs the loader's own two load-time gates through the helpers it uses:
+    the configured artifact must resolve (a local model directory or a
+    cached Hub snapshot, never the network), and on native Windows the
+    model must not load its Transformer module from a nested subfolder. A
+    probe error, such as an ``onnx_file_name`` outside the model, is not a
+    blocker: ONNX stays selected so the loader's warning names the error
+    instead of a silent torch choice hiding it.
+    """
+    from pseudolife_memory.memory import embedding  # noqa: PLC0415
+
+    emb = config.embedding
+    try:
+        file_name, source = embedding._configured_onnx_source(emb)  # noqa: SLF001
+        if source is None:
+            return (
+                f"No verified ONNX artifact {file_name!r} for embedding model "
+                f"{emb.model_name} in the local model or Hub cache"
+            )
+        if embedding._native_windows_nested_layout(source):  # noqa: SLF001
+            return (
+                f"Embedding model {emb.model_name} loads its Transformer "
+                "module from a nested subfolder, whose ONNX artifact the "
+                "pinned Optimum stack mis-detects on native Windows"
+            )
+    except Exception:  # noqa: BLE001 — the loader reports it at load time
+        return None
+    return None
+
+
 class _UseLabelFailed:
     """Sentinel: a retrieval-use label the storage layer refused.
 
@@ -700,6 +825,12 @@ class MemoryService(DreamOps):
         # The CMS is published before hydration completes. Coordination may
         # read readiness concurrently, so stay unready until reseeding succeeds.
         self._hlc_reseed_pending = True
+        self._coordination_hlc_epoch = None
+        # The one-shot curation listing-name carry-over (curation_safety.
+        # migrate_folded_dismissals) has run for this bank; after a failed
+        # attempt, the monotonic time the next one may start.
+        self._listing_spelling_checked = False
+        self._listing_spelling_retry_at = 0.0
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._last_saved_fingerprint = None
@@ -732,6 +863,23 @@ class MemoryService(DreamOps):
         # exception still propagates to the caller; this is purely for
         # visibility.
         self._init_refusal: str | None = None
+        # The RETRYABLE counterpart, kept apart because the shim exits on
+        # init_refusal: a failed store build (fail-closed hydration, retried
+        # after a backoff) or the bank writer lease held by another process.
+        # /health reports it as degraded + not_ready; cleared when an init
+        # completes (or, for the lease, when storage opens).
+        self._not_ready: str | None = None
+        # Retry backoff after a failed store build: until _init_retry_at
+        # (time.monotonic) passes, _ensure_init refuses at once instead of
+        # rebuilding and re-hydrating every store for each incoming call.
+        # _init_backoff_s is the window last armed; all three reset when an
+        # init completes.
+        self._init_failures = 0
+        self._init_backoff_s = 0.0
+        self._init_retry_at = 0.0
+        # Set when a failed attempt abandoned half-built stores: the next
+        # attempt collects them first (see _ensure_init).
+        self._collect_before_retry = False
         # Set by _ensure_init when the legacy .pt import left a partial
         # bank behind (#187). Boot deliberately continues -- a half-imported
         # bank is still usable -- but the state must not be silent, so it
@@ -906,19 +1054,26 @@ class MemoryService(DreamOps):
         # library default stays 0.0 (no-op) — this is a deployment-build choice.
         if absent("memory.traces.retention_boost"):
             config.memory.traces.retention_boost = 1.0
-        # ONNX embedder whenever the optional extra is installed (the
-        # daemon image bakes it): ~3x faster single-text encode on CPU
-        # with parity-checked embeddings (fp32 ONNX, min cosine vs torch
-        # 1.00000 over 20 texts, 2026-07-12) -- true for MiniLM,
-        # which has a baked ONNX artifact. Qwen3-Embedding-0.6B (the default
-        # since embedding-backbone-v25) has NO in-repo ONNX artifact, so the
-        # load-only preflight takes the warn-and-fall-back path before ONNX
-        # construction. Expect that warning in the daemon log on every deploy
-        # that uses the Qwen default.
-        # A plain pip install (no [onnx] extra) still never takes this
-        # branch at all.
+        # ONNX embedder when the optional extra is installed (the daemon
+        # image bakes it) AND the loader would actually load it: ~3x faster
+        # single-text encode on CPU with parity-checked embeddings (fp32
+        # ONNX, min cosine vs torch 1.00000 over 20 texts, 2026-07-12) --
+        # measured on MiniLM, whose artifact the image bakes.
+        # Qwen3-Embedding-0.6B (the default since embedding-backbone-v25) has
+        # no ONNX artifact, and a nested module layout on native Windows is
+        # refused at load, so both get torch here rather than an ONNX
+        # selection the loader can only warn about and fall back from on
+        # every boot; a warning on every boot trains operators to ignore
+        # warnings. The probe runs the loader's own gates, local-only. An
+        # explicit embedding.backend is never second-guessed (backend: onnx
+        # keeps its warn-and-fall-back), and a plain pip install (no [onnx]
+        # extra) never runs the probe.
         if absent("embedding.backend") and _onnx_embedding_available():
-            config.embedding.backend = "onnx"
+            blocker = _onnx_auto_select_blocker(config)
+            if blocker is None:
+                config.embedding.backend = "onnx"
+            else:
+                logger.info("%s; using the torch backend.", blocker)
 
     def _refuse_on_stale_hydrated_dims(self) -> None:
         """Refuse to serve a bank whose hydrated embeddings don't fit the
@@ -1006,9 +1161,21 @@ class MemoryService(DreamOps):
                 "this operation requires the durable Postgres tier; "
                 "configure PSEUDOLIFE_MCP_DATABASE_URL or install the "
                 "lite tier")
-        from pseudolife_memory.storage.postgres import PostgresStorage
+        # Inside a lease refusal's retry window, refuse at once: every
+        # attempt waits out the lease under the service lock, so a burst of
+        # calls must pay that once per window, not once per call.
+        self._refuse_while_backing_off()
+        from pseudolife_memory.storage.postgres import (
+            PostgresStorage, WriterLeaseHeld)
         try:
             self._storage = PostgresStorage(self._db_url)
+        except WriterLeaseHeld as exc:
+            # Another process owns the bank. Retryable, not a refusal: the
+            # holder may be a maintenance script, and a retry after the
+            # window costs a connect, never a model load.
+            self._not_ready = str(exc)
+            self._arm_retry_backoff()
+            raise
         except RuntimeError as exc:
             # schema.py's dim-mismatch refusal (schema v25) fires here —
             # record it for /health, then let it propagate: this call
@@ -1017,6 +1184,7 @@ class MemoryService(DreamOps):
             self._init_refusal = str(exc)
             raise
         self._init_refusal = None
+        self._not_ready = None
         logger.info("storage: postgres (%s)",
                     self._db_url.rsplit("@", 1)[-1])
         # Invariant: unqualified tables MUST resolve to the real `public`
@@ -1034,6 +1202,10 @@ class MemoryService(DreamOps):
         return self._storage
 
     def _ensure_init(self) -> None:
+        storage = self._storage
+        if storage is not None and hasattr(storage, "verify_writer_session"):
+            storage.verify_writer_session()
+        self._rehydrate_if_bank_changed_hands()
         self._recover_correction_locked()
         self._recover_entry_reinstatement_locked()
         from pseudolife_memory.curation_safety import recover_slot_curation
@@ -1042,7 +1214,21 @@ class MemoryService(DreamOps):
         if self._cms is not None:
             if self._hlc_reseed_pending:
                 self._reseed_hlc()
+            else:
+                # A reconnect without another writer keeps the resident clock.
+                self._coordination_hlc_epoch = getattr(self._storage, "_lease_epoch", None)
+            self._carry_over_listing_spelling()
             return
+        self._refuse_while_backing_off()
+        if self._collect_before_retry:
+            # Reclaim the last failed attempt's stores before building new
+            # ones, once per abandoned build. Not inside that attempt: its
+            # exception, still in flight there, held the frames that
+            # reference them. They sit in torch reference cycles a quiet
+            # process can leave uncollected (the retention behind the
+            # 2026-08-04 balloon).
+            self._collect_before_retry = False
+            gc.collect()
         logger.info("MemoryService: initialising embedder + CMS (first call).")
         # Storage connects BEFORE any model load (2026-08-04 boot balloon):
         # while Postgres is in crash-recovery after machine boot, every
@@ -1085,6 +1271,147 @@ class MemoryService(DreamOps):
         # 1024-d; all-MiniLM-L6-v2 is 384-d. Whatever model is configured,
         # this line keeps memory.embedding_dim honest without hand-tuning.
         self.config.memory.embedding_dim = self._embedder.embedding_dim
+        try:
+            self._hydrate_resident_stores()
+        except BaseException as exc:
+            self._abandon_partial_init(exc)
+            raise
+        self._init_failures = 0
+        self._init_backoff_s = 0.0
+        self._init_retry_at = 0.0
+        self._init_refusal = None
+        self._not_ready = None
+        self._reseed_hlc()
+        self._carry_over_listing_spelling()
+
+    def _arm_retry_backoff(self) -> None:
+        """Open, or widen, the retry window after a failed init attempt: a
+        failed store build or a refused writer lease."""
+        self._init_failures += 1
+        self._init_backoff_s = min(
+            INIT_RETRY_MAX_SECONDS,
+            INIT_RETRY_BASE_SECONDS * 2 ** min(self._init_failures - 1, 16))
+        self._init_retry_at = time.monotonic() + self._init_backoff_s
+
+    def _rehydrate_if_bank_changed_hands(self) -> None:
+        """Re-read the bank when another writer held it while this process
+        was disconnected (Codex review of #343, 2026-09-23).
+
+        The writer lease keeps one writer at a time, but the storage layer
+        reconnects on its own. It detects the handover by the lease epoch
+        and then refuses every call (``BankChangedHands``), because this
+        process's resident stores may predate the other writer's changes,
+        and its per-slot saves and flushes would write that stale copy
+        back. ``_ensure_init`` first round-trips the writer session
+        (``verify_writer_session``), so a session that died is replaced and
+        checked before anything is served. Then the resident stores are
+        dropped here so the rest of ``_ensure_init`` hydrates them afresh.
+        The pending recoveries only reconcile the resident copy with durable
+        state, which a full re-read supersedes. A reconnect with no other
+        writer in between keeps the resident copy (nothing is flagged).
+        """
+        storage = self._storage
+        reason = getattr(storage, "resident_invalidated", None)
+        if not reason:
+            return
+        # Name what is discarded. Callers of the unsaved writes were already
+        # told those writes failed, but a pending recovery may have been
+        # the only record of an outcome a caller never learned.
+        dropped = [name for name, pending in (
+            ("correction", self._correction_recovery),
+            ("entry reinstatement", self._entry_reinstatement_recovery),
+            ("slot curation", self._slot_curation_recovery),
+            ("lesson synthesis", self._lesson_synthesis_recovery),
+        ) if pending is not None]
+        unsaved = sum(len(getattr(store, "dirty_slots", None) or ())
+                      for store in (self._cortex, self._world, self._lessons)
+                      if store is not None)
+        unpersisted = sum(1 for band in (self._cms.bands if self._cms else ())
+                          for entry in band.entries if entry.db_id is None)
+        logger.warning(
+            "%s: dropping the resident stores and re-reading the bank before "
+            "serving (discarding pending recoveries: %s; unsaved slots: %d; "
+            "entries never persisted: %d)", reason,
+            ", ".join(dropped) or "none", unsaved, unpersisted)
+        self._hlc_reseed_pending = True
+        self._coordination_hlc_epoch = None
+        self._cms = None
+        self._cortex = None
+        self._world = None
+        self._lessons = None
+        self._collect_before_retry = True
+        self._correction_recovery = None
+        self._entry_reinstatement_recovery = None
+        self._slot_curation_recovery = None
+        self._lesson_synthesis_recovery = None
+        self._entity_kind_cache = None
+        self._last_saved_fingerprint = None
+        # Meta-backed state init reloads only when its row holds a value: a
+        # row the other writer cleared must not leave this process's copy.
+        self._active_session = None
+        self._episode_tombstones = {}
+        self._deferred_empty_roots = {}
+        self._dream_batch_failures = {}
+        storage.acknowledge_rehydration()
+
+    def _refuse_while_backing_off(self) -> None:
+        """Refuse at once while a failed init's retry window is open, so a
+        burst of calls costs one attempt per window, not one per call.
+        Storage connect failures never open a window: they are already
+        cheap, and a database that is still starting must be picked up as
+        soon as it answers."""
+        wait = self._init_retry_at - time.monotonic()
+        if wait > 0:
+            raise RuntimeError(
+                f"memory bank not ready: "
+                f"{self._not_ready or self._init_refusal} "
+                f"(next retry in {wait:.0f}s)")
+
+    def _abandon_partial_init(self, exc: BaseException) -> None:
+        """Drop every store a failed ``_ensure_init`` attempt built.
+
+        Fail closed (fresh-eyes review 2026-09-23). A failed cortex, world
+        or lesson hydration used to be logged and skipped, so the daemon
+        served that store EMPTY and saved from it slot by slot. Its next
+        write to a pre-existing slot replaced the slot's durable history,
+        and an explicit save rewrote the whole table from the empty copy. A
+        failed entry hydration left the half-built CMS assigned, so
+        ``_ensure_init`` never ran again. With ``_cms`` gone, every tool
+        call re-enters ``_ensure_init``, and the autosave and exit-flush
+        paths no-op, so nothing is served or written until an attempt
+        completes. The embedder is kept: rebuilding the ~2.4 GB model on
+        every attempt was the 2026-08-04 boot balloon.
+        """
+        self._cms = None
+        self._cortex = None
+        self._world = None
+        self._lessons = None
+        self._collect_before_retry = True
+        if not isinstance(exc, Exception):
+            return  # an interrupt, not a failed attempt: nothing to back off
+        reason = (str(exc) if isinstance(exc, RuntimeError)
+                  else f"{type(exc).__name__}: {exc}")
+        # Retryable unless a permanent guard (the hydrated-dim refusal)
+        # recorded itself as init_refusal before raising. The shim exits on
+        # init_refusal, so it must never carry a state a retry can clear.
+        self._not_ready = None if self._init_refusal == reason else reason
+        self._arm_retry_backoff()
+        logger.error(
+            "initialization failed; refusing to serve a partially loaded "
+            "bank (%s). Nothing is served or written until a retry "
+            "succeeds; next attempt in %.0fs.", reason, self._init_backoff_s)
+
+    def _hydrate_resident_stores(self) -> None:
+        """Build the resident stores and fill them from storage (or the
+        v0.1 files). A failed Postgres hydration of entries, cortex, world
+        facts or lessons raises, as does any other unhandled failure, and
+        ``_ensure_init`` then drops whatever was built
+        (:meth:`_abandon_partial_init`): a store that failed to load is
+        never served or saved from. Five steps keep their own deliberate
+        tolerance: the legacy ``.pt`` import (resumable, surfaced as
+        ``migration_partial``), the weights file, the optional reference
+        bank, dream tracking (a failure disables the dream alone, surfaced
+        as ``dream_tracking_error``), and the v0.1 file-mode loads."""
         try:
             self._reference = ReferenceBank(
                 self.config.memory.reference,
@@ -1145,7 +1472,10 @@ class MemoryService(DreamOps):
                     "SHORT bank): %s — progress is recorded in the '%s' meta "
                     "row; fix the cause and restart to resume the import.",
                     exc, _migrate.MIGRATION_META_KEY)
-            n = _sync.hydrate_cms(self._cms, self._storage)
+            try:
+                n = _sync.hydrate_cms(self._cms, self._storage)
+            except Exception as exc:
+                raise RuntimeError(f"entry hydration failed: {exc}") from exc
             logger.info("hydrated %d entries from storage", n)
             try:
                 self._cms.load_weights(self.config.memory.save_dir)
@@ -1176,8 +1506,8 @@ class MemoryService(DreamOps):
             from pseudolife_memory.storage import sync as _sync
             try:
                 _sync.hydrate_cortex(self._cortex, self._storage)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Cortex hydration skipped: %s", exc)
+            except Exception as exc:
+                raise RuntimeError(f"cortex hydration failed: {exc}") from exc
         else:
             try:
                 self._cortex.load(self._cortex_path())
@@ -1197,8 +1527,9 @@ class MemoryService(DreamOps):
             from pseudolife_memory.storage import sync as _sync
             try:
                 _sync.hydrate_world_cortex(self._world, self._storage)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("World cortex hydration skipped: %s", exc)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"world cortex hydration failed: {exc}") from exc
 
         # Procedural / outcome memory (schema v10) — sibling slot store for the
         # lessons the agent learns from its own work (what worked / dead-ended /
@@ -1209,10 +1540,35 @@ class MemoryService(DreamOps):
             from pseudolife_memory.storage import sync as _sync
             try:
                 _sync.hydrate_lessons(self._lessons, self._storage)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Lesson store hydration skipped: %s", exc)
+            except Exception as exc:
+                raise RuntimeError(f"lesson hydration failed: {exc}") from exc
 
-        self._reseed_hlc()
+    def _carry_over_listing_spelling(self) -> None:
+        """Caller holds the lock. First call in a process with storage and
+        the lesson/world stores loaded (nothing lists slot pairs before
+        that): move human curation dismissals from the folded to the escaped
+        listing spelling, once per bank (see
+        curation_safety.migrate_folded_dismissals). A failure costs those
+        dismissals' pairs a return to the listing, never a call; it is
+        retried a minute later, because until it lands a new dismissal of a
+        pipe-free twin reads as a folded row that attempt would copy."""
+        import time as _t
+        if (self._listing_spelling_checked or self._storage is None
+                or self._lessons is None or self._world is None
+                or _t.monotonic() < self._listing_spelling_retry_at):
+            return
+        from pseudolife_memory import curation_safety
+        try:
+            copied = curation_safety.migrate_folded_dismissals(self)
+        except Exception as exc:  # noqa: BLE001
+            self._listing_spelling_retry_at = _t.monotonic() + 60.0
+            logger.warning("curation dismissal spelling carry-over failed "
+                           "(retrying in 60 s): %s", exc)
+            return
+        self._listing_spelling_checked = True
+        if copied:
+            logger.info("curation: carried %d human dismissal(s) over to the "
+                        "escaped slot-key spelling", copied)
 
     def _reseed_hlc(self) -> None:
         # Re-seed the HLC from the stored high-water stamp (2026-07-02 P1): a
@@ -1240,6 +1596,7 @@ class MemoryService(DreamOps):
                 best = max(best, tuple(stamp))
         if best > (0, 0):
             self._hlc.observe(*best)
+        self._coordination_hlc_epoch = getattr(self._storage, "_lease_epoch", None)
         self._hlc_reseed_pending = False
 
     # ------------------------------------------------------------------
@@ -1574,6 +1931,9 @@ class MemoryService(DreamOps):
                     d["via"] = via
                 entries_out.append(d)
                 served_components.append(comp)
+            _annotate_supersession(
+                [(e, d) for (e, _, _, _), d in zip(ranked, entries_out)],
+                (r for band in self._cms.bands for r in band.entries))
             # Chronicle events (schema v28): a temporally-cued query also
             # serves matching live events, chronologically ascending.
             # Needs no knob — an empty table (chronicle extraction
@@ -1755,9 +2115,13 @@ class MemoryService(DreamOps):
             # within one tick — same-tick stores must still list newest-first.
             all_entries.sort(key=lambda e: (e.timestamp, e.seq), reverse=True)
             limited = all_entries[: max(0, int(n))]
+            entries_out = [_entry_to_dict(e) for e in limited]
+            _annotate_supersession(
+                list(zip(limited, entries_out)),
+                (r for band in self._cms.bands for r in band.entries))
             return {
                 "count": len(limited),
-                "entries": [_entry_to_dict(e) for e in limited],
+                "entries": entries_out,
             }
 
     # ------------------------------------------------------------------
@@ -2844,6 +3208,27 @@ class MemoryService(DreamOps):
                 _c = self._storage.load_communities()["communities"]
                 result["communities"] = len(_c)
                 result["graph_digest_at"] = (self._storage.get_meta("graph_digest") or {}).get("computed_at")
+                # All-time capacity drops, durable across restarts (the CMS
+                # ``true_drops`` counter is per process). Guarded like the
+                # telemetry reads below: stats() is on the session-start
+                # path, and a malformed meta row must not break it.
+                from pseudolife_memory.storage.postgres import (
+                    CAPACITY_DROPS_META_KEY,
+                )
+                try:
+                    drops = self._storage.get_meta(CAPACITY_DROPS_META_KEY) or {}
+                    result["true_drops_total"] = int(drops.get("count", 0))
+                    result["last_true_drop"] = {
+                        "at": drops.get("last_at"),
+                        "entry_id": drops.get("last_entry_id"),
+                        "source": drops.get("last_source"),
+                        "superseded": drops.get("last_superseded"),
+                    } if drops else None
+                except Exception:  # noqa: BLE001
+                    logger.warning("capacity drop record unreadable",
+                                   exc_info=True)
+                    result["true_drops_total"] = None
+                    result["last_true_drop"] = None
                 # Retrieval log liveness: nothing else reads the table, and
                 # both write paths swallow their errors, so this is the only
                 # place a silently-dead log becomes visible. Guarded: a
@@ -4681,12 +5066,16 @@ class MemoryService(DreamOps):
         """Is the memory loop actually being exercised? Windowed activity
         counts + per-session rates for the Console tile. Needs Postgres —
         ``{"available": False}`` without (never raises)."""
+        retry_days = self.config.memory.lessons.signal_retry_days
+        t = time.time() if now is None else float(now)
+        since = t - retry_days * 86400.0 if retry_days > 0 else None
         with self._lock:
             self._ensure_init()
             if self._storage is None:
                 return {"available": False}
             h = self._storage.loop_health(
-                window_s=float(window_days) * 86400.0, now=now)
+                window_s=float(window_days) * 86400.0, now=now,
+                pending_since_ts=since)
         sessions = h.get("sessions") or 0
 
         def _rate(n: int) -> float | None:
@@ -5357,7 +5746,15 @@ class MemoryService(DreamOps):
     def get_entry(self, entry_id: int) -> dict[str, Any]:
         """Dereference a trace pointer: the dense episode + the facts it formed.
         Bumps access_count (ambient reinforcement). {found: False, faded: True}
-        when the episode has evicted."""
+        when the episode has evicted.
+
+        A superseded entry also carries ``superseded``, ``superseded_at``,
+        ``superseded_by_text`` and the successor annotation search serves
+        (``_annotate_supersession``), so dereferencing a ``replaced_by.id``
+        shows when that note is itself a chain link. The state is read
+        from the row being served, not the resident copy: a row the CMS
+        does not hold must not be served as live. A live entry's payload
+        is unchanged."""
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -5370,12 +5767,33 @@ class MemoryService(DreamOps):
                 self._cms.bump_entry_access_count(int(entry_id), 1)
             facts = self._storage.facts_for_entry(int(entry_id))
             self._record_retrieval_use(int(entry_id), "get")
+            supersession: dict[str, Any] = {}
+            if row.get("superseded_at") is not None:
+                from types import SimpleNamespace
+
+                eid = int(entry_id)
+                supersession = {
+                    "superseded": True,
+                    "superseded_at": row["superseded_at"],
+                    "superseded_by_text": row["superseded_by_text"],
+                }
+                # The subject is the row, not a resident object, so the
+                # helper's identity-based self-exclusion cannot apply; the
+                # entry is filtered out of the candidates by id instead.
+                _annotate_supersession(
+                    [(SimpleNamespace(
+                        superseded_at=row["superseded_at"],
+                        superseded_by_text=row["superseded_by_text"]),
+                      supersession)],
+                    (r for band in (self._cms.bands if self._cms else ())
+                     for r in band.entries if r.db_id != eid))
         return {"found": True, "entry_id": row["id"], "text": row["text"],
                 "source": row.get("source"),
                 "reinforcements": row.get("reinforcements", 0),
                 "explicit_reinforcements": row.get("explicit_reinforcements", 0),
                 "access_count": row.get("access_count", 0) + 1,  # +1 for the bump just applied
-                "consolidated_into": facts}
+                "consolidated_into": facts,
+                **supersession}
 
     def reinforce(self, entry_id: int) -> dict[str, Any]:
         """The 'this episode was useful' signal — bump reinforcements (Phase-2
@@ -5462,14 +5880,31 @@ class MemoryService(DreamOps):
 
     def warmup(self):
         """Eagerly load embedder + reranker + NLI so the first real tool call
-        is warm. Safe to run in a background thread at startup."""
-        try:
-            with self._lock:
-                self._ensure_init()
-                self._last_saved_fingerprint = self._entry_fingerprint()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("warmup init failed: %s", exc)
-            return
+        is warm. Safe to run in a background thread at startup.
+
+        A retryable startup failure (a failed store build, or the writer
+        lease held elsewhere) is retried here each time its backoff window
+        expires, so a daemon nobody is calling still recovers from a
+        transient cause. Once the window reaches its cap (after about two
+        minutes), warmup leaves further retries to callers and the session
+        reaper, so a failure that never clears is not re-attempted every
+        minute forever. Any other failure (an unreachable database, a
+        permanent refusal) waits for the next caller, as before."""
+        while True:
+            try:
+                with self._lock:
+                    self._ensure_init()
+                    self._last_saved_fingerprint = self._entry_fingerprint()
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("warmup init failed: %s", exc)
+                # Only a retryable failure sets _not_ready and arms a window;
+                # a permanent refusal is not retried here.
+                wait = self._init_retry_at - time.monotonic()
+                if (not self._not_ready or wait <= 0
+                        or self._init_backoff_s >= INIT_RETRY_MAX_SECONDS):
+                    return
+                time.sleep(wait)
         try:
             self.search("warmup probe", top_k=1)
         except Exception as exc:  # noqa: BLE001
@@ -6368,16 +6803,24 @@ class MemoryService(DreamOps):
                 key=lambda r: (-r["count"], r["source"]),
             )
 
+            # Cap recent entries — even a small dict times N entries
+            # gets unwieldy on long episodes. Use ``memory_recent``
+            # filtered by episode for the full list. Annotated like
+            # search/recent hits; a successor may sit outside this
+            # episode, so it is resolved over every resident entry.
+            recent = entries[:20]
+            recent_out = [_entry_to_dict(e) for e in recent]
+            _annotate_supersession(
+                list(zip(recent, recent_out)),
+                (r for band in self._cms.bands for r in band.entries))
+
             return {
                 "found": True,
                 **self._episode_to_dict(ep),
                 "entry_count": len(entries),
                 "tag_distribution": tag_rows,
                 "source_distribution": source_rows,
-                # Cap recent entries — even a small dict times N entries
-                # gets unwieldy on long episodes. Use ``memory_recent``
-                # filtered by episode for the full list.
-                "recent_entries": [_entry_to_dict(e) for e in entries[:20]],
+                "recent_entries": recent_out,
             }
 
     # ------------------------------------------------------------------

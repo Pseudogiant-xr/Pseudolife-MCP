@@ -46,6 +46,17 @@ Do not bypass native app permissions through private IPC or open its persisted
 task in another server to simulate delivery. CLI and desktop pull support is
 independent of that limitation.
 
+## Queue doorbell (2026-09-23)
+
+Codex's first-party `codex queue` command reaches idle tasks the bridge cannot,
+the desktop app's included, but Codex delivers its text as a user message. The
+optional doorbell therefore keeps the rule above by content rather than by
+channel: it queues only a fixed, labelled notice with the pending count, never
+peer text, and the model reads the mail itself through `memory_message receive`.
+Putting peer text in the queued message would place it in a user-role turn; that
+variant is not implemented. Setup and limits are in the configuration guide's
+"Optional Codex doorbell" section.
+
 ## Host evidence (2026-09-12)
 
 Probes used Codex CLI `0.154.0` and the desktop app-server binary

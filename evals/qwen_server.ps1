@@ -49,6 +49,7 @@ $script:QwenDir    = "$env:USERPROFILE\ClaudeCode\llama.cpp"
 # (hash 6444B058CAAC both) and ~4% faster decode; gate canary re-run on bump.
 $script:QwenEngine = "$script:QwenDir\engine-b10488"
 $script:QwenUrl    = "http://127.0.0.1:1234/v1/models"
+$script:OwnedQwenProcess = $null
 
 function Get-QwenModelPath {
     # Qwen3.8 GGUFs embed the MTP head in the main file — one model for both
@@ -91,6 +92,23 @@ function Get-RunningQwenConfig {
 }
 
 function Stop-Qwen {
+    param([switch]$Owned)
+    if ($Owned) {
+        # The Process object retains the handle returned by Start-Process.
+        # Killing through it cannot target a different process after PID reuse.
+        $process = $script:OwnedQwenProcess
+        if ($null -eq $process) { return }
+        try {
+            if (-not $process.HasExited) {
+                $process.Kill()
+                $process.WaitForExit(5000) | Out-Null
+            }
+            $script:OwnedQwenProcess = $null
+        } catch {
+            Write-Warning "Could not stop the Qwen process started by this run: $_"
+        }
+        return
+    }
     Get-Process llama-server -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 5
@@ -129,10 +147,31 @@ function Start-Qwen {
        unconditionally, whatever its VRAM: reusing it mislabels a whole
        campaign, displacing it breaks the never-displace rule. Clearing
        one takes an operator decision — run Stop-Qwen deliberately. #>
-    param([switch]$Fast, [switch]$Force, [int]$Ctx = 100000)
+    param([switch]$Fast, [switch]$Force, [switch]$Owned, [int]$Ctx = 100000)
     $want = if ($Fast) { 'fast' } else { 'reproducible' }
 
+    if ($Owned -and ($Fast -or $Force -or $null -ne $script:OwnedQwenProcess)) {
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') owned launch requires a fresh reproducible server without -Force"
+        return $false
+    }
     $running = Get-RunningQwenConfig
+    if ($Owned) {
+        if ($running) {
+            Write-Host "$(Get-Date -Format 'HH:mm:ss') Qwen server already running; owned launch will not reuse or displace it"
+            return $false
+        }
+        try {
+            $listener = Get-NetTCPConnection -State Listen -ErrorAction Stop |
+                Where-Object LocalPort -eq 1234
+        } catch {
+            Write-Host "$(Get-Date -Format 'HH:mm:ss') cannot verify port 1234 ownership; refusing owned launch"
+            return $false
+        }
+        if ($listener) {
+            Write-Host "$(Get-Date -Format 'HH:mm:ss') port 1234 is occupied; owned launch will not displace it"
+            return $false
+        }
+    }
     if ($running -eq 'foreign') {
         Write-Host ("$(Get-Date -Format 'HH:mm:ss') FOREIGN llama-server on " +
                     ":1234 — it is not serving $(Split-Path (Get-QwenModelPath) -Leaf); " +
@@ -218,7 +257,7 @@ function Start-Qwen {
         # would otherwise launch a stock server under the -Fast label.
         $env:MTP = "1"
         Start-Process -FilePath cmd.exe -WorkingDirectory $script:QwenDir `
-            -WindowStyle Minimized `
+            -WindowStyle Hidden `
             -ArgumentList '/c', "`"$script:QwenDir\run-server-qwen38.bat`" > qwen-server.log 2>&1"
         return (Wait-QwenEndpoint -Seconds 300)
     }
@@ -261,10 +300,30 @@ function Start-Qwen {
         "--cache-ram", "0",
         "--ctx-checkpoints", "0"
     )
-    Start-Process -FilePath "$script:QwenEngine\llama-server.exe" `
-        -WorkingDirectory $script:QwenEngine -WindowStyle Minimized `
-        -ArgumentList $qwenArgs `
-        -RedirectStandardOutput (Join-Path $script:QwenDir 'qwen-server.log') `
-        -RedirectStandardError  (Join-Path $script:QwenDir 'qwen-server.err')
-    return (Wait-QwenEndpoint -Seconds 300)
+    try {
+        $process = Start-Process -FilePath "$script:QwenEngine\llama-server.exe" `
+            -WorkingDirectory $script:QwenEngine -WindowStyle Hidden `
+            -ArgumentList $qwenArgs `
+            -RedirectStandardOutput (Join-Path $script:QwenDir 'qwen-server.log') `
+            -RedirectStandardError  (Join-Path $script:QwenDir 'qwen-server.err') `
+            -PassThru -ErrorAction Stop
+    } catch {
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') Qwen launch failed: $_"
+        return $false
+    }
+    if ($Owned) { $script:OwnedQwenProcess = $process }
+    $ready = Wait-QwenEndpoint -Seconds 300
+    if (-not $Owned -or -not $ready) { return $ready }
+    try {
+        $listener = Get-NetTCPConnection -State Listen -ErrorAction Stop |
+            Where-Object LocalPort -eq 1234
+    } catch {
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') cannot verify launched server owns port 1234"
+        return $false
+    }
+    if (@($listener | Where-Object OwningProcess -eq $process.Id).Count -ne 1) {
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') launched server does not own port 1234"
+        return $false
+    }
+    return $true
 }

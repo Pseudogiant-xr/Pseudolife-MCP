@@ -61,6 +61,18 @@ class FaultStorage(TransactionalStorage):
         return super().delete_entry_ids(ids)
 
 
+class AuditedFaultStorage(FaultStorage):
+    """Offers the audited capacity eviction, as PostgresStorage does, so a
+    true drop takes that path instead of the plain delete."""
+
+    def delete_evicted_entry(self, entry_id, *, source, superseded):
+        if self.fail == "evict":
+            raise RuntimeError("injected evict write-through failure")
+        if entry_id is not None:
+            self.rows.pop(entry_id, None)
+        return 1
+
+
 def _snapshot(svc):
     cms = svc._cms
     rows = deepcopy(getattr(svc._storage, "rows", None))
@@ -159,18 +171,20 @@ def test_staged_clone_isolates_mutable_bank_state(tmp_path, monkeypatch):
     assert staged.bands[0].on_evict.func.__self__ is staged
 
 
-@pytest.mark.parametrize("fault", ["insert", "update", "delete"])
+@pytest.mark.parametrize("fault", ["insert", "update", "delete", "evict"])
 def test_strict_write_through_fault_rolls_back_every_staged_side_effect(
     tmp_path, monkeypatch, fault,
 ):
-    storage = FaultStorage()
+    # "evict" is the audited capacity eviction (delete_evicted_entry);
+    # "delete" keeps covering the plain-delete fallback.
+    storage = AuditedFaultStorage() if fault == "evict" else FaultStorage()
     svc = _service(tmp_path, monkeypatch, storage)
     old = _seed(svc)
     if fault == "update":
         svc._cms.bands[0].promotion_access_count = 0
         svc._cms.bands[0].promotion_surprise = -1.0
         svc._cms.bands[1].update_interval = 1
-    elif fault == "delete":
+    elif fault in ("delete", "evict"):
         svc._cms.bands = [svc._cms.bands[0]]
         svc._cms.bands[0].max_entries = 1
         svc._cms.instant = svc._cms.short_term = svc._cms.long_term = svc._cms.bands[0]

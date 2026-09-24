@@ -327,8 +327,15 @@ def _split_search(payload: dict) -> dict[str, int]:
     """Where a served ``memory_search`` payload's bytes actually go."""
     entries = payload.get("entries", []) or []
     text_chars = sum(len(wire(e.get("text", ""))) for e in entries)
+    # Compact entries stopped carrying ``superseded_by_text`` on 2026-09-23
+    # (a superseded hit serves the capped ``replaced_by`` pointer instead),
+    # so this column reads 0 for compact projections from then on; the
+    # pointer is metered in its own column rather than folded into
+    # "other", so runs either side of the change stay comparable.
     sup_chars = sum(len(wire(e.get("superseded_by_text", "")))
                     for e in entries if e.get("superseded_by_text"))
+    rb_chars = sum(len(wire(e["replaced_by"]))
+                   for e in entries if e.get("replaced_by"))
     entries_chars = len(wire(entries))
     cortex_chars = len(wire(payload.get("cortex", []) or []))
     events_chars = len(wire(payload["events"])) if payload.get("events") else 0
@@ -338,7 +345,9 @@ def _split_search(payload: dict) -> dict[str, int]:
         "entries_chars": entries_chars,
         "entries_text_chars": text_chars,
         "entries_superseded_text_chars": sup_chars,
-        "entries_other_chars": entries_chars - text_chars - sup_chars,
+        "entries_replaced_by_chars": rb_chars,
+        "entries_other_chars": (entries_chars - text_chars - sup_chars
+                                - rb_chars),
         "cortex_chars": cortex_chars,
         "events_chars": events_chars,
         "envelope_chars": total - entries_chars - cortex_chars - events_chars,
@@ -413,6 +422,7 @@ def measure_search(mod, dm: Daemon, top_k: int,
             # text + metadata (2026-09-04 review finding).
             for k in ("total_chars", "entries_chars", "entries_text_chars",
                       "entries_superseded_text_chars",
+                      "entries_replaced_by_chars",
                       "entries_other_chars", "cortex_chars", "events_chars")
         }
         agg[arm]["total_approx_tokens"] = _stats(

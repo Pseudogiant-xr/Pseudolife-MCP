@@ -14,6 +14,13 @@
 # digest text changed; the rest is the text. It prints here once, when the
 # watermark is past the shared .seen marker (the tool-result hint advances
 # the same marker), so a quiet turn adds nothing. Still file reads only.
+#
+# Claude Code keeps an MCP server's session id for the life of the process,
+# while /clear and /resume give hooks a new one (env-vars docs, 2026-09-23).
+# The session hooks therefore keep the shim's key per Claude Code process in
+# claude-$CLAUDE_PID.host (see session-start.sh); when that record is
+# confirmed for this session, its key replaces the one derived from the
+# stdin id.
 
 echo "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
 
@@ -33,6 +40,25 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
     # A pipeline's status is its last command's, so the fallback lives
     # inside the group, not after it.
     KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+    # The record is followed only while it is confirmed for this very
+    # session (line 2). The env id equals the stdin id only in a hook Claude
+    # Code started for this session; a host run from a Claude Bash command
+    # inherits both variables from the outer session and must not follow it.
+    case "${CLAUDE_PID:-}" in
+        ''|*[!0-9]*) ;;
+        *)
+            RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
+            if [ -n "$KEY" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] &&
+                    [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
+                SHIM="" FOR=""
+                { IFS= read -r SHIM; IFS= read -r FOR; } 2>/dev/null < "$RECORD"
+                case "$SHIM" in ''|*[!0-9a-f]*) SHIM="" ;; esac
+                if [ "${#SHIM}" -eq 64 ] && [ "$FOR" = "$KEY" ]; then
+                    KEY="$SHIM"
+                fi
+            fi
+            ;;
+    esac
     FILE="$DIGEST_DIR/$KEY.txt"
     if [ -n "$KEY" ] && [ -f "$FILE" ] && [ ! -L "$FILE" ]; then
         SEEN="$DIGEST_DIR/$KEY.seen"

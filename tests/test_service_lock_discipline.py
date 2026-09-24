@@ -70,6 +70,12 @@ CALLER_HOLDS_LOCK = {
     "_reseed_hlc",
     # Reached only from _ensure_init; the fixpoint below verifies its lock.
     "_initialize_dream_tracking",
+    # The store-building body of _ensure_init (fail-closed hydration,
+    # 2026-09-23), split out only so a failure can drop what it built.
+    "_hydrate_resident_stores",
+    # Drops stale resident stores after a writer handover; first step of
+    # _ensure_init (the fixpoint below verifies its lock).
+    "_rehydrate_if_bank_changed_hands",
     "_ensure_postgres_storage",
     "_ensure_subject_entity",
     "_persist_all",
@@ -77,10 +83,11 @@ CALLER_HOLDS_LOCK = {
     "_emit_correction_signal",
     "_link_lesson_graph",
     "_write_lesson_locked",
-    # Lock-taking wrappers and ReviewJudgments invoke these while locked.
-    "_judge_enrich_locked",
-    "_enrich_link_proposals_locked",
-    "_enrich_junk_proposals_locked",
+    # ReviewJudgments invokes these evidence reads while locked; the
+    # *_from pack builders that consume them touch no storage.
+    "_judge_evidence_locked",
+    "_link_evidence_locked",
+    "_junk_evidence_locked",
     "_graph_accept_proposal_locked",
     "_graph_reject_proposal_locked",
     "_graph_accept_entity_merge_locked",

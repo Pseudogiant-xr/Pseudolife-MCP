@@ -48,6 +48,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
+import embedder_stamp  # noqa: E402 — stdlib only
+
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 WINDOW = 0   # --window: known-facts window size applied to every bench service
@@ -310,7 +313,10 @@ def _bench_db_name() -> str:
     # PSEUDOLIFE_BENCH_DB: the test suite pins a per-run name here so that
     # reset_bench()'s backend reap + truncate can't hit a concurrent suite
     # run (tests/conftest.py). Eval CLI runs leave it unset -> fixed name.
-    return os.environ.get("PSEUDOLIFE_BENCH_DB", "pseudolife_memory_bench")
+    # A production bank name is refused here, before anything connects.
+    name = os.environ.get("PSEUDOLIFE_BENCH_DB", "pseudolife_memory_bench")
+    refuse_production_database(name)
+    return name
 
 
 def bench_url() -> str:
@@ -330,22 +336,27 @@ def bench_url() -> str:
 # questions until 2026-08-25 (#181). One list now, defined beside the DDL
 # and completeness-checked by tests/test_bench_reset_tables.py.
 #
-# Safe above the lazy service imports below: schema.py imports only
-# `logging`, and neither package __init__ pulls in torch — the
+# Safe above the lazy service imports below: schema.py imports only the
+# standard library, and neither package __init__ pulls in torch — the
 # CUDA_VISIBLE_DEVICES setup at the top of this module is unaffected.
 from pseudolife_memory.storage.schema import (  # noqa: E402
     BENCH_RESET_TABLES as _ALL_TABLES,
+    refuse_production_database,
 )
 
 
 def reset_bench() -> str:
     """Ensure the dedicated bench DB exists and is empty. Returns its URL.
 
-    NEVER touches the live ``pseudolife_memory`` DB — this is its own database.
+    NEVER touches the live ``pseudolife_memory`` DB — this is its own
+    database, and that is enforced, not just named: ``_bench_db_name()``
+    refuses a production bank name before anything connects, and the
+    server-side check below runs before the reap.
     """
     import psycopg
     from psycopg.conninfo import make_conninfo
 
+    bench_db = _bench_db_name()
     admin = os.environ.get(
         "PSEUDOLIFE_BENCH_ADMIN_URL",
         "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
@@ -354,14 +365,18 @@ def reset_bench() -> str:
     with psycopg.connect(admin, connect_timeout=5, autocommit=True) as conn:
         row = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
-            (_bench_db_name(),),
+            (bench_db,),
         ).fetchone()
         if row is None:
-            conn.execute(f'CREATE DATABASE "{_bench_db_name()}"')
+            conn.execute(f'CREATE DATABASE "{bench_db}"')
 
     url = bench_url()
-    from pseudolife_memory.storage.schema import ensure_schema
+    from pseudolife_memory.storage.schema import (
+        assert_disposable_database,
+        ensure_schema,
+    )
     with psycopg.connect(url, connect_timeout=5) as conn:
+        assert_disposable_database(conn)  # first: before the reap below
         conn.execute("SET search_path TO public")
         conn.commit()
         with conn.cursor() as cur:  # reap any leaked backends holding locks
@@ -748,6 +763,7 @@ def run_rung(name: str) -> dict:
         svc = build_service(Path(td))
         result["bench_env"] = rung_bench_env(svc.config.memory.dream)
         ingest(svc)
+        result["embedder"] = embedder_stamp.describe(svc)
         if rung["kind"] == "naive":
             result.update(measure_naive(svc))
             result["extract_seconds"] = 0.0
@@ -809,6 +825,7 @@ def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80),
                     "false_abstain_answerable": round(wrong / len(PAIRS), 3),
                 })
     return {"rung": name, "status": "ok", "curve": curve,
+            "embedder": embedder_stamp.describe(svc),
             **endpoint_stamp(rung)}
 
 
@@ -821,6 +838,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 **endpoint_stamp(rung)}
     import tempfile
     curve = []
+    embedder = None
     for thr in thresholds:
         with tempfile.TemporaryDirectory(prefix=f"plsup_{name}_",
                                          ignore_cleanup_errors=True) as td:
@@ -831,6 +849,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 svc.store(pair["a_text"], source="bench")
                 svc.store(pair["b_text"], source="bench")
             _, tally = consolidate(svc, make_extractor(rung))
+            embedder = embedder_stamp.describe(svc)
             m = measure_cortex(svc)
             false_merge = 0
             for pair in NO_MERGE:
@@ -846,7 +865,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 "false_merge": false_merge,
             })
     return {"rung": name, "status": "ok", "curve": curve,
-            **endpoint_stamp(rung)}
+            "embedder": embedder, **endpoint_stamp(rung)}
 
 
 # ---------------------------------------------------------------------------

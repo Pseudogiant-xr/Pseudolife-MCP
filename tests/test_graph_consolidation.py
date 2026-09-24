@@ -442,6 +442,22 @@ def test_shared_mention_entries_respects_limit():
     assert len(gc.shared_mention_entries(entries, "alpha", "beta", limit=2)) == 2
 
 
+def test_shared_mention_entries_pre_tokenized_matches_default():
+    # The link judge's pack passes the entries' token sets in, scanned once
+    # per row instead of re-tokenized per row; the answer must not move.
+    from pseudolife_memory.memory.graph_review import _token_set
+    entries = [{"id": 1, "text": "mcp-publisher pushes the server to the MCP registry"},
+               {"id": 2, "text": "mcp-publisher was reinstalled at v1.8.0"},
+               {"id": 3, "text": "the MCP registry lists mcp-publisher builds"},
+               {"id": 4, "text": ""}]
+    tokens = [_token_set(e["text"]) for e in entries]
+    for a, b, limit in (("mcp-publisher", "MCP registry", 5),
+                        ("mcp-publisher", "MCP registry", 1),
+                        ("mcp-publisher", "nothing here", 5)):
+        assert (gc.shared_mention_entries(entries, a, b, limit, tokens=tokens)
+                == gc.shared_mention_entries(entries, a, b, limit))
+
+
 def test_junk_entities_flags_slot_key_artifacts_against_known_entities():
     # 2026-07-26: `X.attribute` entities minted when an extractor flattens a
     # vocab slot key. Detected only when the PREFIX is itself a known entity,

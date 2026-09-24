@@ -2,8 +2,8 @@
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.15.0",
-  "schema": 41,
-  "verified": "2026-09-22"
+  "schema": 42,
+  "verified": "2026-09-24"
  },
  "groups": {
   "clients": {
@@ -146,7 +146,7 @@
    "d": [
     "GET /api/hook/session-start → stdout becomes session context",
     "Fail-open: daemon down → friendly fallback, still exit 0",
-    "Payload capped at 9,500 chars (client caps stdout at 10k)", "On resume or compact clears the coordination digest's .seen marker so the next prompt prints the current digest afresh"
+    "Payload capped at 9,500 chars (client caps stdout at 10k)", "On resume, compact or clear clears the coordination digest's .seen marker so the next prompt prints the current digest afresh", "Keeps the shim's digest key once per Claude Code process (claude-<CLAUDE_PID>.host: shim key, then the session it is confirmed for); a launch writes the session's own key, /clear and in-session /resume carry it only on a fresh session-end.sh handoff naming this process's creation identity, anything unproven fails closed to the session's own key"
    ]
   },
   {
@@ -160,7 +160,7 @@
    "d": [
     "One-line memory discipline injected on every user turn",
     "Recall-before-review: search the bank, then compare to the files",
-    "No daemon call — offline-safe, always exit 0", "Coordination digest: reads the shim's per-session digest file (SHA-256 of the stdin session_id under PSEUDOLIFE_DIGEST_DIR) and prints it only when its watermark passed the shared .seen marker, then advances it; quiet turns add nothing; one ledger line per firing"
+    "No daemon call — offline-safe, always exit 0", "Coordination digest: reads the shim's per-session digest file (SHA-256 of the stdin session_id under PSEUDOLIFE_DIGEST_DIR, or the shim key in claude-<CLAUDE_PID>.host when the hook's CLAUDE_CODE_SESSION_ID matches that session_id and the record is confirmed for it) and prints it only when its watermark passed the shared .seen marker, then advances it; quiet turns add nothing; one ledger line per firing"
    ]
   },
   {
@@ -173,14 +173,29 @@
    "p": "plugin/hooks/",
    "d": [
     "POST /api/hook/session-end closes the session episode",
-    "Ownership-guarded: only clears the active-session pointer it owns"
+    "Ownership-guarded: only clears the active-session pointer it owns", "First, before the connection checks and any network call (plugin SessionEnd hooks get 1.5 s): on /clear or /resume confirms the process's digest-key record for the ending session (rewriting one that is not) and leaves the handoff claude-<CLAUDE_PID>.switch: time, the process's creation identity, the ending session's key"
+   ]
+  },
+  {
+   "id": "hookwake",
+   "g": "plugin",
+   "x": 40,
+   "y": 980,
+   "t": "stop-wake.sh",
+   "s": "Stop hook · opt-in asyncRewake",
+   "p": "plugin/hooks/",
+   "d": [
+    "Off unless PSEUDOLIFE_AGENT_WAKE_HOOK=1, checked in the hooks.json command before bash reads the script",
+    "async + asyncRewake: waits after each turn on the session's coordination digest; exit 2 wakes an idle session",
+    "Fires when the digest watermark passes .seen and mail is listed, then advances .seen; one lease per session, at most 20 wakes an hour",
+    "Codex loads the same hooks.json: a no-op there (lifecycle.ps1 -Event Stop exits at once; the bash command stops at the flag check)"
    ]
   },
   {
    "id": "cmds",
    "g": "plugin",
    "x": 40,
-   "y": 980,
+   "y": 1075,
    "t": "/dream · /memory-status",
    "s": "slash commands",
    "p": "plugin/commands/",
@@ -215,7 +230,7 @@
    "p": "pseudolife_memory/cli.py",
    "d": [
     "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio · channel → optional preview transport",
-    "briefing / episode-start / episode-end subcommands",
+    "briefing / doctor / backup / export / import / coordination-recovery / wait-mail / episode-start / episode-end subcommands",
     "Heavy imports deferred into serve/embedded branches — shim start is near-instant"
    ]
   },
@@ -258,7 +273,7 @@
     "ZIP of JSONL (one per table) + manifest — decoupled from Postgres major version and deployment tier, unlike pg_dump's physical backup",
     "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim",
     "Carries entry dream state but excludes the acknowledgement secret; an imported bank creates its own token identity",
-    "Operational coordination_agents and coordination_messages never enter portable knowledge exports; full database backups retain them"
+    "Operational coordination_agents, coordination_messages and the coordination_events audit log never enter portable knowledge exports; full database backups retain them"
    ]
   },
   {
@@ -305,7 +320,7 @@
     "Refuses non-loopback bind without token (exit 2) unless TRUST_BIND=1",
     "Starts durability autosave, dream sweep, idle-session reaper",
     "/health does a LIVE db ping on a dedicated connection",
-    "Reports status: degraded + init_refusal when the engine can't init (v25)"
+    "Reports status: degraded + init_refusal when the engine refuses for good (v25 dim guards; the shim exits on it), or degraded + not_ready while a retry can clear it (bank writer lease held elsewhere, failed store hydration backing off)"
    ]
   },
   {
@@ -480,6 +495,7 @@
    "d": [
     "sentence-transformers; torch or ONNX backend with auto-fallback",
     "Thread-safe LRU cache; weights baked into the image (HF_HUB_OFFLINE)",
+    "CPU precision cpu_dtype auto: bf16 loaded directly on native-bf16 CPUs, else fp32; rows leave as float32",
     "Swapped from MiniLM 384-d in schema v25 after a seven-arm shootout"
    ]
   },
@@ -750,7 +766,7 @@
     "~20 sub-configs; unknown YAML keys ignored",
     "DSN resolved in service.py from PSEUDOLIFE_MCP_DATABASE_URL",
     "No DSN → legacy file mode (.pt + ChromaDB under data_dir)",
-    "coordination.enabled defaults off; awareness_limit bounds peer summaries and allowed_principals defaults empty"
+    "coordination.enabled defaults off; awareness_limit bounds peer summaries and allowed_principals defaults empty; audit_retention_days (default 90, 0 = forever) bounds the board audit log"
    ]
   },
   {
@@ -766,6 +782,7 @@
     "Per-action parameter allow-lists reject unexpected or missing parameters before any database work",
     "Runs the store on a dedicated mailbox connection under the coordination lock; the service lock is used for cold durable-tier initialization and for full initialization before send, including clock-reseed retries; initialized mailbox calls avoid it, so a dream holding it cannot expire an adapter lease; send waits for clock history before stamping the message",
     "Failures re-raise through public_error, so callers see a stable code and never a supplied value",
+    "The prune pass (at most once a minute, on register, send or heartbeat) hands coordination.audit_retention_days to the store",
     "Disabled configuration answers {enabled: false} rather than an error, so a disabled bank stays quiet"
    ]
   },
@@ -925,10 +942,11 @@
     "One psycopg conn: autocommit reads + explicit _txn() writes",
     "_txn COMMITTED check — no phantom RETURNING ids on a dead conn",
     "Heal-on-next-use reconnect; ping() on a dedicated conn for /health",
+    "Writer lease: a session advisory lock on that one conn, taken before schema DDL (waits up to 2 s for an exiting holder); a second instance on the bank refuses (WriterLeaseHeld names the holder), and a reconnect must re-take it before serving; a writer_lease_epoch meta row detects another writer in the gap, and then every call refuses (BankChangedHands) until the service re-reads the bank",
     "Dream acknowledgement captures one connection and transaction for exact entry IDs plus display cursor; pre-v38 rows are classified once",
     "Explicit source retirement and trace invalidations commit together; late trace writes lock the same source row",
     "Entry reinstatement locks the same row, atomically appends an operation-keyed audit and clears only retirement fields; durable replay precedes target admission",
-    "CoordinationStore uses the same transaction discipline; locked recipient sequence allocation and message insertion commit together"
+    "CoordinationStore uses the same transaction discipline; locked recipient sequence allocation and message insertion commit together, and each mutation's audit event commits with it"
    ]
   },
   {
@@ -937,14 +955,14 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 41",
+   "s": "DDL · SCHEMA_META_VERSION 42",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
-    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces/memory_trace_invalidations · entry_reinstatement_decisions · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads · curation_judgments · store_decisions · coordination_agents · coordination_messages",
-    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 entries.dream_state (per-entry acknowledgement; NULL marks old rows for one-time source-aware legacy classification; new rows default pending) · v39 memory_trace_invalidations (FK-free source correction events survive entry deletion and fact snapshots; atomic with explicit source retirement) · v40 agent coordination (coordination_agents instance credentials/attachment generations; coordination_messages addressed mail, recipient sequence, request-key deduplication, expiry and explicit acknowledgment; no episode cascade and no embeddings) · v41 entry_reinstatement_decisions (FK-free operation-keyed audit; exact preimage, decision and retirement clear commit together; trace-invalidated targets refused)",
+    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces/memory_trace_invalidations · entry_reinstatement_decisions · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads · curation_judgments · store_decisions · coordination_agents · coordination_messages · coordination_events",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 entries.dream_state (per-entry acknowledgement; NULL marks old rows for one-time source-aware legacy classification; new rows default pending) · v39 memory_trace_invalidations (FK-free source correction events survive entry deletion and fact snapshots; atomic with explicit source retirement) · v40 agent coordination (coordination_agents instance credentials/attachment generations; coordination_messages addressed mail, recipient sequence, request-key deduplication, expiry and explicit acknowledgment; no episode cascade and no embeddings) · v41 entry_reinstatement_decisions (FK-free operation-keyed audit; exact preimage, decision and retirement clear commit together; trace-invalidated targets refused) · v42 coordination_events (append-only, FK-free, sha256-chained board audit log written in each mutation's own transaction and pruned only by its own window, which logs its cuts; coordination_messages.first_read_at)",
     "One-current-row-per-slot partial unique indexes",
-    "Owns driver-free COORDINATION_SCHEMA_SQL; both operational tables enter the shared bench reset roster"
+    "Owns driver-free COORDINATION_SCHEMA_SQL; all three operational tables enter the shared bench reset roster"
    ]
   },
   {
@@ -1035,7 +1053,7 @@
    "x": 1760,
    "y": 1530,
    "t": "storage/coordination.py",
-   "s": "agent rows + addressed mail",
+   "s": "agent rows + addressed mail + audit log",
    "p": "pseudolife_memory/storage/coordination.py",
    "d": [
     "send locks both agent rows FOR UPDATE in agent-ID order, so reciprocal sends cannot deadlock each other",
@@ -1044,14 +1062,17 @@
     "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
     "The coordination_hlc_highwater meta row only ever moves forward (numeric compare), so pruning mail cannot regress mailbox stamps",
     "Live delivery is bounded to MAX_ATTEMPTS (3) per message across attachments; the adapter's receive skips exhausted mail, an explicit receive still returns it",
-    "prune() removes addresses with no lease and no retained message after seven days idle, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true; list_agents shows leased or hour-active peers, leased first, and counts the rest as idle_omitted", "attach and heartbeat return pending_preview beside pending_count: the PREVIEW_LIMIT (5) oldest pending messages with sender label and a PREVIEW_EXCERPT (100-char) excerpt, read-only, for the shim's turn digest"
+    "prune() removes addresses with no lease and no retained message after seven days idle, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true; list_agents shows leased or hour-active peers, leased first, and counts the rest as idle_omitted", "attach and heartbeat return pending_preview beside pending_count: the PREVIEW_LIMIT (5) oldest pending messages with sender label and a PREVIEW_EXCERPT (100-char) excerpt, read-only, for the shim's turn digest",
+    "Every mutation but heartbeat appends a coordination_events row in its own transaction: a dense seq under a transaction-scoped advisory lock taken last, hash = sha256(prev_hash || canonical row)",
+    "receive stamps first_read_at once, pull or delivery, and logs a read; prune logs expire/prune and, given audit_retention_days, cuts the log as a prefix and logs the cut (audit_prune) as the surviving chain's anchor",
+    "audit_events / verify_audit_chain back the operator-only, read-only board-audit CLI; recover/rebind log operator events and still run on a restored pre-v42 bank"
    ]
   },
   {
    "id": "install",
    "g": "ops",
    "x": 40,
-   "y": 1700,
+   "y": 1795,
    "t": "install.ps1 / .sh",
    "s": "one-shot idempotent installer",
    "p": "ops/",
@@ -1067,7 +1088,7 @@
    "id": "preflight",
    "g": "ops",
    "x": 300,
-   "y": 1700,
+   "y": 1795,
    "t": "preflight",
    "s": "read-only doctor",
    "p": "ops/preflight.ps1",
@@ -1080,7 +1101,7 @@
    "id": "installhook",
    "g": "ops",
    "x": 560,
-   "y": 1700,
+   "y": 1795,
    "t": "install-hook",
    "s": "SessionStart hook wiring",
    "p": "ops/install-hook.ps1",
@@ -1093,7 +1114,7 @@
    "id": "shimauto",
    "g": "ops",
    "x": 820,
-   "y": 1700,
+   "y": 1795,
    "t": "install-shim-autostart",
    "s": "Sonnet shim task",
    "p": "ops/install-shim-autostart.ps1",
@@ -1105,7 +1126,7 @@
    "id": "update",
    "g": "ops",
    "x": 1080,
-   "y": 1700,
+   "y": 1795,
    "t": "update.ps1 / .sh",
    "s": "safe daemon-only redeploy",
    "p": "ops/update.ps1",
@@ -1120,20 +1141,22 @@
    "id": "backup",
    "g": "ops",
    "x": 1340,
-   "y": 1700,
+   "y": 1795,
    "t": "backup.ps1 / .sh",
    "s": "pg_dump + state tar",
    "p": "ops/backup.ps1",
    "d": [
     "gzip -9 in-container → data/backups/; 7-day rotation",
-    "Optional off-disk mirror with independent retention"
+    "Optional off-disk mirror with independent retention",
+    "Row-count manifest per dump; a >25% drop in entries/facts/lessons holds all rotation",
+    "Manifest copied into the daemon → /health last_backup; install-backup-task.ps1 runs it daily"
    ]
   },
   {
    "id": "restore",
    "g": "ops",
    "x": 1600,
-   "y": 1700,
+   "y": 1795,
    "t": "restore.ps1 / .sh",
    "s": "rehearsal-first restore",
    "p": "ops/restore.ps1",
@@ -1146,7 +1169,7 @@
    "id": "compose",
    "g": "ops",
    "x": 1860,
-   "y": 1700,
+   "y": 1795,
    "t": "docker-compose.yml",
    "s": "project pseudolife-mcp · 3 services",
    "p": "ops/docker-compose.yml",
@@ -1155,14 +1178,14 @@
     "Daemon depends_on pg healthy; extractor deliberately NOT depended on",
     "TRUST_BIND=1 is safe: compose publishes loopback-only — the port publish is the security boundary",
     "Override file: swap extractor GGUF or disable the sidecar (profiles)",
-    "Daemon mem_limit 4g (memswap pinned equal - no swap); fences the 2026-08-04 balloon incident"
+    "Daemon mem_limit 6g (memswap pinned equal - no swap; 4g OOM-killed it 2026-09-23); MALLOC_ARENA_MAX=2"
    ]
   },
   {
    "id": "ladder",
    "g": "evals",
    "x": 40,
-   "y": 1120,
+   "y": 1215,
    "t": "ladder_sweep.py",
    "s": "extractor ladder",
    "p": "evals/ladder_sweep.py",
@@ -1176,7 +1199,7 @@
    "id": "lme",
    "g": "evals",
    "x": 40,
-   "y": 1215,
+   "y": 1310,
    "t": "LongMemEval bench",
    "s": "flagship external eval",
    "p": "evals/longmemeval_bench.py",
@@ -1190,7 +1213,7 @@
    "id": "gate",
    "g": "evals",
    "x": 40,
-   "y": 1310,
+   "y": 1405,
    "t": "regression_gate.ps1",
    "s": "pre-commit retrieval gate",
    "p": "evals/regression_gate.ps1",
@@ -1204,7 +1227,7 @@
    "id": "distill",
    "g": "evals",
    "x": 40,
-   "y": 1405,
+   "y": 1500,
    "t": "distillation pipeline",
    "s": "teacher → QLoRA E4B",
    "p": "evals/distill_*.py",
@@ -1218,7 +1241,7 @@
    "id": "benches",
    "g": "evals",
    "x": 40,
-   "y": 1500,
+   "y": 1595,
    "t": "subsystem benches",
    "s": "lesson · relation · memcot · retention…",
    "p": "evals/",
@@ -1352,6 +1375,18 @@
    "f": "plugin",
    "t": "cmds",
    "l": "provides",
+   "k": "control"
+  },
+  {
+   "f": "plugin",
+   "t": "hookwake",
+   "l": "registers (opt-in)",
+   "k": "control"
+  },
+  {
+   "f": "hookwake",
+   "t": "cc",
+   "l": "exit 2 wakes the idle session",
    "k": "control"
   },
   {
@@ -1945,7 +1980,7 @@
   {
    "f": "coordstore",
    "t": "pgstorage",
-   "l": "coordination_agents / messages · _txn()",
+   "l": "coordination_agents / messages / events · _txn()",
    "k": "data"
   }
  ],

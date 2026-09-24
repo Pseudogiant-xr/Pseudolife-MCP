@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v41). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v42). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -22,9 +22,11 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `claude-desktop` / `codex` / `gemini` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
+| `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | `60` | Daemon on Linux/glibc only (the Docker tier): how often a background thread calls `malloc_trim(0)` to hand back heap memory glibc keeps after embedder encode bursts. Measured 2026-09-23 with four persistent worker threads, 1,007-1,433 MiB of it was still resident at idle with the fp32 embedder (897-1,476 MiB bf16), and a trim took a median 7 ms with no measurable slowdown of the next encode (`evals/results/allocator-trim-pool-20260923.json`, `allocator-trim-probe-20260923.json`, `allocator-trim-latency-20260923.json`). It lowers what the daemon holds after a burst, not the peak of the burst itself. `0` disables. |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
 | `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` | _(unset)_ | Set `1` to restore the retired `mcp-session-id` transport-session fallback for one release (rollback hatch; logs a warning on first use). The header names the HTTP *connection*, not the session — concurrent sessions share it — and the MCP 2026-07-28 revision removes it from the protocol. Session identity rides the hook-registered episode handle and `X-PL-Session` instead — see [Episodes](episodes.md). |
-| `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `4g` | Docker tier only (read by compose, not the daemon): hard memory cap on the daemon container, with the memory+swap total pinned to the same value — no swap, so exceeding the cap is a clean container restart rather than a host-wide memory event. Steady state is ~2.8 GB with the default embedder; raise for very large banks. |
+| `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `6g` | Docker tier only (read by compose, not the daemon): hard memory cap on the daemon container, with the memory+swap total pinned to the same value — no swap, so exceeding the cap is a clean container restart rather than a host-wide memory event. Measured 2026-09-23 with the fp32 embedder, the daemon held ~3.1–3.3 GiB anon at rest and up to 4.5 GB hours later, and the old `4g` default OOM-killed it under an ordinary request burst; bf16 takes ~1.4 GB off. `/health`'s `memory` block reports use against the cap. Raise for very large banks. |
+| `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` | _(unset)_ | Overrides `embedding.cpu_dtype` (`auto` / `fp32` / `bf16`) — the torch embedder's precision on a CPU. Set `fp32` to roll a daemon back from bf16 without a rebuild; `/health`'s `embedder` block shows the resident dtype. |
 
 For the Docker stack, set these in `ops/.env`
 (`cp ops/.env.example ops/.env` — the install/update scripts scaffold it too;
@@ -48,7 +50,11 @@ coordination:
   enabled: true
   awareness_limit: 5
   allowed_principals: [editor, reviewer]
+  audit_retention_days: 90
 ```
+
+`audit_retention_days` is how long the [audit log](#audit-log) keeps each event:
+a whole number of days, default 90, and `0` keeps the log forever.
 
 `awareness_limit` must be an integer from 1 to 20 and caps peer summaries. Existing
 episodes have no trustworthy project/task or principal fields, so unregistered
@@ -77,9 +83,13 @@ set `PSEUDOLIFE_AGENT_STATE` to a
 private file outside the repository for deliberate mailbox resume. Each concurrent
 adapter needs its own state file; sharing one does not create a second identity.
 Claude Code sessions can instead set `PSEUDOLIFE_AGENT_STATE_DIR` to a private
-directory: the shim keys one state file per session under it by the
-`CLAUDE_CODE_SESSION_ID` the host exports, so a resumed session keeps its
-address and concurrent sessions never share one. Without either, each launch
+directory: the shim keys one state file under it by the
+`CLAUDE_CODE_SESSION_ID` Claude Code launches it with, so concurrent sessions
+never share one and `claude --resume <id>` returns to the session's address.
+That id is fixed for the shim's lifetime: `/clear` or an in-session `/resume`
+keeps the running shim and its address. `claude --continue`, or `--resume`
+without an id, may launch the shim with the process's startup id instead of
+the resumed one, and the session then gets a new address. Without either, each launch
 gets a new address, registered as not resumable and retired an hour after it
 goes quiet. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
@@ -100,7 +110,94 @@ shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
 unchanged, a one-line reminder rides every tenth tool result. The file is
 removed when the shim exits; a session id without an adapter (or a host that
-exports none, such as Claude Desktop) gets hints only.
+exports none, such as the app-level MCP servers Claude Desktop launches from
+`claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
+Code, whose per-session stdio shim does receive the id.
+
+Claude Code hooks see the current session id, which `/clear` and an
+in-session `/resume` change, while the shim keeps the id it was launched with.
+The plugin's session hooks therefore keep the shim's digest key once per
+Claude Code process, in `claude-<CLAUDE_PID>.host` beside the digests, and
+the prompt hook reads through that record while it is confirmed for the
+current session. `CLAUDE_PID` is the Claude Code process id, which Claude
+Code v2.1.214 and later export to hooks; older versions keep the per-session
+key. The record passes to the next session only through a handoff that the
+SessionEnd hook binds to the process's creation time. A record left by a
+process that exited, even one whose PID was reused, is never followed, and a
+host that cannot report a creation time falls back to the per-session key.
+After `/clear`, compaction or a resume, the current digest prints once more. A `--continue` launch whose shim got the
+startup id cannot be mapped, since no hook ever sees that id; such a session
+gets hints only.
+
+### Waking an idle session: `pseudolife-mcp wait-mail`
+
+Mail reaches a recipient on its next Pseudolife tool call or prompt; nothing in
+MCP can start a turn in a session that has gone idle, so the host has to.
+`pseudolife-mcp wait-mail` gives the host something to wake on: it blocks until
+the digest above shows mail nothing has shown yet, prints it and exits.
+
+```sh
+pseudolife-mcp wait-mail [--session-id ID | --digest PATH] [--timeout SECONDS] [--interval SECONDS]
+```
+
+It keys the coordination digest the way the shim does (`--session-id`, a Codex
+thread id for instance, else `CLAUDE_CODE_SESSION_ID`; `PSEUDOLIFE_DIGEST_DIR`
+applies); `--digest` names the file outright and accepts only a digest's own
+`<64 hex digits>.txt` name. After `/clear` changes the session id, it follows a
+`claude-<CLAUDE_PID>.host` record of the shim's spawn-time key for this Claude
+process if one exists and its second line confirms it for the current session
+(the SHA-256 of its id); without one, a waiter armed after `/clear` finds no
+digest. It needs no daemon connection, token or
+network. Each check is a file `stat` (every 2 s by default); the file is read
+only after the adapter rewrites it. It fires when the watermark is past the
+shared `.seen` marker and the digest lists pending mail, so mail that arrived
+while the agent was busy fires at once and mail a prompt hook or tool-result
+hint already showed does not. On firing it prints the digest body verbatim on
+stdout, agent-origin framing included, then advances `.seen` so the hook and
+hint do not repeat it, and appends a `wait` line to `ledger.log`. Exit codes:
+`0` new mail; `3` timeout (default 4 h, at most 24 h), re-arm; `2` nothing to
+wait on — no session id, no digest file (the adapter writes it when it
+attaches: at shim start in Claude Code, on a thread's first `memory_*` call in
+Codex), a file that disappeared because the shim exited, a file that cannot be
+inspected when armed (a later read error is retried), a
+stdout that cannot take the mail (left unmarked), or a bad argument.
+Diagnostics go to stderr. The adapter refreshes the digest on its 20 s
+heartbeat, so a waiter fires up to about 22 s after the send. It also rewrites
+an unchanged digest every hour, without moving the watermark, so the day-old
+sweep another adapter runs at start never takes a long-idle session's file.
+
+In Claude Code, the agent arms it with the Bash or PowerShell tool and
+`run_in_background: true`. Claude Code reports the exit as a task notification,
+which starts a turn even in an idle session (observed on Claude Code 2.1.280,
+2026-09-23):
+
+1. After registering with `memory_agents`, arm one waiter; keep exactly one
+   armed.
+2. On exit `0`: `memory_message` receive, act, acknowledge each `message_id`,
+   then re-arm. On `3`: re-arm. On `2`: read the stderr line, fix what it
+   names (in Codex, make one `memory_*` call first) and re-arm once; if it
+   persists, continue pull-only.
+3. Before ending a turn that waits on a peer, make sure a waiter is armed.
+
+Arm it from the main conversation: a command started by a foreground subagent
+ends with that subagent's final response, and `-p` runs end background commands
+shortly after their final result. When `pseudolife-mcp` is not on the shell's
+`PATH`, call the shim's own executable or `python -m pseudolife_memory.cli
+wait-mail` under the interpreter the shim runs on. In Claude Code's auto mode a
+classifier reviews each such command, and in one 2026-09-23 session it refused
+a long-running waiter script from the home directory as persistence (it allowed
+the same script in another). The recommended setup is a narrow allow rule,
+`Bash(pseudolife-mcp wait-mail *)` (and `PowerShell(pseudolife-mcp wait-mail *)`
+on Windows), which also matches the bare command: auto mode resolves narrow
+shell rules before the classifier runs, while it drops broad ones such as
+`Bash(python*)` and every rule naming the Monitor tool, so arm the waiter as a
+background Bash or PowerShell command, not a Monitor. Setting
+`autoMode.classifyAllShell` suspends even narrow rules. Codex never starts a turn
+when a background command exits, so run it there only in the foreground: a
+background run would advance `.seen` with nobody reading its output.
+Acknowledging some messages while a waiter is armed, and leaving others pending,
+rewrites the digest and fires once, the same way the tool-result hint
+re-delivers a changed digest.
 
 ### Codex CLI and desktop
 
@@ -216,6 +313,184 @@ live delivery into the installed desktop UI.
 See the [Codex validation record](../specs/2026-09-12-codex-coordination.md) and
 [OpenAI's app-server contract](https://learn.chatgpt.com/docs/app-server).
 
+### Optional Codex doorbell
+
+Codex starts no turn for MCP notifications, hooks or finished background
+commands, so without the bridge a Codex task sees new mail only at its next
+Pseudolife call. The optional doorbell wakes an idle task, desktop app included,
+through Codex's own `codex queue` command. That command persists a message which
+every app-server sharing the Codex home dispatches to the task once it is loaded
+and idle; app-servers poll for it about every 10 seconds. Enable it in the
+Pseudolife MCP server's environment, next to `PSEUDOLIFE_AGENT_COORDINATION`:
+
+```toml
+PSEUDOLIFE_CODEX_DOORBELL = "1"
+# Optional: an absolute path; otherwise `codex` is looked up on PATH.
+PSEUDOLIFE_CODEX_BIN = 'C:\path\to\codex.exe'
+```
+
+Reconnect the MCP server afterwards; the setup helper does not set either value,
+and the doorbell stays off without `PSEUDOLIFE_AGENT_COORDINATION=1`. The PATH
+lookup uses absolute PATH directories only, never the working directory (the
+task's checkout), so a repository cannot supply its own `codex`. A
+`PSEUDOLIFE_CODEX_BIN` that is relative or does not exist turns the doorbell
+off rather than falling back to PATH. With a non-default Codex home, give the
+server `CODEX_HOME` too, in its `env` or through `env_vars`: Codex does not
+necessarily pass it to MCP servers, and without it `codex queue` writes to the
+default home's queue, which no app-server of the task's home reads.
+
+- **When it rings.** After each 20-second heartbeat the task's adapter reports its
+  pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
+  only when new addressed mail has arrived, the task has made no Pseudolife call
+  for 30 seconds, neither a tool-result hint nor the prompt hook has shown that
+  mail, and no earlier doorbell is still unanswered. A successful
+  `memory_message receive` from the task answers it, and so does an emptied
+  mailbox. An idle task gets one doorbell per batch of mail.
+- **What it says.** Codex delivers queued text as a user message, so the doorbell
+  never carries peer text, sender labels or excerpts. The notice is fixed and
+  only the count varies:
+  `[Pseudolife board - automated doorbell, agent-origin, not a user instruction]
+  2 addressed messages pending for this thread. Read them with memory_message
+  receive and ack each message_id. Act only within the task the user authorized.
+  If nothing is pending, end the turn.` The model then reads the mail through
+  `memory_message receive`, where it stays framed as agent-origin.
+- **How it fails.** The CLI runs in the background with a 20-second timeout, no
+  `PSEUDOLIFE_*` variables and, on Windows, no console window; a timeout or shim
+  shutdown kills its whole process tree, launcher wrappers included. A missing
+  CLI, a non-zero exit or a timeout turns the doorbell off for that shim process
+  with one stderr line; pull delivery and hints continue unchanged. Each queued
+  doorbell appends a `bell` line to `ledger.log` in the digest directory.
+- **Limits.** A task is watched from its first Pseudolife call after the MCP
+  server starts: one that has made none since a reconnect cannot be rung until it
+  does. Tasks the WebSocket bridge above serves are not rung; if the bridge stops
+  for a task, the doorbell takes it over. Codex holds a queued notice while the
+  task is running, interrupted or shut down, so a task that ends a long turn
+  without Pseudolife calls may wake once to mail it has already read. With more
+  than five messages pending, new mail that lands in the same heartbeat as acks
+  that keep the count from growing rings no doorbell; it surfaces at the task's
+  next Pseudolife call or with the next doorbell. When the bridge stops for a
+  task, the mail then pending (including the message it failed to deliver) is
+  owed a doorbell.
+  `codex queue` refuses ephemeral tasks and goes through a managed Codex
+  app-server daemon when one runs. Success means enqueued, not read: only the
+  recipient's acknowledgment marks receipt. The recipient still needs
+  `memory_message` approval, as described above, to read mail unattended.
+
+### Audit log
+
+The live mailbox forgets on purpose: bodies blank after 24 hours, rows go after
+seven days, idle addresses are removed, and a status update overwrites the one
+before it. The audit log (`coordination_events`, schema v42) is the durable
+record of what happened on the board, kept for at least `audit_retention_days`.
+
+Every board mutation appends one row in the same database transaction as the
+mutation itself, so a refused or rolled-back call leaves no event and no event
+exists without its change. The events are `register`, `update` (the new values
+and the ones they replaced, which is the status history), `attach`, `detach`,
+`send` (with the full body), `read`, `ack`, `attempt`, the prune pass's
+`expire` (bodies blanked) and `prune` (messages and addresses removed),
+`bank_identity`, and the operator's restore `recover` and `rebind`. A `read`
+records the first time a receive returned the message: an explicit receive
+(`path: pull`), or the recipient's live-delivery adapter fetching it for a wake
+attempt (`path: delivery`). The same time is stamped on the message as
+`first_read_at`. The per-turn digest's 100-character preview is not a read.
+Lease heartbeats are not logged: at the shim's 20-second cadence one session
+would add about 4,300 rows a day, and `attach`/`detach` already bracket each
+lease.
+
+Each row carries a dense sequence number `seq`, the event, its actor (`agent`,
+`daemon` or `operator`), the bearer principal the daemon verified for agent
+actions (never a credential), the agent and recipient IDs, project and task,
+the message ID, a JSON payload, `created_at`, the message's HLC stamp on `send`
+(other events are ordered by `seq`: stamping every mutation would need the full
+service initialization that mailbox calls deliberately avoid), and two hashes.
+`hash` is sha256 of the previous row's hash followed by the row's canonical
+content, so editing, inserting or reordering rows breaks the chain, and so does
+removing any but the oldest (see below). Appends take a transaction-scoped
+advisory lock after every board-row lock the mutation holds, which orders
+writers on separate connections.
+
+Retention is separate from the mailbox. The prune pass that expires bodies also
+removes the log's oldest rows once they are older than `audit_retention_days`.
+It cuts on UTC day boundaries and removes only a fully expired prefix, so an
+event stays at least the window. Normally it stays at most a day longer;
+out-of-order timestamps can retain older rows behind a newer row until that
+row also expires. The cut is always a prefix, recorded
+as an `audit_prune` event naming the last removed row, and the surviving chain
+starts from that anchor. `0` never prunes. The pass runs at most once a minute
+and only while the board is in use (registration, sending or heartbeats on an
+enabled board): a board that goes quiet, or has coordination disabled, keeps its
+log, bodies included, until activity resumes.
+
+A synthetic replay at the scale of the 2026-09-23/24 fifteen-session trial (40
+agents and 623 messages, plus 15 status updates and 2 attachments per agent,
+which the trial's export does not record) left 2,671 events in 1.6 MB including
+indexes: 144.5 MB if every one of 90 nights were that busy
+([artifact](../../evals/results/coordination-audit-volume-20260924.json)). In the
+same run the append added 1.3 to 2.2 ms to the median send, receive and
+acknowledgment on a local server, against a control arm with it disabled whose
+own two runs differed by up to 0.6 ms. Status-update latency was too noisy there
+to read (its two control runs were 1.8 ms apart), and with one writer at a time
+the run did not measure waiting on the append lock.
+
+The log is read by an operator, never by an agent: there is no MCP tool and no
+REST route for it. `pseudolife-mcp board-audit` reads the bank directly, through
+`PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance, in a
+read-only snapshot, so it is safe beside a running daemon:
+
+```sh
+pseudolife-mcp board-audit export --task fix-week --since 2026-09-23 --out board.jsonl
+pseudolife-mcp board-audit verify
+```
+
+`export` writes one JSON object per line, oldest first, to stdout or to a new
+`--out` file, which it never overwrites. Prefer `--out` for anything you keep: a
+PowerShell 5 `>` redirect writes UTF-16. The filters are `--project`, `--task`,
+`--agent` (the acting agent or a message's recipient), and `--since` / `--until`
+(epoch seconds or ISO 8601; a time without an offset is local). The daemon's
+`expire`, `prune` and `audit_prune` rows and the operator's `recover` carry no
+project or task and name agents only in their payload, so a filtered export
+leaves them out.
+
+`verify` walks the chain and prints one JSON report: `ok`, the number of
+`events`, `first_seq`, the head (`head_seq`, `head_hash`, `head_created_at`),
+and `start_cut`, the cut the log starts from once retention has removed its
+oldest rows. It exits 0 when the chain is intact. It exits 1 with the first
+failing `seq` and a `reason`: `sequence_gap`, `broken_link`, `hash_mismatch` or
+`unanchored_start` for the chain, or `head_missing`, `head_mismatch` or
+`head_pruned` for an expected head. It exits 2 when it could not check.
+`verify --input <file>` checks an export file instead of the bank; the export
+must be unfiltered, since a filtered one has gaps. In the Docker tier run it
+inside the daemon container, which already has the database URL:
+`docker exec pseudolife-mcp-daemon pseudolife-mcp board-audit verify`.
+
+What `verify` shows: no row was edited, inserted or reordered, and none was
+removed except the oldest, behind a cut record whose own fields add up (written
+by the daemon, a window of at least a day, the cutoff that window gives at its
+time, and no surviving row older than that cutoff). What it cannot show on its
+own, because no secret is involved: that the newest rows were not dropped; that
+the table was not rewritten with every hash recomputed; and that the oldest
+rows were not removed by someone who also appended a consistent cut record.
+Record `head_seq:head_hash` and `head_created_at` from each `verify` somewhere
+outside the bank, and later run `verify --expect-head SEQ:HASH`. That catches
+the first two. The third needs a series of recorded heads: retention never
+removes a row created at or after its cutoff, so a recorded head that comes
+back `head_pruned` although its `head_created_at` is at or after
+`start_cut.cutoff` means rows went that retention would have kept (unless the
+daemon's clock stepped backwards, or the window was raised since). A forged
+cut stamped with the current time and your configured window passes
+everything else. For history you must be able to prove, keep periodic `--out`
+exports (privately) and check them with `verify --input`. The log records mutations made through
+the coordination store; a direct SQL edit of the mailbox tables leaves no event.
+It proves what was sent and by which verified principal, not that a message was
+true.
+
+The log is private data. It holds message bodies verbatim for the whole
+retention window, and bodies carry machine paths and usernames. It lives only
+in the bank database and its full backups, portable `export`/`import` archives
+omit it, and the CLI writes only to stdout or a local file you name. Keep
+exports out of repositories and anywhere public.
+
 ### Delivery and recovery
 
 Use ordinary `pseudolife-mcp` for authenticated pull messaging. The optional
@@ -237,6 +512,8 @@ decision explicitly as ordinary memory if it should become durable knowledge.
 Initial limits are 8192 UTF-8 bytes per message, 256 pending messages per recipient,
 60 new sends per sender per minute and 50 messages per receive page. Bodies stop
 being served after 24 hours; request-key metadata is retained for seven days.
+The [audit log](#audit-log) keeps its own copy of every body for
+`audit_retention_days`.
 Opportunistic pruning runs at most once per minute during registration, sending
 or heartbeats. Expired bodies remain unservable even when no adapter is running
 to trigger physical cleanup. Full queues and rate limits return explicit errors.
@@ -322,17 +599,86 @@ lock, so concurrent launches cannot both register against that stale reservation
 The lock file remains on disk; lock ownership is released when the process exits,
 including a crash. Do not delete it while an adapter might be using it.
 
-Full database backups contain coordination mail. Portable `export`/`import`
-archives omit both coordination tables and their clock metadata so moving
+Full database backups contain coordination mail and the audit log. Portable `export`/`import`
+archives omit the coordination tables (agents, mail and the audit log) and their clock metadata so moving
 knowledge cannot clone live mailboxes or instance credentials. Follow the
 [offline mailbox recovery procedure](coordination-recovery.md) after a database
 restore. See the [experimental design](../specs/2026-09-11-agent-coordination-design.md)
 for delivery-state and host-verification contracts.
 
+### Waking an idle Claude Code session: the Stop hook
+
+Mail otherwise reaches a Claude Code session only at its next memory call or
+prompt, so an idle session can sit on a message for hours. The plugin ships an
+opt-in `Stop` hook that waits on the session's digest after every turn and
+wakes the session when new mail arrives. It is off unless the hook's
+environment sets `PSEUDOLIFE_AGENT_WAKE_HOOK=1` (for example in the `env` block
+of `~/.claude/settings.json`, which Claude Code passes to the processes it
+starts); the hook's command checks the flag before bash reads the script. It
+needs the coordination adapter above, since it waits on the digest file the
+adapter writes: without a digest directory it exits at once. It also needs a
+Claude Code release that honours `asyncRewake` (verified on 2.1.280); one
+that ignored `async` would run it in the foreground and hold each turn end.
+
+Opting in lets any peer allowed to mail this session start a model turn in it
+while you are away, in whatever permission mode the session runs; peer text
+still cannot grant approval. Every wake spends tokens, and two opted-in
+sessions can keep waking each other, so wakes are capped (below).
+
+- The hook runs with `"async": true` and `"asyncRewake": true`: in the
+  background after each turn, and exit code 2 starts a new turn even when the
+  session is idle. Verified in the Desktop Code tab on Claude Code 2.1.280, in
+  auto permission mode (under a second from exit to the new turn). Claude Code
+  labels the delivery "Stop hook blocking error"; that label is the wake, not
+  a failure. The reminder is one line saying so, then the digest, which reads
+  as agent-origin, not user authority.
+- It fires when the digest's watermark is past the `.seen` marker and the
+  digest lists mail. Mail that arrived during the turn fires at once; a digest
+  the session already saw (through the prompt hook, the tool-result hint or an
+  earlier wake) does not fire again at the next turn end. Firing advances
+  `.seen` and appends a `wait` line to `ledger.log`; if the marker cannot be
+  written, the hook does not wake at all. SessionStart clears `.seen` on
+  resume and compact, and any change to the digest while mail is pending
+  (acknowledging some of it, a message expiring) is a new digest, so either
+  can wake the session once more.
+- At most 20 wakes per session in any hour. Mail over the cap waits for the
+  window to free up; it is delayed, not dropped.
+- One watcher per session: each turn end takes the lease in `<key>.wake`, and
+  the previous watcher exits within one poll (5 s). A digest file absent when
+  the watch starts is waited for; one that vanishes during it (the shim
+  exited) ends the watch. After `/clear` it reads the
+  digest named by the per-process `claude-<pid>.host` record, when
+  SessionStart has written one.
+- A watcher waits at most 3540 s after the turn that armed it; the hook's
+  `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
+  `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
+  longer is not woken; its mail still appears on its next prompt. On Linux and
+  macOS the watcher also stops when Claude Code exits. In `claude -p` runs,
+  Claude Code ends a waiting hook at teardown.
+- Codex loads the same `hooks.json`. The `Stop` entry is a no-op there: the
+  native command (`lifecycle.ps1 -Event Stop`) exits at once; the bash
+  command stops at the flag check, and the script exits unless Claude Code
+  started it.
+  `ops/setup-codex-hooks.py` approves it with the other three definitions
+  (see [Codex specifics](providers.md#codex-specifics)).
+
 ## Built-in defaults (tuned for Claude's use case)
 
 - **Embedding backbone `Qwen/Qwen3-Embedding-0.6B`** (`EmbeddingConfig.model_name`,
-  default since schema v25) — fp32 torch, no GPU sidecar. It's
+  default since schema v25) — torch on the CPU, no GPU sidecar, in the
+  precision `EmbeddingConfig.cpu_dtype` picks: `auto` (the default) loads
+  the model straight into bf16 when the CPU has native bf16 (x86
+  AVX512_BF16 / AMX_BF16) and uses fp32 otherwise, since bf16 without
+  native support is slow; `fp32` / `bf16` force one. Measured 2026-09-23 on
+  the production image, bf16 held ~1.4 GB steady vs ~2.85 GB for fp32, and
+  on 400 real bank entries bf16 queries against stored fp32 vectors kept
+  top-8 overlap 0.994 and rank-0 60/60, with the regression gate scoring
+  every arm identically to its fp32 baseline
+  (`evals/results/embedder-cpu-bf16-probe-20260923.json`). The default
+  applies everywhere the embedder runs, evals included: an eval on a
+  native-bf16 CPU embeds in bf16. Vectors are stored as float32
+  either way. `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` overrides the config value;
+  `/health` reports the resident `embedder.dtype`. It's
   instruction-asymmetric: query-side text (search/recall probes) is encoded
   with `EmbeddingConfig.query_prefix`'s instruction prefix via
   `encode_query()`; everything stored (entries, fact/world/lesson claim
@@ -347,9 +693,20 @@ for delivery-state and host-verification contracts.
   for what this changes about retrieval, and the
   [schema version history](#schema-version-history) below for the v25
   cutover itself.
-- **ONNX acceleration is load-only** (`EmbeddingConfig.backend = "onnx"`,
-  selected automatically by the MCP defaults when the optional ONNX stack is
-  installed). `EmbeddingConfig.onnx_file_name` defaults to
+- **ONNX acceleration is load-only** (`EmbeddingConfig.backend = "onnx"`).
+  The MCP defaults select it only when the optional ONNX stack is installed
+  *and* the loader would load it: the configured model's artifact already
+  resolves locally, and, on native Windows, the model's Transformer module
+  does not load from a nested subfolder (see the end of this item).
+  Otherwise they choose torch up front and log one INFO line saying why. One
+  deliberate exception: an `onnx_file_name` that fails validation (for
+  example, one that leaves the model directory) keeps ONNX selected, so the
+  loader's warning names the bad setting instead of hiding it. The
+  default Qwen3-Embedding-0.6B ships no ONNX artifact, so the daemon runs it
+  on torch; MiniLM, whose artifact the daemon image bakes, still gets ONNX.
+  An explicit `embedding.backend` is never overridden: `backend: onnx`
+  without a loadable artifact still warns and falls back to torch at load.
+  `EmbeddingConfig.onnx_file_name` defaults to
   `onnx/model.onnx`; that exact artifact must already exist in a local model
   directory or a revision-specific cached Hub snapshot. A missing artifact falls
   back to torch before SentenceTransformers constructs its ONNX backend, in
@@ -397,9 +754,12 @@ for delivery-state and host-verification contracts.
 - **MIRAS preset `flat`** (default since 2026-08-15) — one band named
   `flat` at capacity 5,250 (the previous continuum's summed total), with
   a `balanced` retention policy. Eviction is a retention-scored **true
-  drop** that only fires at genuine capacity, is counted
-  (`memory_stats().true_drops`) and logged — a bank under real pressure
-  is visible, never silent. This is the arm the preregistered flat-band
+  drop** that only fires at genuine capacity: it permanently deletes the
+  entry's row (superseded entries go first), is counted
+  (`memory_stats().true_drops` since start; `true_drops_total` and
+  `last_true_drop` all-time, kept in the `meta` table on Postgres) and
+  logged as a WARNING naming the entry — a bank under real pressure is
+  visible, never silent. This is the arm the preregistered flat-band
   verdict measured as tying the 8-band continuum on every gate (ranking,
   forced-eviction retention quality, real recorded queries — see the
   [benchmarks page](benchmarks.md#band-structure)), so the simpler
@@ -415,6 +775,30 @@ for delivery-state and host-verification contracts.
   than the new preset seats, the deepest band is left over capacity and
   the count logged rather than truncated at startup — normal eviction
   drains it from there.
+  **Before the first delete**: from 80% of the last band's capacity (the
+  only band whose evictions are true drops) `memory_stats()` carries a
+  `capacity_warning` and `/health` a `capacity_warning: true` flag. **To
+  raise the cap**, switch to a custom preset that keeps the band name
+  `flat` (so hydration leaves every row's band stamp alone), merged under
+  the existing top-level `memory:` key of `config.yaml` — never a second
+  `memory:` key — then restart the daemon:
+
+  ```yaml
+  memory:
+    miras:
+      preset: custom
+      bands:
+        - name: flat
+          max_entries: 10000   # size to the daemon's RAM and latency budget
+          update_interval: 1000000000
+          promotion_access_count: 1000000000
+          promotion_surprise: 1.1
+          retention_policy: balanced
+  ```
+
+  Every resident entry costs daemon RAM (a correction briefly holds a
+  second copy of the bank), and search latency grows with the bank, since
+  the BM25 pool is rebuilt over every entry per query.
 - **No NLI scorer.** The `cross-encoder/nli-deberta-v3-xsmall`
   contradiction model (~278 MB) is an unwired seam, not a switch: the
   `[nli]` extra and `memory.nli.*` exist for library callers who inject a
@@ -560,6 +944,27 @@ for delivery-state and host-verification contracts.
   total work; whatever it leaves behind is picked up by the next sweep.
   A chosen bound (roughly one extractor batch), not a measured one. `0`
   drains everything pending.
+- **Outcome signals kept ten years** (`memory.lessons.signal_retention_days
+  = 3650`, was `30` until 2026-09-23) — the dream sweep deletes
+  `memory_outcome` signals, consumed or pending, once they are older than
+  this. Signals are the only evidence behind a lesson: under the 30-day
+  window, 760 of the live bank's 1,618 current lessons had already lost
+  every signal they came from. The log grows about 800 rows (under 1 MB on
+  disk) a month.
+- **Pending signals offered for 30 days** (`memory.lessons.signal_retry_days
+  = 30`) — a pending signal is offered to lesson synthesis, oldest first
+  and up to `synthesis_max_signals` per sweep, only while it is younger
+  than this. A signal whose extraction lands no lesson stays pending and
+  is offered again on later sweeps. Past this age it is kept as evidence
+  but no longer offered, so a full batch of permanently failing signals
+  cannot hold newer ones back for the whole retention window. The age
+  counts from when the signal was recorded, not from its first attempt:
+  signals never offered (synthesis off, an extractor outage or backlog
+  longer than this) age out too. They stay in the table, the Console's
+  loop-health tile counts them apart from the pending ones, and raising
+  the value offers them again. A chosen bound (the retry lifetime the old
+  30-day retention implied), not a measured one. `0` offers pending
+  signals for the whole retention window.
 - **Slot-index shadow verification on** (`memory.slot_index_shadow_rate =
   0.01`) — ~1% of slot-pool queries recompute the index from scratch and
   compare; divergences land in `stats()` as
@@ -688,10 +1093,20 @@ for delivery-state and host-verification contracts.
   `memory.mcp.entry_text_chars = 600`) — the payload an MCP client reads
   *back* from a tool call, shaped for its context window: a
   `memory_search` hit's `text` is truncated to `entry_text_chars` and
-  marked `truncated: true` (`memory_get` returns the full text;
-  `superseded_by_text` is exempt from the cap — a compact entry carries no
-  id for the superseding entry, so a clipped correction could not be
-  recovered by any call); the cortex block serves `min(5, top_k)` facts,
+  marked `truncated: true` (`memory_get` returns the full text); a
+  superseded hit carries `replaced_by: {id, at, preview, verified,
+  current}` — the successor's row id when one entry (or one current
+  entry) has the replacement's text, the supersession date, the
+  replacement's first 120 chars, whether an explicit correction
+  (`memory_supersede` / `memory_consolidate`, successor source
+  `correction` / `consolidation`; a custom consolidate `source` reads
+  unverified) made the link, and whether that successor is itself still
+  live (`current: false` marks a chain link or an unresolved successor)
+  — instead of the replacement's full text, which `verbose=true` still serves
+  (2026-09-23: about 4 in 10 links the automatic contradiction detector
+  left before it stopped superseding point at an unrelated note, so the
+  full text must not arrive framed as the answer);
+  the cortex block serves `min(5, top_k)` facts,
   so a narrow search stops paying for five;
   and `memory_fact_get` serves the acting subset — value, kind/members,
   confidence, origin, `asserted_at`/`age`, freshness, the currency and
@@ -703,7 +1118,11 @@ for delivery-state and host-verification contracts.
   `memory_fact_get` from 2,175 to 1,296. These are PROJECTIONS above the
   service layer — ranking, `min_score` and every benchmark number are
   unaffected. Set `compact_payloads: false` to restore the pre-2026-09-04
-  payloads verbatim; raise `entry_text_chars` for long-form corpora where
+  payloads verbatim (superseded hits keep the `replaced_by` pointer, which
+  `memory_get` also serves for a superseded entry, and
+  `memory_episode_summary` still compacts its `recent_entries` like
+  `memory_recent` — none of the three follows the knob); raise
+  `entry_text_chars` for long-form corpora where
   the tail of a note carries the answer.
 
 ## Toolset tiers
@@ -817,6 +1236,27 @@ written during that window are kept, and only slots nobody has written land
 from the legacy bank. Leave the original `.pt` files in place until it
 completes: the resume reads them, and deleting one makes the bank
 unfinishable.
+
+The daemon owns its bank alone. It holds a Postgres advisory-lock *writer
+lease* for as long as it runs. A second daemon, a stdio-embedded server, or
+a maintenance script or eval that opens the same bank through the service
+refuses to start, and names the process that holds it. Stop the daemon for
+offline maintenance such as `ops/dedup_cortex.py`. If the daemon loses its
+database session and another lease-holding writer used the bank
+meanwhile, the daemon re-reads the bank before it serves or saves
+anything. If loading the bank fails
+at startup, the daemon serves nothing rather than a partly loaded bank:
+- `/health` reports `status: "degraded"` with the reason in `not_ready`. A
+  daemon refused the lease reads the same way.
+- Tool calls are refused.
+- Retries back off from 5 s, doubling to 60 s. The daemon retries a
+  startup failure on its own for the first couple of minutes. After that,
+  or for a failure first met by a later call, it retries on the next call
+  or on the session reaper's 5-minute tick.
+
+`init_refusal` is different. It marks a bank the daemon will never serve as
+configured, such as an embedding-dimension mismatch, and the shim exits on
+it.
 
 ## Session identity
 
@@ -937,16 +1377,21 @@ of truth — see the volume note above.)
 ## Windows / WSL2 memory (Docker tier)
 
 Docker Desktop's WSL2 VM (`Vmmem`) claims up to **~50% of host RAM** by
-default, which is far more than the stack needs. Under dream load the whole
-stack wants ~6–7 GB with the default extractor sidecar, or ~2 GB in
-`sonnet-only` mode — where the Qwen3 embedding backbone is the bulk of it.
+default, which is far more than the stack needs. Adding up the parts
+measured 2026-09-23 — daemon ~2.5 GB with the bf16 embedder or ~4 GB with
+fp32, the extractor sidecar's ~5.3 GB mmapped model plus its context, and
+Postgres — the whole stack wants ~9 GB under dream load with the default
+sidecar (~10 GB with fp32), or ~3 GB in `sonnet-only` mode (~4.5 GB), where
+the Qwen3 embedding backbone is the bulk of it. Encode bursts add up to
+~1 GB on top.
 Cap the VM by copying `ops/wslconfig.example` to
 `%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
 
-The daemon container is separately hard-capped at 4 GB, with memory+swap
+The daemon container is separately hard-capped at 6 GB, with memory+swap
 pinned to the same value so exceeding it is a clean container restart rather
 than a host-wide memory event. `PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env`
-raises it for very large banks.
+raises it for very large banks; `/health`'s `memory` block shows how close
+the daemon runs to it (`near_limit` at 90%).
 
 After `wsl --shutdown` the host port forward is gone; `docker restart
 pseudolife-mcp-daemon` re-establishes it.
@@ -967,6 +1412,49 @@ live bank with an explicit `-Apply` / `--apply`; add
 `-StateArchive <pseudolife_state-*.tgz>` / `--state-archive` to also
 restore the state volume (opt-in, so a DB-only restore never clobbers
 current state).
+
+Each dump also gets a `pseudolife_manifest-<stamp>.json` beside it: the
+per-table row counts, read from the dump itself. The manifests drive a
+**row-count gate**. If `entries`, `facts` or `lessons` fell by more than
+25% (`-MaxRowDropPercent` / `--max-row-drop-percent`) against the newest
+manifest that was not itself held, the script keeps the new dump but skips
+local rotation and mirror pruning and says so loudly. It looks for that
+baseline in both the backup folder and the mirror. A logical wipe therefore
+cannot rotate the good copies away. It also holds when history exists but
+none of it is usable (unreadable or count-less manifests, or a folder it
+cannot list), so a gate that cannot see never waves a wipe through. On the
+first run after upgrading there are dumps but no manifests yet; the
+newest complete date-stamped dump is then read as the baseline, and only
+a truly empty history rotates without one. The warning names the last
+good dump and the `restore` command for it. With no file named, `restore`
+skips held dumps (the newest one after a wipe is the one that shrank) and
+refuses if every dump is held; naming a file overrides that. The hold repeats on
+every run until one passes `-AcceptRowDrop` / `--accept-row-drop`, which
+rotates and makes that dump the new baseline. The gate compares each dump
+with the newest good one, so it is built for sudden loss: a slow decline
+of less than the threshold per backup passes. The manifest is also
+copied into the daemon, and `/health` reports it as `last_backup` (`at`,
+`age_hours`, `rotation`). The key is absent until a backup script has
+run; the pip tiers' `pseudolife-mcp backup` does not record one yet.
+
+Deploys back up first, but nothing else backs up on a schedule. On
+Windows, register a daily run once:
+
+```powershell
+ops\install-backup-task.ps1              # daily 03:00
+ops\install-backup-task.ps1 -At 02:15
+ops\install-backup-task.ps1 -Uninstall   # remove it
+```
+
+The task runs the main checkout's `ops\backup.ps1`, even when installed
+from a worktree; the installer warns if that copy predates the row-count
+gate. It catches up at the next boot or logon if the machine was off,
+waiting up to 10 minutes (`-DockerWaitSeconds`) for Docker to answer
+first, and it runs as you, so `PSEUDOLIFE_BACKUP_MIRROR` applies. Each run
+is appended to `data\backups\backup-task.log`. On Linux/macOS, a cron entry
+that runs `ops/backup.sh` does the same job, but cron starts with a bare
+environment: set `PATH` (so it finds `docker`) and any
+`PSEUDOLIFE_BACKUP_MIRROR*` variables in the crontab itself.
 
 The pip tiers (lite / host-process) use `pseudolife-mcp backup` instead:
 same shape — a `pg_dump | gzip` of the bank (`--no-owner --no-acl`, so
@@ -1007,8 +1495,8 @@ while any other connection holds the database — stop the daemon first
 pseudolife-daemon`); `--force` overrides for connections you know are
 inert — and refuses an export whose format version or embedding dimension
 it cannot honor. Operational telemetry (retrieval/read logs, the dream-run
-journal), agent instance credentials and coordination mail deliberately stay
-behind, and the manifest lists exactly which
+journal), agent instance credentials, coordination mail and the board's audit
+log deliberately stay behind, and the manifest lists exactly which
 tables were excluded. Ingested `document_ingest` files live on the state
 volume/data dir, not in Postgres — carry those with the physical backup's
 state archive.
@@ -1023,7 +1511,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v41**; migrations are additive
+The current Postgres meta version is **v42**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -1070,6 +1558,7 @@ The milestones:
 | v39 | `memory_trace_invalidations` preserves source-supersession events by normalized slot and source entry ID, without entry or fact foreign keys. Explicit correction records entry retirement and existing trace invalidations together. Events survive source deletion, cortex snapshots and compaction; confirmation still clears the served warning. Table creation and older logical imports reconstruct only surviving superseded source/trace pairs. **Upgrade effect:** the first v39 start materialises one event per surviving superseded-source trace pair — 2077 pairs on the reference bank on 2026-09-11, measured with `ops/measure_reverify_population.py`. That reproduces the warnings the bank already served, but from then on they no longer drain when the source is evicted or deleted; each clears only when its slot is confirmed again (`memory_fact_set` at the slot with the same or a new value, or accepting a contender). To clear a population deliberately, re-assert those slots. `re_verify` stays a passive flag and is still excluded from `correct_with`. Additive/idempotent |
 | v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
 | v41 | Audited continuum entry reinstatement (2026-09-22). Adds `entry_reinstatement_decisions`, an operation-keyed, FK-free append-only audit that survives later entry deletion. A single Postgres transaction binds the reviewed retirement preimage to the decision and clears only the entry's retirement fields; retries use the operation UUID. The first version refuses entries with trace invalidations and leaves all cortex state unchanged. Additive/idempotent; existing banks start with an empty decision table. |
+| v42 | Board audit log (2026-09-24). Adds `coordination_events`, an append-only, FK-free, sha256-hash-chained record of every agent-board mutation (register, update with the replaced values, attach, detach, send with its body, first read, ack, attempt, expire, prune, bank identity, restore recover/rebind), written in the mutation's own transaction and pruned only by its own `coordination.audit_retention_days` window (default 90, `0` keeps it forever), which logs its cuts. Adds `coordination_messages.first_read_at`. Operational data, excluded from portable exports like the other coordination tables; read and verified with `pseudolife-mcp board-audit`. The log is cut at most once a day, on UTC day boundaries, and only while the board is in use. Additive/idempotent; existing banks start with an empty log, and history before the upgrade is not reconstructed: a message still unacknowledged at the upgrade has no `send` event, and its first read afterwards is logged as its first read. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

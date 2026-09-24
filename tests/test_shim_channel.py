@@ -177,12 +177,16 @@ def test_codex_tool_metadata_overrides_session_and_attaches_lazily(monkeypatch):
         def deliver_hint(self): return None
         def note_turn(self): pass
 
+    noted = []
+
     class Registry:
         async def get(self, thread_id, *, snapshot):
             requested.append(thread_id)
             return Adapter()
         def unread_hint(self, thread_id, adapter):
             return adapter.unread_hint
+        def note_call(self, thread_id, name, arguments, *, succeeded=False):
+            noted.append((thread_id, name, arguments, succeeded))
 
     async def serve(server, *args, **kwargs):
         handler = server.get_request_handler("tools/call")
@@ -200,6 +204,8 @@ def test_codex_tool_metadata_overrides_session_and_attaches_lazily(monkeypatch):
         codex_metadata=True, coordination_registry=Registry()))
 
     assert requested == [THREAD_ID]
+    # The doorbell's view of activity: the call's start, then its success.
+    assert noted == [(THREAD_ID, "memory_stats", {}, False), (THREAD_ID, "memory_stats", {}, True)]
     assert headers[0]["X-PL-Session"] == "process-session"  # startup has no call metadata
     assert headers[1]["X-PL-Session"] == THREAD_ID
     assert headers[1]["X-PL-Agent"] == "fixture-agent"

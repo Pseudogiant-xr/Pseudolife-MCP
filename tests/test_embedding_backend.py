@@ -197,6 +197,31 @@ def test_native_windows_flat_layout_still_loads_onnx(
     assert captured[0].kwargs["backend"] == "onnx"
 
 
+def test_nested_layout_still_loads_onnx_off_windows(
+    captured, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """The nested-subfolder fallback is a native-Windows gate only.
+
+    Linux and the daemon image detect ``0_Transformer/onnx`` correctly, so
+    the same layout that falls back on Windows keeps the accelerator here.
+    """
+    from pseudolife_memory.memory import embedding
+
+    model = tmp_path / "model"
+    (model / "0_Transformer" / "onnx").mkdir(parents=True)
+    (model / "0_Transformer" / "onnx" / "model.onnx").write_bytes(b"onnx")
+    _modules_json(model, "0_Transformer")
+
+    monkeypatch.setattr(embedding, "_native_windows", lambda: False, raising=False)
+
+    pipe = _pipeline(EmbeddingConfig(
+        device="cpu", backend="onnx", model_name=str(model),
+    ))
+    assert pipe.backend == "onnx"
+    assert captured[0].model_name == str(model)
+    assert captured[0].kwargs["backend"] == "onnx"
+
+
 def test_onnx_backend_honors_custom_file_name(captured, tmp_path) -> None:
     model = tmp_path / "model"
     (model / "custom").mkdir(parents=True)

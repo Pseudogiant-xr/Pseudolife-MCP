@@ -11,8 +11,8 @@ briefing says when the two differ.
 
 The digest must come out identical from Python, bash (``sha256sum`` /
 ``shasum``) and PowerShell, over a checkout, a marketplace cache or Codex's
-content-addressed copy, on any line-ending convention: SHA-256 over
-``name NUL bytes NUL`` for the four scripts in :data:`HOOK_SCRIPTS` order,
+plugin copy, on any line-ending convention: SHA-256 over
+``name NUL bytes NUL`` for the scripts in :data:`HOOK_SCRIPTS` order,
 with CRLF normalised to LF. ``tests/test_hooks_digest.py`` pins the three
 implementations against each other.
 """
@@ -22,13 +22,17 @@ import hashlib
 import os
 from pathlib import Path
 
-# In this order on every side. ``hooks.json`` is deliberately absent: Codex's
-# copy of the scripts carries no manifest, and must digest the same.
-HOOK_SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
+# In this order on every side. ``hooks.json`` is deliberately absent, so a copy
+# of the scripts without it digests the same. The one exception is a manual
+# Codex bundle (ops/setup-codex-hooks.py): it carries four scripts and no
+# stop-wake.sh (manual installs have no Stop hook), so it has no digest; it
+# sends no plugin version either, so the notice was never live there.
+HOOK_SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh",
+                "stop-wake.sh")
 
 
 def hooks_digest(directory: Path | str) -> str | None:
-    """SHA-256 hex of the four hook scripts under ``directory``, or ``None``
+    """SHA-256 hex of the hook scripts under ``directory``, or ``None``
     when any is missing (a directory that is not a hooks directory)."""
     directory = Path(directory)
     digest = hashlib.sha256()

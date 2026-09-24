@@ -12,7 +12,9 @@ import psycopg
 import pytest
 import torch
 
-from pseudolife_memory.storage.schema import BENCH_RESET_TABLES, ensure_schema
+from pseudolife_memory.storage.schema import (
+    BENCH_RESET_TABLES, assert_disposable_database, ensure_schema,
+)
 from tests.pg_fixtures import pg_conn, pg_service, pg_url  # noqa: F401
 
 
@@ -426,6 +428,7 @@ def test_stale_cortex_snapshot_cannot_regress_ack_display_metadata(storage):
 
 
 def _truncate(conn):
+    assert_disposable_database(conn)
     conn.execute(
         "TRUNCATE " + ", ".join(BENCH_RESET_TABLES)
         + " RESTART IDENTITY CASCADE"
@@ -451,11 +454,12 @@ def _rewrite_archive(source, target, *, schema_version, strip_dream_state):
             new.writestr(name, payload)
 
 
-def test_logical_transfer_preserves_states_but_rotates_secret(pg_url, tmp_path):
+def test_logical_transfer_preserves_states_but_rotates_secret(pg_conn, pg_url, tmp_path):
     from pseudolife_memory.storage.postgres import PostgresStorage
     from pseudolife_memory.transfer_cli import perform_export, perform_import
 
     with psycopg.connect(pg_url) as conn:
+        assert_disposable_database(conn)  # before the DDL, not just the TRUNCATE
         conn.execute("SET search_path TO public")
         ensure_schema(conn)
         _truncate(conn)
@@ -495,11 +499,12 @@ def test_logical_transfer_preserves_states_but_rotates_secret(pg_url, tmp_path):
         ).fetchone()[0] == "b" * 64
 
 
-def test_old_logical_export_imports_entries_with_null_marker(pg_url, tmp_path):
+def test_old_logical_export_imports_entries_with_null_marker(pg_conn, pg_url, tmp_path):
     from pseudolife_memory.storage.postgres import PostgresStorage
     from pseudolife_memory.transfer_cli import perform_export, perform_import
 
     with psycopg.connect(pg_url) as conn:
+        assert_disposable_database(conn)  # before the DDL, not just the TRUNCATE
         conn.execute("SET search_path TO public")
         ensure_schema(conn)
         _truncate(conn)

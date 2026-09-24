@@ -77,6 +77,12 @@ class DreamOps:
     # Post-pass caps: screen at most this many freshly-minted entities per
     # cycle, one best-match proposal each — the queue stays reviewable.
     _ALIAS_SCAN_MAX = 20
+    # Entity display name -> embedding, kept between alias screens so each
+    # screen encodes only names it has not seen. Capped at 4,096 names
+    # (<= 16 MB at 1,024 dims); the live bank held ~2,050 entity names on
+    # 2026-09-23, ~8 MB. Replaced per instance on first write.
+    _ALIAS_MEMO_MAX = 4096
+    _alias_name_memo: dict | None = None
     _INFER_CURSOR_KEY = "outcome_inference_cursor"
     _DIGEST_CURSOR_KEY = "session_digest_cursor"
 
@@ -400,7 +406,9 @@ class DreamOps:
 
         Extraction runs outside the lock. Selected inputs are revalidated before
         staged lessons, graph changes and handled acknowledgements commit in one
-        transaction. Empty/failed routes stay pending until retry or retention.
+        transaction. Empty/failed routes stay pending and are re-offered for
+        ``signal_retry_days``; after that they are kept but not offered, and
+        retention deletes them later.
         """
         import time as _t
         cfg = self.config.memory.lessons
@@ -408,7 +416,13 @@ class DreamOps:
             return {"signals": 0, "lessons": 0, "skipped": "no-storage"}
         if not (cfg.enabled and cfg.synthesize_in_dream):
             return {"signals": 0, "lessons": 0, "skipped": "disabled"}
-        cutoff = _t.time() - cfg.signal_retention_days * 86400
+        now = _t.time()
+        cutoff = now - cfg.signal_retention_days * 86400
+        # Retry eligibility is bounded apart from retention, so a cap-full
+        # batch that never lands cannot hold newer signals back for the whole
+        # retention window (see LessonsConfig.signal_retry_days).
+        retry_days = cfg.signal_retry_days
+        since = now - retry_days * 86400 if retry_days > 0 else None
         # One sweep drains at most ``synthesis_max_signals``: the whole batch
         # commits under the service lock, so an unbounded backlog would set
         # the length of a single daemon pause. The remainder stays pending
@@ -417,7 +431,7 @@ class DreamOps:
         with self._lock:
             self._ensure_init()
             self._storage.prune_signals(cutoff)
-            signals = self._storage.pending_signals(limit=cap)
+            signals = self._storage.pending_signals(limit=cap, since_ts=since)
         if not signals:
             return {"signals": 0, "lessons": 0}
         all_inferred = bool(signals) and all(
@@ -948,15 +962,23 @@ class DreamOps:
         auto-folded). Complements ``_propose_write_dedup``: paraphrase
         coreference ("production extractor sidecar" ~ "Pseudolife-MCP default
         extractor sidecar") shares almost no tokens but embeds close.
+
+        Names are read under the service lock, embedded OUTSIDE it, and
+        proposals filed under it again: encoding ~1,000-2,050 existing names
+        while holding the lock froze the daemon 55-171 s per new-entity
+        dream (2026-09-23 lock-stalls review). Names an earlier screen
+        embedded come from ``_alias_name_memo``, not the model. Proposals
+        are filed only between entities that still exist in the graph; the
+        screen never mints one.
         Returns the number of proposals filed; never raises."""
         import time as _t
         try:
             thr = float(self.config.memory.dream.alias_candidate_min_cosine)
             if thr <= 0 or not new_entities:
                 return 0
+            import torch
             from pseudolife_memory.graph import norm_name
             from pseudolife_memory.memory.graph_consolidation import variant_conflict
-            filed = 0
             with self._lock:
                 self._ensure_init()
                 if (self._storage is None or self._embedder is None
@@ -972,12 +994,45 @@ class DreamOps:
                             existing[k] = r.entity
                 if not existing:
                     return 0
+            new_items = list(new_entities.items())[:self._ALIAS_SCAN_MAX]
+            ex_items = list(existing.items())
+            # Unlocked until the filing block. The embedder is built once
+            # per process and never replaced, and dream_run's single-flight
+            # guard makes this the memo's only writer.
+            memo = self._alias_name_memo or {}
+            names = list(dict.fromkeys(
+                [d for _, d in new_items] + [d for _, d in ex_items]))
+            missing = [n for n in names if n not in memo]
+            if missing:
+                fresh = self._embedder.encode(missing)     # normalized
+                memo.update((n, v.clone()) for n, v in zip(missing, fresh))
+            # Keep exactly this screen's names, capped: a retired or renamed
+            # entity's vector drops out, and past the cap the tail is
+            # re-encoded each screen rather than growing the memo.
+            self._alias_name_memo = {n: memo[n]
+                                     for n in names[:self._ALIAS_MEMO_MAX]}
+            sims = (torch.stack([memo[d] for _, d in new_items])
+                    @ torch.stack([memo[d] for _, d in ex_items]).T)
+            matches = []
+            for i, (_, disp) in enumerate(new_items):
+                j = int(sims[i].argmax())
+                score = float(sims[i][j])
+                if score < thr:
+                    continue
+                target = ex_items[j][1]
+                pair = tuple(sorted((norm_name(disp), norm_name(target))))
+                if pair[0] == pair[1]:
+                    continue
+                if variant_conflict(disp, target):
+                    continue    # size/quant/version mismatch: never a merge
+                matches.append((disp, target, pair, score))
+            if not matches:
+                return 0
+            filed = 0
+            with self._lock:
+                if self._storage is None:
+                    return 0
                 dismissed = frozenset(self._storage.dismissed_pairs())
-                new_items = list(new_entities.items())[:self._ALIAS_SCAN_MAX]
-                ex_items = list(existing.items())
-                new_emb = self._embedder.encode([d for _, d in new_items])
-                ex_emb = self._embedder.encode([d for _, d in ex_items])
-                sims = new_emb @ ex_emb.T          # encode() normalizes
                 # Fold direction is evidence-ranked like _propose_write_dedup:
                 # the thin side folds into the evidence-bearing side. Filing
                 # (new, existing) verbatim made the reviewer's only accept
@@ -991,19 +1046,24 @@ class DreamOps:
                     return deg.get(eid, 0) + fct.get(eid, 0)
 
                 now = _t.time()
-                for i, (_, disp) in enumerate(new_items):
-                    j = int(sims[i].argmax())
-                    score = float(sims[i][j])
-                    if score < thr:
+                for disp, target, pair, score in matches:
+                    if pair in dismissed:
                         continue
-                    target = ex_items[j][1]
-                    pair = tuple(sorted((norm_name(disp), norm_name(target))))
-                    if pair[0] == pair[1] or pair in dismissed:
+                    # Find, never create. Fact writes mint their subject's
+                    # node (since 2026-06-11), so a name with no node is one
+                    # the graph never kept or has dropped: an entity deleted
+                    # (graph_delete_entity, an accepted junk review, the deep
+                    # dream's junk sweep) whose facts survive -- possibly
+                    # while these names were embedded outside the lock -- a
+                    # junk-shaped subject, an older fact, or a claim that
+                    # wrote nothing. Re-minting resurrected deleted entities
+                    # and queued merges against them (Codex review of #338).
+                    # find_entity follows aliases, so an endpoint merged away
+                    # resolves to its survivor.
+                    a = self._storage.find_entity(norm_name(disp))
+                    b = self._storage.find_entity(norm_name(target))
+                    if a is None or b is None:
                         continue
-                    if variant_conflict(disp, target):
-                        continue    # size/quant/version mismatch: never a merge
-                    a = self._resolve_or_create_entity(disp)
-                    b = self._resolve_or_create_entity(target)
                     if a["id"] == b["id"]:
                         continue                    # already aliased/merged
                     # The name-keyed check above misses a display-enriched
@@ -2488,15 +2548,24 @@ class DreamOps:
 
     def _contested_facts(self) -> list[dict]:
         """Contested cortex facts shaped for graph_insight.suggest_questions.
-        Mirrors how cortex_search detects contention: current_records() +
-        contenders_for(). CortexRecord exposes .entity/.attribute/.value."""
+        Same pairing as cortex_search (each current record against its
+        slot's contenders), but contenders are bucketed by slot in one pass
+        like ``cortex_dump``: one ``contenders_for`` scan per current record
+        was quadratic and held the service lock 42-78 s on every dream
+        (7,162-fact live bank, 2026-09-23)."""
         out = []
         with self._lock:
             self._ensure_init()
             if self._cortex is None:
                 return out
+            parked: dict[tuple[str, str], list] = {}
+            for c in self._cortex.records:
+                if c.status == "contested":
+                    parked.setdefault(c.key, []).append(c)
+            if not parked:
+                return out
             for r in self._cortex.current_records():
-                conts = self._cortex.contenders_for(r.entity, r.attribute)
+                conts = parked.get(r.key)
                 if conts:
                     out.append({
                         "entity": r.entity, "attribute": r.attribute, "value": r.value,
@@ -2963,32 +3032,42 @@ class DreamOps:
                 extra_body=ex.extra_body)
         return ex if hasattr(ex, method) else None
 
-    def _judge_enrich(self, pending: list[dict]) -> list[dict]:
-        with self._lock:
-            return self._judge_enrich_locked(pending)
+    def _judge_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the merge-judge evidence pack (caller
+        holds the lock); :meth:`_judge_enrich_from` builds the pack from
+        them with the lock released. Entry TEXTS only: nothing in the pack
+        reads an embedding, and decoding them was most of the read."""
+        return {"graph": self._storage.load_graph(),
+                "scopes": self._storage.entity_sources_map(),
+                "traces": self._storage.traces_by_entity_norm(),
+                "entries": self._storage.load_entry_texts(),
+                "facts": self._storage.entity_fact_counts()}
 
-    def _judge_enrich_locked(self, pending: list[dict]) -> list[dict]:
+    def _judge_enrich_from(self, pending: list[dict], evidence: dict) -> list[dict]:
         """The merge-judge evidence pack for ``pending`` rows — the same
         snippets/scopes/degree the review surfaces show, with the
-        ``low_differential`` stamp."""
+        ``low_differential`` stamp. Pure over ``evidence``: no lock."""
         cfg = self.config.memory.deep_dream
-        g = self._storage.load_graph()
-        scope_map = self._storage.entity_sources_map()
-        traces = self._storage.traces_by_entity_norm()
-        entries = self._storage.load_entries()
-        fact_counts = self._storage.entity_fact_counts()
+        g = evidence["graph"]
         from pseudolife_memory.memory import graph_consolidation as gc
+        # Mentions for the rows' own entities only (each entity resolves
+        # independently of the others). The graph-wide pass was ~1.1 s of
+        # every ~1.3 s enrichment: 7,473 entities, live bank, 2026-09-23.
+        ids = {eid for p in pending for eid in (p.get("entity_id"), p.get("into_id"))}
         _, mentions = gc.entity_context_vectors(
-            g["entities"], entries, traces,
+            [e for e in g["entities"] if e["id"] in ids],
+            evidence["entries"], evidence["traces"],
             min_mentions=cfg.min_entity_mentions,
-            max_fallback_mentions=cfg.max_fallback_mentions or None)
+            max_fallback_mentions=cfg.max_fallback_mentions or None,
+            with_vectors=False)
         # Built at the JUDGE's cap, not the review surface's: the
         # 2026-09-02 panel judged 305/309 merge snippets clipped to 240
         # chars at build time and lost guidance in three folds.
         return self._enrich_merge_proposals(
-            pending, g["entities"], g["edges"], entries, traces,
-            mentions, scope_map, cfg.max_context_snippets,
-            cfg.judge_snippet_max_chars, True, fact_counts=fact_counts)
+            pending, g["entities"], g["edges"], evidence["entries"],
+            evidence["traces"], mentions, evidence["scopes"],
+            cfg.max_context_snippets, cfg.judge_snippet_max_chars, True,
+            fact_counts=evidence["facts"])
 
     @staticmethod
     def _model_name(ex, fallback: str | None = None) -> str:
@@ -3079,6 +3158,9 @@ class DreamOps:
                 review = ReviewJudgments(self, "merge", ex, pending, current_model)
                 reconsidered = refresh_proposal_terminals(review, limit=cap)
                 review.pending = [p for p in self._storage.pending_entity_proposals() if p.get("kind") == "merge"]
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
                 pending = review.refresh()
             first = [p for p in pending if not p.get("judge_verdict")]
             second = ([p for p in pending
@@ -3086,7 +3168,6 @@ class DreamOps:
                       if cfg.judge_second_opinion else [])
             if not first and not second:
                 return {"judged": 0, "reconsideration": reconsidered}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
             out = {"judged": 0, "auto_rejected": 0, "auto_accepted": 0,
                    "second_opinions": 0, "pending_unjudged": 0,
                    "reconsideration": reconsidered,
@@ -3110,7 +3191,9 @@ class DreamOps:
                 logger.info("deep-dream judge: second opinion on %d pending "
                             "merge proposal(s) (mode %s)", len(batch),
                             cfg.judge_mode)
-                enriched = self._judge_enrich(batch)
+                # The signed packs: validate() re-checks exactly the
+                # evidence the model is shown.
+                enriched = review.rows(batch)
                 proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
                               "reason": e.get("reason"), "score": e.get("score"),
                               "low_differential": e.get("low_differential"),
@@ -3155,7 +3238,7 @@ class DreamOps:
                             note1 = (row.get("judge_note") or "")[:160]
                             tag = ("split" if v1 != v2 else "agree")
                             note = f"{note1} | 2nd ({model2}): {v2} {c2:.2f} [{tag}]"
-                            if not review.current(row):
+                            if not review.current(row, first_opinion=True):
                                 continue
                             ok = self._storage.set_entity_proposal_second_judgment(
                                 e["id"], verdict=v2, confidence=c2, model=model2,
@@ -3226,12 +3309,12 @@ class DreamOps:
                                     out["auto_accepted"] += 1
             if first and cap > len(second[:cap]):
                 batch = first[:cap - len(second[:cap])]
-                # Announce the batch BEFORE the enrichment + model call: the
-                # completion line alone let the 2026-08-31 forensics misplace
-                # a ~50s window inside this (mostly lock-free) phase.
+                # Announce the batch BEFORE the model call: the completion
+                # line alone let the 2026-08-31 forensics misplace a ~50s
+                # window inside this (lock-free) phase.
                 logger.info("deep-dream judge: judging %d pending merge "
                             "proposal(s) (mode %s)", len(batch), cfg.judge_mode)
-                enriched = self._judge_enrich(batch)
+                enriched = review.rows(batch)
                 proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
                               "reason": e.get("reason"), "score": e.get("score"),
                               "low_differential": e.get("low_differential"),
@@ -3274,21 +3357,26 @@ class DreamOps:
 
     # ── link judge (2026-09-02) ───────────────────────────────────────────
 
-    def _enrich_link_proposals(self, pending: list[dict]) -> list[dict]:
-        with self._lock:
-            return self._enrich_link_proposals_locked(pending)
+    def _link_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the link-judge evidence pack (caller
+        holds the lock); entry texts only, as for the merge pack."""
+        return {"graph": self._storage.load_graph(),
+                "scopes": self._storage.entity_sources_map(),
+                "entries": self._storage.load_entry_texts()}
 
-    def _enrich_link_proposals_locked(self, pending: list[dict]) -> list[dict]:
+    def _enrich_link_proposals_from(self, pending: list[dict],
+                                    evidence: dict) -> list[dict]:
         """Evidence pack for pending edge proposals: each side's live
         edges and scopes, the detector's rationale, and the notes naming
-        BOTH entities (per-side notes when nothing names both)."""
+        BOTH entities (per-side notes when nothing names both). Pure over
+        ``evidence``: no lock."""
         from pseudolife_memory.memory import graph_consolidation as gc
         from pseudolife_memory.memory.graph_review import _token_set
         cfg = self.config.memory.deep_dream
         cap = cfg.snippet_max_chars
-        g = self._storage.load_graph()
-        scope_map = self._storage.entity_sources_map()
-        entries = self._storage.load_entries()
+        g = evidence["graph"]
+        scope_map = evidence["scopes"]
+        entries = evidence["entries"]
         disp = {e["id"]: e["display"] for e in g["entities"]}
         outs: dict[int, list[str]] = {}
         ins: dict[int, list[str]] = {}
@@ -3305,17 +3393,16 @@ class DreamOps:
             src = e.get("source")
             return (f"[{src}] " if src else "") + str(e.get("text", ""))[:cap]
 
-        entry_tokens = None
+        # Tokenized once per pack, not once per row: validate() builds the
+        # judged batch's pack under the service lock.
+        tokens = [_token_set(e.get("text", "")) for e in entries] if pending else []
 
         def mentions_of(display, k=2):
-            nonlocal entry_tokens
             want = _token_set(display)
             if not want:
                 return []
-            if entry_tokens is None:
-                entry_tokens = [(e, _token_set(e.get("text", ""))) for e in entries]
             found = []
-            for e, toks in entry_tokens:
+            for e, toks in zip(entries, tokens):
                 if want <= toks:
                     found.append(stamp(e))
                     if len(found) >= k:
@@ -3325,7 +3412,7 @@ class DreamOps:
         rows = []
         for i, p in enumerate(pending):
             both = [t[:cap] for t in gc.shared_mention_entries(
-                entries, p["src"], p["dst"], limit=3)]
+                entries, p["src"], p["dst"], limit=3, tokens=tokens)]
             rows.append({
                 "n": i + 1, "src": p["src"], "relation": p["relation"],
                 "dst": p["dst"], "rationale": p.get("rationale"),
@@ -3374,14 +3461,16 @@ class DreamOps:
                 review = ReviewJudgments(self, "link", ex, pending, current_model)
                 reconsidered = refresh_proposal_terminals(review, limit=cap)
                 review.pending = self._storage.pending_proposals()
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
                 pending = [p for p in review.refresh() if not p.get("judge_verdict")]
             if not pending:
                 return {"judged": 0, "reconsideration": reconsidered}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
-            batch = pending[:cap]
+            batch = pending[:cap]      # the cap prepare() signed for
             logger.info("deep-dream link judge: judging %d pending link "
                         "proposal(s) (mode %s)", len(batch), mode)
-            rows = self._enrich_link_proposals(batch)
+            rows = review.rows(batch)
             verdicts = ex.judge_links(rows)
             self._stamp_skipped(verdicts, rows, relation=None)
             model = self._model_name(ex)
@@ -3428,27 +3517,37 @@ class DreamOps:
 
     # ── junk judge (2026-09-02) ───────────────────────────────────────────
 
-    def _enrich_junk_proposals(self, pending: list[dict]) -> list[dict]:
-        with self._lock:
-            return self._enrich_junk_proposals_locked(pending)
+    def _junk_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the junk-judge evidence pack for
+        ``pending`` (caller holds the lock); entry texts only, as for the
+        merge pack."""
+        g = self._storage.load_graph()
+        canon = {e["id"]: e["canonical"] for e in g["entities"]}
+        return {"graph": g,
+                "scopes": self._storage.entity_sources_map(),
+                "entries": self._storage.load_entry_texts(),
+                "facts": self._storage.entity_fact_counts(),
+                "fact_texts": self._storage.current_fact_counts_by_entity_text(),
+                "fact_rows": {p["entity_id"]: self._storage.entity_fact_rows(
+                    p["entity_id"], canon.get(p["entity_id"], ""))
+                    for p in pending}}
 
-    def _enrich_junk_proposals_locked(self, pending: list[dict]) -> list[dict]:
+    def _enrich_junk_proposals_from(self, pending: list[dict],
+                                    evidence: dict) -> list[dict]:
         """Evidence pack for pending junk proposals: detector class, live
         degree and edges (with origin), fact count and text, whether the
-        node is a lesson-minted object, scopes, mentioning notes."""
+        node is a lesson-minted object, scopes, mentioning notes. Pure over
+        ``evidence`` (read for these rows): no lock."""
         from pseudolife_memory.graph import degree_counts, norm_name as _nn
         from pseudolife_memory.memory.graph_review import _token_set
         cfg = self.config.memory.deep_dream
         cap = cfg.snippet_max_chars
-        g = self._storage.load_graph()
-        scope_map = self._storage.entity_sources_map()
-        entries = self._storage.load_entries()
-        fact_counts = self._storage.entity_fact_counts()
-        fact_texts = self._storage.current_fact_counts_by_entity_text()
-        fact_rows = {p["entity_id"]: self._storage.entity_fact_rows(
-            p["entity_id"], next((e["canonical"] for e in g["entities"]
-                                  if e["id"] == p["entity_id"]), ""))
-            for p in pending}
+        g = evidence["graph"]
+        scope_map = evidence["scopes"]
+        entries = evidence["entries"]
+        fact_counts = evidence["facts"]
+        fact_texts = evidence["fact_texts"]
+        fact_rows = evidence["fact_rows"]
         disp = {e["id"]: e["display"] for e in g["entities"]}
         canon = {e["id"]: e["canonical"] for e in g["entities"]}
         deg = degree_counts(g["edges"])
@@ -3541,14 +3640,16 @@ class DreamOps:
                 review = ReviewJudgments(self, "junk", ex, pending, current_model)
                 reconsidered = refresh_proposal_terminals(review, limit=cap)
                 review.pending = [p for p in self._storage.pending_entity_proposals() if p.get("kind") == "junk"]
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
                 pending = [p for p in review.refresh() if not p.get("judge_verdict")]
             if not pending:
                 return {"judged": 0, "reconsideration": reconsidered}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
-            batch = pending[:cap]
+            batch = pending[:cap]      # the cap prepare() signed for
             logger.info("deep-dream junk judge: judging %d pending junk "
                         "proposal(s) (mode %s)", len(batch), mode)
-            rows = self._enrich_junk_proposals(batch)
+            rows = review.rows(batch)
             verdicts = ex.judge_junk(rows)
             self._stamp_skipped(verdicts, rows)
             model = self._model_name(ex)
@@ -3611,7 +3712,7 @@ class DreamOps:
             apply_auto_distinct, capture_pair_evidence,
             can_auto_fold, curation_bound_action,
             curation_bound_observed_model,
-            curation_judgment_bindings,
+            curation_judgment_bindings, curation_judgment_saved,
             curation_judgment_state, curation_observed_model,
             curation_policy_fingerprint, record_bound_curation_judgment,
             has_auto_dismissals, refresh_auto_dismissals,
@@ -3882,10 +3983,15 @@ class DreamOps:
                 and getattr(ex, "served_model", None) == response_served_model)
             for store, c, pair_evidence, v in actions:
                 conf = float(v["confidence"])
+                # Evaluated under the apply's service lock: review_rejudge
+                # deletes the saved opinion under that lock, and an opinion
+                # it forgot while this tick ran unlocked must not be acted on.
+                guard = (lambda pair_evidence=pair_evidence: policy_guard()
+                         and curation_judgment_saved(self, pair_evidence))
                 if (v["verdict"] == "distinct" and mode in ("auto-distinct", "auto")
                         and conf >= cfg.curation_distinct_min_confidence):
                     res = apply_auto_distinct(
-                        self, pair_evidence, policy_guard=policy_guard,
+                        self, pair_evidence, policy_guard=guard,
                         settle_judgment=True)
                     applied += bool(res.get("dismissed"))
                 elif (v["verdict"] == "duplicate" and mode == "auto"
@@ -3898,7 +4004,7 @@ class DreamOps:
                     applied += bool(self._apply_slot_duplicate(
                         store, c, v.get("keep"), v.get("fold"),
                         reason=v.get("note") or None,
-                        evidence=pair_evidence, policy_guard=policy_guard,
+                        evidence=pair_evidence, policy_guard=guard,
                         settle_judgment=True))
             return {"judged": judged, "applied": applied,
                     "pending_unjudged": max(0, len(todo) - judged),
@@ -3971,7 +4077,8 @@ class DreamOps:
             mark = None
             from pseudolife_memory.memory.review_judgments import (
                 fingerprint, judging_policy, candidate_generation, candidate_current,
-                observed_model, last_response_identity, record_response_identity)
+                candidate_inputs, observed_model, last_response_identity,
+                record_response_identity)
             from pseudolife_memory.memory.dream import _CANDIDATE_JUDGE_SYSTEM_PROMPT
             from pseudolife_memory.memory.review_decisions import (
                 record_candidate_dismissal, refresh_candidate_dismissals,
@@ -3988,12 +4095,16 @@ class DreamOps:
                     return {"judged": 0, "skipped": "no_storage"}
                 last_model = last_response_identity(self, "candidate", policy)
                 memo_model = current_model or last_model
-                decision_generation = candidate_generation(self, decision_inputs=False)
                 reconsidered = refresh_candidate_dismissals(
                     self, policy_fingerprint=policy,
-                    generation_fingerprint=decision_generation,
                     served_model=current_model, last_response_model=last_model, limit=cap)
-                generation = candidate_generation(self)
+                # After the refresh: a reopen deletes a dismissed pair, an
+                # input of the full generation only.
+                inputs = candidate_inputs(self)
+            decision_generation = candidate_generation(
+                self, decision_inputs=False, inputs=inputs)
+            generation = candidate_generation(self, inputs=inputs)
+            del inputs
             if candidates is None:
                 with self._lock:
                     self._ensure_init()
@@ -4013,6 +4124,7 @@ class DreamOps:
                 self._ensure_init()
                 memo = self._storage.get_meta("deep_candidate_verdicts") or {}
             pairs = dict(memo.get("pairs") or {})
+            read_keys = set(pairs)
             now = _t.time()
             horizon = float(cfg.candidate_rejudge_days) * 86400.0
 
@@ -4020,11 +4132,13 @@ class DreamOps:
                 return "|".join(sorted((_nn(c["src"]), _nn(c["dst"]))))
 
             with self._lock:
-                if candidate_generation(self) != generation:
-                    return {"judged": 0, "reason": "stale_evidence"}
-                source_evidence = dict(zip(
-                    (key(c) for c in candidates),
-                    candidate_evidence_fingerprints(self, candidates)))
+                inputs = candidate_inputs(self)
+            if candidate_generation(self, inputs=inputs) != generation:
+                return {"judged": 0, "reason": "stale_evidence"}
+            source_evidence = dict(zip(
+                (key(c) for c in candidates),
+                candidate_evidence_fingerprints(self, candidates, inputs=inputs)))
+            del inputs
 
             def signature(c):
                 return fingerprint({"candidate": c, "policy": policy,
@@ -4046,10 +4160,15 @@ class DreamOps:
             if not todo:
                 if mark is not None:
                     with self._lock:
-                        self._storage.set_meta("deep_candidates_judged",
-                                               {"ts": mark["ts"], "complete": True,
-                                                "policy": policy, "generation": generation,
-                                                "served_model": memo_model})
+                        live = (self._storage.get_meta("deep_candidate_verdicts")
+                                or {}).get("pairs") or {}
+                        # review_rejudge may have forgotten an opinion since
+                        # the read; its complete=False must stand.
+                        if all(key(c) in live for c in candidates):
+                            self._storage.set_meta("deep_candidates_judged",
+                                                   {"ts": mark["ts"], "complete": True,
+                                                    "policy": policy, "generation": generation,
+                                                    "served_model": memo_model})
                 return {"judged": 0, "reason": "all_judged", "reconsideration": reconsidered}
             cap = max(1, int(limit if limit is not None else cfg.judge_batch))
             chunk = todo[:cap]
@@ -4060,10 +4179,11 @@ class DreamOps:
                      "src_snippets": c.get("src_snippets") or [],
                      "dst_snippets": c.get("dst_snippets") or []}
                     for i, c in enumerate(chunk)]
-            new_rows, new_indices, verdicts = [], [], []
+            new_rows, new_indices, verdicts, replayed = [], [], [], {}
             for row, candidate in zip(rows, chunk):
                 saved = pairs.get(key(candidate), {})
                 if fresh(candidate) and saved.get("reply") and current_model:
+                    replayed[row["n"]] = saved
                     verdicts.append({**saved["reply"], "n": row["n"]})
                 else:
                     new_indices.append(row["n"])
@@ -4089,6 +4209,12 @@ class DreamOps:
                 if policy != fingerprint(
                         judging_policy(self, ex, _CANDIDATE_JUDGE_SYSTEM_PROMPT)):
                     return {"judged": 0, "reason": "stale_evidence"}
+                # The lock was released for the model call: merge into the
+                # LIVE memo, so an opinion review_rejudge forgot meanwhile
+                # stays forgotten instead of being written back.
+                pairs = dict((self._storage.get_meta("deep_candidate_verdicts")
+                              or {}).get("pairs") or {})
+                forgotten = read_keys - set(pairs)
                 decision_evidence = candidate_evidence_fingerprints(self, chunk)
                 entity_ids = {}
                 for entity in self._storage.load_graph()["entities"]:
@@ -4097,6 +4223,8 @@ class DreamOps:
                 changed_entities = set()
                 for v in verdicts:
                     c = chunk[v["n"] - 1]
+                    if v["n"] in replayed and pairs.get(key(c)) != replayed[v["n"]]:
+                        continue    # the saved reply was forgotten or replaced
                     endpoints = {c.get(field + "_id") or entity_ids.get(_nn(c[field]))
                                  for field in ("src", "dst")}
                     if (source_evidence[key(c)] != decision_evidence[v["n"] - 1]
@@ -4160,13 +4288,16 @@ class DreamOps:
                             left += 1
                             pairs[key(c)]["complete"] = True
                         self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
-            # Bounded memo: newest 500 pairs.
-            if len(pairs) > 500:
-                keep = sorted(pairs.items(), key=lambda kv: -float(kv[1].get("ts", 0)))[:500]
-                pairs = dict(keep)
-            remaining = max(0, len(todo) - len(chunk)) + sum(
-                not pairs.get(key(c), {}).get("complete") for c in chunk)
-            with self._lock:
+                # Bounded memo: newest 500 pairs.
+                if len(pairs) > 500:
+                    keep = sorted(pairs.items(), key=lambda kv: -float(kv[1].get("ts", 0)))[:500]
+                    pairs = dict(keep)
+                # A candidate outside this slice whose opinion was forgotten
+                # during the call is unjudged again.
+                todo_keys = {key(c) for c in todo}
+                remaining = max(0, len(todo) - len(chunk)) + sum(
+                    not pairs.get(key(c), {}).get("complete") for c in chunk) + sum(
+                    key(c) in forgotten and key(c) not in todo_keys for c in candidates)
                 self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
                 if mark is not None:
                     self._storage.set_meta(

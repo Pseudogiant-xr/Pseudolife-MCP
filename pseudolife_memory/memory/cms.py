@@ -154,6 +154,13 @@ def has_date_cue(text: str) -> bool:
 #        co-locates the signing secret and display cursor with those states.
 SCHEMA_VERSION = 7
 
+# Fill fraction of the terminal band (the one whose evictions are true
+# drops) at which stats() carries a ``capacity_warning``. Measured
+# 2026-09-23 on the production bank: 36-65 new entries/day against the
+# 5,250-entry flat default, so the last 20% (1,050 entries) is roughly
+# 16-29 days of notice before the first permanent delete.
+CAPACITY_WARNING_FRACTION = 0.8
+
 # Shared tokenizer for the slot-query pool (Pool 1.5): the query side and
 # the entry-slot-token index below must use the identical rule, or the two
 # silently drift apart and the index stops finding matches the old
@@ -2663,21 +2670,81 @@ class ContinuumMemorySystem:
         tying the continuum under forced eviction). True drops are
         counted (``stats()["true_drops"]``) and logged so a bank under
         real capacity pressure is visible, never silent.
+
+        Since 2026-09-23 each true drop is also a WARNING line naming the
+        entry, and Postgres storage deletes the row through
+        ``delete_evicted_entry``, which counts the drop in ``meta`` in the
+        same transaction — the per-process counter above resets on every
+        restart, so it could not say whether a bank had ever lost entries.
+        Inside a correction the whole store is staged in one transaction, so
+        a drop that rolls back is neither deleted nor counted (the WARNING
+        line, written as the drop happens, is not taken back).
         """
         self._slot_index_dirty = True
         if band_idx is not None and band_idx + 1 < len(self.bands):
             self._relocate(entry, self.bands[band_idx + 1])
             return
         self._true_drops += 1
-        logger.info("capacity eviction (true drop #%d): %r",
-                    self._true_drops, entry.text[:80])
-        if self.storage is not None and entry.db_id is not None:
+        superseded = entry.superseded_at is not None
+        all_time: int | None = None
+        if self.storage is not None:
+            # Test doubles and older storages expose only the plain delete
+            # (the same optional-capability read as hydrate's update_entry).
+            evict = getattr(self.storage, "delete_evicted_entry", None)
             try:
-                self.storage.delete_entry_ids([entry.db_id])
+                if evict is not None:
+                    all_time = evict(
+                        entry.db_id, source=entry.source,
+                        superseded=superseded)
+                elif entry.db_id is not None:
+                    self.storage.delete_entry_ids([entry.db_id])
             except Exception as exc:  # noqa: BLE001
                 if self._strict_storage:
                     raise
                 logger.warning("evict write-through failed: %s", exc)
+        band = self.bands[band_idx].name if band_idx is not None else entry.bank
+        logger.warning(
+            "capacity eviction true drop: entry_id=%s source=%r "
+            "superseded=%s band=%r (#%d since start, all-time %s): %r",
+            entry.db_id, entry.source, superseded, band, self._true_drops,
+            all_time if all_time is not None else "n/a", entry.text[:80])
+
+    def capacity_warning(self) -> dict | None:
+        """Warn when the terminal band nears the capacity where evictions
+        become permanent deletes; ``None`` below the threshold.
+
+        Only the last band is checked: an earlier band that fills demotes
+        its evictee into the next one and loses nothing, so under the
+        continuum a full head band is normal. Under the flat default the
+        last band is the only band. Cheap attribute reads only — ``/health``
+        calls this without the service lock.
+        """
+        band = self.bands[-1]
+        capacity = band.max_entries
+        if capacity <= 0:
+            return None
+        size = band.size
+        fill = size / capacity
+        if fill < CAPACITY_WARNING_FRACTION:
+            return None
+        if size >= capacity:
+            state = ("is full: every new memory now permanently deletes "
+                     "the lowest-retention entry")
+        else:
+            state = (f"is {fill:.0%} full: at capacity every new memory "
+                     "will permanently delete the lowest-retention entry")
+        return {
+            "band": band.name,
+            "size": size,
+            "capacity": capacity,
+            "fill": round(fill, 3),
+            "message": (
+                f"Band {band.name!r} holds {size:,} of {capacity:,} entries "
+                f"and {state} (superseded entries first). Raise its "
+                "max_entries with a custom preset — see 'MIRAS preset "
+                "flat' in docs/guide/configuration.md."
+            ),
+        }
 
     def stats(self) -> dict:
         """Memory statistics.
@@ -2714,8 +2781,12 @@ class ContinuumMemorySystem:
             # Entries destroyed by capacity eviction since startup (no
             # deeper band to demote into). 0 until the store genuinely
             # fills; a growing number is the signal to raise capacity or
-            # curate.
+            # curate. The all-time count lives in storage (service.stats()
+            # adds true_drops_total on Postgres).
             "true_drops": self._true_drops,
+            # Set from 80% of the terminal band's capacity, i.e. before the
+            # first permanent delete; None below that.
+            "capacity_warning": self.capacity_warning(),
             # v0.2: True when weights.pt (and .bak) failed to load and the
             # band MLPs restarted fresh. Entries are unaffected.
             "weights_reset": self.weights_reset,

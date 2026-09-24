@@ -73,7 +73,7 @@ if ($LASTEXITCODE -ne 0) { Log "rebuild failed"; exit 2 }
 
 # -- Stage 2: judge replicates --------------------------------------------
 try {
-    if (-not (Start-Qwen)) { Log "no Qwen endpoint"; exit 2 }
+    if (-not (Start-Qwen -Owned)) { Log "no owned Qwen endpoint"; exit 2 }
     & $py $replicatePy run --extractor e4b-ft --tag arm1-gate
     if ($LASTEXITCODE -ne 0) { Log "run (r1) failed"; exit 2 }
     if ($Replicates -gt 1) {
@@ -94,6 +94,6 @@ try {
     & $py $replicatePy gate-check --extractor e4b-ft --tag arm1-gate
     exit $LASTEXITCODE
 } finally {
-    Stop-Qwen
+    Stop-Qwen -Owned
     Log "regression gate finished"
 }

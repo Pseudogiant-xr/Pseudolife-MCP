@@ -3,10 +3,13 @@
 # Three lanes:
 #   * test            — full suite vs the production-parity PG 18 service
 #                       container (pgvector image, same as the Docker tier
-#                       since the 2026-08-14 16→18 bump);
+#                       since the 2026-08-14 16→18 bump), every test on the
+#                       real embedding weights (PSEUDOLIFE_TEST_EMBEDDER=real);
 #   * test-lite-linux — full suite vs the [lite] extra's embedded
 #                       PostgreSQL 18 (no service container): covers the
-#                       lite provider itself on a Linux runner;
+#                       lite provider itself on a Linux runner, and the
+#                       local default (tests/fake_embedder.py for every test
+#                       not marked real_model);
 #   * test-lite-windows — the lite-critical surface (embedded provider,
 #                       backup/restore rehearsal, shim) on a real Windows
 #                       runner. Windows runners cannot host service
@@ -133,11 +136,17 @@ jobs:
         # stops 2 workers x torch's intra-op threads oversubscribing the
         # 4-vCPU runner. Verified locally 2026-08-28: full suite green at
         # -n 2 and -n 4.
+        #
+        # PSEUDOLIFE_TEST_EMBEDDER=real: this production-parity lane runs every
+        # test on the real embedding weights, so real-model behaviour stays
+        # covered on every PR. The lite lane below runs the local default:
+        # tests/fake_embedder.py for every test not marked real_model.
         env:
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
           OMP_NUM_THREADS: "2"
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
+          PSEUDOLIFE_TEST_EMBEDDER: real
         run: bash ops/ci_tests.sh
 
       - name: Upload test diagnostics
@@ -258,8 +267,9 @@ jobs:
           python -m pip install -U pip
           pip install -e .[dev,lite]
 
-      - name: Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins)
+      - name: Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins, suite lock)
         # These start their own embedded instances (including the crash /
         # attach / lock paths) — no pre-started server, no service
         # container (unsupported on Windows runners), no HF download.
-        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_ops_update_credentials.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py -q
+        # test_suite_lock.py is the only CI coverage of the msvcrt backend.
+        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_wait_mail_cli.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_ops_update_credentials.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py tests/test_suite_lock.py tests/test_codex_doorbell.py -q
