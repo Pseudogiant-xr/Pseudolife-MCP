@@ -863,6 +863,43 @@ def _list(args, transport) -> int:
     return 0
 
 
+# --- operator break ----------------------------------------------------------------
+
+def _break(args) -> int:
+    """Free a held lease through the bank itself (operator only). Prints the
+    store's answer as JSON; 1 when no bank is found or the break failed."""
+    from pseudolife_memory.backup_cli import _default_data_dir
+    from pseudolife_memory.transfer_cli import _resolve_dsn
+    dsn, own_instance = _resolve_dsn(_default_data_dir(os.environ))
+    try:
+        if not dsn:
+            _say("no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, "
+                 "or run where the lite tier's data dir holds one")
+            return 1
+        from pseudolife_memory.storage.coordination import (
+            CoordinationConnection, CoordinationError, CoordinationStore)
+        try:
+            storage = CoordinationConnection(dsn)
+        except Exception as exc:  # noqa: BLE001 — a DSN in a driver message stays unprinted
+            _say(f"cannot open the bank ({type(exc).__name__})")
+            return 1
+        try:
+            result = CoordinationStore(storage).break_lease(args.name)
+        except CoordinationError as exc:
+            _say(f"break refused: {exc.code}")
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            _say(f"break failed ({type(exc).__name__}); nothing was changed")
+            return 1
+        finally:
+            storage.close()
+        print(json.dumps(result))
+        return 0
+    finally:
+        if own_instance is not None:
+            own_instance.stop()
+
+
 # --- arguments ---------------------------------------------------------------------
 
 def _seconds(low: int, high: int | None):
@@ -921,7 +958,7 @@ def _parsers():
                     "maintenance window) around a command. The lease is an OS file lock; "
                     "the agent board, where the daemon has one, mirrors it so other "
                     "agents see the holder, queue in order and see the expected end.")
-    actions = parser.add_subparsers(dest="action", metavar="{run,list}")
+    actions = parser.add_subparsers(dest="action", metavar="{run,list,break}")
     run = actions.add_parser(
         "run", help="run a command while holding a lease",
         usage="pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] "
@@ -953,7 +990,17 @@ def _parsers():
     listing.add_argument("name", nargs="?", type=_lease_name, metavar="NAME",
                          help="show only this lease")
     listing.add_argument("--json", action="store_true", help="print one JSON report")
-    return parser, run, listing
+    breaking = actions.add_parser(
+        "break", help="(operator) free a lease whatever its holder says",
+        description="Operator only: free the lease NAME on the board, whatever its holder "
+                    "says, and grant it to the next waiter. It opens the bank directly, "
+                    "the way board-audit and export find it (PSEUDOLIFE_MCP_DATABASE_URL, "
+                    "else the lite tier's data dir), never through an agent's credential, "
+                    "and the audit log records the break with the operator as its actor. "
+                    "It frees the board's record only: a process still holding the local "
+                    "lock keeps it until it exits.")
+    breaking.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to free")
+    return parser, run, listing, breaking
 
 
 def main(argv: list[str] | None = None, *, transport=None) -> int:
@@ -965,20 +1012,24 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
     if "--" in argv:
         split = argv.index("--")
         argv, command = argv[:split], argv[split + 1:]
-    parser, run, listing = _parsers()
+    parser, run, listing, breaking = _parsers()
     try:
         args = parser.parse_args(argv)
         if args.action is None:
             parser.print_usage(sys.stderr)
-            parser.exit(EXIT_USAGE, "pseudolife-mcp lease: choose run or list "
-                                    "(--help explains both)\n")
+            parser.exit(EXIT_USAGE, "pseudolife-mcp lease: choose run, list or break "
+                                    "(--help explains each)\n")
         if args.action == "run" and not command:
             run.error("put the command to run after --, as in: "
                       "pseudolife-mcp lease run gpu -- python train.py")
         if args.action == "list" and command is not None:
             listing.error("list takes no command")
+        if args.action == "break" and command is not None:
+            breaking.error("break takes no command")
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else EXIT_USAGE
     if args.action == "list":
         return _list(args, transport)
+    if args.action == "break":
+        return _break(args)
     return _run(args, command, transport)

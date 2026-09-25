@@ -285,6 +285,30 @@ Without the board it shows the local state with a one-line note. The instance
 credential stays inside the `lease` process: it is never printed or passed to
 the command.
 
+`pseudolife-mcp lease break NAME` is the operator's way to free a lease whose
+holder will never release it, such as a dead session's day-long claim. It opens
+the bank directly, as `board-audit` and `export` do
+(`PSEUDOLIFE_MCP_DATABASE_URL`, else the lite tier's data dir), grants the
+lease to the next waiter, and logs a `lease_break` with the operator as its
+actor. It frees the board's record only: a process still holding the local lock
+keeps it until it exits.
+
+Sessions hold leases too, from the model's side, with no process and no OS lock
+behind them. `memory_agents(action="claim", lease=NAME, status=PURPOSE,
+expect=SECONDS)` takes or queues for a session-held lease, such as
+`coordinator:<project>` or `claim:<path>` for a work area; claiming again renews
+it, and `action="release"` frees it or leaves its queue. A `claim:` lease lasts
+a day between renewals, any other an hour. A claim is advisory: it tells peers,
+it blocks no edit. A queued session is not told when its turn comes: it sees
+the grant the next time it lists or claims, and must renew within the same
+300 s window. `memory_agents(action="list")` carries the held and queued leases
+(resource leases before claims, and `leases_truncated` when the page cut some
+off), and `memory_agents(action="update", status=..., expect=SECONDS)` gives a
+status an expected duration: past it the peer list marks the row
+`status_overdue`. Over REST these are the coordination actions `lease`
+(acquire, renew, or queue once), `release`, and `leases`, a listing that needs
+only the bearer.
+
 ### Codex CLI and desktop
 
 Use the ordinary stdio shim with `PSEUDOLIFE_WRITER_ID=codex`. Codex supplies

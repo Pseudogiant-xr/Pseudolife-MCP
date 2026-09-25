@@ -31,6 +31,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - REST gains `lease` (acquire, renew or queue once), `release` and
   `leases` (a listing that needs only the bearer). A full queue is a
   transient 429.
+- `pseudolife-mcp lease run NAME [--expect D] [--ttl S] [--purpose T]
+  [--no-board] [--timeout D] -- COMMAND` holds a named lease around any
+  command. What excludes is an OS file lock
+  (`~/.pseudolife-mcp/locks/lease-<name>.lock`, `PSEUDOLIFE_LEASE_LOCK_DIR`
+  overrides), released the moment its holder exits or dies, so nothing goes
+  stale. Where the daemon's board is on for the bearer, the board mirrors
+  it: runs queue in arrival order and see the holder, purpose and expected
+  end. Without a board, or when the board fails in any way, the run waits on
+  the OS lock alone; a board failure never stops the command. Ctrl-C,
+  SIGTERM and SIGHUP stop the command, giving it time to clean up, before
+  the lease is released. A run nested inside a run of the same lease exits
+  64 instead of waiting for itself. The command gets
+  `PSEUDOLIFE_LEASES_HELD`; exit codes are the command's own, 75 when
+  `--timeout` expired first, 128+N when stopped by a signal.
+- `pseudolife-mcp lease list [NAME] [--json]` shows the board's leases
+  beside the local lock files, and `pseudolife-mcp lease break NAME` is the
+  operator's way to free a hold nobody will release: through the bank
+  directly, never an agent credential, logged with the operator as actor.
+  The test suite's own `full-suite.lock` is unchanged; `lease list` only
+  probes it.
 - `memory_agents` gains `claim` and `release`: a session-held lease such as
   `coordinator:<project>` or `claim:<path>`, whose `status` is its purpose.
   A model renews by claiming again; a `claim:` lease lasts a day between
