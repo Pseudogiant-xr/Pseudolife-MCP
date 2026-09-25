@@ -273,7 +273,7 @@ def memory_agents(
 ) -> dict[str, Any]:
     """Discover peers or update your registered agent's project, task and status.
 
-    Coordination (bearer auth required). List before shared-resource work and on resume;
+    Bearer auth required. List before shared-resource work and on resume;
     project/task are exact relevance filters, never permissions. Without an
     adapter, list shows bounded open sessions with unknown ownership/scope.
     Idle peers are counted (idle_omitted), not listed; activity is evidence, not a lock.
