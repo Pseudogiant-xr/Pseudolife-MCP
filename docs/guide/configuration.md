@@ -491,10 +491,12 @@ inside the daemon container, which already has the database URL:
 What `verify` shows: no row was edited, inserted or reordered, and none was
 removed except the oldest, behind a cut record whose own fields add up (written
 by the daemon, a window of at least a day, the cutoff that window gives at its
-time, and no surviving row older than that cutoff). What it cannot show on its
-own, because no secret is involved: that the newest rows were not dropped; that
-the table was not rewritten with every hash recomputed; and that the oldest
-rows were not removed by someone who also appended a consistent cut record.
+time, and a first surviving row no older than that cutoff; retention removes
+only an expired prefix, so a later row stamped before the cutoff can remain).
+What it cannot show on its own, because no secret is involved: that the
+newest rows were not dropped; that the table was not rewritten with every
+hash recomputed; and that the oldest rows were not removed by someone who
+also appended a consistent cut record.
 Record `head_seq:head_hash` and `head_created_at` from each `verify` somewhere
 outside the bank, and later run `verify --expect-head SEQ:HASH`. That catches
 the first two. The third needs a series of recorded heads: retention never
@@ -887,10 +889,14 @@ sessions can keep waking each other, so wakes are capped (below).
   debug/audit switch. Before 2026-07-30 this knob was mis-registered as
   `memory.show_superseded` and did nothing.
 - **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
-  above zero and `memory_search` returns `low_confidence: true` whenever
-  the top match scores below the floor. Calibrated as a pair with
-  `memory.cortex.guard_min_score`; the recommended abstention-on values
-  and the calibration story: [Retrieval](retrieval.md#abstention--confidence-floors).
+  above zero and `memory_search` also returns `low_confidence: true` when
+  the top match scores below the floor and no cortex fact clears
+  `memory.cortex.guard_min_score`. No value is calibrated for the current
+  embedder, and the pair this guide used to recommend would flag a fifth
+  of real searches whose hits agents used:
+  [Retrieval](retrieval.md#abstention--confidence-floors). The dense
+  relevance floor under it, `memory.search.min_score` (`0.25`), is a
+  separate knob and not an abstention signal either.
 - **Dream slot resolver off** (`memory.cortex.dream_slot_match_threshold =
   0.0`) — a positive cosine floor lets the dream pass map a paraphrased
   `(entity, attribute)` onto an existing slot before writing, to catch
@@ -1170,7 +1176,8 @@ sessions can keep waking each other, so wakes are capped (below).
   payloads verbatim (superseded hits keep the `replaced_by` pointer, which
   `memory_get` also serves for a superseded entry, and
   `memory_episode_summary` still compacts its `recent_entries` like
-  `memory_recent` — none of the three follows the knob); raise
+  `memory_recent`, and every compact entry keeps its write `date`
+  (2026-09-25) — none of the four follows the knob); raise
   `entry_text_chars` for long-form corpora where
   the tail of a note carries the answer.
 
@@ -1235,8 +1242,12 @@ daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the
 mechanism that gives **concurrent** Claude Code sessions distinct identity —
-a per-process `X-PL-Session` header, the strongest of the five
-[session-identity](#session-identity) tiers. The shim works against
+an `X-PL-Session` header, the strongest of the five
+[session-identity](#session-identity) tiers. Under Claude Code (writer id
+unset or `claude-code`) the header is the session id Claude Code launched the
+shim with, the same id its SessionStart hook registers, so the shim and the
+hook share one session episode. Other hosts get one id per shim process. The
+shim opens no episode itself; see [Episodes](episodes.md). The shim works against
 **either** daemon deployment, host-process or the containerized stack — it's
 just an HTTP client to `PSEUDOLIFE_MCP_DAEMON_URL` and only spawns a new host
 daemon when nothing answers there already (a cross-process lock keeps
@@ -1314,14 +1325,14 @@ through one chokepoint, evaluated in strict precedence order:
 
 | tier | source | scope | notes |
 |---|---|---|---|
-| 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
+| 1 | `X-PL-Session` header | per session | the stdio shim sends this on every call: Claude Code's own session id under Claude Code (the id tier 3 registers), one id per shim process elsewhere, the thread id on each Codex call; any integrator can |
 | 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`, and on the lifecycle tools `memory_episode_start` / `memory_episode_end` / `memory_session_title` — where a resolved handle wins outright (they never consult the header tiers); the daemon mints it and advertises it in the SessionStart briefing |
 | 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it. A singleton — concurrent sessions race it, which is why the lifecycle tools take the per-call handle |
 | 4 | `mcp-session-id` header | per connection | **retired** — the header names the connection (concurrent sessions share it) and the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes it from the protocol. `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one release as a rollback hatch |
 | 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
 
 **Why the header outranks the handle when both are present.** A shim
-header is infrastructure-asserted per OS process; an `episode` handle is
+header is infrastructure-asserted, by the host or per OS process; an `episode` handle is
 model-supplied and can be confused between two concurrent sessions'
 briefings. But identity and target episode are separable — a write still
 lands in the handle's named episode even when the header wins identity for

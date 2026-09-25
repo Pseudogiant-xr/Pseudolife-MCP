@@ -1,3 +1,9 @@
+import ctypes
+import re
+import threading
+
+import pytest
+
 from pseudolife_memory.memory.briefing import (select_lessons, format_briefing,
                                                format_bounded_briefing)
 
@@ -207,6 +213,154 @@ def test_bounded_briefing_keeps_multiline_lesson_as_one_item():
     assert "orphan continuation" not in out
     assert "A" * 100 not in out
     assert "briefing item(s) omitted" in out
+
+
+_OMITTED_MARKER = re.compile(
+    r"(\d+) briefing item\(s\) omitted\. Full briefing: "
+    r"`pseudolife-mcp briefing` or GET /api/briefing\.\Z")
+
+
+class _Abandoned(Exception):
+    pass
+
+
+def _within(timeout, fn, *args):
+    """Run ``fn`` on a worker thread and fail, rather than hang, if it does not
+    return. format_bounded_briefing runs on every SessionStart hook call, and
+    before 2026-09-25 it could loop forever on some budgets."""
+    box = {}
+
+    def target():
+        try:
+            box["value"] = fn(*args)
+        except BaseException as exc:  # noqa: BLE001 — re-raised below
+            box["error"] = exc
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        # A daemon thread left spinning holds the GIL for the rest of the
+        # run and slows every later test to a crawl; interrupt its loop.
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_ulong(worker.ident), ctypes.py_object(_Abandoned))
+        worker.join(5)
+        pytest.fail(f"{fn.__name__}{args[1:]!r} did not terminate within {timeout}s")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def _audit_shape():
+    # The 2026-09-25 audit repro: one long lesson ahead of ten short ones.
+    # Greedy packing selects 1 item at one cap and 10 at a slightly smaller
+    # one, so the omitted count flips between 10 and 1 digit-widths.
+    return ("## Lessons from past work\n- " + "L" * 198 + "\n"
+            + "\n".join(["- ttttttt"] * 10))
+
+
+def _production_shape(why, questions, lessons, world, summary):
+    """A 13-item briefing shaped like the served one: 3 uncertainties, 3 open
+    questions, 3 lessons, 3 world facts and a recap with a digest summary."""
+    return format_briefing(
+        surprises=[{"src": f"node-{i}", "dst": "pseudolife-daemon",
+                    "relation": "part-of", "why": "w" * n}
+                   for i, n in enumerate(why)],
+        questions=[{"question": "q" * n} for n in questions],
+        lessons=[{"lesson": "l" * n, "polarity": "+"} for n in lessons],
+        world=[{"entity": f"world-{i}", "attribute": "fact", "value": "v" * n,
+                "source_url": "https://example.com/p"} for i, n in enumerate(world)],
+        recap={"title": "Last session", "entry_count": 3, "summary": "s" * summary},
+    )
+
+
+def _production_cycles_at_620():
+    return _production_shape([10, 180, 20], [30, 260, 280], [70, 90, 310],
+                             [120, 140, 60], 110)
+
+
+def _production_cycles_at_1849():
+    return _production_shape([70, 160, 220], [200, 350, 40], [1230, 480, 830],
+                             [690, 560, 650], 1110)
+
+
+def _marker_room_shape():
+    # One 160-byte lesson, then three 11-byte ones. Before 2026-09-25 the
+    # loop settled on the selection packed WITHOUT room for its marker and
+    # fell back to "Briefing omitted." at 210-221 bytes, although the three
+    # short lessons plus the marker fit.
+    return ("## Lessons from past work\n- " + "A" * 158
+            + "\n- bbbbbbbbb\n- ccccccccc\n- ddddddddd")
+
+
+@pytest.mark.parametrize("md_factory, max_bytes", [
+    (_audit_shape, 318),
+    (_production_cycles_at_620, 620),
+    (_production_cycles_at_1849, 1849),
+])
+def test_bounded_briefing_terminates_where_greedy_repacking_cycled(md_factory, max_bytes):
+    from pseudolife_memory.memory.briefing import _briefing_items
+    md = md_factory()
+    out = _within(10, format_bounded_briefing, md, max_bytes)
+    assert len(out.encode("utf-8")) <= max_bytes
+    match = _OMITTED_MARKER.search(out)
+    assert match, out
+    shown = out[:match.start()].rstrip("\n")
+    assert len(_briefing_items(shown)) + int(match.group(1)) == len(_briefing_items(md))
+
+
+@pytest.mark.parametrize("max_bytes", range(210, 222))
+def test_bounded_briefing_final_selection_leaves_room_for_its_marker(max_bytes):
+    out = _within(10, format_bounded_briefing, _marker_room_shape(), max_bytes)
+    assert out == ("## Lessons from past work\n- bbbbbbbbb\n- ccccccccc\n- ddddddddd\n\n"
+                   "1 briefing item(s) omitted. Full briefing: "
+                   "`pseudolife-mcp briefing` or GET /api/briefing.")
+
+
+def _sweep(md, budgets):
+    return [(cap, format_bounded_briefing(md, cap)) for cap in budgets]
+
+
+@pytest.mark.parametrize("md_factory", [
+    _audit_shape, _production_cycles_at_620, _production_cycles_at_1849,
+    _marker_room_shape,
+])
+def test_bounded_briefing_budget_sweep_is_bounded_whole_and_honest(md_factory):
+    """Every budget from 0 to 2000: the call returns, fits the budget in UTF-8
+    bytes, never slices an item, and says how many items it left out."""
+    from pseudolife_memory.memory.briefing import _briefing_items, _render_items
+    md = md_factory()
+    items = _briefing_items(md)
+    full = _render_items(items)
+    worst_marker = (f"{len(items)} briefing item(s) omitted. Full briefing: "
+                    "`pseudolife-mcp briefing` or GET /api/briefing.")
+    for cap, out in _within(60, _sweep, md, range(0, 2001)):
+        assert len(out.encode("utf-8")) <= cap, cap
+        if cap >= len(full.encode("utf-8")):
+            assert out == full, cap
+            continue
+        match = _OMITTED_MARKER.search(out)
+        if cap >= len(worst_marker):
+            assert match, (cap, out)
+        if not match:
+            assert out in ("", "Briefing omitted."), (cap, out)
+            continue
+        shown = _briefing_items(out[:match.start()].rstrip("\n"))
+        assert all(item in items for item in shown), cap
+        assert int(match.group(1)) >= 1, cap
+        assert len(shown) + int(match.group(1)) == len(items), cap
+
+
+def test_bounded_briefing_keeps_recap_summary_with_its_title():
+    md = _production_shape([40, 40, 40], [60, 60, 60], [200, 300, 400],
+                           [80, 80, 80], 600)
+    title = "- Last session (3 memories)"
+    summary = "  " + "s" * 600
+    assert f"{title}\n{summary}" in md
+    for cap, out in _within(60, _sweep, md, range(0, 2001)):
+        assert (title in out) == (summary in out), cap
+        if title in out:
+            assert f"{title}\n{summary}" in out, cap
 
 
 def test_briefing_source_fields_cannot_add_markdown_item_boundaries():

@@ -31,7 +31,6 @@ from typing import NoReturn
 
 from pseudolife_memory import __version__
 from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for
-from pseudolife_memory.session_title import title_from_cwd
 
 try:
     from builtins import BaseExceptionGroup as _BaseExceptionGroup
@@ -621,8 +620,9 @@ def ensure_daemon(url: str) -> dict:
 
 def _session_headers(token: str | None, session_uid: str) -> dict[str, str]:
     """Headers that ride every upstream call. ``X-PL-Writer`` attributes the
-    writer (v0.4 keying); ``X-PL-Session`` is this shim's stable per-session id
-    — the daemon keys episode stamping by it so concurrent sessions don't
+    writer (v0.4 keying); ``X-PL-Session`` is the stable session id
+    :func:`run_shim` chose (the client's own under Claude Code) — the daemon
+    keys episode stamping by it so concurrent sessions don't
     cross-contaminate."""
     headers: dict[str, str] = {}
     if token:
@@ -1120,29 +1120,38 @@ def _require_mcp_sdk_v2() -> None:
     sys.exit(1)
 
 
-def _session_state_path(url: str):
-    """Key the adapter's state file by the host session, so a resumed Claude
-    Code session keeps its address instead of minting one per launch.
+def _claude_session_id() -> str | None:
+    """The Claude Code session id this shim was launched with, or ``None``.
 
     Claude Code exports ``CLAUDE_CODE_SESSION_ID`` to the stdio MCP servers it
     launches (seen 2026-09-20 in a running shim's environment). The value is
     fixed for the process: ``/clear`` and an in-session ``/resume`` keep this
-    shim and its address, and ``--resume <id>`` launches it with the resumed
-    id. ``--continue``, or ``--resume`` without an id, may launch it with the
-    startup id instead, which then gets a new address (Claude Code env-vars
-    docs, checked 2026-09-23). It applies only with ``PSEUDOLIFE_AGENT_STATE_DIR``
-    configured and a canonical UUID; anything else means a fresh address
-    per launch, as before. An unusable directory is reported and falls
-    back the same way rather than taking the memory proxy down."""
-    root = os.environ.get("PSEUDOLIFE_AGENT_STATE_DIR")
+    shim and its id, and ``--resume <id>`` launches it with the resumed id.
+    ``--continue``, or ``--resume`` without an id, may launch it with the
+    startup id instead (Claude Code env-vars docs, checked 2026-09-23). Only
+    a canonical UUID counts: Claude Code's ids are lowercase canonical, and
+    the plugin hook registers the session under the raw string."""
     session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    if not root or not session:
-        return None
     try:
         canonical = str(uuid.UUID(session))
     except ValueError:
         return None
-    if canonical != session:
+    return canonical if canonical == session else None
+
+
+def _session_state_path(url: str):
+    """Key the adapter's state file by the host session, so a resumed Claude
+    Code session keeps its address instead of minting one per launch.
+
+    The key is :func:`_claude_session_id`; a launch that gets a different id
+    (``--continue``, ``--resume`` without an id) gets a new address. It
+    applies only with ``PSEUDOLIFE_AGENT_STATE_DIR`` configured and a
+    canonical UUID; anything else means a fresh address per launch, as
+    before. An unusable directory is reported and falls back the same way
+    rather than taking the memory proxy down."""
+    root = os.environ.get("PSEUDOLIFE_AGENT_STATE_DIR")
+    canonical = _claude_session_id()
+    if not root or canonical is None:
         return None
     from pathlib import Path
     from pseudolife_memory.codex_coordination import _prepare_private_dir
@@ -1388,17 +1397,30 @@ def run_shim(*, channel: bool = False) -> None:
     health = ensure_daemon(url)
     provider = CredentialProvider.from_environment()
     _require_credential_for_auth(url, health, provider)
-    # One shim == one Claude session. This uid keys BOTH the session episode
-    # (opened/closed here) and per-store stamping (rides every call as
-    # X-PL-Session), so lifecycle and attribution always agree. It stays the
-    # shim's own: Claude Code does export CLAUDE_CODE_SESSION_ID, which keys
-    # only the coordination state file (_session_state_path) and the turn
-    # digest; other hosts export nothing comparable.
-    session_uid = uuid.uuid4().hex
-    _post_episode(url, None, "/api/episode/start", {
-        "session_key": session_uid,
-        "title": title_from_cwd(os.getcwd()),
-    }, provider=provider)
+    # One client session, one root episode. ``session_uid`` rides every call
+    # as X-PL-Session, and the daemon stamps a write that passes no
+    # ``episode=`` handle (and names the session for memory_session_title)
+    # by it. Under Claude Code (writer id unset or ``claude-code``) it is the
+    # session id Claude Code launched this shim with, when it exported a
+    # canonical one: the plugin's SessionStart hook registers the session's
+    # root under that same id, so both land on one root, and the host owns
+    # that root's lifecycle (the SessionEnd hook, else the idle reaper).
+    # A shim exit is not a session end: a reconnect restarts the shim
+    # mid-session, and an explicit end prunes an empty root outright,
+    # orphaning the handle the hook advertised. A host with any other writer
+    # id keeps a key of its own: started from a Claude Code Bash tool it
+    # inherits that session's id, and would forward it if it passes its
+    # environment through to MCP servers. Codex keys each call by its thread
+    # anyway (_proxy).
+    #
+    # The shim opens no root itself: the daemon opens one on the first write
+    # that needs it (_ensure_session_episode), so an idle or search-only shim
+    # leaves nothing behind. The eager open this replaces cost the live bank
+    # 193 shim-keyed roots in the 24 h to 2026-09-25, 189 of them empty (154
+    # titled after the shared runtime directory Codex launches the shim from).
+    writer = os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
+    host_session = _claude_session_id() if writer in ("", "claude-code") else None
+    session_uid = host_session or uuid.uuid4().hex
     try:
         asyncio.run(_run_session_proxy(
             url, None, session_uid, channel=channel, provider=provider,
@@ -1406,6 +1428,8 @@ def run_shim(*, channel: bool = False) -> None:
     except KeyboardInterrupt:  # session closed
         pass
     finally:
-        # Close the session episode (prune-on-empty if it captured nothing).
-        _post_episode(url, None, "/api/episode/end",
-                      {"session_key": session_uid}, provider=provider)
+        if host_session is None:
+            # Close this shim's own session: prune-on-empty if it captured
+            # nothing, a no-op if no write ever opened it.
+            _post_episode(url, None, "/api/episode/end",
+                          {"session_key": session_uid}, provider=provider)

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+import uuid
 
 import pytest
 
@@ -33,9 +35,13 @@ _OUTER_TIMEOUT_S = _shim._SPAWN_WAIT_ALIVE_S + 60
 
 def _shim_env(port: int, data_dir, **extra) -> dict:
     """The environment a shim subprocess is driven with: point it at a daemon
-    URL/port and a data dir, and drop the token (loopback needs none)."""
+    URL/port and a data dir, and drop the token (loopback needs none). The
+    runner's host identity is dropped too: run from a Claude Code session,
+    the shim would otherwise key its calls by that live session's id."""
+    inherited = {name: value for name, value in os.environ.items()
+                 if name not in ("CLAUDE_CODE_SESSION_ID", "PSEUDOLIFE_WRITER_ID")}
     env = {
-        **os.environ,
+        **inherited,
         "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
         "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
         "PSEUDOLIFE_MCP_PORT": str(port),
@@ -448,6 +454,146 @@ def test_post_episode_is_best_effort(monkeypatch):
     # Must NOT raise — episode bookkeeping can never break a session.
     shim._post_episode("http://127.0.0.1:8765", None, "/api/episode/start",
                        {"session_key": "x", "title": "t"})
+
+
+# One client session, one root episode (2026-09-25). The shim used to open a
+# root of its own at launch, keyed by a fresh uuid, beside the root the
+# plugin's SessionStart hook registers under the client's session id. On the
+# live bank that day, 189 of the 193 shim-keyed roots opened in 24 h held no
+# entry: 154 were titled after the shared shim runtime directory that Codex
+# launches from, and Codex keys every call by its thread anyway.
+
+_CLAUDE_SESSION = "0b9c5f3e-7a1d-4c2e-9f8a-2d4e6b8c0a1f"
+
+
+def _run_shim_lifecycle(monkeypatch, env: dict):
+    """Run ``run_shim`` with the daemon and the proxy stubbed out. Returns the
+    session key the proxy was given, the episode POSTs made before the proxy
+    started, and every episode POST by the time ``run_shim`` returned."""
+    from pseudolife_memory import shim
+
+    for name in ("CLAUDE_CODE_SESSION_ID", "PSEUDOLIFE_WRITER_ID"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "ensure_daemon", lambda url: {"status": "ok"})
+    posts = []
+    monkeypatch.setattr(
+        shim, "_post_episode",
+        lambda url, token, path, payload, **kwargs: posts.append((path, payload)))
+    seen = {}
+
+    async def proxy(url, token, session_uid, **kwargs):
+        seen["session_uid"] = session_uid
+        seen["posts_before_proxy"] = list(posts)
+
+    monkeypatch.setattr(shim, "_run_session_proxy", proxy)
+    shim.run_shim()
+    return seen["session_uid"], seen["posts_before_proxy"], posts
+
+
+@pytest.mark.parametrize("writer", [None, "claude-code"])
+def test_claude_code_shim_joins_the_host_session_and_leaves_its_lifecycle_to_it(
+        monkeypatch, writer):
+    """Claude Code exports its session id to the MCP servers it launches, and
+    the plugin hook registers the session's root under that same id. The shim
+    keys its calls by it, so a write without ``episode=`` and a
+    ``memory_session_title`` land on the hook's root, and it neither opens
+    nor closes that root: a shim exit is not a session end (a reconnect
+    restarts the shim mid-session), and an explicit end prunes an empty root
+    outright, which would orphan the handle the hook advertised."""
+    env = {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION}
+    if writer:
+        env["PSEUDOLIFE_WRITER_ID"] = writer
+    session_uid, _, posts = _run_shim_lifecycle(monkeypatch, env)
+    assert session_uid == _CLAUDE_SESSION
+    assert posts == []
+
+
+@pytest.mark.parametrize("env", [
+    {},
+    {"CLAUDE_CODE_SESSION_ID": "not-a-session"},
+    # Claude Code's ids are lowercase; the hook registers the raw string.
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION.upper()},
+    # Any other host started from a Claude Code Bash tool inherits the outer
+    # session's id and would forward it if it passes its environment through
+    # to MCP servers. Codex keys each call by its own thread instead.
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION, "PSEUDOLIFE_WRITER_ID": "codex"},
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION, "PSEUDOLIFE_WRITER_ID": "gemini"},
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION,
+     "PSEUDOLIFE_WRITER_ID": "claude-desktop"},
+], ids=["no-host-session", "not-a-uuid", "not-canonical", "codex-nested-in-claude",
+        "gemini-nested-in-claude", "claude-desktop"])
+def test_shim_without_a_host_session_opens_no_root_and_closes_only_its_own(
+        monkeypatch, env):
+    """Without a usable host session id the shim keeps a key of its own. It
+    opens nothing at launch: the daemon opens that key's root on the first
+    write that needs it, so an idle shim, or one that only searched, leaves
+    no episode behind. At exit it closes its own key (a no-op when nothing
+    was opened; prune-on-empty otherwise)."""
+    session_uid, before_proxy, posts = _run_shim_lifecycle(monkeypatch, env)
+    assert session_uid != _CLAUDE_SESSION
+    assert re.fullmatch(r"[0-9a-f]{32}", session_uid)
+    assert before_proxy == []
+    assert posts == [("/api/episode/end", {"session_key": session_uid})]
+
+
+def test_claude_code_session_through_the_shim_keeps_one_root_episode(shared_daemon):
+    """End to end on a real daemon: the hook registers the session, then the
+    real shim, launched with the same CLAUDE_CODE_SESSION_ID, stores once
+    with the advertised handle and once without. Both writes land on the
+    hook's root, no other root appears, and the shim's exit leaves the
+    host's session open."""
+    import asyncio
+    import urllib.request
+
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    base = f"http://127.0.0.1:{shared_daemon['port']}"
+    session = str(uuid.uuid4())
+
+    def roots() -> dict:
+        with urllib.request.urlopen(base + "/api/episodes?limit=100000",
+                                    timeout=30) as response:
+            episodes = json.loads(response.read())["episodes"]
+        return {e["id"]: e for e in episodes if not e.get("parent_id")}
+
+    before = set(roots())
+    with urllib.request.urlopen(
+            f"{base}/api/hook/session-start?session_id={session}&source=startup",
+            timeout=60) as response:
+        handle = re.search(r'episode="([0-9a-f]+)"',
+                           response.read().decode("utf-8")).group(1)
+
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"],
+                    CLAUDE_CODE_SESSION_ID=session)
+
+    async def drive():
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"], env=env)
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as client:
+                await client.initialize()
+                for arguments in (
+                        {"text": f"Fixture session {session} chose the blue "
+                                 "migration plan for the harbour database.",
+                         "source": "shim-root-test", "episode": handle},
+                        {"text": f"Fixture session {session} measured the "
+                                 "harbour replica lag at forty seconds.",
+                         "source": "shim-root-test"}):
+                    result = await client.call_tool("memory_store", arguments)
+                    assert not result.is_error, result
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=_OUTER_TIMEOUT_S))
+    after = roots()
+    new = [after[i] for i in set(after) - before]
+    assert [e["session_key"] for e in new] == [session], new
+    assert new[0]["entry_count"] == 2
+    # Holds only if the shim's exit ran inside the client's termination grace;
+    # the lifecycle unit test above is the strict guard on the exit.
+    assert new[0]["ended_at"] is None
 
 
 def test_spawn_daemon_never_allocates_a_console_window(monkeypatch):
@@ -937,7 +1083,8 @@ def test_startup_exits_when_the_configured_token_file_is_unusable(
 def test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential(
         monkeypatch, capsys):
     """The check is load-bearing in run_shim: it fires after ensure_daemon
-    and before the episode-start POST (which would be the first 401)."""
+    and before the proxy's first upstream call (which would be the first
+    401) and the exit's episode-end POST."""
     from pseudolife_memory import shim
 
     _no_credential(monkeypatch)
@@ -946,6 +1093,9 @@ def test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential(
                         lambda url: {"status": "ok", "auth": True})
     monkeypatch.setattr(
         shim, "_post_episode",
+        lambda *a, **k: pytest.fail("must exit before any daemon traffic"))
+    monkeypatch.setattr(
+        shim, "_run_session_proxy",
         lambda *a, **k: pytest.fail("must exit before any daemon traffic"))
     with pytest.raises(SystemExit) as exc:
         shim.run_shim()

@@ -33,8 +33,14 @@ ENV_EXAMPLE = REPO / "ops" / ".env.example"
 _VAR = re.compile(r"\$\{([A-Z][A-Z0-9_]*)")
 
 # Substitutions that are supplied by the environment rather than by the
-# operator, so the template has no business documenting them.
-_NOT_OPERATOR_SETTABLE: frozenset[str] = frozenset()
+# operator, so the template has no business documenting them. The build
+# stamp is computed from the checkout by ops/update.ps1|.sh on every deploy;
+# a value pinned in ops/.env would stamp images with a stale commit.
+_NOT_OPERATOR_SETTABLE: frozenset[str] = frozenset({
+    "PSEUDOLIFE_BUILD_GIT_SHA",
+    "PSEUDOLIFE_BUILD_DIRTY",
+    "PSEUDOLIFE_BUILD_TIME",
+})
 
 
 def _compose_vars() -> set[str]:
