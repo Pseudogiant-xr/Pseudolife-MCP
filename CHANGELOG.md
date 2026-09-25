@@ -125,10 +125,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   order, and the waiting notice and `fail` refusal name every holder. Slot 0
   keeps the file names `full-suite.lock` and `full-suite.holder.json`, so
   runs from older checkouts share it (and never see a second slot); slot k
-  is `full-suite.k.lock` with its own `full-suite.k.holder.json`. A count
-  that is not a whole number of at least 1 is a usage error. The default
-  stays 1, so other machines behave as before; the maintainer's host runs 2
-  after trimming memory.
+  is `full-suite.k.lock` with its own `full-suite.k.holder.json`. Queued
+  runs re-read the count at every poll, so raising or lowering it reaches
+  the backlog at once. A count that is not a whole number from 1 to 8 is a
+  usage error that names its source; the file may carry a UTF-8 byte-order
+  mark, and a UTF-16 file (Windows PowerShell 5.1's `>`) is reported as
+  such. The default stays 1, so other machines behave as before; the
+  maintainer's host runs 2 after trimming memory.
 
 ### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
 - **Hydration fails closed.** If loading cortex facts, world facts or lessons

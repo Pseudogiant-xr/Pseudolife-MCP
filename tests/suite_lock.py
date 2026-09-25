@@ -53,7 +53,9 @@ Configuration:
     trimmed (paging to NVMe accepted). Slot 0 keeps the historical file
     names, so runs from older code share it and never see a second slot;
     waiters take free slots in arrival order, and notices name every holder.
-    A lowered count takes effect as the higher slots' holders finish.
+    Queued runs re-read the count at every poll, so a change reaches the
+    backlog at once; lowering it never stops a run that already holds a
+    higher slot. A whole number from 1 to 8; the file may carry a BOM.
 ``PSEUDOLIFE_SUITE_LOCK_DIR``
     Overrides ``~/.pseudolife-mcp/locks`` (the tests use a temp dir).
 ``PSEUDOLIFE_TEST_CUDA=1``
@@ -74,7 +76,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import IO
+from typing import IO, Callable
 
 if os.name == "nt":
     import msvcrt
@@ -89,6 +91,7 @@ MODES = ("wait", "fail", "off")
 LOCK_FILE = "full-suite.lock"
 HOLDER_FILE = "full-suite.holder.json"
 SLOTS_FILE = "full-suite.slots"
+MAX_SLOTS = 8  # a sanity bound: each slot is a ~20 GB full suite
 QUEUE_DIR = "full-suite.queue"
 TICKET_SUFFIX = ".ticket"
 
@@ -186,17 +189,19 @@ def slot_count(environ, directory: Path) -> int:
     if raw is None:
         path = directory / SLOTS_FILE
         try:
-            raw, source = path.read_text(encoding="utf-8"), str(path)
+            # utf-8-sig: Windows PowerShell 5.1's Set-Content -Encoding UTF8
+            # writes a byte-order mark.
+            raw, source = path.read_text(encoding="utf-8-sig"), str(path)
         except FileNotFoundError:
             return 1
-    try:
-        count = int(raw.strip())
-    except ValueError:
-        count = 0
-    if count < 1:
-        raise ValueError(f"{source}={raw.strip()!r}: expected a whole number, "
-                         f"at least 1")
-    return count
+        except UnicodeDecodeError:
+            raise ValueError(f"{path}: not UTF-8 text (PowerShell 5.1's `>` "
+                             f"writes UTF-16; use Set-Content -Encoding ascii)") from None
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit() and 1 <= int(text) <= MAX_SLOTS):
+        raise ValueError(f"{source}={text!r}: expected a whole number from 1 "
+                         f"to {MAX_SLOTS}")
+    return int(text)
 
 
 def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
@@ -400,34 +405,49 @@ def describe_holder(record: dict | None) -> str:
             f"since {since}")
 
 
-def acquire(directory: Path, mode: str, *, worktree: str, slots: int = 1,
+def _take_a_slot(directory: Path, handles: dict[int, IO[bytes]],
+                 count: int) -> int | None:
+    """Lock the first free slot of ``count``, opening handles as needed."""
+    for index in range(count):
+        if index not in handles:
+            handles[index] = open(directory / _slot_file(LOCK_FILE, index), "a+b")  # noqa: SIM115
+        if _try_lock(handles[index]):
+            return index
+    return None
+
+
+def acquire(directory: Path, mode: str, *, worktree: str,
+            slots: int | Callable[[], int] = 1,
             poll: float = 2.0, notice_every: float = 60.0,
             out: IO[str] | None = None) -> HeldLock:
     """Take one of ``slots`` lock slots in arrival order, waiting (``wait``)
     or raising :class:`SuiteLockBusy` (``fail``) while every slot is held
-    or another process queued first."""
-    if slots < 1:
-        raise ValueError(f"slots={slots}: at least one is needed")
+    or another process queued first. A callable ``slots`` is read again on
+    every poll, so a changed count reaches runs already queued."""
+    count = slots() if callable(slots) else slots
+    if count < 1:
+        raise ValueError(f"slots={count}: at least one is needed")
     out = out or sys.stderr
     directory.mkdir(parents=True, exist_ok=True)
-    lock_path = directory / LOCK_FILE
-    handles: list[IO[bytes]] = []
+    handles: dict[int, IO[bytes]] = {}
     slot = None
     waited_from = next_notice = None
     try:
-        for index in range(slots):
-            handles.append(open(directory / _slot_file(LOCK_FILE, index), "a+b"))  # noqa: SIM115
         ticket = _enqueue(directory / QUEUE_DIR)
         try:
             while True:
+                if callable(slots):
+                    try:
+                        count = slots()
+                    except (OSError, ValueError):
+                        pass  # a bad edit mid-queue: keep the last good count
                 ahead = _queued_ahead(ticket)
                 if not ahead:
-                    slot = next((index for index, handle in enumerate(handles)
-                                 if _try_lock(handle)), None)
+                    slot = _take_a_slot(directory, handles, count)
                     if slot is not None:
                         break
                 situation = _describe_wait(
-                    [read_holder(directory, index) for index in range(slots)], ahead)
+                    [read_holder(directory, index) for index in range(count)], ahead)
                 if mode == "fail":
                     raise SuiteLockBusy(
                         f"full-suite lock {situation}; {LOCK_ENV}=fail refuses "
@@ -436,7 +456,8 @@ def acquire(directory: Path, mode: str, *, worktree: str, slots: int = 1,
                 hint = ""
                 if waited_from is None:
                     waited_from = next_notice = now
-                    hint = f" ({lock_path}; {LOCK_ENV}=fail exits instead, =off skips it)"
+                    hint = (f" (lock directory {directory}; {LOCK_ENV}=fail exits "
+                            f"instead, =off skips it)")
                 if now >= next_notice:
                     print(f"waiting for the full-suite lock {situation}{hint}",
                           file=out, flush=True)
@@ -445,10 +466,10 @@ def acquire(directory: Path, mode: str, *, worktree: str, slots: int = 1,
         finally:
             _leave(ticket)  # taken, refused or interrupted: out of the queue
     except BaseException:  # refused, a lock error, or Ctrl-C while queued
-        for handle in handles:
+        for handle in handles.values():
             handle.close()
         raise
-    for index, handle in enumerate(handles):
+    for index, handle in handles.items():
         if index != slot:
             handle.close()
     record = {
@@ -463,7 +484,7 @@ def acquire(directory: Path, mode: str, *, worktree: str, slots: int = 1,
         pass  # the record is a courtesy to waiters; the lock is what counts
     if waited_from is not None:
         minutes, seconds = divmod(int(time.monotonic() - waited_from), 60)
-        which = f" (slot {slot + 1} of {slots})" if slots > 1 else ""
+        which = f" (slot {slot + 1} of {count})" if count > 1 else ""
         print(f"full-suite lock acquired{which} after waiting "
               f"{minutes}m{seconds:02d}s", file=out, flush=True)
     return HeldLock(handles[slot], directory, slot)
@@ -506,9 +527,9 @@ def take_for_session(config, environ, tests_root: Path) -> HeldLock | None:
         return None
     directory = lock_dir(environ)
     try:
-        slots = slot_count(environ, directory)
+        slot_count(environ, directory)  # a bad count fails before queueing
         return acquire(directory, mode, worktree=str(tests_root.parent),
-                       slots=slots)
+                       slots=lambda: slot_count(environ, directory))
     except (SuiteLockBusy, ValueError) as exc:  # busy in fail mode, or a bad count
         raise pytest.UsageError(str(exc)) from None
     except OSError as exc:

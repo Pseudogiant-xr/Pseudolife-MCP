@@ -325,6 +325,11 @@ def _lock_backend():
             else (suite_lock.fcntl, "flock"))
 
 
+def _is_file(fd: int, path: Path) -> bool:
+    # The slot lock files are opened only once a waiter is first in line.
+    return path.exists() and os.path.samestat(os.fstat(fd), os.stat(path))
+
+
 def _lock_backend_raises(monkeypatch, code: int, only: Path | None = None) -> None:
     """Make the lock backend raise ``code`` — for every file, or ``only``
     for the one given (a queue ticket's lock keeps working)."""
@@ -332,7 +337,7 @@ def _lock_backend_raises(monkeypatch, code: int, only: Path | None = None) -> No
     real = getattr(module, name)
 
     def refuse(fd, *args, **kwargs):
-        if only is None or os.path.samestat(os.fstat(fd), os.stat(only)):
+        if only is None or _is_file(fd, only):
             raise OSError(code, os.strerror(code))
         return real(fd, *args, **kwargs)
 
@@ -466,6 +471,11 @@ def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch, sl
             f"{order[0]!r} took the freed slot while the earlier waiter was queued")
     finally:
         clock.gates["earlier"].set()
+        if len(holders) == slots:
+            # Failed before a slot freed: free them all, or the joins below
+            # wait out their timeouts.
+            while holders:
+                suite_lock.release(holders.pop())
         # Any other holders keep their slots until both waiters are done, so
         # the two take turns in the one freed slot and record in that order.
         for thread in threads:
@@ -563,7 +573,7 @@ def test_a_new_ticket_a_checker_is_testing_is_retried_not_refused(tmp_path,
     busy = {"left": 1}
 
     def ticket_busy_once(fd, *args, **kwargs):
-        if busy["left"] and not os.path.samestat(os.fstat(fd), os.stat(lock_file)):
+        if busy["left"] and not _is_file(fd, lock_file):
             busy["left"] -= 1
             raise OSError(errno.EACCES, os.strerror(errno.EACCES))
         return real(fd, *args, **kwargs)
@@ -606,7 +616,14 @@ def test_the_slot_count_comes_from_the_env_then_the_file_then_one(tmp_path):
     (tmp_path / suite_lock.SLOTS_FILE).write_text("2\n", encoding="utf-8")
     assert suite_lock.slot_count({}, tmp_path) == 2
     assert suite_lock.slot_count({"PSEUDOLIFE_SUITE_SLOTS": " 3 "}, tmp_path) == 3
-    for bad in ("0", "-1", "two", "", "1.5"):
+    # Windows PowerShell 5.1's Set-Content -Encoding UTF8 writes a BOM.
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("2\r\n", encoding="utf-8-sig")
+    assert suite_lock.slot_count({}, tmp_path) == 2
+    # Its `"2" > file` writes UTF-16: an error that names the file.
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("2", encoding="utf-16")
+    with pytest.raises(ValueError, match="full-suite.slots"):
+        suite_lock.slot_count({}, tmp_path)
+    for bad in ("0", "-1", "two", "", "1.5", "1_0", "٢", "9"):
         with pytest.raises(ValueError, match="PSEUDOLIFE_SUITE_SLOTS"):
             suite_lock.slot_count({"PSEUDOLIFE_SUITE_SLOTS": bad}, tmp_path)
         (tmp_path / suite_lock.SLOTS_FILE).write_text(bad, encoding="utf-8")
@@ -662,6 +679,72 @@ def test_a_full_run_takes_a_second_slot_when_the_file_allows_two(tmp_path):
     (tmp_path / suite_lock.SLOTS_FILE).write_text("many", encoding="utf-8")
     with pytest.raises(pytest.UsageError, match="full-suite.slots"):
         suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+
+
+def _queue_for_session(tmp_path) -> tuple[threading.Thread, dict]:
+    """A full run queueing through take_for_session on a thread; returns the
+    thread and a dict that receives the HeldLock."""
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path),
+               "PSEUDOLIFE_SUITE_LOCK": "wait"}
+    result: dict = {}
+
+    def run():
+        result["held"] = suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + START_TIMEOUT
+    queue_dir = tmp_path / suite_lock.QUEUE_DIR
+    while not (queue_dir.is_dir() and any(queue_dir.iterdir())):
+        assert time.monotonic() < deadline, "the run never queued"
+        time.sleep(0.02)
+    return thread, result
+
+
+def test_a_raised_slot_count_reaches_runs_already_queued(tmp_path):
+    # With a backlog queued under 1, raising the file to 2 must open the
+    # second slot to them, not only to later arrivals.
+    slots_file = tmp_path / suite_lock.SLOTS_FILE
+    slots_file.write_text("1", encoding="utf-8")
+    holder = suite_lock.acquire(tmp_path, "fail", worktree="holder")
+    thread, result = None, {}
+    try:
+        thread, result = _queue_for_session(tmp_path)
+        slots_file.write_text("2", encoding="utf-8")
+        thread.join(10)   # the next poll, 2 s apart, sees the new count
+        assert "held" in result, "the queued run never took the second slot"
+        assert result["held"].slot == 1
+        suite_lock.release(result["held"])
+    finally:
+        suite_lock.release(holder)
+        if thread is not None:
+            thread.join(START_TIMEOUT)
+        if "held" in result and not result["held"].file.closed:
+            suite_lock.release(result["held"])
+
+
+def test_a_lowered_slot_count_reaches_runs_already_queued(tmp_path):
+    slots_file = tmp_path / suite_lock.SLOTS_FILE
+    slots_file.write_text("2", encoding="utf-8")
+    holders = [suite_lock.acquire(tmp_path, "fail", worktree=f"holder{i}", slots=2)
+               for i in range(2)]
+    thread = None
+    try:
+        thread, result = _queue_for_session(tmp_path)
+        slots_file.write_text("1", encoding="utf-8")
+        time.sleep(2.5)                       # a poll under the new count
+        suite_lock.release(holders.pop())     # slot 1 frees: no longer ours
+        thread.join(5)
+        assert "held" not in result, "the queued run took a slot the count dropped"
+        suite_lock.release(holders.pop())     # slot 0 frees
+        thread.join(10)
+        assert result["held"].slot == 0
+        suite_lock.release(result["held"])
+    finally:
+        for holder in holders:
+            suite_lock.release(holder)
+        if thread is not None:
+            thread.join(START_TIMEOUT)
 
 
 # --- the conftest wiring, end to end ----------------------------------------
