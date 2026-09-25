@@ -216,7 +216,10 @@ class Daemon:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         if self.token:
             req.add_header("Authorization", f"Bearer {self.token}")
-        with urllib.request.urlopen(req, timeout=120) as r:
+        # Plain urlopen follows a 3xx and copies Authorization to the new host.
+        from pseudolife_memory.shim import _NoRedirectHandler
+        opener = urllib.request.build_opener(_NoRedirectHandler)
+        with opener.open(req, timeout=120) as r:
             return json.loads(r.read().decode("utf-8"))
 
 
