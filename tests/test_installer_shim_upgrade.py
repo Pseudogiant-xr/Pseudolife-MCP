@@ -70,7 +70,7 @@ def _bash_process_table(table: str | Rows | None) -> str:
         return "shim_process_table() { return 2; }"
     if table == "unreadable":
         return "shim_process_table() { return 1; }"
-    places = {"launcher": '"$installed_bin/pseudolife-mcp"',
+    places = {"launcher": '"$installed_bin/pseudolife-mcp.exe"',
               "venv": '"$pipx_home/venvs/pseudolife-mcp"',
               "beside": '"$pipx_home/venvs/pseudolife-mcp-old"'}
     rows = "\n".join(
@@ -147,8 +147,11 @@ if [ -n '{home}' ]; then
     export FAKE_PIPX_HOME="$pipx_home"
 fi
 if [ '{"yes" if existing else "no"}' = yes ]; then
-    printf '#!/bin/sh\\n' >"$installed_bin/pseudolife-mcp"
-    chmod +x "$installed_bin/pseudolife-mcp"
+    # pip and pipx create only pseudolife-mcp.exe on Windows. Git Bash's
+    # extensionless probe in resolve_installed_shim still finds it, and
+    # cygpath -w gives the .exe back, which is what the process table shows.
+    printf '#!/bin/sh\\n' >"$installed_bin/pseudolife-mcp.exe"
+    chmod +x "$installed_bin/pseudolife-mcp.exe"
     mkdir -p "$pipx_home/venvs/pseudolife-mcp/Scripts" "$pipx_home/venvs/pseudolife-mcp-old/Scripts"
 fi
 repo='{repo}'
