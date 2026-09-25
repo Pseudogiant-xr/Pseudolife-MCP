@@ -225,6 +225,59 @@ Acknowledging some messages while a waiter is armed, and leaving others pending,
 rewrites the digest and fires once, the same way the tool-result hint
 re-delivers a changed digest.
 
+### Leases: `pseudolife-mcp lease`
+
+Awareness and mail say who is working on what; they do not stop two agents
+starting the same GPU job or full test suite at once. A lease does: a named,
+expiring hold on a shared resource, taken around any command.
+
+```sh
+pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]
+pseudolife-mcp lease list [NAME] [--json]
+```
+
+What excludes is an OS file lock, `~/.pseudolife-mcp/locks/lease-<NAME>.lock`
+(`PSEUDOLIFE_LEASE_LOCK_DIR` overrides the directory; characters outside
+`A-Za-z0-9._-` become `_`, plus a short hash of the name). The OS releases it
+the moment the holding process exits or dies, so a crash leaves nothing stale.
+With a bearer token (`PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`) and
+a daemon whose board is on, the board mirrors the lock: the run registers a
+short-lived address (retired an hour after its last activity), queues for
+`NAME` in arrival order, reports its position and the holder on stderr about
+once a minute, then takes the OS lock and runs the command, renewing the board
+lease every third of `--ttl` (default 120 s, from 30 s to a day). When a lease
+frees, the head of the queue has 300 s to take it before the board passes it
+on. `--expect` sets the expected end the board shows, marked stale once past;
+`--purpose` says what the lease is for.
+
+Without a token, with the daemon unreachable, the board off or refused for this
+bearer, or with `--no-board`, the run says once why and waits on the OS lock
+alone: polled every 2 s, not in arrival order. The board never stops a command
+from running: a board that keeps failing for two minutes is dropped the same
+way, and a renewal that finds the lease lost warns once while the command
+continues under the OS lock. A lock held by something the board does not show
+(a `--no-board` run) delays a board holder until it is freed.
+
+The command inherits the terminal and the environment, plus
+`PSEUDOLIFE_LEASES_HELD` (comma-separated names, appended to any inherited
+value). Exit codes: the command's own; `75` when `--timeout` (`90`, `90s`,
+`20m`, `2h`) expired before the lease was held, and the command did not run;
+`130` on Ctrl-C, which terminates the command before releasing; `2` a usage
+error; `71` an unusable lock file; `126` or `127` a command that cannot start
+or is not found. The `lease` process holds the lock, not the command: kill it
+outright (SIGKILL, Task Manager) and the lock goes while the command may run
+on. Do not nest a run inside another of the same name; the inner one waits for
+the outer until its `--timeout`. On a case-insensitive filesystem, names that
+differ only in case share one lock file, which can only make one wait for the
+other.
+
+`lease list` shows each board lease (holder, purpose, age, expected end,
+queue) beside the local lock files, each probed held or free, and whether the
+test suite's own lock (`full-suite.lock`, which leases never take) is held.
+Without the board it shows the local state with a one-line note. The instance
+credential stays inside the `lease` process: it is never printed or passed to
+the command.
+
 ### Codex CLI and desktop
 
 Use the ordinary stdio shim with `PSEUDOLIFE_WRITER_ID=codex`. Codex supplies
