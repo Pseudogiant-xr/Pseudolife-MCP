@@ -28,11 +28,13 @@ exactly; they exist because each one was violated at least once.
    `llms-full.txt`). The v30 bump found the last two the hard way.
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
-   without it, which is not a pass. Two exemptions, both spelled out under
+   without it, which is not a pass. Three exemptions, spelled out under
    "One full suite at a time per machine" below: **docs-only changes** run
-   the doc guards instead, and **merging origin/master into a branch that
-   already passed**, with no conflict in code resolved by hand, runs the
-   tests covering the overlap and lets CI gate it.
+   the doc guards instead, **test-only changes** run the touched test
+   files, and **merging origin/master into a branch that already passed**,
+   with no conflict in code resolved by hand, runs the tests covering the
+   overlap; CI gates all three. A queued local suite doesn't hold the PR
+   back: open it while you wait, and merge only after the suite passes.
 4. **Deploy only via `ops/update.ps1`** (backup → rollback tag → daemon-only
    `--no-deps` rebuild → health). Never `docker compose down -v` — the bank
    volumes are external precisely so that this is survivable, but don't test it.
@@ -132,6 +134,22 @@ took 143 CUDA OOMs.
   (or push a new commit) and wait for that run to go green. Re-running the
   old run doesn't help: it reuses the original merge commit. If any conflict
   in code was resolved by hand, the local full suite is still required.
+- **Test-only changes skip the local full suite** (maintainer decision
+  2026-09-25): the diff touches only `tests/test_*.py` and test data or
+  fixture files (non-code files such as `tests/fixtures/*.json`), with or
+  without docs-only files beside them. Run the touched test files locally,
+  watched RED as always (plus what the docs-only bullet runs, if docs
+  changed too), and let CI's full PostgreSQL job gate it, pressing
+  **Update branch** if master moves before merge. NOT test-only:
+  `tests/conftest.py`, `tests/pg_fixtures.py`, `tests/suite_lock.py` or any
+  other shared helper under `tests/` (a non-`test_` `.py` that test files
+  import), or anything outside `tests/` that is not docs-only. A test file
+  can still break other test files (module-level state, a fixture that
+  leaks a service), which only CI's full job sees, so it must be green.
+- **Open the PR while the local full suite is queued** (maintainer decision
+  2026-09-25): push and open it so CI and review run in parallel. The body
+  says "local full suite: queued" and is updated with the result; merge
+  only after the local suite has passed.
 
 ## Review discipline
 
