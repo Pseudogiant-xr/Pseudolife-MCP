@@ -34,17 +34,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   excerpt of each and a one-line reminder of the memory loop. Quiet turns
   add nothing. The hook keeps its cursor (the daemon's clock) in
   `<digest dir>/<sha256(session id)>.mark` and saves the next one only after
-  printing, so a timed-out request is asked again next turn. The first
-  turn of a session is a baseline. Mail keeps its coordination digest.
+  printing, so a timed-out request is asked again next turn; a cursor it
+  cannot save keeps it silent rather than repeating the note. A session's
+  first turn counts from the start of its episode, so what landed between
+  SessionStart and the first prompt is reported. Mail keeps its
+  coordination digest.
   `user-prompt-submit.sh` sources `session-start.sh memory-changes`, so the
   connection checks stay in one script; `lifecycle.ps1` does the same for
   Codex on Windows. The `ops/install-hook.*` fallback keeps the fixed line,
   and `ops/setup-codex-hooks.py` now reads it from `install-hook.ps1`.
 - New `MemoryService.memory_changes_since(since, session_key=)`: counts and
   the newest of each kind, scanned under the service lock that every entry
-  and lesson write holds while stamping, so its `now` is a safe next cursor.
-  A lesson confirmation is not new; a superseded status note is not
-  counted. Read-only; no schema change.
+  and lesson write holds while stamping, so its `now` (rounded down) is a
+  safe next cursor. A lesson confirmation is not new; a superseded status
+  note is not counted. Known limits: rows restored with their original
+  stamps (recovery, reinstatement) or written while the wall clock is
+  stepped back can land behind a cursor; a status note stored without
+  `episode=` after `/clear` can be attributed to the previous session and
+  reported back to its own writer. Read-only; no schema change.
+  `session_briefing(max_unsure=0)` no longer reads the graph digest.
 - Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
   (or `ops/update.sh --all`) and restart clients. Codex may ask to re-approve
   the changed hooks in `/hooks`. An old plugin against a new daemon keeps its

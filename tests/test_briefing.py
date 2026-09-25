@@ -123,6 +123,12 @@ def test_session_start_hook_leaves_out_the_unsure_section(tmp_path):
     assert "## What your memory is unsure about" in full
     assert "probe-slot-a" in full and "Which value of" in full
 
+    # Nothing asked for, nothing read: the digest is not fetched to be dropped.
+    def unread():
+        raise AssertionError("graph_digest read for max_unsure=0")
+    svc.graph_digest = unread
+    assert "keep the lesson" in svc.session_briefing(max_unsure=0)["markdown"]
+
 
 def test_fetch_markdown_parses_api_response(monkeypatch):
     from pseudolife_memory import briefing_cli as bc

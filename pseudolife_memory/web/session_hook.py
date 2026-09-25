@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -584,7 +585,7 @@ def _excerpt(text: Any) -> str:
     return line if len(line) <= _EXCERPT_CHARS else line[:_EXCERPT_CHARS - 1] + "…"
 
 
-def _render_memory_changes(changes: dict[str, Any]) -> str:
+def _render_memory_changes(changes: dict[str, Any], first_turn: bool) -> str:
     lines = []
     count = int(changes.get("status_count") or 0)
     if count:
@@ -603,7 +604,9 @@ def _render_memory_changes(changes: dict[str, Any]) -> str:
             f"{_excerpt(newest.get('lesson'))}. More: `memory_lesson_search`.")
     if not lines:
         return ""
-    return "\n".join(["Memory changed since your last turn:", *lines, MEMORY_CHANGES_TAIL])
+    head = ("Memory changed since this session started:" if first_turn
+            else "Memory changed since your last turn:")
+    return "\n".join([head, *lines, MEMORY_CHANGES_TAIL])
 
 
 def hook_memory_changes(service: Any, session_id: str | None,
@@ -613,20 +616,23 @@ def hook_memory_changes(service: Any, session_id: str | None,
 
     The hook keeps the cursor and saves the next one only after printing,
     so a request it gave up on is asked again next turn (the note arrives
-    at least once). A missing or malformed ``since``, or one later than
-    this daemon's clock (a clock step, a forged value), is a baseline: a
-    cursor and no note. The first turn of a session is a baseline too; its
-    startup briefing has just shown the lessons. Never raises: on any
-    failure the body is empty, and the hook prints nothing and keeps its
-    cursor."""
+    at least once). A session's first turn has no ``since``: the daemon
+    counts from the session's start when it can date it, and otherwise
+    answers a baseline (a cursor, no note). A malformed ``since``, or one
+    later than this daemon's clock (a clock step, a forged value), is a
+    baseline too. The cursor rounds down: rounding up could step past a
+    write stamped in the last half microsecond, rounding down at worst
+    reports one again. Never raises: on any failure the body is empty,
+    and the hook prints nothing and keeps its cursor."""
     try:
         start = float(since) if since and _CURSOR_SHAPE.fullmatch(since) else None
         changes = service.memory_changes_since(start, session_key=session_id or None)
         now = float(changes["now"])
-        cursor = f"{now:.6f}\n"
-        if start is None or start > now:
+        cursor = f"{math.floor(now * 1_000_000) / 1_000_000:.6f}\n"
+        scanned = changes.get("since")
+        if scanned is None or float(scanned) > now:
             return cursor
-        note = _render_memory_changes(changes)
+        note = _render_memory_changes(changes, first_turn=start is None)
         return cursor + (note + "\n" if note else "")
     except Exception:  # noqa: BLE001 — never break a turn
         logger.exception("memory-change note failed for session_id=%r", session_id)

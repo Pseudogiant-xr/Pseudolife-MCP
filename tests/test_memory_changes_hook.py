@@ -89,11 +89,29 @@ def test_a_confirmed_lesson_or_superseded_status_is_not_new(pristine_service):
     assert out["lesson_count"] == 0 and out["status_count"] == 0
 
 
-def test_no_since_is_a_baseline_without_a_scan(pristine_service):
+def test_no_since_for_an_unknown_session_is_a_baseline_without_a_scan(pristine_service):
     before = time.time()
-    out = pristine_service.memory_changes_since(None, session_key="s")
-    assert out["now"] >= before
+    out = pristine_service.memory_changes_since(None, session_key="never-registered")
+    assert out["now"] >= before and out["since"] is None
     assert out["status_count"] == 0 and out["lesson_count"] == 0
+
+
+def test_a_registered_sessions_first_turn_counts_from_its_session_start(pristine_service):
+    """The first prompt has no cursor yet. Counting from the moment the
+    session's episode opened keeps what landed between SessionStart (whose
+    briefing the session saw) and that prompt (2026-09-26 review)."""
+    svc = pristine_service
+    other = svc.episode_start_session("sess-early", "session - early")["id"][:12]
+    svc.store("status note from before this session started", source="status", episode=other)
+    time.sleep(0.05)
+    started = svc.episode_start_session("sess-new", "session - new")
+    time.sleep(0.05)
+    svc.store("status note after SessionStart, before the first prompt",
+              source="status", episode=other)
+    out = svc.memory_changes_since(None, session_key="sess-new")
+    assert out["since"] == pytest.approx(started["started_at"])
+    assert out["status_count"] == 1
+    assert out["status"][0]["text"] == "status note after SessionStart, before the first prompt"
 
 
 # ── rendering: cursor line, then a note only on change ─────────────────────
@@ -103,7 +121,7 @@ def _service(**changes):
 
     def memory_changes_since(since, *, session_key=None):
         calls.append((since, session_key))
-        base = {"now": 2000.5, "status_count": 0, "status": [],
+        base = {"now": 2000.5, "since": since, "status_count": 0, "status": [],
                 "lesson_count": 0, "lessons": []}
         return {**base, **changes}
     return SimpleNamespace(memory_changes_since=memory_changes_since), calls
@@ -112,12 +130,28 @@ def _service(**changes):
 @pytest.mark.parametrize("since", [None, "", "abc", "nan", "inf", "-1", "1e3",
                                    "1" * 13, "12.3.4", "3000.25"])
 def test_missing_invalid_or_future_since_answers_only_a_cursor(since):
-    """First turn, a mangled mark file, or a cursor from the future (a clock
-    stepped back, a forged value): baseline, nothing printed."""
+    """A mangled mark file, a cursor from the future (a clock stepped back,
+    a forged value), or a first turn the daemon cannot date: baseline,
+    nothing printed."""
     svc, calls = _service(status_count=3, status=[{"text": "x"}])
     assert hook_memory_changes(svc, "s1", since) == "2000.500000\n"
     expected = 3000.25 if since == "3000.25" else None
     assert calls == [(expected, "s1")]
+
+
+def test_first_turn_dated_by_the_daemon_reports_since_session_start():
+    svc, _ = _service(since=1500.0, lesson_count=1,
+                      lessons=[{"lesson": "new", "polarity": "+"}])
+    token, note = hook_memory_changes(svc, "s1", None).split("\n", 1)
+    assert token == "2000.500000"
+    assert note.startswith("Memory changed since this session started:\n- 1 new lesson")
+
+
+def test_the_cursor_rounds_down_never_past_a_write():
+    """Rounding up could step past an entry stamped within the last half
+    microsecond; rounding down at worst reports an item again."""
+    svc, _ = _service(now=1234.5678999)
+    assert hook_memory_changes(svc, "s1", "1000") == "1234.567899\n"
 
 
 def test_quiet_turn_answers_only_the_next_cursor():
@@ -305,6 +339,28 @@ def test_prompt_hook_keeps_its_cursor_on_an_empty_or_malformed_answer(tmp_path, 
     assert out == ""
     assert daemon.queries[0][1]["since"] == ["100.500000"]
     assert _mark(digest_dir, "sess-1").read_text().strip() == "100.500000"
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+def test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor(tmp_path, hook):
+    """A cursor that can be read but not written would repeat the same note
+    on every turn; better to stay silent (2026-09-26 review)."""
+    import os
+    import stat
+    digest_dir = tmp_path / "digests"
+    digest_dir.mkdir()
+    mark = _mark(digest_dir, "sess-1")
+    mark.write_text("100.500000\n")
+    os.chmod(mark, stat.S_IREAD)
+    daemon = _Daemon([b"200.000000\nMemory changed since your last turn:\n- x\n"])
+    try:
+        out = _run_prompt_hook(hook, daemon.url, digest_dir,
+                               json.dumps({"session_id": "sess-1"}), tmp_path)
+    finally:
+        daemon.close()
+        os.chmod(mark, stat.S_IREAD | stat.S_IWRITE)
+    assert out == ""
+    assert mark.read_text().strip() == "100.500000"
 
 
 @pytest.mark.parametrize("hook", ["bash", "native"])

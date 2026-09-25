@@ -154,15 +154,19 @@ if [ "${1:-}" = memory-changes ]; then
     [ "${#TOKEN}" -le 22 ] || exit 0
     NOTE=""
     case "$BODY" in *$'\n'*) NOTE=${BODY#*$'\n'} ;; esac
-    [ -z "$NOTE" ] || printf '%s\n' "$NOTE"
     if [ ! -d "$MARK_DIR" ]; then
         mkdir -p "$MARK_DIR" 2>/dev/null && chmod 700 "$MARK_DIR" 2>/dev/null
     fi
+    # A cursor that cannot be saved would repeat the same note every turn:
+    # stay silent instead.
+    [ -d "$MARK_DIR" ] && [ -w "$MARK_DIR" ] && [ ! -L "$MARK" ] || exit 0
+    [ ! -e "$MARK" ] || [ -w "$MARK" ] || exit 0
     if [ ! -f "$MARK" ]; then
         # A session's first note: marks of sessions gone a month go too.
         find "$MARK_DIR" -maxdepth 1 -type f -name '*.mark' -mtime +30 -delete 2>/dev/null
     fi
-    [ -L "$MARK" ] || printf '%s\n' "$TOKEN" 2>/dev/null > "$MARK"
+    [ -z "$NOTE" ] || printf '%s\n' "$NOTE"
+    printf '%s\n' "$TOKEN" 2>/dev/null > "$MARK"
     exit 0
 fi
 # The separate memory-policy hook (hooks.json runs this script again with

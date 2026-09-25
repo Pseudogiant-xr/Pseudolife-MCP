@@ -8271,7 +8271,8 @@ class MemoryService(DreamOps):
         that output. Read-only; no LLM. Each sub-call takes the lock itself, so this
         orchestrator must not hold it."""
         from pseudolife_memory.memory.briefing import format_briefing, select_lessons
-        dg = self.graph_digest()
+        # The SessionStart hook asks for no unsure items: skip the read.
+        dg = self.graph_digest() if max_unsure > 0 else {}
         surprises: list[dict] = []
         questions: list[dict] = []
         if dg.get("available"):
@@ -8338,23 +8339,36 @@ class MemoryService(DreamOps):
         write holds while it stamps and publishes (dream synthesis swaps its
         staged store in inside the same hold, and a band relocation keeps
         the entry's timestamp), so a write this scan missed carries a later
-        stamp: ``now`` is the caller's next ``since``. One known miss:
-        lessons restored by the synthesis commit-recovery path keep the
-        stamps of a batch a scan may already have passed; they still reach
+        stamp: ``now`` is the caller's next ``since``. Known misses: paths
+        that restore rows with their original stamps (lesson-synthesis
+        commit recovery, entry reinstatement, correction recovery) can land
+        behind a cursor a scan already passed, and a wall clock stepped
+        backwards hides writes until it catches up. All of them still reach
         search and the next startup briefing.
 
-        With ``since`` None nothing is scanned; only ``now`` (a baseline)
-        comes back. Counts cover every change, ``status`` / ``lessons`` at
-        most ``limit`` of each. Read-only."""
-        out: dict[str, Any] = {"now": 0.0, "status_count": 0, "status": [],
-                               "lesson_count": 0, "lessons": []}
+        With ``since`` None (a session's first turn) the scan starts where
+        ``session_key``'s open root episode started, so what landed between
+        SessionStart and the first prompt is reported; for a key with no
+        open episode nothing is scanned and only ``now`` comes back (a
+        baseline). ``since`` in the result is the start actually used, None
+        for a baseline. Counts cover every change, ``status`` / ``lessons``
+        at most ``limit`` of each. Read-only."""
+        out: dict[str, Any] = {"now": 0.0, "since": since, "status_count": 0,
+                               "status": [], "lesson_count": 0, "lessons": []}
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
             out["now"] = time.time()
+            episodes = self._cms.episodes.episodes
+            if since is None and session_key:
+                ep = self._cms.episodes.open_leaf_for(session_key)
+                seen: set[str] = set()
+                while ep is not None and ep.parent_id in episodes and ep.id not in seen:
+                    seen.add(ep.id)
+                    ep = episodes[ep.parent_id]
+                since = out["since"] = ep.started_at if ep is not None else None
             if since is None:
                 return out
-            episodes = self._cms.episodes.episodes
             status = []
             for band in self._cms.bands:
                 for en in band.entries:

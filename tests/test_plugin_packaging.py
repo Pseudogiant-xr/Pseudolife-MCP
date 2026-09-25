@@ -383,7 +383,7 @@ def test_instruction_blocks_reference_only_core_visible_tools():
     # every kind of change so each line's tool names are checked.
     from types import SimpleNamespace
     from pseudolife_memory.web.session_hook import hook_memory_changes
-    changes = {"now": 2.0, "status_count": 1, "status": [{"text": "s"}],
+    changes = {"now": 2.0, "since": 1.0, "status_count": 1, "status": [{"text": "s"}],
                "lesson_count": 1, "lessons": [{"lesson": "l", "polarity": "+"}]}
     note = hook_memory_changes(SimpleNamespace(
         memory_changes_since=lambda since, session_key=None: changes), "s", "1")

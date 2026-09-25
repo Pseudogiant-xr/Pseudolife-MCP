@@ -209,7 +209,7 @@ try {
 
 # The per-turn memory-change note (UserPromptSubmit), as in session-start.sh
 # memory-changes: no request without a safe session id.
-if ($Event -eq 'UserPromptSubmit' -and $sessionId -cnotmatch '^[A-Za-z0-9._-]{1,128}$') { exit 0 }
+if ($Event -eq 'UserPromptSubmit' -and $sessionId -cnotmatch '^[A-Za-z0-9._-]{1,128}\z') { exit 0 }
 
 if ($Event -eq 'CoordinationPrompt') {
     try {
@@ -299,14 +299,13 @@ try {
             $since = ([IO.File]::ReadAllText($mark)).Trim()
         }
         $query = '?session_id=' + [Uri]::EscapeDataString($sessionId)
-        if ($since -cmatch '^[0-9.]{1,22}$') { $query += '&since=' + $since }
+        if ($since -cmatch '^[0-9.]{1,22}\z') { $query += '&since=' + $since }
         $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/memory-changes$query" -Headers $headers -TimeoutSec 2 -MaximumRedirection 0
         $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
         $lines = $text -split "`n", 2
         $token = $lines[0].TrimEnd("`r")
-        if ($token -cnotmatch '^[0-9.]{1,22}$') { exit 0 }
+        if ($token -cnotmatch '^[0-9.]{1,22}\z') { exit 0 }
         $note = if ($lines.Count -gt 1) { $lines[1].TrimEnd("`r", "`n") } else { '' }
-        if ($note) { Write-Context $note }
         $markDir = Split-Path -Parent $mark
         if (-not (Test-Path -LiteralPath $markDir -PathType Container)) {
             New-Item -ItemType Directory -Path $markDir -Force | Out-Null
@@ -319,7 +318,16 @@ try {
         } elseif ((Get-Item -LiteralPath $mark -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
             exit 0
         }
-        [IO.File]::WriteAllText($mark, "$token`n")
+        # Open the cursor for writing before printing: one that cannot be
+        # saved (read-only, refused) would repeat the same note every turn,
+        # so any refusal throws into the silent catch first.
+        $stream = [IO.File]::Open($mark, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::Write)
+        try {
+            if ($note) { Write-Context $note }
+            $bytes = [Text.Encoding]::ASCII.GetBytes("$token`n")
+            $stream.SetLength(0)
+            $stream.Write($bytes, 0, $bytes.Length)
+        } finally { $stream.Dispose() }
         exit 0
     }
     $payload = $rawInput | ConvertFrom-Json
