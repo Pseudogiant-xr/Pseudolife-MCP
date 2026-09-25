@@ -153,7 +153,9 @@ of it:
   answers without it is refused (exit 4, nothing written) with the
   upgrade named — `pipx upgrade pseudolife-mcp`, or `pipx install --force .` from
   the checkout for a change not yet released — and so is a shim from
-  before `--help` existed (it answers "unknown mode"). A probe that yields
+  before `--help` existed (it answers "unknown mode"). On Windows, run that
+  upgrade with every session using the shim closed (Desktop fully quit
+  from the tray), or it can leave the shim half-removed. A probe that yields
   no evidence (missing, not executable, timeout, any other non-zero exit,
   exit 0 with no output) is not blocking: the run proceeds and says the
   check did not happen, so a clean exit 0 from the registrar is proof only
@@ -366,6 +368,9 @@ upgrade the client or configure that entry manually before using the shim.
    `-m pip install --upgrade "pseudolife-mcp[lite]"`; for a source checkout,
    reinstall the intended checkout with `-m pip install -e .` to refresh
    dependencies and editable metadata. Docker shim-only hosts omit `[lite]`.
+   On Windows, run either with every session using that shim closed
+   (Claude Desktop fully quit from the tray), or it can leave the shim
+   half-removed.
    Re-running the Docker installer preserves existing registrations; it does
    not repair a different interpreter already registered with Codex.
 4. Reconnect and ask for a real memory search and lesson search. Confirm the
