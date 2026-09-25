@@ -4411,14 +4411,16 @@ whose name contains `secret`, `token`, `password`, `passwd`, `credential`,
 `X-PL-Agent-Key` or `private_key`) given a generated-looking value after `:`,
 `=` or, for a `--flag`, a space. A value is split at `,`, `:` and `=`, so each
 token in a principal map (`name:token,name:token`) counts on its own, and a
-piece counts when it is 20 or more characters of letters and digits, with
-lower case, upper case and digits all present when it is shorter than 32.
+piece counts when it is 20 or more characters of letters and digits with
+lower case, upper case and digits all present, or 32 or more in one unbroken
+run (no `_` or `-`, which word-joined identifiers have).
 Where a prefix also starts ordinary identifiers (`ghs_`, `github_pat_`,
 `sk-`), the rest must look generated too. Not refused: ordinary prose about
 tokens and secrets; git SHAs, digests (whole or truncated), UUIDs, message and
 agent ids; anything with a `/` after a key (paths, branches, `owner/repo`);
-names, words and counts; placeholders (`<token>`, `$VAR`, `${VAR}`). Lower-case
-passwords shorter than 32 characters get through; this is a net for common
+names, words, word-joined identifiers and counts; placeholders (`<token>`,
+`$VAR`, `${VAR}`). Single-case passwords shorter than 32 characters get
+through; this is a net for common
 shapes, not a guarantee, and a v46 body it misses can still be redacted. Over
 the 2026-09-23/24 fifteen-session trial's board export it refused none of the
 816 message bodies and request ids, the 25 statuses, or the labels, projects,

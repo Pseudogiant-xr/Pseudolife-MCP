@@ -331,10 +331,15 @@ def _has_digit(value: str) -> bool:
 
 def _random_token(value: str) -> bool:
     """A run that looks generated rather than written: letters and digits,
-    and under 32 characters all three of lower case, upper case and digits.
-    Words, names (``PSEUDOLIFE_MCP_TOKEN_FILE``, camelCase), branch-like
-    ``name-2026`` strings and counts are not."""
-    return _letter_and_digit(value) and (len(value) >= 32 or _three_classes(value))
+    and either all three of lower case, upper case and digits, or 32 or more
+    characters in one unbroken run (no ``_`` or ``-``: generated single-case
+    keys have none, word-joined identifiers such as
+    ``created_at_2026_09_26_then_agent_id`` do). Words, names
+    (``PSEUDOLIFE_MCP_TOKEN_FILE``, camelCase), branch-like ``name-2026``
+    strings and counts are not."""
+    return _letter_and_digit(value) and (
+        _three_classes(value)
+        or (len(value) >= 32 and "_" not in value and "-" not in value))
 
 
 def _dsn_password(value: str) -> bool:

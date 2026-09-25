@@ -57,7 +57,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fifteen-session trial's board export it refused none of the 816 message
   bodies and request ids, the 25 statuses, or the labels, projects, tasks and
   episodes of its 26 agents. It is a net for common shapes, not a guarantee:
-  lower-case passwords under 32 characters get through.
+  single-case passwords under 32 characters get through.
 - Limits: the send event keeps the body's sha256, and the mailbox row's
   request fingerprint (kept seven days) is a sha256 over the body too, so a
   short or guessable body can still be confirmed by someone who guesses it

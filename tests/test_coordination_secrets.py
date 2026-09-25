@@ -91,6 +91,8 @@ SECRETS = [
     ("key_value", f"apiKey={URLSAFE}"),
     ("key_value", f"passwd={URLSAFE}"),
     ("key_value", f"credentials:\t{URLSAFE}"),
+    # A long single-case generated key still counts when it is one run.
+    ("key_value", "api_key=" + j("k3v9x2m7q8w1z5r4", "t6y0u2i8o4p7a1s3", "d5f9")),
 ]
 
 ORDINARY = [
@@ -150,6 +152,12 @@ ORDINARY = [
     j("github", "_pat_", "rotation_2026_q3_followup_note"),
     "author: Pseudogiant-xr",
     "cache_key=memory_agents_2026_09_26_roster",
+    # Long word-joined identifiers after a key-named key (found 2026-09-26
+    # after the key names were widened to key/auth/bearer).
+    "cache_key=memory_agents_2026_09_26_roster_long_version",
+    "sort_key: created_at_2026_09_26_then_agent_id_asc_v2",
+    "idempotency_key=send-2026-09-26-relay-6-retry-3-of-5",
+    "keyboard=us-intl-2026-layout-with-dead-keys",
     "set PSEUDOLIFE_MCP_TOKENS=editor:<token>,reviewer:<token>",
     "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>",
     "Authorization: Bearer $PSEUDOLIFE_MCP_TOKEN",
