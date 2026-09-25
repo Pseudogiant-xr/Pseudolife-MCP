@@ -9,11 +9,11 @@ replays the LOGGED served lists under a candidate policy and answers one
 question: what share of the hits agents actually used would the policy
 still have served, and at what cost in rows and entry-text chars?
 
-It is a pure log replay: no model, no daemon, no restored bank, and
-nothing is re-ranked. A policy can only REMOVE rows from what was served —
-a top_k cut, a fused-score floor, a source exclusion. That makes it the
-gate for PROJECTION-side serving changes (MCP defaults, payload shape,
-default-search exclusions), which no other instrument sees:
+It is a pure log replay: no model, no daemon, no restored bank. A
+policy is a narrower default ``top_k``, a fused-score floor or a source
+exclusion. That makes it the gate for PROJECTION-side serving changes (MCP
+defaults, payload shape, default-search exclusions), which no other
+instrument sees:
 
 * ``evals/regression_gate.ps1`` rebuilds contexts from bank dumps and
   judges answers; by its own header it does NOT exercise CMS candidate
@@ -21,6 +21,34 @@ default-search exclusions), which no other instrument sees:
 * LongMemEval / BEAM call ``svc.search`` and ``svc.cortex_search``
   directly with their own ``top_k`` (``tests/test_agent_payload_budget.py``
   pins that), so an MCP default can never move them.
+
+A narrower ``top_k`` is SIMULATED from the logged fusion inputs, not read
+off as a prefix of the wider list, because the wider search is not a
+superset in order. With the shipped shape (weighted-sum fusion, pool
+multiplier 1, reranker off) ``cms.retrieve`` takes the dense pool as the
+top ``top_k`` entries by COSINE, then applies the superseded (x0.55) and
+assistant (x0.85) multipliers and the BM25 boost, then sorts and cuts. So
+a width-8 list's first six rows can include an entry at cosine rank 7 that
+a width-6 search never pools, and a width-6 search can serve a superseded
+entry that width 8 pushed below its cut. ``simulate_width`` rebuilds the
+width-K list from each served row's logged ``components``: dense rows at
+cosine rank K or more leave the pool and come back only as a BM25-only
+injection (``weight x normalised``) when they had a lexical score;
+everything is re-sorted by score and cut to K (the slot pool's own cap at
+K cannot bind: a slot hit ranked past K has K slot hits above it). No
+row the wider search did not serve can enter the narrower list (at most
+8 - K entries leave the pool, and each unserved candidate had at least 8
+rows above it), so the log is sufficient, with two stated gaps:
+dense-pool members the wider search cut are not logged, which can
+understate a served row's cosine rank (``top_k=6 (pessimistic)`` bounds
+that by assuming every unlogged pool slot outranks every logged row), and
+a demoted entry could come back through the slot channel, which is not
+modelled. Searches logged under another shape fall back to the prefix and
+are counted. ``top_k=6 (prefix)`` is the 2026-09-23 review's method, kept
+for comparison. The artifact's ``width_simulation_check`` scores both
+methods against REAL narrower searches: the same query text (compared in
+SQL, never fetched) served at a wider and a narrower ``top_k`` in one
+session within ten minutes and under the same filters.
 
 What it cannot do, and what therefore still needs another instrument:
 
@@ -58,10 +86,15 @@ Agent-origin filter (every step is counted in the artifact):
 4. hand-set probe sessions (any session id that is not a client-issued
    32-hex or UUID id) are dropped;
 5. ``memory_recall`` fan-out: recall issues its searches back to back
-   under one session, so any run of ``--burst-min`` or more same-session
-   events with gaps of at most ``--burst-gap`` seconds is dropped whole.
-   Parallel agent searches can trip this too; the artifact counts them;
-6. the 2026-09-23 fresh-eyes review's own traffic (``REVIEW_2026_09_23``).
+   under one session, and never attaches the cortex block's served facts
+   (only the MCP ``memory_search`` handler does). An event inside a run of
+   ``--burst-min`` or more same-session events with gaps of at most
+   ``--burst-gap`` seconds is dropped when it carries no served facts; a
+   burst event WITH facts is a parallel ``memory_search`` (subagents share
+   their parent's MCP session) and is kept. Both counts are reported;
+6. the 2026-09-23 fresh-eyes review's own traffic (``REVIEW_2026_09_23``,
+   matched on id AND on the review's time window, so the ids cannot
+   silently drop events from another bank).
 
 PRIVACY: this is a public repository and real queries carry paths and
 names, so the SCRIPT is public but its inputs and per-query outputs stay
@@ -80,8 +113,8 @@ reads ``retrieval_events``, ``retrieval_uses`` and ``entries`` only (never
 Usage::
 
     set PSEUDOLIFE_METRICS_DSN=postgresql://pseudolife:<password>@127.0.0.1:5433/pseudolife_memory
-    python evals/serving_policy_replay.py --until 2026-09-25T03:30:00Z \\
-        --out evals/results/serving-policy-replay-20260925.json
+    python evals/serving_policy_replay.py --until 2026-09-25T02:00:00Z \\
+        --out evals/results/serving-policy-replay-20260925-r2.json
 
 The DSN follows ``evals/capture_metrics.py`` (``PSEUDOLIFE_METRICS_DSN``,
 defaulting to the stock local stack). Pass ``--until`` so a committed
@@ -119,9 +152,9 @@ WARMUP_QUERY = "warmup probe"
 
 # The MCP ``memory_search`` default ``top_k`` in force over the replayed
 # window. A logged 8 is the default OR an explicit 8 — indistinguishable.
-# The default became 6 on 2026-09-25 on this replay's evidence: a window
-# that starts after that change reaches the daemon must pass
-# ``--default-top-k 6``, and one that straddles it cannot be stratified.
+# If the MCP default ever changes, a window after the change must pass the
+# new value with ``--default-top-k``; a window that straddles it cannot be
+# stratified.
 DEFAULT_TOP_K = 8
 
 # memory_recall fan-out detector (the 2026-09-23 review's definition).
@@ -148,6 +181,9 @@ _CLIENT_SESSION = re.compile(
 REVIEW_2026_09_23: frozenset[int] = frozenset(
     set(range(3607, 3611)) | set(range(3612, 3669))
     | set(range(3670, 3701)) | {3702, 3703, 3706})
+# Every id above was written inside this window; an id outside it is some
+# other bank's event and is left alone.
+REVIEW_WINDOW = ("2026-09-23T05:00:00Z", "2026-09-23T06:40:00Z")
 
 # Rank bands for the rank-matched use tables.
 RANK_BANDS = (("r0-1", 0, 1), ("r2-3", 2, 3), ("r4+", 4, 10_000))
@@ -168,6 +204,8 @@ class Row:
     score: float | None        # the fused score as served
     superseded: bool           # superseded AT SERVE TIME (logged multiplier)
     dense: float | None = None  # bi-encoder cosine; None = not a dense hit
+    channel: str | None = None  # dense / slot / bm25 (logged components)
+    bm25: float | None = None   # normalised BM25; 0.0 = scored nothing
 
 
 @dataclass
@@ -183,6 +221,11 @@ class Event:
     # Scores of the cortex facts served above the entries (schema v34),
     # all of them at or above the guard in force (0.2 over this window).
     fact_scores: list[float] = field(default_factory=list)
+    # Retrieval shape logged in ``params`` — what ``simulate_width`` needs.
+    pool_size: int | None = None
+    bm25_weight: float | None = None   # None = BM25 did not run
+    bm25_min: float = 0.0
+    simulable: bool = False            # weighted_sum, x1 pool, no rerank
 
 
 @dataclass(frozen=True)
@@ -191,37 +234,97 @@ class EntryInfo:
     text_len: int
 
 
+WIDTH_METHODS = ("simulate", "pessimistic", "prefix")
+
+# Insertion order of the channels in ``cms.retrieve`` (band walk, slot
+# pool, BM25 injections): the stable sort's tie-break.
+_CHANNEL_ORDER = {"dense": 0, "slot": 1, "bm25": 2}
+
+
+def simulate_width(ev: Event, k: int, method: str = "simulate"
+                   ) -> tuple[list[Row], bool]:
+    """The rows a width-``k`` search would have served, rebuilt from a
+    wider logged search (module docstring). Returns ``(rows, simulated)``;
+    ``simulated`` is False when the event was not logged under the shipped
+    shape and the prefix was used instead."""
+    rows = list(ev.rows)
+    if ev.top_k is None or k >= ev.top_k:
+        return rows, True
+    if method == "prefix":
+        return rows[:k], True
+    if not ev.simulable or any(r.channel not in _CHANNEL_ORDER for r in rows):
+        return rows[:k], False
+    dense = sorted((r for r in rows if r.channel == "dense"),
+                   key=lambda r: (-(r.dense or 0.0), r.rank))
+    unlogged = 0
+    if method == "pessimistic" and ev.pool_size is not None:
+        unlogged = max(0, ev.pool_size - len(dense))
+    cos_rank = {r.entry_id: i + unlogged for i, r in enumerate(dense)}
+    slot_rank = {r.entry_id: i for i, r in enumerate(
+        sorted((r for r in rows if r.channel == "slot"),
+               key=lambda r: r.rank))}
+    pool: list[tuple[tuple, Row]] = []
+    for r in rows:
+        if r.channel == "dense" and cos_rank[r.entry_id] >= k:
+            # Out of the dense pool: back only as a BM25-only injection.
+            if (ev.bm25_weight is not None and r.bm25
+                    and r.bm25 >= ev.bm25_min):
+                demoted = Row(r.entry_id, r.rank, ev.bm25_weight * r.bm25,
+                              r.superseded, None, "bm25", r.bm25)
+                pool.append(((2, -r.bm25), demoted))
+            continue
+        if r.channel == "dense":
+            tie = (0, cos_rank[r.entry_id])
+        elif r.channel == "slot":
+            tie = (1, slot_rank[r.entry_id])
+        else:
+            tie = (2, -(r.bm25 or 0.0))
+        pool.append((tie, r))
+    pool.sort(key=lambda t: (-(t[1].score or 0.0), t[0]))
+    return [Row(r.entry_id, i, r.score, r.superseded, r.dense, r.channel,
+                r.bm25) for i, (_, r) in enumerate(pool[:k])], True
+
+
 @dataclass(frozen=True)
 class Policy:
-    """A projection-side serving policy. Every knob can only drop rows.
+    """A projection-side serving policy.
 
     ``top_k`` is a NEW DEFAULT: it applies to default-width events only
     (logged ``top_k == default_top_k``); explicit widths are the caller's
-    and stay as served. ``exclude_sources`` applies to events whose caller
-    passed no ``sources`` filter (a caller who asks for digests gets them).
-    ``min_score`` drops rows below a fused-score floor on every event.
+    and stay as served. ``width_method`` picks how the narrower list is
+    built (``simulate_width``). ``exclude_sources`` applies to events whose
+    caller passed no ``sources`` filter (a caller who asks for digests gets
+    them) and does not backfill. ``min_score`` drops rows below a
+    fused-score floor on every event.
     """
 
     name: str
     top_k: int | None = None
     exclude_sources: tuple[str, ...] = ()
     min_score: float | None = None
+    width_method: str = "simulate"
 
-    def keeps(self, ev: Event, row: Row, info: EntryInfo | None,
-              default_top_k: int) -> bool:
-        if (self.top_k is not None and ev.top_k == default_top_k
-                and row.rank >= self.top_k):
-            return False
-        if (self.exclude_sources and not ev.sources_filter
-                and info is not None and info.source in self.exclude_sources):
-            return False
-        if (self.min_score is not None and row.score is not None
-                and row.score < self.min_score):
-            return False
-        return True
+    def serve(self, ev: Event, entries: dict[int, EntryInfo],
+              default_top_k: int) -> tuple[list[Row], bool]:
+        """The rows this policy serves for ``ev``, and whether a width
+        change was simulated (False = fell back to the prefix)."""
+        rows, simulated = list(ev.rows), True
+        if self.top_k is not None and ev.top_k == default_top_k:
+            rows, simulated = simulate_width(ev, self.top_k,
+                                             self.width_method)
+        if self.exclude_sources and not ev.sources_filter:
+            rows = [r for r in rows
+                    if (entries.get(r.entry_id) is None
+                        or entries[r.entry_id].source
+                        not in self.exclude_sources)]
+        if self.min_score is not None:
+            rows = [r for r in rows
+                    if r.score is None or r.score >= self.min_score]
+        return rows, simulated
 
     def describe(self) -> dict[str, Any]:
         return {"top_k": self.top_k,
+                "width_method": self.width_method if self.top_k else None,
                 "exclude_sources": list(self.exclude_sources),
                 "min_score": self.min_score}
 
@@ -232,6 +335,8 @@ DEFAULT_POLICIES: tuple[Policy, ...] = (
     Policy("top_k=6", top_k=6),
     Policy("top_k=5", top_k=5),
     Policy("top_k=4", top_k=4),
+    Policy("top_k=6 (pessimistic)", top_k=6, width_method="pessimistic"),
+    Policy("top_k=6 (prefix)", top_k=6, width_method="prefix"),
     Policy("exclude_digest", exclude_sources=("digest",)),
     Policy("top_k=6+exclude_digest", top_k=6, exclude_sources=("digest",)),
     Policy("min_score=0.5", min_score=0.5),
@@ -302,16 +407,20 @@ def select_agent_events(events: list[Event], *, since: float,
 
     Bursts are detected over the whole windowed log, before the other
     filters, so a recall run is recognised even when a probe interleaves
-    with it."""
+    with it. A burst event that carries served facts is a parallel
+    ``memory_search``, not recall, and is kept (counted as
+    ``burst_kept_with_facts``)."""
     counts: dict[str, int] = {}
     window = [e for e in events
               if e.created_at >= since
               and (until is None or e.created_at < until)]
     counts["events_in_window"] = len(window)
     bursts = burst_ids(window, gap_s, min_size)
+    review_lo, review_hi = (parse_ts(t) for t in REVIEW_WINDOW)
     kept: list[Event] = []
     steps = Counter()
     labelled = Counter()
+    burst_kept = burst_kept_labelled = 0
     for e in window:
         if e.is_warmup:
             step = "dropped_warmup"
@@ -319,11 +428,15 @@ def select_agent_events(events: list[Event], *, since: float,
             step = "dropped_no_session"
         elif not is_client_session(e.session_id):
             step = "dropped_probe_session"
-        elif e.id in bursts:
+        elif e.id in bursts and not e.fact_scores:
             step = "dropped_recall_burst"
-        elif e.id in exclude_ids:
+        elif (e.id in exclude_ids
+              and review_lo <= e.created_at < review_hi):
             step = "dropped_review_2026_09_23"
         else:
+            if e.id in bursts:
+                burst_kept += 1
+                burst_kept_labelled += bool(e.used)
             kept.append(e)
             continue
         steps[step] += 1
@@ -335,6 +448,8 @@ def select_agent_events(events: list[Event], *, since: float,
         # How many LABELLED events each step removed: a filter that eats
         # labels is the one whose definition matters most.
         counts[f"{k}_labelled"] = labelled.get(k, 0)
+    counts["burst_kept_with_facts"] = burst_kept
+    counts["burst_kept_with_facts_labelled"] = burst_kept_labelled
     counts["agent_events"] = len(kept)
     return kept, counts
 
@@ -410,16 +525,19 @@ def policy_table(events: list[Event], entries: dict[int, EntryInfo],
     for pol in policies:
         used_tot = used_kept = rows_tot = rows_kept = 0
         chars_tot = chars_kept = rows_unknown_len = 0
-        affected = 0
+        affected = fallbacks = 0
         per_session: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
         for e in events:
-            dropped_any = False
+            served, simulated = pol.serve(e, entries, default_top_k)
+            fallbacks += not simulated
+            served_ids = {r.entry_id for r in served}
+            affected += [r.entry_id for r in served] != [
+                r.entry_id for r in e.rows]
+            rows_kept += len(served)
             for row in e.rows:
                 info = entries.get(row.entry_id)
-                keep = pol.keeps(e, row, info, default_top_k)
+                keep = row.entry_id in served_ids
                 rows_tot += 1
-                rows_kept += keep
-                dropped_any |= not keep
                 c = served_text_chars(info, text_cap)
                 if c is None:
                     rows_unknown_len += 1
@@ -432,7 +550,6 @@ def policy_table(events: list[Event], entries: dict[int, EntryInfo],
                     ps = per_session[_session_key(e)]
                     ps[0] += 1
                     ps[1] += keep
-            affected += dropped_any
         ci = wilson(used_kept, used_tot)
         boot = _bootstrap({k: tuple(v) for k, v in per_session.items()},
                           lambda t: _ratio(t[1], t[0]), reps, seed)
@@ -450,6 +567,7 @@ def policy_table(events: list[Event], entries: dict[int, EntryInfo],
             "entry_text_chars_kept_share": _r(_ratio(chars_kept, chars_tot)),
             "rows_without_length": rows_unknown_len,
             "events_changed": affected,
+            "events_prefix_fallback": fallbacks,
         })
     return out
 
@@ -709,10 +827,59 @@ def abstention_report(events: list[Event],
                 _r(max(p.fact_scores, default=0.0))
                 for p in probes if p.id in ABSENT_ANSWER_PROBES),
         },
+        "off_domain_probes": {
+            "found": sum(1 for p in probes if p.id in OFF_DOMAIN_PROBES),
+            "served_dense_cosine_range": [
+                _r(f(r.dense for p in probes if p.id in OFF_DOMAIN_PROBES
+                     for r in p.rows if r.dense is not None))
+                for f in (min, max)
+            ] if any(r.dense is not None for p in probes
+                     if p.id in OFF_DOMAIN_PROBES for r in p.rows) else None,
+        },
         "served_facts": len(fact_scores),
         "served_facts_below_0.65": sum(1 for f in fact_scores if f < 0.65),
         "served_facts_below_0.65_share": _r(_ratio(
             sum(1 for f in fact_scores if f < 0.65), len(fact_scores))),
+    }
+
+
+def simulation_check(pairs: list[tuple[Event, int, list[int]]]
+                     ) -> dict[str, Any]:
+    """Score ``simulate_width`` and the prefix against real narrower
+    searches. Each pair is (wide event, narrow top_k, the entry ids the
+    narrow search actually served)."""
+    c = Counter()
+    widths = Counter()
+    for ev, k, truth in pairs:
+        widths[f"{ev.top_k}->{k}"] += 1
+        sim, ok = simulate_width(ev, k, "simulate")
+        pre, _ = simulate_width(ev, k, "prefix")
+        s_ids, p_ids = [r.entry_id for r in sim], [r.entry_id for r in pre]
+        c["pairs"] += 1
+        c["simulated"] += ok
+        c["truth_rows"] += len(truth)
+        c["simulate_exact_set"] += set(s_ids) == set(truth)
+        c["prefix_exact_set"] += set(p_ids) == set(truth)
+        c["simulate_rows_matched"] += len(set(s_ids) & set(truth))
+        c["prefix_rows_matched"] += len(set(p_ids) & set(truth))
+        if set(s_ids) != set(p_ids):
+            c["methods_disagree"] += 1
+            c["disagree_simulate_exact"] += set(s_ids) == set(truth)
+            c["disagree_prefix_exact"] += set(p_ids) == set(truth)
+    n, rows = c["pairs"], c["truth_rows"]
+    return {
+        **{k: c[k] for k in (
+            "pairs", "simulated", "truth_rows", "simulate_exact_set",
+            "prefix_exact_set", "simulate_rows_matched",
+            "prefix_rows_matched", "methods_disagree",
+            "disagree_simulate_exact", "disagree_prefix_exact")},
+        "simulate_exact_set_share": _r(_ratio(c["simulate_exact_set"], n)),
+        "prefix_exact_set_share": _r(_ratio(c["prefix_exact_set"], n)),
+        "simulate_rows_matched_share": _r(_ratio(
+            c["simulate_rows_matched"], rows)),
+        "prefix_rows_matched_share": _r(_ratio(
+            c["prefix_rows_matched"], rows)),
+        "widths": dict(sorted(widths.items())),
     }
 
 
@@ -731,7 +898,9 @@ def build_report(events: list[Event], entries: dict[int, EntryInfo], *,
                  text_cap: int | None = None,
                  reps: int = 2000, seed: int = 20260925,
                  gap_s: float = BURST_GAP_S,
-                 min_size: int = BURST_MIN) -> dict[str, Any]:
+                 min_size: int = BURST_MIN,
+                 pairs: list[tuple[Event, int, list[int]]] | None = None,
+                 ) -> dict[str, Any]:
     """Everything the artifact carries — aggregates only."""
     if text_cap is None:
         from pseudolife_memory.utils.config import McpConfig
@@ -762,9 +931,13 @@ def build_report(events: list[Event], entries: dict[int, EntryInfo], *,
                    "entry_text_cap": text_cap,
                    "bootstrap_reps": reps, "bootstrap_seed": seed},
         "requested_top_k": top_k_distribution(agent),
+        "width_simulation_check": (simulation_check(pairs)
+                                   if pairs is not None else None),
         "abstention": abstention_report(agent, [
             e for e in events
-            if e.id in ABSENT_ANSWER_PROBES + OFF_DOMAIN_PROBES]),
+            if e.id in ABSENT_ANSWER_PROBES + OFF_DOMAIN_PROBES
+            and parse_ts(REVIEW_WINDOW[0]) <= e.created_at
+            < parse_ts(REVIEW_WINDOW[1])]),
         "strata": {},
         "digests": {
             "presence": digest_presence(agent, entries),
@@ -813,6 +986,28 @@ WHERE u.used_via = 'outcome' AND e.created_at >= %(since)s
 # length(text), never text: entry bodies are private and are not needed.
 _ENTRIES_SQL = "SELECT id, source, length(text) FROM entries"
 
+# The same query served twice in one session, within ten minutes, under the
+# same filters, at a wider and a narrower top_k. query_text is only
+# COMPARED; the narrow search contributes its served entry ids alone.
+_PAIRS_SQL = """
+SELECT w.id, w.session_id, w.created_at, false, w.served, w.params,
+       w.served_facts, (n.params->>'top_k')::int,
+       (SELECT coalesce(array_agg((x->>'entry_id')::bigint), '{}')
+          FROM jsonb_array_elements(n.served) x)
+FROM retrieval_events w
+JOIN retrieval_events n
+  ON n.query_text = w.query_text
+ AND n.id <> w.id
+ AND n.session_id IS NOT DISTINCT FROM w.session_id
+ AND abs(n.created_at - w.created_at) < 600
+ AND (n.params->>'top_k')::int < (w.params->>'top_k')::int
+ AND coalesce(n.params->'filters', 'null'::jsonb)
+     = coalesce(w.params->'filters', 'null'::jsonb)
+WHERE w.params IS NOT NULL AND n.params IS NOT NULL
+  AND w.query_text <> %(warmup)s
+  AND (%(until)s::float8 IS NULL OR w.created_at < %(until)s::float8)
+"""
+
 
 def _requested_top_k(params: dict | None) -> int | None:
     if not isinstance(params, dict) or params.get("top_k") is None:
@@ -839,12 +1034,42 @@ def _row(served: dict) -> Row | None:
         comps = {}
     mult = comps.get("supersession_mult")
     dense = comps.get("dense")
+    bm25 = comps.get("bm25")
     score = served.get("score")
     return Row(entry_id=int(served["entry_id"]),
                rank=int(served.get("rank", 0)),
                score=None if score is None else float(score),
                superseded=mult is not None and float(mult) < 1.0,
-               dense=None if dense is None else float(dense))
+               dense=None if dense is None else float(dense),
+               channel=comps.get("channel"),
+               bm25=None if bm25 is None else float(bm25))
+
+
+def _shape(params: dict | None) -> dict[str, Any]:
+    """The retrieval shape ``simulate_width`` needs, from ``params``."""
+    if not isinstance(params, dict):
+        return {}
+    pool = params.get("candidate_pool") or {}
+    rer = params.get("reranker") or {}
+    tl = params.get("timeline") or {}
+    bm = params.get("bm25") or {}
+    # A row logged before the pool-shape knobs (2026-09-04) has no
+    # candidate_pool block; it ran the shipped shape, which the knobs'
+    # defaults reproduce byte for byte (config.py, candidate_pool_multiplier).
+    shipped = ("candidate_pool" not in params
+               or (pool.get("fusion") == "weighted_sum"
+                   and int(pool.get("multiplier") or 0) == 1))
+    out: dict[str, Any] = {
+        "pool_size": (int(pool["pool_size"])
+                      if pool.get("pool_size") is not None else None),
+        "simulable": bool(
+            shipped and not rer.get("fired") and not tl.get("fired")
+            and not params.get("contiguity_neighbors")),
+    }
+    if bm.get("enabled"):
+        out["bm25_weight"] = float(bm.get("weight", 0.0))
+        out["bm25_min"] = float(bm.get("min_score", 0.0))
+    return out
 
 
 def _fact_scores(served_facts: list | None) -> list[float]:
@@ -861,7 +1086,7 @@ def events_from_rows(ev_rows: list[tuple], use_rows: list[tuple]
             id=int(eid), session_id=sid, created_at=float(created),
             is_warmup=bool(warm), top_k=_requested_top_k(params),
             sources_filter=_sources_filter(params), rows=rows,
-            fact_scores=_fact_scores(facts))
+            fact_scores=_fact_scores(facts), **_shape(params))
     for eid, entry_id in use_rows:
         ev = events.get(int(eid))
         if ev is not None:
@@ -870,7 +1095,8 @@ def events_from_rows(ev_rows: list[tuple], use_rows: list[tuple]
 
 
 def fetch(dsn: str, since: float, until: float | None
-          ) -> tuple[list[Event], dict[int, EntryInfo], str]:
+          ) -> tuple[list[Event], dict[int, EntryInfo], str,
+                     list[tuple[Event, int, list[int]]]]:
     import psycopg  # noqa: PLC0415
 
     with psycopg.connect(dsn, connect_timeout=10, autocommit=True,
@@ -888,9 +1114,12 @@ def fetch(dsn: str, since: float, until: float | None
             use_rows = conn.execute(_USES_SQL, q).fetchall()
             entries = {int(i): EntryInfo(source=s, text_len=int(n or 0))
                        for i, s, n in conn.execute(_ENTRIES_SQL).fetchall()}
+            pair_rows = conn.execute(_PAIRS_SQL, q).fetchall()
         finally:
             conn.execute("ROLLBACK")
-    return events_from_rows(ev_rows, use_rows), entries, db
+    pairs = [(events_from_rows([r[:7]], [])[0], int(r[7]),
+              [int(x) for x in r[8]]) for r in pair_rows]
+    return events_from_rows(ev_rows, use_rows), entries, db, pairs
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -912,7 +1141,8 @@ def print_summary(report: dict[str, Any]) -> None:
           f"-{f['dropped_no_session']}, probe sessions "
           f"-{f['dropped_probe_session']}, recall bursts "
           f"-{f['dropped_recall_burst']}, 09-23 review "
-          f"-{f['dropped_review_2026_09_23']})")
+          f"-{f['dropped_review_2026_09_23']}); burst events kept as "
+          f"parallel searches {f['burst_kept_with_facts']}")
     lab = report["labels"]
     print(f"labelled searches {lab['labelled_events']} from "
           f"{lab['labelling_sessions']}/{lab['agent_sessions']} sessions; "
@@ -930,6 +1160,13 @@ def print_summary(report: dict[str, Any]) -> None:
                   f"{(_fmt(b[0]) + '-' + _fmt(b[1]).strip()) if b else '-':>16}"
                   f"{_fmt(p['rows_kept_share']):>8}"
                   f"{_fmt(p['entry_text_chars_kept_share']):>8}")
+    sc = report.get("width_simulation_check")
+    if sc:
+        print(f"\nwidth simulation vs {sc['pairs']} real narrower searches: "
+              f"exact set {sc['simulate_exact_set']} (prefix "
+              f"{sc['prefix_exact_set']}); rows matched "
+              f"{_fmt(sc['simulate_rows_matched_share'])} (prefix "
+              f"{_fmt(sc['prefix_rows_matched_share'])})")
     a = report["abstention"]
     print(f"\nabstention: served nothing {a['served_nothing']}/"
           f"{a['searches']}; top dense cosine p05/p50 "
@@ -964,6 +1201,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--burst-min", type=int, default=BURST_MIN)
     ap.add_argument("--reps", type=int, default=2000,
                     help="session bootstrap replicates (0 = off)")
+    ap.add_argument("--text-cap", type=int, default=None,
+                    help="entry text cap in chars (default: the library "
+                         "McpConfig.entry_text_chars; pass the deployed "
+                         "value if it differs)")
     ap.add_argument("--out", default=None,
                     help="artifact path; omitted = print only")
     ap.add_argument("--force", action="store_true",
@@ -975,11 +1216,12 @@ def main(argv: list[str] | None = None) -> int:
     if out is not None and out.exists() and not args.force:
         sys.exit(f"{out} exists — tag the rerun with a new name, or pass "
                  "--force to replace it deliberately")
-    events, entries, db = fetch(args.dsn, since, until)
+    events, entries, db, pairs = fetch(args.dsn, since, until)
     report = build_report(
         events, entries, since=since, until=until,
         default_top_k=args.default_top_k, reps=args.reps,
-        gap_s=args.burst_gap, min_size=args.burst_min)
+        text_cap=args.text_cap,
+        gap_s=args.burst_gap, min_size=args.burst_min, pairs=pairs)
     report = {
         "generated_for": ("serving-policy replay: logged served lists vs "
                           "memory_outcome used_ids labels"),

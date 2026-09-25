@@ -75,6 +75,20 @@ def test_a_recall_burst_is_dropped_whole_and_spaced_searches_survive():
     assert counts["dropped_recall_burst"] == 3
 
 
+def test_a_burst_of_searches_with_served_facts_is_kept():
+    """Recall never attaches the cortex block's facts; the MCP
+    memory_search handler does. Parallel searches (subagents share their
+    parent's MCP session) trip the timing rule but carry facts."""
+    burst = [_ev(i, (0,), ts=T0 + i) for i in (1, 2, 3)]
+    burst[0].fact_scores = [0.5]
+    burst[1].fact_scores = [0.4]
+    kept, counts = spr.select_agent_events(burst, since=0)
+    assert sorted(e.id for e in kept) == [1, 2]
+    assert counts["dropped_recall_burst"] == 1
+    assert counts["burst_kept_with_facts"] == 2
+    assert counts["burst_kept_with_facts_labelled"] == 2
+
+
 def test_a_burst_needs_every_gap_inside_the_limit():
     evs = [_ev(1, ts=T0), _ev(2, ts=T0 + 2), _ev(3, ts=T0 + 6)]
     assert spr.burst_ids(evs) == set()
@@ -89,10 +103,14 @@ def test_the_2026_09_23_review_probes_are_excluded_by_id():
         assert eid in spr.REVIEW_2026_09_23
     for eid in (3606, 3611, 3669, 3701, 3704, 3707):
         assert eid not in spr.REVIEW_2026_09_23
+    inside = spr.parse_ts("2026-09-23T05:19:20Z")
     kept, counts = spr.select_agent_events(
-        [_ev(3697, ts=T0), _ev(3701, ts=T0 + 100)], since=0)
+        [_ev(3697, ts=inside), _ev(3701, ts=inside + 400)], since=0)
     assert [e.id for e in kept] == [3701]
     assert counts["dropped_review_2026_09_23"] == 1
+    # The same id outside the review's window is another bank's event.
+    kept, _ = spr.select_agent_events([_ev(3697, ts=T0)], since=0)
+    assert [e.id for e in kept] == [3697]
 
 
 def test_the_window_is_half_open_and_counts_labelled_drops():
@@ -102,6 +120,109 @@ def test_the_window_is_half_open_and_counts_labelled_drops():
     assert [e.id for e in kept] == [3]
     assert counts["events_in_window"] == 2
     assert counts["dropped_warmup_labelled"] == 1
+
+
+# ── width simulation ─────────────────────────────────────────────────────
+
+def _logged(eid, rows, *, top_k=8, pool_size=8, bm25_weight=0.3,
+            used=()):
+    """A width-``top_k`` event whose rows are (entry_id, cosine, bm25,
+    superseded, channel), logged in served (score) order as cms.retrieve
+    computes it: cosine x 0.55 if superseded, + weight x bm25; slot rows
+    carry their own score in the cosine position."""
+    built = []
+    for eid_, cos, bm, sup, ch in rows:
+        if ch == "dense":
+            score = cos * (0.55 if sup else 1.0) + bm25_weight * bm
+            built.append((score, spr.Row(eid_, 0, score, sup, cos, ch, bm)))
+        else:
+            built.append((cos, spr.Row(eid_, 0, cos, sup, None, ch, bm)))
+    built.sort(key=lambda t: -t[0])
+    served = [spr.Row(r.entry_id, i, r.score, r.superseded, r.dense,
+                      r.channel, r.bm25) for i, (_, r) in enumerate(built)]
+    return spr.Event(id=eid, session_id=S1, created_at=T0, is_warmup=False,
+                     top_k=top_k, sources_filter=None, rows=served,
+                     used=set(used), pool_size=pool_size,
+                     bm25_weight=bm25_weight, bm25_min=0.1, simulable=True)
+
+
+def test_a_narrower_search_is_not_a_prefix_of_a_wider_one():
+    """The review's prefix method keeps the entry at cosine rank 6 that a
+    width-6 search never pools, and drops the superseded entry at cosine
+    rank 0 that width 8 merely pushed below its cut."""
+    ev = _logged(1, [
+        (10, 0.90, 0.0, True, "dense"),     # superseded: 0.495 as served
+        (11, 0.85, 0.0, False, "dense"), (12, 0.80, 0.0, False, "dense"),
+        (13, 0.75, 0.0, False, "dense"), (14, 0.70, 0.0, False, "dense"),
+        (15, 0.65, 0.0, False, "dense"), (16, 0.62, 0.0, False, "dense"),
+        (17, 0.60, 0.0, False, "dense")], used=(10, 16))
+    assert [r.entry_id for r in ev.rows][-1] == 10     # served last at 8
+    sim, simulated = spr.simulate_width(ev, 6)
+    assert simulated
+    assert [r.entry_id for r in sim] == [11, 12, 13, 14, 15, 10]
+    prefix, _ = spr.simulate_width(ev, 6, "prefix")
+    assert [r.entry_id for r in prefix] == [11, 12, 13, 14, 15, 16]
+    rows = spr.policy_table([ev], {}, [spr.Policy("k6", top_k=6),
+                                       spr.Policy("p", top_k=6,
+                                                  width_method="prefix")],
+                            default_top_k=8, text_cap=600, reps=0, seed=1)
+    assert [(r["used_hits"], r["used_kept"]) for r in rows] == [(2, 1),
+                                                                (2, 1)]
+    assert rows[0]["rows_kept"] == 6 and rows[0]["events_prefix_fallback"] == 0
+
+
+def test_a_lexical_hit_leaving_the_pool_returns_as_an_injection():
+    """An entry pushed out of the dense pool keeps only its BM25-only
+    score, ``weight x normalised``; one with no lexical score is gone."""
+    sup = [(20 + i, 0.54 - 0.01 * i, 0.0, True, "dense") for i in range(6)]
+    ev = _logged(2, sup + [(30, 0.48, 1.0, False, "dense"),
+                           (31, 0.47, 0.0, False, "dense")])
+    assert ev.rows[0].entry_id == 30                   # 0.78 at width 8
+    sim, _ = spr.simulate_width(ev, 6)
+    ids = [r.entry_id for r in sim]
+    assert ids[0] == 30 and 31 not in ids and 25 not in ids
+    assert (sim[0].score, sim[0].channel) == (0.3, "bm25")
+
+
+def test_the_pessimistic_bound_moves_logged_rows_down_the_cosine_order():
+    """Pool members the wider cut dropped are not logged, so a logged row's
+    cosine rank can be understated; the bound assumes every unlogged pool
+    slot outranks every logged row."""
+    ev = _logged(4, [(50 + i, 0.9 - 0.05 * i, 0.0, False, "dense")
+                     for i in range(7)] + [(60, 0.95, 0.0, False, "slot")])
+    sim, _ = spr.simulate_width(ev, 6)
+    low, _ = spr.simulate_width(ev, 6, "pessimistic")
+    assert len([r for r in sim if r.channel == "dense"]) == 5
+    assert len([r for r in low if r.channel == "dense"]) == 5
+    assert [r.entry_id for r in low][-1] == 54     # one fewer deep row...
+    ev.pool_size = 10                              # ...once 3 are unlogged
+    low, _ = spr.simulate_width(ev, 6, "pessimistic")
+    assert [r.entry_id for r in low] == [60, 50, 51, 52]
+
+
+def test_the_simulation_is_scored_against_real_narrower_searches():
+    ev = _logged(6, [
+        (10, 0.90, 0.0, True, "dense"),
+        (11, 0.85, 0.0, False, "dense"), (12, 0.80, 0.0, False, "dense"),
+        (13, 0.75, 0.0, False, "dense")], top_k=4)
+    # A real width-2 search served the two highest-cosine entries.
+    check = spr.simulation_check([(ev, 2, [10, 11])])
+    assert (check["simulate_exact_set"], check["prefix_exact_set"]) == (1, 0)
+    assert check["simulate_rows_matched"] == 2
+    assert check["prefix_rows_matched"] == 1      # prefix served 11, 12
+    assert check["disagree_simulate_exact"] == 1
+    assert check["widths"] == {"4->2": 1}
+
+
+def test_an_unsimulable_search_falls_back_to_the_prefix_and_is_counted():
+    ev = _logged(5, [(70 + i, 0.9 - 0.05 * i, 0.0, False, "dense")
+                     for i in range(8)], used=(77,))
+    ev.simulable = False                       # say, the reranker fired
+    row = spr.policy_table([ev], {}, [spr.Policy("k6", top_k=6)],
+                           default_top_k=8, text_cap=600, reps=0,
+                           seed=1)[0]
+    assert row["events_prefix_fallback"] == 1
+    assert (row["used_hits"], row["used_kept"]) == (1, 0)
 
 
 # ── policies ─────────────────────────────────────────────────────────────
@@ -254,6 +375,9 @@ def test_the_sql_reads_no_text_and_never_touches_meta():
     # query_text is only ever COMPARED, never selected.
     assert spr._EVENTS_SQL.count("query_text") == 1
     assert "(query_text = %(warmup)s)" in spr._EVENTS_SQL
+    # The pair finder compares query texts and selects none of them.
+    select = spr._PAIRS_SQL.split("FROM retrieval_events w")[0]
+    assert "query_text" not in select
 
 
 class _FakeCursor:
@@ -284,6 +408,15 @@ class _FakeConn:
             return _FakeCursor([(self._ro,)])
         if "current_database" in sql:
             return _FakeCursor([("pseudolife_memory",)])
+        if "JOIN retrieval_events n" in sql:
+            wide = [{"entry_id": 8, "rank": 0, "score": 0.9,
+                     "components": {"channel": "dense", "dense": 0.9,
+                                    "bm25": 0.0}},
+                    {"entry_id": 9, "rank": 1, "score": 0.8,
+                     "components": {"channel": "dense", "dense": 0.8,
+                                    "bm25": 0.0}}]
+            return _FakeCursor([(2, S1, T0, False, wide,
+                                 {"top_k": 2, "filters": {}}, None, 1, [8])])
         if "FROM retrieval_events" in sql and "retrieval_uses" not in sql:
             return _FakeCursor([(1, S1, T0, False, [
                 {"entry_id": 7, "rank": 0, "score": 0.8,
@@ -310,7 +443,10 @@ def _patch_connect(monkeypatch, conn, seen):
 def test_fetch_reads_inside_a_read_only_transaction(monkeypatch):
     conn, seen = _FakeConn(), {}
     _patch_connect(monkeypatch, conn, seen)
-    events, entries, db = spr.fetch("postgresql://x/y", T0 - 1, None)
+    events, entries, db, pairs = spr.fetch("postgresql://x/y", T0 - 1,
+                                           None)
+    assert [(p[0].id, p[1], p[2]) for p in pairs] == [(2, 1, [8])]
+    assert pairs[0][0].simulable        # pre-knob params: the shipped shape
     assert "default_transaction_read_only=on" in seen["options"]
     assert conn.sql[0] == "BEGIN READ ONLY"
     assert conn.sql[1] == "SHOW transaction_read_only"
