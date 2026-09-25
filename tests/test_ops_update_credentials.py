@@ -90,7 +90,7 @@ function global:Invoke-RestMethod {{
     $global:healthObserved = $true
     @{{status='ok';schema=40;persist_errors=0}}
 }}
-try {{ & '{ops / "update.ps1"}' -NoBackup -NoCachePrune -Tag fixture }}
+try {{ & '{ops / "update.ps1"}' -NoBackup -NoCachePrune -Tag fixture -AllowDirty }}
 catch {{ $failed = $true }}
 @{{
     failed = $failed
@@ -167,7 +167,7 @@ function global:docker {{
 }}
 function global:Invoke-RestMethod {{ @{{status='ok';schema=40;persist_errors=0}} }}
 $failed = $false
-try {{ & '{ops / "update.ps1"}' -NoBackup -NoCachePrune -Tag fixture }}
+try {{ & '{ops / "update.ps1"}' -NoBackup -NoCachePrune -Tag fixture -AllowDirty }}
 catch {{ $failed = $true }}
 @{{ observed=$global:composeObserved; cleared=$global:tokenCleared;
    mapCleared=$global:mapCleared; failed=$failed;
@@ -215,7 +215,7 @@ docker() {{
 }}
 curl() {{ echo '{{"status":"ok"}}'; }}
 export -f docker curl
-bash {shlex.quote((ops / "update.sh").as_posix())} --no-backup --no-cache-prune --tag fixture
+bash {shlex.quote((ops / "update.sh").as_posix())} --no-backup --no-cache-prune --tag fixture --allow-dirty
 ec=$?
 if [ "$PSEUDOLIFE_MCP_TOKEN" = fixture-old ] && [ "$PSEUDOLIFE_MCP_TOKENS" = fixture:old-map ]; then
     echo "$ec restored" > {shlex.quote(result.as_posix())}

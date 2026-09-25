@@ -58,7 +58,7 @@ export async function renderStream(root, ctx) {
       note.textContent = `${entries.length} ${searching ? "result" : "recent"}${entries.length === 1 ? "" : "s"}`;
       clear(results);
       if (searching && data.low_confidence)
-        results.appendChild(el("div", { class: "chip warn", style: { marginBottom: "12px" } }, "low confidence — the agent would abstain"));
+        results.appendChild(el("div", { class: "chip warn", style: { marginBottom: "12px" } }, "low confidence — nothing cleared the score floor"));
       if (searching && (data.cortex || []).length) {
         results.appendChild(el("div", { class: "eyebrow", style: { margin: "4px 2px 8px" } }, "cortex (canonical)"));
         for (const f of data.cortex) results.appendChild(cortexHit(f));

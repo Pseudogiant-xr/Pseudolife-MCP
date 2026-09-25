@@ -72,6 +72,25 @@ def _last_backup(svc) -> dict | None:
             "rotation": str(record.get("rotation", "unknown"))}
 
 
+def _build_stamp() -> dict | None:
+    """The commit this daemon image was built from, baked in by
+    ``ops/Dockerfile.daemon`` from build args ``ops/update.ps1|.sh`` fill.
+
+    /health could not name the deployed commit (2026-09-23 review): the
+    package version only moves with a release. ``None`` (key omitted) when
+    the process is not running from a stamped image, i.e. a pip install.
+    An image built without the args carries the Dockerfile's ``unknown``
+    defaults and reports them as such.
+    """
+    sha = os.environ.get("PSEUDOLIFE_BUILD_GIT_SHA")
+    if not sha:
+        return None
+    dirty = {"true": True, "false": False}.get(
+        os.environ.get("PSEUDOLIFE_BUILD_DIRTY", "").strip().lower())
+    return {"git_sha": sha, "dirty": dirty,
+            "built_at": os.environ.get("PSEUDOLIFE_BUILD_TIME", "unknown")}
+
+
 def _extractor_status(svc) -> str | None:
     """One word for "can this bank fill its own cortex?".
 
@@ -148,6 +167,9 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         # >0 means writes succeeded in memory but a snapshot did not persist.
         "persist_errors": getattr(svc, "_persist_errors", 0),
     }
+    build = _build_stamp()
+    if build is not None:
+        payload["build"] = build
     # Deliberately does NOT touch `status`: a bank with no extractor is
     # serving correctly, and web/api.py turns any non-ok payload into a
     # 503 that the Docker healthcheck and ops/update.* treat as fatal.

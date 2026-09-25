@@ -28,7 +28,13 @@ exactly; they exist because each one was violated at least once.
    `llms-full.txt`). The v30 bump found the last two the hard way.
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
-   without it, which is not a pass.
+   without it, which is not a pass. Three exemptions, spelled out under
+   "One full suite at a time per machine" below: **docs-only changes** run
+   the doc guards instead, **test-only changes** run the touched test
+   files, and **merging origin/master into a branch that already passed**,
+   with no conflict in code resolved by hand, runs the tests covering the
+   overlap; CI gates all three. A queued local suite doesn't hold the PR
+   back: open it while you wait, and merge only after the suite passes.
 4. **Deploy only via `ops/update.ps1`** (backup → rollback tag → daemon-only
    `--no-deps` rebuild → health). Never `docker compose down -v` — the bank
    volumes are external precisely so that this is survivable, but don't test it.
@@ -87,18 +93,83 @@ took 143 CUDA OOMs.
 
 - `tests/conftest.py` enforces it. A full run (all of `tests/`, half or more
   of its files, or a `-k`/`-m` that only excludes, like `not slow`) takes
-  the lock `~/.pseudolife-mcp/locks/full-suite.lock` and waits for the
-  holder, naming it about once a minute, so start full runs in the
-  background. `PSEUDOLIFE_SUITE_LOCK=fail` exits instead; `=off` skips the
-  lock (the default on GitHub Actions: one job per VM). Targeted runs are
-  never locked. The lock lives in your home directory: a WSL or other-user
-  run does not see it.
+  the lock `~/.pseudolife-mcp/locks/full-suite.lock` and waits its turn,
+  naming the holder about once a minute, so start full runs in the
+  background. Waiters are served in arrival order: each holds a ticket in
+  `full-suite.queue/` beside the lock, and only the earliest live waiter may
+  try it (a worktree whose base predates the queue takes no ticket and
+  still races for the lock — rebase it). `PSEUDOLIFE_SUITE_LOCK=fail` exits
+  instead; `=off` skips the lock (the default on GitHub Actions: one job per
+  VM). Targeted runs are never locked. The lock lives in your home
+  directory: a WSL or other-user run does not see it.
+- The lock has a slot count, default 1: `PSEUDOLIFE_SUITE_SLOTS`, else
+  `~/.pseudolife-mcp/locks/full-suite.slots`. Leave it at 1 on the
+  maintainer's host (maintainer decision 2026-09-25 ~19:15). A two-slot
+  trial that afternoon ran each suite in ~50 min instead of ~17, with
+  load-timeout failures, so two at once finished fewer suites than one after
+  another. With more slots, waiters still take free ones in arrival order
+  and the waiting notice names every holder.
 - The suite sets `CUDA_VISIBLE_DEVICES=-1` itself (`PSEUDOLIFE_TEST_CUDA=1`
   opts back in). Never `""`: on Windows an empty value leaves the GPU usable.
 - With several sessions active, still announce `SUITE-START` / `SUITE-END` on
   the coordination board (`memory_agents` / `memory_message`) and keep
   `suite=running|idle` in your status: the lock queues runs, the board lets
   peers plan around the queue.
+- **CPU- or memory-saturating work never overlaps a full suite**
+  (maintainer rule 2026-09-25). That means load or stress repros (CPU
+  burners, memory hogs), benchmark sweeps, parallel stress loops, and
+  anything else that pegs the CPU or commits several GB (a model server, a
+  large in-memory eval) on the maintainer's host. First check no full suite
+  is running: no `~/.pseudolife-mcp/locks/full-suite*.holder.json`, and no
+  `suite=running` in `memory_agents` list. A run with
+  `PSEUDOLIFE_SUITE_LOCK=off` leaves no holder file, so the board check is
+  not optional. Announce the window on the board, bound it with a fixed
+  duration and a stop switch (a sentinel file), and stop at once if a suite
+  starts. On 2026-09-25 a 16-worker × 25-min burner ran at 100% CPU beside
+  two full-suite gate runs. Timing flakes, or os error 1455 when commit
+  runs out, invalidate gates and send sessions chasing false regressions.
+- **Docs-only changes skip the local full suite** (maintainer decision
+  2026-09-25). Docs-only means the diff against `origin/master`
+  (`git diff --name-only origin/master...`) touches only documentation:
+  `*.md` files anywhere (READMEs and their translations, `docs/**`,
+  `CHANGELOG.md`, `CONTRIBUTING.md`, `examples/*.md`, `plugin/README.md`,
+  skill `.md` files), `llms.txt` / `llms-full.txt`, and non-code files under
+  `docs/` such as `docs/atlas/atlas.json`. Any `.py`, `.ps1` or `.sh`, any
+  `.json` outside `docs/`, or any change under `tests/`, `ops/`, plugin
+  hooks, workflows or packaging means it is NOT docs-only. Run locally
+  instead the doc guards (`tests/test_release_ux.py`,
+  `tests/test_llms_txt.py`, `tests/test_atlas_currency.py`,
+  `tests/test_eval_evidence.py`, `tests/test_i18n_readme.py`) plus every
+  test file that names a touched path (`git grep -l <file basename> tests/`).
+  CI's full PostgreSQL job (`test`) must still be green before merge.
+- **Merging origin/master forward needs no new local full suite**
+  (maintainer decision 2026-09-25) when the branch already passed its local
+  full suite and no conflict in code (`.py` / `.ps1` / `.sh`, tests, config)
+  was resolved by hand. Run locally the test files covering the files both
+  sides touched (plus the doc guards if docs overlapped), push, and let CI
+  gate it: its `pull_request` jobs use `actions/checkout`'s default merge
+  ref, so the run for the newly pushed head tests the PR merged with master
+  as of that push, and it must be green before merge. Before clicking merge,
+  if master has moved since the PR's last CI run, press **Update branch**
+  (or push a new commit) and wait for that run to go green. Re-running the
+  old run doesn't help: it reuses the original merge commit. If any conflict
+  in code was resolved by hand, the local full suite is still required.
+- **Test-only changes skip the local full suite** (maintainer decision
+  2026-09-25): the diff touches only `tests/test_*.py` and test data or
+  fixture files (non-code files such as `tests/fixtures/*.json`), with or
+  without docs-only files beside them. Run the touched test files locally,
+  watched RED as always (plus what the docs-only bullet runs, if docs
+  changed too), and let CI's full PostgreSQL job gate it, pressing
+  **Update branch** if master moves before merge. NOT test-only:
+  `tests/conftest.py`, `tests/pg_fixtures.py`, `tests/suite_lock.py` or any
+  other shared helper under `tests/` (a non-`test_` `.py` that test files
+  import), or anything outside `tests/` that is not docs-only. A test file
+  can still break other test files (module-level state, a fixture that
+  leaks a service), which only CI's full job sees, so it must be green.
+- **Open the PR while the local full suite is queued** (maintainer decision
+  2026-09-25): push and open it so CI and review run in parallel. The body
+  says "local full suite: queued" and is updated with the result; merge
+  only after the local suite has passed.
 
 ## Review discipline
 

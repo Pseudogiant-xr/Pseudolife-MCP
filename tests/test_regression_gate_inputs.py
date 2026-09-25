@@ -34,18 +34,34 @@ def test_missing_bank_directory_preserves_prior_results_and_does_not_launch(tmp_
 
 
 @pytest.mark.parametrize(
-    ("running", "initial_listener", "ready", "final_owner", "launch_fails", "expected"),
+    ("running", "initial_listener", "ready", "final_owner", "launch_fails", "busy",
+     "expected", "says"),
     [
-        ("reproducible", False, True, 4242, False, (False, 0, 0)),
-        ("", True, True, 4242, False, (False, 0, 0)),
-        ("", False, True, 4242, False, (True, 1, 1)),
-        ("", False, True, 9999, False, (False, 1, 1)),
-        ("", False, False, 4242, False, (False, 1, 1)),
-        ("", False, True, 4242, True, (False, 1, 0)),
+        # A reproducible server already serving is reused, never stopped.
+        # Its own VRAM is not a busy GPU: nothing new is launched onto it.
+        ("reproducible", False, True, 4242, False, None, (True, 0, 0),
+         "reusing the reproducible Qwen server"),
+        ("reproducible", False, True, 4242, False, 20000, (True, 0, 0),
+         "this run did not start it and will not stop it"),
+        # Running but not answering: neither reused nor displaced.
+        ("reproducible", False, False, 4242, False, None, (False, 0, 0),
+         "not answering on :1234"),
+        # Any other config is refused, never displaced.
+        ("fast", False, True, 4242, False, None, (False, 0, 0),
+         "Qwen server running as 'fast' but 'reproducible' is required"),
+        ("foreign", False, True, 4242, False, None, (False, 0, 0),
+         "not serving Qwen3.8-27B-UD-Q4_K_XL.gguf"),
+        ("", True, True, 4242, False, None, (False, 0, 0), "port 1234 is occupied"),
+        ("", False, True, 4242, False, None, (True, 1, 1), ""),
+        ("", False, True, 9999, False, None, (False, 1, 1), ""),
+        ("", False, False, 4242, False, None, (False, 1, 1), ""),
+        ("", False, True, 4242, True, None, (False, 1, 0), ""),
+        # Nothing to reuse and the GPU is busy: hold, never launch.
+        ("", False, True, 4242, False, 6000, (False, 0, 0), "GPU BUSY"),
     ],
 )
 def test_owned_qwen_launch_and_cleanup_never_stop_foreign_processes(
-    running, initial_listener, ready, final_owner, launch_fails, expected
+    running, initial_listener, ready, final_owner, launch_fails, busy, expected, says
 ):
     """Exercise the helper with process and port mocks; never launch a model."""
     pwsh = shutil.which("pwsh")
@@ -59,6 +75,7 @@ $script:mockInitialListener = ${str(initial_listener).lower()}
 $script:mockReady = ${str(ready).lower()}
 $script:mockFinalOwner = {final_owner}
 $script:mockLaunchFails = ${str(launch_fails).lower()}
+$script:mockBusy = {"$null" if busy is None else busy}
 $script:listenerCalls = 0
 $script:launches = 0
 $script:fake = [pscustomobject]@{{Id=4242; HasExited=$false; Kills=0}}
@@ -74,7 +91,8 @@ function Get-NetTCPConnection {{
         return [pscustomobject]@{{LocalPort=1234; OwningProcess=$script:mockFinalOwner}}
     }}
 }}
-function Test-GpuBusy {{ return $null }}
+function Test-GpuBusy {{ return $script:mockBusy }}
+function Start-Sleep {{}}
 function Test-Path {{ return $false }}
 function Wait-QwenEndpoint {{ return $script:mockReady }}
 function Start-Process {{
@@ -99,6 +117,7 @@ Write-Output "OWNED_RESULT=$result,$script:launches,$($script:fake.Kills)"
     assert actual == f"{str(expected[0])},{expected[1]},{expected[2]}", (
         result.stdout + result.stderr
     )
+    assert says in result.stdout, result.stdout + result.stderr
 
 
 def test_regression_gate_uses_owned_qwen_lifecycle():

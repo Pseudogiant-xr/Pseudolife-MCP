@@ -35,6 +35,7 @@ code with the pager's.
       changes are exempt)
 - [ ] Full suite green, with the bench Postgres up (`127.0.0.1:5433`) —
       PG-backed tests skip silently without it, which is not a pass
+      (docs-only: the doc guards instead, see `CONTRIBUTING.md`)
 - [ ] New behaviour has a test that was **watched fail** before the fix
 - [ ] Docs updated, and `python ops/gen_llms_txt.py` re-run if any README or
       `docs/guide/` page changed

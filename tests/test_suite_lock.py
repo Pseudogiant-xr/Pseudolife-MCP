@@ -9,7 +9,9 @@ would wait forever.
 
 from __future__ import annotations
 
+import collections
 import errno
+import io
 import os
 import queue
 import signal
@@ -39,6 +41,7 @@ import os, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from tests import suite_lock
+print("PID", os.getpid(), flush=True)
 directory = Path(sys.argv[2])
 held = suite_lock.acquire(directory, "wait", worktree=sys.argv[3],
                           poll=0.05, notice_every=0.2, out=sys.stdout)
@@ -275,6 +278,8 @@ def test_a_full_run_takes_the_lock_and_records_its_holder(tmp_path):
         assert record["pid"] == os.getpid()
         assert record["worktree"] == str(ROOT)
         assert "started" in record
+        # The holder left the queue when it took the lock.
+        assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
         with pytest.raises(suite_lock.SuiteLockBusy):
             suite_lock.acquire(tmp_path, "fail", worktree="second")
     finally:
@@ -315,28 +320,47 @@ def test_an_xdist_worker_never_takes_the_lock(held):
     assert suite_lock.take_for_session(worker, environ, TESTS) is None
 
 
-def _lock_backend_raises(monkeypatch, code: int) -> None:
-    def refuse(*args, **kwargs):
-        raise OSError(code, os.strerror(code))
+def _lock_backend():
+    return ((suite_lock.msvcrt, "locking") if os.name == "nt"
+            else (suite_lock.fcntl, "flock"))
 
-    if os.name == "nt":
-        monkeypatch.setattr(suite_lock.msvcrt, "locking", refuse)
-    else:
-        monkeypatch.setattr(suite_lock.fcntl, "flock", refuse)
+
+def _is_file(fd: int, path: Path) -> bool:
+    # The slot lock files are opened only once a waiter is first in line.
+    return path.exists() and os.path.samestat(os.fstat(fd), os.stat(path))
+
+
+def _lock_backend_raises(monkeypatch, code: int, only: Path | None = None) -> None:
+    """Make the lock backend raise ``code`` — for every file, or ``only``
+    for the one given (a queue ticket's lock keeps working)."""
+    module, name = _lock_backend()
+    real = getattr(module, name)
+
+    def refuse(fd, *args, **kwargs):
+        if only is None or _is_file(fd, only):
+            raise OSError(code, os.strerror(code))
+        return real(fd, *args, **kwargs)
+
+    monkeypatch.setattr(module, name, refuse)
 
 
 @pytest.mark.parametrize("code", [errno.EACCES, errno.EAGAIN])
 def test_contention_errors_read_as_busy(tmp_path, monkeypatch, code):
-    _lock_backend_raises(monkeypatch, code)
+    _lock_backend_raises(monkeypatch, code, only=tmp_path / suite_lock.LOCK_FILE)
     with pytest.raises(suite_lock.SuiteLockBusy):
         suite_lock.acquire(tmp_path, "fail", worktree="w")
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
 
 
-def test_any_other_lock_error_is_raised_instead_of_waited_on(tmp_path, monkeypatch):
+@pytest.mark.parametrize("which", ["every lock", "the main lock"])
+def test_any_other_lock_error_is_raised_instead_of_waited_on(tmp_path, monkeypatch,
+                                                             which):
     # Read as "busy", a filesystem without locks would queue the run forever
     # behind a holder that does not exist. (Fail mode, so a regression fails
-    # the test rather than hanging it.)
-    _lock_backend_raises(monkeypatch, errno.ENOLCK)
+    # the test rather than hanging it.) The ticket is locked first, so "the
+    # main lock" is the case that reaches the main lock's error handling.
+    only = tmp_path / suite_lock.LOCK_FILE if which == "the main lock" else None
+    _lock_backend_raises(monkeypatch, errno.ENOLCK, only=only)
     with pytest.raises(OSError) as raised:
         suite_lock.acquire(tmp_path, "fail", worktree="w")
     assert raised.value.errno == errno.ENOLCK
@@ -365,6 +389,7 @@ def test_a_second_process_waits_then_takes_the_lock_on_release(held, procs):
     held.holder.expect("RELEASED")
     waiter_pid = int(waiter.expect("ACQUIRED").split()[1])
     assert suite_lock.read_holder(held.dir)["pid"] == waiter_pid
+    assert not list((held.dir / suite_lock.QUEUE_DIR).iterdir())
 
 
 def test_the_lock_is_released_when_its_holder_crashes(held, procs):
@@ -377,12 +402,369 @@ def test_the_lock_is_released_when_its_holder_crashes(held, procs):
     assert suite_lock.read_holder(held.dir)["pid"] == waiter_pid
 
 
+# --- first come, first served -----------------------------------------------
+
+class _GatedClock:
+    """Stands in for suite_lock's ``time``: counts each thread's poll sleeps,
+    and parks a thread that has a gate in its sleep until the gate opens.
+    Everything else is the real time module."""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.sleeps: collections.Counter[str] = collections.Counter()
+        self.gates: dict[str, threading.Event] = {}
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def sleep(self, seconds: float) -> None:
+        name = threading.current_thread().name
+        with self.cond:
+            self.sleeps[name] += 1
+            self.cond.notify_all()
+        if name in self.gates:
+            self.gates[name].wait(START_TIMEOUT)
+        time.sleep(seconds)
+
+    def wait_for(self, predicate, what: str) -> None:
+        with self.cond:
+            assert self.cond.wait_for(predicate, START_TIMEOUT), (
+                f"no {what} within {START_TIMEOUT}s")
+
+
+@pytest.mark.parametrize("slots", [1, 2])
+def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch, slots):
+    # 2026-09-25: with eight full suites queued, one waited from 13:48 to
+    # past 14:57 while later arrivals took the lock ahead of it — whichever
+    # waiter polled first after a release won. Here the earlier waiter is
+    # parked in its poll sleep when a slot frees, and the later one polls
+    # every 10 ms: on a first-poller-wins lock it takes the slot every time.
+    clock = _GatedClock()
+    monkeypatch.setattr(suite_lock, "time", clock)
+    order: list[str] = []
+
+    def queue_up(name: str) -> None:
+        held_lock = suite_lock.acquire(tmp_path, "wait", worktree=name, slots=slots,
+                                       poll=0.01, out=io.StringIO())
+        with clock.cond:
+            order.append(name)
+            clock.cond.notify_all()
+        suite_lock.release(held_lock)
+
+    holders = [suite_lock.acquire(tmp_path, "fail", worktree=f"holder{i}", slots=slots)
+               for i in range(slots)]
+    clock.gates["earlier"] = threading.Event()
+    threads = []
+    try:
+        for name in ("earlier", "later"):
+            thread = threading.Thread(target=queue_up, args=(name,), name=name,
+                                      daemon=True)
+            thread.start()
+            threads.append(thread)
+            clock.wait_for(lambda name=name: clock.sleeps[name] >= 1,
+                           f"poll sleep from {name}")
+        polls = clock.sleeps["later"]
+        suite_lock.release(holders.pop(0))      # one slot frees
+        clock.wait_for(lambda: order or clock.sleeps["later"] >= polls + 3,
+                       "three more polls from the later waiter")
+        assert order == [], (
+            f"{order[0]!r} took the freed slot while the earlier waiter was queued")
+    finally:
+        clock.gates["earlier"].set()
+        if len(holders) == slots:
+            # Failed before a slot freed: free them all, or the joins below
+            # wait out their timeouts.
+            while holders:
+                suite_lock.release(holders.pop())
+        # Any other holders keep their slots until both waiters are done, so
+        # the two take turns in the one freed slot and record in that order.
+        for thread in threads:
+            thread.join(START_TIMEOUT)
+        for holder in holders:
+            suite_lock.release(holder)
+    assert order == ["earlier", "later"]
+    _assert_no_live_ticket(tmp_path)
+
+
+def _assert_no_live_ticket(directory: Path) -> None:
+    """Every ticket left in the queue is free. On Windows a waiter's unlink
+    fails while another waiter has the ticket open to test it (seen in 2 of
+    20 runs of the test above, 2026-09-25); the leftover is unlocked, so it
+    is skipped at once and deleted once past the grace window."""
+    for path in (directory / suite_lock.QUEUE_DIR).iterdir():
+        with open(path, "rb") as ticket:
+            assert suite_lock._try_lock(ticket), f"{path.name} is still held"
+            suite_lock._unlock(ticket)
+
+
+def _ticket_file(directory: Path, *, age_s: float, pid: int) -> Path:
+    queue_dir = directory / suite_lock.QUEUE_DIR
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    arrived = time.time_ns() - int(age_s * 1e9)
+    return queue_dir / f"{arrived:020d}-{pid}{suite_lock.TICKET_SUFFIX}"
+
+
+@pytest.mark.parametrize(("age_s", "locked", "outcome"), [
+    (3600, True, "queued"),    # an hour in the queue, its owner still holding it
+    (0, True, "queued"),       # arrived a moment ago and holding it
+    (3600, False, "deleted"),  # its owner died: the OS dropped the ticket's lock
+    # Not locked yet, or its owner died young: passed over, but kept until
+    # past the grace window, since its owner may be about to lock it.
+    (0, False, "skipped"),
+], ids=["old-and-held", "new-and-held", "owner-dead", "new-and-free"])
+def test_a_ticket_counts_while_its_owner_holds_it(tmp_path, age_s, locked, outcome):
+    path = _ticket_file(tmp_path, age_s=age_s, pid=4242)
+    handle = open(path, "xb")  # noqa: SIM115 — closed below
+    try:
+        if locked:
+            assert suite_lock._try_lock(handle)
+        else:
+            handle.close()
+        if outcome == "queued":
+            with pytest.raises(
+                    suite_lock.SuiteLockBusy,
+                    match=r"no recorded holder, 1 earlier arrival queued ahead "
+                          r"\(pid 4242; if pid 4242 never takes the lock"):
+                suite_lock.acquire(tmp_path, "fail", worktree="w")
+        else:
+            suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="w"))
+    finally:
+        handle.close()
+    # A refused or finished run leaves no ticket of its own either way.
+    remaining = [p.name for p in (tmp_path / suite_lock.QUEUE_DIR).iterdir()]
+    assert remaining == ([] if outcome == "deleted" else [path.name])
+
+
+def test_the_refusal_names_the_holder_and_the_waiters_ahead(held):
+    path = _ticket_file(held.dir, age_s=60, pid=4242)
+    with open(path, "xb") as ticket:
+        assert suite_lock._try_lock(ticket)
+        with pytest.raises(
+                suite_lock.SuiteLockBusy,
+                match=rf"held by holder-wt \(pid {held.pid}\) since \d\d:\d\d, "
+                      rf"with 1 earlier arrival queued ahead \(pid 4242\);"):
+            suite_lock.acquire(held.dir, "fail", worktree="w")
+
+
+def test_a_waiter_killed_while_queued_does_not_hold_up_the_queue(held, procs):
+    waiter = _lock_process(procs, held.dir, "waiter-wt")
+    waiter_pid = int(waiter.expect("PID").split()[1])
+    waiter.expect("waiting for the full-suite lock")
+    tickets = list((held.dir / suite_lock.QUEUE_DIR).iterdir())
+    assert [t.name.split("-")[1] for t in tickets] == [
+        f"{waiter_pid}{suite_lock.TICKET_SUFFIX}"]
+
+    _kill_pid(waiter_pid)                      # no cleanup: the ticket stays
+    held.holder.send_release()
+    held.holder.expect("RELEASED")
+    # The dead ticket is seconds old, inside its grace window: it must be
+    # passed over as soon as the OS drops its lock, not when the window ends.
+    deadline = time.monotonic() + suite_lock.TICKET_GRACE_NS / 2e9
+    while True:
+        try:
+            next_lock = suite_lock.acquire(held.dir, "fail", worktree="next")
+            break
+        except suite_lock.SuiteLockBusy:
+            # Windows frees a killed process's locks soon, not at once.
+            assert time.monotonic() < deadline, "a dead waiter still heads the queue"
+            time.sleep(0.05)
+    suite_lock.release(next_lock)
+    # Only the dead waiter's ticket may remain (young tickets are not deleted).
+    assert {p.name for p in (held.dir / suite_lock.QUEUE_DIR).iterdir()} <= {
+        t.name for t in tickets}
+
+
+def test_a_new_ticket_a_checker_is_testing_is_retried_not_refused(tmp_path,
+                                                                 monkeypatch):
+    # A later arrival testing a brand-new ticket holds its lock for a moment;
+    # the owner must wait that out, not fail the run.
+    module, name = _lock_backend()
+    real = getattr(module, name)
+    lock_file = tmp_path / suite_lock.LOCK_FILE
+    busy = {"left": 1}
+
+    def ticket_busy_once(fd, *args, **kwargs):
+        if busy["left"] and not _is_file(fd, lock_file):
+            busy["left"] -= 1
+            raise OSError(errno.EACCES, os.strerror(errno.EACCES))
+        return real(fd, *args, **kwargs)
+
+    monkeypatch.setattr(module, name, ticket_busy_once)
+    suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="w"))
+    assert busy["left"] == 0
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
+
+
+class _InterruptedClock:
+    """suite_lock's ``time``, with Ctrl-C arriving during the poll sleep."""
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def sleep(self, seconds: float) -> None:
+        raise KeyboardInterrupt
+
+
+def test_ctrl_c_while_queued_takes_the_ticket_with_it(tmp_path, monkeypatch):
+    holder = suite_lock.acquire(tmp_path, "fail", worktree="holder")
+    monkeypatch.setattr(suite_lock, "time", _InterruptedClock())
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            suite_lock.acquire(tmp_path, "wait", worktree="interrupted",
+                               out=io.StringIO())
+    finally:
+        suite_lock.release(holder)
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
+    # Nothing is left to queue behind: a leaked ticket, still locked through
+    # this process's open handle, would refuse this run.
+    suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="next"))
+
+
+# --- slots: more than one full run at once, where configured -----------------
+
+def test_the_slot_count_comes_from_the_env_then_the_file_then_one(tmp_path):
+    assert suite_lock.slot_count({}, tmp_path) == 1
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("2\n", encoding="utf-8")
+    assert suite_lock.slot_count({}, tmp_path) == 2
+    assert suite_lock.slot_count({"PSEUDOLIFE_SUITE_SLOTS": " 3 "}, tmp_path) == 3
+    # Windows PowerShell 5.1's Set-Content -Encoding UTF8 writes a BOM.
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("2\r\n", encoding="utf-8-sig")
+    assert suite_lock.slot_count({}, tmp_path) == 2
+    # Its `"2" > file` writes UTF-16: an error that names the file.
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("2", encoding="utf-16")
+    with pytest.raises(ValueError, match="full-suite.slots"):
+        suite_lock.slot_count({}, tmp_path)
+    for bad in ("0", "-1", "two", "", "1.5", "1_0", "٢", "9"):
+        with pytest.raises(ValueError, match="PSEUDOLIFE_SUITE_SLOTS"):
+            suite_lock.slot_count({"PSEUDOLIFE_SUITE_SLOTS": bad}, tmp_path)
+        (tmp_path / suite_lock.SLOTS_FILE).write_text(bad, encoding="utf-8")
+        with pytest.raises(ValueError, match="full-suite.slots"):
+            suite_lock.slot_count({}, tmp_path)
+
+
+def test_two_slots_hold_two_runs_and_a_third_names_both(tmp_path):
+    first = suite_lock.acquire(tmp_path, "fail", worktree="first", slots=2)
+    try:
+        second = suite_lock.acquire(tmp_path, "fail", worktree="second", slots=2)
+        try:
+            assert (first.slot, second.slot) == (0, 1)
+            # Slot 0 keeps the historical file names, so runs from older code
+            # share it; slot 1 has its own lock file and holder record.
+            assert suite_lock.read_holder(tmp_path)["worktree"] == "first"
+            assert (tmp_path / "full-suite.holder.json").exists()
+            assert (tmp_path / "full-suite.1.lock").exists()
+            assert suite_lock.read_holder(tmp_path, slot=1)["worktree"] == "second"
+            with pytest.raises(suite_lock.SuiteLockBusy,
+                               match=r"held by first \(pid \d+\) since \d\d:\d\d "
+                                     r"and second \(pid \d+\) since \d\d:\d\d;"):
+                suite_lock.acquire(tmp_path, "fail", worktree="third", slots=2)
+            # A run configured for one slot waits on slot 0 alone.
+            with pytest.raises(suite_lock.SuiteLockBusy):
+                suite_lock.acquire(tmp_path, "fail", worktree="one-slot")
+        finally:
+            suite_lock.release(second)
+        # Releasing a slot drops only its own record and frees it.
+        assert suite_lock.read_holder(tmp_path, slot=1) is None
+        assert suite_lock.read_holder(tmp_path)["worktree"] == "first"
+        third = suite_lock.acquire(tmp_path, "fail", worktree="third", slots=2)
+        assert third.slot == 1
+        suite_lock.release(third)
+    finally:
+        suite_lock.release(first)
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
+
+
+def test_a_full_run_takes_a_second_slot_when_the_file_allows_two(tmp_path):
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path),
+               "PSEUDOLIFE_SUITE_LOCK": "fail"}
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("2", encoding="utf-8")
+    first = suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+    second = suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+    try:
+        assert {first.slot, second.slot} == {0, 1}
+        with pytest.raises(pytest.UsageError, match=r"\) since \d\d:\d\d and "):
+            suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+    finally:
+        suite_lock.release(second)
+        suite_lock.release(first)
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("many", encoding="utf-8")
+    with pytest.raises(pytest.UsageError, match="full-suite.slots"):
+        suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+
+
+def _queue_for_session(tmp_path) -> tuple[threading.Thread, dict]:
+    """A full run queueing through take_for_session on a thread; returns the
+    thread and a dict that receives the HeldLock."""
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path),
+               "PSEUDOLIFE_SUITE_LOCK": "wait"}
+    result: dict = {}
+
+    def run():
+        result["held"] = suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + START_TIMEOUT
+    queue_dir = tmp_path / suite_lock.QUEUE_DIR
+    while not (queue_dir.is_dir() and any(queue_dir.iterdir())):
+        assert time.monotonic() < deadline, "the run never queued"
+        time.sleep(0.02)
+    return thread, result
+
+
+def test_a_raised_slot_count_reaches_runs_already_queued(tmp_path):
+    # With a backlog queued under 1, raising the file to 2 must open the
+    # second slot to them, not only to later arrivals.
+    slots_file = tmp_path / suite_lock.SLOTS_FILE
+    slots_file.write_text("1", encoding="utf-8")
+    holder = suite_lock.acquire(tmp_path, "fail", worktree="holder")
+    thread, result = None, {}
+    try:
+        thread, result = _queue_for_session(tmp_path)
+        slots_file.write_text("2", encoding="utf-8")
+        thread.join(10)   # the next poll, 2 s apart, sees the new count
+        assert "held" in result, "the queued run never took the second slot"
+        assert result["held"].slot == 1
+        suite_lock.release(result["held"])
+    finally:
+        suite_lock.release(holder)
+        if thread is not None:
+            thread.join(START_TIMEOUT)
+        if "held" in result and not result["held"].file.closed:
+            suite_lock.release(result["held"])
+
+
+def test_a_lowered_slot_count_reaches_runs_already_queued(tmp_path):
+    slots_file = tmp_path / suite_lock.SLOTS_FILE
+    slots_file.write_text("2", encoding="utf-8")
+    holders = [suite_lock.acquire(tmp_path, "fail", worktree=f"holder{i}", slots=2)
+               for i in range(2)]
+    thread = None
+    try:
+        thread, result = _queue_for_session(tmp_path)
+        slots_file.write_text("1", encoding="utf-8")
+        time.sleep(2.5)                       # a poll under the new count
+        suite_lock.release(holders.pop())     # slot 1 frees: no longer ours
+        thread.join(5)
+        assert "held" not in result, "the queued run took a slot the count dropped"
+        suite_lock.release(holders.pop())     # slot 0 frees
+        thread.join(10)
+        assert result["held"].slot == 0
+        suite_lock.release(result["held"])
+    finally:
+        for holder in holders:
+            suite_lock.release(holder)
+        if thread is not None:
+            thread.join(START_TIMEOUT)
+
+
 # --- the conftest wiring, end to end ----------------------------------------
 
 def _pytest_env(directory: Path, mode: str) -> dict[str, str]:
     env = dict(os.environ)
     env["PSEUDOLIFE_SUITE_LOCK_DIR"] = str(directory)
     env["PSEUDOLIFE_SUITE_LOCK"] = mode
+    env.pop("PSEUDOLIFE_SUITE_SLOTS", None)  # each test sets its own
     # These runs never reach a PG test; don't provision a database for them.
     env.pop("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", None)
     return env
@@ -400,6 +782,16 @@ def test_a_full_pytest_run_refuses_to_queue_in_fail_mode(held, procs):
     run = procs(_full_run_collecting_nothing(), _pytest_env(held.dir, "fail"))
     assert run.drain() == pytest.ExitCode.USAGE_ERROR, run.seen
     assert any(f"holder-wt (pid {held.pid})" in line for line in run.seen), run.seen
+
+
+def test_a_full_pytest_run_takes_a_second_slot_beside_the_holder(held, procs):
+    # The same refusal as above, with the environment allowing two slots:
+    # conftest reads the count and the run takes slot 1 instead of queueing.
+    env = _pytest_env(held.dir, "fail")
+    env["PSEUDOLIFE_SUITE_SLOTS"] = "2"
+    run = procs(_full_run_collecting_nothing(), env)
+    assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
+    assert not any("full-suite lock held by" in line for line in run.seen), run.seen
 
 
 def test_a_full_pytest_run_waits_for_the_holder_then_runs(held, procs):

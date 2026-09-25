@@ -106,6 +106,16 @@ weights for each PR, and `test-lite-linux` with the default. A third lane
 behavior, add a test; if you fix a bug, add the test that would have
 caught it.
 
+A docs-only change can skip the full run locally. That means Markdown
+anywhere, `llms.txt` / `llms-full.txt`, and non-code files under `docs/`
+(such as `docs/atlas/atlas.json`), with nothing under `tests/`, `ops/`,
+plugin hooks, workflows or packaging, and no code or `.json` outside
+`docs/`. Run the doc guards instead (`tests/test_release_ux.py`,
+`tests/test_llms_txt.py`, `tests/test_atlas_currency.py`,
+`tests/test_eval_evidence.py`, `tests/test_i18n_readme.py`), plus every
+test file that names a file you touched (`git grep -l <file basename>
+tests/`). CI's full lanes still have to pass before merge.
+
 ## If you run a live bank
 
 Some contributors dogfood the server while hacking on it. Two standing rules
