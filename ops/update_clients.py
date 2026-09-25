@@ -447,6 +447,41 @@ def codex_bundle_digest(repo: Path) -> str:
     return module.bundle_digest(module.bundle_bytes(Path(repo) / "plugin" / "hooks"))
 
 
+def _unapproved_plugin_handlers(repo: Path, config_text: str) -> list[str] | None:
+    """Handler positions of the checkout's plugin hooks.json that Codex has no
+    approval for, or ``None`` when the config cannot be read here.
+
+    Codex runs a plugin handler only once its approval is recorded under
+    ``hooks.state."<plugin>:hooks/hooks.json:<event>:<group>:<handler>"``
+    (config.toml, checked 2026-09-25), and a new position is skipped without
+    a word in the desktop app. A handler the user disabled is their choice.
+    Whether an approved definition has since changed is Codex's hash, not
+    recomputed here; this catches the new positions a plugin update adds."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        return None
+    try:
+        state = (tomllib.loads(config_text).get("hooks") or {}).get("state") or {}
+        manifest = json.loads((Path(repo) / "plugin" / "hooks" / "hooks.json")
+                              .read_text(encoding="utf-8"))["hooks"]
+    except (ValueError, OSError, KeyError, AttributeError):
+        return None
+    if not isinstance(state, dict) or not isinstance(manifest, dict):
+        return None
+    missing = []
+    for event, groups in manifest.items():
+        name = re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
+        for g, group in enumerate(groups):
+            for h, _ in enumerate(group.get("hooks") or []):
+                key = f"{PLUGIN_ID}:hooks/hooks.json:{name}:{g}:{h}"
+                entry = state.get(key)
+                if not isinstance(entry, dict) or not (
+                        entry.get("trusted_hash") or entry.get("enabled") is False):
+                    missing.append(key)
+    return missing
+
+
 def check_codex_hooks(repo: Path) -> dict:
     """Codex hooks come either as content-addressed manual copies under
     ``<codex home>/pseudolife/hooks/<digest>`` (``setup-codex-hooks.py``) or
@@ -463,14 +498,20 @@ def check_codex_hooks(repo: Path) -> dict:
                           "hash, so refresh with consent: python ops/setup-codex-hooks.py --trust ask"}
     config = codex_home / "config.toml"
     try:
-        plugin_managed = f'"{PLUGIN_ID}"' in config.read_text(encoding="utf-8")
+        config_text = config.read_text(encoding="utf-8")
     except OSError:
-        plugin_managed = False
-    if not plugin_managed:
+        config_text = ""
+    if f'"{PLUGIN_ID}"' not in config_text:
         return {"state": "not-configured", "detail": "no Codex hook copies or plugin under the Codex home"}
     clone_hooks = codex_home / ".tmp" / "marketplaces" / MARKETPLACE / "plugin" / "hooks"
     checkout = checkout_hooks_digest(repo, Path(repo) / "plugin" / "hooks")
     if clone_hooks.is_dir() and checkout_hooks_digest(repo, clone_hooks) == checkout:
+        missing = _unapproved_plugin_handlers(repo, config_text)
+        if missing:
+            return {"state": "needs-approval",
+                    "detail": f"Codex skips {len(missing)} plugin hook handler(s) it has not approved; "
+                              "approve them: python ops/setup-codex-hooks.py --source plugin --trust ask "
+                              "(or /hooks in the Codex terminal app)"}
         return {"state": "current", "detail": "Codex runs the plugin's hooks; its marketplace clone matches "
                                               "the checkout's scripts"}
     return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed",
@@ -485,7 +526,7 @@ def _marker(state: str) -> str:
         return "[!]"
     if state.startswith(("reinstalled", "refreshed", "current")) or state == "editable":
         return "[x]"
-    if state == "stale":
+    if state in ("stale", "needs-approval"):
         return "[!]"
     return "[-]"
 

@@ -62,19 +62,31 @@ handlers. The coordination startup handler asks the agent to update its
 project, task and status with `memory_agents`, list relevant peers, and read
 pending `memory_message` mail. It runs independently of the daemon briefing;
 neither handler depends on the other running first. Coordination identity
-and credentials remain owned by the existing shim adapter. If coordination
-is unavailable, the agent reports that once and continues ordinary memory work.
+and credentials remain owned by the existing shim adapter.
 
-When the shim's coordination adapter is enabled (`PSEUDOLIFE_AGENT_COORDINATION=1`
-in the MCP server's env block), it keeps a small digest file per session under
+Coordination is on by default, behind bearer authentication. The startup
+handler makes one bounded request (`GET /api/hook/coordination-start`, two
+seconds, no retry) with the same connection and credential settings as the
+memory handler, and prints the check-in only when the daemon serves it, which
+it does where the board is on for that bearer (the daemon cannot see whether
+the client has an adapter). A disabled board
+(`coordination.enabled: false`), an open install, an unlisted principal, or
+a daemon that does not answer adds nothing, and neither does a client that
+sets `PSEUDOLIFE_AGENT_COORDINATION` to anything but `1`/`true`/`yes`/`on` in
+the hook's environment.
+
+When the shim's coordination adapter is up (the default for a shim holding a
+bearer token the daemon serves the board to; `PSEUDOLIFE_AGENT_COORDINATION=0`
+in the MCP server's env block turns it off), it keeps a small digest file per
+session under
 `~/.pseudolife-mcp/digests/` — the pending addressed messages, rendered once,
 behind a watermark that moves only when they change. The coordination UserPromptSubmit hook
 reads that file by the `session_id` it receives and prints the digest only when
 the watermark passed the `.seen` marker, so a quiet turn adds nothing to the
 context and a change appears once. The same marker gates the hint the shim
 appends to tool results, so the two paths never repeat each other. SessionStart
-on `resume` or `compact` clears the marker so the current digest prints afresh;
-the bash hooks do the same on `clear`. Under Claude Code, `/clear` and an
+on `resume`, `compact` or `clear` clears the marker so the current digest
+prints afresh. Under Claude Code, `/clear` and an
 in-session `/resume` give the hooks a new `session_id` while the shim keeps
 the one it was launched with, so the session hooks keep the shim's key once
 per Claude Code process (`claude-<CLAUDE_PID>.host` in the same directory).
@@ -136,8 +148,9 @@ don't double up:
   for concise memory guidance and a bounded briefing, and registers the
   session's episode identity. Needs `bash` on PATH
   (Git Bash on Windows) and `curl` — both ship with git / the OS.
-- **Coordination SessionStart hook** — requests agent check-in and preserves
-  the local digest mapping across supported session changes, without a daemon call.
+- **Coordination SessionStart hook** — preserves the local digest mapping
+  across supported session changes, then prints the agent check-in the
+  daemon serves where the board works (one bounded request).
 - **Memory UserPromptSubmit hook** — echoes a one-line mid-session memory
   discipline on every turn (recall before reviewing code/docs/PRs, then
   compare memory against the files; status questions are memory questions;
