@@ -568,7 +568,7 @@ def _world_correct_with(e: dict[str, Any]) -> str | None:
 def memory_search(
     query: Annotated[str, Field(
         description="Natural-language description; specific beats vague.")],
-    # 8 stays pending a maintainer decision (2026-09-25). The
+    # 8, kept by maintainer decision (2026-09-25) on this evidence. The
     # serving-policy replay (evals/serving_policy_replay.py, artifact
     # evals/results/serving-policy-replay-20260925-r3.json) simulated a
     # narrower default over the 276 default-width agent searches of
