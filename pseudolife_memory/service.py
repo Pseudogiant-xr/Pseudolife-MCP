@@ -1817,7 +1817,9 @@ class MemoryService(DreamOps):
 
         ``count_access=False`` serves without bumping the served entries'
         ``access_count`` (a serve counter that feeds band promotion and the
-        read audit). Only a synthetic probe should pass it: :meth:`warmup`.
+        read audit) or the per-band query/hit counters behind
+        ``retrieval_queries``. Only a synthetic probe should pass it:
+        :meth:`warmup`.
 
         ``return_event_id=True`` adds ``retrieval_event_id`` (the id of the
         retrieval-log row this search wrote) to the result, so the caller

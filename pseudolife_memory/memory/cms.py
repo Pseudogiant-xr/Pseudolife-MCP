@@ -759,8 +759,9 @@ class ContinuumMemorySystem:
             hide_superseded: Override the configured history visibility for
                 this retrieval only. Applied before candidate caps and dedup.
             count_access: False serves the result without bumping the
-                served entries' ``access_count`` — for synthetic probes (the
-                startup warmup), which are not reads.
+                served entries' ``access_count`` or the per-band query/hit
+                counters — for synthetic probes (the startup warmup), which
+                are not reads.
             bands: When provided, restrict the neural pool to bands with
                 these names — e.g. ``["working", "instant"]`` for "just the
                 fast tiers" or ``["forever"]`` for identity recall only.
@@ -1412,9 +1413,11 @@ class ContinuumMemorySystem:
         # Update per-tier instrumentation. ``hit_band_names`` is the set of
         # tiers that contributed at least one entry to the *post-merge*
         # result — gives a usage-rate signal we can surface via /api/memory/stats.
-        self._tier_queries += 1
-        for name in hit_band_names:
-            self._tier_hits[name] = self._tier_hits.get(name, 0) + 1
+        # A synthetic probe (count_access=False) is not a query either.
+        if count_access:
+            self._tier_queries += 1
+            for name in hit_band_names:
+                self._tier_hits[name] = self._tier_hits.get(name, 0) + 1
 
         # ── Pool 2: reference documents ───────────────────────────────────────
         # Kept separate so they can NEVER displace neural memories.

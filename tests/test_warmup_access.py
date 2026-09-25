@@ -36,6 +36,23 @@ def test_warmup_does_not_count_as_an_access(
     assert entry.access_count == before + 1
 
 
+def test_warmup_is_not_counted_as_a_retrieval_query(
+        pristine_service: MemoryService) -> None:
+    """The persisted query/hit counters behind ``retrieval_queries`` and
+    the per-band hit rate are read telemetry too (PR review, 2026-09-25)."""
+    svc = pristine_service
+    svc.store("warmup probe", source="notes")
+    cms = svc._cms  # noqa: SLF001
+    queries, hits = cms._tier_queries, dict(cms._tier_hits)  # noqa: SLF001
+
+    svc.warmup()
+    assert cms._tier_queries == queries  # noqa: SLF001
+    assert cms._tier_hits == hits  # noqa: SLF001
+
+    svc.search("warmup probe", top_k=1)
+    assert cms._tier_queries == queries + 1  # noqa: SLF001
+
+
 def test_retrieve_can_serve_without_accruing(
         pristine_service: MemoryService) -> None:
     svc = pristine_service
