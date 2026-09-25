@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — Codex hook setup no longer hangs on a hook Codex killed)
+- `ops/setup-codex-hooks.py` could hang on a busy Windows machine for as long
+  as a killed hook lingered (two test runs were still stuck when stopped after
+  7 and 10 minutes). Codex kills a hook that outruns its budget, and a
+  PowerShell hook killed while still starting up could stay stuck mid-exit,
+  holding an inherited copy of the Codex app-server's output pipe; setup
+  waited on that pipe with no limit. It now gives the pipe two seconds after
+  the app-server exits and moves on, so setup finishes and reports the
+  verification check that failed.
+
 ### Changed (2026-09-25 — deploys name their commit and refuse a dirty tree)
 - `/health` reports the commit the running image was built from:
   `build: {git_sha, dirty, built_at}`. The daemon image carries the same
@@ -316,6 +326,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an upgraded install, not a daemon redeploy.
 - `evals/agent_token_ledger.py` sends the daemon bearer on its REST reads and
   now refuses redirects the same way.
+
+### Fixed (2026-09-25 — the session-start briefing no longer hands its bearer to a redirect target)
+- `pseudolife-mcp briefing` (the SessionStart hook that `ops/install-hook.ps1`
+  and `ops/install-hook.sh` install) fetched `/api/briefing` with plain
+  `urllib.request.urlopen`. urllib follows redirects and copies every header
+  except the content headers to the target, so a daemon URL answering with a
+  redirect would have sent `Authorization: Bearer <token>` to whatever host
+  it named. The fetch now uses the shim's no-redirect opener, as the shim's
+  own episode calls do: a redirect fails the fetch, and the hook prints
+  nothing. The five-second timeout is unchanged. The `--coordination`
+  check-in fetch already refused redirects.
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is

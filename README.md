@@ -529,6 +529,10 @@ logon autostart task:
 pip install -U "pseudolife-mcp[lite]"
 ```
 
+On Windows, first close every Claude Code, Codex and Claude Desktop
+session using the shim (quit Desktop from the tray): upgrading a shim
+that is running can leave it half-removed.
+
 **Docker tier:** after a `git pull` (or local code change), redeploy the
 **daemon only** — safely, without touching Postgres or the extractor:
 
@@ -728,7 +732,9 @@ the registrar probes `<command> --help` for the file form first and
 refuses an older shim (exit 4, nothing written) rather than register an
 entry that would fail with the same TaskGroup error — upgrade the shim
 (`pipx upgrade pseudolife-mcp`, or `pipx install --force .` from the checkout) and
-re-run. After any edit, fully quit Desktop from the tray or
+re-run. On Windows, run that upgrade with every session using the shim
+closed (Desktop fully quit from the tray), or it can leave the shim
+half-removed. After any edit, fully quit Desktop from the tray or
 menu-bar icon and relaunch — closing the window does not reload the
 config.
 
@@ -1146,7 +1152,9 @@ pseudolife-mcp-daemon`).
   shim predates token-file support (PyPI releases through 0.15.0 read only
   the literal token): `pseudolife-mcp --help` from a capable shim lists
   `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim and re-run the installer,
-  which now refuses to register an older one against a token file.
+  which now refuses to register an older one against a token file. On
+  Windows, upgrade with every session using the shim closed (Desktop
+  fully quit from the tray), or it can leave the shim half-removed.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —

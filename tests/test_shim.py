@@ -16,8 +16,7 @@ from pseudolife_memory import shim as _shim
 from tests.helpers import (free_port as _free_port,
                            pg_reachable as _pg_reachable,
                            private_bank as _private_bank,
-                           spawn_serve as _spawn_serve,
-                           stop_daemon as _stop_daemon)
+                           serve_on_private_bank as _serve_on_private_bank)
 from tests.pg_fixtures import resolve_test_db_url
 
 pytest.importorskip("psycopg")
@@ -66,28 +65,26 @@ def shared_daemon(tmp_path_factory):
     ``test_shim_forwards_list_changed_on_toolset_expand`` deliberately does
     NOT use this: it needs a daemon booted at the minimal toolset tier, and
     the shim's own spawn of that daemon is also the autostart test.
+
+    Its bank is private, never the run's database: see
+    ``tests.helpers.serve_on_private_bank`` for the writer-lease failure
+    that sharing it caused here.
     """
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-    port = _free_port()
-    data_dir = tmp_path_factory.mktemp("shim_daemon")
     # Token removed rather than blanked: the shims below send no Authorization
     # header, so a daemon that inherited PSEUDOLIFE_MCP_TOKEN would 401 them.
-    proc, _ = _spawn_serve(port, data_dir, url,
-                           env_extra={"PSEUDOLIFE_MCP_TOKEN": None})
-    try:
-        yield {"port": port, "data_dir": data_dir}
-    finally:
-        _stop_daemon(proc)
+    with _serve_on_private_bank(
+            "shimdaemon", tmp_path_factory.mktemp("shim_daemon"),
+            env_extra={"PSEUDOLIFE_MCP_TOKEN": None}) as d:
+        yield d
 
 
 @pytest.fixture()
 def own_bank():
     """A private bank for a test whose shim autostarts its own daemon.
 
-    A bank has one writer (the writer lease): this daemon would otherwise
-    contend with ``shared_daemon`` for the run's database, and off Windows
+    A bank has one writer (the writer lease): on the run's database this
+    daemon would contend with in-process tests' services (see
+    ``tests.helpers.serve_on_private_bank``), and off Windows
     ``_reap_daemon`` cannot kill it, so it would outlive its test holding
     that database. Dropping the private bank cuts it off instead.
     """
@@ -334,7 +331,7 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path, own_bank):
     try:
         asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
     finally:
-        _reap_daemon(port)
+        _reap_daemon(port, tmp_path)
 
 
 def test_shim_forwards_stringified_list_param(shared_daemon):
@@ -670,22 +667,61 @@ def test_shipped_package_never_spawns_with_detached_process():
         f"CREATE_NO_WINDOW so no console window is ever allocated")
 
 
-def _reap_daemon(port: int) -> None:
-    """Best-effort cleanup of the detached daemon the shim auto-spawned."""
+def _reap_daemon(port: int, data_dir) -> None:
+    """Best-effort cleanup of the detached daemon the shim auto-spawned.
+
+    Only a listener on ``port`` whose environment names this test's
+    ``data_dir`` (the shim hands its own environment to the daemon it
+    spawns) is killed. If the spawn failed, the port may be another
+    session's by now, and killing by port alone would take that down.
+    """
     import urllib.request
+
+    import psutil
     try:
         urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
     except Exception:  # noqa: BLE001
         pass
-    if sys.platform == "win32":
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"Get-NetTCPConnection -LocalPort {port} -State Listen "
-             f"-ErrorAction SilentlyContinue | "
-             f"ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force "
-             f"-ErrorAction SilentlyContinue }}"],
-            capture_output=True,
-        )
+    if sys.platform != "win32":
+        return
+    for conn in psutil.net_connections(kind="tcp"):
+        if (conn.status != psutil.CONN_LISTEN or not conn.laddr
+                or conn.laddr.port != port or not conn.pid):
+            continue
+        try:
+            proc = psutil.Process(conn.pid)
+            if proc.environ().get("PSEUDOLIFE_MCP_DATA_DIR") == str(data_dir):
+                proc.kill()
+        except psutil.Error:
+            pass
+
+
+def test_reap_daemon_kills_only_the_daemon_this_test_started(tmp_path):
+    if sys.platform != "win32":
+        pytest.skip("the reaper only acts on Windows")
+    listen = ("import socket, time; s = socket.socket(); "
+              "s.bind(('127.0.0.1', 0)); s.listen(); "
+              "print(s.getsockname()[1], flush=True); time.sleep(60)")
+
+    def listener(data_dir):
+        proc = subprocess.Popen(
+            [sys.executable, "-c", listen], stdout=subprocess.PIPE, text=True,
+            env={**os.environ, "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir)},
+            creationflags=subprocess.CREATE_NO_WINDOW)
+        return proc, int(proc.stdout.readline())
+
+    theirs, their_port = listener(tmp_path / "another-session")
+    ours, our_port = listener(tmp_path)
+    try:
+        _reap_daemon(their_port, tmp_path)
+        _reap_daemon(our_port, tmp_path)
+        ours.wait(timeout=10)
+        assert theirs.poll() is None, "killed another session's listener"
+    finally:
+        for proc in (theirs, ours):
+            proc.kill()
+            proc.wait(timeout=10)
+            proc.stdout.close()
 
 
 # ── Spawn hardening (2026-08-29 port-shadowing incident) ─────────────────────
