@@ -109,10 +109,10 @@ MAX_PAGE = 50
 MAX_PENDING = 256
 MESSAGE_TTL = 86400
 DEDUPE_RETENTION = 7 * 86400
-# An address that has been idle this long, has held no lease for
-# EPHEMERAL_AGENT_RETENTION and is referenced by no retained message is
-# removed by the same prune pass; idle means no activity, and a lease renewal
-# counts only when the shim saw a turn.
+# An address that has had neither its own activity nor a lease for this long
+# and is referenced by no retained message is removed by the same prune pass;
+# a lease renewal counts as activity only when the shim saw a turn, but a
+# held lease still keeps a live shim's address.
 AGENT_RETENTION = DEDUPE_RETENTION
 # Peers the default list shows: holding a lease, or active this recently.
 # Measured 2026-09-20 on the live bank: 90 registered addresses, 11 leased,
@@ -664,11 +664,12 @@ class CoordinationStore:
         # Lazy: the helper's package loads the embedding stack, which the
         # daemon has already imported and the offline CLIs never need.
         from pseudolife_memory.memory.context_builder import _relative_time
+        # CASE fixes the evaluation order: only update payloads are cast.
         set_at = {row["agent_id"]: row["set_at"] for row in self._all(
             "SELECT agent_id,max(created_at) AS set_at FROM coordination_events "
-            "WHERE agent_id=ANY(%s) AND (event='register' OR (event='update' "
-            "AND (payload::jsonb->'fields') ? 'status')) GROUP BY agent_id",
-            ([agent["agent_id"] for agent in agents],))}
+            "WHERE agent_id=ANY(%s) AND CASE event WHEN 'register' THEN true "
+            "WHEN 'update' THEN (payload::jsonb->'fields') ? 'status' ELSE false END "
+            "GROUP BY agent_id", ([agent["agent_id"] for agent in agents],))}
         oldest = None
         if len(set_at) < len(agents):
             oldest = self._one("SELECT min(created_at) AS t FROM coordination_events")["t"]
@@ -1014,14 +1015,14 @@ class CoordinationStore:
         """Expire bodies, discard terminal retry metadata after seven days, and
         remove addresses that are idle, unleased and referenced by no retained
         message (the message rows go first, so a referenced address outlives
-        its mail by the retention window). A leased address goes only once
-        its lease has been gone for EPHEMERAL_AGENT_RETENTION: a parked shim
-        whose lease lapsed during a daemon restart or a host sleep keeps its
-        address, because the first heartbeat after the restart prunes before
-        it is served and the adapter re-attaches within a minute. Then an
-        address registered as not resumable goes after
-        EPHEMERAL_AGENT_RETENTION of inactivity, any other after
-        AGENT_RETENTION.
+        its mail by the retention window). An address goes once it has had
+        neither its own activity nor a lease for its window:
+        EPHEMERAL_AGENT_RETENTION when registered as not resumable,
+        AGENT_RETENTION otherwise. A parked shim whose lease lapsed during a
+        daemon restart or a host sleep keeps its address, because the first
+        heartbeat afterwards prunes before it is served and the adapter
+        re-attaches within a minute; a resumable one keeps it across any
+        outage shorter than AGENT_RETENTION.
 
         The pass logs what it blanked (``expire``) and removed (``prune``).
         With ``audit_retention_days`` > 0 it also removes the audit log's
@@ -1040,19 +1041,19 @@ class CoordinationStore:
             removed = sorted(r["message_id"] for r in self._all(
                 "DELETE FROM coordination_messages WHERE created_at<=%s "
                 "AND expires_at<=%s RETURNING message_id", (now - DEDUPE_RETENTION, now)))
-            # A lease that lapsed less than EPHEMERAL_AGENT_RETENTION ago may
-            # belong to a live shim cut off by a restart or a host sleep, and
-            # its recovery re-attach does not refresh last_activity; only a
-            # lease gone that long, or a detach, says the process has ended.
+            # The retention window runs from the later of the address's own
+            # last action and its last lease. A lapsed lease may belong to a
+            # live shim cut off by a restart or a host sleep, whose recovery
+            # re-attach does not refresh last_activity; only a lease gone for
+            # the whole window, or a detach, says the process has ended.
+            window = f"CASE WHEN {ephemeral} THEN %s ELSE %s END"
             agents = sorted(r["agent_id"] for r in self._all(
                 "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR "
-                "a.lease_until<=%s) "
-                f"AND a.last_activity<=CASE WHEN {ephemeral} THEN %s ELSE %s END "
+                f"a.lease_until<={window}) AND a.last_activity<={window} "
                 "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
                 "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id) "
                 "RETURNING a.agent_id",
-                (now - EPHEMERAL_AGENT_RETENTION,
-                 now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION)))
+                (now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION) * 2))
             events = []
             if expired:
                 events.append(self._event("expire", {"message_ids": expired}, actor="daemon"))

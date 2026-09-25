@@ -218,7 +218,7 @@
     "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
     "Re-emits tools/list_changed downstream after memory_toolset tier changes",
     "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification",
-    "Writer id claude-desktop (one Desktop app process serving every conversation) binds no coordination identity and refuses memory_message / memory_agents update with a pointer to the session's own server"
+    "Writer id claude-desktop (one Desktop app process serving every conversation) binds no coordination identity, refuses memory_message / memory_agents update with a pointer to a per-session server, and prepends that advice to its instructions; its memory_agents list shows open sessions only"
    ]
   },
   {
@@ -1063,7 +1063,7 @@
     "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
     "The coordination_hlc_highwater meta row only ever moves forward (numeric compare), so pruning mail cannot regress mailbox stamps",
     "Live delivery is bounded to MAX_ATTEMPTS (3) per message across attachments; the adapter's receive skips exhausted mail, an explicit receive still returns it",
-    "prune() removes addresses with no lease and no retained message after seven days idle, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true, and a re-attach under the row's own attachment_id is lease recovery, not activity; list_agents shows peers active within ACTIVE_WINDOW (ATTACHED_IDLE_WINDOW, 3 h, while leased), leased first, stamps each with status_set_at/status_age/status_stale (newest register or status update in the audit log, stale past STATUS_STALE_AFTER = 2 h) and counts the rest as idle_omitted", "attach and heartbeat return pending_preview beside pending_count: the PREVIEW_LIMIT (5) oldest pending messages with sender label and a PREVIEW_EXCERPT (100-char) excerpt, read-only, for the shim's turn digest",
+    "prune() removes an address with no retained message once it has had neither its own activity nor a lease for seven days, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true, and a re-attach under the row's own attachment_id is lease recovery, not activity; list_agents shows peers active within ACTIVE_WINDOW (ATTACHED_IDLE_WINDOW, 3 h, while leased), leased first, stamps each with status_set_at/status_age/status_stale (newest register or status update in the audit log, stale past STATUS_STALE_AFTER = 2 h) and counts the rest as idle_omitted", "attach and heartbeat return pending_preview beside pending_count: the PREVIEW_LIMIT (5) oldest pending messages with sender label and a PREVIEW_EXCERPT (100-char) excerpt, read-only, for the shim's turn digest",
     "Every mutation but heartbeat appends a coordination_events row in its own transaction: a dense seq under a transaction-scoped advisory lock taken last, hash = sha256(prev_hash || canonical row)",
     "receive stamps first_read_at once, pull or delivery, and logs a read; prune logs expire/prune and, given audit_retention_days, cuts the log as a prefix and logs the cut (audit_prune) as the surviving chain's anchor",
     "audit_events / verify_audit_chain back the operator-only, read-only board-audit CLI; recover/rebind log operator events and still run on a restored pre-v42 bank"

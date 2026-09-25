@@ -57,9 +57,9 @@ def test_heartbeat_renews_the_lease_but_is_activity_only_when_the_shim_saw_a_tur
 
 
 def test_peer_list_shows_leased_or_recently_active_peers_and_counts_the_rest(store):
-    """The default list is peers holding a lease or active within
-    ACTIVE_WINDOW, leased first; every other peer matching the scope is
-    only counted, under ``idle_omitted``."""
+    """The default list is peers active within ACTIVE_WINDOW, or within
+    ATTACHED_IDLE_WINDOW while holding a lease, leased first; every other
+    peer matching the scope is only counted, under ``idle_omitted``."""
     from pseudolife_memory.storage.coordination import ACTIVE_WINDOW
     caller = store.register("alice")
     parked = store.register("alice", project="p")
@@ -220,21 +220,23 @@ def test_ephemeral_reap_waits_an_hour_after_the_lease_lapsed_not_after_the_last_
 def test_a_live_shim_idle_past_retention_survives_a_lease_lapse(store):
     """Recovery re-attaches used to stamp last_activity, which kept a live
     idle shim young against AGENT_RETENTION; they no longer do, since they
-    are not the agent's act. So the lease speaks for the process instead:
-    a resumable address, like a state-less one, goes only once its lease
-    has been gone for EPHEMERAL_AGENT_RETENTION, not the moment a daemon
-    restart or a host sleep lets it lapse."""
-    from pseudolife_memory.storage.coordination import (
-        AGENT_RETENTION, EPHEMERAL_AGENT_RETENTION)
+    are not the agent's act. So the lease speaks for the process too: an
+    address goes only once it has had neither its own action nor a lease
+    for its retention window, so neither a daemon restart nor a night's
+    host sleep retires a live resumable shim's address (review of
+    b9c718b8: an hour's lease grace still lost it on the first overnight
+    sleep after a week's idleness)."""
+    from pseudolife_memory.storage.coordination import AGENT_RETENTION
     parked = store.register("alice", capabilities={"resumable": True})
     store.attach(*creds(parked), attachment_id="one")
     store.test_time[0] += AGENT_RETENTION + 3600
     store.attach(*creds(parked), attachment_id="one")   # recovery: not activity
-    store.test_time[0] += 61 + 60          # restart: lease lapsed, prune a minute later
-    store.prune()
-    assert parked["agent_id"] in _remaining(store)
-    store.attach(*creds(parked), attachment_id="one")
-    store.test_time[0] += 61 + EPHEMERAL_AGENT_RETENTION   # the process is gone
+    for gap in (61 + 60, 8 * 3600):        # a restart, then a night's host sleep
+        store.test_time[0] += gap
+        store.prune()                      # the first heartbeat prunes first
+        assert parked["agent_id"] in _remaining(store)
+        store.attach(*creds(parked), attachment_id="one")
+    store.test_time[0] += 61 + AGENT_RETENTION           # the process is gone
     store.prune()
     assert parked["agent_id"] not in _remaining(store)
 
@@ -612,11 +614,15 @@ def test_the_desktop_app_process_registers_no_board_identity(monkeypatch, tmp_pa
         seen.update(kwargs)
 
     monkeypatch.setattr(shim, "_proxy", proxy)
-    asyncio.run(shim._run_session_proxy("http://fixture", "token", "process-session"))
+    asyncio.run(shim._run_session_proxy("http://fixture", "token", "process-session",
+                                        instructions_note="version note"))
     assert _RecordingAdapter.constructed == []
     assert "coordination_adapter" not in seen and "agent_headers" not in seen
-    assert "own Pseudolife server" in seen["coordination_refusal"]
-    assert not (tmp_path / "desktop.json").exists()
+    assert "per-session Pseudolife server" in seen["coordination_refusal"]
+    # The served instructions may ask for the board check-in this process
+    # refuses; the note ahead of them says to skip it, after any version note.
+    assert seen["instructions_note"].startswith("version note\n\n")
+    assert "skip memory_agents update and memory_message" in seen["instructions_note"]
 
 
 def test_the_shared_process_refuses_board_writes_and_forwards_everything_else(monkeypatch):
@@ -642,7 +648,8 @@ def test_the_shared_process_refuses_board_writes_and_forwards_everything_else(mo
             assert caught.value.data["classification"] == "coordination_unavailable"
             assert caught.value.data["operation_outcome"] == "not_dispatched"
             assert "every conversation" in caught.value.message
-            assert "own Pseudolife server" in caught.value.message
+            assert "per-session Pseudolife server" in caught.value.message
+            assert "open sessions only" in caught.value.message
         for name, arguments in (("memory_agents", {"action": "list"}), ("memory_search", {})):
             result = await handler.handler(None, types.CallToolRequestParams(
                 name=name, arguments=arguments))

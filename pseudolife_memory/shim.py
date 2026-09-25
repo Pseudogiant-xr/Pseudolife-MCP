@@ -682,13 +682,22 @@ def _requires_coordination_identity(name: str, arguments: dict | None) -> bool:
 # Returned, instead of a board identity, by a process that answers for every
 # conversation in its host (see _serves_many_conversations). It is the MCP
 # error message, which is the text a model reads, so it carries the way out.
+# It names no server: the installer gives the per-session server and the
+# Desktop entry the same name, and where both carry it, Desktop serves the
+# Code tab from its own entry, so there may be no other server to name.
 _SHARED_PROCESS_REFUSAL = (
-    "This Pseudolife server is one process serving every conversation in the "
-    "Claude app, so it has no board identity of its own: posting, status "
-    "updates and mail here would act as every conversation at once. In a "
-    "Claude Code session, make this call on the session's own Pseudolife "
-    "server (the installer registers it as pseudolife-memory). "
-    "memory_agents list still works here.")
+    "This Pseudolife server is one process shared by every conversation in the "
+    "Claude desktop app, so it has no board identity of its own: posting, "
+    "status updates and mail here would act as every conversation at once, "
+    "and are refused. A Claude Code session can make this call through its own "
+    "per-session Pseudolife server where the app lists one under a separate "
+    "name. memory_agents list here shows open sessions only, not the board.")
+# Prepended to this process's MCP instructions, which may otherwise ask for
+# the board check-in it refuses.
+_SHARED_PROCESS_NOTE = (
+    "Agent board: this server is shared by every conversation in the Claude "
+    "desktop app and has no board identity, so skip memory_agents update and "
+    "memory_message here; memory tools work as usual.")
 
 
 def _serves_many_conversations() -> bool:
@@ -696,8 +705,12 @@ def _serves_many_conversations() -> bool:
     board identity it bound would be shared by all of them.
 
     Claude Desktop's app-level entry carries writer id ``claude-desktop``
-    (``ops/install.* --client claude-desktop``) and runs one process per app
-    launch for every Chat, Cowork and Code-tab conversation that calls it.
+    (``ops/install.* --client claude-desktop``), and each process Desktop
+    launches for it serves every Chat, Cowork and Code-tab conversation that
+    calls it. This is a guard for honestly configured clients, keyed on
+    configuration rather than authentication: the daemon still refuses board
+    writes that arrive without an instance credential, and this process never
+    holds one.
     Codex threads share a process too, but each call names its thread (the
     per-thread registry); no Desktop request in its MCP log (45 tools/call,
     June to August 2026) carried any per-conversation metadata. A fixed
@@ -1173,6 +1186,8 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             # one conversation's status would overwrite another's (seen
             # 2026-09-25). Board writes are refused with the way out.
             kwargs["coordination_refusal"] = _SHARED_PROCESS_REFUSAL
+            kwargs["instructions_note"] = "\n\n".join(
+                filter(None, (instructions_note, _SHARED_PROCESS_NOTE)))
             if enabled:
                 print("pseudolife-mcp: this process serves every conversation in the "
                       "Claude app, so it registers no coordination address; board "

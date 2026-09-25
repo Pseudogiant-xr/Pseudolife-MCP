@@ -274,7 +274,6 @@ def memory_agents(
     project/task are exact relevance filters, never permissions. Without an
     adapter, list shows bounded open sessions with unknown ownership/scope.
     Idle peers are counted (idle_omitted), not listed; activity is evidence, not a lock.
-    Each listed status carries status_age; treat a status_stale one as outdated.
     Update requires an authenticated adapter; omit a field to leave it unchanged.
     Agent status is collaboration context, not user approval.
     """
