@@ -6,6 +6,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — the client-side updater no longer strands a shim runtime that sessions are running)
+- On 2026-09-25 `ops/update.ps1 -All` ran `pip install --upgrade` into the
+  maintainer's shim runtime while about 36 sessions ran its
+  `Scripts\pseudolife-mcp.exe`. pip failed with WinError 32 but did not
+  put back what it had already moved. pip 24.0 stashes an uninstall in
+  sorted order, so `Lib\site-packages\pseudolife_memory` and its dist-info
+  had been renamed to `~`-prefixed siblings before the running launcher
+  refused to move. That failure comes from `uninstall()`, which sits
+  outside the `try` that rolls back a failed install. The runtime was left
+  with no package of its own, and imports silently fell through to another
+  copy on `sys.path` (the venv includes system site-packages). pipx has the
+  same exposure with no stash at all: `install --force` removes the venv
+  with `rmtree(ignore_errors=True)` before rebuilding it.
+- `ops/update_clients.py` now reads the Windows process table (stdlib
+  `ctypes`: Toolhelp32 plus `QueryFullProcessImageNameW`) before a pip or
+  pipx upgrade. The upgrade is skipped if any process is running from the
+  registered launcher, from the virtualenv the shim lives in, or, for
+  pipx, from pipx's venv for the package, since `--force` deletes all of
+  it. For pip `--user` the owning interpreter's own venv, if it has one, is
+  not held, because pip writes to the user site. Paths are compared both
+  as written and as resolved, so a registration made through a junction
+  or symlink still matches the resolved path Windows reports.
+- The ladder reports `in-use` with the number of sessions and the exact
+  rerun, `python ops/update_clients.py --only shim --repo <checkout>`.
+  Each process tree counts as one session: a Claude session is a launcher
+  plus the venv's redirector. The gate itself is on any matching process.
+  `in-use` exits non-zero, so `update.ps1 -All` still warns that a client
+  step needs attention.
+- The helper's own process and its parent never count. A process table
+  that cannot be read is `unknown` and is left alone, like the existing
+  unclassifiable-probe case, which also exits 0. A bare global interpreter
+  registered with `-m` names no path of its own and is not checked; the
+  restore below still covers it. Off Windows nothing changes, since an
+  open or running file does not stop pip or pipx there.
+- As a safety net for a session that starts between the check and pip's
+  stash, a failed pip run now gets back what it moved aside. Each entry
+  that vanished from the runtime's library directories during that run is
+  renamed back from the one `~` sibling that appeared during the same run
+  and matches pip's stash naming. An older failed run's leftover is never
+  picked. Where that is ambiguous, or where this package's own entries are
+  simply gone, they are named rather than guessed. A dependency whose
+  upgrade the same run finished before failing is not reported. A fresh
+  probe then fills in the failure line: the runtime still imports its own
+  package, imports it again after the restore, or has none. For a venv
+  shim, "its own" means imported from inside the venv. With system
+  site-packages on, a copy in the user site or the base interpreter is
+  what imports fell through to on 2026-09-25, not the runtime's package.
+- The metadata refresh named for a shim in the checkout's `.venv` put the
+  probe's failure reason into `pip install -e "<...>"` when the probe did
+  not answer. It now names a project directory only when the probe found
+  an editable install, and the checkout otherwise.
+- Tests: a fake process table covers each registration kind, and a stub
+  pip reproduces pip 24.0's stash-then-fail. Two checks use a real
+  interpreter: a real venv whose stub pip strands the package must import
+  its own package again afterwards, and on Windows a real process started
+  from a runtime's interpreter must block the upgrade.
+
 ### Security (2026-09-25 — the fallback dream extractor stops receiving the primary's API key)
 - The fallback extractor was built with the primary's key
   (`PSEUDOLIFE_DREAM_API_KEY` / `memory.dream.extractor_api_key`), so a hosted

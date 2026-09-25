@@ -16,7 +16,12 @@ already live and the metadata refresh needs every session closed, so it
 is named, not run. A pipx-managed one is ``pipx install --force``-ed
 from the checkout. A launcher or ``python -m pseudolife_memory.cli``
 inside some other virtualenv is upgraded through that interpreter's pip.
-Anything else is left alone and named.
+Anything else is left alone and named. On Windows a pip or pipx upgrade is
+skipped while any process runs from the shim's virtualenv or its registered
+launcher (either would strand it half-removed); the sessions are counted
+and the rerun named instead. A bare global interpreter registered with
+``-m`` names no path of its own and is not checked. A pip run that fails
+anyway gets back what it moved aside.
 
 Plugin: the version string is pinned to the package version, so a plugin
 change on master does not move ``/plugin update``. The marketplace clone
@@ -114,26 +119,36 @@ _INSTALL_KIND_PROBE = (
 )
 
 
-_install_kinds: dict[str, tuple[str, str]] = {}
+_install_kinds: dict[str, tuple[str, str, list[str]]] = {}
 
 
 def install_kind(interpreter: Path) -> tuple[str, str]:
     """One probe per interpreter per run (a registration is classified,
     de-duplicated and then reported, each of which asks)."""
+    return _probed(interpreter)[:2]
+
+
+def install_libs(interpreter: Path) -> list[Path]:
+    """The library directories the probe reported for this interpreter."""
+    return [Path(lib) for lib in _probed(interpreter)[2]]
+
+
+def _probed(interpreter: Path) -> tuple[str, str, list[str]]:
     key = str(interpreter).lower()
     if key not in _install_kinds:
         _install_kinds[key] = _probe_install_kind(interpreter)
     return _install_kinds[key]
 
 
-def _probe_install_kind(interpreter: Path) -> tuple[str, str]:
+def _probe_install_kind(interpreter: Path) -> tuple[str, str, list[str]]:
     """``("editable", <project dir>)`` when the interpreter imports the
     package from outside its library directories (a PEP 660 editable
     install, a legacy egg-link, or a .pth pointing at a checkout),
     ``("site", "")`` when it imports from a library directory,
     ``("missing", "")`` when the probe answered that it does not import at
-    all, and ``("unknown", <reason>)`` when the probe did not answer.
-    "The probe failed" and "the package is absent" are different facts and
+    all, and ``("unknown", <reason>)`` when the probe did not answer — each
+    followed by the library directories the probe reported (none when it
+    did not answer). "The probe failed" and "the package is absent" are different facts and
     only the second licenses a pip install. Editable-ness is a property of
     the install, not of any path this helper knows: on 2026-09-21 a
     path-only check pip-upgraded the maintainer's checkout venv and
@@ -144,7 +159,7 @@ def _probe_install_kind(interpreter: Path) -> tuple[str, str]:
     code, out = run_cli([str(interpreter), "-c", _INSTALL_KIND_PROBE], timeout=60,
                         cwd=tempfile.gettempdir())
     if code != 0:
-        return "unknown", f"probe exited {code}: {_failure_line(out, code)}"
+        return "unknown", f"probe exited {code}: {_failure_line(out, code)}", []
     # run_cli appends stderr after stdout, so a warning from a .pth or
     # sitecustomize can follow the JSON line: find the report, wherever it is.
     report = None
@@ -160,18 +175,19 @@ def _probe_install_kind(interpreter: Path) -> tuple[str, str]:
             report = candidate
             break
     if report is None:
-        return "unknown", f"probe printed no report: {_failure_line(out, code)}"
+        return "unknown", f"probe printed no report: {_failure_line(out, code)}", []
+    libs = [str(lib) for lib in report.get("libs") or [] if lib]
     package_dir = report.get("package_dir")
     if not package_dir:
-        return "missing", ""
+        return "missing", "", libs
     package = Path(package_dir)
-    for lib in report.get("libs", []):
+    for lib in libs:
         try:
             if package.resolve().is_relative_to(Path(lib).resolve()):
-                return "site", ""
+                return "site", str(package), libs
         except (OSError, ValueError):
             continue
-    return "editable", str(package.parent)
+    return "editable", str(package.parent), libs
 
 
 def _pip_or_editable(kind: str, interpreter: Path) -> tuple[str, Path | None]:
@@ -265,6 +281,242 @@ def _classify(command: str, args: str, repo: Path, pipx_listing: dict | None = N
     return "unmanaged", None
 
 
+# ── what an upgrade must not pull out from under running sessions ───────────
+#
+# 2026-09-25: `pip install --upgrade` into a runtime that ~36 sessions were
+# running failed with WinError 32 on its Scripts\pseudolife-mcp.exe. pip 24.0
+# stashes what it uninstalls in sorted order, so Lib\site-packages\
+# pseudolife_memory and its dist-info had already been renamed to `~`-prefixed
+# siblings, and the raise came from uninstall(), which sits outside the try
+# that rolls a failed install back: the runtime was left with no package of
+# its own. pipx is worse: `install --force` deletes the venv with
+# rmtree(ignore_errors=True) before rebuilding it, so with the launcher
+# running everything else in it is gone, with nothing to put back. On Windows
+# a runtime something is running is therefore never upgraded; the restore
+# below is the net for a session that starts after the check.
+
+def list_processes() -> list[tuple[int, int, str]] | None:
+    """``(pid, parent pid, image path)`` of every process this user can
+    query, or ``None`` off Windows, where an open or running file does not
+    stop pip or pipx replacing it. Raises ``OSError`` when the table cannot
+    be read."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessEntry(ctypes.Structure):   # PROCESSENTRY32W
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
+                    ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = kernel32.Process32NextW.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x2, 0)   # TH32CS_SNAPPROCESS
+    if not snapshot or snapshot == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    parents: list[tuple[int, int]] = []
+    try:
+        entry = ProcessEntry(dwSize=ctypes.sizeof(ProcessEntry))
+        more = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while more:
+            parents.append((entry.th32ProcessID, entry.th32ParentProcessID))
+            more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    if not parents:
+        raise ctypes.WinError(ctypes.get_last_error())
+    rows: list[tuple[int, int, str]] = []
+    image = ctypes.create_unicode_buffer(32768)
+    for pid, ppid in parents:
+        # PROCESS_QUERY_LIMITED_INFORMATION; a process this user may not
+        # query (another account's, a protected one) is not one of its shims.
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            continue
+        try:
+            size = wintypes.DWORD(len(image))
+            if kernel32.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(size)):
+                rows.append((pid, ppid, image.value))
+        finally:
+            kernel32.CloseHandle(handle)
+    return rows
+
+
+def _venv_root(path: Path) -> Path | None:
+    root = path.parent.parent
+    return root if (root / "pyvenv.cfg").is_file() else None
+
+
+def _pipx_venv_roots(pipx_listing: dict) -> list[Path]:
+    """The pipx venv of ``pseudolife-mcp``, from the app paths its metadata
+    names inside it: ``install --force`` deletes all of it, so a session
+    running from it directly (not through the exposed launcher) holds it."""
+    venv = next((v for k, v in pipx_listing.get("venvs", {}).items() if k.lower() == PACKAGE), None)
+    paths = venv.get("metadata", {}).get("main_package", {}).get("app_paths", []) if isinstance(venv, dict) else []
+    roots = []
+    for entry in paths:
+        candidate = entry.get("__Path__") if isinstance(entry, dict) else entry
+        root = _venv_root(Path(str(candidate))) if candidate else None
+        if root and root not in roots:
+            roots.append(root)
+    return roots
+
+
+def _held_paths(command: Path, interpreter: Path | None, extra: list[Path] = ()) -> list[Path]:
+    """What a running session of this registration executes from: the
+    registered launcher itself, and the whole virtualenv the shim lives in
+    (its launcher and the venv's python.exe redirector both run from there;
+    ``interpreter`` only when pip installs into that interpreter's own
+    environment). A user scripts or pipx bin directory holds other tools'
+    launchers too, so only the registered one counts there. A bare
+    interpreter outside any virtualenv is shared with everything else
+    Python on the machine and names nothing by itself."""
+    roots = {root for root in (_venv_root(command), interpreter and _venv_root(interpreter)) if root}
+    roots.update(extra)
+    if not _PYTHON_STEM.fullmatch(command.name.lower().removesuffix(".exe")):
+        roots.add(command)
+    return sorted(roots)
+
+
+def _path_forms(path) -> set[str]:
+    """A path as written and as resolved: Windows reports a process's image
+    by its final path, while a registration may go through a junction,
+    symlink or 8.3 short name."""
+    forms = {os.path.normcase(os.path.abspath(path))}
+    try:
+        forms.add(os.path.normcase(os.path.realpath(path)))
+    except (OSError, ValueError):
+        pass
+    return forms
+
+
+def _sessions_holding(paths: list[Path]) -> tuple[int, int] | None:
+    """``(sessions, processes)`` running from ``paths``, or ``None`` where
+    that cannot stop an upgrade. A Claude session is a launcher plus the
+    venv redirector it starts, a Codex one the redirector alone, so each
+    process tree rooted in ``paths`` counts once. This helper and its
+    parent never count (it may be run with the runtime's own python)."""
+    rows = list_processes()
+    if rows is None or not paths:
+        return None
+    held = {form for p in paths for form in _path_forms(p)}
+
+    def inside(image: str) -> bool:
+        return any(form == p or form.startswith(p.rstrip(os.sep) + os.sep)
+                   for form in _path_forms(image) for p in held)
+
+    own = {os.getpid(), os.getppid()}
+    running = {pid: ppid for pid, ppid, image in rows if pid not in own and inside(image)}
+    return sum(1 for ppid in running.values() if ppid not in running), len(running)
+
+
+# pip's AdjacentTempDirectory.LEADING_CHARS (pip 24.0, src/pip/_internal/utils/
+# temp_dir.py): a stashed directory is renamed to "~" + some of these + the
+# rest of its name, the same length, or failing that "~" + some + the whole name.
+_PIP_STASH_CHARS = set("-~.=%0123456789")
+# This distribution's entries in a library directory (its import package and
+# dist-info), normcased as Windows compares them.
+_OWN_NAMES = ("pseudolife_memory", "pseudolife_mcp-")
+
+
+def _stash_of(stash: str, original: str) -> bool:
+    """Whether ``stash`` is a name pip gives ``original`` when it moves it
+    aside next to itself during an uninstall."""
+    stash, original = os.path.normcase(stash), os.path.normcase(original)
+    if not stash.startswith("~") or stash == original:
+        return False
+    for k in range(len(original)):
+        tail = original[k:]
+        head = stash[:len(stash) - len(tail)]
+        if (stash.endswith(tail) and head.startswith("~") and set(head[1:]) <= _PIP_STASH_CHARS
+                and (k == 0 or len(stash) == len(original))):
+            return True
+    return False
+
+
+def _listing(libs: list[Path]) -> dict[Path, set[str]]:
+    listing = {}
+    for lib in libs:
+        try:
+            listing[lib] = set(os.listdir(lib))
+        except OSError:
+            continue
+    return listing
+
+
+def _restore_stashes(before: dict[Path, set[str]]) -> tuple[list[str], list[str]]:
+    """Put back what a failed pip run moved aside and left there.
+
+    Only entries that vanished during this run are restored, each from the
+    one ``~`` sibling that appeared during it and can be its stash — an
+    older failed run's leftover is not this run's and is never picked. Where
+    that is ambiguous, or this package's own files are simply gone (a file
+    pip moved to a temp directory), they are named, not guessed. A
+    dependency whose upgrade the same run completed before failing is
+    neither. Returns ``(restored, missing)``."""
+    restored, missing = [], []
+    for lib, names in before.items():
+        now = _listing([lib]).get(lib, set())
+        gone = sorted(names - now)
+        stashes = [name for name in now - names if name.startswith("~")]
+        for original in gone:
+            found = [s for s in stashes if _stash_of(s, original)]
+            if len(found) == 1 and sum(_stash_of(found[0], g) for g in gone) == 1:
+                try:
+                    os.rename(lib / found[0], lib / original)
+                    restored.append(str(lib / original))
+                    continue
+                except OSError:
+                    pass
+            if found or os.path.normcase(original).startswith(_OWN_NAMES):
+                missing.append(str(lib / original))
+    return restored, missing
+
+
+def _after_failed_pip(interpreter: Path, before: dict[Path, set[str]], own_root: Path | None) -> str:
+    """What the runtime is left with once pip has failed, in words. With
+    system site-packages on, a venv also sees the user site and the base
+    interpreter's: a copy found there is not its own package, so the
+    package must import from inside ``own_root`` when there is one."""
+    restored, missing = _restore_stashes(before)
+    kind, where, _ = _probe_install_kind(interpreter)
+    if kind == "site" and own_root is not None:
+        try:
+            kind = "site" if Path(where).resolve().is_relative_to(own_root.resolve()) else f"elsewhere: {where}"
+        except (OSError, ValueError):
+            kind = f"elsewhere: {where}"
+    notes = []
+    if restored:
+        notes.append("pip had moved " + ", ".join(restored) + " aside and not put "
+                     + ("them" if len(restored) > 1 else "it") + " back: restored")
+    if missing:
+        notes.append("pip removed " + ", ".join(missing) + " and "
+                     + ("they" if len(missing) > 1 else "it") + " could not be restored")
+    if kind == "site":
+        notes.append("the runtime still imports its own package" if not notes
+                     else "the runtime imports its own package again")
+    else:
+        notes.append(f"the runtime has no package of its own (probe: {kind}) and imports fall through to "
+                     "whatever else is on sys.path; reinstall it with every session closed before "
+                     "starting another")
+    return "; ".join(notes)
+
+
+def _retry_command(repo: Path) -> str:
+    return f"python \"{Path(__file__).resolve()}\" --only shim --repo \"{repo}\""
+
+
 def update_shim(repo: Path) -> dict:
     repo = Path(repo)
     registrations: list[tuple[str, str, str]] = []
@@ -300,9 +552,38 @@ def update_shim(repo: Path) -> dict:
         if key in done:
             continue
         done.add(key)
+        if kind in ("pipx", "pip", "pip-user"):
+            # pip --user writes to the user site, not to its interpreter's
+            # environment; pipx --force deletes its whole venv.
+            held = _held_paths(Path(command), interpreter if kind == "pip" else None,
+                               _pipx_venv_roots(pipx_listing) if kind == "pipx" else [])
+            try:
+                holding = _sessions_holding(held)
+            except OSError as exc:
+                results.append({"state": "unknown",
+                                "detail": f"{client}: could not read the process table to see whether a "
+                                          f"session runs {command} ({exc}); left alone rather than upgraded. "
+                                          f"With every session closed: {_retry_command(repo)}"})
+                continue
+            # Gate on processes: the session count is for the message (a
+            # cycle of reused parent pids can leave a tree with no root).
+            if holding and holding[1]:
+                processes = holding[1]
+                sessions = max(holding[0], 1)
+                results.append({"state": "in-use",
+                                "detail": f"{client}: {sessions} session{'s are' if sessions != 1 else ' is'} "
+                                          f"running the shim from {', '.join(map(str, held))} "
+                                          f"({processes} process{'es' if processes != 1 else ''}); not "
+                                          f"upgraded, since {'pipx' if kind == 'pipx' else 'pip'} would leave "
+                                          f"it half-removed. Close {'them' if sessions != 1 else 'it'} and run: "
+                                          f"{_retry_command(repo)}"})
+                continue
         if kind == "editable":
             venv_python = interpreter or _interpreter_beside(Path(command)) or Path(command).parent / "python"
-            project = install_kind(venv_python)[1] if Path(venv_python).is_file() else ""
+            # The probe's detail is a project directory only for an editable
+            # answer (a package path for "site", a failure reason for "unknown").
+            probed, found = install_kind(venv_python) if Path(venv_python).is_file() else ("", "")
+            project = found if probed == "editable" else ""
             results.append({"state": "editable",
                             "detail": f"{client}: {command} runs a source tree directly"
                                       + (f" ({project})" if project else "")
@@ -326,20 +607,22 @@ def update_shim(repo: Path) -> dict:
         elif kind in ("pip", "pip-user"):
             scope = ["--user"] if kind == "pip-user" else []
             shown = f"\"{interpreter}\" -m pip install {' '.join(scope + ['--upgrade'])} {repo}"
+            before = _listing(install_libs(interpreter))
             code, out = run_cli([str(interpreter), "-m", "pip", "install", *scope, "--upgrade", str(repo)])
             results.append({"state": f"reinstalled:{kind}", "detail": f"{client}: {shown}"}
                            if code == 0 else
                            {"state": "failed",
                             "detail": f"{client}: {shown} failed "
                                       f"({_failure_line(out, code)}); "
-                                      f"close every session using the shim and retry"})
+                                      f"{_after_failed_pip(interpreter, before, _venv_root(interpreter) if kind == 'pip' else None)}. "
+                                      f"Close every session using the shim and run: {_retry_command(repo)}"})
         else:
             results.append({"state": "unmanaged",
                             "detail": f"{client}: {command} {args}".strip() + " is not a registration this "
                                       "helper recognises (checkout .venv, pipx, a virtualenv's launcher or "
                                       "python -m, or pip --user); upgrade it in its own environment, e.g. "
                                       f"<its python> -m pip install --upgrade \"{repo}\""})
-    order = ("failed", "unknown", "reinstalled:pipx", "reinstalled:pip", "reinstalled:pip-user", "editable",
+    order = ("failed", "in-use", "unknown", "reinstalled:pipx", "reinstalled:pip", "reinstalled:pip-user", "editable",
              "unmanaged")
     results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
     return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
@@ -522,7 +805,7 @@ def check_codex_hooks(repo: Path) -> dict:
 # ── the command ─────────────────────────────────────────────────────────────
 
 def _marker(state: str) -> str:
-    if state == "failed":
+    if state in ("failed", "in-use"):
         return "[!]"
     if state.startswith(("reinstalled", "refreshed", "current")) or state == "editable":
         return "[x]"
@@ -547,7 +830,8 @@ def main(argv=None) -> int:
         report["plugin"] = update_plugin(repo)
     if "codex" in steps:
         report["codex"] = check_codex_hooks(repo)
-    report["ok"] = all(r["state"] != "failed" for k, r in report.items() if k != "ok")
+    # A shim left un-upgraded because sessions run it still needs the rerun.
+    report["ok"] = all(r["state"] not in ("failed", "in-use") for k, r in report.items() if k != "ok")
     if args.json:
         print(json.dumps(report, indent=2))
         return 0 if report["ok"] else 1

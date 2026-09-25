@@ -584,7 +584,10 @@ daemon is healthy:
 It reinstalls the shim behind each Claude Code / Codex registration where
 that is safe (pipx, or the registered interpreter's pip; a shim running
 straight from this checkout is already live and is named instead, since
-its metadata refresh needs every session closed), refreshes the plugin
+its metadata refresh needs every session closed; on Windows a shim whose
+virtualenv or launcher a session is running from is skipped, with the
+sessions counted and the rerun named, because pip or pipx would leave it
+half-removed), refreshes the plugin
 cache by comparing bytes against the marketplace clone (the plugin's
 version string only moves with a release, so `/plugin update` alone would
 say "already latest"), and reports whether Codex's hook copy matches the
