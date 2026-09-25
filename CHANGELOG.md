@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — Codex hook setup no longer hangs on a hook Codex killed)
+- `ops/setup-codex-hooks.py` could hang on a busy Windows machine for as long
+  as a killed hook lingered (two test runs were still stuck when stopped after
+  7 and 10 minutes). Codex kills a hook that outruns its budget, and a
+  PowerShell hook killed while still starting up could stay stuck mid-exit,
+  holding an inherited copy of the Codex app-server's output pipe; setup
+  waited on that pipe with no limit. It now gives the pipe two seconds after
+  the app-server exits and moves on, so setup finishes and reports the
+  verification check that failed.
+
 ### Changed (2026-09-25 — deploys name their commit and refuse a dirty tree)
 - `/health` reports the commit the running image was built from:
   `build: {git_sha, dirty, built_at}`. The daemon image carries the same
