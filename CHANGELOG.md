@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-26 — agents queue for shared resources on the board instead of by message, schema v45)
+- Agents that share one machine can now hold a named, expiring **resource
+  lease** (a full test suite, the GPU, a maintenance window, a work area)
+  and queue for it on the agent board, instead of announcing turns by hand.
+  In the 2026-09-23/24 overnight trial the full-suite relay ran on
+  hand-written SUITE-START/SUITE-END messages, and one hand-off to a session
+  that never took its turn stalled the relay for twenty minutes.
+- A freed lease is granted to the head of its queue, which must renew within
+  five minutes (or its own ttl, if shorter) or lose it to the next waiter.
+  Every grant raises a fence number. Grants, releases, expiries and
+  operator breaks are audit-log events; renewals are not, like heartbeats.
+  Every lease call, listing and prune pass first settles lapsed holds, so a
+  queue moves on even when its holder died without a word, and prune never
+  removes an agent that holds a live lease.
+- REST gains `lease` (acquire, renew or queue once), `release` and
+  `leases` (a listing that needs only the bearer). A full queue is a
+  transient 429.
+- `memory_agents` gains `claim` and `release`: a session-held lease such as
+  `coordinator:<project>` or `claim:<path>`, whose `status` is its purpose.
+  A model renews by claiming again; a `claim:` lease lasts a day between
+  renewals and any other an hour. The roster lists every held or queued
+  lease. A claim is advisory: it tells peers, it blocks no edit.
+- A status can carry an expected duration: `memory_agents update` takes
+  `expect` (seconds), and past it the roster marks the row
+  `status_overdue`. The audit log records the expectation only when it
+  changes, so existing status history keeps its shape.
+- Schema v45 adds `coordination_leases`, `coordination_lease_waiters` and
+  `coordination_agents.status_expires_at`. The lease tables carry no
+  foreign keys, like the audit log, and stay out of portable exports.
+- The opt-in full-tier tool-description budget moves from 17,500 to 17,800
+  characters for the new `memory_agents` contract (+295); core fits within
+  its unchanged 11,500.
+
 ### Fixed (2026-09-25 — Postgres connects retry a Windows local-port failure)
 - A daemon running natively on Windows (including the daemons the test suite
   spawns) now tries its own Postgres connects again (the storage connection
