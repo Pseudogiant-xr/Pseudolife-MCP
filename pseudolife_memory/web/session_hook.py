@@ -1,6 +1,8 @@
 """Plain-text session-start context for the Claude Code plugin hook.
 
-``GET /api/hook/session-start`` serves a short standing memory core and,
+The installer's hook without the plugin (``pseudolife-mcp briefing
+--hook-json``) reads the same endpoint, so both paths start with the same
+core. ``GET /api/hook/session-start`` serves a short standing memory core and,
 when the request is authorized, complete budgeted entries from the session
 briefing. The detailed reference remains in ``examples/CLAUDE.memory.md``
 and ``MEMORY_LOOP_BLOCK``. Users can add instructions by writing

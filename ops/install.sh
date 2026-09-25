@@ -626,13 +626,20 @@ install_claude_plugin
 # Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
 # exact hook trust, runtime verification, and instruction fallback together.
 # Gemini/generic have no hook system.
+instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 if grep -q "pseudolife-memory@pseudolife-mcp" \
         "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
     CLAUDE_PLUGIN_INSTALLED=1
     case " $CLIENTS " in *" claude "*)
         step "pseudolife-memory Claude Code plugin detected — skipping Claude"
-        echo "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
-        echo "    longer bundles an MCP server, so the transport is still wired below." ;;
+        if [ "$instruction_choice" = append ]; then
+            echo "    hook (the plugin provides it); the CLAUDE.md block is still appended,"
+            echo "    as requested. The plugin no longer bundles an MCP server, so the"
+            echo "    transport is still wired below."
+        else
+            echo "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
+            echo "    longer bundles an MCP server, so the transport is still wired below."
+        fi ;;
     esac
 else
     CLAUDE_PLUGIN_INSTALLED=""
@@ -650,7 +657,6 @@ CODEX_CONNECTION_CONFIGURED=""
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED=""
 CODEX_RUNTIME_DEFAULTS=""
 CODEX_RUNTIME_RECOVERY=""
-instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 for selected_client in $CLIENTS; do
     case "$selected_client" in claude|codex) ;; *) continue ;; esac
@@ -835,8 +841,12 @@ for selected_client in $CLIENTS; do
         continue
     fi
     if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
-        record_instr claude "covered-by-plugin"
-        continue
+        # The plugin hook serves a compact core, not this block, so an
+        # explicit append still writes it; auto and skip leave CLAUDE.md alone.
+        if [ "$instruction_choice" != append ]; then
+            record_instr claude "covered-by-plugin"
+            continue
+        fi
     fi
     case "$selected_client" in
         gemini)  instruction_path="$HOME/.gemini/GEMINI.md" ;;

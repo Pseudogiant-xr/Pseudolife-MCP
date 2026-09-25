@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — Claude Code without the plugin starts with the memory core)
+- The SessionStart hook the installer writes for Claude Code without the
+  plugin (`pseudolife-mcp briefing --hook-json`, also used by older Codex
+  hook setups) now injects what the plugin hook injects, read from
+  `/api/hook/session-start`: the compact memory core, then, when the request
+  is authorized, any daemon `hook-instructions.md`, cold-bank onboarding and
+  the bounded briefing. It used to inject
+  only the live briefing from `/api/briefing`, so those sessions started
+  without the memory core, and a cold bank injected nothing. Existing
+  `settings.json` entries need no edit: the installer's `docker exec` command
+  picks this up with the daemon image, a host-installed command with the
+  `pseudolife-mcp` package. As with the plugin, this briefing no longer
+  includes the coordination section. Plain `pseudolife-mcp briefing` still
+  prints the full `/api/briefing`.
+- An explicit `--instructions append` (`-Instructions append`, or the
+  `--claude-md` alias) now writes the standing block to `~/.claude/CLAUDE.md`
+  when the Claude Code plugin is installed, as the README states; Codex
+  already honoured it. `auto` and `skip` still leave `CLAUDE.md` alone beside
+  the plugin.
+
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing
   items within its output budget, with explicit notices when content is omitted.

@@ -2,9 +2,12 @@
 
 Torch-free and dependency-light: stdlib ``urllib`` only, no MCP handshake. Hits
 the already-running daemon's REST ``/api/briefing`` (never auto-starts one;
-session-start must stay fast). Prints nothing + exit 0 when the daemon is down,
-the bank is cold, or anything goes wrong — a memory briefing must never break a
-session.
+session-start must stay fast). With ``--hook-json`` it reads
+``/api/hook/session-start`` instead — the same compact memory core plus
+bounded briefing the plugin hook serves — so a hook wired by the installer
+(Claude Code without the plugin, older Codex hooks) starts with the core too.
+Prints nothing + exit 0 when the daemon is down, the bank is cold, or anything
+goes wrong — a memory briefing must never break a session.
 """
 from __future__ import annotations
 
@@ -41,6 +44,18 @@ def _fetch_markdown(url: str, token: str | None, max_unsure: int, max_lessons: i
     return (data or {}).get("markdown", "") or ""
 
 
+def _fetch_session_start(url: str, token: str | None) -> str:
+    """GET ``/api/hook/session-start`` — the plugin hook's plain-text context:
+    the memory core, then (when authorized) the bounded briefing, already
+    within the hook's size budget. No ``session_id`` is sent, so this path
+    registers no episode."""
+    req = urllib.request.Request(f"{url}/api/hook/session-start")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=5) as r:
+        return r.read().decode("utf-8")
+
+
 def run_briefing() -> None:
     from pseudolife_memory.shim import _daemon_url, probe_health  # torch-free helpers
 
@@ -51,7 +66,9 @@ def run_briefing() -> None:
     ap.add_argument("--max-world", type=int, default=3)
     ap.add_argument("--hook-json", action="store_true",
                     help="emit a Claude Code/Codex SessionStart hook payload "
-                         "(hookSpecificOutput.additionalContext) instead of raw markdown")
+                         "(hookSpecificOutput.additionalContext) carrying the "
+                         "memory core and the bounded briefing the plugin hook "
+                         "serves; the --max-* caps do not apply")
     args, _ = ap.parse_known_args(sys.argv[2:])  # argv[1] == "briefing"
 
     url = _daemon_url()
@@ -59,7 +76,10 @@ def run_briefing() -> None:
         return  # daemon down -> inject nothing
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
     try:
-        md = _fetch_markdown(url, token, args.max_unsure, args.max_lessons, args.max_world)
+        if args.hook_json:
+            md = _fetch_session_start(url, token)
+        else:
+            md = _fetch_markdown(url, token, args.max_unsure, args.max_lessons, args.max_world)
     except Exception:
         return  # never break session start
     md = (md or "").strip()

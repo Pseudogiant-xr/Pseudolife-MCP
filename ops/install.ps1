@@ -603,14 +603,20 @@ Install-ClaudePlugin
 $installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
 $claudePluginInstalled = (Test-Path $installedPlugins) -and
     ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
+$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
 if ($claudePluginInstalled -and ($clients -contains "claude")) {
     Step "pseudolife-memory Claude Code plugin detected - skipping Claude"
-    Write-Host "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
-    Write-Host "    longer bundles an MCP server, so the transport is still wired below."
+    if ($instructionChoice -eq "append") {
+        Write-Host "    hook (the plugin provides it); the CLAUDE.md block is still appended,"
+        Write-Host "    as requested. The plugin no longer bundles an MCP server, so the"
+        Write-Host "    transport is still wired below."
+    } else {
+        Write-Host "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
+        Write-Host "    longer bundles an MCP server, so the transport is still wired below."
+    }
 }
 
 $hookState = @{}
-$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
 $codexSetup = $null
 $codexSetupValid = $false
 $codexCredentialFile = $null
@@ -800,8 +806,12 @@ foreach ($selectedClient in $clients) {
         continue
     }
     if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
-        $instrState["claude"] = "covered-by-plugin"
-        continue
+        # The plugin hook serves a compact core, not this block, so an
+        # explicit append still writes it; auto and skip leave CLAUDE.md alone.
+        if ($instructionChoice -ne "append") {
+            $instrState["claude"] = "covered-by-plugin"
+            continue
+        }
     }
     $instructionPath = switch ($selectedClient) {
         "gemini" { Join-Path $env:USERPROFILE ".gemini\GEMINI.md" }

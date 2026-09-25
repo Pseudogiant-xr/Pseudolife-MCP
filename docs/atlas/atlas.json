@@ -243,7 +243,7 @@
    "s": "manual / Codex hook path",
    "p": "pseudolife_memory/briefing_cli.py",
    "d": [
-    "GET /api/briefing → markdown or hookSpecificOutput JSON",
+    "GET /api/briefing → markdown; --hook-json: GET /api/hook/session-start → hookSpecificOutput JSON",
     "Never auto-starts the daemon; prints nothing on any failure",
     "Wired by ops/install-hook for non-plugin installs"
    ]
@@ -1410,7 +1410,7 @@
   {
    "f": "briefingcli",
    "t": "api",
-   "l": "GET /api/briefing",
+   "l": "GET /api/hook/session-start (--hook-json) · /api/briefing",
    "k": "data"
   },
   {
