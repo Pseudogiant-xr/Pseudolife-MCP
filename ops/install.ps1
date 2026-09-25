@@ -1158,7 +1158,9 @@ foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "claude-desktop") {
         # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
         # by ops/register_claude_desktop.py (absolute shim path - Desktop's
-        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated).
+        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated). It is
+        # named pseudolife-desktop so Code-tab sessions keep their own
+        # per-session pseudolife-memory server.
         if ($Transport -ne "shim") {
             Write-Warning "Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) - ignoring -Transport http for it."
         }
@@ -1197,7 +1199,7 @@ foreach ($selectedClient in $clients) {
         & $desktopPython (Join-Path $repo "ops\register_claude_desktop.py") @desktopArgs 2>&1 | Out-Host
         $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = $null
         $env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = $null
-        Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
+        Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop as pseudolife-desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
         continue
     }
     if ($selectedClient -eq "generic") {

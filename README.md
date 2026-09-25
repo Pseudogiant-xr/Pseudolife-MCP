@@ -375,7 +375,7 @@ is agent context every session, so it stays lean.
 | `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
-| `memory_agents(action, project?, task?, status?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers holding a lease or active within the hour and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_agents(action, project?, task?, status?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
 | `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
@@ -528,6 +528,10 @@ logon autostart task:
 ```bash
 pip install -U "pseudolife-mcp[lite]"
 ```
+
+On Windows, first close every Claude Code, Codex and Claude Desktop
+session using the shim (quit Desktop from the tray): upgrading a shim
+that is running can leave it half-removed.
 
 **Docker tier:** after a `git pull` (or local code change), redeploy the
 **daemon only** — safely, without touching Postgres or the extractor:
@@ -700,7 +704,7 @@ installer prefers that path when it exists). The equivalent entry by hand:
 ```json
 {
   "mcpServers": {
-    "pseudolife-memory": {
+    "pseudolife-desktop": {
       "command": "/absolute/path/to/pseudolife-mcp",
       "env": {
         "PSEUDOLIFE_WRITER_ID": "claude-desktop",
@@ -711,6 +715,16 @@ installer prefers that path when it exists). The equivalent entry by hand:
   }
 }
 ```
+
+The entry is named `pseudolife-desktop` on purpose. Desktop's Code tab runs
+Claude Code, which starts its own per-session `pseudolife-memory` server; when
+an app-level entry has the same name, Desktop sends the session's
+`mcp__pseudolife-memory__*` calls to the app-level entry and the session's own
+server gets none. Re-running the installer renames an entry it wrote under the
+old name (its `env` sets `PSEUDOLIFE_WRITER_ID` to `claude-desktop`), keeping
+any `env` keys you added and backing the config up first. It leaves any other
+`pseudolife-memory` entry alone and warns about it. Chat and Cowork then list
+the tools as `mcp__pseudolife-desktop__*`.
 
 Two things differ from the CLI clients. Desktop launches MCP servers with a
 **sanitized environment** — PATH plus a few system variables, none of your
@@ -731,7 +745,9 @@ the registrar probes `<command> --help` for the file form first and
 refuses an older shim (exit 4, nothing written) rather than register an
 entry that would fail with the same TaskGroup error — upgrade the shim
 (`pipx upgrade pseudolife-mcp`, or `pipx install --force .` from the checkout) and
-re-run. After any edit, fully quit Desktop from the tray or
+re-run. On Windows, run that upgrade with every session using the shim
+closed (Desktop fully quit from the tray), or it can leave the shim
+half-removed. After any edit, fully quit Desktop from the tray or
 menu-bar icon and relaunch — closing the window does not reload the
 config.
 
@@ -1079,7 +1095,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v42 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v43 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1135,7 +1151,8 @@ pseudolife-mcp-daemon`).
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
-  is at the bottom of `mcp-server-pseudolife-memory.log` in the app's log
+  is at the bottom of `mcp-server-pseudolife-desktop.log`
+  (`mcp-server-pseudolife-memory.log` for an entry not yet renamed) in the app's log
   folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
   on macOS). If it is a 401, the daemon is token-gated and the
   Desktop-launched shim holds no credential: Desktop sanitizes the
@@ -1149,7 +1166,9 @@ pseudolife-mcp-daemon`).
   shim predates token-file support (PyPI releases through 0.15.0 read only
   the literal token): `pseudolife-mcp --help` from a capable shim lists
   `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim and re-run the installer,
-  which now refuses to register an older one against a token file.
+  which now refuses to register an older one against a token file. On
+  Windows, upgrade with every session using the shim closed (Desktop
+  fully quit from the tray), or it can leave the shim half-removed.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —

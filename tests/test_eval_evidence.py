@@ -9871,3 +9871,31 @@ CLAIMS.append(Claim(
     artifacts=(AUDIT_VOLUME,),
     value=lambda d: d["if_every_night_were_a_trial_mb"]["90"],
     stated=144.5, places=1))
+
+
+# ── the memory-policy bench sanity check (2026-09-25) ────────────────────
+# evals/README.md reports that the bench could not separate no policy from
+# the full policy at 3 replicates. The regraded artifact is the one the
+# README cites; the run's own artifact predates the review's grader fixes.
+MPB_SANITY = RESULTS + "memory-policy-bench-sanity-20260925-regraded.json"
+
+
+def _mpb_arm(arm, metric):
+    return lambda d: d["summary"]["per_arm"][arm]["metrics"][metric]["mean"]
+
+
+for _cid, _needle, _value, _stated, _places in (
+        ("mpb-sanity-score-gain", "The full policy moved the score +0.19 over no policy",
+         lambda d: d["comparisons"]["full_separate_hook - none"]["score"]["delta"], 0.19, 2),
+        ("mpb-sanity-aa-noise", "inside the A/A noise floor of 0.24",
+         lambda d: d["aa_noise"]["score"], 0.24, 2),
+        ("mpb-sanity-spend", "72 valid runs, $7.04 at list prices",
+         lambda d: d["totals"]["usd"], 7.04, 2),
+        ("mpb-sanity-valid-runs", "72 valid runs, $7.04 at list prices",
+         lambda d: d["summary"]["valid_runs"], 72, 0),
+        ("mpb-sanity-calls-none", "0.4 (none) to 1.0 (full) memory calls per run",
+         _mpb_arm("none", "memory_tool_calls"), 0.4, 1),
+        ("mpb-sanity-calls-full", "0.4 (none) to 1.0 (full) memory calls per run",
+         _mpb_arm("full_separate_hook", "memory_tool_calls"), 1.0, 1)):
+    CLAIMS.append(Claim(id=_cid, doc=EVALS, needle=_needle, artifacts=(MPB_SANITY,),
+                        value=_value, stated=_stated, places=_places))

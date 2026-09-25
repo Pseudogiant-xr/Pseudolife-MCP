@@ -389,6 +389,12 @@ class DreamConfig:
     # Timeout/max_tokens are shared with the primary — no fallback copies.
     fallback_base_url: str | None = None
     fallback_model: str | None = None
+    # The fallback's own bearer key (env PSEUDOLIFE_DREAM_FALLBACK_API_KEY,
+    # honoured in both settings-source modes like extractor_api_key). Unset =
+    # the fallback sends no key: the primary's key is never shared, since it
+    # belongs to the primary's provider and the usual fallback (the in-stack
+    # sidecar, plain HTTP) needs none.
+    fallback_api_key: str | None = None
     extractor_mode: str = "auto"
     # GAM #2 graph-from-text: the dream also extracts (src,relation,dst) triples
     # into the graph (separate extract_relations call — the bench winner). Edges
@@ -1252,6 +1258,51 @@ class StorageConfig:
     write_mode: str = "snapshot"
 
 
+# The standing memory policies session start can serve; see
+# :class:`MemoryPolicyConfig` and ``pseudolife_memory.web.session_hook``.
+MEMORY_POLICY_VARIANTS = ("none", "compact", "full_separate_hook")
+
+
+@dataclass
+class MemoryPolicyConfig:
+    """Which standing memory policy the session-start hooks serve.
+
+    This is the knob ``evals/memory_policy_bench.py`` measures. ``variant``
+    applies to every session:
+
+    * ``compact`` (default) — the short core served since 2026-09-24
+      (``STARTUP_MEMORY_CORE``), ahead of the briefing in one hook output;
+    * ``none`` — no policy text; the briefing and the episode line still serve;
+    * ``full_separate_hook`` — the full ``MEMORY_LOOP_BLOCK`` (7.5 KB), served
+      by the plugin's separate memory-policy hook, because block plus
+      briefing overflow the 9,500-byte budget of one hook output.
+
+    ``ab_arms`` turns on an online A/B test: a non-empty list assigns each
+    hook-registered session one arm by a stable hash of its client session
+    id, in place of ``variant``. A variant may repeat (an A/A test). Sessions
+    that reach the hook without a session id keep ``variant``.
+    """
+
+    variant: str = "compact"
+    ab_arms: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.variant not in MEMORY_POLICY_VARIANTS:
+            raise ValueError(
+                f"memory_policy.variant must be one of "
+                f"{', '.join(MEMORY_POLICY_VARIANTS)} (got {self.variant!r})")
+        if not isinstance(self.ab_arms, list) or any(
+                arm not in MEMORY_POLICY_VARIANTS for arm in self.ab_arms):
+            raise ValueError(
+                f"memory_policy.ab_arms must be a list of variants from "
+                f"{', '.join(MEMORY_POLICY_VARIANTS)} (got {self.ab_arms!r})")
+        if len(self.ab_arms) == 1:
+            raise ValueError(
+                "memory_policy.ab_arms needs at least two arms; set "
+                "memory_policy.variant to serve one variant to every session")
+        self.ab_arms = list(self.ab_arms)
+
+
 @dataclass
 class CoordinationConfig:
     """Peer awareness and addressed mail; limits bound injected session context.
@@ -1306,6 +1357,7 @@ class AppConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     time: TimeConfig = field(default_factory=TimeConfig)
     coordination: CoordinationConfig = field(default_factory=CoordinationConfig)
+    memory_policy: MemoryPolicyConfig = field(default_factory=MemoryPolicyConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
@@ -1436,5 +1488,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.time = _dict_to_dataclass(TimeConfig, raw["time"])
     if "coordination" in raw:
         config.coordination = _dict_to_dataclass(CoordinationConfig, raw["coordination"])
+    if "memory_policy" in raw:
+        config.memory_policy = _dict_to_dataclass(MemoryPolicyConfig, raw["memory_policy"])
 
     return config
