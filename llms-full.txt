@@ -3451,7 +3451,8 @@ reliably — without the agent having to remember:
    Session titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an
-   `episode_hint` until you do); a session closing still-generic gets an
+   `episode_hint` until you do, naming the handle when the store passed
+   one); a session closing still-generic gets an
    auto-derived `"{dominant source} - {stamp}: {first-entry snippet}"`
    title. Fragmented history is repairable over REST:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
@@ -4891,7 +4892,7 @@ header is infrastructure-asserted, by the host or per OS process; an `episode` h
 model-supplied and can be confused between two concurrent sessions'
 briefings. But identity and target episode are separable — a write still
 lands in the handle's named episode even when the header wins identity for
-stamping, and it opens no episode for the header session. An unknown,
+stamping, and it opens no episode for a different header session. An unknown,
 closed, or ambiguous handle never fails the write —
 it degrades to the next tier and the result carries
 `"episode_warning": "unknown or closed episode handle"`.

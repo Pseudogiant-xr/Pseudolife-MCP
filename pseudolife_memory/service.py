@@ -1716,13 +1716,17 @@ class MemoryService(DreamOps):
             # Nudge the agent while the session episode the entry landed on
             # (the handle's root, else the caller's session root) still
             # carries the generic fallback title (the daemon has no project
-            # signal of its own; the agent does).
+            # signal of its own; the agent does). With a handle the hint
+            # names it: a title call without one resolves the header
+            # session, which after /clear is the old session's root.
             root = (self._cms.episodes.get(resolved[0]) if resolved is not None
                     else self._session_root_locked(session_id))
             if root is not None and GENERIC_TITLE_RE.match(root.title or ""):
+                handle_arg = (f", episode='{root.id[:12]}'"
+                              if resolved is not None else "")
                 out["episode_hint"] = (
                     "session episode is untitled — call "
-                    "memory_session_title('<project> - <topic>')")
+                    f"memory_session_title('<project> - <topic>'{handle_arg})")
             if episode_warning:
                 out["episode_warning"] = "unknown or closed episode handle"
             return out

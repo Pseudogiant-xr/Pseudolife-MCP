@@ -847,6 +847,9 @@ def test_store_with_the_new_handle_after_clear_leaves_the_old_session_alone(
     finally:
         reset_writer_context(tok)
     assert res["stored"] is True and "episode_warning" not in res
+    # A handle-less outcome attributes through the global current episode,
+    # which SessionStart set to R2; reopening R1 dragged it back there.
+    assert svc._current_episode_id() == r2
     assert _s1_episodes(svc) == before
     entry = next(e for band in svc._cms.bands for e in band.entries
                  if e.text.startswith("After the clear"))
@@ -854,11 +857,18 @@ def test_store_with_the_new_handle_after_clear_leaves_the_old_session_alone(
     svc.set_active_session(None)
 
 
-def test_episode_hint_after_clear_reads_the_handle_root(pg_service):
+@pytest.mark.parametrize("captured_before_clear", [True, False],
+                         ids=["r1-kept", "r1-pruned"])
+def test_episode_hint_after_clear_reads_the_handle_root(
+        pg_service, captured_before_clear):
     """The untitled-session hint describes the root the entry landed on (the
-    handle's), not whatever the stale header session holds."""
+    handle's), not whatever the stale header session holds, and names that
+    handle: a title call without it would reopen R1 under the stale header
+    and overwrite R1's title."""
     svc = pg_service
-    _, _, handle = _clear_the_session(svc, captured_before_clear=False)
+    _, _, handle = _clear_the_session(
+        svc, captured_before_clear=captured_before_clear)
+    before = _s1_episodes(svc)
     tok = set_writer_context("claude-code", _S1)
     try:
         first = svc.store("After the clear: the deploy window is Tuesday noon.",
@@ -870,9 +880,10 @@ def test_episode_hint_after_clear_reads_the_handle_root(pg_service):
     finally:
         reset_writer_context(tok)
     assert "memory_session_title" in first.get("episode_hint", "")
+    assert f"episode='{handle}'" in first["episode_hint"]
     assert named["ok"] is True
     assert second["stored"] is True and "episode_hint" not in second
-    assert _s1_episodes(svc) == {}
+    assert _s1_episodes(svc) == before
     svc.set_active_session(None)
 
 

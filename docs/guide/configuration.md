@@ -1304,7 +1304,7 @@ header is infrastructure-asserted, by the host or per OS process; an `episode` h
 model-supplied and can be confused between two concurrent sessions'
 briefings. But identity and target episode are separable — a write still
 lands in the handle's named episode even when the header wins identity for
-stamping, and it opens no episode for the header session. An unknown,
+stamping, and it opens no episode for a different header session. An unknown,
 closed, or ambiguous handle never fails the write —
 it degrades to the next tier and the result carries
 `"episode_warning": "unknown or closed episode handle"`.

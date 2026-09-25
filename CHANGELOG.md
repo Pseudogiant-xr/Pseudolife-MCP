@@ -20,7 +20,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   moves the daemon's global current-episode pointer back to the old root,
   which a handle-less `memory_outcome` is attributed through.
 - A store's `episode_hint` now reads the root the entry landed on (the
-  handle's root when one resolves), not the header session's root.
+  handle's root when one resolves), not the header session's root, and when
+  a handle resolved it names it (`memory_session_title(..., episode='<id>')`):
+  a title call without the handle resolves the header session, which after
+  `/clear` would reopen and rename the old session's root.
 - `memory_episode_start` with a handle already nested under the handle's root
   without opening one for the header session; a test now pins it.
 - A session end that matches no open root (a SessionEnd for a reaped
@@ -78,7 +81,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coordination adapter, `memory_agents` then excludes only the launch id's
   roots from its peers, so it can list the session's own new root.
   `--continue`, or `--resume` without an id, may launch the shim with an id
-  no hook registers, so its writes open a root of their own.
+  no hook registers, so its handle-less writes open a root of their own.
   Shim sessions no longer take their title from the working directory: an
   episode the daemon opens starts as `session - <time>`, store results carry
   an `episode_hint` until the agent names it, and a title still generic at

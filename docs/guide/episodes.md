@@ -114,7 +114,8 @@ reliably — without the agent having to remember:
    Session titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an
-   `episode_hint` until you do); a session closing still-generic gets an
+   `episode_hint` until you do, naming the handle when the store passed
+   one); a session closing still-generic gets an
    auto-derived `"{dominant source} - {stamp}: {first-entry snippet}"`
    title. Fragmented history is repairable over REST:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
