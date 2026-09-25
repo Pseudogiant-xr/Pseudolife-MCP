@@ -496,7 +496,13 @@ class CaptureProxy:
 
             do_GET = do_POST = do_PUT = do_DELETE = _forward
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        class Server(ThreadingHTTPServer):
+            daemon_threads = True
+
+            def handle_error(self, request, client_address):
+                pass   # a client closing its keep-alive socket is not news
+
+        self.server = Server(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -567,6 +573,10 @@ def run_claude(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mod
         # Claude Code's background helper model defaults to Haiku; pin it.
         "ANTHROPIC_SMALL_FAST_MODEL": model, "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
         "DISABLE_AUTOUPDATER": "1",
+        # Claude Code's own auto memory is a file-based memory policy of its
+        # own (~13k chars of system prompt); held off like the other
+        # policy surfaces. The settings flag below does the same.
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
         # Defer MCP tool schemas behind ToolSearch, as in a session with many
         # MCP servers; alone, the memory server's 46 tools would load whole.
         "ENABLE_TOOL_SEARCH": tool_search,
@@ -576,6 +586,7 @@ def run_claude(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mod
     cmd = [cli, "-p", "--model", model, "--effort", effort,
            "--output-format", "stream-json", "--verbose", "--include-hook-events",
            "--strict-mcp-config", "--mcp-config", str(mcp_path), "--plugin-dir", str(plugin),
+           "--settings", json.dumps({"autoMemoryEnabled": False}),
            "--permission-mode", "acceptEdits", "--permission-prompts", "none",
            "--allowedTools", "mcp__pseudolife-memory", "Bash(python *)", "Bash(python3 *)",
            "Bash(make *)", "Bash(ls *)", "Bash(cat *)", "Bash(grep *)",
@@ -809,10 +820,14 @@ def grade_run(*, sc: fx.Scenario, manifest: dict, ledger: list[dict], db: str,
                 for e in (r.get("result") or {}).get("entries") or [])
             for r in calls.get("memory_lesson_search", []) if isinstance(r.get("result"), dict))
     elif sid == "b_contested":
+        # Resolved = the verified value is current. memory_fact_set with the
+        # contender's own value supersedes but leaves that identical
+        # contender parked (``contested`` stays true; seen 2026-09-25), so
+        # a leftover contender equal to the current value still counts.
         row = _slot(final.get("facts", {}), "lanternfish", "deploy_region") or {}
         rules["contested_slot_resolved_to_source"] = (
-            str(row.get("value")) == "us-east-2" and not row.get("contested")
-            and not row.get("contender_value"))
+            str(row.get("value")) == "us-east-2"
+            and row.get("contender_value") in (None, "us-east-2"))
     elif sid == "c_current_version":
         rules["recalled_before_stating"] = bool(
             reads and target_birth is not None and reads[0] <= target_birth)
@@ -896,7 +911,8 @@ EXPECTED = {"none": (), "compact": ("core",), "compact_gaps": ("core", "gaps"),
             "full_separate_hook": ("full_block",)}
 # Anything that talks about memory policy. After the constant surfaces are
 # removed, none of these may remain in the model's context.
-_MARKER = re.compile(r"(?i)\bmemory_[a-z_]+|pseudolife|used_ids|memory bank|\blessons?\b")
+_MARKER = re.compile(r"(?i)\bmemory_[a-z_]+|pseudolife|used_ids|memory bank|\blessons?\b"
+                     r"|auto[- ]?memory|MEMORY\.md|file-based memory|persistent memory")
 
 
 def _norm(text: str) -> str:
@@ -931,12 +947,61 @@ _CONSTANT = re.compile(r"mcp__pseudolife-memory__[a-z_]+|pseudolife-memory:[a-z-
                        r"|## pseudolife-memory\b")
 
 
-def validity(*, variant: str, capture_dir: Path, ledger: list[dict], prompt: str,
-             model: str, grade: dict, client_session: str | None = None) -> dict:
-    """Prove the arm's policy text is present and is the only memory-policy
-    text in the model's starting context."""
+def policy_scan(text: str, variant: str, ledger: list[dict],
+                strip: tuple[str, ...] = ()) -> dict:
+    """The arm's policy must be in ``text`` (normalised context), no other
+    known policy text may be, the served hook responses must have arrived
+    intact, and once the arm's policy and the constant surfaces are removed
+    nothing memory-related may remain."""
     from pseudolife_memory.mcp_server import _MCP_INSTRUCTIONS
 
+    reasons = []
+    texts = {k: _norm(v) for k, v in policy_texts().items()}
+    found = {k: v in text for k, v in texts.items()}
+    expected = set(EXPECTED[variant])
+    for key in expected:
+        if not found[key]:
+            reasons.append(f"the arm's {key} text is missing from the context")
+    for key, present in found.items():
+        if present and key not in expected:
+            reasons.append(f"{key} text is present but the arm does not serve it")
+    residue = text
+    for key in expected:
+        residue = residue.replace(texts[key], " ")
+    residue = residue.replace(_norm(_MCP_INSTRUCTIONS), " ")
+    served_in_context = []
+    for r in ledger:
+        if r.get("kind") != "hook" or r.get("path") not in _CONTEXT_HOOKS:
+            continue
+        pieces = [p for p in (_norm(x) for x in re.split(r"\n\s*\n", r.get("body") or "")) if p]
+        if not pieces:
+            continue
+        served_in_context.append(all(p in text for p in pieces))
+        for p in pieces:
+            residue = residue.replace(p, " ")
+    if not all(served_in_context):
+        reasons.append("a hook response did not reach the model's context intact")
+    residue = _CONSTANT.sub(" ", residue)
+    # Paths carry the run id (a scenario id such as a_lesson); drop any
+    # token that contains it before looking for policy words.
+    for needle in strip:
+        residue = re.sub(r"\S*" + re.escape(needle) + r"\S*", " ", residue)
+    leaks = sorted({residue[max(0, m.start() - 40): m.end() + 40]
+                    for m in _MARKER.finditer(residue)})
+    if leaks:
+        reasons.append(f"{len(leaks)} memory-policy mention(s) outside the arm's policy "
+                       f"and the constant surfaces")
+    return {"reasons": reasons, "policy_found": found, "leaks": leaks[:10],
+            "hook_outputs_in_context": all(served_in_context) if served_in_context else None}
+
+
+def validity(*, variant: str, capture_dir: Path, ledger: list[dict], prompt: str,
+             model: str, grade: dict, client_session: str | None = None,
+             strip: tuple[str, ...] = ()) -> dict:
+    """Prove the arm's policy text is present and is the only memory-policy
+    text in the model's starting context (the captured request that carries
+    the task), that every request used the pinned model, and that the hooks
+    registered the client's own session with the disposable daemon."""
     reasons = []
     requests = []
     for f in sorted(capture_dir.glob("*.json")):
@@ -954,50 +1019,15 @@ def validity(*, variant: str, capture_dir: Path, ledger: list[dict], prompt: str
     if main is None:
         return {"valid": False, "reasons": reasons + ["no captured request carries the task"],
                 "models": models}
-    text = _norm(_request_text(main))
-    texts = {k: _norm(v) for k, v in policy_texts().items()}
-    found = {k: v in text for k, v in texts.items()}
-    expected = set(EXPECTED[variant])
-    for key in expected:
-        if not found[key]:
-            reasons.append(f"the arm's {key} text is missing from the context")
-    for key, present in found.items():
-        if present and key not in expected:
-            reasons.append(f"{key} text is present but the arm does not serve it")
-    # Remove the arm's policy and the documented constant surfaces, then
-    # nothing memory-related may remain.
-    residue = text
-    for key in expected:
-        residue = residue.replace(texts[key], " ")
-    residue = residue.replace(_norm(_MCP_INSTRUCTIONS), " ")
-    hook_bodies = [r.get("body") or "" for r in ledger
-                   if r.get("kind") == "hook" and r.get("path") in _CONTEXT_HOOKS]
-    served_in_context = []
-    for body in hook_bodies:
-        body_n = _norm(body)
-        if not body_n:
-            continue
-        pieces = [p for p in (_norm(x) for x in re.split(r"\n\s*\n", body)) if p]
-        served_in_context.append(all(p in text for p in pieces))
-        for p in pieces:
-            residue = residue.replace(p, " ")
-    if not all(served_in_context):
-        reasons.append("a hook response did not reach the model's context intact")
-    residue = _CONSTANT.sub(" ", residue)
-    leaks = sorted({residue[max(0, m.start() - 40): m.end() + 40]
-                    for m in _MARKER.finditer(residue)})
-    if leaks:
-        reasons.append(f"{len(leaks)} memory-policy mention(s) outside the arm's policy "
-                       f"and the constant surfaces")
+    scan = policy_scan(_norm(_request_text(main)), variant, ledger, strip)
+    reasons += scan.pop("reasons")
     registered = grade.get("registered_session_ids") or []
     if not registered:
         reasons.append("the SessionStart hook never registered a session with the "
                        "disposable daemon")
     elif client_session and client_session not in registered:
         reasons.append("the hook registered a different session than the client ran")
-    return {"valid": not reasons, "reasons": reasons, "models": models,
-            "policy_found": found, "leaks": leaks[:10],
-            "hook_outputs_in_context": all(served_in_context) if served_in_context else None,
+    return {"valid": not reasons, "reasons": reasons, "models": models, **scan,
             "requests": len(requests)}
 
 
@@ -1206,6 +1236,7 @@ class Bench:
             time.sleep(2.0)   # let SessionEnd land
             final = {"facts": daemon.get("/api/facts?limit=5000"),
                      "world": daemon.get("/api/world?limit=5000")}
+            (run_dir / "final.json").write_text(json.dumps(final), encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             rec["errors"].append(f"{type(exc).__name__}: {str(exc)[:300]}")
             client, final = None, {}
@@ -1227,9 +1258,12 @@ class Bench:
                 rec["validity"] = validity(variant=item["variant"],
                                            capture_dir=run_dir / "capture", ledger=ledger,
                                            prompt=prompt, model=args.model, grade=rec["grade"],
-                                           client_session=client.get("session_id"))
+                                           client_session=client.get("session_id"),
+                                           strip=(rid, rid.replace("_", "-"), self.tag))
             elif rec.get("grade"):
-                rec["validity"] = codex_validity(run_dir, item["variant"], rec["grade"])
+                rec["validity"] = codex_validity(run_dir, item["variant"], rec["grade"], ledger,
+                                                 client_session=client.get("session_id"),
+                                                 strip=(rid, rid.replace("_", "-"), self.tag))
         if not args.keep_dbs:
             try:
                 drop_db(self.admin, db_name)
@@ -1335,6 +1369,13 @@ def scrub_record(rec: dict, canary: str | None) -> None:
 
 # ── codex (plumbing check) ─────────────────────────────────────────────────
 
+CODEX_APPROVED_TOOLS = (
+    "memory_search", "memory_lesson_search", "memory_fact_get", "memory_fact_set",
+    "memory_fact_resolve", "memory_world_search", "memory_world_set", "memory_store",
+    "memory_outcome", "memory_session_title", "memory_get", "memory_recall",
+    "memory_episode_start", "memory_episode_end", "memory_toolset", "memory_stats",
+    "memory_graph", "memory_history", "memory_recent", "memory_supersede")
+
 def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, model: str,
               effort: str, timeout: float) -> dict:
     """``codex exec`` in a throwaway CODEX_HOME: the user's login copied
@@ -1349,6 +1390,10 @@ def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mode
     (home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
     shim = shim_server(daemon, run_dir, "bench-codex")
     env_lines = "\n".join(f'{k} = {json.dumps(v)}' for k, v in shim["env"].items())
+    # Under approval_policy "never" an MCP call without its own approval
+    # entry is refused, which would measure the config, not the policy.
+    approvals = "".join(f"[mcp_servers.pseudolife-memory.tools.{name}]\n"
+                        'approval_mode = "approve"\n' for name in CODEX_APPROVED_TOOLS)
     (home / "config.toml").write_text(
         f'model = {json.dumps(model)}\nmodel_reasoning_effort = {json.dumps(effort)}\n'
         'approval_policy = "never"\nsandbox_mode = "workspace-write"\n'
@@ -1356,14 +1401,15 @@ def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mode
         '[mcp_servers.pseudolife-memory]\n'
         f'command = {json.dumps(shim["command"])}\nargs = {json.dumps(shim["args"])}\n'
         'startup_timeout_sec = 120\ntool_timeout_sec = 120\n'
-        f'[mcp_servers.pseudolife-memory.env]\n{env_lines}\n', encoding="utf-8")
+        f'[mcp_servers.pseudolife-memory.env]\n{env_lines}\n{approvals}', encoding="utf-8")
+    for d in (run_dir / "home", run_dir / "agents", run_dir / "digests"):
+        d.mkdir(exist_ok=True)
     install_codex_hooks(home, project, daemon)
     env = scrubbed_env({"CODEX_HOME": str(home), "HOME": str(run_dir / "home"),
                         "USERPROFILE": str(run_dir / "home"),
                         "PSEUDOLIFE_MCP_DAEMON_URL": daemon.url,
                         "PSEUDOLIFE_MCP_TOKEN": daemon.token,
                         "PSEUDOLIFE_DIGEST_DIR": str(run_dir / "digests")})
-    (run_dir / "home").mkdir(exist_ok=True)
     cli = shutil.which("codex") or "codex"
     cmd = [cli, "exec", "--json", "--skip-git-repo-check", "-m", model,
            "-c", f"model_reasoning_effort={json.dumps(effort)}", "-"]
@@ -1404,7 +1450,11 @@ def install_codex_hooks(home: Path, project: Path, daemon: Daemon) -> None:
     (home / "hooks.json").write_text(json.dumps({"hooks": hooks}, indent=2), encoding="utf-8")
     executable = setup.resolve_codex()
     env_before = dict(os.environ)
-    os.environ["CODEX_HOME"] = str(home)
+    # The setup client passes os.environ to `codex app-server`: scrub it.
+    os.environ.clear()
+    os.environ.update(scrubbed_env({"CODEX_HOME": str(home),
+                                    "HOME": str(home.parent / "home"),
+                                    "USERPROFILE": str(home.parent / "home")}))
     try:
         with setup.codex(executable, home, project) as client:
             config, listed = setup.inventory(client, project)
@@ -1451,9 +1501,21 @@ def parse_codex_stream(path: Path) -> dict:
     return out
 
 
-def codex_validity(run_dir: Path, variant: str, grade: dict) -> dict:
-    """Codex keeps the whole prompt in its session rollout; the same scan as
-    for Claude runs over it."""
+def _texts_in(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [t for v in value.values() for t in _texts_in(v)]
+    if isinstance(value, list):
+        return [t for v in value for t in _texts_in(v)]
+    return []
+
+
+def codex_validity(run_dir: Path, variant: str, grade: dict, ledger: list[dict],
+                   client_session: str | None = None, strip: tuple[str, ...] = ()) -> dict:
+    """Codex records its whole starting context in the session rollout (base
+    and developer instructions, hook context, the prompt); the same scan as
+    for Claude runs over it. Tool output is agent-driven and left out."""
     rollouts = sorted((run_dir / "codex-home" / "sessions").rglob("rollout-*.jsonl"))
     if not rollouts:
         return {"valid": False, "reasons": ["no Codex rollout recorded"]}
@@ -1465,24 +1527,20 @@ def codex_validity(run_dir: Path, variant: str, grade: dict) -> dict:
             continue
         payload = item.get("payload") or {}
         if item.get("type") == "session_meta":
-            text_parts.append(json.dumps(payload.get("instructions") or ""))
-            text_parts.append(json.dumps(payload.get("base_instructions") or ""))
-        if payload.get("type") == "message" and payload.get("role") in ("user", "developer", "system"):
-            for part in payload.get("content") or []:
-                if isinstance(part, dict):
-                    text_parts.append(part.get("text", ""))
-    text = _norm("\n".join(text_parts))
-    texts = {k: _norm(v) for k, v in policy_texts().items()}
-    found = {k: v in text for k, v in texts.items()}
-    expected = set(EXPECTED[variant])
-    reasons = [f"the arm's {k} text is missing" for k in expected if not found[k]]
-    reasons += [f"{k} text is present but the arm does not serve it"
-                for k, p in found.items() if p and k not in expected]
-    if not grade.get("registered_session_ids"):
+            text_parts += _texts_in({k: v for k, v in payload.items()
+                                     if "instruction" in k})
+        elif payload.get("type") == "message" and payload.get("role") in (
+                "user", "developer", "system"):
+            text_parts += _texts_in(payload.get("content"))
+    scan = policy_scan(_norm("\n".join(text_parts)), variant, ledger, strip)
+    reasons = scan.pop("reasons")
+    registered = grade.get("registered_session_ids") or []
+    if not registered:
         reasons.append("the SessionStart hook never registered a session with the "
                        "disposable daemon")
-    return {"valid": not reasons, "reasons": reasons, "policy_found": found,
-            "source": "codex rollout"}
+    elif client_session and client_session not in registered:
+        reasons.append("the hook registered a different session than the client ran")
+    return {"valid": not reasons, "reasons": reasons, **scan, "source": "codex rollout"}
 
 
 # ── artifact and report ────────────────────────────────────────────────────
@@ -1550,7 +1608,8 @@ def build_artifact(records: list[dict], arms: list[Arm], args, manifest: dict, t
             "the session briefing (identical bank in every arm)",
             "the plugin's slash-command descriptions"],
         "held_off": ["UserPromptSubmit per-turn reminder", "coordination hooks and daemon "
-                     "coordination", "dream / extractor"],
+                     "coordination", "Claude Code auto memory (a file-based memory policy "
+                     "of its own)", "dream / extractor"],
         "summary": summary, "comparisons": comparisons, "aa_noise": noise,
         "acceptance": verdicts, "totals": dict(totals), "runs": records,
     }
@@ -1582,6 +1641,8 @@ def render(artifact: dict) -> str:
         lines.append(row)
     lines.append("")
     for key, comp in artifact["comparisons"].items():
+        if not any(d.get("pairs") for d in comp.values()):
+            continue
         lines.append(f"paired {key}:")
         for metric in METRICS:
             d = comp[metric]
@@ -1643,6 +1704,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--keep-dbs", action="store_true")
     r.add_argument("--out", type=Path, default=None,
                    help="artifact path (default evals/results/memory-policy-bench-<tag>.json)")
+    c = sub.add_parser("cleanup", help="drop leftover plbench_ run databases")
+    c.add_argument("--all", action="store_true", help="templates too")
     p = sub.add_parser("report", help="re-render an artifact")
     p.add_argument("artifact", type=Path)
     e = sub.add_parser("estimate", help="extrapolate cost from an artifact")
@@ -1656,6 +1719,16 @@ def main(argv: list[str] | None = None) -> int:
         if "haiku" in args.model.lower():
             raise SystemExit("the bench never runs Haiku; pass an explicit model")
         Bench(args).run()
+    elif args.cmd == "cleanup":
+        admin = admin_url()
+        with _admin_connect(admin) as conn:
+            names = [n for (n,) in conn.execute(
+                "SELECT datname FROM pg_database WHERE datname LIKE %s",
+                (f"{BENCH_DB_PREFIX}%",)).fetchall()]
+        for name in names:
+            if args.all or not name.startswith(f"{BENCH_DB_PREFIX}tpl_"):
+                drop_db(admin, name)
+                print(f"dropped {name}")
     elif args.cmd == "report":
         print(render(json.loads(args.artifact.read_text(encoding="utf-8"))))
     else:

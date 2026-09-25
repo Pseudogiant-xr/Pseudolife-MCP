@@ -198,6 +198,28 @@ def test_a_leaked_instruction_file_invalidates_the_run(tmp_path):
     assert any("outside the arm's policy" in r for r in v["reasons"])
 
 
+def test_client_auto_memory_counts_as_competing_policy(tmp_path):
+    """Claude Code's auto memory section (seen 2026-09-25 in a bench run) is
+    a memory policy of its own; the bench turns it off and must notice it."""
+    served = "\n\n".join((AD, BRIEFING))
+    cap = _capture(tmp_path, f"SessionStart:startup hook success: {served}",
+                   system="# auto memory\nYou have a persistent, file-based memory system. "
+                          "Add a pointer to MEMORY.md.")
+    v = mb.validity(variant="none", capture_dir=cap, ledger=[_hook(served)], prompt=PROMPT,
+                    model="claude-sonnet-5", grade=GRADE)
+    assert not v["valid"]
+
+
+def test_run_paths_carrying_the_scenario_id_are_not_policy(tmp_path):
+    served = "\n\n".join((AD, BRIEFING))
+    cap = _capture(tmp_path, f"SessionStart:startup hook success: {served}",
+                   system=r"Primary working directory: C:\plbench\t1\runs\t1-none-a_lesson-r0\lanternfish")
+    v = mb.validity(variant="none", capture_dir=cap, ledger=[_hook(served)], prompt=PROMPT,
+                    model="claude-sonnet-5", grade=GRADE,
+                    strip=("t1-none-a_lesson-r0", "t1-none-a-lesson-r0", "t1"))
+    assert v["valid"], v["reasons"]
+
+
 def test_the_wrong_arms_policy_invalidates_the_run(tmp_path):
     from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
     served = f"{AD}\n\n{STARTUP_MEMORY_CORE}\n\n{BRIEFING}"

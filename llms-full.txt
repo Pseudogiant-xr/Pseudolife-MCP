@@ -4218,6 +4218,40 @@ sessions can keep waking each other, so wakes are capped (below).
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
 
+## Startup memory policy (`memory_policy`)
+
+Which standing memory policy the session-start hooks serve. The default is
+the short core the memory hook has served since 2026-09-24; the other
+variants exist so their effect on agent behaviour can be measured
+(`evals/memory_policy_bench.py`) rather than argued.
+
+```yaml
+memory_policy:
+  variant: compact          # none | compact | compact_gaps | full_separate_hook
+  ab_arms: []               # e.g. [compact, compact_gaps] for an online A/B test
+```
+
+| Variant | What session start serves |
+|---|---|
+| `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
+| `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. |
+| `compact_gaps` | The core plus three rules the tool descriptions do not carry: recall before stating a current version, number or benchmark; route verified external facts to `memory_world_set`; correct memory-vs-code drift on the spot. |
+| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
+
+The separate output is the plugin's third SessionStart handler
+(`session-start.sh memory-policy`, or `lifecycle.ps1 -Event MemoryPolicy` in
+Codex on Windows); `ops/setup-codex-hooks.py` installs and approves it for
+manual Codex hooks too. For every other variant it answers an empty body and
+adds nothing. The `install-hook` scripts' settings hooks do not carry it, so
+`full_separate_hook` serves no policy to those installs.
+
+`ab_arms` assigns each session the SessionStart hook registers one arm, by a
+SHA-256 of its client session id modulo the arm count; a variant may repeat
+for an A/A arm. The arm is logged by the daemon and can be recomputed from
+`episodes.session_key` for a window whose arm list is known; sessions that
+reach the hook without a session id keep `variant`. A custom
+`hook-instructions.md` is served in every variant.
+
 ## Built-in defaults (tuned for Claude's use case)
 
 - **Embedding backbone `Qwen/Qwen3-Embedding-0.6B`** (`EmbeddingConfig.model_name`,
