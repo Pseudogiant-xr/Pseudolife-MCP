@@ -316,6 +316,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an upgraded install, not a daemon redeploy.
 - `evals/agent_token_ledger.py` sends the daemon bearer on its REST reads and
   now refuses redirects the same way.
+### Fixed (2026-09-25 — the session-start briefing no longer hands its bearer to a redirect target)
+- `pseudolife-mcp briefing` (the SessionStart hook that `ops/install-hook.ps1`
+  and `ops/install-hook.sh` install) fetched `/api/briefing` with plain
+  `urllib.request.urlopen`. urllib follows redirects and copies every header
+  except the content headers to the target, so a daemon URL answering with a
+  redirect would have sent `Authorization: Bearer <token>` to whatever host
+  it named. The fetch now uses the shim's no-redirect opener, as the shim's
+  own episode calls do: a redirect fails the fetch, and the hook prints
+  nothing. The five-second timeout is unchanged. The `--coordination`
+  check-in fetch already refused redirects.
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
