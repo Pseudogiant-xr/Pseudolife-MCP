@@ -395,6 +395,7 @@ def test_overview_carries_loop_health(svc):
     assert loop["available"] is True
     assert loop["stores"]["current"] >= 0
     assert "stores_per_session" in loop and "last_lesson_at" in loop
+    assert "root_episodes" in loop and "sessions" in loop
 
 
 def test_asgi_unknown_api_404(svc):

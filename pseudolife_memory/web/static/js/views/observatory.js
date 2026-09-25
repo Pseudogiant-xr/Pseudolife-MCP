@@ -237,7 +237,15 @@ function loopHealthPanel(loop) {
     ["outcomes", el("span", {}, fmtNum(o.current ?? 0), " ", trendArrow(o.current, o.previous),
       el("span", { class: "dim", style: { marginLeft: "8px", fontSize: ".82rem" } },
         `${by.success || 0}✓ ${by.failure || 0}✗ ${by.correction || 0}↺`))],
-    ["sessions", fmtNum(loop.sessions ?? 0)],
+    ["sessions", el("span", {
+        title: "Client sessions: hook-registered roots, plus shim roots with memory "
+          + "activity; idle shim roots are not sessions. A session whose root was "
+          + "pruned because it stored nothing is not counted." },
+      fmtNum(loop.sessions ?? 0),
+      loop.root_episodes != null
+        ? el("span", { class: "dim", style: { marginLeft: "8px", fontSize: ".82rem" } },
+          `of ${fmtNum(loop.root_episodes)} root episodes`)
+        : null)],
     ["per session", `${loop.stores_per_session ?? "—"} stores · ${loop.outcomes_per_session ?? "—"} outcomes`],
     ["pending signals", fmtNum(loop.pending_signals ?? 0) + " (next dream distils)"
       + (loop.pending_signals_expired
