@@ -244,6 +244,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   A fast (MTP), foreign or unresponsive server is still refused, with a
   message naming it, and never displaced. A fresh launch keeps the GPU-busy
   hold (more than 5 GB of VRAM in use) and the owned-process cleanup.
+
 ### Fixed (2026-09-25 — one session episode per client session)
 - The stdio shim no longer opens a session episode of its own at launch. It
   opened one keyed by a fresh id and titled after its working directory,
@@ -300,6 +301,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Upgrading:** this changes the shim, a separate install that a
   daemon-only deploy never touches. Deploy with `ops/update.ps1 -All` (or
   `ops/update.sh --all`), then restart the clients.
+
 ### Fixed (2026-09-25 — the daemon bearer is no longer forwarded across a redirect)
 - `pseudolife-mcp episode-start` / `episode-end` refuse HTTP redirects. They
   POST with the `PSEUDOLIFE_MCP_TOKEN` bearer through `urllib`, whose
