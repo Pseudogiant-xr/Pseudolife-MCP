@@ -338,7 +338,7 @@ try {
         # no context. Silent on failure; SessionStart reports a down daemon.
         # The source lets the daemon skip the block on a resume or compaction.
         $query = if ($sid) {
-            '?session_id=' + [Uri]::EscapeDataString($sid) + '&source=' + [Uri]::EscapeDataString([string]$payload.source)
+            '?session_id=' + [Uri]::EscapeDataString($sid) + '&source=' + [Uri]::EscapeDataString($startReason)
         } else { '' }
         $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/memory-policy$query" -Headers $headers -TimeoutSec 5 -MaximumRedirection 0
         $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
@@ -347,7 +347,8 @@ try {
         $pairs = @()
         if ($sid) {
             $pairs += 'session_id=' + [Uri]::EscapeDataString($sid)
-            $pairs += 'source=' + [Uri]::EscapeDataString([string]$payload.source)
+            # The resolved reason: `source`, else `session_start_reason`.
+            $pairs += 'source=' + [Uri]::EscapeDataString($startReason)
         }
         $pluginVersion = Get-PluginVersion
         if ($pluginVersion) { $pairs += 'plugin_version=' + [Uri]::EscapeDataString($pluginVersion) }

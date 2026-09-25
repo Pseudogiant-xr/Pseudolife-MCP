@@ -261,21 +261,44 @@ def _policy_daemon(body: bytes):
     return server, worker, paths
 
 
-def _run_policy_hook(hook, port, tmp_path):
+def _run_policy_hook(hook, port, tmp_path, stdin='{"session_id":"fixture","source":"startup"}',
+                     event="MemoryPolicy"):
     import subprocess
     from tests.test_codex_hooks import HOOK_PROCESS_TIMEOUT, bash_exe, isolated_env, pwsh_run
     env = isolated_env(tmp_path / "codex-home")
     env.update({"PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
                 "PSEUDOLIFE_MCP_TOKEN": "fixture-token"})
-    stdin = '{"session_id":"fixture","source":"startup"}'
     if hook == "bash":
+        args = ["memory-policy"] if event == "MemoryPolicy" else []
         return subprocess.run(
-            [bash_exe(), str(ROOT / "plugin/hooks/session-start.sh"), "memory-policy"],
+            [bash_exe(), str(ROOT / "plugin/hooks/session-start.sh"), *args],
             input=stdin, env=env, capture_output=True, text=True,
             timeout=HOOK_PROCESS_TIMEOUT, check=True).stdout
     return pwsh_run("-Command",
-                    f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event MemoryPolicy",
+                    f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event {event}",
                     input=stdin, env=env).stdout
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+@pytest.mark.parametrize("event", ["SessionStart", "MemoryPolicy"])
+@pytest.mark.parametrize("reason", ["compact", "resume"])
+def test_hooks_forward_a_start_reason_given_as_session_start_reason(tmp_path, hook, event, reason):
+    """Codex can name the start reason ``session_start_reason`` instead of
+    ``source``. Both scripts resolve either field; the daemon only knows a
+    continued session by what the request forwards, so a dropped reason
+    re-sends the whole startup block (PR #408 review, 2026-09-26)."""
+    from urllib.parse import parse_qs, urlsplit
+    server, worker, paths = _policy_daemon(b"")
+    stdin = json.dumps({"session_id": "fixture", "session_start_reason": reason})
+    try:
+        _run_policy_hook(hook, server.server_port, tmp_path, stdin=stdin, event=event)
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+    wanted = "/api/hook/session-start" if event == "SessionStart" else "/api/hook/memory-policy"
+    sent = [parse_qs(urlsplit(p).query) for p in paths if urlsplit(p).path == wanted]
+    assert sent and sent[0]["source"] == [reason], paths
 
 
 @pytest.mark.parametrize("hook", ["bash", "native"])

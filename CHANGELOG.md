@@ -22,7 +22,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   compaction drops the line from context) and one pointer line; after a
   compaction also a daemon-side `hook-instructions.md`, whose rules nothing
   else carries. `/api/hook/memory-policy` serves nothing for those sources,
-  and both plugin hooks now forward `source` to it. Startup, `/clear` and
+  and both plugin hooks now forward `source` to it (`lifecycle.ps1` forwards
+  the reason it resolved, so a Codex payload that names it
+  `session_start_reason` counts too). Startup, `/clear` and
   any other source still get the full block. The route honours `source`
   only for an authorized caller, like `session_id`.
 - The plugin's UserPromptSubmit hook no longer echoes the 614-character
