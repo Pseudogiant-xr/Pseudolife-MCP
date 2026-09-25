@@ -1,8 +1,8 @@
-<!-- i18n-sync: v10 -->
+<!-- i18n-sync: v11 -->
 
 # Pseudolife-MCP
 
-[英文版 README](../../README.md) · 已同步:v10 (2026-09-04)
+[英文版 README](../../README.md) · 已同步:v11 (2026-09-25)
 
 **为 Claude Code、Codex 及其他 MCP 客户端提供持久的长期记忆。**
 
@@ -51,9 +51,9 @@ ops\install.ps1         # Windows (pwsh 7+)
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
-安装脚本会检查前置依赖(缺少什么就打印一行明确的修复命令),并询问使用哪种梦境提取器——通过你的 Max 套餐调用某个 Claude 模型(安装最轻量)、使用 Claude shim 并以内置本地模型作为自动回退、在 ChatGPT 套餐上以同样的两种方式使用 GPT-5.6 模型(通过 Codex CLI),或者单独使用内置的本地模型(完全不需要任何套餐)。随后它会启动整套服务,为所选客户端完成接入(会话开始时的简报钩子——它会在每次会话中传递记忆循环指导——以及 MCP 传输注册),并对守护进程做健康检查。该脚本是幂等的:随时可以重复执行;`--extractor <mode>` 可用于切换提取器配置。
+安装脚本会检查前置依赖(缺少什么就打印一行明确的修复命令),并询问使用哪种梦境提取器——通过你的 Max 套餐调用某个 Claude 模型(安装最轻量)、使用 Claude shim 并以内置本地模型作为自动回退、在 ChatGPT 套餐上以同样的两种方式使用 GPT-5.6 模型(通过 Codex CLI),或者单独使用内置的本地模型(完全不需要任何套餐)。随后它会启动整套服务,为所选客户端完成接入(为具备钩子系统的客户端安装会话钩子,并注册 MCP 传输),并对守护进程做健康检查。该脚本是幂等的:随时可以重复执行;`--extractor <mode>` 可用于切换提取器配置。
 
-守护进程启动后,Claude Code 的**插件**会添加会话开始时的记忆简报、常驻记忆循环指导,以及 `/dream` 与 `/memory-status` 命令——MCP 服务器本身由安装脚本注册,因此插件绝不会重复注册它的工具:
+当 Claude Code 是所选客户端之一时,安装脚本还会添加 Claude Code 的**插件**(可用 `--claude-plugin skip` / `-ClaudePlugin skip` 跳过)。插件的记忆会话开始钩子(经过验证的 Codex 钩子运行的也是同一个)会提供记忆循环指导的精简核心,以及一份有长度上限的实时简报;插件还会添加每次提交提示词时的提醒,以及 `/dream` 与 `/memory-status` 命令。没有插件时,安装脚本写入 Claude Code `settings.json` 的钩子只传递简报本身。两者都不会提供完整的记忆循环指导:如需完整指导,请将 `examples/CLAUDE.memory.md` 追加到你的 `CLAUDE.md` 或 `AGENTS.md` 中。MCP 服务器本身由安装脚本注册,因此插件绝不会重复注册它的工具。如需手动添加插件,请在 Claude Code 中执行:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
