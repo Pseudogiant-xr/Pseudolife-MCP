@@ -648,7 +648,8 @@ DEFINITIONS = {
         "show) since; the last two are counted in excluded_*. stale counts ages at or "
         "over threshold_s (the board's own STATUS_STALE_AFTER unless --stale-after says "
         "otherwise). agents_without_status_event counts agents in the reported messages "
-        "with no such event in the input: an export filtered at the source loses them."),
+        "with no status-setting event in the input before measured_at (a later prune "
+        "does not erase one): an export filtered at the source loses them."),
     "proposals": (
         "Resources agents coordinated by hand. A message counts for a resource when it "
         "carries the resource's START/END tag (SUITE-START) or pairs a coordination word "
@@ -681,14 +682,17 @@ def _latency(messages) -> dict:
 
 
 def _replay(state, until):
-    """Status, lifecycle and revocation per agent from the rows before ``until``."""
-    status, lifecycle, revoked = {}, {}, set()
+    """Status, lifecycle and revocation per agent from the rows before
+    ``until``, plus every agent that set a status there: a prune takes the
+    status out of what peers can read, not the fact that it was set."""
+    status, lifecycle, revoked, ever_set = {}, {}, set(), set()
     for at, op, agents, value in state:
         if until is not None and at >= until:
             continue
         for agent in agents:
             if op == "status":
                 status[agent] = (at, value)
+                ever_set.add(agent)
             elif op in ("attach", "detach"):
                 lifecycle[agent] = op
             elif op == "revoke":
@@ -699,7 +703,7 @@ def _replay(state, until):
                 status.pop(agent, None)
                 lifecycle.pop(agent, None)
                 revoked.discard(agent)
-    return status, lifecycle, revoked
+    return status, lifecycle, revoked, ever_set
 
 
 def _staleness(board: Board, messages, until, stale_after) -> dict:
@@ -708,7 +712,7 @@ def _staleness(board: Board, messages, until, stale_after) -> dict:
                 "note": "This input records no status history (the legacy board export keeps "
                         "only each agent's latest status, not when it was set)."}
     end = until if until is not None else board.window_end
-    status, lifecycle, revoked = _replay(board.state, until)
+    status, lifecycle, revoked, ever_set = _replay(board.state, until)
     ages, detached, excluded_revoked = [], 0, 0
     for agent, (at, non_blank) in status.items():
         if not non_blank:
@@ -726,7 +730,7 @@ def _staleness(board: Board, messages, until, stale_after) -> dict:
             "median_age_s": _seconds(quantile(ages, 0.5)),
             "p90_age_s": _seconds(quantile(ages, 0.9)),
             "excluded_detached": detached, "excluded_revoked": excluded_revoked,
-            "agents_without_status_event": len(in_messages - set(status))}
+            "agents_without_status_event": len(in_messages - ever_set)}
 
 
 def build_report(board: Board, *, windows=(), coordinator="auto",

@@ -553,6 +553,21 @@ def test_staleness_leaves_out_ended_and_revoked_sessions(tmp_path):
     assert (stale["excluded_detached"], stale["excluded_revoked"]) == (1, 1)
 
 
+def test_a_pruned_agent_still_had_a_status_event(tmp_path):
+    """Prune takes an agent's status out of what peers can read, not the fact
+    that it set one. Counted as never having a status event, a pruned sender
+    in a complete export looked like the gap a filtered export leaves
+    (independent review of #409, 2026-09-26)."""
+    b = Board({"a": "claude-code", "b": "claude-code"}, statuses={"a": "x", "b": "y"})
+    b.send("a", "b", 100, 105)
+    b.event(9000, "prune", None, {"message_ids": [], "agent_ids": [aid("a")]})
+    report = run(write_audit(tmp_path, b))
+    assert report["input"]["filtered_export"] is False
+    stale = report["metrics"]["status_staleness"]
+    assert stale["agents_without_status_event"] == 0
+    assert stale["agents_with_status"] == 1        # a's status went with it
+
+
 def test_since_and_until_scope_messages_but_replay_earlier_rows_for_state(tmp_path):
     """Scoping inside the report keeps the state a filtered export loses:
     principals and statuses set before the scope."""
