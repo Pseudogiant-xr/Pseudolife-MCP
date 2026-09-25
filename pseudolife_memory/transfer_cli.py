@@ -87,6 +87,9 @@ EXPORTED_TABLES = (
 EXCLUDED_TABLES = (
     "dream_runs", "dream_run_slots", "retrieval_events", "retrieval_uses",
     "slot_reads",
+    # v43: which clients registered with THIS daemon, and when — the
+    # session half of the retrieval telemetry above.
+    "client_sessions",
     # Mail and instance credentials belong to the source bank's runtime.
     "coordination_agents", "coordination_messages",
     # The board's audit log holds message bodies (paths, usernames) and its

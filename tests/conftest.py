@@ -31,8 +31,9 @@ os.environ["PSEUDOLIFE_EMBEDDING_CPU_DTYPE"] = "fp32"
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# CPU-only unless PSEUDOLIFE_TEST_CUDA=1, and one full suite per machine —
-# tests/suite_lock.py carries the measurements. The GPU is hidden here,
+# CPU-only unless PSEUDOLIFE_TEST_CUDA=1, and one full suite per machine
+# unless its lock allows more slots — tests/suite_lock.py carries the
+# measurements. The GPU is hidden here,
 # before anything can import torch; the lock is taken in pytest_configure.
 from tests import suite_lock  # noqa: E402
 
@@ -59,6 +60,21 @@ if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
     os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = bench_admin_url()
     os.environ["_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"] = "1"
 
+# Windows can fail a loopback connect for want of a local port, which says
+# nothing about the server (tests/pg_defaults.py, is_local_port_exhaustion).
+# The fixtures and the storage code under test all connect through
+# psycopg.connect, so one wrapper, installed here before any test module
+# imports, covers every connect in this process. Spawned daemons are other
+# processes and run psycopg as shipped.
+try:
+    import psycopg
+except ImportError:  # the PG-backed suites skip themselves
+    pass
+else:
+    from tests.pg_defaults import retry_local_port_exhaustion  # noqa: E402
+
+    psycopg.connect = retry_local_port_exhaustion(psycopg.connect)
+
 # Isolate client configuration before test-module imports can snapshot it.
 # Model caches and ordinary home-directory lookup stay intact; only the Codex
 # connection and its credentials/state are redirected to this owned temp home.
@@ -80,6 +96,7 @@ EXTRACTOR_ENDPOINT_ENV = (
     "PSEUDOLIFE_DREAM_BASE_URL", "PSEUDOLIFE_DREAM_MODEL",
     "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL", "PSEUDOLIFE_DREAM_FALLBACK_MODEL",
     "PSEUDOLIFE_DREAM_EXTRACTOR_MODE", "PSEUDOLIFE_DREAM_API_KEY",
+    "PSEUDOLIFE_DREAM_FALLBACK_API_KEY",
 )
 
 

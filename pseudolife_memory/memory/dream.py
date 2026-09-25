@@ -2094,18 +2094,24 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     probes the primary per invocation — recovery is automatic at the next
     sweep. Raises ValueError for mode "fallback" with no fallback URL.
     The bench/eval harness never calls this — it constructs extractors
-    directly so runs stay pinned to one endpoint."""
+    directly so runs stay pinned to one endpoint.
+
+    The fallback authenticates with its own key
+    (``PSEUDOLIFE_DREAM_FALLBACK_API_KEY`` / ``fallback_api_key``) or none —
+    never the primary's, which would otherwise ride every fallback dream to
+    a different host (2026-09-25)."""
     import os
 
     r = resolve_endpoints(cfg)
-    api_key = os.environ.get("PSEUDOLIFE_DREAM_API_KEY") or cfg.extractor_api_key
+    fallback_key = (os.environ.get("PSEUDOLIFE_DREAM_FALLBACK_API_KEY")
+                    or getattr(cfg, "fallback_api_key", None))
     if r["mode"] == "fallback":
         if not (r["fallback_url"] and r["fallback_model"]):
             raise ValueError(
                 "extractor_mode=fallback but no fallback endpoint is "
                 "configured (fallback_base_url/fallback_model)")
         return OpenAICompatExtractor(
-            r["fallback_url"], r["fallback_model"], api_key=api_key,
+            r["fallback_url"], r["fallback_model"], api_key=fallback_key,
             max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
             extra_body=_cache_extra_body(cfg),
         ), "fallback"
@@ -2118,7 +2124,7 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     logger.warning("dream primary extractor %s unreachable — using fallback %s",
                    r["primary_url"], r["fallback_url"])
     return OpenAICompatExtractor(
-        r["fallback_url"], r["fallback_model"], api_key=api_key,
+        r["fallback_url"], r["fallback_model"], api_key=fallback_key,
         max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
         extra_body=_cache_extra_body(cfg),
     ), "fallback"
