@@ -6,6 +6,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — the client-side updater no longer strands a shim runtime that sessions are running)
+- On 2026-09-25 `ops/update.ps1 -All` ran `pip install --upgrade` into the
+  maintainer's shim runtime while about 36 sessions ran its
+  `Scripts\pseudolife-mcp.exe`. pip failed with WinError 32 but did not
+  put back what it had already moved. pip 24.0 stashes an uninstall in
+  sorted order, so `Lib\site-packages\pseudolife_memory` and its dist-info
+  had been renamed to `~`-prefixed siblings before the running launcher
+  refused to move. That failure comes from `uninstall()`, which sits
+  outside the `try` that rolls back a failed install. The runtime was left
+  with no package of its own, and imports silently fell through to another
+  copy on `sys.path` (the venv includes system site-packages). pipx has the
+  same exposure with no stash at all: `install --force` removes the venv
+  with `rmtree(ignore_errors=True)` before rebuilding it.
+- `ops/update_clients.py` now reads the Windows process table (stdlib
+  `ctypes`: Toolhelp32 plus `QueryFullProcessImageNameW`) before every pip
+  or pipx upgrade. If a process is running from the shim's virtualenv, or
+  from the registered launcher where the shim has no venv of its own, the
+  upgrade is skipped. The ladder reports `in-use` with the number of
+  sessions (one per process tree: a Claude session is a launcher plus the
+  venv's redirector) and the exact rerun,
+  `python ops/update_clients.py --only shim --repo <checkout>`.
+  `in-use` exits non-zero, so `update.ps1 -All` still warns that a client
+  step needs attention. The helper's own process and its parent never
+  count. A process table that cannot be read is `unknown` and is left
+  alone. Off Windows nothing changes, since an open or running file does
+  not stop pip or pipx there.
+- As a safety net for a session that starts between the check and pip's
+  stash, a failed pip run now gets back what it moved aside. Each entry
+  that vanished from the runtime's library directories during that run is
+  renamed back from the one `~` sibling that appeared during the same run
+  and matches pip's stash naming. An older failed run's leftover is never
+  picked. Anything without exactly one such sibling is named rather than
+  guessed. The failure line then says whether the runtime still imports
+  its own package, imports it again after the restore, or has none, from a
+  fresh probe.
+- Tests: a fake process table covers each registration kind, and a stub
+  pip reproduces pip 24.0's stash-then-fail. Two checks use a real
+  interpreter: a real venv whose stub pip strands the package must import
+  its own package again afterwards, and on Windows a real process started
+  from a runtime's interpreter must block the upgrade.
+
 ### Changed (2026-09-25 — deploys name their commit and refuse a dirty tree)
 - `/health` reports the commit the running image was built from:
   `build: {git_sha, dirty, built_at}`. The daemon image carries the same
