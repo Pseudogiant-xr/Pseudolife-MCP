@@ -22,6 +22,7 @@ the health probe are stubbed as shell functions (``tests/ops_harness.py``).
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -46,15 +47,27 @@ UPDATE_SH = REPO / "ops" / "update.sh"
 
 _RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 _GIT = shutil.which("git")
+# Inherited from a git hook or a debugging shell, these would point the
+# sandbox's git at another repository or index, or add trace output.
+_GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+            "GIT_COMMON_DIR", "GIT_TRACE", "GIT_TRACE2", "GIT_TRACE2_EVENT",
+            "GIT_TEST_ASSUME_DIFFERENT_OWNER")
 
 pytestmark = pytest.mark.skipif(_GIT is None, reason="git not available")
+
+
+def _clean_git_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for name in _GIT_ENV:
+        env.pop(name, None)
+    return env
 
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), "-c", "user.name=test", "-c",
          "user.email=test@example.com", "-c", "core.autocrlf=false", *args],
-        check=True, capture_output=True, text=True).stdout.strip()
+        check=True, capture_output=True, text=True, env=_clean_git_env()).stdout.strip()
 
 
 def _sandbox(sdir: Path, *, repo: bool, dirty: int = 0) -> tuple[Path, str]:
@@ -73,10 +86,11 @@ def _sandbox(sdir: Path, *, repo: bool, dirty: int = 0) -> tuple[Path, str]:
         "param($Keep, $Repository)\n", encoding="utf-8")
     (ops / "prune-rollbacks.sh").write_text(
         "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8", newline="\n")
+    (ops / "prune-rollbacks.sh").chmod(0o755)
     (root / "README.md").write_text("sandbox\n", encoding="utf-8", newline="\n")
     sha = ""
     if repo:
-        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "init", "-q", str(root)], check=True, env=_clean_git_env())
         _git(root, "add", "-A")
         _git(root, "commit", "-q", "-m", "sandbox")
         sha = _git(root, "rev-parse", "HEAD")
@@ -90,7 +104,8 @@ def _sandbox(sdir: Path, *, repo: bool, dirty: int = 0) -> tuple[Path, str]:
 
 def _env(root: Path, **extra) -> dict[str, str]:
     # Never let git discover a repository above the sandboxes.
-    return hermetic_env(GIT_CEILING_DIRECTORIES=str(root), **extra)
+    scrub = {name: None for name in _GIT_ENV}
+    return hermetic_env(GIT_CEILING_DIRECTORIES=str(root), **scrub, **extra)
 
 
 def _stamp(res) -> dict[str, str]:
@@ -150,6 +165,7 @@ _PS_SCENARIOS = {
                               "$env:GIT_TEST_ASSUME_DIFFERENT_OWNER = '1'\n"),
     "clean_under_fi_culture": (dict(repo=True), "",
                                "[Threading.Thread]::CurrentThread.CurrentCulture = 'fi-FI'\n"),
+    "clean_with_git_trace": (dict(repo=True), "", "$env:GIT_TRACE = '1'\n"),
 }
 
 
@@ -169,6 +185,7 @@ def deploys(tmp_path_factory):
                  "$env:PSEUDOLIFE_BUILD_GIT_SHA = 'caller-value'\n"
                  "Remove-Item Env:\\PSEUDOLIFE_BUILD_DIRTY -ErrorAction SilentlyContinue\n"
                  "Remove-Item Env:\\GIT_TEST_ASSUME_DIFFERENT_OWNER -ErrorAction SilentlyContinue\n"
+                 "Remove-Item Env:\\GIT_TRACE -ErrorAction SilentlyContinue\n"
                  "[Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::InvariantCulture\n"
                  + touch + (extra_setup if extra_setup != "TOUCH" else "") + _PS_DOCKER)
         # finally: a run that throws must still record the caller's env.
@@ -189,6 +206,16 @@ def test_a_clean_tree_is_deployed_with_its_commit(deploys):
     assert stamp["sha"] == deploys.shas["clean"], res.detail()
     assert stamp["dirty"] == "false", res.detail()
     assert _RFC3339.match(stamp["time"]), res.detail()
+
+
+def test_git_chatter_on_stderr_is_not_mistaken_for_dirty_paths(deploys):
+    # A successful git can still write warnings or GIT_TRACE lines to
+    # stderr; only its stdout is data.
+    res = deploys["clean_with_git_trace"]
+    assert res.returncode == 0, res.detail()
+    stamp = _stamp(res)
+    assert (stamp["sha"], stamp["dirty"]) == (
+        deploys.shas["clean_with_git_trace"], "false"), res.detail()
 
 
 def test_the_build_time_is_rfc3339_whatever_the_locale(deploys):
@@ -295,6 +322,8 @@ export -f docker curl
 
 _SH_SCENARIOS = {
     "sh_clean": (dict(repo=True), "", False),
+    "sh_clean_with_git_trace": (dict(repo=True), "", "export GIT_TRACE=1"),
+    "sh_foreign_owner_refused": (dict(repo=True), "", "export GIT_TEST_ASSUME_DIFFERENT_OWNER=1"),
     "sh_dirty_refused": (dict(repo=True, dirty=2), "", False),
     "sh_many_dirty_refused": (dict(repo=True, dirty=25), "", False),
     "sh_dirty_allowed": (dict(repo=True, dirty=2), "--allow-dirty", False),
@@ -315,7 +344,9 @@ def sh_deploys(tmp_path_factory):
         (sdir / "calls.log").write_text("", encoding="utf-8")
         repo, shas[name] = _sandbox(sdir, **sandbox)
         touch_line = (f'export TOUCH_ON_INSPECT="{(repo / "late-edit.txt").as_posix()}"\n'
-                      if touch else "unset TOUCH_ON_INSPECT\n")
+                      if touch is True else "unset TOUCH_ON_INSPECT\n")
+        if isinstance(touch, str):
+            touch_line += touch + "\n"
         setup = (f'export CALLS="{(sdir / "calls.log").as_posix()}"\n'
                  "export HEALTH_RETRIES=2\nexport HEALTH_DELAY_MS=50\n"
                  f"export SCENARIO_DIR\n{touch_line}{_SH_DOCKER}")
@@ -333,6 +364,20 @@ def test_update_sh_stamps_a_clean_tree(sh_deploys):
     stamp = _stamp(res)
     assert (stamp["sha"], stamp["dirty"]) == (sh_deploys.shas["sh_clean"], "false"), res.detail()
     assert _RFC3339.match(stamp["time"]), res.detail()
+
+
+def test_update_sh_ignores_git_chatter_on_stderr(sh_deploys):
+    res = sh_deploys["sh_clean_with_git_trace"]
+    assert res.returncode == 0, res.detail()
+    stamp = _stamp(res)
+    assert (stamp["sha"], stamp["dirty"]) == (
+        sh_deploys.shas["sh_clean_with_git_trace"], "false"), res.detail()
+
+
+def test_update_sh_quotes_gits_safe_directory_advice(sh_deploys):
+    res = sh_deploys["sh_foreign_owner_refused"]
+    assert res.returncode == 1, res.detail()
+    assert "safe.directory" in res.stderr, res.detail()
 
 
 def test_update_sh_refuses_a_dirty_tree_and_lists_it(sh_deploys):

@@ -32,12 +32,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   commit that does not contain it.
 - The test suite dumps every thread's stack when one test runs longer than
   600 s (`faulthandler_timeout`); the slowest legitimate test on CI takes
-  about 72 s. CI's `ops/ci_tests.sh` now also ends a pytest run at 40
-  minutes, inside the step, so a hang fails the step while the runner is
-  still up: its log keeps the stack dump, and the diagnostics upload still
-  runs. A master CI run hung until the 50-minute job timeout on 2026-09-22,
-  and that cancelled job kept no log at all. Neither helps if the runner
-  itself stops responding.
+  about 72 s. CI's `ops/ci_tests.sh` now also ends a pytest run at 35
+  minutes with SIGABRT, inside the step, so a hang fails the step while the
+  runner is still up. Every pytest process then prints its thread stacks
+  as it dies, even for a hang outside any single test; the step log keeps
+  them, and the diagnostics upload still runs. A master CI run hung until
+  the 50-minute job timeout on 2026-09-22, and that cancelled job kept no
+  log at all. Neither helps if the runner itself stops responding.
 
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing

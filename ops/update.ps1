@@ -71,12 +71,21 @@ $repo = Split-Path -Parent $PSScriptRoot
 function Get-TreeState {
     # HEAD and `git status`, or git's own reason it could not report them
     # (a missing repository, or safe.directory refusing a foreign owner).
+    # Only stdout is data: on success git can still write warnings or
+    # GIT_TRACE lines to stderr, which must not read as dirty paths. Its
+    # stderr is collected only once a command has failed.
     $state = @{ Sha = "unknown"; Dirty = "unknown"; Lines = @(); Error = "git is not on PATH" }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $state }
-    $head = @(git -C $repo rev-parse HEAD 2>&1 | ForEach-Object { "$_" })
-    if ($LASTEXITCODE -ne 0) { $state.Error = ($head -join " ").Trim(); return $state }
-    $lines = @(git -C $repo status --porcelain --untracked-files=normal 2>&1 | ForEach-Object { "$_" })
-    if ($LASTEXITCODE -ne 0) { $state.Error = ($lines -join " ").Trim(); return $state }
+    $head = @(git -C $repo rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        $state.Error = ((git -C $repo rev-parse HEAD 2>&1 | ForEach-Object { "$_" }) -join " ").Trim()
+        return $state
+    }
+    $lines = @(git -C $repo status --porcelain --untracked-files=normal 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        $state.Error = ((git -C $repo status --porcelain 2>&1 | ForEach-Object { "$_" }) -join " ").Trim()
+        return $state
+    }
     $state.Sha = $head[0].Trim()
     $state.Lines = $lines
     $state.Dirty = if ($lines.Count -gt 0) { "true" } else { "false" }

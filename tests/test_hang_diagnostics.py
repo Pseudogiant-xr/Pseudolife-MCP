@@ -7,9 +7,11 @@ log for the cancelled job: nothing said which test hung or where.
 test item (setup + call + teardown) outlives it. The dump is diagnostic
 only: the test keeps running and can still pass. It works from inside
 xdist workers too (checked 2026-09-25 with ``-n 2 --dist loadfile``).
-``ops/ci_tests.sh`` bounds pytest at 40 minutes inside the step, so a hang
-fails the step (keeping its log) instead of being cancelled with the job.
-Neither helps if the runner itself stops responding.
+``ops/ci_tests.sh`` ends pytest at 35 minutes with SIGABRT inside the step,
+so a hang fails the step (keeping its log) instead of being cancelled with
+the job, and every pytest process dumps its stacks as it dies (checked
+2026-09-25 on Linux: ``timeout`` exits 124 after the dump). Neither helps
+if the runner itself stops responding.
 """
 
 from __future__ import annotations
@@ -41,20 +43,28 @@ def test_a_hung_test_dumps_its_stack_before_ci_cancels_the_job():
     assert _faulthandler_timeout() < _shortest_ci_job_timeout_seconds()
 
 
+# What runs before pytest in a CI job: install, plus a cold embedder
+# download with the warm-up step's retries (~2 min warm, up to ~10 cold).
+_CI_SETUP_ALLOWANCE_S = 600
+
+
 def test_ci_ends_a_hung_run_inside_the_step_after_the_dump():
     # The step must end before the job timeout (or the log is lost with the
-    # cancelled job) and after the faulthandler dump (or there is nothing
-    # to keep).
+    # cancelled job), counting setup and the kill grace, and after the
+    # faulthandler dump. SIGABRT makes every process dump its stacks as it
+    # dies, which TERM would not.
     script = (REPO / "ops" / "ci_tests.sh").read_text(encoding="utf-8")
-    m = re.search(r"timeout --kill-after=\d+s (\d+)m\s*\\\s*\n\s*python -m pytest", script)
-    assert m, "ops/ci_tests.sh does not bound the pytest run with timeout"
-    bound = int(m.group(1)) * 60
+    m = re.search(r"timeout --signal=ABRT --kill-after=(\d+)s (\d+)m\s*\\\s*\n\s*"
+                  r"python -m pytest", script)
+    assert m, "ops/ci_tests.sh does not bound the pytest run with timeout --signal=ABRT"
+    grace, bound = int(m.group(1)), int(m.group(2)) * 60
     workflow = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     jobs = [int(t) * 60 for t, _ in re.findall(
         r"timeout-minutes:\s*(\d+)((?:(?!timeout-minutes)[\s\S])*?)run: bash ops/ci_tests\.sh",
         workflow)]
     assert jobs, "no ci.yml job runs ops/ci_tests.sh"
-    assert _faulthandler_timeout() < bound < min(jobs)
+    assert _faulthandler_timeout() < bound
+    assert _CI_SETUP_ALLOWANCE_S + bound + grace <= min(jobs)
 
 
 def test_the_timeout_clears_the_slowest_legitimate_test():

@@ -89,14 +89,17 @@ tree_state() {
     tree_lines=""
     tree_error="git is not on PATH"
     command -v git >/dev/null 2>&1 || return 0
+    # Only stdout is data: on success git can still write warnings or
+    # GIT_TRACE lines to stderr, which must not read as dirty paths. Its
+    # stderr is collected only once a command has failed.
     local out
-    if ! out="$(git -C "$repo" rev-parse HEAD 2>&1)"; then
-        tree_error="$out"
+    if ! out="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"; then
+        tree_error="$(git -C "$repo" rev-parse HEAD 2>&1 || true)"
         return 0
     fi
     local sha="$out"
-    if ! out="$(git -C "$repo" status --porcelain --untracked-files=normal 2>&1)"; then
-        tree_error="$out"
+    if ! out="$(git -C "$repo" status --porcelain --untracked-files=normal 2>/dev/null)"; then
+        tree_error="$(git -C "$repo" status --porcelain 2>&1 || true)"
         return 0
     fi
     tree_sha="$sha"
