@@ -208,23 +208,34 @@ def test_plugin_hook_wiring_session_end():
 
 
 def test_plugin_hook_wiring_user_prompt_submit():
-    """UserPromptSubmit must echo the static mid-session discipline line —
-    including the recall-before-review clause (recall the target area, then
-    compare memory against the files and correct drift both ways). Static by
-    design: the hook fires on every user turn, so no daemon round-trip and no
-    network dependency, and it must never block a turn."""
+    """UserPromptSubmit carries the per-turn memory-change note, not a static
+    line (maintainer decision 2026-09-26): user-prompt-submit.sh sources
+    session-start.sh in its `memory-changes` mode, which makes one bounded
+    request per turn — no retry, so a stalled daemon costs at most about two
+    seconds of the hook's budget — and never blocks a turn. The note's
+    reminder keeps the recall-before-review clause."""
+    from pseudolife_memory.web.session_hook import MEMORY_CHANGES_TAIL
     hooks = json.loads(_read("plugin/hooks/hooks.json"))
     groups = hooks["hooks"]["UserPromptSubmit"]
     commands = [h["command"] for g in groups for h in g["hooks"]]
     assert any("${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.sh" in c
                for c in commands)
 
-    script = _read("plugin/hooks/user-prompt-submit.sh")
-    assert "curl" not in script       # static: every-turn, offline-safe
-    for phrase in ("reviewing code, docs, or a PR", "memory_search",
-                   "memory_lesson_search", "compare"):
-        assert phrase in script, f"discipline line lost: {phrase!r}"
-    assert re.search(r"^exit 0\s*$", script, re.M)   # must never block a turn
+    wrapper = _read("plugin/hooks/user-prompt-submit.sh")
+    assert "set -- memory-changes" in wrapper and "session-start.sh" in wrapper
+    assert "curl" not in wrapper and "mid-session discipline" not in wrapper
+    assert re.search(r"^exit 0\s*$", wrapper, re.M)   # must never block a turn
+
+    script = _read("plugin/hooks/session-start.sh")
+    branch = script[script.index('= memory-changes ]'):script.index('= memory-policy ]')]
+    curls = re.findall(r"curl (?:[^\n]*\\\n)*[^\n]*", branch)
+    assert len(curls) == 1 and "/api/hook/memory-changes" in curls[0]
+    assert "--retry" not in curls[0] and '"${AUTH[@]}"' in curls[0]
+    budget = next(h["timeout"] for g in groups for h in g["hooks"]
+                  if "user-prompt-submit.sh" in h["command"])
+    assert int(re.search(r"--max-time (\d+)", curls[0])[1]) <= budget - 2
+    for phrase in ("review", "memory_search", "memory_lesson_search", "compare"):
+        assert phrase in MEMORY_CHANGES_TAIL, f"reminder lost: {phrase!r}"
 
 
 def test_coordination_has_independent_start_and_prompt_handlers():
@@ -258,26 +269,28 @@ def test_coordination_has_independent_start_and_prompt_handlers():
 
 # ── content sync ────────────────────────────────────────────────────────────
 
-def test_discipline_line_synced_across_plugin_and_installers():
-    """The per-turn discipline line ships in THREE copies — the plugin script
-    plus both installers. Drift means plugin users and installer users carry
-    different standing instructions forever, silently. Extract the literal
-    from each copy and pin: exactly one occurrence per file, all identical,
-    the installers' idempotency needle inside the line itself (a needle that
-    only matches the file would let a reworded line duplicate the hook on
-    every re-run), and a length budget — the line is injected on EVERY user
-    turn, so growth is a per-turn context tax."""
+def test_discipline_line_synced_across_installers():
+    """The installers' per-turn discipline line (plugin-less installs; the
+    plugin's hook became the memory-change note on 2026-09-26) ships in TWO
+    copies. Drift means bash and PowerShell installs carry different
+    standing instructions forever, silently, and ops/setup-codex-hooks.py
+    reads the PowerShell copy to recognise the echo it may migrate. Pin:
+    exactly one occurrence per file, identical, the installers' idempotency
+    needle inside the line itself (a needle that only matches the file would
+    let a reworded line duplicate the hook on every re-run), and a length
+    budget — the line is injected on EVERY user turn."""
     pat = re.compile(r"(Memory \(PseudoLife\) mid-session discipline:[^'\"\n]*)")
     lines = {}
-    for rel in ("plugin/hooks/user-prompt-submit.sh",
-                "ops/install-hook.sh", "ops/install-hook.ps1"):
+    for rel in ("ops/install-hook.sh", "ops/install-hook.ps1"):
         found = pat.findall(_read(rel))
         assert len(found) == 1, f"{rel}: expected 1 discipline line, got {len(found)}"
         lines[rel] = found[0]
     assert len(set(lines.values())) == 1, f"discipline line drift: {lines}"
-    line = lines["plugin/hooks/user-prompt-submit.sh"]
+    line = lines["ops/install-hook.sh"]
     assert "mid-session discipline" in line   # the installers' idempotency needle
     assert len(line) <= 800                   # every-turn cost budget (~700 on 2026-08-28)
+    for rel in ("plugin/hooks/user-prompt-submit.sh", "plugin/hooks/lifecycle.ps1"):
+        assert not pat.search(_read(rel)), f"{rel} still carries the static line"
 
 
 def test_memory_loop_block_leaves_briefing_headroom():
@@ -366,9 +379,16 @@ def test_instruction_blocks_reference_only_core_visible_tools():
     from pseudolife_memory.web.session_hook import (MEMORY_LOOP_BLOCK,
                                                     ONBOARDING_BLOCK,
                                                     STARTUP_MEMORY_CORE)
-    # The UserPromptSubmit line is injected every turn — same visibility bar.
-    ups = re.findall(r"\b((?:memory|document)_[a-z_]+)",
-                     _read("plugin/hooks/user-prompt-submit.sh"))
+    # The per-turn memory-change note — same visibility bar. Render one with
+    # every kind of change so each line's tool names are checked.
+    from types import SimpleNamespace
+    from pseudolife_memory.web.session_hook import hook_memory_changes
+    changes = {"now": 2.0, "status_count": 1, "status": [{"text": "s"}],
+               "lesson_count": 1, "lessons": [{"lesson": "l", "polarity": "+"}]}
+    note = hook_memory_changes(SimpleNamespace(
+        memory_changes_since=lambda since, session_key=None: changes), "s", "1")
+    ups = re.findall(r"\b((?:memory|document)_[a-z_]+)", note)
+    assert {"memory_search", "memory_lesson_search", "memory_outcome"} <= set(ups)
     # STARTUP_MEMORY_CORE is what SessionStart actually serves since #364.
     referenced = (_referenced_tools(MEMORY_LOOP_BLOCK)
                   | _referenced_tools(ONBOARDING_BLOCK)

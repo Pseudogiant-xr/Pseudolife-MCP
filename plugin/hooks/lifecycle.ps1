@@ -207,11 +207,9 @@ try {
     if (-not $startReason) { $startReason = [string]$parsedInput.session_start_reason }
 } catch {}
 
-if ($Event -eq 'UserPromptSubmit') {
-    $disciplineLine = "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
-    Write-Context $disciplineLine
-    exit 0
-}
+# The per-turn memory-change note (UserPromptSubmit), as in session-start.sh
+# memory-changes: no request without a safe session id.
+if ($Event -eq 'UserPromptSubmit' -and $sessionId -cnotmatch '^[A-Za-z0-9._-]{1,128}$') { exit 0 }
 
 if ($Event -eq 'CoordinationPrompt') {
     try {
@@ -289,13 +287,51 @@ try {
         if ($text.Trim()) { Write-Context $text.TrimEnd() }
         exit 0
     }
+    if ($Event -eq 'UserPromptSubmit') {
+        # One request per turn, printing only when memory changed since this
+        # session's last note. The cursor is saved only after printing, so a
+        # failed or timed-out request asks for the same window next turn.
+        # Silent on every failure (the catch below prints nothing for it).
+        $mark = Join-Path (Get-DigestDir) ((Get-DigestKey $sessionId) + '.mark')
+        $since = ''
+        if ((Test-Path -LiteralPath $mark -PathType Leaf) -and
+            -not ((Get-Item -LiteralPath $mark -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $since = ([IO.File]::ReadAllText($mark)).Trim()
+        }
+        $query = '?session_id=' + [Uri]::EscapeDataString($sessionId)
+        if ($since -cmatch '^[0-9.]{1,22}$') { $query += '&since=' + $since }
+        $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/memory-changes$query" -Headers $headers -TimeoutSec 2 -MaximumRedirection 0
+        $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+        $lines = $text -split "`n", 2
+        $token = $lines[0].TrimEnd("`r")
+        if ($token -cnotmatch '^[0-9.]{1,22}$') { exit 0 }
+        $note = if ($lines.Count -gt 1) { $lines[1].TrimEnd("`r", "`n") } else { '' }
+        if ($note) { Write-Context $note }
+        $markDir = Split-Path -Parent $mark
+        if (-not (Test-Path -LiteralPath $markDir -PathType Container)) {
+            New-Item -ItemType Directory -Path $markDir -Force | Out-Null
+        }
+        if (-not (Test-Path -LiteralPath $mark -PathType Leaf)) {
+            # A session's first note: marks of sessions gone a month go too.
+            $cutoff = (Get-Date).AddDays(-30)
+            Get-ChildItem -LiteralPath $markDir -Filter '*.mark' -File -ErrorAction SilentlyContinue |
+                Where-Object LastWriteTime -lt $cutoff | Remove-Item -Force -ErrorAction SilentlyContinue
+        } elseif ((Get-Item -LiteralPath $mark -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            exit 0
+        }
+        [IO.File]::WriteAllText($mark, "$token`n")
+        exit 0
+    }
     $payload = $rawInput | ConvertFrom-Json
     $sid = [string]$payload.session_id
     if ($Event -eq 'MemoryPolicy') {
         # The separate memory-policy hook: the full block when the daemon's
         # memory_policy variant is full_separate_hook, else an empty body and
         # no context. Silent on failure; SessionStart reports a down daemon.
-        $query = if ($sid) { '?session_id=' + [Uri]::EscapeDataString($sid) } else { '' }
+        # The source lets the daemon skip the block on a resume or compaction.
+        $query = if ($sid) {
+            '?session_id=' + [Uri]::EscapeDataString($sid) + '&source=' + [Uri]::EscapeDataString([string]$payload.source)
+        } else { '' }
         $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/memory-policy$query" -Headers $headers -TimeoutSec 5 -MaximumRedirection 0
         $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
         if ($text) { Write-Context $text }

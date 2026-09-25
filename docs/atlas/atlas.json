@@ -145,6 +145,7 @@
    "p": "plugin/hooks/",
    "d": [
     "GET /api/hook/session-start → stdout becomes session context",
+    "On resume or compact the daemon serves only drift notices, the episode-handle line and a briefing pointer (after a compaction also hook-instructions.md); the memory-policy request forwards source too",
     "Fail-open: daemon down → friendly fallback, still exit 0",
     "Payload capped at 9,500 chars (client caps stdout at 10k)", "On resume, compact or clear clears the coordination digest's .seen marker so the next prompt prints the current digest afresh", "Keeps the shim's digest key once per Claude Code process (claude-<CLAUDE_PID>.host: shim key, then the session it is confirmed for); a launch writes the session's own key, /clear and in-session /resume carry it only on a fresh session-end.sh handoff naming this process's creation identity, anything unproven fails closed to the session's own key"
    ]
@@ -155,12 +156,12 @@
    "x": 40,
    "y": 790,
    "t": "user-prompt-submit.sh",
-   "s": "UserPromptSubmit hook · static echo",
+   "s": "UserPromptSubmit hook · memory-change note",
    "p": "plugin/hooks/",
    "d": [
-    "One-line memory discipline injected on every user turn",
-    "Recall-before-review: search the bank, then compare to the files",
-    "No daemon call — offline-safe, always exit 0", "Coordination digest: reads the shim's per-session digest file (SHA-256 of the stdin session_id under PSEUDOLIFE_DIGEST_DIR, or the shim key in claude-<CLAUDE_PID>.host when the hook's CLAUDE_CODE_SESSION_ID matches that session_id and the record is confirmed for it) and prints it only when its watermark passed the shared .seen marker, then advances it; quiet turns add nothing; one ledger line per firing"
+    "Sources session-start.sh memory-changes: one GET /api/hook/memory-changes per turn (2 s cap, no retry), printing only when lessons or other sessions' status notes landed since the session's last note",
+    "Cursor in <digest dir>/<sha256(session id)>.mark, saved only after printing, so a missed note is asked for again next turn",
+    "The note's reminder tail keeps recall-before-review; silent on any failure, always exit 0", "Coordination digest: reads the shim's per-session digest file (SHA-256 of the stdin session_id under PSEUDOLIFE_DIGEST_DIR, or the shim key in claude-<CLAUDE_PID>.host when the hook's CLAUDE_CODE_SESSION_ID matches that session_id and the record is confirmed for it) and prints it only when its watermark passed the shared .seen marker, then advances it; quiet turns add nothing; one ledger line per firing"
    ]
   },
   {

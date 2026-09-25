@@ -8321,6 +8321,64 @@ class MemoryService(DreamOps):
             result["coordination"] = coordination
         return result
 
+    def memory_changes_since(self, since: float | None, *,
+                             session_key: str | None = None,
+                             limit: int = 1) -> dict[str, Any]:
+        """What the per-turn memory-change note reports: memory that landed
+        after ``since`` (this daemon's wall-clock seconds, the ``now`` of a
+        previous call). Two kinds count:
+
+        * current ``source="status"`` entries written outside
+          ``session_key``'s own episodes (sub-episodes carry the root's
+          key), newest first;
+        * current lessons asserted since, newest first. A confirmation only
+          refreshes ``last_confirmed``, so it is not new.
+
+        ``now`` is read under the service lock, which every entry and lesson
+        write holds while it stamps and publishes (dream synthesis swaps its
+        staged store in inside the same hold, and a band relocation keeps
+        the entry's timestamp), so a write this scan missed carries a later
+        stamp: ``now`` is the caller's next ``since``. One known miss:
+        lessons restored by the synthesis commit-recovery path keep the
+        stamps of a batch a scan may already have passed; they still reach
+        search and the next startup briefing.
+
+        With ``since`` None nothing is scanned; only ``now`` (a baseline)
+        comes back. Counts cover every change, ``status`` / ``lessons`` at
+        most ``limit`` of each. Read-only."""
+        out: dict[str, Any] = {"now": 0.0, "status_count": 0, "status": [],
+                               "lesson_count": 0, "lessons": []}
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            out["now"] = time.time()
+            if since is None:
+                return out
+            episodes = self._cms.episodes.episodes
+            status = []
+            for band in self._cms.bands:
+                for en in band.entries:
+                    if (en.source != "status" or en.superseded_at is not None
+                            or en.timestamp <= since):
+                        continue
+                    ep = episodes.get(en.episode_id) if en.episode_id else None
+                    if session_key and ep is not None and ep.session_key == session_key:
+                        continue
+                    status.append((en.timestamp, en.seq, en.text))
+            lessons = ([(r.asserted_at, r.value, r.polarity)
+                        for r in self._lessons.current_records() if r.asserted_at > since]
+                       if self._lessons is not None else [])
+        status.sort(reverse=True)
+        lessons.sort(key=lambda r: r[0], reverse=True)
+        n = max(0, int(limit))
+        out.update(
+            status_count=len(status),
+            status=[{"text": text, "timestamp": ts} for ts, _, text in status[:n]],
+            lesson_count=len(lessons),
+            lessons=[{"lesson": value, "polarity": polarity, "asserted_at": ts}
+                     for ts, value, polarity in lessons[:n]])
+        return out
+
     def _episode_digest_body(self, episode_id: str | None) -> str | None:
         """The narrative body (header line stripped) of ``episode_id``'s
         digest entry, or None. Takes the lock itself — callers (the

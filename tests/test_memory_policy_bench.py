@@ -353,6 +353,10 @@ def test_the_validity_check_knows_exactly_the_daemons_variants():
     assert set(mb.EXPECTED) == set(MEMORY_POLICY_VARIANTS)
     texts = mb.policy_texts()
     assert all(key in texts for keys in mb.EXPECTED.values() for key in keys)
+    # The held-off per-turn surface keeps a leak marker: its parse from a
+    # hook script used to drop the key silently once the script changed.
+    from pseudolife_memory.web.session_hook import MEMORY_CHANGES_TAIL
+    assert texts["memory_changes_tail"] == MEMORY_CHANGES_TAIL
 
 
 BF16 = {"backend": "torch", "device": "cpu", "dtype": "bf16"}

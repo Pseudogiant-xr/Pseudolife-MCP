@@ -204,6 +204,24 @@ def test_memory_policy_endpoint_rejects_post(svc):
     assert st == 405
 
 
+@pytest.mark.parametrize("source", ["resume", "compact"])
+def test_full_block_is_not_re_sent_on_resume_or_compact(svc, source):
+    """Like the main SessionStart output, the separate block is served once
+    per conversation: a resume still holds it and a compaction keeps the
+    MCP server instructions (maintainer decision 2026-09-26)."""
+    _set(svc, "full_separate_hook")
+    assert hook_memory_policy(svc, "s1", source) == ""
+    assert hook_memory_policy(svc, "s1", "startup") == MEMORY_LOOP_BLOCK
+    st, body = call(_app(svc), "GET", "/api/hook/memory-policy",
+                    query=f"session_id=s1&source={source}")
+    assert st == 200 and body == b""
+    # Unauthorized: source is dropped with session_id, as on session-start.
+    app = _app(svc, token="secret")
+    st, body = call(app, "GET", "/api/hook/memory-policy",
+                    query=f"session_id=s1&source={source}")
+    assert st == 200 and body.decode("utf-8") == MEMORY_LOOP_BLOCK
+
+
 # ── plugin wiring ──────────────────────────────────────────────────────────
 
 def test_plugin_runs_the_memory_policy_hook_as_its_own_session_start_output():
@@ -269,7 +287,7 @@ def test_memory_policy_hook_prints_the_daemon_body_as_its_own_output(tmp_path, h
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
-    assert paths == ["/api/hook/memory-policy?session_id=fixture"]
+    assert paths == ["/api/hook/memory-policy?session_id=fixture&source=startup"]
     if hook == "bash":
         assert out == "FULL POLICY BLOCK"
     else:

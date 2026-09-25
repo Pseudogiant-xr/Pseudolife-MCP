@@ -742,6 +742,13 @@ manual Codex hooks too. For every other variant it answers an empty body and
 adds nothing. The `install-hook` scripts' settings hooks do not carry it, so
 `full_separate_hook` serves no policy to those installs.
 
+Every variant's policy text is served once per conversation. On a resume or a
+compaction (SessionStart `source=resume|compact`, forwarded by the plugin's
+hooks) neither output re-sends it: the main output keeps the drift notices,
+the episode-handle line and a pointer to the full briefing (after a
+compaction, also a custom `hook-instructions.md`, which nothing else
+carries), and the separate output adds nothing.
+
 `ab_arms` assigns each session the SessionStart hook registers one arm, by a
 SHA-256 of its client session id modulo the arm count; a variant may repeat
 for an A/A arm. Sessions that reach the hook without a session id keep

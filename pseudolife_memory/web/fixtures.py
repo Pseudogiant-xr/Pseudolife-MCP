@@ -237,6 +237,10 @@ class FixtureService:
                          include_coordination=True):
         return {"markdown": "## Memory briefing (fixture)\n- lesson: prefer bar over foo"}
 
+    def memory_changes_since(self, since, *, session_key=None, limit=1):
+        return {"now": time.time(), "status_count": 0, "status": [],
+                "lesson_count": 0, "lessons": []}
+
     def loop_health(self, window_days=7, now=None):
         return {"available": True, "window_days": window_days,
                 "stores": {"current": 42, "previous": 31},

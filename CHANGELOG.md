@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-26 — session hooks say each thing once, and the per-turn hook speaks only when memory changed)
+- The session-start hook stopped serving "What your memory is unsure
+  about" (graph bridges and contested slots). Every session paid for it, and
+  it carried test probe slots and a LAN-address slot into transcripts. The
+  Console's Insight view (`/api/graph/digest`), `GET /api/briefing` and
+  `pseudolife-mcp briefing` keep it. The hook now asks
+  `session_briefing(max_unsure=0)`.
+- A resumed or compacted session is no longer re-sent the startup block.
+  Both re-fire SessionStart; the 2026-09-23 review found 88 of 156 payloads
+  were such re-fires, and one local session re-sent about 5.3 KB on each of
+  3 compactions and 4 resumes into a transcript that still held the first.
+  For `source=resume|compact` `/api/hook/session-start` now serves the drift
+  notices, the episode-handle line (resume can change the session id;
+  compaction drops the line from context) and one pointer line; after a
+  compaction also a daemon-side `hook-instructions.md`, whose rules nothing
+  else carries. `/api/hook/memory-policy` serves nothing for those sources,
+  and both plugin hooks now forward `source` to it. Startup, `/clear` and
+  any other source still get the full block. The route honours `source`
+  only for an authorized caller, like `session_id`.
+- The plugin's UserPromptSubmit hook no longer echoes the 614-character
+  discipline line every turn (170 turns of one session cost about 25k
+  tokens). It is now a memory-change note: one request per turn to the new
+  `GET /api/hook/memory-changes` (2 s cap, no retry, silent on failure),
+  printing only when new lessons or new `source="status"` notes from other
+  sessions landed since this session's last note, with the newest one-line
+  excerpt of each and a one-line reminder of the memory loop. Quiet turns
+  add nothing. The hook keeps its cursor (the daemon's clock) in
+  `<digest dir>/<sha256(session id)>.mark` and saves the next one only after
+  printing, so a timed-out request is asked again next turn. The first
+  turn of a session is a baseline. Mail keeps its coordination digest.
+  `user-prompt-submit.sh` sources `session-start.sh memory-changes`, so the
+  connection checks stay in one script; `lifecycle.ps1` does the same for
+  Codex on Windows. The `ops/install-hook.*` fallback keeps the fixed line,
+  and `ops/setup-codex-hooks.py` now reads it from `install-hook.ps1`.
+- New `MemoryService.memory_changes_since(since, session_key=)`: counts and
+  the newest of each kind, scanned under the service lock that every entry
+  and lesson write holds while stamping, so its `now` is a safe next cursor.
+  A lesson confirmation is not new; a superseded status note is not
+  counted. Read-only; no schema change.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to re-approve
+  the changed hooks in `/hooks`. An old plugin against a new daemon keeps its
+  static line; a new plugin against an old daemon gets a 404 and prints
+  nothing per turn until the daemon is updated.
+
 ### Fixed (2026-09-25 — the client-side updater no longer strands a shim runtime that sessions are running)
 - On 2026-09-25 `ops/update.ps1 -All` ran `pip install --upgrade` into the
   maintainer's shim runtime while about 36 sessions ran its

@@ -546,6 +546,9 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
                 self.send(b"Session episode: abcdef123456 -- fixture briefing", "text/plain; charset=utf-8")
             elif parsed.path == "/api/episodes":
                 self.send(json.dumps({"episodes": [{"session_key": s} for s in sessions]}).encode())
+            elif parsed.path == "/api/hook/memory-changes":
+                seen.append("prompt")
+                self.send(b"100.000000\n", "text/plain; charset=utf-8")
             else:
                 self.send_error(404)
 
@@ -563,6 +566,8 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
     home.mkdir()
     if existing_config:
         (home / "config.toml").write_text('# User comment must survive\n[features]\nmemories = false\n')
+    digests = tmp_path / "digests"
+    monkeypatch.setenv("PSEUDOLIFE_DIGEST_DIR", str(digests))
     monkeypatch.setenv("CODEX_HOME", str(home))
     monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", f"http://127.0.0.1:{server.server_port}")
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
@@ -581,7 +586,9 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
         _ready_unless_overloaded(result)
         assert result["verified"] == {"session_start": True, "user_prompt_submit": True, "session_end": True}
         assert result["instructions"] == "covered-by-hooks"
-        assert seen == ["start", "end"] and not sessions
+        assert seen == ["start", "prompt", "end"] and not sessions
+        # The verifier proves the prompt hook by its cursor, then removes it.
+        assert not list(digests.glob("*.mark"))
         text = (home / "config.toml").read_text()
         assert text.count("trusted_hash") == 6
         if existing_config:

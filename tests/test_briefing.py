@@ -91,6 +91,39 @@ def test_session_briefing_can_skip_coordination_without_losing_memory(tmp_path):
     assert "keep the lesson" in full["markdown"]
 
 
+def test_session_start_hook_leaves_out_the_unsure_section(tmp_path):
+    """The SessionStart hook no longer serves "What your memory is unsure
+    about" (graph bridges and contested slots): every session paid for it,
+    it carried probe slots and a LAN-address slot into transcripts, and the
+    Console Insight view keeps it (2026-09-23 review, maintainer decision
+    2026-09-25). GET /api/briefing and `pseudolife-mcp briefing` still
+    carry it."""
+    from types import SimpleNamespace
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.web.session_hook import session_start_context
+
+    svc = MemoryService(data_dir=str(tmp_path))
+    svc.config = SimpleNamespace(coordination=SimpleNamespace(enabled=False))
+    svc.stats = lambda: {"total_memories": 5}
+    svc.graph_digest = lambda: {"available": True, "digest": {
+        "surprises": [{"src": "probe-slot-a", "dst": "lan-host", "why": "bridge"}],
+        "questions": [{"question": "Which value of `primary` is correct?"}]}}
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": "keep the lesson", "polarity": "+"}]}
+    svc.world_dump = lambda: {"entries": []}
+    svc.episode_list = lambda **kw: {"episodes": []}
+
+    served = session_start_context(svc, True)
+    assert "keep the lesson" in served
+    assert "What your memory is unsure about" not in served
+    assert "probe-slot-a" not in served and "Which value of" not in served
+    assert "omitted" not in served     # left out on purpose, not for room
+
+    full = svc.session_briefing()["markdown"]
+    assert "## What your memory is unsure about" in full
+    assert "probe-slot-a" in full and "Which value of" in full
+
+
 def test_fetch_markdown_parses_api_response(monkeypatch):
     from pseudolife_memory import briefing_cli as bc
 

@@ -1,5 +1,5 @@
 {
-  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory discipline + end-of-session episode close + opt-in Stop hook that wakes an idle session on board mail",
+  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory-change note + end-of-session episode close + opt-in Stop hook that wakes an idle session on board mail",
   "hooks": {
     "UserPromptSubmit": [
       {

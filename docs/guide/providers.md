@@ -51,10 +51,12 @@ they do not enforce semantic compliance with every memory instruction:
    briefing keeps complete items and reports omissions; detailed guidance stays
    in the standing block. Claude Code (hook or plugin), Codex
    (approve setup or review the definitions in `/hooks` first).
-5. **Per-turn hooks** — a memory-discipline reminder injected on every
-   prompt (recall before review, status questions are memory questions,
-   log outcomes), plus a separate coordination handler for changed inbox
-   previews. Full addressed messages are read through `memory_message`, then
+5. **Per-turn hooks** — with the plugin, a memory-change note printed only
+   when new lessons or other sessions' status notes landed since the last
+   one, with a one-line reminder (recall before review, status questions are
+   memory questions, log outcomes); the `ops/install-hook.*` fallback
+   injects that reminder as a fixed line on every prompt. Plus a separate
+   coordination handler for changed inbox previews. Full addressed messages are read through `memory_message`, then
    acknowledged after reading. Claude Code and current Codex runtimes.
 
 The coordination hook does not register a second mailbox or own credentials:

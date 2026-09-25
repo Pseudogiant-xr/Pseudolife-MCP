@@ -1098,7 +1098,7 @@ bank.
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
-| Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
+| Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
@@ -3438,9 +3438,12 @@ reliably — without the agent having to remember:
    **verified world facts** (fresh, cited, age-ranked), and **where we left
    off** (a one-line recap of your last closed session). Empty sections are
    omitted, so a cold bank prints nothing. As a hook (`--hook-json`, or the
-   plugin) it injects a short memory core first and then this block, fitted
-   to the hook's size budget, so even a cold bank's session starts with
-   the core.
+   plugin) it injects a short memory core first and then this block without
+   the unsure section (the Console's Insight view keeps it), fitted to the
+   hook's size budget, so even a cold bank's session starts with the core.
+   A resumed or compacted session is not served the block again: it gets
+   the episode-handle line and a pointer to the full briefing (after a
+   compaction, also a daemon-side `hook-instructions.md`).
 2. **Episode lifecycle is owned by the daemon, keyed by a resolved session
    identity — hooks make that identity precise, but nothing about opening
    or closing an episode requires them.** Five tiers, strict precedence
@@ -3631,8 +3634,7 @@ briefing content is also available on demand via the CLI or the Console's
 
 The plugin's daemon-served memory hook uses a short operating guide rather
 than repeating the full standing memory policy. Its bounded briefing retains
-complete items, prioritizes lessons and recap over global uncertainties, and
-reports omitted content. Full standing guidance is in
+complete items, prioritizes lessons and recap, and reports omitted content. Full standing guidance is in
 [`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md). A custom
 `hook-instructions.md` in the daemon's data directory is also bounded: an
 omission notice means the complete custom instructions must be obtained before
@@ -4445,6 +4447,13 @@ Codex on Windows); `ops/setup-codex-hooks.py` installs and approves it for
 manual Codex hooks too. For every other variant it answers an empty body and
 adds nothing. The `install-hook` scripts' settings hooks do not carry it, so
 `full_separate_hook` serves no policy to those installs.
+
+Every variant's policy text is served once per conversation. On a resume or a
+compaction (SessionStart `source=resume|compact`, forwarded by the plugin's
+hooks) neither output re-sends it: the main output keeps the drift notices,
+the episode-handle line and a pointer to the full briefing (after a
+compaction, also a custom `hook-instructions.md`, which nothing else
+carries), and the separate output adds nothing.
 
 `ab_arms` assigns each session the SessionStart hook registers one arm, by a
 SHA-256 of its client session id modulo the arm count; a variant may repeat
@@ -5624,10 +5633,12 @@ they do not enforce semantic compliance with every memory instruction:
    briefing keeps complete items and reports omissions; detailed guidance stays
    in the standing block. Claude Code (hook or plugin), Codex
    (approve setup or review the definitions in `/hooks` first).
-5. **Per-turn hooks** — a memory-discipline reminder injected on every
-   prompt (recall before review, status questions are memory questions,
-   log outcomes), plus a separate coordination handler for changed inbox
-   previews. Full addressed messages are read through `memory_message`, then
+5. **Per-turn hooks** — with the plugin, a memory-change note printed only
+   when new lessons or other sessions' status notes landed since the last
+   one, with a one-line reminder (recall before review, status questions are
+   memory questions, log outcomes); the `ops/install-hook.*` fallback
+   injects that reminder as a fixed line on every prompt. Plus a separate
+   coordination handler for changed inbox previews. Full addressed messages are read through `memory_message`, then
    acknowledged after reading. Claude Code and current Codex runtimes.
 
 The coordination hook does not register a second mailbox or own credentials:
