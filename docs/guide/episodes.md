@@ -20,7 +20,7 @@ reliably — without the agent having to remember:
    or closing an episode requires them.** Five tiers, strict precedence
    (full table + rationale:
    [Configuration — session identity](configuration.md#session-identity)):
-   a stdio shim's per-process `X-PL-Session` header outranks an explicit
+   a stdio shim's `X-PL-Session` header outranks an explicit
    `episode` handle passed on a write (on the lifecycle tools —
    `memory_episode_start`/`_end`, `memory_session_title` — a resolved
    handle wins outright), which outranks the SessionStart-hook-registered
@@ -44,18 +44,38 @@ reliably — without the agent having to remember:
      (default 6 h, the resume window; `0` disables) so a dead session stops
      attracting later tier-3 writes — SessionStart re-stamps it, so an active
      session (Claude Code re-fires the hook on resume/compact) stays live.
-   - **Ownership guard.** `memory_episode_end` and the direct
-     `POST /api/episode/end` with no `session_key` in the body can only
-     close a root episode whose `session_key` matches the caller's own
-     resolved identity — a session can no longer pop another, still-open
-     session's root by accident. No match is a no-op:
+   - **Ownership guard.** `memory_episode_end` pops only the caller's own
+     sub-episodes and never closes a session root, with or without a
+     handle. The direct `POST /api/episode/end` with no `session_key` in
+     the body can only close a root episode whose `session_key` matches the
+     caller's own resolved identity — a session can no longer pop another,
+     still-open session's root by accident. No match is a no-op:
      `{"closed": null, "reason": "no owned open session"}`. The idle
      reaper is separate: it closes any root idle past the threshold,
      using each root's own key — that's its job, not a guard bypass.
-   - **The stdio shim** (the installer default) opens the episode eagerly
-     at connect with a title derived from the working directory, and
-     closes it when the client disconnects — so shim sessions get named
-     episodes without any hook.
+   - **The stdio shim** (the installer default) opens no episode of its
+     own. Under Claude Code its `X-PL-Session` header is the session id
+     Claude Code launched it with, which is the id the plugin's
+     SessionStart hook registers. A write without an `episode` handle, or a
+     `memory_session_title`, therefore lands on the hook's root, and that
+     root's lifecycle stays with the hooks and the idle reaper: the shim's
+     exit does not close it, because a reconnect restarts the shim
+     mid-session. Without the plugin's hooks the daemon opens that root on
+     the first write, and the idle reaper closes it. Other hosts get one
+     session per shim process (Codex keys each call by its own thread
+     instead). The daemon opens that session's episode on the first write
+     that needs one, as for a direct-HTTP client, and the shim closes it at
+     exit when the host lets it exit; otherwise the idle reaper does. A
+     shim that is idle or only searches leaves no episode behind. Until
+     2026-09-25 the shim opened a working-directory-titled episode at
+     connect, which gave each Claude Code session a second root and left an
+     empty root for every shim a host killed. One gap remains: `/clear` and
+     an in-session `/resume` give the session a new id but keep the shim's.
+     Afterwards a write without a handle, and a `memory_store` even with
+     one, reopens the root under the old id (or opens one); a handle-less
+     write lands there, and a handle-less `memory_session_title` renames it.
+     `--continue`, or `--resume` without an id, can likewise launch the shim
+     with an id no hook registers.
    - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
      handle) still get episodes: the daemon **lazily opens** one on the
      first store of a new session (so empty sessions never leave a husk)
@@ -90,7 +110,7 @@ reliably — without the agent having to remember:
    empty closed episodes without a tombstone. Past the handle window, or
    on an ambiguous prefix, the write proceeds under normal identity with
    an `episode_warning`.
-   Direct-HTTP titles start generic
+   Session titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an
    `episode_hint` until you do); a session closing still-generic gets an
@@ -174,8 +194,11 @@ owns the mailbox; this handler does not create another identity or grant
 permissions. The memory and coordination hooks have independent output budgets
 and do not depend on execution order.
 
-The lightweight `install-hook` scripts install the briefing, coordination
-check-in instruction, and per-turn discipline line; they do not register an
+The lightweight `install-hook` scripts install the briefing, the coordination
+check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
+the daemon serves it: a board that is on and usable by that bearer), and the
+per-turn discipline line. Re-running them replaces the unconditional check-in
+echo older versions wrote. They do not register an
 agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing` reads `/api/briefing` and
 forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven
@@ -192,8 +215,8 @@ you**, daemon-owned and keyed by a resolved session identity (five tiers —
 shim header, `episode` handle, hook registration, legacy transport id, or
 idle-gap sessionization; see
 [Configuration — session identity](configuration.md#session-identity)) so
-concurrent sessions don't collide; absent a hook or shim, the daemon lazily
-opens one on first store and an idle reaper closes it. For a substantial
+concurrent sessions don't collide; absent a hook, the daemon lazily opens
+one on first store and an idle reaper closes it. For a substantial
 multi-step task you open a **nested sub-episode** under the session:
 
 ```

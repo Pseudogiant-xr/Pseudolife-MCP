@@ -298,7 +298,12 @@ class Codex:
             self.proc.terminate()
             self.proc.wait(timeout=5)
         self.reader.join(timeout=2)
-        if self.proc.stdout:
+        # A hook Codex killed can outlive it holding an inherited copy of its
+        # stdout (seen on Windows under load: a PowerShell hook stuck mid-exit
+        # for minutes), so the reader never sees EOF. Closing the pipe under
+        # that blocked read would wait on the hook; the daemon reader ends
+        # with this process instead.
+        if self.proc.stdout and not self.reader.is_alive():
             self.proc.stdout.close()
 
 
@@ -392,8 +397,11 @@ def legacy_commands():
                      (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8"))[1]
     coordination = re.search(r'\$coordinationLine = "(.*)"',
                              (ROOT / "ops/install-hook.ps1").read_text(encoding="utf-8"))[1]
-    return {"pseudolife-mcp briefing --hook-json",
-            "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json",
+    briefings = {"pseudolife-mcp briefing --hook-json",
+                 "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"}
+    # The installers' daemon-gated check-in (2026-09-25) and the
+    # unconditional echo it replaced.
+    return {*briefings, *(command + " --coordination" for command in briefings),
             f"echo '{line}'", f"Write-Output '{line}'",
             f"echo '{coordination}'", f"Write-Output '{coordination}'"}
 
@@ -764,7 +772,7 @@ def credential_environment(path, daemon_url):
             os.environ["PSEUDOLIFE_MCP_DAEMON_URL"] = before_url
 
 
-def daemon_request(path):
+def daemon_request(path, *, text=False):
     url = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:8765").rstrip("/")
     headers = {}
     try:
@@ -775,7 +783,20 @@ def daemon_request(path):
     if token:
         headers["Authorization"] = "Bearer " + token
     with urlopen(Request(url + path, headers=headers), timeout=3) as response:
-        return json.load(response)
+        return response.read().decode("utf-8") if text else json.load(response)
+
+
+def board_checkin_expected():
+    """Whether CoordinationStart should print the board check-in here: the
+    daemon serves it only where this credential can use the board, and a
+    client opt-out asks for none (2026-09-25)."""
+    setting = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower()
+    if setting and setting not in {"1", "true", "yes", "on"}:
+        return False
+    try:
+        return bool(daemon_request("/api/hook/coordination-start", text=True).strip())
+    except Exception:
+        return False
 
 
 def episode_open(thread_id):
@@ -849,9 +870,10 @@ def verify(executable, home, cwd, config, hooks, selected):
                     text in entry.get("text", "") for run in runs for entry in run.get("entries", [])):
                 raise SetupError(f"{EVENTS[event]} did not return the expected memory context "
                                  f"({len(runs)} completed events, memory={any(text in entry.get('text', '') for run in runs for entry in run.get('entries', []))}). Check daemon access and /hooks.")
-        if not any("memory_agents(action=list)" in entry.get("text", "")
-                   for run in completed if run.get("eventName") == "sessionStart"
-                   for entry in run.get("entries", [])):
+        if board_checkin_expected() and not any(
+                "memory_agents(action=list)" in entry.get("text", "")
+                for run in completed if run.get("eventName") == "sessionStart"
+                for entry in run.get("entries", [])):
             raise SetupError("CoordinationStart did not return board setup guidance. Check /hooks.")
         if not episode_open(thread):
             raise SetupError("SessionStart did not open a verifiable memory episode. Check daemon access.")
@@ -870,6 +892,9 @@ def standing_instructions(home, choice, fallback_allowed, ready, report):
     if choice == "skip":
         return "skipped"
     if choice == "auto" and ready:
+        # Verified hooks serve a compact memory core, not this block; the
+        # append stays optional (--instructions append). The state name is
+        # read by both installers, which print what it means.
         return "covered-by-hooks"
     if choice != "append" and not fallback_allowed:
         return "skipped"

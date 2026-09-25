@@ -54,7 +54,7 @@ fi
 exec 3>&2 2>/dev/null
 
 INPUT=$(cat)
-# Only a top-level "session_id" counts (see user-prompt-submit.sh).
+# Only a top-level "session_id" counts (see coordination-prompt.sh).
 SID=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' |
       head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
 case "$SID" in ''|*[!A-Za-z0-9._-]*) exit 0 ;; esac

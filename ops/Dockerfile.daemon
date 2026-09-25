@@ -116,6 +116,22 @@ ENV PSEUDOLIFE_PLUGIN_DIR=/app/plugin
 RUN mkdir -p /data
 VOLUME ["/data"]
 
+# Build stamp: the commit this image holds, so `docker image inspect` and
+# /health can say what is deployed (they could not, 2026-09-23 review).
+# ops/update.ps1|.sh pass the checkout's HEAD, whether it was dirty, and the
+# build time; a build without them bakes "unknown". Declared after the last
+# RUN on purpose: a changed ARG invalidates every later RUN, and the build
+# time changes on every build.
+ARG GIT_SHA=unknown
+ARG GIT_DIRTY=unknown
+ARG BUILD_TIME=unknown
+LABEL org.opencontainers.image.revision=$GIT_SHA \
+      org.opencontainers.image.created=$BUILD_TIME \
+      pseudolife.build.dirty=$GIT_DIRTY
+ENV PSEUDOLIFE_BUILD_GIT_SHA=$GIT_SHA \
+    PSEUDOLIFE_BUILD_DIRTY=$GIT_DIRTY \
+    PSEUDOLIFE_BUILD_TIME=$BUILD_TIME
+
 EXPOSE 8765
 
 # Liveness: /health is unauthenticated by design (see daemon.py).

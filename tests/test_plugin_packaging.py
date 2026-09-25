@@ -235,12 +235,23 @@ def test_coordination_has_independent_start_and_prompt_handlers():
         assert len(handlers) == 2
         assert any(script in h["command"] and native_event in h["commandWindows"]
                    for h in handlers)
-        assert "curl" not in _read("plugin/hooks/" + script)
+    # Every turn: static, offline-safe.
+    assert "curl" not in _read("plugin/hooks/coordination-prompt.sh")
+    # Session start: one bounded request for the daemon-served check-in,
+    # which the daemon serves only where the board works.
     start = _read("plugin/hooks/coordination-start.sh")
-    assert "memory_agents(action=list)" in start
-    assert "memory_agents(action=update" in start
-    assert "memory_message(action=receive)" in start
-    assert "memory_message(action=ack" in start
+    curls = re.findall(r"^curl (?:[^\n]*\\\n)*[^\n]*", start, re.M)
+    assert len(curls) == 1 and "/api/hook/coordination-start" in curls[0]
+    assert "--retry" not in curls[0]
+    max_time = int(re.search(r"--max-time (\d+)", curls[0])[1])
+    budget = next(h["timeout"] for group in hooks["SessionStart"] for h in group["hooks"]
+                  if "coordination-start.sh" in h["command"])
+    assert max_time <= budget - 2  # headroom for the record work before it
+    assert "memory_agents" not in start
+    from pseudolife_memory.coordination import CHECKIN_TEXT
+    for phrase in ("memory_agents(action=list)", "memory_agents(action=update",
+                   "memory_message(action=receive)", "memory_message(action=ack"):
+        assert phrase in CHECKIN_TEXT
 
 
 # ── content sync ────────────────────────────────────────────────────────────
@@ -274,6 +285,28 @@ def test_memory_loop_block_leaves_briefing_headroom():
     assert len(STARTUP_MEMORY_CORE) < 2_000
     assert len(STARTUP_MEMORY_CORE) < HOOK_CONTEXT_MAX_CHARS - 2_000
     assert len(MEMORY_LOOP_BLOCK) > len(STARTUP_MEMORY_CORE)
+
+
+def test_startup_core_carries_the_detailed_blocks_key_rules():
+    """Since #364 the SessionStart hook serves STARTUP_MEMORY_CORE, not the
+    detailed block, so three of that block's rules are restated in the core
+    itself (maintainer decision 2026-09-25): search before asserting a
+    "current" value, correct memory-vs-code drift on the spot at the same
+    slot, and route verified external facts to memory_world_set (whose own
+    description says so only once an agent reads that tool). Its pointer to
+    the full guidance must resolve for a pip install, which ships no
+    examples/."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    text = " ".join(STARTUP_MEMORY_CORE.split())
+    assert 'Search before stating a "current" version, number, or benchmark.' in text
+    assert "trust the code and correct the memory on the spot" in text
+    assert "`memory_fact_set` at the same slot" in text
+    assert "Route verified external facts to `memory_world_set`" in text
+    url = ("https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/"
+           "examples/CLAUDE.memory.md")
+    assert url in STARTUP_MEMORY_CORE.splitlines()
+    assert (ROOT / url.rsplit("/blob/master/", 1)[1]).is_file()
+    assert "in the repository" not in text
 
 
 def test_memory_loop_block_carries_recall_before_review_trigger():
@@ -329,12 +362,15 @@ def test_instruction_blocks_reference_only_core_visible_tools():
     the block tells the model to call tools its tools/list doesn't carry."""
     from pseudolife_memory.mcp_server import _TOOL_TIERS
     from pseudolife_memory.web.session_hook import (MEMORY_LOOP_BLOCK,
-                                                    ONBOARDING_BLOCK)
+                                                    ONBOARDING_BLOCK,
+                                                    STARTUP_MEMORY_CORE)
     # The UserPromptSubmit line is injected every turn — same visibility bar.
     ups = re.findall(r"\b((?:memory|document)_[a-z_]+)",
                      _read("plugin/hooks/user-prompt-submit.sh"))
+    # STARTUP_MEMORY_CORE is what SessionStart actually serves since #364.
     referenced = (_referenced_tools(MEMORY_LOOP_BLOCK)
                   | _referenced_tools(ONBOARDING_BLOCK)
+                  | _referenced_tools(STARTUP_MEMORY_CORE)
                   | set(ups))
     assert len(referenced) >= 10          # regex sanity — the block names many
 
