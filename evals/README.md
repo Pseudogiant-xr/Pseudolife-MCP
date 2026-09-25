@@ -4010,11 +4010,15 @@ mix. Since 2026-09-25 a session is a hook-registered root or a shim root
 with memory activity, not every keyed root episode (idle shim roots
 outnumbered sessions four to one); the docstring explains the pairing rule
 and carries the 2026-07-18 baseline, measured with the old denominator.
-The daemon deletes a session root that ends with no stored entry, so the
-rates cover surviving sessions only (sessions that only searched are
-counted separately; sessions that never touched memory leave no trace).
-Lesson searches and unmatched `used_ids` are reported as not recorded: the
-bank persists neither.
+The daemon deletes a session root that ends with no stored entry; since
+schema v43 sessions are counted from the `client_sessions` registration
+record, which survives that prune: sessions that only searched count, and
+so do hook-registered sessions that never touched memory (idle shim-only
+sessions are still dropped as transport artifacts), one per session key,
+with their memory-policy variant. Activity from before v43, or from a client that
+never registered, whose root is gone is still reported separately. Lesson
+searches and unmatched `used_ids` are reported as not recorded: the bank
+persists neither.
 
     python evals/capture_metrics.py [--json] [--since YYYY-MM-DD]
 

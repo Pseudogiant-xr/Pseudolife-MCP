@@ -167,6 +167,16 @@ def current_principal() -> str:
         return DEFAULT_PRINCIPAL
 
 
+def request_principal() -> str | None:
+    """:func:`current_principal` inside a request whose headers are bound,
+    ``None`` outside one (in-process callers, tests) — for durable records
+    that must not claim the default principal for a caller that never
+    presented a credential."""
+    if _http_request_headers() is None:
+        return None
+    return current_principal()
+
+
 def resolve_writer_detailed(
         default_writer: str) -> tuple[str, str | None, str | None]:
     """``(writer_id, header_session, transport_session)`` for this request.

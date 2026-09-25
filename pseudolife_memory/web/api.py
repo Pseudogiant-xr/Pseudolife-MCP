@@ -470,7 +470,11 @@ def build_console_app(
                     await _send_json(send, 200, result)
                     return
                 def dispatch():
-                    if path not in ("/api/agents", "/api/briefing"):
+                    # Headers are bound only where a handler reads the
+                    # caller's principal: the awareness section, and the
+                    # session registration record (v43) episode/start writes.
+                    if path not in ("/api/agents", "/api/briefing",
+                                    "/api/episode/start"):
                         return routes.dispatch(method, path, params, body)
                     from pseudolife_memory.writer_context import (
                         bind_request_headers, unbind_request_headers)

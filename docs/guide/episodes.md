@@ -119,6 +119,29 @@ reliably — without the agent having to remember:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
    `ops/.env` for local time.
 
+### Session record
+
+An episode is not a durable record that a session happened: a root that
+ends holding no stored entry is deleted. So every registration (the
+SessionStart hook, or `POST /api/episode/start` from the stdio shim and the
+CLI episode hooks) also writes one `client_sessions` row per session key
+(schema v43), which no prune, sweep or tombstone expiry deletes. The row
+holds how the session first registered (`hook` or `api`), the bearer's
+principal, its first start and every registration time since (a resumed
+client registers again), its most recent close and why (`end` for
+SessionEnd or shim exit, `idle` for the reaper; cleared when the session
+registers again or a store or handle reopens its root), the startup memory-policy variant the hook assigned
+(for `full_separate_hook`, a plugin without the separate memory-policy hook
+never delivers it), and every root episode id the session was given. A
+session that only searched or logged outcomes loses its root at the end but
+keeps this row, so its searches (by session key) and outcomes (by episode
+id) still have a session to count against; `evals/capture_metrics.py`
+reads it. A root the daemon opened lazily for a key that never registered
+gets no row, and an operator's manual prune of an open root
+(`include_open`) leaves that session open on record. Postgres only;
+operational data, left out of `pseudolife-mcp export` like the retrieval
+log.
+
 ## Inferred outcomes at session close
 
 Most sessions never call `memory_outcome` — the agent stores facts and
