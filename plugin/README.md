@@ -160,6 +160,11 @@ listed for review and left alone. By hand:
   for concise memory guidance and a bounded briefing, and registers the
   session's episode identity. Needs `bash` on PATH
   (Git Bash on Windows) and `curl` — both ship with git / the OS.
+- **Memory-policy SessionStart hook** — curls `/api/hook/memory-policy`,
+  which returns the full memory-loop block only when the daemon's
+  `memory_policy.variant` is `full_separate_hook` (an output of its own, so
+  it never shares the briefing's budget); otherwise it adds nothing. See
+  [Configuration](../docs/guide/configuration.md#startup-memory-policy-memory_policy).
 - **Coordination SessionStart hook** — preserves the local digest mapping
   across supported session changes, then prints the agent check-in the
   daemon serves where the board works (one bounded request).

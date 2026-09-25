@@ -6,6 +6,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-25 — measure what the startup memory policy changes)
+- `memory_policy.variant` selects the standing memory policy session start
+  serves: `none`, `compact` (the default: the core the hook already
+  serves) or `full_separate_hook` (the full memory-loop block, from its own
+  SessionStart output so it never shares the briefing's 9,500-byte budget).
+  A `compact_gaps` variant (the core plus three rules) was retired before
+  release, because the same three rules now live in the core itself; the
+  committed smoke artifact still carries one arm of it.
+  `memory_policy.ab_arms` assigns hook-registered sessions an arm by a
+  SHA-256 of the client session id. See
+  [configuration](docs/guide/configuration.md#startup-memory-policy-memory_policy).
+- The plugin gains a third SessionStart handler (`session-start.sh
+  memory-policy`; `lifecycle.ps1 -Event MemoryPolicy` for Codex on
+  Windows) calling the new `GET /api/hook/memory-policy`; it adds nothing
+  unless the variant is `full_separate_hook`. `ops/setup-codex-hooks.py`
+  installs, counts and verifies it. A change under `plugin/`: deploy with
+  `ops/update.ps1 -All`.
+- `evals/memory_policy_bench.py`: headless `claude -p` (and `codex exec`)
+  sessions against a disposable daemon and a cloned `plbench_` bank, one
+  scenario per policy rule, scored only from the daemon's records, with a
+  per-run check that the arm's policy text is the only memory-policy text
+  in the model's context, paired bootstrap statistics against an A/A noise
+  floor, and a hill-climb acceptance rule. Each run records the embedder
+  that seeded its bank and the one that served its queries. It refuses the
+  live bank and the live daemon ports and never writes a real client
+  configuration.
+
+### Fixed (2026-09-25 — session counts in capture metrics)
+- `evals/capture_metrics.py` counted every keyed root episode as a session.
+  A client session can leave two roots (the SessionStart hook's and the
+  stdio shim's), and idle shim roots dominate: on 2026-09-25 the live bank
+  held 166 keyed roots in 24 h for 34 client sessions. It now counts hook
+  roots plus shim roots with memory activity, merges a hook root with its
+  only nearby shim root, attributes searches by the caller's session id
+  (a search row's episode is the daemon's current one), reports what it
+  cannot attribute, and adds the online loop metrics (searched early,
+  outcome coverage, credited used_ids, entries retrieved again within 14
+  days). It also says what the bank cannot provide: the daemon deletes a
+  session root that ends with no stored entry, so sessions that only
+  searched are reported separately and sessions that never touched memory
+  are invisible; lesson searches and unmatched used_ids are not persisted.
+
 ### Fixed (2026-09-25 — Codex hook setup no longer hangs on a hook Codex killed)
 - `ops/setup-codex-hooks.py` could hang on a busy Windows machine for as long
   as a killed hook lingered (two test runs were still stuck when stopped after

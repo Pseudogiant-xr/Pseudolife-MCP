@@ -688,6 +688,42 @@ sessions can keep waking each other, so wakes are capped (below).
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
 
+## Startup memory policy (`memory_policy`)
+
+Which standing memory policy the session-start hooks serve. The default is
+the short core the memory hook has served since 2026-09-24; the other
+variants exist so their effect on agent behaviour can be measured
+(`evals/memory_policy_bench.py`) rather than argued.
+
+```yaml
+memory_policy:
+  variant: compact          # none | compact | full_separate_hook
+  ab_arms: []               # e.g. [compact, full_separate_hook] for an online A/B test
+```
+
+| Variant | What session start serves |
+|---|---|
+| `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
+| `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. Since 2026-09-25 it restates three of the full block's rules: search before stating a "current" version, number or benchmark; correct memory-vs-code drift on the spot; route verified external facts to `memory_world_set`. |
+| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
+
+The separate output is the plugin's third SessionStart handler
+(`session-start.sh memory-policy`, or `lifecycle.ps1 -Event MemoryPolicy` in
+Codex on Windows); `ops/setup-codex-hooks.py` installs and approves it for
+manual Codex hooks too. For every other variant it answers an empty body and
+adds nothing. The `install-hook` scripts' settings hooks do not carry it, so
+`full_separate_hook` serves no policy to those installs.
+
+`ab_arms` assigns each session the SessionStart hook registers one arm, by a
+SHA-256 of its client session id modulo the arm count; a variant may repeat
+for an A/A arm. Sessions that reach the hook without a session id keep
+`variant`. The daemon logs each assignment. The bank alone cannot
+reconstruct them all: a session root that ends with no stored entry is
+deleted, so an online comparison read from the bank sees only the sessions
+that stored something (see `evals/capture_metrics.py`). A durable
+per-session record is a follow-up that needs a schema change. A custom
+`hook-instructions.md` is served in every variant.
+
 ## Built-in defaults (tuned for Claude's use case)
 
 - **Embedding backbone `Qwen/Qwen3-Embedding-0.6B`** (`EmbeddingConfig.model_name`,

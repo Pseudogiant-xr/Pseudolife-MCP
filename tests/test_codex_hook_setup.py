@@ -127,9 +127,7 @@ def test_read_only_rerun_rejects_modified_trusted_manual_scripts(tmp_path, monke
     installed = next((tmp_path / "pseudolife/hooks").glob("*/lifecycle.ps1"))
     definitions = setup.manual_definitions(installed.parent)
     hooks = [hook(tmp_path, event, key=name, command=definitions[name]["commandWindows"], trustStatus="trusted")
-             for event, name in [*setup.EVENTS.items(),
-                                 ("sessionStart", "CoordinationStart"),
-                                 ("userPromptSubmit", "CoordinationPrompt")]]
+             for event, roles in setup.MANUAL_ROLES.items() for name in roles]
     setup.vet_manual(hooks, tmp_path)
     installed.write_text("modified by user")
     with pytest.raises(setup.SetupError, match="modified"):
@@ -140,9 +138,7 @@ def test_manual_set_rejects_duplicate_handler_in_place_of_coordination(tmp_path)
     setup.install_manual(tmp_path, report())
     directory = next((tmp_path / "pseudolife/hooks").glob("*/lifecycle.ps1")).parent
     definitions = setup.manual_definitions(directory)
-    roles = [*setup.EVENTS.items(),
-             ("sessionStart", "CoordinationStart"),
-             ("userPromptSubmit", "CoordinationPrompt")]
+    roles = [(event, name) for event, names in setup.MANUAL_ROLES.items() for name in names]
     hooks = [hook(tmp_path, event, key=name, command=definitions[name]["commandWindows"])
              for event, name in roles]
     assert setup.complete_set(hooks, "manual")
@@ -173,7 +169,7 @@ def test_approved_upgrade_accepts_exact_legacy_four_script_bundle(tmp_path):
         for event, role in setup.EVENTS.items()}}))
     setup.install_manual(tmp_path, report())
     installed = json.loads(manifest.read_text())["hooks"]
-    assert len(installed["SessionStart"]) == 2
+    assert len(installed["SessionStart"]) == 3  # memory, memory-policy, coordination
     assert len(installed["UserPromptSubmit"]) == 2
     assert len(installed["SessionEnd"]) == 1
     assert all((directory / name).read_bytes() == body for name, body in bodies.items())
@@ -587,7 +583,7 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
         assert result["instructions"] == "covered-by-hooks"
         assert seen == ["start", "end"] and not sessions
         text = (home / "config.toml").read_text()
-        assert text.count("trusted_hash") == 5
+        assert text.count("trusted_hash") == 6
         if existing_config:
             assert text.startswith("# User comment must survive")
         assert "dangerously-bypass" not in text
