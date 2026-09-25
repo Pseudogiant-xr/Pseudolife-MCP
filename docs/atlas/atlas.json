@@ -1133,6 +1133,8 @@
    "s": "safe daemon-only redeploy",
    "p": "ops/update.ps1",
    "d": [
+    "Refuses a dirty tree, or one git cannot describe, unless -AllowDirty",
+    "Stamps git sha / dirty / build time into image labels + /health build",
     "backup → rollback tag <tag>-pre-update-<ts> → prune (keep 2)",
     "compose up -d --no-deps --build pseudolife-daemon ONLY",
     "Health poll; prints the exact rollback one-liner",

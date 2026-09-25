@@ -549,6 +549,16 @@ every healthy deploy; see
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
+The image records the commit it was built from, and `/health` reports it
+as `build` (`git_sha`, `dirty`, `built_at`). So the script refuses a tree
+with uncommitted or untracked files, and lists them. It also refuses a
+tree git cannot describe (no git, not a clone, or git's `safe.directory`
+refusal, which it quotes). Commit or clean up first, or pass
+`-AllowDirty` / `--allow-dirty` to deploy the tree as it is: stamped
+`dirty: true`, or `unknown` when git cannot describe it. Each deploy
+builds a new image, so the daemon container is recreated even when the
+commit has not changed.
+
 **Everything at once:** the daemon is one of three installs. The **shim**
 your clients launch and the **Claude Code plugin** are separate and do not
 move with it. `-All` / `--all` moves them in the same run, after the

@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-25 — deploys name their commit and refuse a dirty tree)
+- `/health` reports the commit the running image was built from:
+  `build: {git_sha, dirty, built_at}`. The daemon image carries the same
+  values as OCI labels (`org.opencontainers.image.revision`,
+  `org.opencontainers.image.created`, `pseudolife.build.dirty`).
+  `ops/update.ps1|.sh` pass them from the checkout, and the release
+  workflow passes them for the GHCR image. An image built another way, such
+  as a bare `docker compose up --build` or the first install, reports
+  `"unknown"`, and a pip install omits the key. Until now the only answer
+  to "what is deployed?" was the package version, which moves only with a
+  release. Because the build time is part of the image, every deploy now
+  builds a new image and recreates the daemon container, even when the
+  commit has not changed.
+- `ops/update.ps1` and `ops/update.sh` refuse to deploy a tree with
+  uncommitted or untracked files, or one whose state git cannot report,
+  before the backup or any docker call. The refusal lists the paths, or
+  quotes git's own reason (such as its `safe.directory` advice).
+  `-AllowDirty` / `--allow-dirty` deploys it anyway, stamped `dirty: true`,
+  or `unknown` when git cannot describe it. Just before the build, the
+  scripts check the tree again and stop if HEAD or its clean state moved
+  meanwhile, so an image is never stamped with a tree it was not built
+  from. The maintainer's main checkout often carries another session's
+  uncommitted work, and a deploy from it would ship that work under a
+  commit that does not contain it.
+- The test suite dumps every thread's stack when one test runs longer than
+  600 s (`faulthandler_timeout`); the slowest legitimate test on CI takes
+  about 72 s. CI's `ops/ci_tests.sh` now also ends a pytest run at 35
+  minutes with SIGABRT, inside the step, so a hang fails the step while the
+  runner is still up. Every pytest process then prints its thread stacks
+  as it dies, even for a hang outside any single test; the step log keeps
+  them, and the diagnostics upload still runs. A master CI run hung until
+  the 50-minute job timeout on 2026-09-22, and that cancelled job kept no
+  log at all. Neither helps if the runner itself stops responding.
+
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
   on by default: `coordination.enabled` defaults to `true`, and without an
