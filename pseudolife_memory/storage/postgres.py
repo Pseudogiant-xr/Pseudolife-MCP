@@ -54,9 +54,10 @@ CAPACITY_DROPS_META_KEY = "capacity_true_drops"
 # another port. Measured 2026-09-25 on the maintainer's Windows host, about
 # twenty sessions against one Postgres on 127.0.0.1:5433: WSAEADDRINUSE failed
 # three connects in two full test runs (one inside ``_connect``), 0-2 per run,
-# with 250-600 TIME_WAIT entries to that port during a run. WSAENOBUFS was not
-# seen; it is the exhaustion case of the same table. Four calls with a 0.05 s
-# jittered exponential backoff stay well under a second in all.
+# with 250-600 TIME_WAIT entries to that port during a run. WSAENOBUFS, the
+# exhaustion case of the same table, then failed one test fixture's connect in
+# a full run the same evening. Four calls with a 0.05 s jittered exponential
+# backoff stay well under a second in all.
 _LOCAL_PORT_ERRORS = re.compile(r"/(10048|10055)\)")
 _LOCAL_PORT_ERROR_NAMES = {"10048": "WSAEADDRINUSE", "10055": "WSAENOBUFS"}
 _CONNECT_ATTEMPTS = 4

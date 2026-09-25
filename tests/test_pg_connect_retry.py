@@ -25,8 +25,10 @@ ADDR_IN_USE = psycopg.OperationalError(
     'connection failed: connection to server at "127.0.0.1", port 5433 '
     "failed: Address already in use (0x00002740/10048)\n"
     "\tIs the server running on that host and accepting TCP/IP connections?")
+# Verbatim from a test fixture's connect in a full run on 2026-09-25; note
+# the "connection is bad" prefix rather than "connection failed".
 NO_BUFS = psycopg.OperationalError(
-    'connection failed: connection to server at "127.0.0.1", port 5433 '
+    'connection is bad: connection to server at "127.0.0.1", port 5433 '
     "failed: No buffer space available (0x00002747/10055)\n"
     "\tIs the server running on that host and accepting TCP/IP connections?")
 REFUSED = psycopg.OperationalError(
