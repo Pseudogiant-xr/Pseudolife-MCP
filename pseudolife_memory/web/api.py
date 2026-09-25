@@ -491,16 +491,20 @@ def build_console_app(
             return
         if path == "/mcp" or path.startswith("/mcp/"):
             from pseudolife_memory.coordination import (
-                bound_identity, dispatch as coordination_dispatch,
-                enforce_bound_identity,
+                authenticated_principal, bound_identity,
+                dispatch as coordination_dispatch, enforce_bound_identity,
             )
             headers = {k.decode().lower(): v.decode("latin-1")
                        for k, v in scope.get("headers", [])}
             try:
                 binding = bound_identity(headers)
                 if binding is not None:
-                    principal = resolve_principal(
-                        headers.get("authorization"), token_map, token)
+                    # Fail closed on an open install: open loopback resolves
+                    # everyone to "default", which the board admits by
+                    # default, and a binding must never reach the store
+                    # without a bearer.
+                    principal = authenticated_principal(
+                        headers, token_map=token_map, token=token)
 
                     def validate_binding():
                         context = coordination_dispatch(

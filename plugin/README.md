@@ -67,16 +67,18 @@ and credentials remain owned by the existing shim adapter.
 Coordination is on by default, behind bearer authentication. The startup
 handler makes one bounded request (`GET /api/hook/coordination-start`, two
 seconds, no retry) with the same connection and credential settings as the
-memory handler, and prints the check-in only when the daemon serves it: to a
-bearer that can use the board right now. A disabled board
+memory handler, and prints the check-in only when the daemon serves it, which
+it does where the board is on for that bearer (the daemon cannot see whether
+the client has an adapter). A disabled board
 (`coordination.enabled: false`), an open install, an unlisted principal, or
 a daemon that does not answer adds nothing, and neither does a client that
 sets `PSEUDOLIFE_AGENT_COORDINATION` to anything but `1`/`true`/`yes`/`on` in
 the hook's environment.
 
 When the shim's coordination adapter is up (the default for a shim holding a
-bearer token; `PSEUDOLIFE_AGENT_COORDINATION=0` in the MCP server's env block
-turns it off), it keeps a small digest file per session under
+bearer token the daemon serves the board to; `PSEUDOLIFE_AGENT_COORDINATION=0`
+in the MCP server's env block turns it off), it keeps a small digest file per
+session under
 `~/.pseudolife-mcp/digests/` — the pending addressed messages, rendered once,
 behind a watermark that moves only when they change. The coordination UserPromptSubmit hook
 reads that file by the `session_id` it receives and prints the digest only when

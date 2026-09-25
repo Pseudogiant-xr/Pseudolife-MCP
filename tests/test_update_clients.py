@@ -641,3 +641,13 @@ def test_update_scripts_offer_all_and_call_the_helper_after_health():
     # The call site (the last mention; the usage header mentions it first).
     assert sh.rindex("update_clients.py") > sh.index('step "Healthy."')
     assert ps1.rindex("update_clients.py") > ps1.index('Step "Healthy.')
+
+
+@pytest.mark.parametrize("state", ['"not a table"', "[1, 2]"])
+def test_codex_plugin_approval_check_survives_a_malformed_config(cli, state):
+    """A report that crashes on one odd config value loses the whole ladder."""
+    codex_home = _codex_plugin_config(cli)
+    with open(codex_home / "config.toml", "a", encoding="utf-8") as config:
+        config.write(f"\n[hooks]\nstate = {state}\n")
+    shutil.copytree(ROOT / "plugin", codex_home / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin")
+    assert uc.check_codex_hooks(ROOT)["state"] in ("current", "needs-approval")

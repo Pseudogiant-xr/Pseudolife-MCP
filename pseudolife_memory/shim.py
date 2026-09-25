@@ -1119,10 +1119,17 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
     # Agent coordination is on by default (2026-09-25): unset enables the
     # adapter, any other value that is not truthy turns it off. The board
     # requires bearer authentication, so without a credential the default
-    # stays quiet instead of failing, and warning, on every launch.
+    # stays quiet instead of failing, and warning, on every launch. With one,
+    # the default asks the daemon first: a board it will not serve this
+    # bearer (disabled, an unlisted principal, file mode) gets no adapter or
+    # Codex registry, whose refusals would otherwise ride every tool result.
+    # An explicit opt-in skips the question and keeps the adapter's own
+    # diagnostics.
     setting = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower()
-    enabled = setting in {"1", "true", "yes", "on"} or (
-        not setting and _holds_bearer(provider))
+    explicit = setting in {"1", "true", "yes", "on"}
+    enabled = explicit
+    if not setting and _holds_bearer(provider):
+        enabled = await asyncio.to_thread(_board_available, url, provider)
     codex_pull = (not channel
                   and os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
                   == "codex")
@@ -1186,16 +1193,19 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                         url, token, provider=provider, **registry_options)
                     stack.push_async_callback(registry.aclose)
                     kwargs["coordination_registry"] = registry
-
-                    # The registry attaches per thread, later; whether the
-                    # board check-in belongs in the instructions is the
-                    # daemon's call for this bearer.
-                    async def board_ready():
-                        return await asyncio.to_thread(_board_available, url, provider)
-                    kwargs["board_checkin"] = board_ready
+                    if explicit:
+                        # The registry attaches per thread, later; whether
+                        # the board check-in belongs in the instructions is
+                        # the daemon's call for this bearer.
+                        async def board_ready():
+                            return await asyncio.to_thread(_board_available, url, provider)
+                        kwargs["board_checkin"] = board_ready
+                    else:
+                        kwargs["board_checkin"] = True  # the daemon said so above
             elif os.environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower() in {
                     "1", "true", "yes", "on"}:
-                needs = ("agent coordination, which requires bearer authentication"
+                needs = ("agent coordination, which is off here (no bearer token, or "
+                         "the daemon does not serve the board to it)"
                          if not setting else "PSEUDOLIFE_AGENT_COORDINATION=1")
                 print(f"pseudolife-mcp: PSEUDOLIFE_CODEX_DOORBELL needs {needs}; "
                       "doorbell off.", file=sys.stderr)

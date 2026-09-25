@@ -64,13 +64,15 @@ else
 fi
 
 SETTINGS_PATH="$SETTINGS_PATH" BRIEFING_COMMAND="$COMMAND" \
-  UPS_COMMAND="$UPS_COMMAND" COORDINATION_COMMAND="$COORDINATION_COMMAND" "$PYBIN" - <<'PY'
+  UPS_COMMAND="$UPS_COMMAND" COORDINATION_COMMAND="$COORDINATION_COMMAND" \
+  LEGACY_COORDINATION_LINE="$COORDINATION_LINE" "$PYBIN" - <<'PY'
 import json, os
 
 path = os.environ["SETTINGS_PATH"]
 briefing_cmd = os.environ["BRIEFING_COMMAND"]
 ups_cmd = os.environ.get("UPS_COMMAND", "")
 coordination_cmd = os.environ["COORDINATION_COMMAND"]
+legacy_line = os.environ["LEGACY_COORDINATION_LINE"]
 
 obj = {}
 if os.path.exists(path):
@@ -92,12 +94,13 @@ def add_group(groups, command):
     groups.append({"hooks": [{"type": "command", "command": command}]})
 
 
-def drop_command(groups, needle):
+def drop_exact(groups, commands):
+    """Remove hooks whose command is exactly one of ``commands``: a user's
+    own hook that merely mentions the same words stays."""
     removed = False
     for g in groups:
         before = len(g.get("hooks") or [])
-        g["hooks"] = [h for h in (g.get("hooks") or [])
-                      if needle not in (h.get("command") or "")]
+        g["hooks"] = [h for h in (g.get("hooks") or []) if h.get("command") not in commands]
         removed = removed or len(g["hooks"]) != before
     groups[:] = [g for g in groups if g.get("hooks")]
     return removed
@@ -110,7 +113,8 @@ else:
     print(f"Installed SessionStart briefing hook -> {path}")
     print(f"  command: {briefing_cmd}")
 
-if drop_command(hooks["SessionStart"], "Pseudolife coordination:"):
+if drop_exact(hooks["SessionStart"],
+              {f"echo '{legacy_line}'", f"Write-Output '{legacy_line}'"}):
     print("Removed the unconditional coordination check-in hook.")
 if not has_command(hooks["SessionStart"], "pseudolife-mcp briefing", coordination=True):
     add_group(hooks["SessionStart"], coordination_cmd)
@@ -129,6 +133,19 @@ if ups_cmd:
 # rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
 # (see docs/guide/episodes.md). Earlier installer versions added
 # them — remove any we find so old installs converge too.
+
+
+def drop_command(groups, needle):
+    removed = False
+    for g in groups:
+        before = len(g.get("hooks") or [])
+        g["hooks"] = [h for h in (g.get("hooks") or [])
+                      if needle not in (h.get("command") or "")]
+        removed = removed or len(g["hooks"]) != before
+    groups[:] = [g for g in groups if g.get("hooks")]
+    return removed
+
+
 if drop_command(hooks["SessionStart"], "pseudolife-mcp episode-start"):
     print("Removed obsolete episode-start hook (daemon owns episodes now).")
 if drop_command(hooks["SessionEnd"], "pseudolife-mcp episode-end"):

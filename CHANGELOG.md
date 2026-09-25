@@ -14,16 +14,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Bearer authentication is still required: an open (tokenless) install keeps
   the board dormant. Wake, the Codex doorbell and the Claude stop-wake hook
   stay opt-in.
-- The shim starts its coordination adapter by default whenever it holds a
-  bearer token; `PSEUDOLIFE_AGENT_COORDINATION=0` (any value but
-  `1`/`true`/`yes`/`on`) turns it off for that client.
-- The startup check-in no longer asks for calls that must fail. The daemon
-  serves it from the new `GET /api/hook/coordination-start` only to a bearer
-  that can use the board now; the plugin's coordination SessionStart hook
-  (bash and PowerShell, on startup, resume, compaction and `/clear`) and the
-  installers' new `pseudolife-mcp briefing --coordination` hook print what it
-  serves. The daemon's MCP instructions drop the board clause; the shim adds a
-  compact one only when its adapter is up (Codex: when that route answers).
+- The shim starts its coordination adapter (Codex: its per-thread registry)
+  by default when it holds a bearer token and the daemon serves that bearer
+  the board, which it asks once at startup; otherwise it stays quiet.
+  `PSEUDOLIFE_AGENT_COORDINATION=0` (any value but `1`/`true`/`yes`/`on`)
+  turns it off for that client, and `=1` keeps the old unconditional start.
+- The startup check-in no longer asks for calls that must fail where the
+  board is off. The daemon serves it from the new
+  `GET /api/hook/coordination-start` only where the board is on for that
+  bearer; the plugin's coordination SessionStart hook (bash and PowerShell, on
+  startup, resume, compaction and `/clear`) and the installers' new
+  `pseudolife-mcp briefing --coordination` hook print what it serves. The
+  daemon cannot see a client's adapter, so an HTTP client without the shim, an
+  opt-out set only in the MCP env block, or a `docker exec` installer hook can
+  still show it. The daemon's MCP instructions drop the board clause; the shim
+  adds a compact one only when its adapter is up.
+- An identity binding sent to `/mcp` now requires bearer authentication; an
+  open install refuses it before touching the store.
 - `ops/update_clients.py` (run by `ops/update.ps1 -All`) reports Codex plugin
   hook handlers that Codex has not approved as `needs-approval`. The
   2026-09-24 split added two handlers, which Codex skips without a word in

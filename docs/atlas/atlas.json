@@ -218,7 +218,7 @@
     "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
     "Re-emits tools/list_changed downstream after memory_toolset tier changes",
     "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification",
-    "Appends the compact board check-in to the daemon's MCP instructions only when its coordination adapter is up (Codex: when /api/hook/coordination-start answers for its bearer)"
+    "By default asks /api/hook/coordination-start once at startup and builds its coordination adapter (Codex: per-thread registry) only where the daemon serves its bearer the board; appends the compact board check-in to the MCP instructions only when the adapter is up"
    ]
   },
   {
@@ -1946,7 +1946,7 @@
   {
    "f": "shim",
    "t": "adapter",
-   "l": "attaches by default when the shim holds a bearer (PSEUDOLIFE_AGENT_COORDINATION=0 opts out) · wake only with PSEUDOLIFE_AGENT_WAKE",
+   "l": "attaches by default when the daemon serves the shim's bearer the board (PSEUDOLIFE_AGENT_COORDINATION=0 opts out) · wake only with PSEUDOLIFE_AGENT_WAKE",
    "k": "control"
   },
   {

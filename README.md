@@ -814,7 +814,7 @@ messageboard check-in when its coordination adapter is up.
 The memory SessionStart hook delivers a short operating guide and a bounded
 briefing; a separate coordination hook asks the agent to set its project,
 task and status, discover peers, and read pending messages, but only where
-the board works for that credential (it is on by default behind bearer
+the board is on for that credential (it is on by default behind bearer
 authentication, so an open install or a disabled board adds no check-in).
 Detailed memory
 guidance remains in the bundled standing block. Hooks add per-prompt reminders

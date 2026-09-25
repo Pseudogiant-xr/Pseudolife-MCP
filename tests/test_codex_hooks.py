@@ -1666,9 +1666,11 @@ def test_hook_installers_gate_the_coordination_checkin(tmp_path, shell, client):
     if client == "codex":
         legacy.update(commandWindows=f"Write-Output '{legacy_line}'", timeout=5)
     unrelated = {"type": "command", "command": "echo user-owned"}
+    # A user's own hook that merely mentions the phrase is not ours to remove.
+    lookalike = {"type": "command", "command": "echo 'Pseudolife coordination: my own reminder'"}
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({"hooks": {"SessionStart": [
-        {"hooks": [legacy, unrelated]}]}}), encoding="utf-8")
+        {"hooks": [legacy, unrelated, lookalike]}]}}), encoding="utf-8")
     for _ in range(2):
         _install_hooks(shell, client, settings, DOCKER_BRIEFING)
     starts = [h for g in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
@@ -1677,11 +1679,25 @@ def test_hook_installers_gate_the_coordination_checkin(tmp_path, shell, client):
     gated = DOCKER_BRIEFING + " --coordination"
     assert commands.count(gated) == 1
     assert commands.count(DOCKER_BRIEFING) == 1
-    assert not any("Pseudolife coordination:" in c for c in commands)
-    assert unrelated in starts
+    assert legacy["command"] not in commands
+    assert unrelated in starts and lookalike in starts
     if client == "codex" and shell == "powershell":  # the Windows override
         hook = next(h for h in starts if h["command"] == gated)
         assert hook["commandWindows"] == gated and hook["timeout"] == 5
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_hook_installers_add_a_missing_briefing_beside_the_checkin(tmp_path, shell):
+    """The check-in command also names `pseudolife-mcp briefing`; it must
+    not pass for the memory briefing itself."""
+    settings = tmp_path / "settings.json"
+    gated = "pseudolife-mcp briefing --hook-json --coordination"
+    settings.write_text(json.dumps({"hooks": {"SessionStart": [
+        {"hooks": [{"type": "command", "command": gated}]}]}}), encoding="utf-8")
+    _install_hooks(shell, "claude", settings, "pseudolife-mcp briefing --hook-json")
+    commands = [h["command"] for g in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+                for h in g["hooks"]]
+    assert sorted(commands) == ["pseudolife-mcp briefing --hook-json", gated]
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])

@@ -80,17 +80,26 @@ sees no peers and no awareness section in its briefing, and with no bearer token
 configured there is no principal to list, so the board stays dormant on an open
 loopback install: no awareness, no mail and no startup check-in.
 
-The installed shim starts its adapter by default whenever it holds a bearer
-token (`PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`);
-`PSEUDOLIFE_AGENT_COORDINATION=0` (any value but `1`, `true`, `yes` or `on`)
-turns it off for that client. The startup check-in appears only where the
-board works: the daemon serves the hook text (`GET
-/api/hook/coordination-start`) only to a bearer that could register and
-receive right now, the plugin hook and the installers'
-`pseudolife-mcp briefing --coordination` hook print what it serves, and the
-shim appends a compact check-in to the MCP instructions only when its adapter
-is up (for Codex, when that route answers). Set the opt-out where the hooks
-see it too, since they cannot read the MCP env block. Optional
+The installed shim starts its adapter (for Codex, its per-thread registry) by
+default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
+`PSEUDOLIFE_MCP_TOKEN_FILE`) and the daemon serves that bearer the board; it
+asks once at startup and otherwise stays quiet. `PSEUDOLIFE_AGENT_COORDINATION=0`
+(any value but `1`, `true`, `yes` or `on`) turns it off for that client, and
+`=1` skips the question and reports any refusal on stderr.
+
+The startup check-in follows the board. The daemon serves the hook text
+(`GET /api/hook/coordination-start`) only where the board is on for that
+bearer: enabled, authenticated, a listed principal, PostgreSQL. The plugin
+hook and the installers' `pseudolife-mcp briefing --coordination` hook print
+what it serves, and the shim appends a compact check-in to the MCP
+instructions only when its adapter is up. The daemon cannot see whether a
+client has an adapter, so a check-in can still reach one that cannot complete
+it: a client connected over HTTP without the shim whose hooks hold a token; a
+client that opted out only in its MCP env block (set the opt-out where the
+hooks see it too, since they cannot read that block); and a Docker install
+wired by `ops/install-hook.*`, whose `docker exec` check-in asks with the
+daemon container's own token. The check-in tells the agent to say so and
+continue when the tools are unavailable. Optional
 `PSEUDOLIFE_AGENT_LABEL`, `PSEUDOLIFE_AGENT_PROJECT` and `PSEUDOLIFE_AGENT_TASK`
 provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a

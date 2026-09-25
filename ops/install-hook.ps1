@@ -50,21 +50,6 @@ if (Test-Path $SettingsPath) {
     Write-Host "Backed up -> $bak"
 }
 
-function Remove-HookCommand($groups, $needle) {
-    $removed = $false
-    $keptGroups = @()
-    foreach ($group in @($groups)) {
-        if ($null -eq $group) { continue }
-        $keptHooks = @(@($group.hooks) | Where-Object { $_.command -notlike "*$needle*" })
-        if ($keptHooks.Count -ne @($group.hooks).Count) { $removed = $true }
-        if ($keptHooks.Count -gt 0) {
-            $group.hooks = $keptHooks
-            $keptGroups += $group
-        }
-    }
-    return @{ removed = $removed; groups = $keptGroups }
-}
-
 # Idempotency: check briefing hook independently.
 $hasBriefing = $false
 foreach ($group in @($obj.hooks.SessionStart)) {
@@ -101,9 +86,21 @@ $coordinationCommand = if ($Command -like "*pseudolife-mcp briefing*") {
 } else {
     "pseudolife-mcp briefing --hook-json --coordination"
 }
-$legacyCheckin = Remove-HookCommand $obj.hooks.SessionStart "Pseudolife coordination:"
-$obj.hooks.SessionStart = $legacyCheckin.groups
-if ($legacyCheckin.removed) { Write-Host "Removed the unconditional coordination check-in hook." }
+# Exact commands only: a user's own hook that mentions the phrase stays.
+$legacyCommands = @("echo '$coordinationLine'", "Write-Output '$coordinationLine'")
+$legacyRemoved = $false
+$keptGroups = @()
+foreach ($group in @($obj.hooks.SessionStart)) {
+    if ($null -eq $group) { continue }
+    $keptHooks = @(@($group.hooks) | Where-Object { $_.command -notin $legacyCommands })
+    if ($keptHooks.Count -ne @($group.hooks).Count) { $legacyRemoved = $true }
+    if ($keptHooks.Count -gt 0) {
+        $group.hooks = $keptHooks
+        $keptGroups += $group
+    }
+}
+$obj.hooks.SessionStart = $keptGroups
+if ($legacyRemoved) { Write-Host "Removed the unconditional coordination check-in hook." }
 $hasCoordination = $false
 foreach ($group in @($obj.hooks.SessionStart)) {
     foreach ($h in @($group.hooks)) {
@@ -157,6 +154,21 @@ if ($Client -in "claude", "codex") {
 # rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
 # (see docs/guide/episodes.md). Earlier installer versions added
 # them — remove any we find so old installs converge too.
+function Remove-HookCommand($groups, $needle) {
+    $removed = $false
+    $keptGroups = @()
+    foreach ($group in @($groups)) {
+        if ($null -eq $group) { continue }
+        $keptHooks = @(@($group.hooks) | Where-Object { $_.command -notlike "*$needle*" })
+        if ($keptHooks.Count -ne @($group.hooks).Count) { $removed = $true }
+        if ($keptHooks.Count -gt 0) {
+            $group.hooks = $keptHooks
+            $keptGroups += $group
+        }
+    }
+    return @{ removed = $removed; groups = $keptGroups }
+}
+
 $r = Remove-HookCommand $obj.hooks.SessionStart "pseudolife-mcp episode-start"
 $obj.hooks.SessionStart = $r.groups
 if ($r.removed) { Write-Host "Removed obsolete episode-start hook (daemon owns episodes now)." }

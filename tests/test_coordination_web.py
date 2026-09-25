@@ -231,15 +231,24 @@ class _CheckinResponse:
 
 def _checkin_cli(monkeypatch, body, argv, setting=None):
     import sys
+    from pseudolife_memory.shim import _NoRedirectHandler
     seen = []
 
-    def urlopen(req, timeout=5):
-        seen.append((req.full_url, req.get_header("Authorization")))
-        return _CheckinResponse(body)
+    class Opener:
+        def open(self, req, timeout):
+            # Inside a 5 s hook budget, after interpreter start and /health.
+            assert timeout == 2
+            seen.append((req.full_url, req.get_header("Authorization")))
+            return _CheckinResponse(body)
+
+    def build_opener(*handlers):
+        # A redirect must never carry the bearer to another host.
+        assert handlers == (_NoRedirectHandler,)
+        return Opener()
 
     monkeypatch.setattr("pseudolife_memory.shim.probe_health",
                         lambda url, timeout=0.25: {"status": "ok"})
-    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("urllib.request.build_opener", build_opener)
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-token")
     monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", "http://fixture.invalid")
     if setting is None:
@@ -278,3 +287,34 @@ def test_briefing_coordination_honours_an_explicit_client_opt_out(monkeypatch, c
     seen = _checkin_cli(monkeypatch, b"Pseudolife coordination: fixture.\n",
                         ["--coordination", "--hook-json"], setting="0")
     assert seen == [] and capsys.readouterr().out == ""
+
+
+def test_open_install_mcp_binding_never_reaches_the_board(monkeypatch):
+    """Bearer auth stays required (maintainer decision, 2026-09-25): on an
+    open install the identity binding a shim adapter sends fails closed
+    before the store, though "default" is on the default allowed list."""
+    from pseudolife_memory import coordination
+    calls = []
+    monkeypatch.setattr(coordination, "dispatch", lambda *a, **kw: calls.append(kw) or {})
+    app = build_console_app(stub_mcp, None, lambda: {}, FixtureService())
+    status, body = call(app, "POST", "/mcp", headers=[
+        (b"x-pl-bank", b"fixture-bank"), (b"x-pl-principal", b"default")])
+    assert status == 401 and json.loads(body) == {"error": "authentication_required"}
+    assert calls == []
+
+
+def test_authenticated_mcp_binding_still_checks_the_bank(monkeypatch):
+    from pseudolife_memory import coordination
+    calls = []
+
+    def dispatch(service, action, parameters, **kw):
+        calls.append((action, kw["principal"]))
+        return {"bank_id": "fixture-bank", "principal": "default"}
+
+    monkeypatch.setattr(coordination, "dispatch", dispatch)
+    app = build_console_app(stub_mcp, "fixture-secret", lambda: {}, FixtureService())
+    status, _ = call(app, "POST", "/mcp", headers=[
+        (b"authorization", b"Bearer fixture-secret"),
+        (b"x-pl-bank", b"fixture-bank"), (b"x-pl-principal", b"default")])
+    assert calls == [("context", "default")]
+    assert status == 501  # through to the stub MCP app

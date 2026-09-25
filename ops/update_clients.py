@@ -467,6 +467,8 @@ def _unapproved_plugin_handlers(repo: Path, config_text: str) -> list[str] | Non
                               .read_text(encoding="utf-8"))["hooks"]
     except (ValueError, OSError, KeyError, AttributeError):
         return None
+    if not isinstance(state, dict) or not isinstance(manifest, dict):
+        return None
     missing = []
     for event, groups in manifest.items():
         name = re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()

@@ -46,11 +46,15 @@ def _fetch_markdown(url: str, token: str | None, max_unsure: int, max_lessons: i
 def _fetch_checkin(url: str, token: str | None) -> str:
     """GET ``/api/hook/coordination-start``: the agent-board check-in, or
     empty where this bearer cannot use the board (off, unauthenticated, or
-    an unlisted principal)."""
+    an unlisted principal). A redirect is refused rather than followed, since
+    urllib would carry the bearer to its target; two seconds keeps the hook
+    inside its five-second budget."""
+    from pseudolife_memory.shim import _NoRedirectHandler
     req = urllib.request.Request(f"{url}/api/hook/coordination-start")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=5) as r:
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    with opener.open(req, timeout=2) as r:
         return r.read().decode("utf-8")
 
 
