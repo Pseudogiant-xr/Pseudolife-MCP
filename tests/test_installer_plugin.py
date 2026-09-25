@@ -309,6 +309,154 @@ def test_other_clients_do_not_touch_the_plugin(variant, tmp_path):
     assert state == ""
 
 
+def _run_instructions(variant, tmp_path: Path, *, choice: str, plugin: bool,
+                      block_present: bool = False) -> tuple[str, str, Path]:
+    """Run section 10 (standing memory instructions) of one installer for
+    Claude alone, against a disposable home. Returns the recorded state, the
+    ladder line, and the Claude standing file the section would write."""
+    kind, bash = variant
+    env = _fixture_env(tmp_path / f"{kind}-env")
+    home = Path(env["HOME"])
+    claude_md = home / ".claude" / "CLAUDE.md"
+    if block_present:
+        claude_md.parent.mkdir(parents=True, exist_ok=True)
+        claude_md.write_text("# mine\n\n## Memory (pseudolife-memory MCP)\n", encoding="utf-8")
+    if kind == "bash":
+        section = _between("ops/install.sh", "# ── 10. standing memory instructions",
+                           "# ── 11. wire into selected MCP clients")
+        describe = _between("ops/install.sh", "describe_instr() {", "\n}\n") + "\n}"
+        repo = _bash_fixture_path(bash, ROOT, env).replace("'", "'\\''")
+        script = f"""set -euo pipefail
+repo='{repo}'
+CLIENTS='claude'
+CLAUDE_PLUGIN_INSTALLED='{"1" if plugin else ""}'
+instruction_choice='{choice}'
+INSTR_CODEX='' CODEX_SETUP_VALID='' CODEX_HOOK_TRUST=ask CODEX_HOOK_RECOVERY='' AGENTS_FILE=''
+step() {{ printf 'STEP: %s\\n' "$*"; }}
+{section}
+{describe}
+printf 'STATE=%s\\n' "$INSTR_CLAUDE"
+printf 'LINE=%s\\n' "$(describe_instr "$INSTR_CLAUDE")"
+"""
+        proc = subprocess.run([bash], input=script.encode(), capture_output=True,
+                              check=False, timeout=20, env=env)
+    else:
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            pytest.skip("PowerShell 7 is unavailable")
+        section = _between("ops/install.ps1", "# -- 10. standing memory instructions",
+                           "# -- 11. wire into selected MCP clients")
+        describe = _between("ops/install.ps1", "function Describe-Instr($state) {", "\n}\n") + "\n}"
+        script = f"""$ErrorActionPreference = 'Stop'
+$repo = '{str(ROOT).replace("'", "''")}'
+$clients = @('claude')
+$claudePluginInstalled = ${"true" if plugin else "false"}
+$instructionChoice = '{choice}'
+$codexSetup = $null
+$codexSetupValid = $false
+$CodexHookTrust = 'ask'
+$AgentsFile = ''
+$interactive = $false
+function Step($message) {{ Write-Output "STEP: $message" }}
+{section}
+{describe}
+Write-Output "STATE=$($instrState['claude'])"
+Write-Output ("LINE=" + (Describe-Instr $instrState['claude']))
+"""
+        runner = tmp_path / "run-instructions.ps1"
+        runner.write_text(script, encoding="utf-8")
+        proc = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner)],
+                              capture_output=True, check=False, timeout=30, env=env)
+    out = proc.stdout.decode(errors="replace")
+    assert proc.returncode == 0, proc.stderr.decode(errors="replace") + out
+    state = next(line[len("STATE="):] for line in out.splitlines() if line.startswith("STATE="))
+    line = next(line[len("LINE="):] for line in out.splitlines() if line.startswith("LINE="))
+    return state, line, claude_md
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_explicit_append_writes_the_claude_block_beside_the_plugin(variant, tmp_path):
+    """An explicit `--instructions append` / `-Instructions append` always
+    writes the standing block (README install section), plugin or not: the
+    plugin hook serves only a compact core, and subagents read CLAUDE.md,
+    not hook output. Codex already honoured an explicit append; Claude
+    recorded covered-by-plugin before reading the choice (2026-09-25 review)."""
+    state, line, claude_md = _run_instructions(variant, tmp_path, choice="append", plugin=True)
+    block = (ROOT / "examples" / "CLAUDE.memory.md").read_text(encoding="utf-8")
+    assert claude_md.is_file()
+    assert block.strip() in claude_md.read_text(encoding="utf-8")
+    assert state.startswith("appended:") and state.endswith("CLAUDE.md")
+    assert line.startswith("[x] Standing file")
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+@pytest.mark.parametrize("choice", ["auto", "skip"])
+def test_auto_and_skip_leave_claude_md_alone_beside_the_plugin(variant, tmp_path, choice):
+    """Only an explicit append edits CLAUDE.md beside the plugin; the
+    default keeps the 2026-09-25 decision to skip on the plugin path."""
+    state, line, claude_md = _run_instructions(variant, tmp_path, choice=choice, plugin=True)
+    assert not claude_md.exists()
+    assert state == "covered-by-plugin"
+    assert line.startswith("[-] Standing file")
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_explicit_append_beside_the_plugin_never_doubles_the_block(variant, tmp_path):
+    state, line, claude_md = _run_instructions(variant, tmp_path, choice="append",
+                                               plugin=True, block_present=True)
+    assert claude_md.read_text(encoding="utf-8").count("pseudolife-memory") == 1
+    assert state.startswith("present:")
+    assert line.startswith("[x] Standing file")
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+@pytest.mark.parametrize("choice", ["append", "auto"])
+def test_plugin_banner_does_not_promise_to_skip_a_requested_append(variant, tmp_path, choice):
+    """Section 9 announces what the plugin covers before section 10 runs; it
+    must not say the CLAUDE.md block is skipped when append was requested
+    (reviewer finding on this change, 2026-09-25)."""
+    kind, bash = variant
+    env = _fixture_env(tmp_path / f"{kind}-env")
+    _record_plugin(Path(env["HOME"]))
+    if kind == "bash":
+        banner = _between("ops/install.sh", 'if grep -q "pseudolife-memory@pseudolife-mcp"',
+                          '\nHOOK_CLAUDE=""')
+        script = f"""set -euo pipefail
+CLIENTS='claude'
+instruction_choice='{choice}'
+step() {{ printf 'STEP: %s\\n' "$*"; }}
+{banner}
+"""
+        proc = subprocess.run([bash], input=script.encode(), capture_output=True,
+                              check=False, timeout=20, env=env)
+    else:
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            pytest.skip("PowerShell 7 is unavailable")
+        banner = _between("ops/install.ps1",
+                          'if ($claudePluginInstalled -and ($clients -contains "claude")) {',
+                          "\n$hookState = @{}")
+        runner = tmp_path / "run-banner.ps1"
+        runner.write_text(f"""$ErrorActionPreference = 'Stop'
+$clients = @('claude')
+$claudePluginInstalled = $true
+$instructionChoice = '{choice}'
+function Step($message) {{ Write-Output "STEP: $message" }}
+{banner}
+""", encoding="utf-8")
+        proc = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner)],
+                              capture_output=True, check=False, timeout=30, env=env)
+    out = _all_output(proc)
+    assert proc.returncode == 0, out
+    assert "plugin detected" in out
+    if choice == "append":
+        assert "CLAUDE.md block is still appended" in out
+        assert "hook and CLAUDE.md block" not in out
+    else:
+        assert "hook and CLAUDE.md block" in out
+        assert "still appended" not in out
+
+
 def test_both_installers_document_the_flag_and_call_the_step():
     sh = (ROOT / "ops/install.sh").read_text(encoding="utf-8")
     ps1 = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")

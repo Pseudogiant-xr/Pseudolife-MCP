@@ -14,7 +14,10 @@ reliably — without the agent having to remember:
    open questions), **lessons from past work** (avoid / prefer),
    **verified world facts** (fresh, cited, age-ranked), and **where we left
    off** (a one-line recap of your last closed session). Empty sections are
-   omitted, so a cold bank injects nothing.
+   omitted, so a cold bank prints nothing. As a hook (`--hook-json`, or the
+   plugin) it injects a short memory core first and then this block, fitted
+   to the hook's size budget, so even a cold bank's session starts with
+   the core.
 2. **Episode lifecycle is owned by the daemon, keyed by a resolved session
    identity — hooks make that identity precise, but nothing about opening
    or closing an episode requires them.** Five tiers, strict precedence
@@ -71,11 +74,12 @@ reliably — without the agent having to remember:
      connect, which gave each Claude Code session a second root and left an
      empty root for every shim a host killed. One gap remains: `/clear` and
      an in-session `/resume` give the session a new id but keep the shim's.
-     Afterwards a write without a handle, and a `memory_store` even with
-     one, reopens the root under the old id (or opens one); a handle-less
-     write lands there, and a handle-less `memory_session_title` renames it.
-     `--continue`, or `--resume` without an id, can likewise launch the shim
-     with an id no hook registers.
+     Afterwards a `memory_store` or `memory_episode_start` without a handle
+     reopens the root under the old id (or opens one) and lands there, and
+     a `memory_session_title` without one renames that root. A call that
+     passes the handle SessionStart advertised lands on the new root and
+     opens nothing under the old id. `--continue`, or `--resume` without an
+     id, can likewise launch the shim with an id no hook registers.
    - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
      handle) still get episodes: the daemon **lazily opens** one on the
      first store of a new session (so empty sessions never leave a husk)
@@ -113,7 +117,8 @@ reliably — without the agent having to remember:
    Session titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an
-   `episode_hint` until you do); a session closing still-generic gets an
+   `episode_hint` until you do, naming the handle when the store passed
+   one); a session closing still-generic gets an
    auto-derived `"{dominant source} - {stamp}: {first-entry snippet}"`
    title. Fragmented history is repairable over REST:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
@@ -178,7 +183,8 @@ missing). Requires `pseudolife-mcp` on PATH — `pip install -e .` in the
 repo puts it there.
 
 Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
-`hookSpecificOutput.additionalContext` payload Claude Code injects:
+`hookSpecificOutput.additionalContext` payload Claude Code injects — the
+same memory core and bounded briefing the plugin hook serves:
 
 ```json
 {
@@ -194,9 +200,11 @@ Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
 
 The briefing connects to the *already-running* daemon (never starts one)
 and does nothing if the daemon is down — it can't slow or break session
-start. Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
-`--max-world N` (default 3 each). The briefing content is also available on
-demand via the CLI or the Console's `/api/briefing` route.
+start. Tune the printed briefing with `--max-unsure N` / `--max-lessons N` /
+`--max-world N` (default 3 each); with `--hook-json` these are ignored,
+because the daemon fits the hook context to the hook's size budget. The
+briefing content is also available on demand via the CLI or the Console's
+`/api/briefing` route.
 
 The plugin's daemon-served memory hook uses a short operating guide rather
 than repeating the full standing memory policy. Its bounded briefing retains
@@ -222,7 +230,8 @@ check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
 the daemon serves it: a board that is on and usable by that bearer), and the
 per-turn discipline line. Re-running them replaces the unconditional check-in
 echo older versions wrote. They do not register an
-agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing` reads `/api/briefing` and
+agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing --hook-json` reads
+`/api/hook/session-start` (the plugin hook's memory core and briefing) but
 forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven
 episode close: the idle reaper closes the episode instead, and the

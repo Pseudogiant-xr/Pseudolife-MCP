@@ -94,7 +94,8 @@ also wake an idle session when board mail arrives (see
 [Configuration](configuration.md#waking-an-idle-claude-code-session-the-stop-hook)).
 `ops/install-hook.*`
 is the non-plugin fallback: it installs the SessionStart briefing
-(`pseudolife-mcp briefing --hook-json`) and the per-turn discipline line,
+(`pseudolife-mcp briefing --hook-json`, which serves the plugin hook's memory
+core and bounded briefing) and the per-turn discipline line,
 but no SessionEnd hook and no identity registration — those sessions fall
 back to the shim header or idle-gap sessionization (see
 [Episodes](episodes.md#session-lifecycle--daemon-owned-episodes)). The MCP

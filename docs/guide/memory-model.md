@@ -636,9 +636,27 @@ two searches left the earlier one unlabelled, which the replay dropped or,
 when that event carried another label, scored as a miss). With no session
 identity at all the most-recent rule stays: "same session" would otherwise
 mean every other session-less search in the window.
-Nothing is written to the signal itself, and nothing links a signal to the
-labels it caused: the labels stand on their own, and which outcome named
-which ids is deliberately not recorded.
+No foreign key links a signal to the labels it caused: the labels stand on
+their own. Since schema v44 the signal row's `used_ids` column keeps what
+the ids became, as id lists: `{"credited", "unmatched",
+"served_elsewhere"}`, or `{"unchecked", "reason"}` when the label write
+failed. So the share of named ids that matched a search can be measured
+from the bank. It stays `NULL` when the outcome named no ids or the
+retrieval log is off, and also when this best-effort write itself failed
+(counted in `memory_stats` `retrieval_log.write_errors`), so a match rate
+over non-`NULL` rows skips those outcomes. Like the retrieval log, the
+column stays out of portable exports.
+
+`memory_lesson_search` calls are logged too (schema v44), in their own
+`lesson_search_events` table: the query, the caller's session, and the
+lessons served by `(task, aspect)` slot key (stored as `entity_norm` /
+`attribute_norm`) with rank and score. A search
+that found nothing gets a row as well. They are kept out of
+`retrieval_events` because the retrieval replay and telemetry harnesses
+re-run every row there as a `memory_search`. The log shares the retrieval
+log's switch and retention, and `memory_stats` counts it under
+`retrieval_log.lesson_searches`. Lessons shown in the session-start
+briefing are not counted.
 
 Two invariants a harness must keep, because the label silently credits
 nothing otherwise: the outcome must be logged under the **same session

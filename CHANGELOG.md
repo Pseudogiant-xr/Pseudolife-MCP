@@ -6,6 +6,175 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — the client-side updater no longer strands a shim runtime that sessions are running)
+- On 2026-09-25 `ops/update.ps1 -All` ran `pip install --upgrade` into the
+  maintainer's shim runtime while about 36 sessions ran its
+  `Scripts\pseudolife-mcp.exe`. pip failed with WinError 32 but did not
+  put back what it had already moved. pip 24.0 stashes an uninstall in
+  sorted order, so `Lib\site-packages\pseudolife_memory` and its dist-info
+  had been renamed to `~`-prefixed siblings before the running launcher
+  refused to move. That failure comes from `uninstall()`, which sits
+  outside the `try` that rolls back a failed install. The runtime was left
+  with no package of its own, and imports silently fell through to another
+  copy on `sys.path` (the venv includes system site-packages). pipx has the
+  same exposure with no stash at all: `install --force` removes the venv
+  with `rmtree(ignore_errors=True)` before rebuilding it.
+- `ops/update_clients.py` now reads the Windows process table (stdlib
+  `ctypes`: Toolhelp32 plus `QueryFullProcessImageNameW`) before a pip or
+  pipx upgrade. The upgrade is skipped if any process is running from the
+  registered launcher, from the virtualenv the shim lives in, or, for
+  pipx, from pipx's venv for the package, since `--force` deletes all of
+  it. For pip `--user` the owning interpreter's own venv, if it has one, is
+  not held, because pip writes to the user site. Paths are compared both
+  as written and as resolved, so a registration made through a junction
+  or symlink still matches the resolved path Windows reports.
+- The ladder reports `in-use` with the number of sessions and the exact
+  rerun, `python ops/update_clients.py --only shim --repo <checkout>`.
+  Each process tree counts as one session: a Claude session is a launcher
+  plus the venv's redirector. The gate itself is on any matching process.
+  `in-use` exits non-zero, so `update.ps1 -All` still warns that a client
+  step needs attention.
+- The helper's own process and its parent never count. A process table
+  that cannot be read is `unknown` and is left alone, like the existing
+  unclassifiable-probe case, which also exits 0. A bare global interpreter
+  registered with `-m` names no path of its own and is not checked; the
+  restore below still covers it. Off Windows nothing changes, since an
+  open or running file does not stop pip or pipx there.
+- As a safety net for a session that starts between the check and pip's
+  stash, a failed pip run now gets back what it moved aside. Each entry
+  that vanished from the runtime's library directories during that run is
+  renamed back from the one `~` sibling that appeared during the same run
+  and matches pip's stash naming. An older failed run's leftover is never
+  picked. Where that is ambiguous, or where this package's own entries are
+  simply gone, they are named rather than guessed. A dependency whose
+  upgrade the same run finished before failing is not reported. A fresh
+  probe then fills in the failure line: the runtime still imports its own
+  package, imports it again after the restore, or has none. For a venv
+  shim, "its own" means imported from inside the venv. With system
+  site-packages on, a copy in the user site or the base interpreter is
+  what imports fell through to on 2026-09-25, not the runtime's package.
+- The metadata refresh named for a shim in the checkout's `.venv` put the
+  probe's failure reason into `pip install -e "<...>"` when the probe did
+  not answer. It now names a project directory only when the probe found
+  an editable install, and the checkout otherwise.
+- Tests: a fake process table covers each registration kind, and a stub
+  pip reproduces pip 24.0's stash-then-fail. Two checks use a real
+  interpreter: a real venv whose stub pip strands the package must import
+  its own package again afterwards, and on Windows a real process started
+  from a runtime's interpreter must block the upgrade.
+
+### Fixed (2026-09-25 — rerunning the installer no longer strands a shim that sessions are running)
+- On Windows, rerunning `ops/install.ps1` or `ops/install.sh` while a
+  Claude Code or Codex session was running the stdio shim could leave the
+  shim without its own package. The installers upgrade it with
+  `pipx install --force <checkout>` or `pip install --user --upgrade
+  <checkout>`, and neither puts back what it removed before failing on the
+  running launcher. pip 24.0 stashes an uninstall in sorted order, so
+  site-packages is already renamed to `~` siblings when WinError 32 is
+  raised from `uninstall()`, outside the `try` that rolls back. pipx
+  deletes the venv with `rmtree(ignore_errors=True)` first, so everything
+  that is not locked is gone. The client updater hit this on 2026-09-25.
+- Both installers now read the Windows process table
+  (`Get-CimInstance Win32_Process`; `install.sh` under Git Bash, MSYS2 or
+  Cygwin calls `powershell.exe` for it) before upgrading an installed shim.
+  If a process is running from the shim's pipx venv or from its installed
+  launcher, the upgrade is skipped. The warning names the number of
+  sessions (one per process tree: a Claude session is the launcher plus the
+  venv's redirector), the paths and the rerun, and it is repeated at the
+  end of the run. The installed shim stays in place and usable, so clients
+  are still registered against it. A registration the installer would have
+  reported as "upgraded" is reported as not upgraded, marked `[!]`. A
+  process table that cannot be read leaves an installed shim alone. A first
+  install, with nothing installed yet, is not checked. Off Windows nothing
+  changes, since a running file does not stop pip or pipx there.
+- Not covered: a session that starts between the check and pip's
+  uninstall. The installers do not restore pip's `~` stashes after a
+  failed pip run.
+- Tests: fake process tables cover a pipx venv with a Claude and a Codex
+  session, a pip `--user` launcher, lookalike paths that must not count,
+  an unreadable table, a first install and a non-Windows host, against
+  every available bash and PowerShell. The registration steps of both
+  installers are covered for Claude Code, Codex and Gemini CLI. On Windows
+  a real interpreter started from a disposable pipx venv must block the
+  upgrade, through the real process table.
+
+### Fixed (2026-09-25 — `/clear` no longer revives the old session's root)
+- After `/clear` or an in-session `/resume`, a `memory_store` that passed the
+  new session's handle still reopened the old session's root under the
+  shim's launch id (the root SessionEnd had just closed, within the resume
+  window) or, if SessionEnd had pruned it empty, opened a new empty one that
+  lingered until the idle reaper and the sweep. The entry itself already
+  landed on the handle's root. The store path opened a root for the
+  `X-PL-Session` header session whenever one was present; it now does so only
+  when no handle resolves. The header stays the identity stamp (writer and
+  session keying of auto-promoted facts, HLC), as the documented split
+  between identity and target episode says. Such a store also no longer
+  clears the close SessionEnd stamped on the old session's durable
+  `client_sessions` record (v43), which the reopened root did, as if that
+  session had never ended.
+- A store's `episode_hint` now reads the root the entry landed on (the
+  handle's root when one resolves), not the header session's root, and when
+  a handle resolved it names it (`memory_session_title(..., episode='<id>')`):
+  a title call without the handle resolves the header session, which after
+  `/clear` would reopen and rename the old session's root.
+- `memory_episode_start` with a handle already nested under the handle's root
+  without opening one for the header session; a test now pins it.
+- A session end that matches no open root (a SessionEnd for a reaped
+  session, the exit of a non-Claude-Code shim that never wrote) no longer
+  re-upserts every episode row, one committed statement each, under the
+  service lock. A close that matched still writes through.
+
+### Added (2026-09-25 — lesson searches and used_ids outcomes are recorded, schema v44)
+- Two memory-loop questions could not be answered from the bank: whether a
+  session consulted its lessons, and what share of the ids an outcome names
+  in `used_ids` a search had actually served. `memory_lesson_search` wrote
+  no log row, and lessons have no read counter. `memory_outcome` persisted
+  only the credited ids, and nothing linked those to the outcome; the
+  unmatched and served-elsewhere ids went back to the caller and were
+  dropped. Found 2026-09-25 by the memory-policy bench.
+- Schema v44 adds `lesson_search_events`: one row per `memory_lesson_search`
+  call, with the query, the caller's session and episode, and the lessons
+  served by `(entity_norm, attribute_norm)` slot key with rank and score.
+  A search that found nothing gets a row too. It is a separate table from
+  `retrieval_events` on purpose: `evals/retrieval_replay.py`, the telemetry
+  review and the graph ablation re-run every retrieval event as a
+  `memory_search`, so a lesson query there would contaminate them. It
+  shares the retrieval log's switch and retention, and `memory_stats`
+  reports its size as `retrieval_log.lesson_searches`. Lessons shown in
+  the session-start briefing are not counted.
+- Schema v44 adds `outcome_signals.used_ids` (JSONB). It holds what the
+  outcome's ids became: `{"credited", "unmatched", "served_elsewhere"}` id
+  lists, or `{"unchecked", "reason"}` when the label write failed. It is
+  `NULL` when the outcome named no ids, the retrieval log is off, or the
+  record write itself failed. The tool's response is unchanged. Ids the MCP
+  layer drops before the service sees them (`used_ids_ignored`,
+  `used_ids_truncated`) are not recorded. The column is serving telemetry,
+  so `pseudolife-mcp export` leaves it out, as it leaves out the retrieval
+  log; the signals themselves still travel.
+- Both records are observational: a failed write is counted in
+  `memory_stats` `retrieval_log.write_errors` and never fails the search
+  or the outcome.
+
+### Fixed (2026-09-25 — Claude Code without the plugin starts with the memory core)
+- The SessionStart hook the installer writes for Claude Code without the
+  plugin (`pseudolife-mcp briefing --hook-json`, also used by older Codex
+  hook setups) now injects what the plugin hook injects, read from
+  `/api/hook/session-start`: the compact memory core, then, when the request
+  is authorized, any daemon `hook-instructions.md`, cold-bank onboarding and
+  the bounded briefing. It used to inject
+  only the live briefing from `/api/briefing`, so those sessions started
+  without the memory core, and a cold bank injected nothing. Existing
+  `settings.json` entries need no edit: the installer's `docker exec` command
+  picks this up with the daemon image, a host-installed command with the
+  `pseudolife-mcp` package. As with the plugin, this briefing no longer
+  includes the coordination section. Plain `pseudolife-mcp briefing` still
+  prints the full `/api/briefing`.
+- An explicit `--instructions append` (`-Instructions append`, or the
+  `--claude-md` alias) now writes the standing block to `~/.claude/CLAUDE.md`
+  when the Claude Code plugin is installed, as the README states; Codex
+  already honoured it. `auto` and `skip` still leave `CLAUDE.md` alone beside
+  the plugin.
+
 ### Security (2026-09-25 — the fallback dream extractor stops receiving the primary's API key)
 - The fallback extractor was built with the primary's key
   (`PSEUDOLIFE_DREAM_API_KEY` / `memory.dream.extractor_api_key`), so a hosted
@@ -498,9 +667,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   started from inside a Claude Code session, whose id it inherits and
   would forward if it passes its environment through to MCP servers (Codex
   keys each call by its thread anyway). The daemon opens that session's episode on the first
-  write that needs one (a store, even one the surprise gate drops, or a
-  sub-episode or title call without a handle), as it does for a direct-HTTP
-  client. The shim closes it at exit when its host lets it exit, and the
+  write that needs one (a store, sub-episode or title call without a
+  handle, even a store the surprise gate drops), as it does for a
+  direct-HTTP client. The shim closes it at exit when its host lets it exit, and the
   idle reaper otherwise. A shim that is idle or only searches leaves no
   episode.
 - Two daemon paths treated the shim's root as disposable, and now that
@@ -513,15 +682,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   always described and as the handle path already did. Keyless roots
   (embedded and legacy callers) close as before.
 - Limits: `/clear` and an in-session `/resume` give the session a new id,
-  but the shim keeps its launch id. Afterwards any write without a handle,
-  and a `memory_store` even with one, reopens the root under the launch id
-  (the root SessionEnd just closed, within the resume window) or, if
-  SessionEnd pruned it empty, opens a new empty one. A handle-less write
-  lands on that root and a handle-less `memory_session_title` renames it; a
-  store's entry with a handle still lands on the handle's root. The
-  daemon-side fix is a follow-up. `--continue`, or `--resume` without an
-  id, may launch the shim with an id no hook registers, so its writes open
-  a root of their own.
+  but the shim keeps its launch id. Afterwards a `memory_store` or
+  `memory_episode_start` without a handle reopens the root under the launch
+  id (the root SessionEnd just closed, within the resume window) or, if
+  SessionEnd pruned it empty, opens a new one, and lands there; a
+  `memory_session_title` without a handle renames that root. A call that
+  passes the handle SessionStart advertised lands on the new root and opens
+  nothing under the launch id (see the `/clear` entry above). Without a
+  coordination adapter, `memory_agents` then excludes only the launch id's
+  roots from its peers, so it can list the session's own new root.
+  `--continue`, or `--resume` without an id, may launch the shim with an id
+  no hook registers, so its handle-less writes open a root of their own.
   Shim sessions no longer take their title from the working directory: an
   episode the daemon opens starts as `session - <time>`, store results carry
   an `episode_hint` until the agent names it, and a title still generic at
@@ -743,6 +914,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   such. The default stays 1, and so does the maintainer's host: a two-slot
   trial on 2026-09-25 ran each suite in ~50 min instead of ~17, with
   load-timeout failures.
+
+### Fixed (2026-09-25 — a queued full test suite no longer runs code that changed while it waited)
+- A full run that waits for the suite lock has already imported
+  `tests/conftest.py` and what it loads: `tests/suite_lock.py`, the test
+  helpers, and some package code (`tests/fake_embedder.py` brings in
+  `pseudolife_memory/utils/config.py`). Everything else is imported at
+  collection, after the lock. On 2026-09-25 a run queued from 14:59 to 17:46
+  while its session merged master at ~15:50, and it tested the old
+  `CoordinationConfig` defaults against the new test files: 9 failures that
+  all passed alone. Now a full run fingerprints (SHA-256) what it has
+  already read from the checkout before it queues: the modules it imported,
+  pytest's ini file, and `ops/.env`, which conftest reads for the bench URL.
+  It compares them on every poll of the queue, the last time just before it
+  takes the lock. On a change it leaves the queue within seconds, without
+  ever holding the lock, and stops with a usage error, "the tree changed
+  while this run was queued; rerun it", naming the files (marked deleted or
+  created where they went or came). It never reloads them. Modules not yet
+  imported are read at collection as before. An interpreter environment
+  inside the checkout (a `.venv`) is not fingerprinted. xdist workers need
+  no check of their own: they start after their controller holds the lock
+  and import from disk then, and a controller that refuses stops the run
+  before any worker starts. Unseen: a change within the first second of
+  startup, between an import and the fingerprint. The fingerprint takes
+  ~120 ms per full run (834 modules loaded, 11 of them the checkout's); the
+  per-poll check about a millisecond (0.7 ms measured for the 11 modules).
 
 ### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
 - **Hydration fails closed.** If loading cortex facts, world facts or lessons

@@ -584,7 +584,10 @@ daemon is healthy:
 It reinstalls the shim behind each Claude Code / Codex registration where
 that is safe (pipx, or the registered interpreter's pip; a shim running
 straight from this checkout is already live and is named instead, since
-its metadata refresh needs every session closed), refreshes the plugin
+its metadata refresh needs every session closed; on Windows a shim whose
+virtualenv or launcher a session is running from is skipped, with the
+sessions counted and the rerun named, because pip or pipx would leave it
+half-removed), refreshes the plugin
 cache by comparing bytes against the marketplace clone (the plugin's
 version string only moves with a release, so `/plugin update` alone would
 say "already latest"), and reports whether Codex's hook copy matches the
@@ -849,7 +852,8 @@ the core loop through protocol-level `instructions`; the shim adds the
 messageboard check-in when its coordination adapter is up.
 The plugin's memory SessionStart hook (also used by verified Codex hooks)
 delivers a short operating guide and a bounded briefing; without the plugin,
-the installer's Claude Code `settings.json` hook delivers the briefing alone.
+the installer's Claude Code `settings.json` hook
+(`pseudolife-mcp briefing --hook-json`) delivers the same two.
 A separate coordination hook asks the agent to set its project,
 task and status, discover peers, and read pending messages, but only where
 the board is on for that credential (it is on by default behind bearer
@@ -1098,7 +1102,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v43 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v44 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1905,9 +1909,27 @@ two searches left the earlier one unlabelled, which the replay dropped or,
 when that event carried another label, scored as a miss). With no session
 identity at all the most-recent rule stays: "same session" would otherwise
 mean every other session-less search in the window.
-Nothing is written to the signal itself, and nothing links a signal to the
-labels it caused: the labels stand on their own, and which outcome named
-which ids is deliberately not recorded.
+No foreign key links a signal to the labels it caused: the labels stand on
+their own. Since schema v44 the signal row's `used_ids` column keeps what
+the ids became, as id lists: `{"credited", "unmatched",
+"served_elsewhere"}`, or `{"unchecked", "reason"}` when the label write
+failed. So the share of named ids that matched a search can be measured
+from the bank. It stays `NULL` when the outcome named no ids or the
+retrieval log is off, and also when this best-effort write itself failed
+(counted in `memory_stats` `retrieval_log.write_errors`), so a match rate
+over non-`NULL` rows skips those outcomes. Like the retrieval log, the
+column stays out of portable exports.
+
+`memory_lesson_search` calls are logged too (schema v44), in their own
+`lesson_search_events` table: the query, the caller's session, and the
+lessons served by `(task, aspect)` slot key (stored as `entity_norm` /
+`attribute_norm`) with rank and score. A search
+that found nothing gets a row as well. They are kept out of
+`retrieval_events` because the retrieval replay and telemetry harnesses
+re-run every row there as a `memory_search`. The log shares the retrieval
+log's switch and retention, and `memory_stats` counts it under
+`retrieval_log.lesson_searches`. Lessons shown in the session-start
+briefing are not counted.
 
 Two invariants a harness must keep, because the label silently credits
 nothing otherwise: the outcome must be logged under the **same session
@@ -3415,7 +3437,10 @@ reliably — without the agent having to remember:
    open questions), **lessons from past work** (avoid / prefer),
    **verified world facts** (fresh, cited, age-ranked), and **where we left
    off** (a one-line recap of your last closed session). Empty sections are
-   omitted, so a cold bank injects nothing.
+   omitted, so a cold bank prints nothing. As a hook (`--hook-json`, or the
+   plugin) it injects a short memory core first and then this block, fitted
+   to the hook's size budget, so even a cold bank's session starts with
+   the core.
 2. **Episode lifecycle is owned by the daemon, keyed by a resolved session
    identity — hooks make that identity precise, but nothing about opening
    or closing an episode requires them.** Five tiers, strict precedence
@@ -3472,11 +3497,12 @@ reliably — without the agent having to remember:
      connect, which gave each Claude Code session a second root and left an
      empty root for every shim a host killed. One gap remains: `/clear` and
      an in-session `/resume` give the session a new id but keep the shim's.
-     Afterwards a write without a handle, and a `memory_store` even with
-     one, reopens the root under the old id (or opens one); a handle-less
-     write lands there, and a handle-less `memory_session_title` renames it.
-     `--continue`, or `--resume` without an id, can likewise launch the shim
-     with an id no hook registers.
+     Afterwards a `memory_store` or `memory_episode_start` without a handle
+     reopens the root under the old id (or opens one) and lands there, and
+     a `memory_session_title` without one renames that root. A call that
+     passes the handle SessionStart advertised lands on the new root and
+     opens nothing under the old id. `--continue`, or `--resume` without an
+     id, can likewise launch the shim with an id no hook registers.
    - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
      handle) still get episodes: the daemon **lazily opens** one on the
      first store of a new session (so empty sessions never leave a husk)
@@ -3514,7 +3540,8 @@ reliably — without the agent having to remember:
    Session titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an
-   `episode_hint` until you do); a session closing still-generic gets an
+   `episode_hint` until you do, naming the handle when the store passed
+   one); a session closing still-generic gets an
    auto-derived `"{dominant source} - {stamp}: {first-entry snippet}"`
    title. Fragmented history is repairable over REST:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
@@ -3579,7 +3606,8 @@ missing). Requires `pseudolife-mcp` on PATH — `pip install -e .` in the
 repo puts it there.
 
 Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
-`hookSpecificOutput.additionalContext` payload Claude Code injects:
+`hookSpecificOutput.additionalContext` payload Claude Code injects — the
+same memory core and bounded briefing the plugin hook serves:
 
 ```json
 {
@@ -3595,9 +3623,11 @@ Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
 
 The briefing connects to the *already-running* daemon (never starts one)
 and does nothing if the daemon is down — it can't slow or break session
-start. Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
-`--max-world N` (default 3 each). The briefing content is also available on
-demand via the CLI or the Console's `/api/briefing` route.
+start. Tune the printed briefing with `--max-unsure N` / `--max-lessons N` /
+`--max-world N` (default 3 each); with `--hook-json` these are ignored,
+because the daemon fits the hook context to the hook's size budget. The
+briefing content is also available on demand via the CLI or the Console's
+`/api/briefing` route.
 
 The plugin's daemon-served memory hook uses a short operating guide rather
 than repeating the full standing memory policy. Its bounded briefing retains
@@ -3623,7 +3653,8 @@ check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
 the daemon serves it: a board that is on and usable by that bearer), and the
 per-turn discipline line. Re-running them replaces the unconditional check-in
 echo older versions wrote. They do not register an
-agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing` reads `/api/briefing` and
+agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing --hook-json` reads
+`/api/hook/session-start` (the plugin hook's memory core and briefing) but
 forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven
 episode close: the idle reaper closes the episode instead, and the
@@ -3681,7 +3712,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v43). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v44). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -5049,7 +5080,8 @@ header is infrastructure-asserted, by the host or per OS process; an `episode` h
 model-supplied and can be confused between two concurrent sessions'
 briefings. But identity and target episode are separable — a write still
 lands in the handle's named episode even when the header wins identity for
-stamping. An unknown, closed, or ambiguous handle never fails the write —
+stamping, and it opens no episode for a different header session. An unknown,
+closed, or ambiguous handle never fails the write —
 it degrades to the next tier and the result carries
 `"episode_warning": "unknown or closed episode handle"`.
 
@@ -5304,7 +5336,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v43**; migrations are additive
+The current Postgres meta version is **v44**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -5353,6 +5385,7 @@ The milestones:
 | v41 | Audited continuum entry reinstatement (2026-09-22). Adds `entry_reinstatement_decisions`, an operation-keyed, FK-free append-only audit that survives later entry deletion. A single Postgres transaction binds the reviewed retirement preimage to the decision and clears only the entry's retirement fields; retries use the operation UUID. The first version refuses entries with trace invalidations and leaves all cortex state unchanged. Additive/idempotent; existing banks start with an empty decision table. |
 | v42 | Board audit log (2026-09-24). Adds `coordination_events`, an append-only, FK-free, sha256-hash-chained record of every agent-board mutation (register, update with the replaced values, attach, detach, send with its body, first read, ack, attempt, expire, prune, bank identity, restore recover/rebind), written in the mutation's own transaction and pruned only by its own `coordination.audit_retention_days` window (default 90, `0` keeps it forever), which logs its cuts. Adds `coordination_messages.first_read_at`. Operational data, excluded from portable exports like the other coordination tables; read and verified with `pseudolife-mcp board-audit`. The log is cut at most once a day, on UTC day boundaries, and only while the board is in use. Additive/idempotent; existing banks start with an empty log, and history before the upgrade is not reconstructed: a message still unacknowledged at the upgrade has no `send` event, and its first read afterwards is logged as its first read. |
 | v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or shim exit, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
+| v44 | Memory-loop observability (2026-09-25). Adds `lesson_search_events`: one row per `memory_lesson_search` call (query, caller session and episode, the lessons served by `(entity_norm, attribute_norm)` slot key with rank and score; an empty list for a search that found nothing). It is a separate table from `retrieval_events`, whose rows the retrieval replay and telemetry harnesses re-run as `memory_search` calls. FK-free; it shares the retrieval log's switch (`memory.retrieval_log.enabled`) and retention (`retention_days`). Adds `outcome_signals.used_ids` (JSONB): what an outcome's `used_ids` became, as `{"credited", "unmatched", "served_elsewhere"}` id lists, or `{"unchecked", "reason"}` when the label write failed; `NULL` when the outcome named no ids, the log is off, or this best-effort write failed (counted in `retrieval_log.write_errors`). The column is serving telemetry and stays out of portable exports, like the retrieval log. Additive/idempotent; existing rows read `NULL` and the new table starts empty. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
@@ -5634,7 +5667,8 @@ also wake an idle session when board mail arrives (see
 [Configuration](configuration.md#waking-an-idle-claude-code-session-the-stop-hook)).
 `ops/install-hook.*`
 is the non-plugin fallback: it installs the SessionStart briefing
-(`pseudolife-mcp briefing --hook-json`) and the per-turn discipline line,
+(`pseudolife-mcp briefing --hook-json`, which serves the plugin hook's memory
+core and bounded briefing) and the per-turn discipline line,
 but no SessionEnd hook and no identity registration — those sessions fall
 back to the shim header or idle-gap sessionization (see
 [Episodes](episodes.md#session-lifecycle--daemon-owned-episodes)). The MCP

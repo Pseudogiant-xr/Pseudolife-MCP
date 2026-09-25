@@ -137,8 +137,10 @@ def _bash_variants() -> list[str]:
 
 def _run_bash_existing(
     bash: str, tmp_path: Path, *, client: str, config: str, manager_exit: int,
-    shadowed_path: bool = False, existing: bool = True,
+    shadowed_path: bool = False, existing: bool = True, held: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
+    """``held``: the Windows process table shows a session running the
+    installed shim; otherwise the harness is not on Windows."""
     install = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
     helper = _between("ops/install.sh", "resolve_installed_shim() {", "\n}\n\n# Two env pairs") + "\n}"
     loop_start = 'for selected_client in $CLIENTS; do\n    if [ "$selected_client" = claude-desktop ]; then'
@@ -188,6 +190,11 @@ def _run_bash_existing(
     call_log_shell = _bash_fixture_path(bash, call_log, fixture_env).replace("'", "'\\''")
     config_shell = ("pseudolife-memory\n" + config).replace("'", "'\\''")
     path_prefix = f"{fake_bin_shell}:{installed_bin_shell}" if shadowed_path else f"{installed_bin_shell}:{fake_bin_shell}"
+    # CRLF rows, as powershell.exe writes them under Git Bash.
+    held_table = (
+        "shim_process_table() {\n"
+        "    printf '4242|1|%s\\r\\n' \"$(cygpath -m \"$fixture_shim\" 2>/dev/null || printf '%s' \"$fixture_shim\")\"\n"
+        "}" if held else "shim_process_table() { return 2; }")
     script = f"""set -u
 PATH='{path_prefix}:/usr/bin:/bin'
 export PATH CALL_LOG='{call_log_shell}'
@@ -208,6 +215,7 @@ SHIM_TRIED='' SHIM_OK='' SHIM_PATH='{installed_shim_shell}'
 step() {{ printf 'STEP: %s\\n' "$*"; }}
 configure_codex_runtime_defaults() {{ CODEX_RUNTIME_DEFAULTS=preserved; }}
 {helper}
+{held_table}
 {marker}
 {describe}
 {loop}
@@ -258,6 +266,26 @@ def test_install_sh_reports_existing_shim_upgrade_failure_in_status(
     assert "STATE=failed" in output
     assert "[!] registration or shim upgrade FAILED" in output
     assert "registration was preserved" in output
+
+
+@pytest.mark.parametrize("client", CLIENTS)
+@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
+def test_install_sh_never_calls_a_shim_sessions_run_upgraded(
+    bash: str, tmp_path: Path, client: str,
+) -> None:
+    proc = _run_bash_existing(
+        bash, tmp_path, client=client,
+        config=_managed_config(client), manager_exit=0, held=True,
+    )
+    output = (proc.stdout + proc.stderr).decode(errors="replace")
+    calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
+    assert proc.returncode == 0, output
+    assert not any(call.startswith("pipx|install") for call in calls)
+    assert not any(" mcp add" in call or " mcp remove" in call for call in calls)
+    assert "1 session is running the pseudolife-mcp shim" in output
+    assert "registration was preserved, but its pseudolife-mcp shim was not upgraded" in output
+    assert "STATE=failed" in output
+    assert "upgraded its pseudolife-mcp shim" not in output
 
 
 @pytest.mark.parametrize("client", CLIENTS)
@@ -419,8 +447,9 @@ def test_install_sh_flagless_fresh_cli_fails_before_registration(
 
 def _run_powershell_existing(
     tmp_path: Path, *, client: str, config: str, manager_exit: int,
-    shadowed_path: bool = False, existing: bool = True,
+    shadowed_path: bool = False, existing: bool = True, held: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
+    """``held`` as for ``_run_bash_existing``."""
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -449,6 +478,10 @@ def _run_powershell_existing(
     escaped_config = ("pseudolife-memory\n" + config.replace("__INSTALLED_SHIM__", str(installed_shim))).replace("'", "''")
     escaped_installed_shim = str(installed_shim).replace("'", "''")
     escaped_path_bin = str(old_bin if shadowed_path else installed_bin).replace("'", "''")
+    held_table = (
+        "function Get-ShimProcessTable { @([pscustomobject]@{ ProcessId = 4242; ParentProcessId = 1; "
+        f"ExecutablePath = '{escaped_installed_shim}' }}) }}" if held
+        else "function Get-ShimProcessTable { $null }")
     function_defs = []
     for name in CLIENTS:
         query = "list" if name == "gemini" else "get"
@@ -492,6 +525,7 @@ function global:pipx {{
     $global:LASTEXITCODE = [int]$env:FAKE_MANAGER_EXIT
 }}
 {helper}
+{held_table}
 {describe}
 {marker}
 {loop}
@@ -539,6 +573,25 @@ def test_install_ps1_reports_existing_shim_upgrade_failure_in_status(
     assert "STATE=failed" in output
     assert "[!] registration or shim upgrade FAILED" in output
     assert "registration was preserved" in output
+
+
+@pytest.mark.parametrize("client", CLIENTS)
+def test_install_ps1_never_calls_a_shim_sessions_run_upgraded(
+    tmp_path: Path, client: str,
+) -> None:
+    proc = _run_powershell_existing(
+        tmp_path, client=client,
+        config=_managed_config(client), manager_exit=0, held=True,
+    )
+    output = " ".join((proc.stdout + proc.stderr).decode(errors="replace").split())
+    calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
+    assert proc.returncode == 0, output
+    assert not any(call.startswith("pipx|install") for call in calls)
+    assert not any(" mcp add" in call or " mcp remove" in call for call in calls)
+    assert "1 session is running the pseudolife-mcp shim" in output
+    assert "registration was preserved, but its pseudolife-mcp shim was not upgraded" in output
+    assert "STATE=failed" in output
+    assert "upgraded its pseudolife-mcp shim" not in output
 
 
 @pytest.mark.parametrize("client", CLIENTS)

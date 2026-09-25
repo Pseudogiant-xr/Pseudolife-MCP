@@ -184,6 +184,90 @@ def test_briefing_no_daemon_prints_nothing(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
+def _serve_briefing_endpoints(monkeypatch, requests, fail=None):
+    """Answer the CLI's two daemon reads the way the daemon does: the hook
+    endpoint as plain text, /api/briefing as JSON. Records each request with
+    the handlers of the opener it went through; ``fail`` raises instead."""
+    class _Resp:
+        def __init__(self, body): self._b = body.encode("utf-8")
+        def read(self): return self._b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class _Opener:
+        def __init__(self, handlers): self.handlers = handlers
+
+        def open(self, req, timeout=5):
+            requests.append((req, self.handlers))
+            if fail:
+                raise fail(req)
+            if "/api/hook/session-start" in req.full_url:
+                return _Resp("## Memory at session start\nUse the shared bank.\n\n"
+                             "## Lessons from past work\n- prefer: x")
+            return _Resp('{"markdown": "## Lessons from past work\\n- prefer: x"}')
+
+    def _plain_urlopen(*a, **k):
+        raise AssertionError("plain urlopen follows redirects with the bearer")
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr("pseudolife_memory.shim.probe_health",
+                        lambda url, timeout=0.25: {"status": "ok"})
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: _Opener(handlers))
+    monkeypatch.setattr("urllib.request.urlopen", _plain_urlopen)
+
+
+def test_hook_json_serves_the_session_start_core_not_the_bare_briefing(monkeypatch, capsys):
+    """The installer's settings.json hook (Claude Code without the plugin,
+    and the older Codex hook) runs `briefing --hook-json`. It must carry the
+    same memory core the plugin hook gets from /api/hook/session-start, not
+    only the live briefing (2026-09-25 review; maintainer's decision). Like
+    every bearer-carrying read here, it must refuse redirects."""
+    import json
+    import sys
+    from pseudolife_memory import briefing_cli as bc
+    from pseudolife_memory.shim import _NoRedirectHandler
+    requests = []
+    _serve_briefing_endpoints(monkeypatch, requests)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "tok")
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing", "--hook-json"])
+    bc.run_briefing()
+    payload = json.loads(capsys.readouterr().out)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert context.startswith("## Memory at session start")
+    assert "## Lessons from past work" in context
+    assert [r.full_url.split("?")[0] for r, _ in requests] == ["http://127.0.0.1:8765/api/hook/session-start"]
+    assert requests[0][0].get_header("Authorization") == "Bearer tok"
+    assert requests[0][1] == (_NoRedirectHandler,)
+
+
+def test_hook_json_prints_nothing_when_the_endpoint_fails(monkeypatch, capsys):
+    """A refused or failing session-start read must never break the session."""
+    import sys
+    import urllib.error
+    from pseudolife_memory import briefing_cli as bc
+    requests = []
+    _serve_briefing_endpoints(
+        monkeypatch, requests,
+        fail=lambda req: urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None))
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing", "--hook-json"])
+    bc.run_briefing()
+    assert len(requests) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_plain_briefing_still_prints_the_full_api_briefing(monkeypatch, capsys):
+    import sys
+    from pseudolife_memory import briefing_cli as bc
+    requests = []
+    _serve_briefing_endpoints(monkeypatch, requests)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing"])
+    bc.run_briefing()
+    assert capsys.readouterr().out.strip() == "## Lessons from past work\n- prefer: x"
+    assert [r.full_url.split("?")[0] for r, _ in requests] == ["http://127.0.0.1:8765/api/briefing"]
+    assert requests[0][0].get_header("Authorization") is None
+
+
 def test_hook_json_wraps_markdown_as_sessionstart_context():
     import json
     from pseudolife_memory import briefing_cli as bc
