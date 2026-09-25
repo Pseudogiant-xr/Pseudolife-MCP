@@ -1811,8 +1811,13 @@ class MemoryService(DreamOps):
         contiguity_neighbors: int | None = None,
         timeline: bool | None = None,
         return_event_id: bool = False,
+        count_access: bool = True,
     ) -> dict[str, Any]:
         """Retrieve relevant memories ranked by associative similarity.
+
+        ``count_access=False`` serves without bumping the served entries'
+        ``access_count`` (a serve counter that feeds band promotion and the
+        read audit). Only a synthetic probe should pass it: :meth:`warmup`.
 
         ``return_event_id=True`` adds ``retrieval_event_id`` (the id of the
         retrieval-log row this search wrote) to the result, so the caller
@@ -1890,6 +1895,7 @@ class MemoryService(DreamOps):
                 rerank=rerank,
                 bm25=bm25,
                 timeline=timeline,
+                count_access=count_access,
             )
             from pseudolife_memory.memory.abstain import low_confidence
             n_ctg = (self.config.memory.search.contiguity_neighbors
@@ -5907,7 +5913,9 @@ class MemoryService(DreamOps):
                     return
                 time.sleep(wait)
         try:
-            self.search("warmup probe", top_k=1)
+            # Not a read: on every restart this used to add an access to
+            # whichever entry best matched the probe (2026-09-23 review).
+            self.search("warmup probe", top_k=1, count_access=False)
         except Exception as exc:  # noqa: BLE001
             logger.warning("warmup search failed: %s", exc)
 
