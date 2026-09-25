@@ -26,6 +26,611 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   already honoured it. `auto` and `skip` still leave `CLAUDE.md` alone beside
   the plugin.
 
+### Security (2026-09-25 — the fallback dream extractor stops receiving the primary's API key)
+- The fallback extractor was built with the primary's key
+  (`PSEUDOLIFE_DREAM_API_KEY` / `memory.dream.extractor_api_key`), so a hosted
+  primary's provider key rode every fallback dream as a bearer header to the
+  fallback host — usually the in-stack sidecar over plain HTTP, which needs no
+  key. The fallback now sends its own key, the new
+  `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` / `memory.dream.fallback_api_key`, or
+  none. Like the primary's key it never appears in the Console, is honoured
+  under either settings source, and `ops/docker-compose.yml` forwards it to
+  the daemon. Forced `fallback` mode, `auto` falling back, and the
+  review-queue judges (which reuse the selected extractor, including under
+  their second-opinion model) all follow the rule; the primary still
+  receives its own key.
+- Migration: a fallback that relied on sharing the primary's key — a second
+  model on the same hosted provider, or one key-protected server behind both
+  URLs — now gets a 401. Set `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` to the same
+  value. Until then fallback dreams fail like any fallback outage: pulled
+  entries stay pending and retry, except that a batch of exactly one entry
+  (an idle dream with a backlog of one) failing three dreams running is
+  quarantined and never extracted — its memory stays in the bank — and
+  pending outcome signals stop being offered for lesson synthesis after
+  `signal_retry_days` (30). No shipped configuration is affected: the
+  installer never writes a dream key, and the bundled sidecar and both CLI
+  shims check none.
+
+### Added (2026-09-25 — every registered session leaves a record)
+- A session that only searched, set facts or logged outcomes left no trace
+  that it had happened: its root episode is deleted when it ends holding no
+  stored entry, and its searches and outcomes were left naming nothing (on
+  2026-09-25, 43 surviving client sessions in 24 h beside 94 pruned ones
+  with searches and 67 with outcomes). Schema v43 adds `client_sessions`:
+  one row per session key the SessionStart hook or `POST
+  /api/episode/start` (the stdio shim, the CLI episode hooks) registered,
+  never pruned, holding how it registered, the bearer's principal, its
+  first start and every registration since, its most recent close and why
+  (`end` or `idle`, cleared when the session is reopened), the
+  memory-policy variant the hook assigned (so a `memory_policy.ab_arms`
+  test keeps each session's arm), and every root episode id it was given.
+  Best-effort: a failed write never fails a session start. Excluded from
+  `pseudolife-mcp export`. See
+  [Episodes — session record](docs/guide/episodes.md#session-record).
+- `evals/capture_metrics.py` counts sessions from that record, which lifts
+  the limit the capture-metrics entry below describes for sessions that
+  register: a session whose roots were all pruned still counts, its
+  searches attribute by session key and its outcomes by the pruned root's
+  id, a resumed session's new shim pairs with the start it began beside,
+  and the report adds sessions per memory-policy variant. Roots without a
+  record (banks before v43) count as before, except that a key's several
+  roots are now one session (a session outliving the 6 h resume window
+  gets a new root; each used to count separately, with the key's searches
+  credited to its last root only), and "searched early" is measured from
+  the latest start before the search instead of the last root's. On the
+  live bank (read-only, 2026-09-25 16:01) the 24 h window is unchanged; 7
+  days goes from 130 to 117 sessions and 60 days from 348 to 264.
+
+### Fixed (2026-09-25 — the daily backup can run current master)
+- `ops/install-backup-task.ps1 -ScriptCheckout <dir>` runs `ops\backup.ps1`
+  from a dedicated checkout instead of the main one, which can lag master for
+  days while it holds uncommitted work. On 2026-09-24 and 09-25 the daily task
+  ran a `backup.ps1` from before the row-count gate: the nightly dumps were
+  ungated and `/health` `last_backup` did not advance. A worktree is refused
+  until `git worktree lock` protects it, and so is a script checkout that
+  would receive the dumps itself. Dumps and the log stay in the main
+  checkout's `data\backups` (the task now always passes `-OutDir`), where
+  replica pushes read them. Each run logs the script checkout's HEAD.
+- The installer now rejects a misspelled parameter instead of ignoring it:
+  a typo in `-ScriptCheckout` would otherwise have reinstalled the main
+  checkout's copy.
+
+### Fixed (2026-09-25 — a fact set to the parked contender's value settles the contest)
+- A contested slot stayed contested after a write made its contender's
+  value current. With `eu-west-1` current and `us-east-2` parked, setting
+  `us-east-2` superseded the slot but left the contender parked, so
+  `/api/facts` and `memory_search` kept reporting `contested: true` with a
+  `contender_value` equal to the current value (found 2026-09-25 by the
+  memory-policy bench). The write now also marks that contender
+  `superseded` (kept in `memory_history`) and logs it as `resolved` /
+  `contender_value_now_current`. Values match the way a confirm matches:
+  case and surrounding whitespace are ignored. The same fix covers the
+  first write at an empty slot that still holds a contender, and adding
+  the contender's value to a set (`memory_set_add`, including the
+  scalar-to-set conversion). A contender with any other value still
+  conflicts with the new current and stays parked. The contender's support
+  and provenance are not merged into the new current record.
+- `dream_rollback` re-parks a contender that the reverted run's write
+  settled. The run journal has no contender column, so without this a
+  rollback would have dropped a pending review item that used to survive
+  it untouched. The rollback's per-row details name it as
+  `contender_restored`.
+- The live bank held no slot in this state on 2026-09-25 (read-only check:
+  37 active contenders, none equal to a current value), so nothing heals
+  existing rows at load.
+
+### Fixed (2026-09-25 — the loop-health tile counts client sessions, not root episodes)
+- The Console's loop-health tile counted every root episode started in the
+  window as a session and divided its per-session rates by that count.
+  One client session can leave two roots (the SessionStart hook's and the
+  stdio shim's), and most new roots are idle shim roots: on 2026-09-25 the
+  live bank held 166 keyed roots in 24 h, against 34 client sessions by the
+  bench's first count (before its review revised the pairing rules). So
+  `sessions` read high and `stores_per_session` / `outcomes_per_session`
+  read low.
+- `sessions` in the `loop` block of `/api/overview` now uses the
+  client-session definition of the memory-policy bench's
+  `evals/capture_metrics.py`:
+  - hook-keyed roots always count;
+  - other keyed roots count only with an entry, an outcome or a search in
+    the window;
+  - a search counts for the root holding its session id, not for its
+    episode stamp, which is the daemon's current episode rather than the
+    caller's;
+  - a hook root and an active shim root opened within 5 s of each other
+    count once, when neither has another candidate.
+
+  The old count stays as `root_episodes`, and the tile shows both.
+- Still not counted: a session whose root was pruned because it stored
+  nothing. An explicit end prunes at once; the reaper prunes after the
+  resume window. So `sessions` undercounts those and the per-session rates
+  still lean high.
+
+### Added (2026-09-25 — measure what the startup memory policy changes)
+- `memory_policy.variant` selects the standing memory policy session start
+  serves: `none`, `compact` (the default: the core the hook already
+  serves) or `full_separate_hook` (the full memory-loop block, from its own
+  SessionStart output so it never shares the briefing's 9,500-byte budget).
+  A `compact_gaps` variant (the core plus three rules) was retired before
+  release, because the same three rules now live in the core itself; the
+  committed smoke artifact still carries one arm of it.
+  `memory_policy.ab_arms` assigns hook-registered sessions an arm by a
+  SHA-256 of the client session id. See
+  [configuration](docs/guide/configuration.md#startup-memory-policy-memory_policy).
+- The plugin gains a third SessionStart handler (`session-start.sh
+  memory-policy`; `lifecycle.ps1 -Event MemoryPolicy` for Codex on
+  Windows) calling the new `GET /api/hook/memory-policy`; it adds nothing
+  unless the variant is `full_separate_hook`. `ops/setup-codex-hooks.py`
+  installs, counts and verifies it. A change under `plugin/`: deploy with
+  `ops/update.ps1 -All`.
+- `evals/memory_policy_bench.py`: headless `claude -p` (and `codex exec`)
+  sessions against a disposable daemon and a cloned `plbench_` bank, one
+  scenario per policy rule, scored only from the daemon's records, with a
+  per-run check that the arm's policy text is the only memory-policy text
+  in the model's context, paired bootstrap statistics against an A/A noise
+  floor, and a hill-climb acceptance rule. Each run records the embedder
+  that seeded its bank and the one that served its queries. It refuses the
+  live bank and the live daemon ports and never writes a real client
+  configuration.
+
+### Fixed (2026-09-25 — session counts in capture metrics)
+- `evals/capture_metrics.py` counted every keyed root episode as a session.
+  A client session can leave two roots (the SessionStart hook's and the
+  stdio shim's), and idle shim roots dominate: on 2026-09-25 the live bank
+  held 166 keyed roots in 24 h for 34 client sessions. It now counts hook
+  roots plus shim roots with memory activity, merges a hook root with its
+  only nearby shim root, attributes searches by the caller's session id
+  (a search row's episode is the daemon's current one), reports what it
+  cannot attribute, and adds the online loop metrics (searched early,
+  outcome coverage, credited used_ids, entries retrieved again within 14
+  days). It also says what the bank cannot provide: the daemon deletes a
+  session root that ends with no stored entry, so sessions that only
+  searched are reported separately and sessions that never touched memory
+  are invisible; lesson searches and unmatched used_ids are not persisted.
+
+### Fixed (2026-09-25 — one board identity per session, statuses that show their age)
+- Claude Desktop's app-level MCP entry (writer ID `claude-desktop`) no longer
+  registers a coordination address. It is one process serving every
+  conversation in the app, so its address was shared: on 2026-09-25 a Code-tab
+  session posted through it and overwrote another session's status line. It
+  now refuses `memory_message` and `memory_agents(action="update")` before any
+  request, with an error pointing at a session's own per-session server, and
+  prepends that advice to its MCP instructions. Memory tools pass through
+  unchanged; `memory_agents` list there shows open sessions only, not the
+  board. A Code-tab session in Desktop keeps board writes only where its
+  per-session entry is named differently from the Desktop entry (the
+  installer currently gives both the same name).
+- An adapter re-attaching under its own attachment ID no longer counts as
+  activity; a new attachment (a process starting) still does. A 9-minute host
+  sleep on 2026-09-25 lapsed every idle shim's lease, and the re-attach wave on
+  wake made eleven sessions idle for hours read as active within 28 seconds.
+  Those re-attaches had also kept live idle shims young against the
+  seven-day retention, so prune now counts a held lease as well: an address
+  goes once it has had neither its own activity nor a lease for its window
+  (seven days, or one hour for state-less ones), and a daemon restart or a
+  host sleep shorter than that cannot retire a live shim's address.
+- `memory_agents` list gives each listed peer `status_set_at`, `status_age` and
+  `status_stale`. The time comes from the audit log (the newest registration
+  or status update); a non-empty status older than two hours is stale, and a
+  status the log no longer covers is reported as older than the log. No
+  schema change.
+- A peer holding a lease is listed for three hours after its own last action,
+  then counted in `idle_omitted`; peers without a lease keep the one-hour
+  window. Both windows come from the live audit log's first day, as the
+  comments on `STATUS_STALE_AFTER` and `ATTACHED_IDLE_WINDOW` record.
+
+### Fixed (2026-09-25 — Claude Desktop's entry no longer hides Code-tab sessions' own server)
+- `ops/install.* --client claude-desktop` (through
+  `ops/register_claude_desktop.py`) now names Claude Desktop's app-level MCP
+  entry `pseudolife-desktop` instead of `pseudolife-memory`. Claude Code
+  registers its per-session server as `pseudolife-memory`, and where both
+  carried that name Desktop served a Code-tab session's
+  `mcp__pseudolife-memory__*` calls from the app-level entry. The session's own
+  server got no calls, so the session had no board identity of its own (found
+  live 2026-09-21; the maintainer's hand rename restored per-session routing).
+- A re-run renames an entry the registrar wrote under the old name, recognised
+  by `PSEUDOLIFE_WRITER_ID=claude-desktop` in its `env`, and keeps its
+  hand-added `env` keys, its token-file path and any literal token still to
+  migrate. When both names exist, `pseudolife-desktop` wins where both set a
+  key and the old entry fills the gaps; the output names the `env` keys whose
+  old values were dropped, never a value. A `pseudolife-memory` entry the
+  registrar did not write is left untouched and reported on stderr, and
+  `pseudolife-desktop` is written beside it. The config is backed up before
+  every rewrite, as before.
+- Takes effect once the installer is re-run and Desktop is fully quit and
+  relaunched. Chat and Cowork then list the tools as
+  `mcp__pseudolife-desktop__*`, and the log file becomes
+  `mcp-server-pseudolife-desktop.log`. `ops/update.ps1 -All` does not apply it:
+  it never edits `claude_desktop_config.json`.
+
+### Fixed (2026-09-25 — Codex hook setup no longer hangs on a hook Codex killed)
+- `ops/setup-codex-hooks.py` could hang on a busy Windows machine for as long
+  as a killed hook lingered (two test runs were still stuck when stopped after
+  7 and 10 minutes). Codex kills a hook that outruns its budget, and a
+  PowerShell hook killed while still starting up could stay stuck mid-exit,
+  holding an inherited copy of the Codex app-server's output pipe; setup
+  waited on that pipe with no limit. It now gives the pipe two seconds after
+  the app-server exits and moves on, so setup finishes and reports the
+  verification check that failed.
+
+### Changed (2026-09-25 — deploys name their commit and refuse a dirty tree)
+- `/health` reports the commit the running image was built from:
+  `build: {git_sha, dirty, built_at}`. The daemon image carries the same
+  values as OCI labels (`org.opencontainers.image.revision`,
+  `org.opencontainers.image.created`, `pseudolife.build.dirty`).
+  `ops/update.ps1|.sh` pass them from the checkout, and the release
+  workflow passes them for the GHCR image. An image built another way, such
+  as a bare `docker compose up --build` or the first install, reports
+  `"unknown"`, and a pip install omits the key. Until now the only answer
+  to "what is deployed?" was the package version, which moves only with a
+  release. Because the build time is part of the image, every deploy now
+  builds a new image and recreates the daemon container, even when the
+  commit has not changed.
+- `ops/update.ps1` and `ops/update.sh` refuse to deploy a tree with
+  uncommitted or untracked files, or one whose state git cannot report,
+  before the backup or any docker call. The refusal lists the paths, or
+  quotes git's own reason (such as its `safe.directory` advice).
+  `-AllowDirty` / `--allow-dirty` deploys it anyway, stamped `dirty: true`,
+  or `unknown` when git cannot describe it. Just before the build, the
+  scripts check the tree again and stop if HEAD or its clean state moved
+  meanwhile, so an image is never stamped with a tree it was not built
+  from. The maintainer's main checkout often carries another session's
+  uncommitted work, and a deploy from it would ship that work under a
+  commit that does not contain it.
+- The test suite dumps every thread's stack when one test runs longer than
+  600 s (`faulthandler_timeout`); the slowest legitimate test on CI takes
+  about 72 s. CI's `ops/ci_tests.sh` now also ends a pytest run at 35
+  minutes with SIGABRT, inside the step, so a hang fails the step while the
+  runner is still up. Every pytest process then prints its thread stacks
+  as it dies, even for a hang outside any single test; the step log keeps
+  them, and the diagnostics upload still runs. A master CI run hung until
+  the 50-minute job timeout on 2026-09-22, and that cancelled job kept no
+  log at all. Neither helps if the runner itself stops responding.
+
+### Security (2026-09-25 — the extractor API key no longer follows a redirect to another host)
+- **Requests to the configured OpenAI-compatible extractor now refuse HTTP
+  redirects.** The dream extractor's seven calls (claims, events pass,
+  lessons and rules, relations, the review-queue judges, outcome inference,
+  session digest) and the `driver="llm"` recall controller's seed call
+  (`recall.simple_complete`) send `PSEUDOLIFE_DREAM_API_KEY` /
+  `extractor_api_key` (on a fallback dream, the fallback's own
+  `PSEUDOLIFE_DREAM_FALLBACK_API_KEY`) as a bearer header. They used plain
+  `urllib.request.urlopen`, which on every supported Python (checked on
+  3.11, 3.12 and current CPython main) answers a
+  301/302/303 to a POST by re-sending it as a body-less GET to the
+  `Location` target with every header except Content-Length and
+  Content-Type, `Authorization` included. An endpoint that redirected,
+  whether misconfigured, compromised or hostile, handed the key to
+  whatever host it named. Reproduced on loopback: the redirect target
+  received `GET /v1/chat/completions` carrying the bearer and an empty
+  body.
+- These calls now open through `pseudolife_memory/utils/no_redirect.py`, a
+  stdlib-only `urlopen` whose redirect handler raises `HTTPError` with the
+  redirect's status and target instead of following it. Timeouts, the
+  proxy environment and TLS verification are unchanged. A redirecting
+  endpoint now fails the call with `ExtractorError` (for example
+  `HTTP Error 301: Moved Permanently; redirect to https://… refused --
+  configure the final URL directly`), the same cursor-holding failure as
+  any other transport error; `simple_complete` still returns `""`.
+- No working configuration relied on a redirect. The re-sent request was a
+  GET without the prompt, which no OpenAI-compatible server answers with a
+  completion, and the stdlib already refused 307/308 on a POST. An
+  endpoint configured as `http://` for an https-only host, or with a path
+  that redirects, was already failing and now says why. The endpoint health
+  probes (`probe_endpoint`, `fetch_served_model`) are unauthenticated GETs
+  and are unchanged.
+
+### Changed (2026-09-25 — dated search results, an honest low_confidence, and a replay gate for serving changes)
+- Every compact entry from `memory_search`, `memory_recent` and
+  `memory_episode_summary` carries its write `date` (local `YYYY-MM-DD`,
+  as in `replaced_by.at`). Like `replaced_by`, it is not a size cut, so it
+  also survives `memory.mcp.compact_payloads: false`.
+- `low_confidence` is now described as what it is. It fires only when
+  nothing matched, meaning no entry and no cortex fact; over 1,072 agent
+  searches it fired on none. The `memory_search` description no longer says
+  "prefer abstaining" or calls the cortex block "the current, deduped
+  answer". The docs' recommended `guard_min_score = 0.65` +
+  `search_confidence_floor = 0.70` pair, measured on the old MiniLM
+  embedder, is retired: on current agent traffic it would flag 26% of
+  searches, including 20% of the searches whose hits the agent then used.
+  No floor ships; the flag's behavior is unchanged.
+- `memory.search.min_score` (default `0.25`, unchanged) replaces the
+  literal floor in `cms.retrieve`, and a value that is not a number in
+  [0, 1] now fails at load. A per-call `min_score` still overrides it, and
+  only a caller's floor bounds the slot and BM25 injections.
+- The daemon's startup warmup search no longer counts as a read: it adds
+  no access to the entry it hits and no query to the per-band retrieval
+  counters.
+- New gate for projection-side serving changes:
+  `evals/serving_policy_replay.py`. It replays logged served lists under a
+  candidate policy (a narrower default `top_k`, a score floor, a source
+  exclusion) and reports the used hits kept, with rows and entry-text chars
+  as the cost. A narrower `top_k` is simulated from each row's logged
+  fusion inputs, because the dense pool is cut by cosine before the
+  supersession multiplier and the BM25 boost reorder it, so a narrower
+  list is not a prefix of a wider one. Checked against 146 real narrower
+  searches (142 of them the token ledger's 8 -> 3 runs of 2026-09-03/04),
+  the simulation reproduced the exact served set in 98 and the prefix in
+  20. It reads the bank in a read-only transaction and writes an
+  aggregates-only artifact. `evals/regression_gate.ps1` cannot see these
+  changes: it rebuilds contexts offline and never runs search or the MCP
+  projection.
+- Reported, not changed: the default `top_k` stays 8. Over 276
+  default-width agent searches (2026-09-06 to 2026-09-25), a default of 6
+  would keep 85.4% of the hits agents reported using (Wilson 95%
+  79.6-89.8) at 75% of the rows, and 7 would keep 93.0%. The 2026-09-23
+  review's ~90.5% for 6 read the narrower list as a prefix of the wider
+  one; that method gives 90.3% on the same searches. At most 25.7% of
+  agent searches use the default width. Evidence:
+  `evals/results/serving-policy-replay-20260925-r3.json`.
+- Digests, reported and left unchanged: served digests are used at 0.51x
+  the rate of other entries at the same rank (session bootstrap 95%
+  0.38-0.64). 53% of unfiltered agent searches serve at least one digest.
+  Digests are 15% of the rows unfiltered searches serve, but 9% of the hits
+  agents used from them. `memory.dream.digest_enabled` and default search
+  are untouched pending a decision on digests.
+
+### Fixed (2026-09-25 — upgraded Claude Code installs stop running their hooks twice)
+- Upgrading an installer-wired Claude Code to the plugin left the old hooks
+  in `~/.claude/settings.json`. Since 2026-09-21 the installers add the
+  plugin and stop writing those hooks, but never removed them, so an
+  upgraded user got every session-start context twice (memory core
+  included) and the discipline line twice per turn. `plugin/README.md` was
+  the only fix: delete them by hand.
+- With the plugin installed and Claude Code selected, `ops/install.sh` and
+  `ops/install.ps1` now list those entries and offer to remove them. The
+  prompt defaults to keep (`[y/N]`); an unattended run keeps them and names
+  the flag. `--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove`
+  removes them without asking, `keep` never asks. The wiring summary
+  reports the outcome, with the backup path.
+- The removal is `ops/install-hook.sh --remove-legacy` /
+  `ops/install-hook.ps1 -RemoveLegacy` (`--dry-run` / `-DryRun` lists
+  only), usable on its own. It removes only the exact commands the
+  installers shipped (both briefing commands, both coordination hooks: the
+  2026-09-24 echo and the gated `--coordination` briefing, both
+  discipline-line versions, and the pre-2026-07-14 episode hooks), per
+  event, as `ops/setup-codex-hooks.py` already does for Codex. An edited
+  or compound command that merely mentions one is listed for review and
+  left alone. Other hooks in a shared group stay; a group is dropped only
+  when this emptied it, and an emptied event stays as an empty list, as
+  install-hook's episode-hook clean-up already leaves it. It acts only while
+  `installed_plugins.json` records a user-scope install and
+  `enabledPlugins` enables the plugin in the same `settings.json`: a
+  project-scoped or disabled plugin leaves these hooks as the only ones
+  that run. It writes a timestamped backup first, writes through a
+  symlinked `settings.json`, keeps the line endings and never changes a
+  value (the PowerShell writer spells emoji as `\u` pairs). A file with
+  duplicate keys is refused and left alone, as is a hook whose command is
+  not a string.
+
+### Fixed (2026-09-25 — the search log and outcome signals name the caller's episode)
+- With several sessions sharing one daemon, every `retrieval_events` row
+  was stamped with the episode of whichever session had started most
+  recently, not the session that searched. The `session_id` on the same
+  row was already correct. Rows now record the caller's own open episode:
+  the leaf a handle-less `store()` stamps for that session identity. They
+  record no episode when the caller has no session identity or nothing
+  open. Search never opens an episode to fill the column.
+- Two more writers had the same fault: `memory_outcome` without an
+  `episode` handle (or with one that does not resolve), and the correction
+  signal a user-tier supersession emits. Both now use the handle's root
+  when a handle resolves, then the caller's open episode, then no episode.
+  The correction signal also honors a `memory_fact_set` handle for the
+  first time. A session-less caller, including an embedded single-session
+  one, now records these with no episode instead of the process-wide
+  current one.
+- Known limit under the stdio shim with the Claude Code session hook:
+  each session has two open roots. One is keyed by the shim's
+  `X-PL-Session` id, and one is keyed by the hook's session id, whose
+  handle the briefing tells agents to pass. Search takes no handle, so its
+  events land on the shim's root. Outcomes logged without the handle land
+  there too, while handle-carrying stores land on the hook's root. When
+  the shim root captured no entries, closing the session prunes it and
+  leaves those rows naming a deleted episode.
+- There is no schema change. `episode_id` stays nullable and has no
+  foreign key. `retrieval_replay` and `graph_ablation` never read the
+  column, `retrieval_telemetry_review` skips null, and the
+  `retrieval_events_window` export passes it through. Search-log rows
+  written before this fix keep their old episode, so attribute those by
+  their `session_id`. Earlier outcome signals cannot be re-attributed,
+  because `outcome_signals` records no session. Unchanged on purpose:
+  with no session identity, a `store()` (including the replacement entry
+  of a supersede or consolidate) and `memory_episode_start` still fall
+  back to the process-wide current episode.
+
+### Fixed (2026-09-25 — a session start can no longer hang while trimming its briefing)
+- `format_bounded_briefing`, which fits the memory briefing into the
+  SessionStart hook's byte budget, could loop forever. It re-packed items
+  until the omitted count stopped changing, but greedy packing is not
+  monotonic: a smaller budget can skip one long item and fit more short
+  ones, so when the count crossed from 9 to 10 the marker grew a byte and the
+  selection flipped between two sizes indefinitely. The 2026-09-25
+  post-merge audit reproduced it at 318 bytes; production-shaped 13-item
+  briefings hung at 620 and 1,849 bytes. It now packs once, leaving room for
+  the widest marker the call could print, so it always returns.
+- The same loop, when it did settle, kept a selection packed without room for
+  its omitted-items marker and fell back to "Briefing omitted." although
+  shorter items plus the marker fit (a 160-byte lesson ahead of three short
+  ones at 210–221 bytes). The final selection now always has room for the
+  marker, which states how many items were left out.
+- Tests run each repro under a thread-join timeout, so a regression fails
+  instead of hanging the suite, and sweep every budget from 0 to 2,000 bytes:
+  the output fits, no item is sliced (a recap keeps its summary line), and
+  the marker's count matches what was omitted.
+
+### Changed (2026-09-25 — the served memory core carries the rules only it can deliver)
+- Since #364 the SessionStart hook serves `STARTUP_MEMORY_CORE`, not the
+  detailed `MEMORY_LOOP_BLOCK`, yet several places still said the hook
+  delivered the full block. The maintainer kept the compact core (decision
+  2026-09-25), so it restates three of the detailed block's rules: search
+  before stating a "current" version, number or benchmark; trust the code
+  and correct drifted memory on the spot, at the same slot; route verified
+  external facts to `memory_world_set`. It points at the full guidance by its
+  public GitHub URL, which a pip install can open, and stays under the
+  2,000-char pin.
+- `examples/CLAUDE.memory.md`, the README, `docs/guide/providers.md`, the
+  System Atlas and both installers' messages and summaries now say the
+  plugin and verified Codex hooks serve a compact core, and that the full
+  block is an optional standing copy. The installers still skip the block by
+  default for Claude Code and for verified Codex hooks; `covered-by-hooks`
+  stays the report's state name. Without the plugin, Claude Code's
+  installer-written `settings.json` hook serves the briefing alone, not the
+  core; the installer summary names the file to append the block to.
+- `evals/agent_token_ledger.py` now prices the core the hook serves. The
+  published 7,492-char session-start row in `evals/README.md` is marked as
+  the pre-#364 measurement until the ledger is rerun against the live daemon.
+- Comment-only edits to `plugin/hooks/session-end.sh` and `stop-wake.sh`
+  change the hooks digest: deploy with `ops/update.ps1 -All` (or
+  `ops/update.sh --all`), or the session start reports hook drift until the
+  plugin cache is refreshed.
+
+### Changed (2026-09-25 — the regression gate reuses a correctly configured bench server)
+- Since the 2026-09-24 integration, `evals/regression_gate.ps1` exited 2
+  whenever any Qwen server was running, including one already serving the
+  reproducible config the gate needs. `Start-Qwen -Owned` now reuses such a
+  server without taking ownership, so the gate's cleanup leaves it running.
+  A fast (MTP), foreign or unresponsive server is still refused, with a
+  message naming it, and never displaced. A fresh launch keeps the GPU-busy
+  hold (more than 5 GB of VRAM in use) and the owned-process cleanup.
+
+### Fixed (2026-09-25 — one session episode per client session)
+- The stdio shim no longer opens a session episode of its own at launch. It
+  opened one keyed by a fresh id and titled after its working directory,
+  beside the root the plugin's SessionStart hook registers, so every Claude
+  Code session had two roots: a write without an `episode=` handle, or a
+  `memory_session_title`, landed on the shim's root and the rest on the
+  hook's. A host that kills its MCP servers (Codex, the desktop app) never
+  reached the shim's close. In the 24 h to 2026-09-25 the live bank gained
+  193 shim-keyed roots, 189 of them empty, 154 titled after the shared shim
+  runtime directory Codex launches from. The idle reaper closed them and they
+  were deleted only after the resume window.
+- Under Claude Code (writer id unset or `claude-code`) the shim's
+  `X-PL-Session` is now the session id Claude Code launched it with
+  (`CLAUDE_CODE_SESSION_ID`, canonical UUIDs only), which is the id the hook
+  registers. The shim's calls land on the hook's root (see the limits
+  below), and the coordination adapter registers that id as its episode.
+  The shim's exit leaves the root to the host: the SessionEnd hook closes
+  it, or else the idle reaper, which is also what closes it on an install
+  without the plugin's hooks. A reconnect restarts the shim mid-session, and
+  an explicit close would prune an empty root outright, orphaning the handle
+  the hook advertised.
+- A host with any other writer id keeps one id per shim process, even when
+  started from inside a Claude Code session, whose id it inherits and
+  would forward if it passes its environment through to MCP servers (Codex
+  keys each call by its thread anyway). The daemon opens that session's episode on the first
+  write that needs one (a store, even one the surprise gate drops, or a
+  sub-episode or title call without a handle), as it does for a direct-HTTP
+  client. The shim closes it at exit when its host lets it exit, and the
+  idle reaper otherwise. A shim that is idle or only searches leaves no
+  episode.
+- Two daemon paths treated the shim's root as disposable, and now that
+  handle-less lifecycle calls reach the hook's root they must not. After the
+  idle reaper closed a root, `memory_session_title` without a handle opened
+  a second root; it now reopens the closed one within the resume window, as
+  a store does. `memory_episode_end` without a handle closed the session
+  root when no sub-episode was open; for a session-keyed root it now
+  returns `{}` and leaves the root to the session lifecycle, as the tool
+  always described and as the handle path already did. Keyless roots
+  (embedded and legacy callers) close as before.
+- Limits: `/clear` and an in-session `/resume` give the session a new id,
+  but the shim keeps its launch id. Afterwards any write without a handle,
+  and a `memory_store` even with one, reopens the root under the launch id
+  (the root SessionEnd just closed, within the resume window) or, if
+  SessionEnd pruned it empty, opens a new empty one. A handle-less write
+  lands on that root and a handle-less `memory_session_title` renames it; a
+  store's entry with a handle still lands on the handle's root. The
+  daemon-side fix is a follow-up. `--continue`, or `--resume` without an
+  id, may launch the shim with an id no hook registers, so its writes open
+  a root of their own.
+  Shim sessions no longer take their title from the working directory: an
+  episode the daemon opens starts as `session - <time>`, store results carry
+  an `episode_hint` until the agent names it, and a title still generic at
+  close is derived from the content.
+- **Upgrading:** this changes the shim, a separate install that a
+  daemon-only deploy never touches. Deploy with `ops/update.ps1 -All` (or
+  `ops/update.sh --all`), then restart the clients.
+
+### Fixed (2026-09-25 — the daemon bearer is no longer forwarded across a redirect)
+- `pseudolife-mcp episode-start` / `episode-end` refuse HTTP redirects. They
+  POST with the `PSEUDOLIFE_MCP_TOKEN` bearer through `urllib`, whose
+  default opener follows 301/302/303 and copies `Authorization` to the
+  redirect target (verified on Python 3.11 and 3.12). A daemon URL that
+  redirected would therefore have handed the bearer to whichever host it
+  named. They now open through the shim's no-redirect handler, as the shim's
+  own episode calls already do. A 3xx fails the call, which the hook swallows
+  as it does any error. The installers stopped registering these hooks and
+  remove them when re-run, but a `settings.json` written before that still
+  calls these commands. The fix is in the client package, so it arrives with
+  an upgraded install, not a daemon redeploy.
+- `evals/agent_token_ledger.py` sends the daemon bearer on its REST reads and
+  now refuses redirects the same way.
+
+### Fixed (2026-09-25 — the session-start briefing no longer hands its bearer to a redirect target)
+- `pseudolife-mcp briefing` (the SessionStart hook that `ops/install-hook.ps1`
+  and `ops/install-hook.sh` install) fetched `/api/briefing` with plain
+  `urllib.request.urlopen`. urllib follows redirects and copies every header
+  except the content headers to the target, so a daemon URL answering with a
+  redirect would have sent `Authorization: Bearer <token>` to whatever host
+  it named. The fetch now uses the shim's no-redirect opener, as the shim's
+  own episode calls do: a redirect fails the fetch, and the hook prints
+  nothing. The five-second timeout is unchanged. The `--coordination`
+  check-in fetch already refused redirects.
+
+### Fixed (2026-09-25 — naming a session by handle retitles its stored memories)
+- `memory_session_title` with an `episode` handle (the form the SessionStart
+  briefing asks for) now rewrites the `episode_title` stamp on the memories
+  already stored in that session, in memory and in the database, as the
+  handle-less form and `episode_rename` always did. Before, only the episode
+  itself took the new name, so everything written before the rename kept the
+  generic `session - <date> <time>` title. Memories mis-stamped before this
+  fix keep their old stamp until the episode is renamed again:
+  `episode_rename`, or `memory_session_title` once more (the same name
+  works).
+
+### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
+- The agent board (`memory_agents`, `memory_message`, the awareness digest) is
+  on by default: `coordination.enabled` defaults to `true`, and without an
+  `allowed_principals` key the singular-token principal `default` is admitted.
+  Principals from a `PSEUDOLIFE_MCP_TOKENS` map stay off the board until listed.
+  Bearer authentication is still required: an open (tokenless) install keeps
+  the board dormant. Wake, the Codex doorbell and the Claude stop-wake hook
+  stay opt-in.
+- The shim starts its coordination adapter (Codex: its per-thread registry)
+  by default when it holds a bearer token and the daemon serves that bearer
+  the board, which it asks once at startup; otherwise it stays quiet.
+  `PSEUDOLIFE_AGENT_COORDINATION=0` (any value but `1`/`true`/`yes`/`on`)
+  turns it off for that client, and `=1` keeps the old unconditional start.
+- The startup check-in no longer asks for calls that must fail where the
+  board is off. The daemon serves it from the new
+  `GET /api/hook/coordination-start` only where the board is on for that
+  bearer; the plugin's coordination SessionStart hook (bash and PowerShell, on
+  startup, resume, compaction and `/clear`) and the installers' new
+  `pseudolife-mcp briefing --coordination` hook print what it serves. The
+  daemon cannot see a client's adapter, so an HTTP client without the shim, an
+  opt-out set only in the MCP env block, or a `docker exec` installer hook can
+  still show it. The daemon's MCP instructions drop the board clause; the shim
+  adds a compact one only when its adapter is up.
+- An identity binding sent to `/mcp` now requires bearer authentication; an
+  open install refuses it before touching the store.
+- `ops/update_clients.py` (run by `ops/update.ps1 -All`) reports Codex plugin
+  hook handlers that Codex has not approved as `needs-approval`. The
+  2026-09-24 split added two handlers, which Codex skips without a word in
+  the desktop app until approved, so mail previews silently stopped there.
+- `ops/setup-codex-hooks.py` expects the check-in during its live
+  verification only where the board is available, and migrates the
+  installers' gated check-in hook like the older echo.
+- **Upgrading:** a `config.yaml` with no `coordination` key, or a
+  `coordination` block without `enabled`, now runs the board; write
+  `enabled: false` to keep it off (an explicit `false` is respected). An
+  explicit `allowed_principals` list is kept as is. Deploy with
+  `ops/update.ps1 -All` (or `ops/update.sh --all`) so the plugin cache and
+  the shim move with the daemon, then restart the clients. Re-run
+  `ops/install-hook.*` on installs wired by it, which replaces the old
+  unconditional check-in. Codex plugin users approve the two coordination
+  handlers once: `python ops/setup-codex-hooks.py --source plugin --trust ask`,
+  or `/hooks` in the Codex terminal app. Offline mailbox recovery now needs
+  an explicit `enabled: false` in the restored configuration.
+
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing
   items within its output budget, with explicit notices when content is omitted.
@@ -36,6 +641,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identity, credentials and optional wake behavior remain with the existing adapter.
 - MCP initialization instructions also request the startup check-in, so clients
   without lifecycle hooks receive the same core workflow guidance.
+- **Upgrading:** `<data_dir>/hook-instructions.md` no longer replaces the
+  served memory instructions. It is appended after the core and capped at
+  3.5 KB; a longer file is served in whole paragraphs with a notice that the
+  copy is partial. An override written to replace the old block now arrives
+  in addition to the core.
 
 ### Fixed (2026-09-24 — integration safety checks)
 - Coordination sends validate the writer epoch before committing. After a
@@ -117,6 +727,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PSEUDOLIFE_TEST_CUDA=1` is set. An empty value does not work here: on
   Windows it left `torch.cuda.is_available()` true, so the embedder still
   loaded on the GPU.
+
+### Fixed (2026-09-25 — queued full test suites take the lock in arrival order)
+- A full run waiting for the suite lock now waits its turn. Each waiter
+  holds a ticket in `~/.pseudolife-mcp/locks/full-suite.queue/`, named for
+  its arrival time and pid, and only the earliest live waiter may take the
+  lock. Before, every waiter polled the lock and whichever polled first
+  after a release won: on 2026-09-25, with eight suites queued, one run
+  waited from 13:48 to past 14:57 while later arrivals went ahead. A waiter
+  that dies loses its ticket's OS lock, so later waiters pass its ticket
+  over at once (and delete it after 30 s); Ctrl-C and a `fail` refusal
+  remove it at once. `fail` now also refuses while an earlier waiter is
+  queued, and the waiting notice names the waiters ahead. A waiter stopped
+  while first in line (a debugger, a Windows console mid-selection) keeps
+  its place until it resumes or ends; the notice names its pid. A run from
+  a checkout older than this change takes no ticket and races for the lock
+  as before; the lock file is unchanged, so old and new runs still exclude
+  each other.
+- `CONTRIBUTING.md`: a docs-only change can skip the local full suite and
+  run the doc guards plus the tests naming each touched file; CI must still
+  pass before merge.
+
+### Added (2026-09-25 — a machine can allow more than one full test suite at once)
+- The suite lock has a slot count: `PSEUDOLIFE_SUITE_SLOTS`, else a
+  `full-suite.slots` file in the lock directory, else 1. With 2, two full
+  runs hold the lock at once; waiters still take free slots in arrival
+  order, and the waiting notice and `fail` refusal name every holder. Slot 0
+  keeps the file names `full-suite.lock` and `full-suite.holder.json`, so
+  runs from older checkouts share it (and never see a second slot); slot k
+  is `full-suite.k.lock` with its own `full-suite.k.holder.json`. Queued
+  runs re-read the count at every poll, so raising or lowering it reaches
+  the backlog at once. A count that is not a whole number from 1 to 8 is a
+  usage error that names its source; the file may carry a UTF-8 byte-order
+  mark, and a UTF-16 file (Windows PowerShell 5.1's `>`) is reported as
+  such. The default stays 1, and so does the maintainer's host: a two-slot
+  trial on 2026-09-25 ran each suite in ~50 min instead of ~17, with
+  load-timeout failures.
 
 ### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
 - **Hydration fails closed.** If loading cortex facts, world facts or lessons
@@ -936,27 +1582,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hold and transaction as the write. A requeued row is left to a fresh
   first opinion on the next tick. The link and junk judges take one vote
   per row and never read an earlier one, so they were not affected.
-
-### Fixed (2026-09-23 — the curation judge stops re-judging a slot pair whose name contains a `|`)
-- A lesson or world slot with a literal `|` in its entity or attribute was
-  listed under a key that folds the pipe to `-`, but the store-curation judge
-  saved its memo, its automatic distinct dismissal and that dismissal's marker
-  under the raw key. Nothing that reads them found them: the pair went back to
-  the model on every tick that reached it instead of once per
-  `curation_rejudge_days`, `review_rejudge('curation')` could not
-  forget it, and an automatic "distinct" never hid it. All three are now
-  written under the listing's spelling (`curation_safety.curation_pair_keys`,
-  built on `service._slot_key`). The fingerprinted evidence keeps its raw key,
-  so no memo binding, marker fingerprint or retire audit changes and no other
-  pair is re-judged.
-- Rows written under the old spelling retire on their next touch rather than
-  through a migration: the first auto-dismissal refresh (the Console listing or
-  a judge tick) withdraws a raw-spelled marker together with the dismissal row
-  it owns, and the pair's next judgment, which the missed memo now triggers
-  once, deletes the raw-spelled memo row it replaces. A raw memo row whose
-  pair is never judged again (dismissed by a human, one side retired, or no
-  longer similar enough to list) stays behind unread; its key has at least two
-  `|` and cannot match a listing key, which has exactly one.
 
 ### Fixed (2026-09-23 — a rejudge that lands during a judge call is no longer undone)
 - `review_rejudge('candidate')` forgets opinions in the

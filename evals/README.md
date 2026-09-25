@@ -3704,9 +3704,13 @@ guard  floor   abstain_recall   false_abstain
 
 Raising the guard `0.3 → 0.65` (paired with `search_confidence_floor = 0.70`)
 **doubles** abstention recall at zero false-abstain. Pushing the floor higher
-trades into wrongly abstaining on answerable queries. **Recommended for an
+trades into wrongly abstaining on answerable queries. ~~**Recommended for an
 abstention-on deployment: `guard_min_score = 0.65`, `search_confidence_floor =
-0.70`.** Both knobs ship at their behaviour-preserving defaults (`0.3` / `0.0`).
+0.70`.**~~ **Retired 2026-09-25:** measured on the MiniLM embedder; on real
+agent searches under the current embedder the pair flags searches whose hits
+agents used (`docs/guide/retrieval.md`, "Abstention & confidence floors").
+Both knobs shipped at their behaviour-preserving defaults then (`0.3` /
+`0.0`); the guard has shipped at `0.2` since the 2026-07-06 replay sweep.
 
 **Dream slot resolver (Feature A) — no measurable benefit; ships off.** Sweeping
 `dream_slot_match_threshold` (distractor-clean corpus) moved nothing:
@@ -3997,13 +4001,88 @@ trained on the bench corpus transfers directly to the live consolidation run.
 
 # Capture metrics (`capture_metrics.py`)
 
-Read-only report over the **live** bank measuring the memory loop's beats:
-capture coverage, outcome coverage of substantive sessions, per-session
-store density, failure+correction share, and the explicit-vs-inferred
-outcome mix. Carries the 2026-07-18 pre-auto-outcome baseline in its
-docstring and the success criteria for the 2-3-week re-measurement.
+Read-only report over the **live** bank measuring the memory loop's beats
+per client session: capture coverage, sessions that searched within 15
+minutes of starting, outcome coverage, outcomes that credited `used_ids`,
+stored entries another session retrieved within 14 days, per-session store
+density, failure+correction share, and the explicit-vs-inferred outcome
+mix. Since 2026-09-25 a session is a hook-registered root or a shim root
+with memory activity, not every keyed root episode (idle shim roots
+outnumbered sessions four to one); the docstring explains the pairing rule
+and carries the 2026-07-18 baseline, measured with the old denominator.
+The daemon deletes a session root that ends with no stored entry; since
+schema v43 sessions are counted from the `client_sessions` registration
+record, which survives that prune: sessions that only searched count, and
+so do hook-registered sessions that never touched memory (idle shim-only
+sessions are still dropped as transport artifacts), one per session key,
+with their memory-policy variant. Activity from before v43, or from a client that
+never registered, whose root is gone is still reported separately. Lesson
+searches and unmatched `used_ids` are reported as not recorded: the bank
+persists neither.
 
     python evals/capture_metrics.py [--json] [--since YYYY-MM-DD]
+
+---
+
+# Memory-policy bench (`memory_policy_bench.py`)
+
+Does the session-start memory policy change what an agent does with
+memory? Each run starts a disposable daemon on a free loopback port over a
+fresh `plbench_` database cloned from a seeded template (synthetic
+"Lanternfish" fixtures, `memory_policy_scenarios.py`), then one headless
+`claude -p` (or `codex exec`) session in a throwaway config home and a
+project outside the home directory, with the plugin's SessionStart and
+SessionEnd scripts. Arms are values of `memory_policy.variant`;
+`label@suffix` is an A/A copy.
+
+- **Isolation.** Database names must start with `plbench_` and the server is
+  asked which database it reached; the live bank and the live daemon ports
+  are refused. No real client configuration is written; the Claude child
+  gets only the current access token (it cannot refresh the login). A
+  project under the home directory would inherit `~/.claude/CLAUDE.md` as
+  an ancestor file, so the work root defaults to `C:\plbench` /
+  `/tmp/plbench` and is refused if any ancestor carries instruction files.
+- **Scenarios.** One per policy rule: a planted lesson, a contested fact, a
+  stale "current version", continuing another session, a decision plus
+  long-running work, a verified external fact, a secret in the prompt, and
+  an outcome that should cite what it used.
+- **Scoring.** Only from the daemon's records: the run database, the
+  daemon's REST view before shutdown, and a ledger the disposable daemon
+  keeps of every MCP tool call and hook response
+  (`memory_policy_daemon.py`), because the bank does not persist lesson
+  searches or unmatched `used_ids`. Task success checks the files the agent
+  left, never its own account.
+- **Validity.** A local capture proxy records each model request; a run is
+  valid only if the arm's policy text is present and no other memory-policy
+  text is. Constant across arms and listed in the artifact: the MCP server
+  instructions, the memory tools (deferred behind ToolSearch), the episode
+  line, the briefing and the plugin's slash commands. The per-turn reminder
+  and coordination are held off.
+- **Statistics.** Paired on (scenario, replicate), cluster-bootstrap 95%
+  CIs over scenarios, an A/A arm for the noise floor. A challenger replaces
+  the incumbent only if its score (compliance + task success − 0.1 per
+  100k BITE) beats it by more than the A/A spread and no guarded metric
+  (compliance, task success, `used_ids` precision, cost) regresses beyond
+  its own A/A noise.
+
+    python -m evals.memory_policy_bench run --tag <tag> \
+        --arms none,full_separate_hook,full_separate_hook@aa --replicates 3
+    python -m evals.memory_policy_bench report evals/results/memory-policy-bench-<tag>.json
+    python -m evals.memory_policy_bench estimate evals/results/memory-policy-bench-<tag>.json
+    python -m evals.memory_policy_bench regrade --tag <tag> --arms <same> --replicates <n>
+    python -m evals.memory_policy_bench cleanup
+
+**Sanity check, 2026-09-25** (`memory-policy-bench-sanity-20260925-regraded.json`:
+claude-sonnet-5 at medium effort, memory tools deferred behind ToolSearch;
+`none` against `full_separate_hook` and an A/A copy of it, 8 scenarios x 3
+replicates, 72 valid runs, $7.04 at list prices). The bench could not tell
+the two policies apart. The full policy moved the score +0.19 over no policy,
+inside the A/A noise floor of 0.24, and every other metric stayed inside its
+own A/A noise. Most scenarios scored zero compliance in every arm: agents made
+0.4 (none) to 1.0 (full) memory calls per run and solved most tasks from the
+repository alone. At this size the instrument is not fit for purpose yet; it
+needs scenarios that cannot be solved without memory and more replicates (the
+A/A floor narrows roughly with the square root of the number of pairs).
 
 ---
 
@@ -5009,6 +5088,16 @@ with almost no headroom. (Both rows above are the 2026-09-04 run. The
 raw chars, and the manifest by the new parameter's 81-char description in
 all three tiers — without a rerun of this ledger, which needs the live
 daemon.)
+
+**Superseded 2026-09-24 — the session-start row prices a block the hook no
+longer serves.** Since #364 the SessionStart hook serves
+`STARTUP_MEMORY_CORE`, a compact core that `tests/test_plugin_packaging.py`
+pins under 2,000 chars (the 7,500 cap above no longer applies), followed by
+a bounded briefing; `MEMORY_LOOP_BLOCK` remains the detailed standing copy in
+`examples/CLAUDE.memory.md`. `agent_token_ledger.py` now measures the core
+alone; the briefing after it depends on the bank and can fill the rest of the
+hook's 9,500-byte budget. The ledger has not been rerun, which needs the live
+daemon; until it is, the row above is the pre-#364 measurement.
 
 ## What a call costs — before and after the cuts
 

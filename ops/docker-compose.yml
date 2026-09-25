@@ -84,6 +84,13 @@ services:
       # Dockerfile can copy the pseudolife_memory package + pyproject.
       context: ..
       dockerfile: ops/Dockerfile.daemon
+      # Build stamp (image labels + /health's `build` block). ops/update.ps1
+      # and update.sh export these from the checkout; a bare
+      # `compose up --build` bakes "unknown".
+      args:
+        GIT_SHA: ${PSEUDOLIFE_BUILD_GIT_SHA:-unknown}
+        GIT_DIRTY: ${PSEUDOLIFE_BUILD_DIRTY:-unknown}
+        BUILD_TIME: ${PSEUDOLIFE_BUILD_TIME:-unknown}
     # Keep this tag in step with the package version in pyproject.toml; the
     # update scripts read it from here (single source of truth for deploys).
     image: pseudolife-daemon:0.15.0
@@ -200,6 +207,10 @@ services:
       # FALLBACK unset (default) = single-extractor behavior, no probe.
       PSEUDOLIFE_DREAM_FALLBACK_BASE_URL: ${PSEUDOLIFE_DREAM_FALLBACK_BASE_URL:-}
       PSEUDOLIFE_DREAM_FALLBACK_MODEL: ${PSEUDOLIFE_DREAM_FALLBACK_MODEL:-}
+      # The fallback's own bearer key; DREAM_API_KEY above is the primary's
+      # and never goes to the fallback. Empty = the fallback sends no key
+      # (the sidecar needs none).
+      PSEUDOLIFE_DREAM_FALLBACK_API_KEY: ${PSEUDOLIFE_DREAM_FALLBACK_API_KEY:-}
       PSEUDOLIFE_DREAM_EXTRACTOR_MODE: ${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-auto}
       # How often the daemon returns heap memory glibc keeps after encode
       # bursts (malloc_trim). Empty = the 60 s default; 0 disables. See

@@ -29,7 +29,8 @@ modes:
   embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
   briefing       print the session-start briefing (for a SessionStart hook;
                  --hook-json emits the memory core + bounded briefing as
-                 Claude Code/Codex hook JSON)
+                 Claude Code/Codex hook JSON; --coordination prints the
+                 agent-board check-in, only where the board works)
   doctor         check this runtime, daemon health and MCP handshake (no writes)
   backup         back up the bank: pg_dump + state archive with rotation
                  (pip tiers; the Docker tier keeps ops/backup.ps1)

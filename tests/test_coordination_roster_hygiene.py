@@ -57,9 +57,9 @@ def test_heartbeat_renews_the_lease_but_is_activity_only_when_the_shim_saw_a_tur
 
 
 def test_peer_list_shows_leased_or_recently_active_peers_and_counts_the_rest(store):
-    """The default list is peers holding a lease or active within
-    ACTIVE_WINDOW, leased first; every other peer matching the scope is
-    only counted, under ``idle_omitted``."""
+    """The default list is peers active within ACTIVE_WINDOW, or within
+    ATTACHED_IDLE_WINDOW while holding a lease, leased first; every other
+    peer matching the scope is only counted, under ``idle_omitted``."""
     from pseudolife_memory.storage.coordination import ACTIVE_WINDOW
     caller = store.register("alice")
     parked = store.register("alice", project="p")
@@ -91,6 +91,112 @@ def test_peer_list_shows_leased_or_recently_active_peers_and_counts_the_rest(sto
     assert page["truncated"] is True and page["idle_omitted"] == 2
 
 
+def test_a_recovery_reattach_is_not_activity_but_a_new_attachment_is(store):
+    """The 2026-09-25 bulk touch. The host slept from 12:22 to 12:32 AEST, every
+    idle shim's 60 s lease lapsed, and on wake each adapter re-attached
+    under its own attachment id. attach stamped last_activity, so eleven
+    sessions idle for hours all read as active within 28 s of each other.
+    A re-attach under the id the row already holds is the adapter
+    recovering its lease; a new id is a process starting, which is the
+    agent's own act."""
+    a = store.register("alice")
+    generation = store.attach(*creds(a), attachment_id="one")["generation"]
+    store.test_time[0] += 5 * 3600          # asleep: the lease lapses
+    again = store.attach(*creds(a), attachment_id="one")
+    assert again["generation"] == generation + 1
+    assert _last_activity(store, a) == 1000.0
+    store.test_time[0] += 30                # lease still live: a plain renewal
+    store.attach(*creds(a), attachment_id="one")
+    assert _last_activity(store, a) == 1000.0
+    store.test_time[0] += 3600
+    store.attach(*creds(a), attachment_id="two")
+    assert _last_activity(store, a) == store.test_time[0]
+
+
+def test_the_peer_list_says_how_old_each_status_is_and_marks_old_ones_stale(store):
+    """On 2026-09-25 a dozen listed peers still reported PRs "awaiting
+    maintainer merge" a day after the merge, with nothing saying when the
+    line was written. The age comes from the v42 audit log: the newest
+    register, or update that carried a status, for that agent."""
+    from pseudolife_memory.storage.coordination import STATUS_STALE_AFTER
+    caller = store.register("alice")
+    fresh = store.register("alice", status="reviewing")
+    old = store.register("alice", status="PR #1 awaiting merge")
+    blank = store.register("alice")
+    store.test_time[0] += STATUS_STALE_AFTER
+    store.update(*creds(fresh), status="reviewing")    # re-stated counts as set
+    store.update(*creds(old), task="t")                # leaves the status alone
+    store.update(*creds(blank), task="t")
+    rows = {row["agent_id"]: row for row in store.list_agents(*creds(caller))["agents"]}
+    assert rows[fresh["agent_id"]]["status_set_at"] == 1000.0 + STATUS_STALE_AFTER
+    assert rows[fresh["agent_id"]]["status_age"] == "just now"
+    assert rows[fresh["agent_id"]]["status_stale"] is False
+    assert rows[old["agent_id"]]["status_set_at"] == 1000.0
+    assert rows[old["agent_id"]]["status_age"] == "2 hours ago"
+    assert rows[old["agent_id"]]["status_stale"] is True
+    # Nothing to be stale: a blank status is never flagged.
+    assert rows[blank["agent_id"]]["status_set_at"] == 1000.0
+    assert rows[blank["agent_id"]]["status_stale"] is False
+
+
+def test_a_status_older_than_the_audit_log_is_reported_as_older_than_the_log(store):
+    """The fix-week statuses were written before the v42 log existed, and
+    retention cuts old rows too, so the log may hold no status event. The
+    status is then at least as old as the log's oldest row, and that bound
+    is what the list reports; it is stale only once the bound is."""
+    from pseudolife_memory.storage.coordination import STATUS_STALE_AFTER
+    caller = store.register("alice")
+    legacy = store.register("alice", status="PR #343 awaiting merge")
+    conn = store.storage.conn
+    conn.execute("DELETE FROM coordination_events WHERE agent_id=%s", (legacy["agent_id"],))
+    store.test_time[0] += 600
+    store.update(*creds(legacy), task="t")             # active, status untouched
+    row = store.list_agents(*creds(caller))["agents"][0]
+    assert row["status_set_at"] is None
+    assert row["status_age"] == "more than 10 minutes ago"
+    assert row["status_stale"] is False                # the bound is only 10 min
+    store.test_time[0] += STATUS_STALE_AFTER
+    store.update(*creds(legacy), task="t2")
+    row = store.list_agents(*creds(caller))["agents"][0]
+    assert row["status_age"] == "more than 2 hours ago"
+    assert row["status_stale"] is True
+    # An empty log bounds nothing.
+    conn.execute("DELETE FROM coordination_events")
+    row = store.list_agents(*creds(caller))["agents"][0]
+    assert (row["status_set_at"], row["status_age"], row["status_stale"]) == (None, "unknown", False)
+
+
+def test_an_attached_peer_that_stays_silent_leaves_the_default_list(store):
+    """Attached is not working. On 2026-09-25 the default list carried 18
+    attached peers, a dozen of them sessions silent for hours, each held
+    there by its shim's heartbeat. A leased peer is listed for
+    ATTACHED_IDLE_WINDOW after its own last action (long enough to show a
+    waiting session beside its stale status), then only counted; one own
+    action lists it again."""
+    from pseudolife_memory.storage.coordination import ATTACHED_IDLE_WINDOW
+    caller = store.register("alice")
+    parked = store.register("alice", status="PR #343 awaiting merge")
+    generation = store.attach(*creds(parked), attachment_id="parked")["generation"]
+
+    def hold_lease_until(moment):
+        while store.test_time[0] < moment:
+            store.test_time[0] += 55
+            store.heartbeat(*creds(parked), attachment_id="parked", generation=generation)
+
+    hold_lease_until(1000 + ATTACHED_IDLE_WINDOW - 60)
+    listed = store.list_agents(*creds(caller))
+    assert [row["agent_id"] for row in listed["agents"]] == [parked["agent_id"]]
+    assert listed["agents"][0]["adapter_available"] is True
+    assert listed["agents"][0]["status_stale"] is True
+    hold_lease_until(1000 + ATTACHED_IDLE_WINDOW + 60)
+    listed = store.list_agents(*creds(caller))
+    assert listed["agents"] == [] and listed["idle_omitted"] == 1
+    store.heartbeat(*creds(parked), attachment_id="parked", generation=generation, active=True)
+    listed = store.list_agents(*creds(caller))
+    assert [row["agent_id"] for row in listed["agents"]] == [parked["agent_id"]]
+    assert listed["idle_omitted"] == 0
+
+
 def test_ephemeral_reap_waits_an_hour_after_the_lease_lapsed_not_after_the_last_turn(store):
     """The deploy case. A state-less shim parked for hours holds its lease
     by heartbeat alone; a daemon restart longer than the lease lapses it,
@@ -107,6 +213,30 @@ def test_ephemeral_reap_waits_an_hour_after_the_lease_lapsed_not_after_the_last_
     store.prune()
     assert parked["agent_id"] in _remaining(store)
     store.test_time[0] += EPHEMERAL_AGENT_RETENTION
+    store.prune()
+    assert parked["agent_id"] not in _remaining(store)
+
+
+def test_a_live_shim_idle_past_retention_survives_a_lease_lapse(store):
+    """Recovery re-attaches used to stamp last_activity, which kept a live
+    idle shim young against AGENT_RETENTION; they no longer do, since they
+    are not the agent's act. So the lease speaks for the process too: an
+    address goes only once it has had neither its own action nor a lease
+    for its retention window, so neither a daemon restart nor a night's
+    host sleep retires a live resumable shim's address (review of
+    b9c718b8: an hour's lease grace still lost it on the first overnight
+    sleep after a week's idleness)."""
+    from pseudolife_memory.storage.coordination import AGENT_RETENTION
+    parked = store.register("alice", capabilities={"resumable": True})
+    store.attach(*creds(parked), attachment_id="one")
+    store.test_time[0] += AGENT_RETENTION + 3600
+    store.attach(*creds(parked), attachment_id="one")   # recovery: not activity
+    for gap in (61 + 60, 8 * 3600):        # a restart, then a night's host sleep
+        store.test_time[0] += gap
+        store.prune()                      # the first heartbeat prunes first
+        assert parked["agent_id"] in _remaining(store)
+        store.attach(*creds(parked), attachment_id="one")
+    store.test_time[0] += 61 + AGENT_RETENTION           # the process is gone
     store.prune()
     assert parked["agent_id"] not in _remaining(store)
 
@@ -431,3 +561,141 @@ def test_an_explicit_state_file_still_wins_over_the_session_directory(monkeypatc
            "PSEUDOLIFE_AGENT_STATE_DIR": str(tmp_path / "agents"),
            "CLAUDE_CODE_SESSION_ID": str(uuid.uuid4())}
     assert _session_proxy(monkeypatch, env, tmp_path) == str(tmp_path / "fixed.json")
+
+
+# --- one board identity per session ------------------------------------------
+#
+# 2026-09-25: a Claude Code session in the Desktop app sent a pre-notice as
+# agent 6b52025b (principal claude-desktop) and its START/END notices as
+# b7437e8b (claude-code), and overwrote another session's status line on
+# 6b52025b. That session saw two servers. One was its own shim, launched by
+# Claude Code with CLAUDE_CODE_SESSION_ID. The other was the Desktop app's
+# entry (writer id claude-desktop): one process serving every conversation in
+# the app, so the one address it registered was every conversation's.
+
+class _RecordingAdapter:
+    constructed = []
+
+    def __init__(self, *args, **kwargs):
+        type(self).constructed.append(kwargs)
+    async def __aenter__(self): return self
+    async def __aexit__(self, *args): pass
+    instance_headers = {"X-PL-Agent": "shared-agent", "X-PL-Agent-Key": "shared-key"}
+    async def validate_snapshot(self, snapshot): pass
+    def note_turn(self): pass
+    def deliver_hint(self): return None
+
+
+def _desktop_env(monkeypatch, extra=None):
+    from pseudolife_memory import coordination_adapter
+    _RecordingAdapter.constructed = []
+    monkeypatch.setattr(coordination_adapter, "CoordinationAdapter", _RecordingAdapter)
+    for name in ("PSEUDOLIFE_AGENT_STATE", "PSEUDOLIFE_AGENT_STATE_DIR", "CLAUDE_CODE_SESSION_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", "1")
+    monkeypatch.setenv("PSEUDOLIFE_WRITER_ID", "claude-desktop")
+    for name, value in (extra or {}).items():
+        monkeypatch.setenv(name, value)
+
+
+@pytest.mark.parametrize("extra", [
+    {},
+    {"PSEUDOLIFE_WRITER_ID": " Claude-Desktop "},
+    # A fixed state file names one address; it does not stop the process
+    # serving many conversations through it.
+    {"PSEUDOLIFE_AGENT_STATE": "{tmp}/desktop.json"},
+])
+def test_the_desktop_app_process_registers_no_board_identity(monkeypatch, tmp_path, extra):
+    from pseudolife_memory import shim
+    _desktop_env(monkeypatch, {k: v.replace("{tmp}", str(tmp_path)) for k, v in extra.items()})
+    seen = {}
+
+    async def proxy(*args, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    asyncio.run(shim._run_session_proxy("http://fixture", "token", "process-session",
+                                        instructions_note="version note"))
+    assert _RecordingAdapter.constructed == []
+    assert "coordination_adapter" not in seen and "agent_headers" not in seen
+    assert "per-session Pseudolife server" in seen["coordination_refusal"]
+    # The served instructions may ask for the board check-in this process
+    # refuses; the note ahead of them says to skip it, after any version note.
+    assert seen["instructions_note"].startswith("version note\n\n")
+    assert "skip memory_agents update and memory_message" in seen["instructions_note"]
+
+
+def test_the_desktop_app_process_does_not_wait_on_the_default_board_probe(monkeypatch):
+    """Coordination on by default asks the daemon whether it serves this
+    bearer the board before building an adapter (#367). The shared process
+    builds none whatever the answer, so it must not spend its startup on
+    the question."""
+    from pseudolife_memory import shim
+    _desktop_env(monkeypatch)
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION")
+    asked = []
+    monkeypatch.setattr(shim, "_board_available", lambda *args: asked.append(args) or True)
+    seen = {}
+
+    async def proxy(*args, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    asyncio.run(shim._run_session_proxy("http://fixture", "token", "process-session"))
+    assert asked == []
+    assert _RecordingAdapter.constructed == []
+    assert "per-session Pseudolife server" in seen["coordination_refusal"]
+
+
+def test_the_shared_process_refuses_board_writes_and_forwards_everything_else(monkeypatch):
+    """Board writes from the shared process are refused before any request,
+    with the way out in the error text, which is what the model reads; list
+    and ordinary memory calls go through unchanged."""
+    from pseudolife_memory import shim
+    seen = {"calls": []}
+    Server, types = _proxy_fixture(monkeypatch, seen)
+    _desktop_env(monkeypatch)
+    refused = [("memory_agents", {"action": "update", "status": "START live maintenance"}),
+               ("memory_message", {"action": "send", "to": "b7437e8b", "text": "hi",
+                                   "request_id": "r1"}),
+               ("memory_message", {"action": "receive"}),
+               ("memory_message", {"action": "ack", "message_id": "m1"})]
+
+    async def serve(server, *args, **kwargs):
+        handler = server.get_request_handler("tools/call")
+        for name, arguments in refused:
+            with pytest.raises(Exception) as caught:
+                await handler.handler(None, types.CallToolRequestParams(
+                    name=name, arguments=arguments))
+            assert caught.value.data["classification"] == "coordination_unavailable"
+            assert caught.value.data["operation_outcome"] == "not_dispatched"
+            assert "every conversation" in caught.value.message
+            assert "per-session Pseudolife server" in caught.value.message
+            assert "open sessions only" in caught.value.message
+        for name, arguments in (("memory_agents", {"action": "list"}), ("memory_search", {})):
+            result = await handler.handler(None, types.CallToolRequestParams(
+                name=name, arguments=arguments))
+            assert result.is_error is False
+
+    monkeypatch.setattr(Server, "run", serve)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token",
+                                        "process-session"))
+    assert seen["calls"] == ["memory_agents", "memory_search"]
+
+
+def test_a_claude_code_session_shim_still_binds_its_own_identity(monkeypatch, tmp_path):
+    """The per-session shim is the one that should hold the address: the
+    Desktop rule keys on the app entry's writer id, not on Claude clients."""
+    from pseudolife_memory import shim
+    _desktop_env(monkeypatch, {"PSEUDOLIFE_WRITER_ID": "claude-code",
+                               "CLAUDE_CODE_SESSION_ID": str(uuid.uuid4())})
+    seen = {}
+
+    async def proxy(*args, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    asyncio.run(shim._run_session_proxy("http://fixture", "token", "process-session"))
+    assert len(_RecordingAdapter.constructed) == 1
+    assert seen["agent_headers"]["X-PL-Agent"] == "shared-agent"
+    assert "coordination_refusal" not in seen

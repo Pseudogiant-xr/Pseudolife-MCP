@@ -141,6 +141,11 @@ CALLER_HOLDS_LOCK = {
     "_pending_digest_candidates",
     "_store_digest",
     "_delete_episode_row",
+    # v43 client-session record write-throughs, called from the locked
+    # episode lifecycle (start, close, resume) like _delete_episode_row.
+    "_register_client_session_locked",
+    "_end_client_session_locked",
+    "_reopen_client_session_locked",
     "_retitle_locked",
     "_auto_title_locked",
     "_resolve_or_create_entity",

@@ -109,6 +109,13 @@ include = ["pseudolife_memory*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+# Dump every thread's stack when one test item (setup + call + teardown)
+# runs longer than this; the test keeps running. Measured 2026-09-25 over
+# four green master CI runs (2026-09-23/24, ubuntu-latest, -n 2): the
+# slowest item took 71.6 s (test_memcot_bench graph arm), the next 32.8 s.
+# 600 s is ~8x that and fires 40 minutes before the 50-minute job timeout
+# that cancelled the hung 2026-09-22 run with no log.
+faulthandler_timeout = 600
 markers = [
     "slow: needs external infrastructure (a built docker image); skips itself when absent",
     "real_model: needs the real embedding weights (other tests get tests/fake_embedder.py; PSEUDOLIFE_TEST_EMBEDDER=real gives every test the weights); runs on the host platform, not a simulated one",

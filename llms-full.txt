@@ -381,7 +381,7 @@ is agent context every session, so it stays lean.
 | `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
-| `memory_agents(action, project?, task?, status?)` | Experimental, opt-in peer awareness or update of the caller's registered context; lists peers holding a lease or active within the hour and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_agents(action, project?, task?, status?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
 | `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
@@ -413,8 +413,8 @@ is agent context every session, so it stays lean.
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
 The five recall-path tools return **compact entries** by default (result
-payloads are agent context on every retrieval); pass `verbose=true` for full
-metadata. Full-table dumps and topology views live in the **Cortex Console**
+payloads are agent context on every retrieval; search and recent entries
+keep their write `date`); pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
@@ -535,6 +535,10 @@ logon autostart task:
 pip install -U "pseudolife-mcp[lite]"
 ```
 
+On Windows, first close every Claude Code, Codex and Claude Desktop
+session using the shim (quit Desktop from the tray): upgrading a shim
+that is running can leave it half-removed.
+
 **Docker tier:** after a `git pull` (or local code change), redeploy the
 **daemon only** — safely, without touching Postgres or the extractor:
 
@@ -554,6 +558,16 @@ every healthy deploy; see
 [Docker disk retention](docs/runbooks/docker-disk-retention.md) for the
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
+
+The image records the commit it was built from, and `/health` reports it
+as `build` (`git_sha`, `dirty`, `built_at`). So the script refuses a tree
+with uncommitted or untracked files, and lists them. It also refuses a
+tree git cannot describe (no git, not a clone, or git's `safe.directory`
+refusal, which it quotes). Commit or clean up first, or pass
+`-AllowDirty` / `--allow-dirty` to deploy the tree as it is: stamped
+`dirty: true`, or `unknown` when git cannot describe it. Each deploy
+builds a new image, so the daemon container is recreated even when the
+commit has not changed.
 
 **Everything at once:** the daemon is one of three installs. The **shim**
 your clients launch and the **Claude Code plugin** are separate and do not
@@ -621,13 +635,17 @@ Claude Code do it:
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-The plugin replaces the settings.json hook **and** the CLAUDE.md block below
-— the same standing instructions arrive as session context from the daemon.
+The plugin replaces the settings.json hook, and the daemon serves a compact
+memory core and a live briefing as session context. The full CLAUDE.md block
+below is not served; append it if you want the complete guidance.
 It deliberately does **not** bundle the MCP server: Claude Code loads a
 plugin server alongside any user-registered one with no deduplication, which
 doubled every session's tool namespace next to the installer's registration
 — so the transport is registered exactly once, by `ops/install.*` (stdio
 shim by default — per-session episode identity) or the one-liner below.
+Hooks an earlier install wrote to `~/.claude/settings.json` would duplicate
+the plugin's; the installer offers to remove them once the plugin runs
+(`--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove` unattended).
 Details, non-default ports/tokens, and migration:
 [plugin/README.md](plugin/README.md).
 
@@ -689,7 +707,7 @@ installer prefers that path when it exists). The equivalent entry by hand:
 ```json
 {
   "mcpServers": {
-    "pseudolife-memory": {
+    "pseudolife-desktop": {
       "command": "/absolute/path/to/pseudolife-mcp",
       "env": {
         "PSEUDOLIFE_WRITER_ID": "claude-desktop",
@@ -700,6 +718,16 @@ installer prefers that path when it exists). The equivalent entry by hand:
   }
 }
 ```
+
+The entry is named `pseudolife-desktop` on purpose. Desktop's Code tab runs
+Claude Code, which starts its own per-session `pseudolife-memory` server; when
+an app-level entry has the same name, Desktop sends the session's
+`mcp__pseudolife-memory__*` calls to the app-level entry and the session's own
+server gets none. Re-running the installer renames an entry it wrote under the
+old name (its `env` sets `PSEUDOLIFE_WRITER_ID` to `claude-desktop`), keeping
+any `env` keys you added and backing the config up first. It leaves any other
+`pseudolife-memory` entry alone and warns about it. Chat and Cowork then list
+the tools as `mcp__pseudolife-desktop__*`.
 
 Two things differ from the CLI clients. Desktop launches MCP servers with a
 **sanitized environment** — PATH plus a few system variables, none of your
@@ -720,7 +748,9 @@ the registrar probes `<command> --help` for the file form first and
 refuses an older shim (exit 4, nothing written) rather than register an
 entry that would fail with the same TaskGroup error — upgrade the shim
 (`pipx upgrade pseudolife-mcp`, or `pipx install --force .` from the checkout) and
-re-run. After any edit, fully quit Desktop from the tray or
+re-run. On Windows, run that upgrade with every session using the shim
+closed (Desktop fully quit from the tray), or it can leave the shim
+half-removed. After any edit, fully quit Desktop from the tray or
 menu-bar icon and relaunch — closing the window does not reload the
 config.
 
@@ -815,17 +845,25 @@ daemon:
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
 The server's value depends on the agent using it. The MCP server advertises
-the core loop and messageboard check-in through protocol-level `instructions`.
-The memory SessionStart hook delivers a short operating guide and a bounded
-briefing; a separate coordination hook asks the agent to set its project,
-task and status, discover peers, and read pending messages. Detailed memory
+the core loop through protocol-level `instructions`; the shim adds the
+messageboard check-in when its coordination adapter is up.
+The plugin's memory SessionStart hook (also used by verified Codex hooks)
+delivers a short operating guide and a bounded briefing; without the plugin,
+the installer's Claude Code `settings.json` hook
+(`pseudolife-mcp briefing --hook-json`) delivers the same two.
+A separate coordination hook asks the agent to set its project,
+task and status, discover peers, and read pending messages, but only where
+the board is on for that credential (it is on by default behind bearer
+authentication, so an open install or a disabled board adds no check-in).
+Detailed memory
 guidance remains in the bundled standing block. Hooks add per-prompt reminders
 and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
 
-With verified hooks, a standing copy is optional. If you want it instead —
-or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
-hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
+Hooks serve at most that short guide; the detailed block reaches an agent
+only as a standing copy. For the complete guidance, for subagent
+visibility (subagents read `CLAUDE.md` but not hook output), or in place of
+hooks, append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
 per-project `CLAUDE.md` / `AGENTS.md`:
 
@@ -878,10 +916,13 @@ If `[features] hooks = false` is intentional, keep it and use the standing
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** setup approval is limited to PseudoLife's current hook
-definitions: the three lifecycle hooks, plus the plugin's `Stop` entry (Claude
-Code's opt-in wake hook, a no-op in Codex). It does not approve other
-plugins or bypass future trust checks. Changed definitions need approval
-again. If automatic setup cannot
+definitions: the memory and coordination SessionStart and UserPromptSubmit
+handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's opt-in
+wake hook, a no-op in Codex). It does not approve other plugins or bypass
+future trust checks. Changed definitions need approval again, and so does a
+handler a plugin update adds; Codex skips an unapproved one silently in the
+desktop app, which `ops/update.ps1 -All` (or `ops/update_clients.py`) now
+reports as `needs-approval`. If automatic setup cannot
 use the installed runtime's trust interface, it reports the problem and
 asks you to open `/hooks` to review and trust the definitions. Approved standing
 instructions remain available as fallback. Installed files alone do not
@@ -1053,12 +1094,12 @@ bank.
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
-| Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
+| Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v42 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v43 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1114,7 +1155,8 @@ pseudolife-mcp-daemon`).
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
-  is at the bottom of `mcp-server-pseudolife-memory.log` in the app's log
+  is at the bottom of `mcp-server-pseudolife-desktop.log`
+  (`mcp-server-pseudolife-memory.log` for an entry not yet renamed) in the app's log
   folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
   on macOS). If it is a 401, the daemon is token-gated and the
   Desktop-launched shim holds no credential: Desktop sanitizes the
@@ -1128,7 +1170,9 @@ pseudolife-mcp-daemon`).
   shim predates token-file support (PyPI releases through 0.15.0 read only
   the literal token): `pseudolife-mcp --help` from a capable shim lists
   `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim and re-run the installer,
-  which now refuses to register an older one against a token file.
+  which now refuses to register an older one against a token file. On
+  Windows, upgrade with every session using the shim closed (Desktop
+  fully quit from the tray), or it can leave the shim half-removed.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —
@@ -2163,22 +2207,42 @@ rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 
 ## Abstention & confidence floors
 
-Off by default (`memory.search_confidence_floor = 0.0`). Set it above zero
-and `memory_search` returns `low_confidence: true` whenever the top match
-scores below the floor, so the agent can abstain instead of answering from
-a weak hit. A cortex fact in the result always overrides it — but *which*
-cortex facts count is tunable via `memory.cortex.guard_min_score` (default
-`0.2`; a LongMemEval retrieval replay showed the old `0.3` floor served
-*zero* facts for 60% of questions, because terse fact embeddings rarely
-score 0.3 against a natural-language query even when they are the answer —
-while going below 0.2 measurably hurt by diluting the context with weak
-facts): only facts scoring at/above it are treated as a confident answer,
-so weak topically-adjacent facts stop suppressing abstention.
+`low_confidence: true` means **nothing matched**: search served no entry
+and no cortex fact cleared `memory.cortex.guard_min_score`.
+It is not an answerability signal. Over 1,072 real agent searches
+(2026-09-06 to 2026-09-25) it fired on none of them: all but one served
+entries, and that one served cortex facts. A question whose answer is not
+in the bank still returns close-scoring hits. The 2026-09-23
+review's four in-domain absent-answer probes topped out at dense cosine
+0.43-0.64, inside the range of real hits (median top cosine 0.61 across
+those agent searches). Judge the hits; do not read a served result as a
+found answer.
 
-The two are calibrated as a **pair**; the [`evals/`](../../evals/README.md)
-sweep recommends `guard_min_score = 0.65` + `search_confidence_floor = 0.70`
-for an abstention-on deployment (doubles abstention recall at zero
-false-abstain).
+`memory.search_confidence_floor` (default `0.0`, off) adds a score test:
+above zero, `memory_search` also returns `low_confidence: true` when the
+top served score (the fused score, not the raw cosine) is below the floor
+**and** no cortex fact clears the guard. **No value is calibrated for the
+current embedder.** Until 2026-09-25 this page recommended
+`guard_min_score = 0.65` + `search_confidence_floor = 0.70`, a pair
+measured on the MiniLM embedder (2026-06-19). On the agent searches above
+that pair would flag 26% of searches, including 20% of the searches whose
+hits the agent then reported using, and it caught 3 of the 4 absent-answer
+probes (`evals/serving_policy_replay.py`, artifact
+`evals/results/serving-policy-replay-20260925-r3.json`). Leave both knobs at
+their defaults until a real answerability signal exists.
+
+`memory.cortex.guard_min_score` (default `0.2`) decides which cortex facts
+are served at all (a LongMemEval retrieval replay showed the old `0.3`
+floor served *zero* facts for 60% of questions, because terse fact
+embeddings rarely score 0.3 against a natural-language query even when
+they are the answer, while going below 0.2 measurably hurt by diluting the
+context with weak facts). Any served fact suppresses `low_confidence`.
+
+The dense relevance floor, `memory.search.min_score` (default `0.25`), is a
+different knob: a dense candidate below it never enters the pool. On the
+same agent searches the weakest served dense hit was at cosine 0.39 at
+the 1st percentile, and below 0.30 in one search of 1,064, so today the
+floor rarely binds on a real search. Raising it is not a way to abstain.
 
 ## Superseded entries
 
@@ -2687,11 +2751,11 @@ dreams, not better answers. Two ways to switch:
 Console's config view edits the endpoint, model, timeout, and token budget
 live — flip its "Settings source" switch to `config` first (while it is
 `env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
-settings and the panel's values are ignored). The API key stays env-only
-either way. The *model alone* needs no source flip: the **Dreamer** card at
-the top of the same view writes a model-only override
-(`memory.dream.extractor_model_override`) that wins over both owners while
-the endpoint wiring keeps its owner.
+settings and the panel's values are ignored). The API keys (primary and
+fallback) stay env-only either way. The *model alone* needs no source
+flip: the **Dreamer** card at the top of the same view writes a model-only
+override (`memory.dream.extractor_model_override`) that wins over both
+owners while the endpoint wiring keeps its owner.
 
 *Via env:* for the Docker stack, set the override in `ops/.env` (the
 compose file interpolates it into the daemon) and restart the daemon
@@ -2785,6 +2849,14 @@ When the shim is unreachable or the CLI is logged out, dreams automatically
 use the fallback; the Console's Observatory shows which extractor is
 active. Leave `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` unset to keep the
 existing single-extractor behavior.
+
+**API keys are per endpoint.** `PSEUDOLIFE_DREAM_API_KEY` authenticates the
+primary only and is never sent to the fallback. The fallback sends its own
+key, `PSEUDOLIFE_DREAM_FALLBACK_API_KEY`, or none at all — right for the
+bundled sidecar and both CLI shims, none of which checks one, so the pairs on
+this page set neither. A fallback that needs the primary's credential, such
+as a second model on the same hosted provider, needs the key set again under
+the fallback name.
 
 ## OpenAI primary — the Codex CLI shim
 
@@ -3353,7 +3425,7 @@ reliably — without the agent having to remember:
    or closing an episode requires them.** Five tiers, strict precedence
    (full table + rationale:
    [Configuration — session identity](configuration.md#session-identity)):
-   a stdio shim's per-process `X-PL-Session` header outranks an explicit
+   a stdio shim's `X-PL-Session` header outranks an explicit
    `episode` handle passed on a write (on the lifecycle tools —
    `memory_episode_start`/`_end`, `memory_session_title` — a resolved
    handle wins outright), which outranks the SessionStart-hook-registered
@@ -3377,18 +3449,38 @@ reliably — without the agent having to remember:
      (default 6 h, the resume window; `0` disables) so a dead session stops
      attracting later tier-3 writes — SessionStart re-stamps it, so an active
      session (Claude Code re-fires the hook on resume/compact) stays live.
-   - **Ownership guard.** `memory_episode_end` and the direct
-     `POST /api/episode/end` with no `session_key` in the body can only
-     close a root episode whose `session_key` matches the caller's own
-     resolved identity — a session can no longer pop another, still-open
-     session's root by accident. No match is a no-op:
+   - **Ownership guard.** `memory_episode_end` pops only the caller's own
+     sub-episodes and never closes a session root, with or without a
+     handle. The direct `POST /api/episode/end` with no `session_key` in
+     the body can only close a root episode whose `session_key` matches the
+     caller's own resolved identity — a session can no longer pop another,
+     still-open session's root by accident. No match is a no-op:
      `{"closed": null, "reason": "no owned open session"}`. The idle
      reaper is separate: it closes any root idle past the threshold,
      using each root's own key — that's its job, not a guard bypass.
-   - **The stdio shim** (the installer default) opens the episode eagerly
-     at connect with a title derived from the working directory, and
-     closes it when the client disconnects — so shim sessions get named
-     episodes without any hook.
+   - **The stdio shim** (the installer default) opens no episode of its
+     own. Under Claude Code its `X-PL-Session` header is the session id
+     Claude Code launched it with, which is the id the plugin's
+     SessionStart hook registers. A write without an `episode` handle, or a
+     `memory_session_title`, therefore lands on the hook's root, and that
+     root's lifecycle stays with the hooks and the idle reaper: the shim's
+     exit does not close it, because a reconnect restarts the shim
+     mid-session. Without the plugin's hooks the daemon opens that root on
+     the first write, and the idle reaper closes it. Other hosts get one
+     session per shim process (Codex keys each call by its own thread
+     instead). The daemon opens that session's episode on the first write
+     that needs one, as for a direct-HTTP client, and the shim closes it at
+     exit when the host lets it exit; otherwise the idle reaper does. A
+     shim that is idle or only searches leaves no episode behind. Until
+     2026-09-25 the shim opened a working-directory-titled episode at
+     connect, which gave each Claude Code session a second root and left an
+     empty root for every shim a host killed. One gap remains: `/clear` and
+     an in-session `/resume` give the session a new id but keep the shim's.
+     Afterwards a write without a handle, and a `memory_store` even with
+     one, reopens the root under the old id (or opens one); a handle-less
+     write lands there, and a handle-less `memory_session_title` renames it.
+     `--continue`, or `--resume` without an id, can likewise launch the shim
+     with an id no hook registers.
    - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
      handle) still get episodes: the daemon **lazily opens** one on the
      first store of a new session (so empty sessions never leave a husk)
@@ -3423,7 +3515,7 @@ reliably — without the agent having to remember:
    empty closed episodes without a tombstone. Past the handle window, or
    on an ambiguous prefix, the write proceeds under normal identity with
    an `episode_warning`.
-   Direct-HTTP titles start generic
+   Session titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an
    `episode_hint` until you do); a session closing still-generic gets an
@@ -3431,6 +3523,29 @@ reliably — without the agent having to remember:
    title. Fragmented history is repairable over REST:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
    `ops/.env` for local time.
+
+### Session record
+
+An episode is not a durable record that a session happened: a root that
+ends holding no stored entry is deleted. So every registration (the
+SessionStart hook, or `POST /api/episode/start` from the stdio shim and the
+CLI episode hooks) also writes one `client_sessions` row per session key
+(schema v43), which no prune, sweep or tombstone expiry deletes. The row
+holds how the session first registered (`hook` or `api`), the bearer's
+principal, its first start and every registration time since (a resumed
+client registers again), its most recent close and why (`end` for
+SessionEnd or shim exit, `idle` for the reaper; cleared when the session
+registers again or a store or handle reopens its root), the startup memory-policy variant the hook assigned
+(for `full_separate_hook`, a plugin without the separate memory-policy hook
+never delivers it), and every root episode id the session was given. A
+session that only searched or logged outcomes loses its root at the end but
+keeps this row, so its searches (by session key) and outcomes (by episode
+id) still have a session to count against; `evals/capture_metrics.py`
+reads it. A root the daemon opened lazily for a key that never registered
+gets no row, and an operator's manual prune of an open root
+(`include_open`) leaves that session open on record. Postgres only;
+operational data, left out of `pseudolife-mcp export` like the retrieval
+log.
 
 ## Inferred outcomes at session close
 
@@ -3510,8 +3625,11 @@ owns the mailbox; this handler does not create another identity or grant
 permissions. The memory and coordination hooks have independent output budgets
 and do not depend on execution order.
 
-The lightweight `install-hook` scripts install the briefing, coordination
-check-in instruction, and per-turn discipline line; they do not register an
+The lightweight `install-hook` scripts install the briefing, the coordination
+check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
+the daemon serves it: a board that is on and usable by that bearer), and the
+per-turn discipline line. Re-running them replaces the unconditional check-in
+echo older versions wrote. They do not register an
 agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing --hook-json` reads
 `/api/hook/session-start` (the plugin hook's memory core and briefing) but
 forwards no session id, and no SessionEnd hook is written, so an install
@@ -3529,8 +3647,8 @@ you**, daemon-owned and keyed by a resolved session identity (five tiers —
 shim header, `episode` handle, hook registration, legacy transport id, or
 idle-gap sessionization; see
 [Configuration — session identity](configuration.md#session-identity)) so
-concurrent sessions don't collide; absent a hook or shim, the daemon lazily
-opens one on first store and an idle reaper closes it. For a substantial
+concurrent sessions don't collide; absent a hook, the daemon lazily opens
+one on first store and an idle reaper closes it. For a substantial
 multi-step task you open a **nested sub-episode** under the session:
 
 ```
@@ -3571,7 +3689,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v42). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v43). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -3604,9 +3722,10 @@ the launching shell's environment is preserved after the deployment command.
 
 ## Experimental agent coordination
 
-Coordination adds peer awareness and addressed mail within one bank. It defaults
-off and does not reserve files or prevent conflicting edits. Configure it in the
-daemon's `config.yaml`, then restart the daemon:
+Coordination adds peer awareness and addressed mail within one bank. It is on
+by default, behind bearer authentication, and does not reserve files or prevent
+conflicting edits. Configure it in the daemon's `config.yaml`, then restart the
+daemon; `enabled: false` turns it off:
 
 ```yaml
 coordination:
@@ -3626,8 +3745,12 @@ identity. Last reported activity comes from attributed writes; an open episode
 does not prove a process is running. Refresh awareness before shared-resource
 work and on resume.
 
-The allowed names are principals from the bearer-token configuration above;
-the default list is empty. Mailbox operations require PostgreSQL, configured
+The allowed names are principals from the bearer-token configuration above.
+Without the key only `default`, the singular `PSEUDOLIFE_MCP_TOKEN` principal,
+is admitted: principals of a `PSEUDOLIFE_MCP_TOKENS` map are separately
+trusted identities and join the board only when listed (an explicit list
+replaces the default; include `default` to keep it). Mailbox operations
+require PostgreSQL, configured
 bearer authentication and a registered adapter's private instance credential.
 Two sessions sharing a principal still need distinct adapter identities. A
 public agent ID, episode handle or task label never grants mailbox access.
@@ -3635,11 +3758,29 @@ Clients lacking a per-session credential-injecting adapter can use awareness,
 but cannot send, receive or acknowledge another instance's mail. Awareness is
 gated on the same allowed-principal list: a bearer whose principal is not listed
 sees no peers and no awareness section in its briefing, and with no bearer token
-configured there is no principal to list, so awareness stays empty on an open
-loopback install.
+configured there is no principal to list, so the board stays dormant on an open
+loopback install: no awareness, no mail and no startup check-in.
 
-Enable the installed shim adapter with `PSEUDOLIFE_AGENT_COORDINATION=1` and set
-`PSEUDOLIFE_MCP_TOKEN` to that principal's bearer token. Optional
+The installed shim starts its adapter (for Codex, its per-thread registry) by
+default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
+`PSEUDOLIFE_MCP_TOKEN_FILE`) and the daemon serves that bearer the board; it
+asks once at startup and otherwise stays quiet. `PSEUDOLIFE_AGENT_COORDINATION=0`
+(any value but `1`, `true`, `yes` or `on`) turns it off for that client, and
+`=1` skips the question and reports any refusal on stderr.
+
+The startup check-in follows the board. The daemon serves the hook text
+(`GET /api/hook/coordination-start`) only where the board is on for that
+bearer: enabled, authenticated, a listed principal, PostgreSQL. The plugin
+hook and the installers' `pseudolife-mcp briefing --coordination` hook print
+what it serves, and the shim appends a compact check-in to the MCP
+instructions only when its adapter is up. The daemon cannot see whether a
+client has an adapter, so a check-in can still reach one that cannot complete
+it: a client connected over HTTP without the shim whose hooks hold a token; a
+client that opted out only in its MCP env block (set the opt-out where the
+hooks see it too, since they cannot read that block); and a Docker install
+wired by `ops/install-hook.*`, whose `docker exec` check-in asks with the
+daemon container's own token. The check-in tells the agent to say so and
+continue when the tools are unavailable. Optional
 `PSEUDOLIFE_AGENT_LABEL`, `PSEUDOLIFE_AGENT_PROJECT` and `PSEUDOLIFE_AGENT_TASK`
 provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a
@@ -3675,7 +3816,10 @@ unchanged, a one-line reminder rides every tenth tool result. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
-Code, whose per-session stdio shim does receive the id.
+Code, whose per-session stdio shim does receive the id. That shim serves the
+session's calls only while Desktop's app-level entry has a different name, so
+the installer names that entry `pseudolife-desktop` (see
+[Claude Desktop](providers.md#claude-desktop)).
 
 Claude Code hooks see the current session id, which `/clear` and an
 in-session `/resume` change, while the shim keeps the id it was launched with.
@@ -3893,7 +4037,8 @@ PSEUDOLIFE_CODEX_BIN = 'C:\path\to\codex.exe'
 ```
 
 Reconnect the MCP server afterwards; the setup helper does not set either value,
-and the doorbell stays off without `PSEUDOLIFE_AGENT_COORDINATION=1`. The PATH
+and the doorbell stays off without the coordination adapter (on by default
+with a bearer token, off with `PSEUDOLIFE_AGENT_COORDINATION=0`). The PATH
 lookup uses absolute PATH directories only, never the working directory (the
 task's checkout), so a repository cannot supply its own `codex`. A
 `PSEUDOLIFE_CODEX_BIN` that is relative or does not exist turns the doorbell
@@ -4030,10 +4175,12 @@ inside the daemon container, which already has the database URL:
 What `verify` shows: no row was edited, inserted or reordered, and none was
 removed except the oldest, behind a cut record whose own fields add up (written
 by the daemon, a window of at least a day, the cutoff that window gives at its
-time, and no surviving row older than that cutoff). What it cannot show on its
-own, because no secret is involved: that the newest rows were not dropped; that
-the table was not rewritten with every hash recomputed; and that the oldest
-rows were not removed by someone who also appended a consistent cut record.
+time, and a first surviving row no older than that cutoff; retention removes
+only an expired prefix, so a later row stamped before the cutoff can remain).
+What it cannot show on its own, because no secret is involved: that the
+newest rows were not dropped; that the table was not rewritten with every
+hash recomputed; and that the oldest rows were not removed by someone who
+also appended a consistent cut record.
 Record `head_seq:head_hash` and `head_created_at` from each `verify` somewhere
 outside the bank, and later run `verify --expect-head SEQ:HASH`. That catches
 the first two. The third needs a series of recorded heads: retention never
@@ -4083,22 +4230,47 @@ to trigger physical cleanup. Full queues and rate limits return explicit errors.
 Live delivery attempts a message at most three times in total across
 attachments; past that it is left for explicit receive, so one unacknowledged
 message cannot wake the host on every restart. The same prune pass removes an
-address that holds no lease, is referenced by no retained message and has been
-idle for seven days, or for one hour when its adapter registered without a
-state file (`capabilities.resumable: false`), since nothing can attach to that
-address again; for those the lease too must have been gone for the hour, so a
-daemon restart cannot retire a parked shim's address, and if it ever is
-retired the state-less adapter registers a fresh one instead of stopping.
+address that is referenced by no retained message and has had neither its own
+activity nor a lease for seven days, or for one hour when its adapter
+registered without a state file (`capabilities.resumable: false`), since
+nothing can attach to that address again. A held lease keeps a live shim's
+address even while it is idle, so a daemon restart or a host sleep shorter than
+that window cannot retire it; if a state-less address is ever retired, its
+adapter registers a fresh one instead of stopping.
 Addresses that predate the flag keep the seven-day rule. Idle
-means no register, update, attach, send, acknowledgment or forwarded tool call:
-the adapter's lease heartbeat counts as activity only when the shim forwarded a
-tool call since the previous one, so a parked shim is neither ranked nor
-retained as a working one. A client that only reads must acknowledge what it
+means no register, update, new attachment, send, acknowledgment or forwarded
+tool call: the adapter's lease heartbeat counts as activity only when the shim
+forwarded a tool call since the previous one, and an adapter re-attaching under
+its own attachment ID (after a daemon outage or a host sleep) is recovering its
+lease, not acting, so a parked shim is neither ranked nor retained as a working
+one. A client that only reads must acknowledge what it
 reads, or hold a lease, to stay registered. `memory_agents(action="list")`
-shows peers that hold a lease or were active within the last hour, leased
-first, reports the number of other matching peers as `idle_omitted` and sets
-`truncated` when the page cut listed peers; a peer's public agent ID stays
-addressable while its row exists. A
+shows peers active within the last hour, or within the last three hours while
+they hold a lease, leased first; it reports the number of other matching peers
+as `idle_omitted` and sets `truncated` when the page cut listed peers; a peer's
+public agent ID stays addressable while its row exists. Each listed peer
+carries `status_set_at`, `status_age` and `status_stale`. The time comes from
+the [audit log](#audit-log): the newest registration or status update. A status
+the log no longer covers is reported as older than the log's oldest event, for
+example `more than 21 hours ago`. A non-empty status older than two hours is
+marked stale. The two-hour and three-hour windows come from the first day of
+the live audit log (2026-09-25). Working agents refreshed their status within
+34 minutes at p95 and never went more than 51 minutes between board actions
+inside a work block. Idle stretches ran 5.4 hours or longer.
+
+Claude Desktop's app-level entry (writer ID `claude-desktop`) is one process
+serving every conversation in the app, so it registers no coordination
+address: whichever conversation called it would post, set status and read
+mail as all of them. It refuses `memory_agents(action="update")` and
+`memory_message` with an error saying why, prepends the same advice to its MCP
+instructions, and its `memory_agents(action="list")` shows open sessions only,
+not the board. A Claude Code session makes those calls on its own per-session
+server. In the Desktop app's Code tab that works only while the two entries have
+different names: the installer registers both as `pseudolife-memory`, and
+where the names match, Desktop serves the Code tab from its app-level entry.
+The writer ID is operator configuration, not authentication: the guard keeps
+honestly configured clients apart, while the daemon itself refuses any board
+write that carries no instance credential. A
 legacy adapter registers a fresh address on its next start only when the authenticated
 daemon explicitly confirms that the saved address no longer exists. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance
@@ -4224,6 +4396,43 @@ sessions can keep waking each other, so wakes are capped (below).
   started it.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
+
+## Startup memory policy (`memory_policy`)
+
+Which standing memory policy the session-start hooks serve. The default is
+the short core the memory hook has served since 2026-09-24; the other
+variants exist so their effect on agent behaviour can be measured
+(`evals/memory_policy_bench.py`) rather than argued.
+
+```yaml
+memory_policy:
+  variant: compact          # none | compact | full_separate_hook
+  ab_arms: []               # e.g. [compact, full_separate_hook] for an online A/B test
+```
+
+| Variant | What session start serves |
+|---|---|
+| `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
+| `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. Since 2026-09-25 it restates three of the full block's rules: search before stating a "current" version, number or benchmark; correct memory-vs-code drift on the spot; route verified external facts to `memory_world_set`. |
+| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
+
+The separate output is the plugin's third SessionStart handler
+(`session-start.sh memory-policy`, or `lifecycle.ps1 -Event MemoryPolicy` in
+Codex on Windows); `ops/setup-codex-hooks.py` installs and approves it for
+manual Codex hooks too. For every other variant it answers an empty body and
+adds nothing. The `install-hook` scripts' settings hooks do not carry it, so
+`full_separate_hook` serves no policy to those installs.
+
+`ab_arms` assigns each session the SessionStart hook registers one arm, by a
+SHA-256 of its client session id modulo the arm count; a variant may repeat
+for an A/A arm. Sessions that reach the hook without a session id keep
+`variant`. Each registration records the variant it served in the
+session's `client_sessions` row (schema v43, see
+[Episodes](episodes.md#session-record)), which outlives the session's root,
+so an online comparison can be read from the bank for every hook-registered
+session, including those that stored nothing (`evals/capture_metrics.py`
+reports sessions per variant). A custom `hook-instructions.md` is served in
+every variant.
 
 ## Built-in defaults (tuned for Claude's use case)
 
@@ -4401,10 +4610,14 @@ sessions can keep waking each other, so wakes are capped (below).
   debug/audit switch. Before 2026-07-30 this knob was mis-registered as
   `memory.show_superseded` and did nothing.
 - **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
-  above zero and `memory_search` returns `low_confidence: true` whenever
-  the top match scores below the floor. Calibrated as a pair with
-  `memory.cortex.guard_min_score`; the recommended abstention-on values
-  and the calibration story: [Retrieval](retrieval.md#abstention--confidence-floors).
+  above zero and `memory_search` also returns `low_confidence: true` when
+  the top match scores below the floor and no cortex fact clears
+  `memory.cortex.guard_min_score`. No value is calibrated for the current
+  embedder, and the pair this guide used to recommend would flag a fifth
+  of real searches whose hits agents used:
+  [Retrieval](retrieval.md#abstention--confidence-floors). The dense
+  relevance floor under it, `memory.search.min_score` (`0.25`), is a
+  separate knob and not an abstention signal either.
 - **Dream slot resolver off** (`memory.cortex.dream_slot_match_threshold =
   0.0`) — a positive cosine floor lets the dream pass map a paraphrased
   `(entity, attribute)` onto an existing slot before writing, to catch
@@ -4684,7 +4897,8 @@ sessions can keep waking each other, so wakes are capped (below).
   payloads verbatim (superseded hits keep the `replaced_by` pointer, which
   `memory_get` also serves for a superseded entry, and
   `memory_episode_summary` still compacts its `recent_entries` like
-  `memory_recent` — none of the three follows the knob); raise
+  `memory_recent`, and every compact entry keeps its write `date`
+  (2026-09-25) — none of the four follows the knob); raise
   `entry_text_chars` for long-form corpora where
   the tail of a note carries the answer.
 
@@ -4749,8 +4963,12 @@ daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the
 mechanism that gives **concurrent** Claude Code sessions distinct identity —
-a per-process `X-PL-Session` header, the strongest of the five
-[session-identity](#session-identity) tiers. The shim works against
+an `X-PL-Session` header, the strongest of the five
+[session-identity](#session-identity) tiers. Under Claude Code (writer id
+unset or `claude-code`) the header is the session id Claude Code launched the
+shim with, the same id its SessionStart hook registers, so the shim and the
+hook share one session episode. Other hosts get one id per shim process. The
+shim opens no episode itself; see [Episodes](episodes.md). The shim works against
 **either** daemon deployment, host-process or the containerized stack — it's
 just an HTTP client to `PSEUDOLIFE_MCP_DAEMON_URL` and only spawns a new host
 daemon when nothing answers there already (a cross-process lock keeps
@@ -4828,14 +5046,14 @@ through one chokepoint, evaluated in strict precedence order:
 
 | tier | source | scope | notes |
 |---|---|---|---|
-| 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
+| 1 | `X-PL-Session` header | per session | the stdio shim sends this on every call: Claude Code's own session id under Claude Code (the id tier 3 registers), one id per shim process elsewhere, the thread id on each Codex call; any integrator can |
 | 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`, and on the lifecycle tools `memory_episode_start` / `memory_episode_end` / `memory_session_title` — where a resolved handle wins outright (they never consult the header tiers); the daemon mints it and advertises it in the SessionStart briefing |
 | 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it. A singleton — concurrent sessions race it, which is why the lifecycle tools take the per-call handle |
 | 4 | `mcp-session-id` header | per connection | **retired** — the header names the connection (concurrent sessions share it) and the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes it from the protocol. `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one release as a rollback hatch |
 | 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
 
 **Why the header outranks the handle when both are present.** A shim
-header is infrastructure-asserted per OS process; an `episode` handle is
+header is infrastructure-asserted, by the host or per OS process; an `episode` handle is
 model-supplied and can be confused between two concurrent sessions'
 briefings. But identity and target episode are separable — a write still
 lands in the handle's named episode even when the header wins identity for
@@ -5006,6 +5224,7 @@ Windows, register a daily run once:
 ```powershell
 ops\install-backup-task.ps1              # daily 03:00
 ops\install-backup-task.ps1 -At 02:15
+<dir>\ops\install-backup-task.ps1 -ScriptCheckout <dir>   # see below
 ops\install-backup-task.ps1 -Uninstall   # remove it
 ```
 
@@ -5014,7 +5233,26 @@ from a worktree; the installer warns if that copy predates the row-count
 gate. It catches up at the next boot or logon if the machine was off,
 waiting up to 10 minutes (`-DockerWaitSeconds`) for Docker to answer
 first, and it runs as you, so `PSEUDOLIFE_BACKUP_MIRROR` applies. Each run
-is appended to `data\backups\backup-task.log`. On Linux/macOS, a cron entry
+is appended to `data\backups\backup-task.log`, headed by the HEAD commit of
+the checkout whose `backup.ps1` it ran.
+
+If the main checkout cannot follow master (for example, it holds
+uncommitted work), run the backup from a dedicated worktree of master
+instead. Create it with `git worktree add --detach <dir> origin/master`
+from the main checkout, lock it with `git worktree lock <dir>`, then install
+with that worktree's own copy: `<dir>\ops\install-backup-task.ps1
+-ScriptCheckout <dir>`. The installer refuses an unlocked worktree, because
+worktree cleanup would otherwise delete the script the task runs. It also
+refuses a script checkout that would receive the dumps itself, such as a
+separate clone running its own installer. Dumps and the log still go to
+the main checkout's `data\backups`, where a replica push looks for them;
+`restore` from `<dir>` reads its own `data\backups`, so name the files
+there with `-BackupFile` (and `-StateArchive`). Move the worktree forward
+when you deploy (`git -C <dir> fetch origin master`, then
+`git -C <dir> checkout --detach origin/master`); the log shows which commit
+each night ran.
+
+On Linux/macOS, a cron entry
 that runs `ops/backup.sh` does the same job, but cron starts with a bare
 environment: set `PATH` (so it finds `docker`) and any
 `PSEUDOLIFE_BACKUP_MIRROR*` variables in the crontab itself.
@@ -5057,9 +5295,9 @@ while any other connection holds the database — stop the daemon first
 (Docker tier: `docker compose -f ops/docker-compose.yml stop
 pseudolife-daemon`); `--force` overrides for connections you know are
 inert — and refuses an export whose format version or embedding dimension
-it cannot honor. Operational telemetry (retrieval/read logs, the dream-run
-journal), agent instance credentials, coordination mail and the board's audit
-log deliberately stay behind, and the manifest lists exactly which
+it cannot honor. Operational telemetry (retrieval/read logs, the client-session
+record, the dream-run journal), agent instance credentials, coordination mail and
+the board's audit log deliberately stay behind, and the manifest lists exactly which
 tables were excluded. Ingested `document_ingest` files live on the state
 volume/data dir, not in Postgres — carry those with the physical backup's
 state archive.
@@ -5074,7 +5312,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v42**; migrations are additive
+The current Postgres meta version is **v43**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -5122,6 +5360,7 @@ The milestones:
 | v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
 | v41 | Audited continuum entry reinstatement (2026-09-22). Adds `entry_reinstatement_decisions`, an operation-keyed, FK-free append-only audit that survives later entry deletion. A single Postgres transaction binds the reviewed retirement preimage to the decision and clears only the entry's retirement fields; retries use the operation UUID. The first version refuses entries with trace invalidations and leaves all cortex state unchanged. Additive/idempotent; existing banks start with an empty decision table. |
 | v42 | Board audit log (2026-09-24). Adds `coordination_events`, an append-only, FK-free, sha256-hash-chained record of every agent-board mutation (register, update with the replaced values, attach, detach, send with its body, first read, ack, attempt, expire, prune, bank identity, restore recover/rebind), written in the mutation's own transaction and pruned only by its own `coordination.audit_retention_days` window (default 90, `0` keeps it forever), which logs its cuts. Adds `coordination_messages.first_read_at`. Operational data, excluded from portable exports like the other coordination tables; read and verified with `pseudolife-mcp board-audit`. The log is cut at most once a day, on UTC day boundaries, and only while the board is in use. Additive/idempotent; existing banks start with an empty log, and history before the upgrade is not reconstructed: a message still unacknowledged at the upgrade has no `send` event, and its first read afterwards is logged as its first read. |
+| v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or shim exit, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
@@ -5185,8 +5424,9 @@ credentials and requires deliberate rebinds.
    adapters. Keep them stopped through recovery; editing configuration cannot
    disable a daemon that already loaded its configuration.
 2. Set `coordination.enabled: false` in the configuration the restored daemon
-   will use. Retain the explicit `allowed_principals` list needed for later
-   mailbox ownership checks.
+   will use; coordination is on by default, so a configuration without the key
+   is refused. Retain the `allowed_principals` list needed for later mailbox
+   ownership checks (without the key, only `default` is allowed).
 3. Restore the database using the normal backup procedure. Set
    `PSEUDOLIFE_MCP_DATABASE_URL` in the operator's environment to the restored
    database. Recovery uses this environment variable only: it does not start
@@ -5299,7 +5539,7 @@ Portable knowledge exports exclude agent mailboxes, credentials, the audit log,
 bank identity and operational metadata. Import also ignores any bank identity in an archive,
 preserving the destination's identity. Full database backups retain it. See
 [configuration](configuration.md#experimental-agent-coordination) for the
-default-off feature and [the experimental design](../specs/2026-09-11-agent-coordination-design.md)
+feature's defaults and [the experimental design](../specs/2026-09-11-agent-coordination-design.md)
 for delivery and acknowledgment semantics.
 
 ---
@@ -5411,6 +5651,14 @@ transport comes from the installer either way (stdio shim by default),
 registered with `PSEUDOLIFE_WRITER_ID=claude-code` so writes are
 attributed per provider.
 
+Upgrading from the fallback to the plugin leaves its hooks in
+`~/.claude/settings.json`, where they duplicate the plugin's. The installer
+offers to remove them once the plugin is installed and enabled for all
+projects (`--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove` does
+it unattended), and `ops/install-hook.* --remove-legacy` does the same by
+hand. Only the exact entries the installers wrote are removed, after a
+backup; an edited copy of one is listed for review and kept.
+
 With the coordination adapter enabled, the same UserPromptSubmit hook also
 prints the session's coordination digest — pending addressed mail, rendered
 by the shim into a per-session file — but only on the turn after it changed;
@@ -5430,6 +5678,23 @@ installers call and which you can run by hand with
 entry). What Desktop does differently, and what the entry carries because
 of it:
 
+- **Its own name.** The entry is `pseudolife-desktop`. Desktop's Code tab
+  runs Claude Code, which starts its own per-session `pseudolife-memory`
+  server; where an app-level entry carries the same name, Desktop sends the
+  session's `mcp__pseudolife-memory__*` calls to the app-level entry and the
+  session's own server gets none (seen live on 2026-09-21), so the session
+  has no board identity of its own. The registrar renames an entry it wrote
+  under the old name, recognised by `PSEUDOLIFE_WRITER_ID=claude-desktop` in
+  its `env`, and keeps its other settings: hand-added `env` keys, a
+  configured token-file path, a literal token to migrate. When both names
+  exist, `pseudolife-desktop` wins wherever both set a key, the old entry
+  fills the gaps, and the output names the `env` keys whose old values were
+  dropped (names, never values), apart from the settings the registrar
+  rewrites on every run. A `pseudolife-memory` entry the registrar did not
+  write is left untouched and reported on every run, and `pseudolife-desktop`
+  is written beside it, so Desktop loads both. Every rewrite
+  backs the config up first (`claude_desktop_config.json.bak-<timestamp>`).
+  Afterwards Chat and Cowork list the tools as `mcp__pseudolife-desktop__*`.
 - **Sanitized launch environment.** Desktop starts MCP servers with PATH
   plus a few system variables — none of your shell's exports. So `command`
   is the shim's absolute path (a bare `pseudolife-mcp` would not resolve),
@@ -5454,7 +5719,9 @@ of it:
   answers without it is refused (exit 4, nothing written) with the
   upgrade named — `pipx upgrade pseudolife-mcp`, or `pipx install --force .` from
   the checkout for a change not yet released — and so is a shim from
-  before `--help` existed (it answers "unknown mode"). A probe that yields
+  before `--help` existed (it answers "unknown mode"). On Windows, run that
+  upgrade with every session using the shim closed (Desktop fully quit
+  from the tray), or it can leave the shim half-removed. A probe that yields
   no evidence (missing, not executable, timeout, any other non-zero exit,
   exit 0 with no output) is not blocking: the run proceeds and says the
   check did not happen, so a clean exit 0 from the registrar is proof only
@@ -5599,16 +5866,17 @@ content-specific paths so updating their code also changes the definitions.
 
 ### Hooks versus AGENTS.md
 
-The default SessionStart policy and `examples/CLAUDE.memory.md` contain the
-same standing memory instructions. This equivalence covers the **memory
-block**, not the rest of a project's `AGENTS.md`: personality, coding rules,
-project conventions, and other instructions still belong there. A custom
-daemon `hook-instructions.md` can override the default hook policy.
+The default SessionStart policy is a compact core of the memory
+instructions, not the full block in `examples/CLAUDE.memory.md`; append that
+block when you want the complete guidance. Neither replaces the rest of a
+project's `AGENTS.md`: personality, coding rules, project conventions, and
+other instructions still belong there. A custom daemon
+`hook-instructions.md` is served after the core, capped at 3.5 KB.
 
 | Mechanism | What it supplies |
 |---|---|
 | `AGENTS.md` memory block | Standing guidance to recall, capture, and reflect when the client loads instructions |
-| `SessionStart` | The memory policy, a live briefing, and session episode identity |
+| `SessionStart` | A compact memory policy, a live briefing, and session episode identity |
 | `UserPromptSubmit` | A short memory reminder on each prompt |
 | `SessionEnd` | Automatic session episode cleanup |
 
@@ -5666,6 +5934,9 @@ upgrade the client or configure that entry manually before using the shim.
    `-m pip install --upgrade "pseudolife-mcp[lite]"`; for a source checkout,
    reinstall the intended checkout with `-m pip install -e .` to refresh
    dependencies and editable metadata. Docker shim-only hosts omit `[lite]`.
+   On Windows, run either with every session using that shim closed
+   (Claude Desktop fully quit from the tray), or it can leave the shim
+   half-removed.
    Re-running the Docker installer preserves existing registrations; it does
    not repair a different interpreter already registered with Codex.
 4. Reconnect and ask for a real memory search and lesson search. Confirm the

@@ -51,7 +51,9 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Abstention floor", "type": "float", "default": 0.0,
      "min": 0.0, "max": 1.0, "step": 0.01, "restart": False,
      "help": "When the top search score is below this, search returns "
-             "low_confidence so the agent can abstain. 0 = off."},
+             "low_confidence (memory_search also requires that no cortex "
+             "fact clears the cortex guard). Uncalibrated for the current "
+             "embedder. 0 = off."},
     {"path": "memory.top_k", "group": "Retrieval", "label": "Default top-k",
      "type": "int", "default": 8, "min": 1, "max": 50, "step": 1,
      "restart": False, "help": "Episodic retrieval slots across bands."},
@@ -138,7 +140,8 @@ KNOBS: list[dict[str, Any]] = [
              "cortex block sized to the caller's top_k, and "
              "memory_fact_get's bookkeeping keys behind verbose=True. Off "
              "restores the pre-2026-09-04 payloads, except that superseded "
-             "hits keep their short replaced_by pointer. Projection only — "
+             "hits keep their short replaced_by pointer and entries keep "
+             "their write date. Projection only — "
              "ranking and every eval number are unaffected."},
     {"path": "memory.mcp.entry_text_chars", "group": "MCP payloads",
      "label": "Search entry text cap", "type": "int", "default": 600,
@@ -513,8 +516,10 @@ KNOBS: list[dict[str, Any]] = [
      "suggestions": ["http://pseudolife-extractor:8081/v1"],
      "help": "OpenAI-compatible /v1 endpoint used when the primary is "
              "unreachable (or mode = fallback). Empty disables selection "
-             "entirely — single-extractor behavior. Effective only when "
-             "settings source = config."},
+             "entirely — single-extractor behavior. It never receives the "
+             "primary's API key: a fallback that needs one reads "
+             "PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only "
+             "when settings source = config."},
     {"path": "memory.dream.fallback_model", "group": "Extractor",
      "label": "Fallback model", "type": "string", "default": None,
      "restart": False, "suggestions": ["extractor"],

@@ -35,11 +35,15 @@ def test_coordination_hooks_are_independent_of_memory_hooks():
     manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
     prompts = [h for group in manifest["UserPromptSubmit"] for h in group["hooks"]]
     starts = [h for group in manifest["SessionStart"] for h in group["hooks"]]
-    assert len(prompts) == 2 and len(starts) == 2
+    # SessionStart: the memory briefing, the memory-policy block, coordination.
+    assert len(prompts) == 2 and len(starts) == 3
     assert any("coordination-prompt.sh" in h["command"] and "CoordinationPrompt" in h["commandWindows"]
                for h in prompts)
     assert any("coordination-start.sh" in h["command"] and "CoordinationStart" in h["commandWindows"]
                for h in starts)
+    memory = [h for h in starts + prompts if "coordination" not in h["command"]]
+    assert len(memory) == 3
+    assert not any("Coordination" in h["commandWindows"] for h in memory)
 
 
 def _send(store, sender, recipient, text, request_id):
@@ -625,7 +629,7 @@ def _run_prompt_hook(shell, env, session_id="fixture-session"):
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
-def test_prompt_hook_prints_a_new_digest_once_then_only_the_static_line(shell, tmp_path):
+def test_prompt_hook_prints_a_new_digest_once_then_stays_silent(shell, tmp_path):
     env, key = _digest_env(tmp_path)
     quiet = _run_prompt_hook(shell, env)
     assert quiet == ""
@@ -697,7 +701,8 @@ def test_prompt_hook_ignores_a_malformed_digest_and_never_fails(shell, tmp_path)
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
-@pytest.mark.parametrize("source,kept", [("compact", False), ("resume", False), ("startup", True)])
+@pytest.mark.parametrize("source,kept", [("compact", False), ("resume", False), ("clear", False),
+                                         ("startup", True)])
 def test_session_start_on_resume_or_compact_forces_a_fresh_digest(shell, source, kept, tmp_path):
     env, key = _digest_env(tmp_path)
     env["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:9"
@@ -839,8 +844,9 @@ def test_resume_carries_the_record_only_on_this_process_handoff(line, value, tmp
                    "elsewhere": _sha("elsewhere")}[value]
     _plant(switch, "\n".join(lines) + "\n")
     _write_digest(tmp_path, _sha("resumed-session"), 3, BODY)
-    briefing = _claude_hook("coordination-start.sh", env, "resumed-session", source="resume")
-    assert "Pseudolife coordination:" in briefing
+    # No daemon answers here, so the gated check-in adds nothing; the record
+    # handling below is what this test is about.
+    assert _claude_hook("coordination-start.sh", env, "resumed-session", source="resume") == ""
     resumed = _claude_hook("coordination-prompt.sh", env, "resumed-session")
     assert resumed.rstrip("\n").endswith(BODY)
     assert "launch session" not in resumed
@@ -1028,3 +1034,115 @@ def test_both_hook_scripts_render_the_same_digest(tmp_path):
     (tmp_path / "digests" / f"{key}.seen").unlink()
     from_pwsh = _run_prompt_hook("powershell", env)
     assert from_bash == from_pwsh
+
+
+# --- The startup check-in is served only where the board works ---------------
+#
+# A check-in the agent cannot complete (coordination off on the daemon, no
+# bearer, an unlisted principal, or an explicit client opt-out) is a failed
+# tool call on every session start. The daemon serves the text per bearer
+# (GET /api/hook/coordination-start); the hooks print whatever it returns.
+
+CHECKIN = "Pseudolife coordination: fixture check-in served by the daemon."
+
+
+class _CheckinDaemon:
+    """Serves the check-in only to the expected bearer, like the daemon."""
+
+    def __init__(self, body=CHECKIN):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from threading import Thread
+        self.requests = []
+        daemon = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                daemon.requests.append((self.path, self.headers.get("Authorization")))
+                served = (body if self.path == "/api/hook/coordination-start"
+                          and self.headers.get("Authorization") == "Bearer fixture-token"
+                          else "")
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write((served + "\n" if served else "").encode("utf-8"))
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_port}"
+        self.worker = Thread(target=self.server.serve_forever, daemon=True)
+        self.worker.start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.worker.join(timeout=2)
+
+
+def _run_start_hook(shell, env, source="startup", session_id="fixture-session"):
+    payload = json.dumps({"session_id": session_id, "source": source})
+    if shell == "bash":
+        return bash_run(ROOT / "plugin/hooks/coordination-start.sh", input=payload, env=env).stdout
+    result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "CoordinationStart",
+                      input=payload, env=env)
+    if not result.stdout.strip():
+        return ""
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert output["hookEventName"] == "SessionStart"
+    return output["additionalContext"] + "\n"
+
+
+@pytest.fixture
+def checkin_daemon():
+    daemon = _CheckinDaemon()
+    try:
+        yield daemon
+    finally:
+        daemon.close()
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("source", ["startup", "resume", "compact", "clear"])
+def test_start_hook_prints_the_checkin_the_daemon_serves(shell, source, checkin_daemon, tmp_path):
+    env, _ = _digest_env(tmp_path)
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = checkin_daemon.url
+    env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-token"
+    env.pop("PSEUDOLIFE_AGENT_COORDINATION", None)
+    assert _run_start_hook(shell, env, source) == CHECKIN + "\n"
+    assert checkin_daemon.requests == [("/api/hook/coordination-start", "Bearer fixture-token")]
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_start_hook_prints_nothing_when_the_board_is_unavailable(shell, checkin_daemon, tmp_path):
+    """No bearer here, so the daemon serves an empty body: no check-in."""
+    env, _ = _digest_env(tmp_path)
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = checkin_daemon.url
+    env.pop("PSEUDOLIFE_AGENT_COORDINATION", None)
+    assert _run_start_hook(shell, env) == ""
+    assert checkin_daemon.requests == [("/api/hook/coordination-start", None)]
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_start_hook_prints_nothing_when_the_daemon_does_not_answer(shell, tmp_path):
+    env, _ = _digest_env(tmp_path)
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:9"
+    env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-token"
+    env.pop("PSEUDOLIFE_AGENT_COORDINATION", None)
+    started = time.monotonic()
+    assert _run_start_hook(shell, env) == ""
+    assert time.monotonic() - started < 5  # the hook's budget in hooks.json
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("value", ["0", "off", "False"])
+def test_start_hook_honours_an_explicit_client_opt_out(shell, value, checkin_daemon, tmp_path):
+    env, key = _digest_env(tmp_path)
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = checkin_daemon.url
+    env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-token"
+    env["PSEUDOLIFE_AGENT_COORDINATION"] = value
+    directory = _write_digest(tmp_path, key, 3, BODY)
+    (directory / f"{key}.seen").write_text("3")
+    assert _run_start_hook(shell, env, "resume") == ""
+    assert checkin_daemon.requests == []
+    # The digest bookkeeping still runs.
+    assert not (directory / f"{key}.seen").exists()

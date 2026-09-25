@@ -150,22 +150,42 @@ rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 
 ## Abstention & confidence floors
 
-Off by default (`memory.search_confidence_floor = 0.0`). Set it above zero
-and `memory_search` returns `low_confidence: true` whenever the top match
-scores below the floor, so the agent can abstain instead of answering from
-a weak hit. A cortex fact in the result always overrides it — but *which*
-cortex facts count is tunable via `memory.cortex.guard_min_score` (default
-`0.2`; a LongMemEval retrieval replay showed the old `0.3` floor served
-*zero* facts for 60% of questions, because terse fact embeddings rarely
-score 0.3 against a natural-language query even when they are the answer —
-while going below 0.2 measurably hurt by diluting the context with weak
-facts): only facts scoring at/above it are treated as a confident answer,
-so weak topically-adjacent facts stop suppressing abstention.
+`low_confidence: true` means **nothing matched**: search served no entry
+and no cortex fact cleared `memory.cortex.guard_min_score`.
+It is not an answerability signal. Over 1,072 real agent searches
+(2026-09-06 to 2026-09-25) it fired on none of them: all but one served
+entries, and that one served cortex facts. A question whose answer is not
+in the bank still returns close-scoring hits. The 2026-09-23
+review's four in-domain absent-answer probes topped out at dense cosine
+0.43-0.64, inside the range of real hits (median top cosine 0.61 across
+those agent searches). Judge the hits; do not read a served result as a
+found answer.
 
-The two are calibrated as a **pair**; the [`evals/`](../../evals/README.md)
-sweep recommends `guard_min_score = 0.65` + `search_confidence_floor = 0.70`
-for an abstention-on deployment (doubles abstention recall at zero
-false-abstain).
+`memory.search_confidence_floor` (default `0.0`, off) adds a score test:
+above zero, `memory_search` also returns `low_confidence: true` when the
+top served score (the fused score, not the raw cosine) is below the floor
+**and** no cortex fact clears the guard. **No value is calibrated for the
+current embedder.** Until 2026-09-25 this page recommended
+`guard_min_score = 0.65` + `search_confidence_floor = 0.70`, a pair
+measured on the MiniLM embedder (2026-06-19). On the agent searches above
+that pair would flag 26% of searches, including 20% of the searches whose
+hits the agent then reported using, and it caught 3 of the 4 absent-answer
+probes (`evals/serving_policy_replay.py`, artifact
+`evals/results/serving-policy-replay-20260925-r3.json`). Leave both knobs at
+their defaults until a real answerability signal exists.
+
+`memory.cortex.guard_min_score` (default `0.2`) decides which cortex facts
+are served at all (a LongMemEval retrieval replay showed the old `0.3`
+floor served *zero* facts for 60% of questions, because terse fact
+embeddings rarely score 0.3 against a natural-language query even when
+they are the answer, while going below 0.2 measurably hurt by diluting the
+context with weak facts). Any served fact suppresses `low_confidence`.
+
+The dense relevance floor, `memory.search.min_score` (default `0.25`), is a
+different knob: a dense candidate below it never enters the pool. On the
+same agent searches the weakest served dense hit was at cosine 0.39 at
+the 1st percentile, and below 0.30 in one search of 1,064, so today the
+floor rarely binds on a real search. Raising it is not a way to abstain.
 
 ## Superseded entries
 

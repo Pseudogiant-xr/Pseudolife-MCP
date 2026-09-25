@@ -1217,6 +1217,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         texts = [t for t in (texts or []) if t]
         if not texts:
             return []
@@ -1250,7 +1252,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             # Chatty/reasoning models often wrap the object in ```json fences or
@@ -1322,6 +1324,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         texts = [t for t in (texts or []) if t]
         if not texts:
             return []
@@ -1345,7 +1349,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1363,6 +1367,8 @@ class OpenAICompatExtractor:
         rather than consuming them on a failed call."""
         import json
         import urllib.request
+
+        from pseudolife_memory.utils import no_redirect
 
         headers = {"content-type": "application/json"}
         if self.api_key:
@@ -1383,7 +1389,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1502,6 +1508,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         texts = [t for t in (texts or []) if t]
         if not texts:
             return []
@@ -1523,7 +1531,7 @@ class OpenAICompatExtractor:
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1596,6 +1604,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
@@ -1615,7 +1625,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
         except Exception as exc:  # noqa: BLE001 — transport, not content
@@ -1631,6 +1641,8 @@ class OpenAICompatExtractor:
         transport/parse failure so a failed batch marks nothing."""
         import json
         import urllib.request
+
+        from pseudolife_memory.utils import no_redirect
 
         headers = {"content-type": "application/json"}
         if self.api_key:
@@ -1673,7 +1685,7 @@ class OpenAICompatExtractor:
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             # The model the endpoint actually SERVED (OpenAI-compatible
             # responses echo it). A name-agnostic endpoint (llama-server
@@ -1833,6 +1845,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
@@ -1854,7 +1868,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
         except Exception as exc:  # noqa: BLE001 — transport, not content
@@ -2080,18 +2094,24 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     probes the primary per invocation — recovery is automatic at the next
     sweep. Raises ValueError for mode "fallback" with no fallback URL.
     The bench/eval harness never calls this — it constructs extractors
-    directly so runs stay pinned to one endpoint."""
+    directly so runs stay pinned to one endpoint.
+
+    The fallback authenticates with its own key
+    (``PSEUDOLIFE_DREAM_FALLBACK_API_KEY`` / ``fallback_api_key``) or none —
+    never the primary's, which would otherwise ride every fallback dream to
+    a different host (2026-09-25)."""
     import os
 
     r = resolve_endpoints(cfg)
-    api_key = os.environ.get("PSEUDOLIFE_DREAM_API_KEY") or cfg.extractor_api_key
+    fallback_key = (os.environ.get("PSEUDOLIFE_DREAM_FALLBACK_API_KEY")
+                    or getattr(cfg, "fallback_api_key", None))
     if r["mode"] == "fallback":
         if not (r["fallback_url"] and r["fallback_model"]):
             raise ValueError(
                 "extractor_mode=fallback but no fallback endpoint is "
                 "configured (fallback_base_url/fallback_model)")
         return OpenAICompatExtractor(
-            r["fallback_url"], r["fallback_model"], api_key=api_key,
+            r["fallback_url"], r["fallback_model"], api_key=fallback_key,
             max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
             extra_body=_cache_extra_body(cfg),
         ), "fallback"
@@ -2104,7 +2124,7 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     logger.warning("dream primary extractor %s unreachable — using fallback %s",
                    r["primary_url"], r["fallback_url"])
     return OpenAICompatExtractor(
-        r["fallback_url"], r["fallback_model"], api_key=api_key,
+        r["fallback_url"], r["fallback_model"], api_key=fallback_key,
         max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
         extra_body=_cache_extra_body(cfg),
     ), "fallback"

@@ -24,6 +24,9 @@
 #
 # -ClaudePlugin auto|skip: install the Claude Code plugin (hooks + commands)
 #   when claude is a client (default: auto; an installed plugin is left alone).
+# -ClaudeLegacyHooks ask|remove|keep: with the plugin installed, remove the
+#   hooks an earlier install wrote to ~/.claude/settings.json (default: ask -
+#   prompts; unattended runs keep them).
 #
 # Extractor modes (spec: docs/superpowers/specs/
 # 2026-07-14-installer-extractor-choice-design.md):
@@ -62,6 +65,10 @@ param(
     # Install the Claude Code plugin (hooks + commands) when claude is a client.
     [ValidateSet("auto", "skip")]
     [string]$ClaudePlugin = "auto",
+    # With the plugin installed, remove the hooks an earlier install wrote to
+    # ~/.claude/settings.json; ask prompts, and unattended runs keep them.
+    [ValidateSet("ask", "remove", "keep")]
+    [string]$ClaudeLegacyHooks = "ask",
     [switch]$NoArt
 )
 $ErrorActionPreference = "Stop"
@@ -596,6 +603,80 @@ function Describe-Plugin($state) {
 # <<< claude plugin <<<
 Install-ClaudePlugin
 
+# >>> claude legacy hooks >>>
+# Installs from before the plugin wrote the briefing, coordination and
+# discipline hooks (and, before 2026-07-14, episode hooks) into
+# ~/.claude/settings.json. The plugin provides them now, so an upgraded user
+# runs each one twice. install-hook removes only the exact entries the
+# installers wrote, only while the plugin runs for every project, after a
+# backup. Section 9 calls this for a plugin-owned Claude; it asks first
+# unless -ClaudeLegacyHooks says otherwise.
+$script:legacyClaude = ""
+$script:legacyClaudeBackup = ""
+function Read-ClaudeLegacyAnswer {
+    # The reply, or $null when there is no terminal to ask.
+    if (-not $interactive) { return $null }
+    return (Read-Host "Remove them from ~/.claude/settings.json (a timestamped backup is taken first)? [y/N]")
+}
+function Invoke-LegacyHookScript([bool]$dryRun) {
+    $hookArgs = @{ Client = "claude"; RemoveLegacy = $true; DryRun = $dryRun }
+    $global:LASTEXITCODE = 0
+    try {
+        $lines = & (Join-Path $repo "ops\install-hook.ps1") @hookArgs *>&1 | ForEach-Object { "$_" }
+        $code = $LASTEXITCODE
+    } catch {
+        $lines = @("$_")
+        $code = 1
+    }
+    return [pscustomobject]@{ Code = $code; Report = (@($lines) -join "`n") }
+}
+function Invoke-ClaudeLegacyHookCleanup {
+    $scan = Invoke-LegacyHookScript $true
+    switch ($scan.Code) {
+        0 { }
+        3 {
+            # Nothing to remove; a lookalike the user should review still shows.
+            if ($scan.Report -match 'by hand') { Write-Host $scan.Report }
+            return
+        }
+        4 { $script:legacyClaude = "inactive"; Write-Host $scan.Report; return }
+        default { $script:legacyClaude = "error"; Write-Warning $scan.Report; return }
+    }
+    Step "Found hooks an earlier install wrote to ~/.claude/settings.json; the plugin provides them now:"
+    Write-Host $scan.Report
+    $choice = $ClaudeLegacyHooks
+    if ($choice -eq "ask") {
+        $reply = Read-ClaudeLegacyAnswer
+        if ($null -eq $reply) {
+            $choice = "keep"
+            Write-Host "    No terminal to ask: left them in place. Rerun with -ClaudeLegacyHooks remove to remove them."
+        } elseif ($reply -in "y", "yes") {
+            $choice = "remove"
+        } else {
+            $choice = "keep"
+        }
+    }
+    if ($choice -ne "remove") { $script:legacyClaude = "kept"; return }
+    $result = Invoke-LegacyHookScript $false
+    Write-Host $result.Report
+    if ($result.Code -eq 0) {
+        $script:legacyClaude = "removed"
+        $backupLine = @($result.Report -split "`n" | Where-Object { $_ -like "Backed up -> *" })[0]
+        $script:legacyClaudeBackup = "$backupLine" -replace '^Backed up -> ', ''
+    } else {
+        $script:legacyClaude = "error"
+    }
+}
+function Describe-LegacyHooks($state) {
+    switch ($state) {
+        "removed" { "[x] Old hooks            removed from ~/.claude/settings.json (backup: $($script:legacyClaudeBackup))" }
+        "kept" { "[!] Old hooks            still in ~/.claude/settings.json, so they run twice - rerun with -ClaudeLegacyHooks remove" }
+        "inactive" { "[-] Old hooks            kept in ~/.claude/settings.json - the plugin is not enabled for all projects" }
+        "error" { "[!] Old hooks            not removed (see the error above) - remove them by hand (plugin/README.md, Migrating from installer hook wiring)" }
+    }
+}
+# <<< claude legacy hooks <<<
+
 # -- 9. session lifecycle hooks (hook-capable providers only) ---------------------
 # Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
 # exact hook trust, runtime verification, and instruction fallback together.
@@ -607,11 +688,12 @@ $instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $
 if ($claudePluginInstalled -and ($clients -contains "claude")) {
     Step "pseudolife-memory Claude Code plugin detected - skipping Claude"
     if ($instructionChoice -eq "append") {
-        Write-Host "    hook (the plugin provides it); the CLAUDE.md block is still appended,"
-        Write-Host "    as requested. The plugin no longer bundles an MCP server, so the"
-        Write-Host "    transport is still wired below."
+        Write-Host "    hook (the plugin provides it, serving a compact memory core); the full"
+        Write-Host "    CLAUDE.md block is still appended, as requested. The plugin no longer"
+        Write-Host "    bundles an MCP server, so the transport is still wired below."
     } else {
-        Write-Host "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
+        Write-Host "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+        Write-Host "    compact memory core; the full block stays optional). The plugin no"
         Write-Host "    longer bundles an MCP server, so the transport is still wired below."
     }
 }
@@ -630,6 +712,7 @@ foreach ($selectedClient in $clients) {
     if ($selectedClient -notin "claude", "codex") { continue }
     if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
         $hookState["claude"] = "plugin"
+        Invoke-ClaudeLegacyHookCleanup
         continue
     }
     if ($selectedClient -eq "codex") {
@@ -806,8 +889,9 @@ foreach ($selectedClient in $clients) {
         continue
     }
     if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
-        # The plugin hook serves a compact core, not this block, so an
-        # explicit append still writes it; auto and skip leave CLAUDE.md alone.
+        # The plugin's SessionStart hook serves a compact memory core, not
+        # this block: auto and skip leave CLAUDE.md alone (the summary says
+        # so), and an explicit append still writes it.
         if ($instructionChoice -ne "append") {
             $instrState["claude"] = "covered-by-plugin"
             continue
@@ -829,8 +913,9 @@ foreach ($selectedClient in $clients) {
     if ($choice -eq "auto") {
         switch ($selectedClient) {
             "claude" {
-                # The SessionStart hook already delivers the block — a
-                # standing-file copy would double-inject.
+                # Skipped by default. The settings.json SessionStart hook
+                # serves the compact memory core and the live briefing, not
+                # this block; the summary names the file to append it to.
                 $choice = "skip"
             }
             "gemini" {
@@ -1082,7 +1167,9 @@ foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "claude-desktop") {
         # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
         # by ops/register_claude_desktop.py (absolute shim path - Desktop's
-        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated).
+        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated). It is
+        # named pseudolife-desktop so Code-tab sessions keep their own
+        # per-session pseudolife-memory server.
         if ($Transport -ne "shim") {
             Write-Warning "Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) - ignoring -Transport http for it."
         }
@@ -1121,7 +1208,7 @@ foreach ($selectedClient in $clients) {
         & $desktopPython (Join-Path $repo "ops\register_claude_desktop.py") @desktopArgs 2>&1 | Out-Host
         $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = $null
         $env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = $null
-        Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
+        Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop as pseudolife-desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
         continue
     }
     if ($selectedClient -eq "generic") {
@@ -1431,8 +1518,8 @@ function Describe-Instr($state) {
     switch -Wildcard ($state) {
         "appended:*" { "[x] Standing file        $tail" }
         "present:*" { "[x] Standing file        $tail" }
-        "covered-by-plugin" { "[-] Standing file        plugin briefing covers it" }
-        "covered-by-hooks" { "[x] Standing instructions verified session briefing covers them" }
+        "covered-by-plugin" { "[-] Standing file        skipped - the plugin serves a compact memory core; append examples\CLAUDE.memory.md for the full guide" }
+        "covered-by-hooks" { "[-] Standing file        skipped - verified hooks serve a compact memory core; append examples\CLAUDE.memory.md for the full guide" }
         "present" { "[x] Standing file        existing Codex memory fallback" }
         "appended" { "[x] Standing file        Codex memory fallback appended" }
         "skipped:*" { "[-] Standing file        skipped - append later to $tail" }
@@ -1456,6 +1543,7 @@ foreach ($selectedClient in $clients) {
                 Write-Host "    [x] Per-turn discipline  UserPromptSubmit hook"
             }
             Write-Host "    $(Describe-Plugin $script:pluginClaude)"
+            if ($script:legacyClaude) { Write-Host "    $(Describe-LegacyHooks $script:legacyClaude)" }
             Write-Host "    $(Describe-Instr $instrState['claude'])"
         }
         "claude-desktop" {
