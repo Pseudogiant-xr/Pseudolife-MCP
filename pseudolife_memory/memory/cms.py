@@ -739,6 +739,7 @@ class ContinuumMemorySystem:
         bm25: bool | None = None,
         timeline: bool | None = None,
         hide_superseded: bool | None = None,
+        count_access: bool = True,
         _trace: dict | None = None,
     ) -> RetrievalResult:
         """Retrieve from CMS bands and merge results.
@@ -757,6 +758,10 @@ class ContinuumMemorySystem:
             top_k: Maximum neural results. Falls back to ``config.top_k``.
             hide_superseded: Override the configured history visibility for
                 this retrieval only. Applied before candidate caps and dedup.
+            count_access: False serves the result without bumping the
+                served entries' ``access_count`` or the per-band query/hit
+                counters — for synthetic probes (the startup warmup), which
+                are not reads.
             bands: When provided, restrict the neural pool to bands with
                 these names — e.g. ``["working", "instant"]`` for "just the
                 fast tiers" or ``["forever"]`` for identity recall only.
@@ -773,13 +778,20 @@ class ContinuumMemorySystem:
         Filters compose: ``bands`` is applied first, then ``sources``, then
         ``min_logical_turn``, then the score-based ranking.
         """
-        MIN_SCORE = 0.25 if min_score is None else float(min_score)
+        # The default floor is ``memory.search.min_score`` (0.25; see its
+        # comment for the measurement); the getattr guard mirrors the
+        # search-block idiom below for config objects predating the knob.
+        MIN_SCORE = (
+            float(getattr(getattr(self.config, "search", None),
+                          "min_score", 0.25))
+            if min_score is None else float(min_score))
         # An explicitly-passed floor is a contract over the whole result
         # set, including BM25-only injections (which otherwise bypass the
         # dense pool's gate entirely). The *default* floor deliberately
-        # does not bound them: injected scores are ``weight × normalised``
-        # (≤0.3 at the shipped weight), so applying 0.25 to them would
-        # admit only the single top lexical hit per query.
+        # does not bound them — a configured one included: injected scores
+        # are ``weight × normalised`` (≤0.3 at the shipped weight), so
+        # applying 0.25 to them would admit only the single top lexical
+        # hit per query.
         explicit_floor = min_score is not None
         # Gentle penalty for assistant-authored memories so user-authored
         # facts outrank assistant restatements of the same fact.
@@ -1401,9 +1413,11 @@ class ContinuumMemorySystem:
         # Update per-tier instrumentation. ``hit_band_names`` is the set of
         # tiers that contributed at least one entry to the *post-merge*
         # result — gives a usage-rate signal we can surface via /api/memory/stats.
-        self._tier_queries += 1
-        for name in hit_band_names:
-            self._tier_hits[name] = self._tier_hits.get(name, 0) + 1
+        # A synthetic probe (count_access=False) is not a query either.
+        if count_access:
+            self._tier_queries += 1
+            for name in hit_band_names:
+                self._tier_hits[name] = self._tier_hits.get(name, 0) + 1
 
         # ── Pool 2: reference documents ───────────────────────────────────────
         # Kept separate so they can NEVER displace neural memories.
@@ -1690,8 +1704,9 @@ class ContinuumMemorySystem:
         entries, scores, surprises = zip(*combined)
         # Access accrual happens HERE, on the final merged result set —
         # not in band.retrieve, whose top-k is only a candidate pool.
-        for e in entries:
-            e.access_count += 1
+        if count_access:
+            for e in entries:
+                e.access_count += 1
         return RetrievalResult(
             entries=list(entries),
             scores=list(scores),

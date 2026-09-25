@@ -218,7 +218,7 @@ class _FakeResp(io.BytesIO):
 
 def _urlopen_recorder(monkeypatch, replies):
     """Serve canned chat completions; record every request body."""
-    import urllib.request
+    from pseudolife_memory.utils import no_redirect
 
     calls: list[dict] = []
     it = iter(replies)
@@ -229,7 +229,7 @@ def _urlopen_recorder(monkeypatch, replies):
         body = {"choices": [{"message": {"content": json.dumps(content)}}]}
         return _FakeResp(json.dumps(body).encode())
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(no_redirect, "urlopen", fake_urlopen)
     return calls
 
 
@@ -301,14 +301,13 @@ def test_extract_rules_retries_once_when_a_must_include_value_is_missing(
 
 
 def test_extract_rules_failure_raises_like_extract_lessons(monkeypatch):
-    import urllib.request
-
     from pseudolife_memory.memory import dream
+    from pseudolife_memory.utils import no_redirect
 
     def boom(req, timeout=None):
         raise OSError("connection refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    monkeypatch.setattr(no_redirect, "urlopen", boom)
     ext = dream.OpenAICompatExtractor("http://x/v1", "m")
     with pytest.raises(dream.ExtractorError):
         ext.extract_rules([_sig(1)])
@@ -320,9 +319,8 @@ def test_extract_rules_keeps_the_rules_that_succeeded_before_a_failure(
     transient failure on the 90th must not discard the 89 rules already
     extracted (the batch would be retried whole next sweep). Partial
     success returns what landed; only a batch with NO success raises."""
-    import urllib.request
-
     from pseudolife_memory.memory import dream
+    from pseudolife_memory.utils import no_redirect
 
     calls = {"n": 0}
 
@@ -335,7 +333,7 @@ def test_extract_rules_keeps_the_rules_that_succeeded_before_a_failure(
              "about": "a", "polarity": "+", "outcome": "success"}]})}}]}
         return _FakeResp(json.dumps(body).encode())
 
-    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(no_redirect, "urlopen", flaky)
     ext = dream.OpenAICompatExtractor("http://x/v1", "m")
     out = ext.extract_rules([_sig(1), _sig(2), _sig(3)])
     assert [o["task"] for o in out] == ["situation 1", "situation 3"]
