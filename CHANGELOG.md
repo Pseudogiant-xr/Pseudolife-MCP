@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — the daily backup can run current master)
+- `ops/install-backup-task.ps1 -ScriptCheckout <dir>` runs `ops\backup.ps1`
+  from a dedicated checkout instead of the main one, which can lag master for
+  days while it holds uncommitted work. On 2026-09-24 and 09-25 the daily task
+  ran a `backup.ps1` from before the row-count gate: the nightly dumps were
+  ungated and `/health` `last_backup` did not advance. A worktree is refused
+  until `git worktree lock` protects it, and so is a script checkout that
+  would receive the dumps itself. Dumps and the log stay in the main
+  checkout's `data\backups` (the task now always passes `-OutDir`), where
+  replica pushes read them. Each run logs the script checkout's HEAD.
+- The installer now rejects a misspelled parameter instead of ignoring it:
+  a typo in `-ScriptCheckout` would otherwise have reinstalled the main
+  checkout's copy.
+
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
   on by default: `coordination.enabled` defaults to `true`, and without an
