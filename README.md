@@ -1152,7 +1152,9 @@ pseudolife-mcp-daemon`).
   shim predates token-file support (PyPI releases through 0.15.0 read only
   the literal token): `pseudolife-mcp --help` from a capable shim lists
   `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim and re-run the installer,
-  which now refuses to register an older one against a token file.
+  which now refuses to register an older one against a token file. On
+  Windows, upgrade with every session using the shim closed (Desktop
+  fully quit from the tray), or it can leave the shim half-removed.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —
