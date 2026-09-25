@@ -21,6 +21,7 @@ import hashlib
 import logging
 import math
 import os
+import random
 import re
 import secrets
 import sys
@@ -44,6 +45,59 @@ logger = logging.getLogger(__name__)
 # DELETE it counts. It travels with a logical export: it is audit history
 # of this bank's entries, whose ids transfer verbatim.
 CAPACITY_DROPS_META_KEY = "capacity_true_drops"
+
+# libpq renders a Windows socket error as "<text> (0x%08X/%d)". Two codes
+# describe this host's own port table, not the server: WSAEADDRINUSE (10048),
+# which a loopback connect() returns when the local port it picked still has a
+# TIME_WAIT entry to the same server (the client closed first), and WSAENOBUFS
+# (10055), when the ephemeral range is exhausted. A second connect picks
+# another port. Measured 2026-09-25 on the maintainer's Windows host, about
+# twenty sessions against one Postgres on 127.0.0.1:5433: WSAEADDRINUSE failed
+# three connects in two full test runs (one inside ``_connect``), 0-2 per run,
+# with 250-600 TIME_WAIT entries to that port during a run. WSAENOBUFS, the
+# exhaustion case of the same table, then failed one test fixture's connect in
+# a full run the same evening. Four calls with a 0.05 s jittered exponential
+# backoff stay well under a second in all.
+_LOCAL_PORT_ERRORS = re.compile(r"/(10048|10055)\)")
+_LOCAL_PORT_ERROR_NAMES = {"10048": "WSAEADDRINUSE", "10055": "WSAENOBUFS"}
+_CONNECT_ATTEMPTS = 4
+_CONNECT_BACKOFF_SECONDS = 0.05
+
+
+def _local_port_error_code(exc: BaseException) -> str | None:
+    """The Windows error code when a connect failed for want of a usable
+    local port; None for anything else. A connect-time rejection from the
+    server (authentication, too many clients) arrives as libpq's message
+    with no SQLSTATE, so the code in the text is what excludes it; an error
+    that does carry a SQLSTATE is never a local-port failure either."""
+    if not isinstance(exc, psycopg.OperationalError) or exc.sqlstate:
+        return None
+    match = _LOCAL_PORT_ERRORS.search(str(exc))
+    return match.group(1) if match else None
+
+
+def connect_retrying_local_ports(conninfo: str, **kwargs: Any
+                                 ) -> psycopg.Connection:
+    """``psycopg.connect`` that tries again, up to ``_CONNECT_ATTEMPTS``
+    calls in all, when the local port was the problem (see
+    ``_LOCAL_PORT_ERRORS``). Every other failure (refused, timeout, any
+    SQLSTATE) is raised at once, and the last one if the port never frees.
+    The warning names only the attempt and the code: the error text carries
+    the host, and the conninfo the password."""
+    for attempt in range(1, _CONNECT_ATTEMPTS):
+        try:
+            return psycopg.connect(conninfo, **kwargs)
+        except psycopg.OperationalError as exc:
+            code = _local_port_error_code(exc)
+            if code is None:
+                raise
+            logger.warning(
+                "postgres connect failed on a local port (%s %s), attempt "
+                "%d of %d; retrying", _LOCAL_PORT_ERROR_NAMES[code], code,
+                attempt, _CONNECT_ATTEMPTS)
+        time.sleep(_CONNECT_BACKOFF_SECONDS * 2 ** (attempt - 1)
+                   * random.uniform(0.5, 1.5))
+    return psycopg.connect(conninfo, **kwargs)
 
 _ENTRY_COLS = (
     "band", "text", "embedding", "surprise", "ts", "access_count", "source",
@@ -519,8 +573,9 @@ class PostgresStorage:
         autovacuum on the churny canonical tables) and held ACCESS SHARE
         locks that blocked any concurrent DDL. Mutations get explicit
         transaction blocks via :meth:`_txn`."""
-        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True,
-                               fallback_application_name=_application_name())
+        conn = connect_retrying_local_ports(
+            self.dsn, connect_timeout=10, autocommit=True,
+            fallback_application_name=_application_name())
         # Never block forever on a lock — a stuck/orphaned writer should
         # raise here, not hang the whole daemon. (Session-level GUCs; they
         # apply immediately under autocommit.)
@@ -615,7 +670,7 @@ class PostgresStorage:
         reconnects and takes the lease, so the probe stops reporting it.
         Also raises while the owner has yet to re-read a bank another writer
         held in the meantime (:class:`BankChangedHands`)."""
-        with psycopg.connect(self.dsn, connect_timeout=2) as c:
+        with connect_retrying_local_ports(self.dsn, connect_timeout=2) as c:
             c.execute("SELECT 1")
             if self._lease_lost and self._lease_holders(c):
                 raise WriterLeaseHeld(self._lease_lost)

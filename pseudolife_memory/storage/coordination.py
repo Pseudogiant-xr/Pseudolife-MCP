@@ -29,6 +29,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from pseudolife_memory.storage.postgres import connect_retrying_local_ports
 from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
 
 logger = logging.getLogger("pseudolife-mcp")
@@ -59,7 +60,8 @@ class CoordinationConnection:
         self._conn = self._connect()
 
     def _connect(self) -> psycopg.Connection:
-        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True)
+        conn = connect_retrying_local_ports(
+            self.dsn, connect_timeout=10, autocommit=True)
         conn.execute("SET lock_timeout = '5s'")
         conn.execute("SET search_path TO public")
         return conn
