@@ -1155,7 +1155,9 @@ for selected_client in $CLIENTS; do
     if [ "$selected_client" = claude-desktop ]; then
         # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
         # by ops/register_claude_desktop.py (absolute shim path — Desktop's
-        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated).
+        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated). It is
+        # named pseudolife-desktop so Code-tab sessions keep their own
+        # per-session pseudolife-memory server.
         if [ "$TRANSPORT" != "shim" ]; then
             echo "WARNING: Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) — ignoring --transport http for it." >&2
         fi
@@ -1201,7 +1203,7 @@ for selected_client in $CLIENTS; do
             MCP_CLAUDE_DESKTOP=failed
         fi
         if [ "$MCP_CLAUDE_DESKTOP" = shim-env ]; then
-            step "Wired into Claude Desktop via the pseudolife-mcp shim (claude_desktop_config.json) — fully quit and relaunch Desktop to load it."
+            step "Wired into Claude Desktop as pseudolife-desktop via the pseudolife-mcp shim (claude_desktop_config.json) — fully quit and relaunch Desktop to load it."
         else
             echo "WARNING: Claude Desktop registration failed — see the error above and re-run." >&2
         fi

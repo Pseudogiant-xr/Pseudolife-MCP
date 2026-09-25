@@ -381,7 +381,7 @@ is agent context every session, so it stays lean.
 | `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
-| `memory_agents(action, project?, task?, status?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers holding a lease or active within the hour and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_agents(action, project?, task?, status?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
 | `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
@@ -707,7 +707,7 @@ installer prefers that path when it exists). The equivalent entry by hand:
 ```json
 {
   "mcpServers": {
-    "pseudolife-memory": {
+    "pseudolife-desktop": {
       "command": "/absolute/path/to/pseudolife-mcp",
       "env": {
         "PSEUDOLIFE_WRITER_ID": "claude-desktop",
@@ -718,6 +718,16 @@ installer prefers that path when it exists). The equivalent entry by hand:
   }
 }
 ```
+
+The entry is named `pseudolife-desktop` on purpose. Desktop's Code tab runs
+Claude Code, which starts its own per-session `pseudolife-memory` server; when
+an app-level entry has the same name, Desktop sends the session's
+`mcp__pseudolife-memory__*` calls to the app-level entry and the session's own
+server gets none. Re-running the installer renames an entry it wrote under the
+old name (its `env` sets `PSEUDOLIFE_WRITER_ID` to `claude-desktop`), keeping
+any `env` keys you added and backing the config up first. It leaves any other
+`pseudolife-memory` entry alone and warns about it. Chat and Cowork then list
+the tools as `mcp__pseudolife-desktop__*`.
 
 Two things differ from the CLI clients. Desktop launches MCP servers with a
 **sanitized environment** — PATH plus a few system variables, none of your
@@ -1144,7 +1154,8 @@ pseudolife-mcp-daemon`).
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
-  is at the bottom of `mcp-server-pseudolife-memory.log` in the app's log
+  is at the bottom of `mcp-server-pseudolife-desktop.log`
+  (`mcp-server-pseudolife-memory.log` for an entry not yet renamed) in the app's log
   folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
   on macOS). If it is a 401, the daemon is token-gated and the
   Desktop-launched shim holds no credential: Desktop sanitizes the
@@ -3789,7 +3800,10 @@ unchanged, a one-line reminder rides every tenth tool result. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
-Code, whose per-session stdio shim does receive the id.
+Code, whose per-session stdio shim does receive the id. That shim serves the
+session's calls only while Desktop's app-level entry has a different name, so
+the installer names that entry `pseudolife-desktop` (see
+[Claude Desktop](providers.md#claude-desktop)).
 
 Claude Code hooks see the current session id, which `/clear` and an
 in-session `/resume` change, while the shim keeps the id it was launched with.
@@ -4200,22 +4214,47 @@ to trigger physical cleanup. Full queues and rate limits return explicit errors.
 Live delivery attempts a message at most three times in total across
 attachments; past that it is left for explicit receive, so one unacknowledged
 message cannot wake the host on every restart. The same prune pass removes an
-address that holds no lease, is referenced by no retained message and has been
-idle for seven days, or for one hour when its adapter registered without a
-state file (`capabilities.resumable: false`), since nothing can attach to that
-address again; for those the lease too must have been gone for the hour, so a
-daemon restart cannot retire a parked shim's address, and if it ever is
-retired the state-less adapter registers a fresh one instead of stopping.
+address that is referenced by no retained message and has had neither its own
+activity nor a lease for seven days, or for one hour when its adapter
+registered without a state file (`capabilities.resumable: false`), since
+nothing can attach to that address again. A held lease keeps a live shim's
+address even while it is idle, so a daemon restart or a host sleep shorter than
+that window cannot retire it; if a state-less address is ever retired, its
+adapter registers a fresh one instead of stopping.
 Addresses that predate the flag keep the seven-day rule. Idle
-means no register, update, attach, send, acknowledgment or forwarded tool call:
-the adapter's lease heartbeat counts as activity only when the shim forwarded a
-tool call since the previous one, so a parked shim is neither ranked nor
-retained as a working one. A client that only reads must acknowledge what it
+means no register, update, new attachment, send, acknowledgment or forwarded
+tool call: the adapter's lease heartbeat counts as activity only when the shim
+forwarded a tool call since the previous one, and an adapter re-attaching under
+its own attachment ID (after a daemon outage or a host sleep) is recovering its
+lease, not acting, so a parked shim is neither ranked nor retained as a working
+one. A client that only reads must acknowledge what it
 reads, or hold a lease, to stay registered. `memory_agents(action="list")`
-shows peers that hold a lease or were active within the last hour, leased
-first, reports the number of other matching peers as `idle_omitted` and sets
-`truncated` when the page cut listed peers; a peer's public agent ID stays
-addressable while its row exists. A
+shows peers active within the last hour, or within the last three hours while
+they hold a lease, leased first; it reports the number of other matching peers
+as `idle_omitted` and sets `truncated` when the page cut listed peers; a peer's
+public agent ID stays addressable while its row exists. Each listed peer
+carries `status_set_at`, `status_age` and `status_stale`. The time comes from
+the [audit log](#audit-log): the newest registration or status update. A status
+the log no longer covers is reported as older than the log's oldest event, for
+example `more than 21 hours ago`. A non-empty status older than two hours is
+marked stale. The two-hour and three-hour windows come from the first day of
+the live audit log (2026-09-25). Working agents refreshed their status within
+34 minutes at p95 and never went more than 51 minutes between board actions
+inside a work block. Idle stretches ran 5.4 hours or longer.
+
+Claude Desktop's app-level entry (writer ID `claude-desktop`) is one process
+serving every conversation in the app, so it registers no coordination
+address: whichever conversation called it would post, set status and read
+mail as all of them. It refuses `memory_agents(action="update")` and
+`memory_message` with an error saying why, prepends the same advice to its MCP
+instructions, and its `memory_agents(action="list")` shows open sessions only,
+not the board. A Claude Code session makes those calls on its own per-session
+server. In the Desktop app's Code tab that works only while the two entries have
+different names: the installer registers both as `pseudolife-memory`, and
+where the names match, Desktop serves the Code tab from its app-level entry.
+The writer ID is operator configuration, not authentication: the guard keeps
+honestly configured clients apart, while the daemon itself refuses any board
+write that carries no instance credential. A
 legacy adapter registers a fresh address on its next start only when the authenticated
 daemon explicitly confirms that the saved address no longer exists. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance
@@ -5169,6 +5208,7 @@ Windows, register a daily run once:
 ```powershell
 ops\install-backup-task.ps1              # daily 03:00
 ops\install-backup-task.ps1 -At 02:15
+<dir>\ops\install-backup-task.ps1 -ScriptCheckout <dir>   # see below
 ops\install-backup-task.ps1 -Uninstall   # remove it
 ```
 
@@ -5177,7 +5217,26 @@ from a worktree; the installer warns if that copy predates the row-count
 gate. It catches up at the next boot or logon if the machine was off,
 waiting up to 10 minutes (`-DockerWaitSeconds`) for Docker to answer
 first, and it runs as you, so `PSEUDOLIFE_BACKUP_MIRROR` applies. Each run
-is appended to `data\backups\backup-task.log`. On Linux/macOS, a cron entry
+is appended to `data\backups\backup-task.log`, headed by the HEAD commit of
+the checkout whose `backup.ps1` it ran.
+
+If the main checkout cannot follow master (for example, it holds
+uncommitted work), run the backup from a dedicated worktree of master
+instead. Create it with `git worktree add --detach <dir> origin/master`
+from the main checkout, lock it with `git worktree lock <dir>`, then install
+with that worktree's own copy: `<dir>\ops\install-backup-task.ps1
+-ScriptCheckout <dir>`. The installer refuses an unlocked worktree, because
+worktree cleanup would otherwise delete the script the task runs. It also
+refuses a script checkout that would receive the dumps itself, such as a
+separate clone running its own installer. Dumps and the log still go to
+the main checkout's `data\backups`, where a replica push looks for them;
+`restore` from `<dir>` reads its own `data\backups`, so name the files
+there with `-BackupFile` (and `-StateArchive`). Move the worktree forward
+when you deploy (`git -C <dir> fetch origin master`, then
+`git -C <dir> checkout --detach origin/master`); the log shows which commit
+each night ran.
+
+On Linux/macOS, a cron entry
 that runs `ops/backup.sh` does the same job, but cron starts with a bare
 environment: set `PATH` (so it finds `docker`) and any
 `PSEUDOLIFE_BACKUP_MIRROR*` variables in the crontab itself.
@@ -5602,6 +5661,23 @@ installers call and which you can run by hand with
 entry). What Desktop does differently, and what the entry carries because
 of it:
 
+- **Its own name.** The entry is `pseudolife-desktop`. Desktop's Code tab
+  runs Claude Code, which starts its own per-session `pseudolife-memory`
+  server; where an app-level entry carries the same name, Desktop sends the
+  session's `mcp__pseudolife-memory__*` calls to the app-level entry and the
+  session's own server gets none (seen live on 2026-09-21), so the session
+  has no board identity of its own. The registrar renames an entry it wrote
+  under the old name, recognised by `PSEUDOLIFE_WRITER_ID=claude-desktop` in
+  its `env`, and keeps its other settings: hand-added `env` keys, a
+  configured token-file path, a literal token to migrate. When both names
+  exist, `pseudolife-desktop` wins wherever both set a key, the old entry
+  fills the gaps, and the output names the `env` keys whose old values were
+  dropped (names, never values), apart from the settings the registrar
+  rewrites on every run. A `pseudolife-memory` entry the registrar did not
+  write is left untouched and reported on every run, and `pseudolife-desktop`
+  is written beside it, so Desktop loads both. Every rewrite
+  backs the config up first (`claude_desktop_config.json.bak-<timestamp>`).
+  Afterwards Chat and Cowork list the tools as `mcp__pseudolife-desktop__*`.
 - **Sanitized launch environment.** Desktop starts MCP servers with PATH
   plus a few system variables — none of your shell's exports. So `command`
   is the shim's absolute path (a bare `pseudolife-mcp` would not resolve),

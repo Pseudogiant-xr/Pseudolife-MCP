@@ -377,6 +377,29 @@ def test_cortex_dump_flag_clears_after_resolve_in_either_direction(pristine_serv
     assert row["contested"] is False and "contender_value" not in row
 
 
+def test_api_facts_set_to_the_contender_value_clears_the_contested_flag(
+        pristine_service):
+    """The 2026-09-25 bench repro, through the routes it was found on: POST
+    /api/facts/set with the parked contender's value superseded the slot to
+    that value but left the contender parked, so /api/facts kept reporting
+    ``contested: true`` with ``contender_value`` equal to the current."""
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    svc = pristine_service
+    routes = ConsoleRoutes(svc)
+    svc.cortex_write("deploy", "region", "eu-west-1", support="user")
+    svc.cortex_write("deploy", "region", "us-east-2", support="agent")
+    out = routes.dispatch("POST", "/api/facts/set", {},
+                          {"entity": "deploy", "attribute": "region",
+                           "value": "us-east-2", "origin": "user"})
+    assert out["action"] == "superseded"
+    rows = routes.dispatch("GET", "/api/facts", {"limit": "500"}, {})["entries"]
+    row = next(r for r in rows
+               if (r["entity"], r["attribute"]) == ("deploy", "region"))
+    assert row["value"] == "us-east-2"
+    assert row["contested"] is False and "contender_value" not in row
+    assert svc.cortex_contenders("deploy", "region")["contenders"] == []
+
+
 def test_api_facts_route_carries_contested_from_real_service(pristine_service):
     """End to end through the route the Console reads (``/api/facts`` →
     ``_limited(cortex_dump)``), not the service method alone."""

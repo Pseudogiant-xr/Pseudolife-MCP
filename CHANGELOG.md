@@ -36,6 +36,71 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live bank (read-only, 2026-09-25 16:01) the 24 h window is unchanged; 7
   days goes from 130 to 117 sessions and 60 days from 348 to 264.
 
+### Fixed (2026-09-25 — the daily backup can run current master)
+- `ops/install-backup-task.ps1 -ScriptCheckout <dir>` runs `ops\backup.ps1`
+  from a dedicated checkout instead of the main one, which can lag master for
+  days while it holds uncommitted work. On 2026-09-24 and 09-25 the daily task
+  ran a `backup.ps1` from before the row-count gate: the nightly dumps were
+  ungated and `/health` `last_backup` did not advance. A worktree is refused
+  until `git worktree lock` protects it, and so is a script checkout that
+  would receive the dumps itself. Dumps and the log stay in the main
+  checkout's `data\backups` (the task now always passes `-OutDir`), where
+  replica pushes read them. Each run logs the script checkout's HEAD.
+- The installer now rejects a misspelled parameter instead of ignoring it:
+  a typo in `-ScriptCheckout` would otherwise have reinstalled the main
+  checkout's copy.
+
+### Fixed (2026-09-25 — a fact set to the parked contender's value settles the contest)
+- A contested slot stayed contested after a write made its contender's
+  value current. With `eu-west-1` current and `us-east-2` parked, setting
+  `us-east-2` superseded the slot but left the contender parked, so
+  `/api/facts` and `memory_search` kept reporting `contested: true` with a
+  `contender_value` equal to the current value (found 2026-09-25 by the
+  memory-policy bench). The write now also marks that contender
+  `superseded` (kept in `memory_history`) and logs it as `resolved` /
+  `contender_value_now_current`. Values match the way a confirm matches:
+  case and surrounding whitespace are ignored. The same fix covers the
+  first write at an empty slot that still holds a contender, and adding
+  the contender's value to a set (`memory_set_add`, including the
+  scalar-to-set conversion). A contender with any other value still
+  conflicts with the new current and stays parked. The contender's support
+  and provenance are not merged into the new current record.
+- `dream_rollback` re-parks a contender that the reverted run's write
+  settled. The run journal has no contender column, so without this a
+  rollback would have dropped a pending review item that used to survive
+  it untouched. The rollback's per-row details name it as
+  `contender_restored`.
+- The live bank held no slot in this state on 2026-09-25 (read-only check:
+  37 active contenders, none equal to a current value), so nothing heals
+  existing rows at load.
+
+### Fixed (2026-09-25 — the loop-health tile counts client sessions, not root episodes)
+- The Console's loop-health tile counted every root episode started in the
+  window as a session and divided its per-session rates by that count.
+  One client session can leave two roots (the SessionStart hook's and the
+  stdio shim's), and most new roots are idle shim roots: on 2026-09-25 the
+  live bank held 166 keyed roots in 24 h, against 34 client sessions by the
+  bench's first count (before its review revised the pairing rules). So
+  `sessions` read high and `stores_per_session` / `outcomes_per_session`
+  read low.
+- `sessions` in the `loop` block of `/api/overview` now uses the
+  client-session definition of the memory-policy bench's
+  `evals/capture_metrics.py`:
+  - hook-keyed roots always count;
+  - other keyed roots count only with an entry, an outcome or a search in
+    the window;
+  - a search counts for the root holding its session id, not for its
+    episode stamp, which is the daemon's current episode rather than the
+    caller's;
+  - a hook root and an active shim root opened within 5 s of each other
+    count once, when neither has another candidate.
+
+  The old count stays as `root_episodes`, and the tile shows both.
+- Still not counted: a session whose root was pruned because it stored
+  nothing. An explicit end prunes at once; the reaper prunes after the
+  resume window. So `sessions` undercounts those and the per-session rates
+  still lean high.
+
 ### Added (2026-09-25 — measure what the startup memory policy changes)
 - `memory_policy.variant` selects the standing memory policy session start
   serves: `none`, `compact` (the default: the core the hook already
@@ -77,6 +142,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session root that ends with no stored entry, so sessions that only
   searched are reported separately and sessions that never touched memory
   are invisible; lesson searches and unmatched used_ids are not persisted.
+
+### Fixed (2026-09-25 — one board identity per session, statuses that show their age)
+- Claude Desktop's app-level MCP entry (writer ID `claude-desktop`) no longer
+  registers a coordination address. It is one process serving every
+  conversation in the app, so its address was shared: on 2026-09-25 a Code-tab
+  session posted through it and overwrote another session's status line. It
+  now refuses `memory_message` and `memory_agents(action="update")` before any
+  request, with an error pointing at a session's own per-session server, and
+  prepends that advice to its MCP instructions. Memory tools pass through
+  unchanged; `memory_agents` list there shows open sessions only, not the
+  board. A Code-tab session in Desktop keeps board writes only where its
+  per-session entry is named differently from the Desktop entry (the
+  installer currently gives both the same name).
+- An adapter re-attaching under its own attachment ID no longer counts as
+  activity; a new attachment (a process starting) still does. A 9-minute host
+  sleep on 2026-09-25 lapsed every idle shim's lease, and the re-attach wave on
+  wake made eleven sessions idle for hours read as active within 28 seconds.
+  Those re-attaches had also kept live idle shims young against the
+  seven-day retention, so prune now counts a held lease as well: an address
+  goes once it has had neither its own activity nor a lease for its window
+  (seven days, or one hour for state-less ones), and a daemon restart or a
+  host sleep shorter than that cannot retire a live shim's address.
+- `memory_agents` list gives each listed peer `status_set_at`, `status_age` and
+  `status_stale`. The time comes from the audit log (the newest registration
+  or status update); a non-empty status older than two hours is stale, and a
+  status the log no longer covers is reported as older than the log. No
+  schema change.
+- A peer holding a lease is listed for three hours after its own last action,
+  then counted in `idle_omitted`; peers without a lease keep the one-hour
+  window. Both windows come from the live audit log's first day, as the
+  comments on `STATUS_STALE_AFTER` and `ATTACHED_IDLE_WINDOW` record.
+
+### Fixed (2026-09-25 — Claude Desktop's entry no longer hides Code-tab sessions' own server)
+- `ops/install.* --client claude-desktop` (through
+  `ops/register_claude_desktop.py`) now names Claude Desktop's app-level MCP
+  entry `pseudolife-desktop` instead of `pseudolife-memory`. Claude Code
+  registers its per-session server as `pseudolife-memory`, and where both
+  carried that name Desktop served a Code-tab session's
+  `mcp__pseudolife-memory__*` calls from the app-level entry. The session's own
+  server got no calls, so the session had no board identity of its own (found
+  live 2026-09-21; the maintainer's hand rename restored per-session routing).
+- A re-run renames an entry the registrar wrote under the old name, recognised
+  by `PSEUDOLIFE_WRITER_ID=claude-desktop` in its `env`, and keeps its
+  hand-added `env` keys, its token-file path and any literal token still to
+  migrate. When both names exist, `pseudolife-desktop` wins where both set a
+  key and the old entry fills the gaps; the output names the `env` keys whose
+  old values were dropped, never a value. A `pseudolife-memory` entry the
+  registrar did not write is left untouched and reported on stderr, and
+  `pseudolife-desktop` is written beside it. The config is backed up before
+  every rewrite, as before.
+- Takes effect once the installer is re-run and Desktop is fully quit and
+  relaunched. Chat and Cowork then list the tools as
+  `mcp__pseudolife-desktop__*`, and the log file becomes
+  `mcp-server-pseudolife-desktop.log`. `ops/update.ps1 -All` does not apply it:
+  it never edits `claude_desktop_config.json`.
 
 ### Fixed (2026-09-25 — Codex hook setup no longer hangs on a hook Codex killed)
 - `ops/setup-codex-hooks.py` could hang on a busy Windows machine for as long

@@ -5092,7 +5092,9 @@ class MemoryService(DreamOps):
     def loop_health(self, window_days: int = 7,
                     now: float | None = None) -> dict[str, Any]:
         """Is the memory loop actually being exercised? Windowed activity
-        counts + per-session rates for the Console tile. Needs Postgres —
+        counts + per-session rates for the Console tile. The rates divide by
+        client sessions, not root episodes (see
+        :meth:`PostgresStorage.loop_health`). Needs Postgres —
         ``{"available": False}`` without (never raises)."""
         retry_days = self.config.memory.lessons.signal_retry_days
         t = time.time() if now is None else float(now)
