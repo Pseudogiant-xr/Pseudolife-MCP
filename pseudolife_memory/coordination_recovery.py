@@ -56,7 +56,9 @@ def _perform(args):
         raise RecoveryError("an existing daemon configuration file is required")
     config = load_config(path)
     if config.coordination.enabled:
-        raise RecoveryError("coordination must be disabled in the daemon configuration")
+        # On by default, so a config without the key runs the board too.
+        raise RecoveryError("coordination must be disabled in the daemon configuration: "
+                            "set coordination.enabled: false")
     if not args.confirm_daemon_stopped:
         raise RecoveryError("stop the daemon and adapters, then pass --confirm-daemon-stopped")
     if args.action == "recover":

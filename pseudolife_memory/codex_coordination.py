@@ -358,8 +358,8 @@ class CodexCoordinationRegistry:
                 self._note_failure(thread_id, error)
                 if not self._failure_reported:
                     print("pseudolife-mcp: coordination unavailable; memory proxy remains "
-                          "active. Check daemon opt-in, authentication and private adapter "
-                          "state.", file=sys.stderr)
+                          "active. Check the daemon's coordination setting, authentication "
+                          "and private adapter state.", file=sys.stderr)
                     self._failure_reported = True
                 return None
             self._adapters[thread_id] = adapter
