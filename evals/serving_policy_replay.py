@@ -119,6 +119,9 @@ WARMUP_QUERY = "warmup probe"
 
 # The MCP ``memory_search`` default ``top_k`` in force over the replayed
 # window. A logged 8 is the default OR an explicit 8 — indistinguishable.
+# The default became 6 on 2026-09-25 on this replay's evidence: a window
+# that starts after that change reaches the daemon must pass
+# ``--default-top-k 6``, and one that straddles it cannot be stratified.
 DEFAULT_TOP_K = 8
 
 # memory_recall fan-out detector (the 2026-09-23 review's definition).
