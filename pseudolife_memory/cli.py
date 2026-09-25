@@ -42,6 +42,9 @@ modes:
   wait-mail      block until new addressed agent mail, print it and exit
                  (arm as a background command to wake an idle session;
                  exit 0 mail, 3 timeout, 2 setup; --help for options)
+  lease          hold a named lease around a command: `lease run NAME --
+                 COMMAND...` takes an OS file lock the agent board mirrors
+                 (FIFO queue, holder, expected end); `lease list` shows them
   help           show this message (also -h / --help)
 
 credentials (token-gated daemon): PSEUDOLIFE_MCP_TOKEN=<bearer>, or
@@ -94,6 +97,9 @@ def main() -> None:
     elif mode == "wait-mail":
         from pseudolife_memory.wait_mail_cli import run_wait_mail
         sys.exit(run_wait_mail(sys.argv[2:]))
+    elif mode == "lease":
+        from pseudolife_memory.lease_cli import main as lease_main
+        sys.exit(lease_main(sys.argv[2:]))
     else:
         print(
             f"unknown mode {mode!r}; see: pseudolife-mcp --help",
