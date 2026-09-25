@@ -1049,11 +1049,11 @@ class SearchConfig:
     # literal (2026-05-27, MiniLM era), never recalibrated for the
     # 2026-07-28 Qwen3-Embedding switch — and it stays put: measured
     # 2026-09-25 over 1,072 real agent searches
-    # (evals/results/serving-policy-replay-20260925-r2.json,
+    # (evals/results/serving-policy-replay-20260925-r3.json,
     # abstention.lowest_served_dense_cosine), the weakest served dense hit
     # had cosine p01 0.39 and fell below 0.30 in one search of 1,064, so
-    # today the floor binds only on off-domain queries (the 2026-09-23
-    # review's zebra probe served hits at 0.28-0.29,
+    # today the floor rarely binds on a real search; it does on off-domain
+    # ones (the 2026-09-23 review's zebra probe served hits at 0.28-0.29,
     # abstention.off_domain_probes). Raising it would not make it an
     # abstention signal: in-domain absent-answer probes topped out at
     # 0.43-0.64, the range of real hits (abstention.absent_answer_probes).
@@ -1204,7 +1204,7 @@ class MemoryConfig:
     # low_confidence=True. 0.0 = off (only an empty result is low-confidence).
     # No value is calibrated for the Qwen3 embedder: measured 2026-09-25
     # over 1,072 real agent searches
-    # (evals/results/serving-policy-replay-20260925-r2.json, abstention), the
+    # (evals/results/serving-policy-replay-20260925-r3.json, abstention), the
     # 2026-06-19 MiniLM-era pair (floor 0.70 + guard 0.65) would flag 26% of
     # them, including 20% of the searches whose hits the agent then used,
     # and in-domain absent answers score like real hits.

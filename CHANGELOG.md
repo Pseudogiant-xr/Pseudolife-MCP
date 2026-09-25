@@ -35,8 +35,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fusion inputs, because the dense pool is cut by cosine before the
   supersession multiplier and the BM25 boost reorder it, so a narrower
   list is not a prefix of a wider one. Checked against 146 real narrower
-  searches, the simulation reproduced the exact served set in 98 and the
-  prefix in 20. It reads the bank in a read-only transaction and writes an
+  searches (142 of them the token ledger's 8 -> 3 runs of 2026-09-03/04),
+  the simulation reproduced the exact served set in 98 and the prefix in
+  20. It reads the bank in a read-only transaction and writes an
   aggregates-only artifact. `evals/regression_gate.ps1` cannot see these
   changes: it rebuilds contexts offline and never runs search or the MCP
   projection.
@@ -47,7 +48,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   review's ~90.5% for 6 read the narrower list as a prefix of the wider
   one; that method gives 90.3% on the same searches. At most 25.7% of
   agent searches use the default width. Evidence:
-  `evals/results/serving-policy-replay-20260925-r2.json`.
+  `evals/results/serving-policy-replay-20260925-r3.json`.
 - Digests, reported and left unchanged: served digests are used at 0.51x
   the rate of other entries at the same rank (session bootstrap 95%
   0.38-0.64). 53% of unfiltered agent searches serve at least one digest.

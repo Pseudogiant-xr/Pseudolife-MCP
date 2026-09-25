@@ -75,6 +75,13 @@ def test_a_recall_burst_is_dropped_whole_and_spaced_searches_survive():
     assert counts["dropped_recall_burst"] == 3
 
 
+def test_dropped_bursts_report_whether_they_served_nothing():
+    burst = [_ev(i, ts=T0 + i) for i in (1, 2, 3)]
+    burst[2].rows = []
+    _, counts = spr.select_agent_events(burst, since=0)
+    assert counts["dropped_recall_burst_served_nothing"] == 1
+
+
 def test_a_burst_of_searches_with_served_facts_is_kept():
     """Recall never attaches the cortex block's facts; the MCP
     memory_search handler does. Parallel searches (subagents share their
@@ -135,11 +142,18 @@ def _logged(eid, rows, *, top_k=8, pool_size=8, bm25_weight=0.3,
         if ch == "dense":
             score = cos * (0.55 if sup else 1.0) + bm25_weight * bm
             built.append((score, spr.Row(eid_, 0, score, sup, cos, ch, bm)))
+        elif ch == "slot":
+            score = cos + bm25_weight * bm      # cos = slot confidence here
+            built.append((score, spr.Row(eid_, 0, score, sup, None, ch, bm,
+                                         slot=cos)))
         else:
             built.append((cos, spr.Row(eid_, 0, cos, sup, None, ch, bm)))
     built.sort(key=lambda t: -t[0])
     served = [spr.Row(r.entry_id, i, r.score, r.superseded, r.dense,
-                      r.channel, r.bm25) for i, (_, r) in enumerate(built)]
+                      r.channel, r.bm25, slot=r.slot)
+              for i, (_, r) in enumerate(built)]
+    served = [spr.Row(r.entry_id, r.rank, r.score, r.superseded, r.dense,
+                      r.channel, r.bm25, slot=r.slot) for r in served]
     return spr.Event(id=eid, session_id=S1, created_at=T0, is_warmup=False,
                      top_k=top_k, sources_filter=None, rows=served,
                      used=set(used), pool_size=pool_size,
@@ -184,19 +198,60 @@ def test_a_lexical_hit_leaving_the_pool_returns_as_an_injection():
     assert (sim[0].score, sim[0].channel) == (0.3, "bm25")
 
 
-def test_the_pessimistic_bound_moves_logged_rows_down_the_cosine_order():
+def test_the_slot_pool_is_capped_by_confidence_not_by_served_order():
+    """``_slot_query_pool`` keeps the top k slot hits by CONFIDENCE, and the
+    BM25 boost is added only afterwards, so a low-confidence slot hit with a
+    lexical match can be served above the ones a narrower pool keeps."""
+    slots = [(100 + i, 0.95 - 0.05 * i, 0.0, False, "slot") for i in range(7)]
+    slots.append((107, 0.62, 1.0, False, "slot"))      # 0.92 as served
+    ev = _logged(7, slots)
+    assert [r.entry_id for r in ev.rows][1] == 107
+    sim, _ = spr.simulate_width(ev, 6)
+    assert [r.entry_id for r in sim] == [100, 101, 102, 103, 104, 105]
+    row = spr.policy_table([ev], {}, [spr.Policy("k6", top_k=6)],
+                           default_top_k=8, text_cap=600, reps=0,
+                           seed=1)[0]
+    # More slot rows were served than the narrower pool holds: its list may
+    # need slot candidates the wider search never logged.
+    assert row["events_slot_cap_bound"] == 1
+
+
+def test_an_explicit_floor_also_bounds_the_reinjection():
+    """With a caller's own ``min_score``, cms.retrieve refuses a BM25-only
+    injection scoring below it, so a demoted row cannot come back."""
+    sup = [(20 + i, 0.54 - 0.01 * i, 0.0, True, "dense") for i in range(6)]
+    ev = _logged(8, sup + [(30, 0.48, 1.0, False, "dense")])
+    ev.explicit_floor = 0.35
+    sim, _ = spr.simulate_width(ev, 6)
+    assert 30 not in [r.entry_id for r in sim]
+
+
+def test_a_multi_band_search_is_not_simulated():
+    """Each band pools its own top k, so a global cosine rank is wrong."""
+    params = {"top_k": 8, "band_count": 3, "bm25": {"enabled": False},
+              "candidate_pool": {"fusion": "weighted_sum", "multiplier": 1,
+                                 "pool_size": 8},
+              "reranker": {"fired": False}, "timeline": {"fired": False}}
+    assert spr._shape(params)["simulable"] is False
+    params["band_count"] = 1
+    assert spr._shape(params)["simulable"] is True
+    params["min_score_explicit"], params["min_score"] = True, 0.4
+    assert spr._shape(params)["explicit_floor"] == 0.4
+
+
+def test_the_maximum_demotion_arm_shifts_logged_rows_down_the_cosine_order():
     """Pool members the wider cut dropped are not logged, so a logged row's
     cosine rank can be understated; the bound assumes every unlogged pool
     slot outranks every logged row."""
     ev = _logged(4, [(50 + i, 0.9 - 0.05 * i, 0.0, False, "dense")
                      for i in range(7)] + [(60, 0.95, 0.0, False, "slot")])
     sim, _ = spr.simulate_width(ev, 6)
-    low, _ = spr.simulate_width(ev, 6, "pessimistic")
+    low, _ = spr.simulate_width(ev, 6, "max_demotion")
     assert len([r for r in sim if r.channel == "dense"]) == 5
     assert len([r for r in low if r.channel == "dense"]) == 5
     assert [r.entry_id for r in low][-1] == 54     # one fewer deep row...
     ev.pool_size = 10                              # ...once 3 are unlogged
-    low, _ = spr.simulate_width(ev, 6, "pessimistic")
+    low, _ = spr.simulate_width(ev, 6, "max_demotion")
     assert [r.entry_id for r in low] == [60, 50, 51, 52]
 
 
@@ -375,9 +430,12 @@ def test_the_sql_reads_no_text_and_never_touches_meta():
     # query_text is only ever COMPARED, never selected.
     assert spr._EVENTS_SQL.count("query_text") == 1
     assert "(query_text = %(warmup)s)" in spr._EVENTS_SQL
-    # The pair finder compares query texts and selects none of them.
+    # The pair finder compares query texts and selects none of them, and
+    # pairs only searches run under the same knobs.
     select = spr._PAIRS_SQL.split("FROM retrieval_events w")[0]
     assert "query_text" not in select
+    for knob in ("'bm25'", "'min_score'", "'reranker'"):
+        assert knob in spr._PAIRS_SQL
 
 
 class _FakeCursor:

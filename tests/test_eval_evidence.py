@@ -9438,7 +9438,7 @@ for _cid, _doc, _needle, _val, _stated, _places in [
 # what the retired 0.70/0.65 pair would flag), the configuration guide's
 # restatement of it, and the CHANGELOG entry (the width simulation's check
 # against real narrower searches, the top_k report, the digest report).
-SERVING_REPLAY = RESULTS + "serving-policy-replay-20260925-r2.json"
+SERVING_REPLAY = RESULTS + "serving-policy-replay-20260925-r3.json"
 _ABST = "abstention"
 _SIM = "width_simulation_check"
 
@@ -9534,11 +9534,14 @@ for _cid, _doc, _needle, _val, _stated, _places in [
      _floor_cell(0.70, 0.65, "flagged_labelled_share", 100.0), 20, 0),
     ("replay-cl-sim-pairs", CHANGELOG, _CL_SIM,
      lambda d: d[_SIM]["pairs"], 146, 0),
+    ("replay-cl-sim-ledger-pairs", CHANGELOG,
+     "searches (142 of them the token ledger's 8 -> 3 runs of 2026-09-03/04),",
+     lambda d: d[_SIM]["widths"]["8->3"], 142, 0),
     ("replay-cl-sim-exact", CHANGELOG,
-     "searches, the simulation reproduced the exact served set in 98 and the",
+     "the simulation reproduced the exact served set in 98 and the prefix in",
      lambda d: d[_SIM]["simulate_exact_set"], 98, 0),
     ("replay-cl-prefix-exact", CHANGELOG,
-     "prefix in 20. It reads the bank in a read-only transaction and writes an",
+     "20. It reads the bank in a read-only transaction and writes an",
      lambda d: d[_SIM]["prefix_exact_set"], 20, 0),
     ("replay-cl-default-width-searches", CHANGELOG,
      "Reported, not changed: the default `top_k` stays 8. Over 276",

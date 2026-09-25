@@ -171,7 +171,7 @@ measured on the MiniLM embedder (2026-06-19). On the agent searches above
 that pair would flag 26% of searches, including 20% of the searches whose
 hits the agent then reported using, and it caught 3 of the 4 absent-answer
 probes (`evals/serving_policy_replay.py`, artifact
-`evals/results/serving-policy-replay-20260925-r2.json`). Leave both knobs at
+`evals/results/serving-policy-replay-20260925-r3.json`). Leave both knobs at
 their defaults until a real answerability signal exists.
 
 `memory.cortex.guard_min_score` (default `0.2`) decides which cortex facts
@@ -185,8 +185,7 @@ The dense relevance floor, `memory.search.min_score` (default `0.25`), is a
 different knob: a dense candidate below it never enters the pool. On the
 same agent searches the weakest served dense hit was at cosine 0.39 at
 the 1st percentile, and below 0.30 in one search of 1,064, so today the
-floor binds only on off-domain queries. Raising it is not a way to
-abstain.
+floor rarely binds on a real search. Raising it is not a way to abstain.
 
 ## Superseded entries
 

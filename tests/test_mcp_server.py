@@ -824,9 +824,10 @@ def test_memory_search_docstring_is_truthful_about_low_confidence() -> None:
     """``low_confidence`` is ``no entries AND no cortex fact`` at the shipped
     floor 0. Search nearly always serves entries, and the one search in
     1,072 real agent searches that served none still served facts, so the
-    flag fired on none of them (evals/results/serving-policy-replay-20260925-r2.json). It cannot tell an absent answer from
-    a present one either: in-domain absent-answer probes score like real
-    hits. The description used to promise "no confident match, prefer
+    flag fired on none of them
+    (evals/results/serving-policy-replay-20260925-r3.json). It cannot tell
+    an absent answer from a present one either: in-domain absent-answer
+    probes score like real hits. The description used to promise "no confident match, prefer
     abstaining" and called the cortex block "the current, deduped answer";
     both overstate what is served."""
     from pseudolife_memory import mcp_server

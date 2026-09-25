@@ -33,22 +33,31 @@ a width-6 search never pools, and a width-6 search can serve a superseded
 entry that width 8 pushed below its cut. ``simulate_width`` rebuilds the
 width-K list from each served row's logged ``components``: dense rows at
 cosine rank K or more leave the pool and come back only as a BM25-only
-injection (``weight x normalised``) when they had a lexical score;
-everything is re-sorted by score and cut to K (the slot pool's own cap at
-K cannot bind: a slot hit ranked past K has K slot hits above it). No
-row the wider search did not serve can enter the narrower list (at most
-8 - K entries leave the pool, and each unserved candidate had at least 8
-rows above it), so the log is sufficient, with two stated gaps:
-dense-pool members the wider search cut are not logged, which can
-understate a served row's cosine rank (``top_k=6 (pessimistic)`` bounds
-that by assuming every unlogged pool slot outranks every logged row), and
-a demoted entry could come back through the slot channel, which is not
-modelled. Searches logged under another shape fall back to the prefix and
-are counted. ``top_k=6 (prefix)`` is the 2026-09-23 review's method, kept
+injection (``weight x normalised``, refused below a caller's explicit
+floor) when they had a lexical score; slot hits past the K-th by slot
+CONFIDENCE leave too (``_slot_query_pool`` cuts by confidence before the
+BM25 boost reorders them); everything is re-sorted by score and cut to K.
+While no more than K slot rows were served, no row the wider search did
+not serve can enter the narrower list: at most W - K dense entries leave
+the pool, and each unserved candidate had W rows above it. Three stated
+gaps. (1) When more than K slot rows were served, the narrower slot pool
+may hold candidates the wider search cut and never logged; those events
+are counted (``events_slot_cap_bound``). (2) Dense-pool members the wider
+search cut are not logged, so a served row's cosine rank can be
+understated; ``top_k=6 (max demotion)`` is a sensitivity arm that assumes
+every unlogged pool slot outranks every logged row. It is not a bound on
+used hits kept: demoting more rows can also lift lower ones into the cut.
+(3) A demoted entry could come back through the slot channel, which is not
+modelled. Searches logged under another shape (several bands, a pool
+multiplier, RRF, a fired reranker or timeline) fall back to the prefix
+and are counted. ``top_k=6 (prefix)`` is the 2026-09-23 review's method, kept
 for comparison. The artifact's ``width_simulation_check`` scores both
 methods against REAL narrower searches: the same query text (compared in
 SQL, never fetched) served at a wider and a narrower ``top_k`` in one
-session within ten minutes and under the same filters.
+session within ten minutes, under the same filters and ranking knobs.
+Pairs are drawn from the whole log, not the label window, and most of
+them are the 2026-09-03/04 agent-token-ledger runs at 8 -> 3, so the check
+validates the method at K = 3 more than at K = 6.
 
 What it cannot do, and what therefore still needs another instrument:
 
@@ -91,7 +100,11 @@ Agent-origin filter (every step is counted in the artifact):
    ``--burst-min`` or more same-session events with gaps of at most
    ``--burst-gap`` seconds is dropped when it carries no served facts; a
    burst event WITH facts is a parallel ``memory_search`` (subagents share
-   their parent's MCP session) and is kept. Both counts are reported;
+   their parent's MCP session) and is kept. Both counts are reported. The
+   Console's ``/api/search`` also attaches facts and is logged under the
+   active agent's session, so its debounced typing can survive as
+   "parallel searches"; it asks for ``top_k`` 25, so it never reaches the
+   default-width stratum;
 6. the 2026-09-23 fresh-eyes review's own traffic (``REVIEW_2026_09_23``,
    matched on id AND on the review's time window, so the ids cannot
    silently drop events from another bank).
@@ -114,7 +127,7 @@ Usage::
 
     set PSEUDOLIFE_METRICS_DSN=postgresql://pseudolife:<password>@127.0.0.1:5433/pseudolife_memory
     python evals/serving_policy_replay.py --until 2026-09-25T02:00:00Z \\
-        --out evals/results/serving-policy-replay-20260925-r2.json
+        --out evals/results/serving-policy-replay-20260925-r3.json
 
 The DSN follows ``evals/capture_metrics.py`` (``PSEUDOLIFE_METRICS_DSN``,
 defaulting to the stock local stack). Pass ``--until`` so a committed
@@ -206,6 +219,7 @@ class Row:
     dense: float | None = None  # bi-encoder cosine; None = not a dense hit
     channel: str | None = None  # dense / slot / bm25 (logged components)
     bm25: float | None = None   # normalised BM25; 0.0 = scored nothing
+    slot: float | None = None   # slot-channel confidence (before any boost)
 
 
 @dataclass
@@ -225,7 +239,8 @@ class Event:
     pool_size: int | None = None
     bm25_weight: float | None = None   # None = BM25 did not run
     bm25_min: float = 0.0
-    simulable: bool = False            # weighted_sum, x1 pool, no rerank
+    explicit_floor: float | None = None  # the caller's own min_score
+    simulable: bool = False            # weighted_sum, x1 pool, one band
 
 
 @dataclass(frozen=True)
@@ -234,7 +249,7 @@ class EntryInfo:
     text_len: int
 
 
-WIDTH_METHODS = ("simulate", "pessimistic", "prefix")
+WIDTH_METHODS = ("simulate", "max_demotion", "prefix")
 
 # Insertion order of the channels in ``cms.retrieve`` (band walk, slot
 # pool, BM25 injections): the stable sort's tie-break.
@@ -257,21 +272,30 @@ def simulate_width(ev: Event, k: int, method: str = "simulate"
     dense = sorted((r for r in rows if r.channel == "dense"),
                    key=lambda r: (-(r.dense or 0.0), r.rank))
     unlogged = 0
-    if method == "pessimistic" and ev.pool_size is not None:
+    if method == "max_demotion" and ev.pool_size is not None:
         unlogged = max(0, ev.pool_size - len(dense))
     cos_rank = {r.entry_id: i + unlogged for i, r in enumerate(dense)}
+    # The slot pool keeps its top k by confidence; the BM25 boost that can
+    # reorder slot hits is added after that cut.
     slot_rank = {r.entry_id: i for i, r in enumerate(
         sorted((r for r in rows if r.channel == "slot"),
-               key=lambda r: r.rank))}
+               key=lambda r: (-(r.slot if r.slot is not None
+                                else (r.score or 0.0)), r.rank)))}
     pool: list[tuple[tuple, Row]] = []
     for r in rows:
         if r.channel == "dense" and cos_rank[r.entry_id] >= k:
-            # Out of the dense pool: back only as a BM25-only injection.
-            if (ev.bm25_weight is not None and r.bm25
-                    and r.bm25 >= ev.bm25_min):
-                demoted = Row(r.entry_id, r.rank, ev.bm25_weight * r.bm25,
-                              r.superseded, None, "bm25", r.bm25)
+            # Out of the dense pool: back only as a BM25-only injection,
+            # which a caller's explicit floor still gates.
+            injected = (ev.bm25_weight * r.bm25
+                        if ev.bm25_weight is not None and r.bm25
+                        and r.bm25 >= ev.bm25_min else None)
+            if injected is not None and (ev.explicit_floor is None
+                                         or injected >= ev.explicit_floor):
+                demoted = Row(r.entry_id, r.rank, injected, r.superseded,
+                              None, "bm25", r.bm25)
                 pool.append(((2, -r.bm25), demoted))
+            continue
+        if r.channel == "slot" and slot_rank[r.entry_id] >= k:
             continue
         if r.channel == "dense":
             tie = (0, cos_rank[r.entry_id])
@@ -282,7 +306,7 @@ def simulate_width(ev: Event, k: int, method: str = "simulate"
         pool.append((tie, r))
     pool.sort(key=lambda t: (-(t[1].score or 0.0), t[0]))
     return [Row(r.entry_id, i, r.score, r.superseded, r.dense, r.channel,
-                r.bm25) for i, (_, r) in enumerate(pool[:k])], True
+                r.bm25, r.slot) for i, (_, r) in enumerate(pool[:k])], True
 
 
 @dataclass(frozen=True)
@@ -335,7 +359,7 @@ DEFAULT_POLICIES: tuple[Policy, ...] = (
     Policy("top_k=6", top_k=6),
     Policy("top_k=5", top_k=5),
     Policy("top_k=4", top_k=4),
-    Policy("top_k=6 (pessimistic)", top_k=6, width_method="pessimistic"),
+    Policy("top_k=6 (max demotion)", top_k=6, width_method="max_demotion"),
     Policy("top_k=6 (prefix)", top_k=6, width_method="prefix"),
     Policy("exclude_digest", exclude_sources=("digest",)),
     Policy("top_k=6+exclude_digest", top_k=6, exclude_sources=("digest",)),
@@ -420,7 +444,7 @@ def select_agent_events(events: list[Event], *, since: float,
     kept: list[Event] = []
     steps = Counter()
     labelled = Counter()
-    burst_kept = burst_kept_labelled = 0
+    burst_kept = burst_kept_labelled = burst_nothing = 0
     for e in window:
         if e.is_warmup:
             step = "dropped_warmup"
@@ -430,6 +454,7 @@ def select_agent_events(events: list[Event], *, since: float,
             step = "dropped_probe_session"
         elif e.id in bursts and not e.fact_scores:
             step = "dropped_recall_burst"
+            burst_nothing += not e.rows
         elif (e.id in exclude_ids
               and review_lo <= e.created_at < review_hi):
             step = "dropped_review_2026_09_23"
@@ -448,6 +473,9 @@ def select_agent_events(events: list[Event], *, since: float,
         # How many LABELLED events each step removed: a filter that eats
         # labels is the one whose definition matters most.
         counts[f"{k}_labelled"] = labelled.get(k, 0)
+    # A parallel memory_search that served nothing at all (the one case
+    # low_confidence fires) would look exactly like recall here.
+    counts["dropped_recall_burst_served_nothing"] = burst_nothing
     counts["burst_kept_with_facts"] = burst_kept
     counts["burst_kept_with_facts_labelled"] = burst_kept_labelled
     counts["agent_events"] = len(kept)
@@ -525,11 +553,15 @@ def policy_table(events: list[Event], entries: dict[int, EntryInfo],
     for pol in policies:
         used_tot = used_kept = rows_tot = rows_kept = 0
         chars_tot = chars_kept = rows_unknown_len = 0
-        affected = fallbacks = 0
+        affected = fallbacks = slot_bound = 0
         per_session: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
         for e in events:
             served, simulated = pol.serve(e, entries, default_top_k)
             fallbacks += not simulated
+            slot_bound += bool(
+                pol.top_k is not None and e.top_k == default_top_k
+                and pol.width_method != "prefix"
+                and sum(r.channel == "slot" for r in e.rows) > pol.top_k)
             served_ids = {r.entry_id for r in served}
             affected += [r.entry_id for r in served] != [
                 r.entry_id for r in e.rows]
@@ -568,6 +600,7 @@ def policy_table(events: list[Event], entries: dict[int, EntryInfo],
             "rows_without_length": rows_unknown_len,
             "events_changed": affected,
             "events_prefix_fallback": fallbacks,
+            "events_slot_cap_bound": slot_bound,
         })
     return out
 
@@ -880,6 +913,8 @@ def simulation_check(pairs: list[tuple[Event, int, list[int]]]
         "prefix_rows_matched_share": _r(_ratio(
             c["prefix_rows_matched"], rows)),
         "widths": dict(sorted(widths.items())),
+        "scope": ("whole log, not the label window: same query, session, "
+                  "filters and ranking knobs within ten minutes"),
     }
 
 
@@ -1003,6 +1038,13 @@ JOIN retrieval_events n
  AND (n.params->>'top_k')::int < (w.params->>'top_k')::int
  AND coalesce(n.params->'filters', 'null'::jsonb)
      = coalesce(w.params->'filters', 'null'::jsonb)
+ AND coalesce(n.params->'bm25', 'null'::jsonb)
+     = coalesce(w.params->'bm25', 'null'::jsonb)
+ AND (n.params->>'min_score') IS NOT DISTINCT FROM (w.params->>'min_score')
+ AND (n.params->>'min_score_explicit')
+     IS NOT DISTINCT FROM (w.params->>'min_score_explicit')
+ AND (n.params->'reranker'->>'enabled')
+     IS NOT DISTINCT FROM (w.params->'reranker'->>'enabled')
 WHERE w.params IS NOT NULL AND n.params IS NOT NULL
   AND w.query_text <> %(warmup)s
   AND (%(until)s::float8 IS NULL OR w.created_at < %(until)s::float8)
@@ -1042,7 +1084,9 @@ def _row(served: dict) -> Row | None:
                superseded=mult is not None and float(mult) < 1.0,
                dense=None if dense is None else float(dense),
                channel=comps.get("channel"),
-               bm25=None if bm25 is None else float(bm25))
+               bm25=None if bm25 is None else float(bm25),
+               slot=(None if comps.get("slot") is None
+                     else float(comps["slot"])))
 
 
 def _shape(params: dict | None) -> dict[str, Any]:
@@ -1062,9 +1106,16 @@ def _shape(params: dict | None) -> dict[str, Any]:
     out: dict[str, Any] = {
         "pool_size": (int(pool["pool_size"])
                       if pool.get("pool_size") is not None else None),
+        # One band: several bands each pool their own top k, so a global
+        # cosine rank would not say which rows leave the pool.
         "simulable": bool(
-            shipped and not rer.get("fired") and not tl.get("fired")
+            shipped and int(params.get("band_count") or 1) == 1
+            and not rer.get("fired") and not tl.get("fired")
             and not params.get("contiguity_neighbors")),
+        "explicit_floor": (float(params["min_score"])
+                           if params.get("min_score_explicit")
+                           and params.get("min_score") is not None
+                           else None),
     }
     if bm.get("enabled"):
         out["bm25_weight"] = float(bm.get("weight", 0.0))

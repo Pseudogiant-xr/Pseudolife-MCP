@@ -567,7 +567,7 @@ def memory_search(
         description="Natural-language description; specific beats vague.")],
     # 8 stays pending a maintainer decision (2026-09-25). The
     # serving-policy replay (evals/serving_policy_replay.py, artifact
-    # evals/results/serving-policy-replay-20260925-r2.json) simulated a
+    # evals/results/serving-policy-replay-20260925-r3.json) simulated a
     # narrower default over the 276 default-width agent searches of
     # 2026-09-06..25: 6 keeps 85.4% of the hits agents reported using
     # (Wilson 79.6-89.8) at 75% of the rows, 7 keeps 93.0% at 87.5%. The
@@ -805,7 +805,7 @@ def _project_search(result: dict[str, Any], facts: list[dict[str, Any]], *,
     # fired on 0 of 1,072 agent searches (all but one served entries, and
     # that one served facts), and the 2026-09-23 review's in-domain
     # absent-answer probes all got entries AND facts
-    # (evals/results/serving-policy-replay-20260925-r2.json, abstention). The
+    # (evals/results/serving-policy-replay-20260925-r3.json, abstention). The
     # override stays until a real answerability signal exists; the tool
     # description states what the flag means instead of promising more.
     result["low_confidence"] = result.get("low_confidence", False) and not result.get("cortex")
