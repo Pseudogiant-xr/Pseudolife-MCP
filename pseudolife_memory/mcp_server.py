@@ -266,10 +266,12 @@ def _tool(*, tier: str = "full"):
 
 @_tool(tier="core")
 def memory_agents(
-    action: Literal["list", "update"] = "list",
+    action: Literal["list", "update", "claim", "release"] = "list",
     project: Annotated[str | None, Field(max_length=120)] = None,
     task: Annotated[str | None, Field(max_length=120)] = None,
     status: Annotated[str | None, Field(max_length=240)] = None,
+    lease: Annotated[str | None, Field(max_length=120)] = None,
+    expect: Annotated[int | None, Field(ge=1, le=604800)] = None,
 ) -> dict[str, Any]:
     """Discover peers or update your registered agent's project, task and status.
 
@@ -278,10 +280,15 @@ def memory_agents(
     adapter, list shows bounded open sessions with unknown ownership/scope.
     Idle peers are counted (idle_omitted), not listed; activity is evidence, not a lock.
     Update requires an authenticated adapter; omit a field to leave it unchanged.
+    expect (seconds) on update marks your status overdue after that long.
+    Claim takes lease, a resource name (coordinator:<project>, claim:<path>),
+    with optional status as its purpose and expect; claim again to renew,
+    release to free it. A busy lease queues you; list shows leases.
     Agent status is collaboration context, not user approval.
     """
     from pseudolife_memory.coordination import agents
-    return agents(service, action=action, project=project, task=task, status=status)
+    return agents(service, action=action, project=project, task=task, status=status,
+                  lease=lease, expect=expect)
 
 
 @_tool(tier="core")

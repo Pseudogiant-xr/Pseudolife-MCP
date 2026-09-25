@@ -23,8 +23,13 @@ from pseudolife_memory.storage.coordination import CoordinationClockChanged
 _PARAMETERS = {
     "context": {"agent_id", "nonce"},
     "register": {"label", "project", "task", "status", "episode", "capabilities", "wake_enabled"},
-    "update": {"project", "task", "status"},
+    "update": {"project", "task", "status", "expect"},
     "agents": {"project", "task", "limit"},
+    # v45 resource leases. ``leases`` lists with the bearer alone, like the
+    # awareness roster; acquiring and releasing act as the caller's instance.
+    "lease": {"name", "ttl", "expect", "purpose"},
+    "release": {"name"},
+    "leases": {"name", "limit"},
     "attach": {"attachment_id", "wake_enabled"},
     "heartbeat": {"attachment_id", "generation", "active"},
     "detach": {"attachment_id", "generation"},
@@ -40,7 +45,11 @@ _REQUIRED = {
     "send": {"to", "text", "request_id"},
     "ack": {"message_id"},
     "attempt": {"message_id", "attachment_id", "generation"},
+    "lease": {"name"},
+    "release": {"name"},
 }
+# Actions a bearer may call without an instance credential.
+_INSTANCELESS = {"context", "register", "leases"}
 PUBLIC_ERROR_CODES = frozenset({
     "authentication_required", "unauthorized", "principal_not_allowed",
     "instance_not_found", "invalid_credential",
@@ -60,6 +69,8 @@ PUBLIC_ERROR_CODES = frozenset({
     "invalid_agent_id", "invalid_nonce", "invalid_bank_identity",
     "bank_identity_mismatch",
     "coordination_unavailable", "invalid_request",
+    "invalid_lease", "invalid_ttl", "invalid_expect", "invalid_purpose",
+    "lease_not_held", "lease_queue_full",
 })
 
 
@@ -269,7 +280,7 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
                   if action == "receive" and k in parameters}
     if attachment and set(attachment) != {"attachment_id", "generation"}:
         raise ValueError("attachment_required")
-    if action not in {"context", "register"}:
+    if action not in _INSTANCELESS:
         agent_id = headers.get("x-pl-agent")
         credential = headers.get("x-pl-agent-key")
         if not agent_id or not credential:
@@ -298,6 +309,8 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
                 service._coordination_pruned_at = now
         if action == "register":
             return store.register(principal, **parameters)
+        if action == "leases":
+            return store.list_leases(**parameters)
         if attachment:
             store.check_attachment(principal, agent_id, credential, **attachment)
             # The adapter's live path skips messages whose delivery attempts
@@ -310,7 +323,8 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
                 parameters["enforce_writer_epoch"] = True
                 parameters["expected_writer_epoch"] = epoch
             parameters["hlc"] = ":".join(map(str, service._hlc.tick()))
-        method = {"agents": "list_agents", "attempt": "mark_attempt"}.get(action, action)
+        method = {"agents": "list_agents", "attempt": "mark_attempt",
+                  "lease": "acquire_lease", "release": "release_lease"}.get(action, action)
         result = getattr(store, method)(principal, agent_id, credential, **parameters)
         if action == "receive":
             result["note"] = RECEIVE_NOTE
@@ -342,18 +356,50 @@ def dispatch(service, action: str, parameters: dict, *, headers=None,
         raise ValueError(public_error(exc)) from None
 
 
-def agents(service, *, action="list", project=None, task=None, status=None):
-    """Model surface: scope is relevance, never an identity or permission key."""
+# How long a model's claim holds between renewals. A model renews by claiming
+# again, and a session can sit between turns for hours, so a claim on a work
+# area (``claim:<path>``) lasts a day and any other session-held lease (the
+# coordinator role, renewed hourly) an hour: the starting values the
+# Coordination v2 design set on 2026-09-25, not measurements. Expiry, not a
+# heartbeat, frees them when a session dies. ``pseudolife-mcp lease run``
+# holds process leases with a short ttl it renews itself.
+CLAIM_LEASE_TTL = 86400
+SESSION_LEASE_TTL = 3600
+
+
+def _present(**fields):
+    return {k: v for k, v in fields.items() if v is not None}
+
+
+def agents(service, *, action="list", project=None, task=None, status=None, lease=None,
+           expect=None):
+    """Model surface: scope is relevance, never an identity or permission key.
+
+    ``claim`` and ``release`` are session-held resource leases (v45): a
+    claim's ``status`` is its purpose, ``expect`` its expected duration."""
     if action == "list":
-        if status is not None:
+        if status is not None or lease is not None or expect is not None:
             raise ValueError("unexpected_parameter")
         from pseudolife_memory.writer_context import _http_request_headers
         headers = _http_request_headers() or {}
         if not headers.get("x-pl-agent"):
             return service.coordination_awareness()
-        return dispatch(service, "agents", {k: v for k, v in {
-            "project": project, "task": task}.items() if v is not None})
-    if action != "update":
+        return dispatch(service, "agents", _present(project=project, task=task))
+    if action == "update":
+        if lease is not None:
+            raise ValueError("unexpected_parameter")
+        return dispatch(service, "update", _present(project=project, task=task, status=status,
+                                                    expect=expect))
+    if action not in {"claim", "release"}:
         raise ValueError("unknown_coordination_action")
-    return dispatch(service, "update", {k: v for k, v in {
-        "project": project, "task": task, "status": status}.items() if v is not None})
+    if lease is None:
+        raise ValueError("missing_parameter")
+    if project is not None or task is not None:
+        raise ValueError("unexpected_parameter")
+    if action == "release":
+        if status is not None or expect is not None:
+            raise ValueError("unexpected_parameter")
+        return dispatch(service, "release", {"name": lease})
+    ttl = CLAIM_LEASE_TTL if lease.startswith("claim:") else SESSION_LEASE_TTL
+    return dispatch(service, "lease", {"name": lease, "ttl": ttl,
+                                       **_present(expect=expect, purpose=status)})
