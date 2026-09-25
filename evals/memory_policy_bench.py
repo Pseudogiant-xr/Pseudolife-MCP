@@ -299,6 +299,48 @@ def claude_access_token() -> str:
     return data["accessToken"]
 
 
+def free_commit_gb() -> float | None:
+    """Free commit charge (Windows) or available memory (elsewhere), in GB."""
+    if os.name == "nt":
+        import ctypes
+
+        class Status(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        status = Status()
+        status.dwLength = ctypes.sizeof(Status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return status.ullAvailPageFile / 2**30
+        return None
+    try:
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 2**30
+    except (ValueError, OSError, AttributeError):
+        return None
+
+
+def wait_for_headroom(min_gb: float, log, poll_s: float = 30.0, max_wait_s: float = 7_200.0) -> None:
+    """Hold before a daemon start until ``min_gb`` of commit is free. A
+    disposable daemon commits about 4 GB (CPU embedder, bank, Python), and
+    this machine also runs full test suites and GPU servers; starting into a
+    full commit limit kills other sessions' processes (os error 1455)."""
+    waited = 0.0
+    while True:
+        free = free_commit_gb()
+        if free is None or free >= min_gb:
+            return
+        if waited >= max_wait_s:
+            raise RuntimeError(f"only {free:.1f} GB commit free after {waited / 60:.0f} min")
+        if waited % 300 < poll_s:
+            log(f"holding: {free:.1f} GB commit free, need {min_gb:.1f}")
+        time.sleep(poll_s)
+        waited += poll_s
+
+
 def kill_tree(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
@@ -1225,7 +1267,9 @@ class Bench:
                "effort": args.effort, "bench_version": BENCH_VERSION, "errors": []}
         started = time.time()
         try:
-            daemon.start()
+            with self.db_lock:     # one start at a time, so parallel runs see each other
+                wait_for_headroom(args.min_free_gb, self.log)
+                daemon.start()
             if args.client == "claude":
                 client = run_claude(run_dir, project, prompt, daemon, model=args.model,
                                     effort=args.effort, timeout=args.run_timeout,
@@ -1291,6 +1335,7 @@ class Bench:
         scenarios = list(fx.SCENARIO_IDS) if args.scenarios == "all" else [
             fx.scenario(s).id for s in args.scenarios.split(",")]
         items = plan(arms, scenarios, args.replicates, args.seed, rotate=args.rotate)
+        wait_for_headroom(args.min_free_gb, self.log)     # the seeder loads the embedder too
         template, manifest = ensure_template(self.admin, self.work, self.log)
         done = self.done()
         todo = [i for i in items if run_id(self.tag, i) not in done]
@@ -1702,6 +1747,8 @@ def main(argv: list[str] | None = None) -> int:
                         "a session with several MCP servers)")
     r.add_argument("--work-root", type=Path, default=default_work_root())
     r.add_argument("--keep-dbs", action="store_true")
+    r.add_argument("--min-free-gb", type=float, default=8.0,
+                   help="hold each daemon start until this much commit is free")
     r.add_argument("--out", type=Path, default=None,
                    help="artifact path (default evals/results/memory-policy-bench-<tag>.json)")
     c = sub.add_parser("cleanup", help="drop leftover plbench_ run databases")
