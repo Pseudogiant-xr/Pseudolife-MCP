@@ -14,7 +14,10 @@ reliably — without the agent having to remember:
    open questions), **lessons from past work** (avoid / prefer),
    **verified world facts** (fresh, cited, age-ranked), and **where we left
    off** (a one-line recap of your last closed session). Empty sections are
-   omitted, so a cold bank injects nothing.
+   omitted, so a cold bank prints nothing. As a hook (`--hook-json`, or the
+   plugin) it injects a short memory core first and then this block, fitted
+   to the hook's size budget, so even a cold bank's session starts with
+   the core.
 2. **Episode lifecycle is owned by the daemon, keyed by a resolved session
    identity — hooks make that identity precise, but nothing about opening
    or closing an episode requires them.** Five tiers, strict precedence
@@ -180,7 +183,8 @@ missing). Requires `pseudolife-mcp` on PATH — `pip install -e .` in the
 repo puts it there.
 
 Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
-`hookSpecificOutput.additionalContext` payload Claude Code injects:
+`hookSpecificOutput.additionalContext` payload Claude Code injects — the
+same memory core and bounded briefing the plugin hook serves:
 
 ```json
 {
@@ -196,9 +200,11 @@ Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
 
 The briefing connects to the *already-running* daemon (never starts one)
 and does nothing if the daemon is down — it can't slow or break session
-start. Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
-`--max-world N` (default 3 each). The briefing content is also available on
-demand via the CLI or the Console's `/api/briefing` route.
+start. Tune the printed briefing with `--max-unsure N` / `--max-lessons N` /
+`--max-world N` (default 3 each); with `--hook-json` these are ignored,
+because the daemon fits the hook context to the hook's size budget. The
+briefing content is also available on demand via the CLI or the Console's
+`/api/briefing` route.
 
 The plugin's daemon-served memory hook uses a short operating guide rather
 than repeating the full standing memory policy. Its bounded briefing retains
@@ -224,7 +230,8 @@ check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
 the daemon serves it: a board that is on and usable by that bearer), and the
 per-turn discipline line. Re-running them replaces the unconditional check-in
 echo older versions wrote. They do not register an
-agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing` reads `/api/briefing` and
+agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing --hook-json` reads
+`/api/hook/session-start` (the plugin hook's memory core and briefing) but
 forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven
 episode close: the idle reaper closes the episode instead, and the

@@ -846,7 +846,8 @@ the core loop through protocol-level `instructions`; the shim adds the
 messageboard check-in when its coordination adapter is up.
 The plugin's memory SessionStart hook (also used by verified Codex hooks)
 delivers a short operating guide and a bounded briefing; without the plugin,
-the installer's Claude Code `settings.json` hook delivers the briefing alone.
+the installer's Claude Code `settings.json` hook
+(`pseudolife-mcp briefing --hook-json`) delivers the same two.
 A separate coordination hook asks the agent to set its project,
 task and status, discover peers, and read pending messages, but only where
 the board is on for that credential (it is on by default behind bearer

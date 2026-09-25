@@ -684,15 +684,21 @@ function Describe-LegacyHooks($state) {
 $installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
 $claudePluginInstalled = (Test-Path $installedPlugins) -and
     ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
+$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
 if ($claudePluginInstalled -and ($clients -contains "claude")) {
     Step "pseudolife-memory Claude Code plugin detected - skipping Claude"
-    Write-Host "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
-    Write-Host "    compact memory core; the full block stays optional). The plugin no"
-    Write-Host "    longer bundles an MCP server, so the transport is still wired below."
+    if ($instructionChoice -eq "append") {
+        Write-Host "    hook (the plugin provides it, serving a compact memory core); the full"
+        Write-Host "    CLAUDE.md block is still appended, as requested. The plugin no longer"
+        Write-Host "    bundles an MCP server, so the transport is still wired below."
+    } else {
+        Write-Host "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+        Write-Host "    compact memory core; the full block stays optional). The plugin no"
+        Write-Host "    longer bundles an MCP server, so the transport is still wired below."
+    }
 }
 
 $hookState = @{}
-$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
 $codexSetup = $null
 $codexSetupValid = $false
 $codexCredentialFile = $null
@@ -884,9 +890,12 @@ foreach ($selectedClient in $clients) {
     }
     if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
         # The plugin's SessionStart hook serves a compact memory core, not
-        # this block; the block stays optional and the summary says so.
-        $instrState["claude"] = "covered-by-plugin"
-        continue
+        # this block: auto and skip leave CLAUDE.md alone (the summary says
+        # so), and an explicit append still writes it.
+        if ($instructionChoice -ne "append") {
+            $instrState["claude"] = "covered-by-plugin"
+            continue
+        }
     }
     $instructionPath = switch ($selectedClient) {
         "gemini" { Join-Path $env:USERPROFILE ".gemini\GEMINI.md" }
@@ -905,8 +914,8 @@ foreach ($selectedClient in $clients) {
         switch ($selectedClient) {
             "claude" {
                 # Skipped by default. The settings.json SessionStart hook
-                # serves the live briefing only, not this block; the summary
-                # names the file to append it to.
+                # serves the compact memory core and the live briefing, not
+                # this block; the summary names the file to append it to.
                 $choice = "skip"
             }
             "gemini" {

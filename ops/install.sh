@@ -699,14 +699,21 @@ describe_legacy_hooks() {  # $1 = state
 # Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
 # exact hook trust, runtime verification, and instruction fallback together.
 # Gemini/generic have no hook system.
+instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 if grep -q "pseudolife-memory@pseudolife-mcp" \
         "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
     CLAUDE_PLUGIN_INSTALLED=1
     case " $CLIENTS " in *" claude "*)
         step "pseudolife-memory Claude Code plugin detected — skipping Claude"
-        echo "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
-        echo "    compact memory core; the full block stays optional). The plugin no"
-        echo "    longer bundles an MCP server, so the transport is still wired below." ;;
+        if [ "$instruction_choice" = append ]; then
+            echo "    hook (the plugin provides it, serving a compact memory core); the full"
+            echo "    CLAUDE.md block is still appended, as requested. The plugin no longer"
+            echo "    bundles an MCP server, so the transport is still wired below."
+        else
+            echo "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+            echo "    compact memory core; the full block stays optional). The plugin no"
+            echo "    longer bundles an MCP server, so the transport is still wired below."
+        fi ;;
     esac
 else
     CLAUDE_PLUGIN_INSTALLED=""
@@ -724,7 +731,6 @@ CODEX_CONNECTION_CONFIGURED=""
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED=""
 CODEX_RUNTIME_DEFAULTS=""
 CODEX_RUNTIME_RECOVERY=""
-instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 for selected_client in $CLIENTS; do
     case "$selected_client" in claude|codex) ;; *) continue ;; esac
@@ -910,8 +916,13 @@ for selected_client in $CLIENTS; do
         continue
     fi
     if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
-        record_instr claude "covered-by-plugin"
-        continue
+        # The plugin's SessionStart hook serves a compact memory core, not
+        # this block: auto and skip leave CLAUDE.md alone (the summary says
+        # so), and an explicit append still writes it.
+        if [ "$instruction_choice" != append ]; then
+            record_instr claude "covered-by-plugin"
+            continue
+        fi
     fi
     case "$selected_client" in
         gemini)  instruction_path="$HOME/.gemini/GEMINI.md" ;;
@@ -929,8 +940,8 @@ for selected_client in $CLIENTS; do
         case "$selected_client" in
             claude)
                 # Skipped by default. The settings.json SessionStart hook
-                # serves the live briefing only, not this block; the summary
-                # names the file to append it to.
+                # serves the compact memory core and the live briefing, not
+                # this block; the summary names the file to append it to.
                 choice=skip ;;
             gemini)
                 if [ -t 0 ]; then
