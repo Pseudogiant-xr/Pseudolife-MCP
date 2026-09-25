@@ -229,15 +229,30 @@ def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
 def test_start_dream_sweep_warns_without_extractor(tmp_path: Path, monkeypatch, caplog) -> None:
     import importlib
     import logging
+    import threading
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("PSEUDOLIFE_DREAM_BASE_URL", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_DREAM_MODEL", raising=False)
     import pseudolife_memory.mcp_server as mod
     importlib.reload(mod)
+    was_running = {t for t in threading.enumerate() if t.name == "pl-dream"}
+
+    class _NeverStarted:  # the warning is the subject, not the thread
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(mod.threading, "Thread", _NeverStarted)
     with caplog.at_level(logging.WARNING, logger="pseudolife-mcp"):
         mod.start_dream_sweep()   # dream enabled by default, no extractor configured
     msgs = " ".join(r.getMessage().lower() for r in caplog.records)
     assert "extractor" in msgs and "cortex" in msgs
+    # No live sweep may outlive the test: it would wake mid-suite and sweep
+    # whatever mcp_server.service some later test had patched in.
+    started = {t for t in threading.enumerate() if t.name == "pl-dream"}
+    assert started <= was_running, "a real pl-dream thread was left running"
 
 
 def test_start_dream_sweep_starts_for_retrieval_log_when_dream_disabled(
