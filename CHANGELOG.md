@@ -13,8 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   handle-less form and `episode_rename` always did. Before, only the episode
   itself took the new name, so everything written before the rename kept the
   generic `session - <date> <time>` title. Memories mis-stamped before this
-  fix keep their old stamp until the episode is renamed again
-  (`episode_rename`, or `memory_session_title` once more).
+  fix keep their old stamp until the episode is renamed again:
+  `episode_rename`, or `memory_session_title` once more (the same name
+  works).
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
