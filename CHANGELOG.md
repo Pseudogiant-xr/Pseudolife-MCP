@@ -62,6 +62,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interpreter: a real venv whose stub pip strands the package must import
   its own package again afterwards, and on Windows a real process started
   from a runtime's interpreter must block the upgrade.
+
 ### Fixed (2026-09-25 — rerunning the installer no longer strands a shim that sessions are running)
 - On Windows, rerunning `ops/install.ps1` or `ops/install.sh` while a
   Claude Code or Codex session was running the stdio shim could leave the
@@ -96,6 +97,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   installers are covered for Claude Code, Codex and Gemini CLI. On Windows
   a real interpreter started from a disposable pipx venv must block the
   upgrade, through the real process table.
+
 ### Fixed (2026-09-25 — `/clear` no longer revives the old session's root)
 - After `/clear` or an in-session `/resume`, a `memory_store` that passed the
   new session's handle still reopened the old session's root under the
@@ -121,6 +123,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session, the exit of a non-Claude-Code shim that never wrote) no longer
   re-upserts every episode row, one committed statement each, under the
   service lock. A close that matched still writes through.
+
 ### Added (2026-09-25 — lesson searches and used_ids outcomes are recorded, schema v44)
 - Two memory-loop questions could not be answered from the bank: whether a
   session consulted its lessons, and what share of the ids an outcome names
@@ -151,6 +154,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Both records are observational: a failed write is counted in
   `memory_stats` `retrieval_log.write_errors` and never fails the search
   or the outcome.
+
 ### Fixed (2026-09-25 — Claude Code without the plugin starts with the memory core)
 - The SessionStart hook the installer writes for Claude Code without the
   plugin (`pseudolife-mcp briefing --hook-json`, also used by older Codex
