@@ -138,11 +138,14 @@ class _CredentialChangedError(Exception):
 
 
 class _CoordinationUnavailableError(Exception):
-    """Internal sentinel for tools that cannot run without an instance key."""
+    """Internal sentinel for tools that cannot run without an instance key.
+    ``message`` replaces the generic reattach advice when retrying cannot
+    help, as in a process no single session owns."""
 
-    def __init__(self, hint: str | None = None):
+    def __init__(self, hint: str | None = None, message: str | None = None):
         super().__init__()
         self.hint = hint
+        self.message = message
 
 
 def _require_current_credential(provider, snapshot) -> None:
@@ -218,7 +221,8 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         None)
     if coordination_failure is not None:
         classification = "coordination_unavailable"
-        message = "Coordination identity is unavailable; reattach coordination and retry."
+        message = (coordination_failure.message
+                   or "Coordination identity is unavailable; reattach coordination and retry.")
         outcome = "not_dispatched"
     elif names & {"CredentialError", "_CredentialChangedError"}:
         classification = "credential_unavailable"
@@ -675,10 +679,37 @@ def _requires_coordination_identity(name: str, arguments: dict | None) -> bool:
     return name == "memory_agents" and (arguments or {}).get("action") == "update"
 
 
+# Returned, instead of a board identity, by a process that answers for every
+# conversation in its host (see _serves_many_conversations). It is the MCP
+# error message, which is the text a model reads, so it carries the way out.
+_SHARED_PROCESS_REFUSAL = (
+    "This Pseudolife server is one process serving every conversation in the "
+    "Claude app, so it has no board identity of its own: posting, status "
+    "updates and mail here would act as every conversation at once. In a "
+    "Claude Code session, make this call on the session's own Pseudolife "
+    "server (the installer registers it as pseudolife-memory). "
+    "memory_agents list still works here.")
+
+
+def _serves_many_conversations() -> bool:
+    """Whether this process answers for more than one conversation, so any
+    board identity it bound would be shared by all of them.
+
+    Claude Desktop's app-level entry carries writer id ``claude-desktop``
+    (``ops/install.* --client claude-desktop``) and runs one process per app
+    launch for every Chat, Cowork and Code-tab conversation that calls it.
+    Codex threads share a process too, but each call names its thread (the
+    per-thread registry); no Desktop request in its MCP log (45 tools/call,
+    June to August 2026) carried any per-conversation metadata. A fixed
+    ``PSEUDOLIFE_AGENT_STATE`` names one address and so changes nothing."""
+    return os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower() == "claude-desktop"
+
+
 async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None,
                  channel_inbox=None, agent_headers=None, coordination_hint=None,
                  coordination_adapter=None, codex_metadata: bool = False,
-                 coordination_registry=None, instructions_note: str = "") -> None:
+                 coordination_registry=None, instructions_note: str = "",
+                 coordination_refusal: str = "") -> None:
     import asyncio
     import contextlib
     import anyio
@@ -820,6 +851,9 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         attempt = _UpstreamAttempt(phase="initialize")
         try:
             with anyio.fail_after(_operation_timeout_seconds()):
+                if coordination_refusal and _requires_coordination_identity(
+                        params.name, params.arguments):
+                    raise _CoordinationUnavailableError(message=coordination_refusal)
                 snapshot = provider.snapshot()
                 if coordination_adapter is not None:
                     try:
@@ -1134,7 +1168,16 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             return
 
         adapter = None
-        if enabled:
+        if _serves_many_conversations():
+            # No adapter: an address here would be every conversation's, and
+            # one conversation's status would overwrite another's (seen
+            # 2026-09-25). Board writes are refused with the way out.
+            kwargs["coordination_refusal"] = _SHARED_PROCESS_REFUSAL
+            if enabled:
+                print("pseudolife-mcp: this process serves every conversation in the "
+                      "Claude app, so it registers no coordination address; board "
+                      "writes are refused here.", file=sys.stderr)
+        elif enabled:
             from pseudolife_memory.coordination_adapter import CoordinationAdapter, AdapterError
             from pseudolife_memory.credentials import CredentialError
             wake = channel and os.environ.get("PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {

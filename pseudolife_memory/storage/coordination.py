@@ -121,6 +121,21 @@ AGENT_RETENTION = DEDUPE_RETENTION
 # last_activity. An hour keeps a session that just ended visible for a
 # handover and hides the rest; they are still counted.
 ACTIVE_WINDOW = 3600
+# A status line older than this is marked stale in the peer list. Measured
+# 2026-09-25 on the live audit log (582 events over its first 21.6 h): agents
+# that were working refreshed their status at p50 8.7 min, p95 34 min; the
+# longest silence between one agent's own board actions inside a work block
+# was 51 min, and the shortest silence that ended one was 5.4 h (sessions
+# left idle overnight whose statuses still named merged PRs). Two hours is
+# over twice the longest working gap and well under the shortest idle one.
+STATUS_STALE_AFTER = 2 * 3600
+# A peer holding a lease is listed while its own last action is this recent;
+# after that it is counted like any idle peer. A shim's heartbeat holds the
+# lease for as long as the process lives, so on 2026-09-25 the default list
+# carried a dozen sessions silent for hours. Same measurement as above: this
+# shows a quiet session with its (by then stale) status for one more
+# ACTIVE_WINDOW, still under the 5.4 h shortest idle stretch.
+ATTACHED_IDLE_WINDOW = STATUS_STALE_AFTER + ACTIVE_WINDOW
 # An address whose adapter registered ``resumable: false`` has no state file
 # behind it, so nothing can attach to it again once its lease lapses; it is
 # removed after this much idleness instead of AGENT_RETENTION. Same
@@ -618,19 +633,56 @@ class CoordinationStore:
         now = self.clock()
         scope = "SELECT * FROM coordination_agents WHERE " + " AND ".join(clauses)
         leased = "(attachment_id IS NOT NULL AND coalesce(lease_until,0)>%s)"
-        # Only peers holding a lease or active within ACTIVE_WINDOW, reachable
-        # adapters first: a burst of idle addresses must not push the peers
-        # that can actually receive live mail off a bounded page. The rest
-        # are counted, not listed; one extra row tells whether the page cut
+        # Only peers whose own last action is recent: within ACTIVE_WINDOW,
+        # or ATTACHED_IDLE_WINDOW while they hold a lease. Reachable adapters
+        # come first: a burst of idle addresses must not push the peers that
+        # can actually receive live mail off a bounded page. The rest are
+        # counted, not listed; one extra row tells whether the page cut
         # active peers too.
-        rows = self._all(scope + f" AND ({leased} OR last_activity>%s) ORDER BY {leased} DESC,"
+        recent = f"last_activity>CASE WHEN {leased} THEN %s ELSE %s END"
+        windows = (now, now - ATTACHED_IDLE_WINDOW, now - ACTIVE_WINDOW)
+        rows = self._all(scope + f" AND {recent} ORDER BY {leased} DESC,"
                          "last_activity DESC,agent_id LIMIT %s",
-                         (*values, now, now - ACTIVE_WINDOW, now, limit + 1))
+                         (*values, *windows, now, limit + 1))
         idle = self._one("SELECT count(*) AS n FROM coordination_agents WHERE " + " AND ".join(clauses)
-                         + f" AND NOT {leased} AND last_activity<=%s",
-                         (*values, now, now - ACTIVE_WINDOW))["n"]
-        return {"agents": [self._public(row) for row in rows[:limit]],
-                "truncated": len(rows) > limit, "idle_omitted": idle}
+                         + f" AND NOT {recent}", (*values, *windows))["n"]
+        agents = [self._public(row) for row in rows[:limit]]
+        self._stamp_status_age(agents, now)
+        return {"agents": agents, "truncated": len(rows) > limit, "idle_omitted": idle}
+
+    def _stamp_status_age(self, agents, now):
+        """Say when each listed peer's status was set, and mark it stale past
+        STATUS_STALE_AFTER. The live row keeps only the newest value, so the
+        time comes from the audit log: the newest ``register`` (which always
+        sets the status, blank included) or ``update`` that carried one.
+        When the log holds neither (the status predates the v42 log, or
+        retention cut the event), the log's oldest row is a lower bound on
+        the age, reported as such. A blank status is never stale."""
+        if not agents:
+            return
+        # Lazy: the helper's package loads the embedding stack, which the
+        # daemon has already imported and the offline CLIs never need.
+        from pseudolife_memory.memory.context_builder import _relative_time
+        set_at = {row["agent_id"]: row["set_at"] for row in self._all(
+            "SELECT agent_id,max(created_at) AS set_at FROM coordination_events "
+            "WHERE agent_id=ANY(%s) AND (event='register' OR (event='update' "
+            "AND (payload::jsonb->'fields') ? 'status')) GROUP BY agent_id",
+            ([agent["agent_id"] for agent in agents],))}
+        oldest = None
+        if len(set_at) < len(agents):
+            oldest = self._one("SELECT min(created_at) AS t FROM coordination_events")["t"]
+        for agent in agents:
+            when = set_at.get(agent["agent_id"])
+            if when is not None:
+                age, text = now - when, _relative_time(when, now)
+            elif oldest is not None and now - oldest >= 60:
+                age, text = now - oldest, "more than " + _relative_time(oldest, now)
+            else:
+                age, text = None, "unknown"
+            agent["status_set_at"] = when
+            agent["status_age"] = text
+            agent["status_stale"] = bool(agent["status"]) and age is not None \
+                and age >= STATUS_STALE_AFTER
 
     def _pending_count(self, agent_id):
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
@@ -665,10 +717,19 @@ class CoordinationStore:
             if alive and row["attachment_id"] != attachment_id:
                 raise CoordinationError("attachment_busy")
             generation = row["generation"] if alive else row["generation"] + 1
+            # Only a new attachment, a process starting, is the agent's own
+            # act. The id the row already holds is the adapter recovering its
+            # lease after a daemon outage, a host sleep or a pull downgrade:
+            # on 2026-09-25 a 9-minute sleep lapsed every idle shim's lease,
+            # and the re-attach wave on wake made a dozen sessions idle for
+            # hours read as active within 28 s of each other.
+            started = row["attachment_id"] != attachment_id
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET attachment_id=%s,generation=%s,lease_until=%s,"
-                "last_activity=%s,wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
-                (attachment_id, generation, now + ATTACHMENT_LEASE, now, wake_enabled, agent_id))
+                "last_activity=CASE WHEN %s THEN %s ELSE last_activity END,"
+                "wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
+                (attachment_id, generation, now + ATTACHMENT_LEASE, started, now,
+                 wake_enabled, agent_id))
             mailbox = self._mailbox_state(agent_id)
             self._append([self._event(
                 "attach", {"generation": generation, "lease_until": now + ATTACHMENT_LEASE,
