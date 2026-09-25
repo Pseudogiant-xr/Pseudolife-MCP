@@ -4320,15 +4320,14 @@ variants exist so their effect on agent behaviour can be measured
 
 ```yaml
 memory_policy:
-  variant: compact          # none | compact | compact_gaps | full_separate_hook
-  ab_arms: []               # e.g. [compact, compact_gaps] for an online A/B test
+  variant: compact          # none | compact | full_separate_hook
+  ab_arms: []               # e.g. [compact, full_separate_hook] for an online A/B test
 ```
 
 | Variant | What session start serves |
 |---|---|
 | `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
-| `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. |
-| `compact_gaps` | The core plus three rules the tool descriptions do not carry: recall before stating a current version, number or benchmark; route verified external facts to `memory_world_set`; correct memory-vs-code drift on the spot. |
+| `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. Since 2026-09-25 it restates three of the full block's rules: search before stating a "current" version, number or benchmark; correct memory-vs-code drift on the spot; route verified external facts to `memory_world_set`. |
 | `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
 
 The separate output is the plugin's third SessionStart handler

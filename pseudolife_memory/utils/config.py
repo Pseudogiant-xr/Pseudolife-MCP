@@ -1254,7 +1254,7 @@ class StorageConfig:
 
 # The standing memory policies session start can serve; see
 # :class:`MemoryPolicyConfig` and ``pseudolife_memory.web.session_hook``.
-MEMORY_POLICY_VARIANTS = ("none", "compact", "compact_gaps", "full_separate_hook")
+MEMORY_POLICY_VARIANTS = ("none", "compact", "full_separate_hook")
 
 
 @dataclass
@@ -1267,9 +1267,6 @@ class MemoryPolicyConfig:
     * ``compact`` (default) — the short core served since 2026-09-24
       (``STARTUP_MEMORY_CORE``), ahead of the briefing in one hook output;
     * ``none`` — no policy text; the briefing and the episode line still serve;
-    * ``compact_gaps`` — the core plus three rules the tool descriptions do
-      not carry (recall before stating a current value, route verified
-      external facts to ``memory_world_set``, correct memory-vs-code drift);
     * ``full_separate_hook`` — the full ``MEMORY_LOOP_BLOCK`` (7.5 KB), served
       by the plugin's separate memory-policy hook, because block plus
       briefing overflow the 9,500-byte budget of one hook output.

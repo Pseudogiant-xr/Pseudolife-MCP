@@ -273,20 +273,6 @@ https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/examples/CLAUDE.mem
 Full memory briefing: `pseudolife-mcp briefing` or GET /api/briefing."""
 
 
-# Three rules the core leaves to the tool descriptions, which a client may
-# never load (Claude Code defers MCP tool schemas until a tool is searched).
-# Served after the core only by the ``compact_gaps`` variant; the core itself
-# stays as it is so the memory-policy bench can compare the two.
-STARTUP_MEMORY_GAPS = """\
-Before you state a "current" version, number, or benchmark result, search
-memory for a prior record, then confirm the value at its source.
-Route an external fact you verified on the web or in docs to
-`memory_world_set` with its source URL and quote, not to `memory_store`.
-When memory and the code disagree, trust the code and correct the memory on
-the spot: `memory_fact_set` at the same slot, then `memory_outcome` with
-outcome "correction"."""
-
-
 ONBOARDING_BLOCK = """\
 Your memory bank is EMPTY — this session is where it starts. Seed it as you
 work: name the session (`memory_session_title`), store two or three durable
@@ -384,8 +370,6 @@ def _startup_policy(variant: str) -> str:
     ``full_separate_hook`` carries none here: its block has its own hook."""
     if variant == "compact":
         return STARTUP_MEMORY_CORE
-    if variant == "compact_gaps":
-        return STARTUP_MEMORY_CORE + "\n\n" + STARTUP_MEMORY_GAPS
     return ""
 
 

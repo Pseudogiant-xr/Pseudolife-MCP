@@ -8,10 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added (2026-09-25 — measure what the startup memory policy changes)
 - `memory_policy.variant` selects the standing memory policy session start
-  serves: `none`, `compact` (the default, unchanged), `compact_gaps` (the
-  core plus three rules the tool descriptions do not carry) or
-  `full_separate_hook` (the full memory-loop block, from its own
+  serves: `none`, `compact` (the default: the core the hook already
+  serves) or `full_separate_hook` (the full memory-loop block, from its own
   SessionStart output so it never shares the briefing's 9,500-byte budget).
+  A `compact_gaps` variant (the core plus three rules) was retired before
+  release, because the same three rules now live in the core itself; the
+  committed smoke artifact still carries one arm of it.
   `memory_policy.ab_arms` assigns hook-registered sessions an arm by a
   SHA-256 of the client session id. See
   [configuration](docs/guide/configuration.md#startup-memory-policy-memory_policy).
