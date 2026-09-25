@@ -237,12 +237,23 @@ def test_coordination_has_independent_start_and_prompt_handlers():
         assert len(handlers) == count
         assert any(script in h["command"] and native_event in h["commandWindows"]
                    for h in handlers)
-        assert "curl" not in _read("plugin/hooks/" + script)
+    # Every turn: static, offline-safe.
+    assert "curl" not in _read("plugin/hooks/coordination-prompt.sh")
+    # Session start: one bounded request for the daemon-served check-in,
+    # which the daemon serves only where the board works.
     start = _read("plugin/hooks/coordination-start.sh")
-    assert "memory_agents(action=list)" in start
-    assert "memory_agents(action=update" in start
-    assert "memory_message(action=receive)" in start
-    assert "memory_message(action=ack" in start
+    curls = re.findall(r"^curl (?:[^\n]*\\\n)*[^\n]*", start, re.M)
+    assert len(curls) == 1 and "/api/hook/coordination-start" in curls[0]
+    assert "--retry" not in curls[0]
+    max_time = int(re.search(r"--max-time (\d+)", curls[0])[1])
+    budget = next(h["timeout"] for group in hooks["SessionStart"] for h in group["hooks"]
+                  if "coordination-start.sh" in h["command"])
+    assert max_time <= budget - 2  # headroom for the record work before it
+    assert "memory_agents" not in start
+    from pseudolife_memory.coordination import CHECKIN_TEXT
+    for phrase in ("memory_agents(action=list)", "memory_agents(action=update",
+                   "memory_message(action=receive)", "memory_message(action=ack"):
+        assert phrase in CHECKIN_TEXT
 
 
 # ── content sync ────────────────────────────────────────────────────────────

@@ -293,6 +293,7 @@ def test_verification_counts_every_selected_hook(tmp_path, monkeypatch):
     monkeypatch.setattr(setup, "codex", codex)
     monkeypatch.setattr(setup, "wait_for_daemon", lambda: None)
     monkeypatch.setattr(setup, "episode_open", lambda thread: next(opened))
+    monkeypatch.setattr(setup, "board_checkin_expected", lambda: True)
     verified = setup.verify("fixture-codex", tmp_path, tmp_path, {"config": {}}, hooks, hooks)
     assert verified == {"session_start": True, "user_prompt_submit": True, "session_end": True}
 
@@ -388,3 +389,97 @@ def test_transient_failure_normalizes_auto_source_and_preserves_fallback(tmp_pat
     assert result["status"] == "unavailable"
     assert result["instructions"] == "appended"
     assert "private diagnostic" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("source", ["manual", "plugin"])
+@pytest.mark.parametrize("command", [
+    "pseudolife-mcp briefing --hook-json --coordination",
+    "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json --coordination",
+])
+def test_gated_lightweight_checkin_hook_migrates_too(tmp_path, source, command):
+    unrelated = {"type": "command", "command": "echo user-owned"}
+    path = tmp_path / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [
+        {"type": "command", "command": command, "commandWindows": command}, unrelated]}]}}))
+    setup.install_manual(tmp_path, {"backups": []}, plugin=source == "plugin")
+    starts = [h["command"] for group in json.loads(path.read_text())["hooks"]["SessionStart"]
+              for h in group["hooks"]]
+    assert command not in starts and unrelated["command"] in starts
+
+
+def _verification_client(hooks, start_texts):
+    class Client:
+        events = [{"method": "hook/completed", "params": {"run": {
+            "eventName": event, "status": "completed", "entries": [{"text": text}]}}}
+            for event, text in ((("sessionStart", t) for t in start_texts))]
+        events += [{"method": "hook/completed", "params": {"run": {
+            "eventName": "userPromptSubmit", "status": "completed", "entries": [{"text": text}]}}}
+            for text in ("memory_lesson_search", "")]
+
+        def rpc(self, method, params):
+            answers = {"config/read": {"config": {}},
+                       "hooks/list": {"data": [{"hooks": hooks, "errors": []}]},
+                       "thread/start": {"thread": {"id": "fixture-thread"}}, "turn/start": {}}
+            if method not in answers:
+                pytest.fail("Unexpected RPC: " + method)
+            return answers[method]
+
+        def receive(self, timeout):
+            pass
+
+    @contextmanager
+    def codex(*args, **kwargs):
+        yield Client()
+
+    return codex
+
+
+@pytest.mark.parametrize("available,checkin,ok", [
+    (True, "memory_agents(action=list)", True),
+    (True, "", False),
+    (False, "", True),
+])
+def test_verification_expects_the_checkin_only_where_the_board_works(
+        tmp_path, monkeypatch, available, checkin, ok):
+    """A board that is off serves no check-in; setup must not call that a
+    broken hook (the board is on by default only where it can work)."""
+    hooks = plugin_hooks(tmp_path)
+    for h in hooks:
+        h["trustStatus"] = "trusted"
+    opened = iter([True, False])
+    # Three SessionStart handlers run: memory, the memory-policy output
+    # (empty unless the daemon's variant asks for it) and coordination.
+    monkeypatch.setattr(setup, "codex", _verification_client(
+        hooks, ["Session episode: fixture", "", checkin]))
+    monkeypatch.setattr(setup, "wait_for_daemon", lambda: None)
+    monkeypatch.setattr(setup, "episode_open", lambda thread: next(opened))
+    monkeypatch.setattr(setup, "board_checkin_expected", lambda: available)
+    if ok:
+        assert setup.verify("fixture-codex", tmp_path, tmp_path, {"config": {}}, hooks, hooks)["session_start"]
+    else:
+        with pytest.raises(setup.SetupError, match="CoordinationStart"):
+            setup.verify("fixture-codex", tmp_path, tmp_path, {"config": {}}, hooks, hooks)
+
+
+@pytest.mark.parametrize("setting,body,expected,asked", [
+    (None, "Pseudolife coordination: fixture.\n", True, True),
+    (None, "", False, True),
+    ("0", "Pseudolife coordination: fixture.\n", False, False),
+    (None, OSError("down"), False, True),
+])
+def test_board_checkin_expected_asks_the_daemon_like_the_hook(monkeypatch, setting, body, expected, asked):
+    calls = []
+
+    def daemon_request(path, *, text=False):
+        calls.append((path, text))
+        if isinstance(body, Exception):
+            raise body
+        return body
+
+    monkeypatch.setattr(setup, "daemon_request", daemon_request)
+    if setting is None:
+        monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION", raising=False)
+    else:
+        monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", setting)
+    assert setup.board_checkin_expected() is expected
+    assert calls == ([("/api/hook/coordination-start", True)] if asked else [])
