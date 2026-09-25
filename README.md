@@ -622,6 +622,9 @@ plugin server alongside any user-registered one with no deduplication, which
 doubled every session's tool namespace next to the installer's registration
 — so the transport is registered exactly once, by `ops/install.*` (stdio
 shim by default — per-session episode identity) or the one-liner below.
+Hooks an earlier install wrote to `~/.claude/settings.json` would duplicate
+the plugin's; the installer offers to remove them once the plugin runs
+(`--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove` unattended).
 Details, non-default ports/tokens, and migration:
 [plugin/README.md](plugin/README.md).
 

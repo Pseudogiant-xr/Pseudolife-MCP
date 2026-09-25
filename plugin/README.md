@@ -117,7 +117,14 @@ The transport step — `claude mcp add` — is **not** replaced: the installer (
 the one-liner above) still owns the MCP transport.
 
 **Migrating from installer hook wiring?** Remove the old pieces so they
-don't double up:
+don't double up. Rerunning the installer with Claude Code selected offers to
+do this for you once the plugin is installed and enabled for all projects:
+it lists the entries, backs up `~/.claude/settings.json`, and removes only
+the exact commands the installers wrote (`--claude-legacy-hooks remove` /
+`-ClaudeLegacyHooks remove` for an unattended run;
+`ops/install-hook.sh --remove-legacy` or `ops\install-hook.ps1 -RemoveLegacy`
+on their own, `--dry-run` / `-DryRun` to list first). An entry you edited is
+listed for review and left alone. By hand:
 
 1. Delete the `pseudolife-mcp briefing` SessionStart entry from
    `~/.claude/settings.json`
@@ -127,6 +134,9 @@ don't double up:
 3. Remove any installer-added `Pseudolife coordination:` SessionStart entry
    from `~/.claude/settings.json`; the plugin supplies its own check-in hook.
    Keep the full standing memory policy if you rely on its detailed guidance.
+4. Delete any `pseudolife-mcp episode-start` SessionStart or
+   `pseudolife-mcp episode-end` SessionEnd entry (installs from before
+   2026-07-14); the daemon owns episodes now.
 
 (Keep your `claude mcp` registration — the plugin doesn't provide one.)
 
