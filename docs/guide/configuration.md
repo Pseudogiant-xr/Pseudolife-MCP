@@ -225,6 +225,90 @@ Acknowledging some messages while a waiter is armed, and leaving others pending,
 rewrites the digest and fires once, the same way the tool-result hint
 re-delivers a changed digest.
 
+### Leases: `pseudolife-mcp lease`
+
+Awareness and mail say who is working on what; they do not stop two agents
+starting the same GPU job or full test suite at once. A lease does: a named,
+expiring hold on a shared resource, taken around any command.
+
+```sh
+pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]
+pseudolife-mcp lease list [NAME] [--json]
+```
+
+What excludes is an OS file lock, `~/.pseudolife-mcp/locks/lease-<NAME>.lock`
+(`PSEUDOLIFE_LEASE_LOCK_DIR` overrides the directory; characters outside
+`A-Za-z0-9._-` become `_`, plus a short hash of the name). The OS releases it
+the moment the holding process exits or dies, so a crash leaves nothing stale.
+With a bearer token (`PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`) and
+a daemon whose board is on, the board mirrors the lock: the run registers a
+short-lived address (retired an hour after its last activity), queues for
+`NAME` in arrival order, reports its position and the holder on stderr about
+once a minute, then takes the OS lock and runs the command, renewing the board
+lease every third of `--ttl` (default 120 s, from 30 s to a day). When a lease
+frees, the head of the queue has 300 s to take it before the board passes it
+on. `--expect` sets the expected end the board shows, counted from the grant
+and marked stale once past; every call repeats the same value, which leaves it
+alone. `--purpose` says what the lease is for.
+
+Without a token, with the daemon unreachable, the board off or refused for this
+bearer, or with `--no-board`, the run says once why and waits on the OS lock
+alone: polled every 2 s, not in arrival order. The board never stops a command
+from running: a board that keeps failing for two minutes is dropped the same
+way, and a renewal that finds the lease lost warns once while the command
+continues under the OS lock. A lock held by something the board does not show
+(a `--no-board` run) delays a board holder until it is freed.
+
+The command inherits the terminal and the environment, plus
+`PSEUDOLIFE_LEASES_HELD` (comma-separated names, appended to any inherited
+value). Exit codes: the command's own; `75` when `--timeout` (`90`, `90s`,
+`20m`, `2h`) expired before the lease was held, and the command did not run;
+`128+N` when stopped by signal N (`130` Ctrl-C, `143` SIGTERM, `129` SIGHUP);
+`64` for a run nested inside a run of the same lease (its name is in
+`PSEUDOLIFE_LEASES_HELD` while that lease's lock is held), which would
+otherwise wait for itself forever; `2` a usage error; `71` an unusable lock
+file; `126` or `127` a command that cannot start or is not found.
+
+A stop never releases the lease under a running command. Ctrl-C reaches the
+command too, so it first gets 10 s to clean up on its own; SIGTERM or SIGHUP
+sent to the `lease` process is forwarded to it. After that it is interrupted
+(POSIX only), terminated and killed, 10 s apart. The `lease` process holds
+the lock, not the command: kill it outright (SIGKILL, Task Manager) and the
+lock goes while the command may run on. On a case-insensitive filesystem,
+names that differ only in case share one lock file, which can only make one
+wait for the other.
+
+`lease list` shows each board lease (holder, purpose, age, expected end,
+queue) beside the local lock files, each probed held or free, and whether the
+test suite's own lock (`full-suite.lock`, which leases never take) is held.
+Without the board it shows the local state with a one-line note. The instance
+credential stays inside the `lease` process: it is never printed or passed to
+the command.
+
+`pseudolife-mcp lease break NAME` is the operator's way to free a lease whose
+holder will never release it, such as a dead session's day-long claim. It opens
+the bank directly, as `board-audit` and `export` do
+(`PSEUDOLIFE_MCP_DATABASE_URL`, else the lite tier's data dir), grants the
+lease to the next waiter, and logs a `lease_break` with the operator as its
+actor. It frees the board's record only: a process still holding the local lock
+keeps it until it exits.
+
+Sessions hold leases too, from the model's side, with no process and no OS lock
+behind them. `memory_agents(action="claim", lease=NAME, status=PURPOSE,
+expect=SECONDS)` takes or queues for a session-held lease, such as
+`coordinator:<project>` or `claim:<path>` for a work area; claiming again renews
+it, and `action="release"` frees it or leaves its queue. A `claim:` lease lasts
+a day between renewals, any other an hour. A claim is advisory: it tells peers,
+it blocks no edit. A queued session is not told when its turn comes: it sees
+the grant the next time it lists or claims, and must renew within the same
+300 s window. `memory_agents(action="list")` carries the held and queued leases
+(resource leases before claims, and `leases_truncated` when the page cut some
+off), and `memory_agents(action="update", status=..., expect=SECONDS)` gives a
+status an expected duration: past it the peer list marks the row
+`status_overdue`. Over REST these are the coordination actions `lease`
+(acquire, renew, or queue once), `release`, and `leases`, a listing that needs
+only the bearer.
+
 ### Codex CLI and desktop
 
 Use the ordinary stdio shim with `PSEUDOLIFE_WRITER_ID=codex`. Codex supplies
@@ -657,8 +741,8 @@ inside a work block. Idle stretches ran 5.4 hours or longer.
 Claude Desktop's app-level entry (writer ID `claude-desktop`) is one process
 serving every conversation in the app, so it registers no coordination
 address: whichever conversation called it would post, set status and read
-mail as all of them. It refuses `memory_agents(action="update")` and
-`memory_message` with an error saying why, prepends the same advice to its MCP
+mail as all of them. It refuses `memory_agents` `update`, `claim` and
+`release`, and `memory_message`, with an error saying why, prepends the same advice to its MCP
 instructions, and its `memory_agents(action="list")` shows open sessions only,
 not the board. A Claude Code session makes those calls on its own per-session
 server. In the Desktop app's Code tab that works only while the two entries have
@@ -1759,7 +1843,7 @@ The milestones:
 | v42 | Board audit log (2026-09-24). Adds `coordination_events`, an append-only, FK-free, sha256-hash-chained record of every agent-board mutation (register, update with the replaced values, attach, detach, send with its body, first read, ack, attempt, expire, prune, bank identity, restore recover/rebind), written in the mutation's own transaction and pruned only by its own `coordination.audit_retention_days` window (default 90, `0` keeps it forever), which logs its cuts. Adds `coordination_messages.first_read_at`. Operational data, excluded from portable exports like the other coordination tables; read and verified with `pseudolife-mcp board-audit`. The log is cut at most once a day, on UTC day boundaries, and only while the board is in use. Additive/idempotent; existing banks start with an empty log, and history before the upgrade is not reconstructed: a message still unacknowledged at the upgrade has no `send` event, and its first read afterwards is logged as its first read. |
 | v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or shim exit, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
 | v44 | Memory-loop observability (2026-09-25). Adds `lesson_search_events`: one row per `memory_lesson_search` call (query, caller session and episode, the lessons served by `(entity_norm, attribute_norm)` slot key with rank and score; an empty list for a search that found nothing). It is a separate table from `retrieval_events`, whose rows the retrieval replay and telemetry harnesses re-run as `memory_search` calls. FK-free; it shares the retrieval log's switch (`memory.retrieval_log.enabled`) and retention (`retention_days`). Adds `outcome_signals.used_ids` (JSONB): what an outcome's `used_ids` became, as `{"credited", "unmatched", "served_elsewhere"}` id lists, or `{"unchecked", "reason"}` when the label write failed; `NULL` when the outcome named no ids, the log is off, or this best-effort write failed (counted in `retrieval_log.write_errors`). The column is serving telemetry and stays out of portable exports, like the retrieval log. Additive/idempotent; existing rows read `NULL` and the new table starts empty. |
-| v45 | Resource leases (2026-09-26). Adds `coordination_leases`, one FK-free row per lease name (holder agent and principal, purpose, a fence that rises on every grant, and the acquired, expiry and expected-end times), `coordination_lease_waiters`, each lease's FIFO queue, and `coordination_agents.status_expires_at`, when a status says it stops being true. A process-held lease's truth is an OS file lock that `pseudolife-mcp lease run` takes on the host, and the row mirrors it; a session-held lease (`coordinator:<project>`, `claim:<path>`) lives only here. A freed lease goes to the head of its queue, which must renew within five minutes or lose it to the next. Grants, releases, expiries and operator breaks are audit events; renewals are not. Operational data, excluded from portable exports like the other coordination tables. Additive/idempotent. |
+| v45 | Resource leases (2026-09-26). Adds `coordination_leases`, one FK-free row per lease name (holder agent and principal, purpose, a fence that rises on every grant, the acquired, expiry and expected-end times, the estimate the hold was given, and when the lease was last freed, after which a week free and unqueued forgets the row), `coordination_lease_waiters`, each lease's FIFO queue, and `coordination_agents.status_expires_at`, when a status says it stops being true. A process-held lease's truth is an OS file lock that `pseudolife-mcp lease run` takes on the host, and the row mirrors it; a session-held lease (`coordinator:<project>`, `claim:<path>`) lives only here. A freed lease goes to the head of its queue, which must renew within five minutes or lose it to the next. Grants, releases, expiries and operator breaks are audit events; renewals are not. Operational data, excluded from portable exports like the other coordination tables. Additive/idempotent. |
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries the body's sha256 and UTF-8 byte count (`text_sha256`, `text_bytes`) instead of the text, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its digest (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload and cannot be redacted; they leave the log only through audit retention. The board also refuses credential-shaped message bodies, statuses and lease purposes with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.

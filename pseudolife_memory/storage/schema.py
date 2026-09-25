@@ -566,7 +566,9 @@ CREATE TABLE IF NOT EXISTS coordination_leases (
     fence BIGINT NOT NULL DEFAULT 0,
     acquired_at DOUBLE PRECISION,
     expires_at DOUBLE PRECISION,
-    expected_end DOUBLE PRECISION
+    expect INTEGER,
+    expected_end DOUBLE PRECISION,
+    freed_at DOUBLE PRECISION
 );
 CREATE INDEX IF NOT EXISTS coordination_leases_holder_idx
     ON coordination_leases (holder_agent_id) WHERE holder_agent_id IS NOT NULL;

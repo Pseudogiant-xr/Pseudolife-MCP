@@ -21,6 +21,7 @@ ALL_MODES = (
     "episode-start",
     "episode-end",
     "wait-mail",
+    "lease",
 )
 
 

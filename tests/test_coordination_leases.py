@@ -95,10 +95,10 @@ def test_holder_renewal_moves_expiry_without_an_audit_row(store):
     store.acquire_lease(*creds(a), name="gpu", ttl=120)
     before = len(events(store))
     store.test_time[0] += 60
-    out = store.acquire_lease(*creds(a), name="gpu", ttl=120, expect=30)
+    out = store.acquire_lease(*creds(a), name="gpu", ttl=120)
     assert out["state"] == "held" and out["fence"] == 1
     assert out["expires_at"] == 1180.0
-    assert out["expected_end"] == 1090.0
+    assert out["expected_end"] is None
     assert len(events(store)) == before
 
 
@@ -332,3 +332,126 @@ def test_lease_history_keeps_the_audit_chain_valid(store):
     store.break_lease("gpu")
     report = verify_audit_chain(list(audit_events(store.storage.conn)))
     assert report["ok"] is True
+
+
+# ── review fixes (2026-09-26) ────────────────────────────────────────────
+
+
+def test_renewal_keeps_the_expected_end_unless_the_estimate_changes(store):
+    a = store.register("alice")
+    store.acquire_lease(*creds(a), name="full-suite", ttl=120, expect=1200, purpose="suite")
+    before = len(events(store))
+    store.test_time[0] += 40
+    # A wrapper renewing with the same estimate must not push the end out,
+    # or a stalled hold could never read stale.
+    same = store.acquire_lease(*creds(a), name="full-suite", ttl=120, expect=1200,
+                               purpose="suite")
+    assert same["expected_end"] == 2200.0 and same["expires_at"] == 1160.0
+    assert len(events(store)) == before
+    store.test_time[0] += 10
+    moved = store.acquire_lease(*creds(a), name="full-suite", ttl=120, expect=600,
+                                purpose="suite, second half")
+    assert moved["expected_end"] == 1650.0
+    [update] = events(store, "lease_update")
+    assert payload(update) == {"name": "full-suite", "fence": 1, "expect": 600,
+                               "purpose": "suite, second half"}
+
+
+@pytest.mark.parametrize("name", ["gpu\u200b", "\u202egpu", "gpu\u0085", "\ufeffgpu"])
+def test_invisible_and_bidi_characters_are_refused_in_names(store, name):
+    a = store.register("alice")
+    with pytest.raises(CoordinationError, match="invalid_lease"):
+        store.acquire_lease(*creds(a), name=name, ttl=120)
+
+
+def test_a_full_queue_after_a_settle_logs_nothing(store, monkeypatch):
+    from pseudolife_memory.storage import coordination as module
+    a, b, c, d = (store.register("alice") for _ in range(4))
+    store.acquire_lease(*creds(a), name="gpu", ttl=60)
+    store.acquire_lease(*creds(b), name="gpu", ttl=60)
+    store.test_time[0] += 1
+    store.acquire_lease(*creds(c), name="gpu", ttl=60)  # queue: b, c
+    # A settle only ever shortens a queue, so shrink the bound to make the
+    # refusal follow a settle that expires a and grants b (queue: c, full).
+    monkeypatch.setattr(module, "LEASE_QUEUE_MAX", 1)
+    store.test_time[0] += 60
+    before = len(events(store))
+    with pytest.raises(CoordinationError, match="lease_queue_full"):
+        store.acquire_lease(*creds(d), name="gpu", ttl=60)
+    assert len(events(store)) == before  # the settle rolled back with the refusal
+
+
+def test_roster_lists_resource_leases_before_claims_and_says_when_cut(store, monkeypatch):
+    from pseudolife_memory.storage import coordination as module
+    monkeypatch.setattr(module, "MAX_PAGE", 3)
+    a, b = store.register("alice"), store.register("alice")
+    for path in ("a.py", "b.py", "c.py"):
+        store.acquire_lease(*creds(a), name=f"claim:{path}", ttl=3600)
+    store.acquire_lease(*creds(a), name="gpu", ttl=120)
+    listed = store.list_agents(*creds(b), limit=3)
+    assert [lease["name"] for lease in listed["leases"]] == ["gpu", "claim:a.py", "claim:b.py"]
+    assert listed["leases_truncated"] is True
+
+
+def test_prune_drops_a_departed_waiter_before_granting(store):
+    holder = store.register("alice")
+    departed = store.register("alice", capabilities={"resumable": False})
+    live = store.register("alice")
+    store.acquire_lease(*creds(holder), name="gpu", ttl=60)
+    store.acquire_lease(*creds(departed), name="gpu", ttl=60)
+    store.test_time[0] += 1
+    store.acquire_lease(*creds(live), name="gpu", ttl=60)
+    store.test_time[0] += 3700  # holder lapsed; the ephemeral waiter is past its window
+    store.update(*creds(live), status="still here")
+    store.prune()
+    [lease] = store.list_leases()["leases"]
+    assert lease["holder"]["agent_id"] == live["agent_id"]
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_agents WHERE agent_id=%s",
+        (departed["agent_id"],)).fetchone()[0] == 0
+
+
+def test_prune_forgets_a_lease_left_free_for_a_week(store):
+    a = store.register("alice")
+    store.acquire_lease(*creds(a), name="claim:old.py", ttl=3600)
+    store.release_lease(*creds(a), name="claim:old.py")
+    store.acquire_lease(*creds(a), name="claim:new.py", ttl=3600)
+    store.test_time[0] += 7 * 86400 + 1
+    store.acquire_lease(*creds(a), name="claim:new.py", ttl=86400)  # renew, keeps it held
+    store.prune()
+    names = [r[0] for r in store.storage.conn.execute(
+        "SELECT name FROM coordination_leases ORDER BY name").fetchall()]
+    assert names == ["claim:new.py"]
+    [pruned] = [e for e in events(store, "prune") if "leases" in payload(e)]
+    assert payload(pruned)["leases"] == ["claim:old.py"]
+
+
+def test_restore_recovery_frees_every_lease_and_queue(store):
+    a, b = store.register("alice"), store.register("alice")
+    store.acquire_lease(*creds(a), name="coordinator:p", ttl=3600)
+    store.acquire_lease(*creds(b), name="coordinator:p", ttl=3600)
+    out = store.recover()
+    assert out["revoked"] == 2
+    assert store.list_leases()["leases"] == []
+    [row] = events(store, "recover")
+    assert payload(row)["leases_freed"] == ["coordinator:p"]
+    assert payload(row)["waiters_removed"] == 1
+    # A revoked waiter can never take a turn up, so none is granted one.
+    assert events(store, "lease_grant") == []
+
+
+def test_a_revoked_waiter_is_passed_over(store):
+    """A restore recovered by an older build (before v45) revokes every
+    credential but leaves the queues; a revoked waiter can never take a turn
+    up, so the next grant skips it rather than idling for the window."""
+    a, b, c = (store.register("alice") for _ in range(3))
+    store.acquire_lease(*creds(a), name="gpu", ttl=120)
+    store.acquire_lease(*creds(b), name="gpu", ttl=120)
+    store.test_time[0] += 1
+    store.acquire_lease(*creds(c), name="gpu", ttl=120)
+    store.storage.conn.execute(
+        "UPDATE coordination_agents SET credential_hash=NULL WHERE agent_id=%s",
+        (b["agent_id"],))
+    store.release_lease(*creds(a), name="gpu")
+    [lease] = store.list_leases()["leases"]
+    assert lease["holder"]["agent_id"] == c["agent_id"]
