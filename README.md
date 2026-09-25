@@ -683,7 +683,7 @@ installer prefers that path when it exists). The equivalent entry by hand:
 ```json
 {
   "mcpServers": {
-    "pseudolife-memory": {
+    "pseudolife-desktop": {
       "command": "/absolute/path/to/pseudolife-mcp",
       "env": {
         "PSEUDOLIFE_WRITER_ID": "claude-desktop",
@@ -694,6 +694,16 @@ installer prefers that path when it exists). The equivalent entry by hand:
   }
 }
 ```
+
+The entry is named `pseudolife-desktop` on purpose. Desktop's Code tab runs
+Claude Code, which starts its own per-session `pseudolife-memory` server; when
+an app-level entry has the same name, Desktop sends the session's
+`mcp__pseudolife-memory__*` calls to the app-level entry and the session's own
+server gets none. Re-running the installer renames an entry it wrote under the
+old name (its `env` sets `PSEUDOLIFE_WRITER_ID` to `claude-desktop`), keeping
+any `env` keys you added and backing the config up first. It leaves any other
+`pseudolife-memory` entry alone and warns about it. Chat and Cowork then list
+the tools as `mcp__pseudolife-desktop__*`.
 
 Two things differ from the CLI clients. Desktop launches MCP servers with a
 **sanitized environment** — PATH plus a few system variables, none of your
@@ -1115,7 +1125,8 @@ pseudolife-mcp-daemon`).
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
-  is at the bottom of `mcp-server-pseudolife-memory.log` in the app's log
+  is at the bottom of `mcp-server-pseudolife-desktop.log`
+  (`mcp-server-pseudolife-memory.log` for an entry not yet renamed) in the app's log
   folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
   on macOS). If it is a 401, the daemon is token-gated and the
   Desktop-launched shim holds no credential: Desktop sanitizes the

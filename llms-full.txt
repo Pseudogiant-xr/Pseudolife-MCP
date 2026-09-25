@@ -689,7 +689,7 @@ installer prefers that path when it exists). The equivalent entry by hand:
 ```json
 {
   "mcpServers": {
-    "pseudolife-memory": {
+    "pseudolife-desktop": {
       "command": "/absolute/path/to/pseudolife-mcp",
       "env": {
         "PSEUDOLIFE_WRITER_ID": "claude-desktop",
@@ -700,6 +700,16 @@ installer prefers that path when it exists). The equivalent entry by hand:
   }
 }
 ```
+
+The entry is named `pseudolife-desktop` on purpose. Desktop's Code tab runs
+Claude Code, which starts its own per-session `pseudolife-memory` server; when
+an app-level entry has the same name, Desktop sends the session's
+`mcp__pseudolife-memory__*` calls to the app-level entry and the session's own
+server gets none. Re-running the installer renames an entry it wrote under the
+old name (its `env` sets `PSEUDOLIFE_WRITER_ID` to `claude-desktop`), keeping
+any `env` keys you added and backing the config up first. It leaves any other
+`pseudolife-memory` entry alone and warns about it. Chat and Cowork then list
+the tools as `mcp__pseudolife-desktop__*`.
 
 Two things differ from the CLI clients. Desktop launches MCP servers with a
 **sanitized environment** — PATH plus a few system variables, none of your
@@ -1121,7 +1131,8 @@ pseudolife-mcp-daemon`).
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
-  is at the bottom of `mcp-server-pseudolife-memory.log` in the app's log
+  is at the bottom of `mcp-server-pseudolife-desktop.log`
+  (`mcp-server-pseudolife-memory.log` for an entry not yet renamed) in the app's log
   folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
   on macOS). If it is a 401, the daemon is token-gated and the
   Desktop-launched shim holds no credential: Desktop sanitizes the
@@ -3701,7 +3712,10 @@ unchanged, a one-line reminder rides every tenth tool result. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
-Code, whose per-session stdio shim does receive the id.
+Code, whose per-session stdio shim does receive the id. That shim serves the
+session's calls only while Desktop's app-level entry has a different name, so
+the installer names that entry `pseudolife-desktop` (see
+[Claude Desktop](providers.md#claude-desktop)).
 
 Claude Code hooks see the current session id, which `/clear` and an
 in-session `/resume` change, while the shim keeps the id it was launched with.
@@ -5457,6 +5471,23 @@ installers call and which you can run by hand with
 entry). What Desktop does differently, and what the entry carries because
 of it:
 
+- **Its own name.** The entry is `pseudolife-desktop`. Desktop's Code tab
+  runs Claude Code, which starts its own per-session `pseudolife-memory`
+  server; where an app-level entry carries the same name, Desktop sends the
+  session's `mcp__pseudolife-memory__*` calls to the app-level entry and the
+  session's own server gets none (seen live on 2026-09-21), so the session
+  has no board identity of its own. The registrar renames an entry it wrote
+  under the old name, recognised by `PSEUDOLIFE_WRITER_ID=claude-desktop` in
+  its `env`, and keeps its other settings: hand-added `env` keys, a
+  configured token-file path, a literal token to migrate. When both names
+  exist, `pseudolife-desktop` wins wherever both set a key, the old entry
+  fills the gaps, and the output names the `env` keys whose old values were
+  dropped (names, never values), apart from the settings the registrar
+  rewrites on every run. A `pseudolife-memory` entry the registrar did not
+  write is left untouched and reported on every run, and `pseudolife-desktop`
+  is written beside it, so Desktop loads both. Every rewrite
+  backs the config up first (`claude_desktop_config.json.bak-<timestamp>`).
+  Afterwards Chat and Cowork list the tools as `mcp__pseudolife-desktop__*`.
 - **Sanitized launch environment.** Desktop starts MCP servers with PATH
   plus a few system variables — none of your shell's exports. So `command`
   is the shim's absolute path (a bare `pseudolife-mcp` would not resolve),

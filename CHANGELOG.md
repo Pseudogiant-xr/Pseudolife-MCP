@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — Claude Desktop's entry no longer hides Code-tab sessions' own server)
+- `ops/install.* --client claude-desktop` (through
+  `ops/register_claude_desktop.py`) now names Claude Desktop's app-level MCP
+  entry `pseudolife-desktop` instead of `pseudolife-memory`. Claude Code
+  registers its per-session server as `pseudolife-memory`, and where both
+  carried that name Desktop served a Code-tab session's
+  `mcp__pseudolife-memory__*` calls from the app-level entry. The session's own
+  server got no calls, so the session had no board identity of its own (found
+  live 2026-09-21; the maintainer's hand rename restored per-session routing).
+- A re-run renames an entry the registrar wrote under the old name, recognised
+  by `PSEUDOLIFE_WRITER_ID=claude-desktop` in its `env`, and keeps its
+  hand-added `env` keys, its token-file path and any literal token still to
+  migrate. When both names exist, `pseudolife-desktop` wins where both set a
+  key and the old entry fills the gaps; the output names the `env` keys whose
+  old values were dropped, never a value. A `pseudolife-memory` entry the
+  registrar did not write is left untouched and reported on stderr, and
+  `pseudolife-desktop` is written beside it. The config is backed up before
+  every rewrite, as before.
+- Takes effect once the installer is re-run and Desktop is fully quit and
+  relaunched. Chat and Cowork then list the tools as
+  `mcp__pseudolife-desktop__*`, and the log file becomes
+  `mcp-server-pseudolife-desktop.log`. `ops/update.ps1 -All` does not apply it:
+  it never edits `claude_desktop_config.json`.
+
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
   on by default: `coordination.enabled` defaults to `true`, and without an
