@@ -298,7 +298,12 @@ class Codex:
             self.proc.terminate()
             self.proc.wait(timeout=5)
         self.reader.join(timeout=2)
-        if self.proc.stdout:
+        # A hook Codex killed can outlive it holding an inherited copy of its
+        # stdout (seen on Windows under load: a PowerShell hook stuck mid-exit
+        # for minutes), so the reader never sees EOF. Closing the pipe under
+        # that blocked read would wait on the hook; the daemon reader ends
+        # with this process instead.
+        if self.proc.stdout and not self.reader.is_alive():
             self.proc.stdout.close()
 
 
@@ -887,6 +892,9 @@ def standing_instructions(home, choice, fallback_allowed, ready, report):
     if choice == "skip":
         return "skipped"
     if choice == "auto" and ready:
+        # Verified hooks serve a compact memory core, not this block; the
+        # append stays optional (--instructions append). The state name is
+        # read by both installers, which print what it means.
         return "covered-by-hooks"
     if choice != "append" and not fallback_allowed:
         return "skipped"

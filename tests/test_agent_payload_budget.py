@@ -15,7 +15,8 @@ agent_token_ledger.py`` measures it; these tests pin the cuts it justified:
 
 All three ride ONE knob, ``memory.mcp.compact_payloads`` (default True);
 False restores the pre-cut payloads verbatim, except that a superseded hit
-keeps its ``replaced_by`` pointer (2026-09-23). Ranking, ``min_score`` and
+keeps its ``replaced_by`` pointer (2026-09-23) and every entry keeps its
+write ``date`` (2026-09-25). Ranking, ``min_score`` and
 the service layer are untouched — the eval harness calls ``service.*``, not
 these projections.
 """
@@ -45,7 +46,7 @@ def _stable(d):
     """Blank the wall-clock/score fields so the snapshot below pins SHAPE
     and content rather than the second the test ran in."""
     volatile = {"age", "asserted_at", "last_confirmed", "score", "id",
-                "tx_time", "valid_time", "superseded_at"}
+                "tx_time", "valid_time", "superseded_at", "date"}
     if isinstance(d, dict):
         return {k: ("*" if k in volatile else _stable(v))
                 for k, v in sorted(d.items())}
@@ -60,7 +61,9 @@ def _stable(d):
 # It now lives in the pure ``_project_search``. This snapshot was captured
 # from the PRE-refactor tool and must not move: the extraction is
 # behaviour-preserving, and every cut below is gated off here by
-# compact_payloads=False.
+# compact_payloads=False. Two additions are not size cuts and deliberately
+# ride through the switch: a superseded hit's ``replaced_by`` pointer
+# (2026-09-23) and each entry's write ``date`` (2026-09-25).
 
 
 _LEGACY_SEARCH = {
@@ -77,10 +80,11 @@ _LEGACY_SEARCH = {
     "count": 2,
     "entries": [
         {"id": "*", "score": "*", "source": "notes", "tags": [],
+         "date": "*",
          "text": "The bench Postgres listens on 127.0.0.1:5433 and the "
                  "daemon owns the bank volumes."},
         {"id": "*", "score": "*", "source": "notes", "tags": [],
-         "text": "deploy only via ops/update.ps1"},
+         "date": "*", "text": "deploy only via ops/update.ps1"},
     ],
     "low_confidence": False,
     "query": "bench postgres port",
@@ -470,6 +474,17 @@ def _ledger():
     return mod
 
 
+def test_ledger_session_block_is_the_text_the_hook_serves() -> None:
+    """Since #364 the SessionStart hook serves ``STARTUP_MEMORY_CORE``, not
+    ``MEMORY_LOOP_BLOCK``; a ledger that kept pricing the detailed block
+    would publish a per-session cost no session pays. The unauthorized hook
+    body is the policy text alone (no briefing, no custom file)."""
+    from pseudolife_memory.web.session_hook import session_start_context
+    served = session_start_context(object(), authorized=False)
+    block = _ledger().measure_session_block()
+    assert block["raw_chars"] == len(served)
+
+
 def test_ledger_meters_the_replacement_pointer_in_its_own_column() -> None:
     """Since 2026-09-23 a compact superseded hit carries ``replaced_by``
     instead of ``superseded_by_text``. The ledger must price the pointer
@@ -535,3 +550,48 @@ def test_committed_ledger_artifacts_carry_no_hostname() -> None:
             assert not led._HOST.search(text), (
                 f"{art.name} names the machine it was measured on")
         assert not led._UNSAFE.search(text), f"{art.name} carries PII"
+
+
+def test_ledger_daemon_get_refuses_redirects(monkeypatch) -> None:
+    """``Daemon.get`` sends the daemon bearer. Plain urlopen follows a 3xx
+    and copies Authorization to the redirect target, so the ledger must open
+    through the shim's no-redirect opener."""
+    import urllib.request
+
+    from pseudolife_memory.shim import _NoRedirectHandler
+
+    led = _ledger()
+    seen = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"ok": true}'
+
+    class _Opener:
+        def open(self, req, timeout=None):
+            seen["url"] = req.full_url
+            seen["auth"] = req.get_header("Authorization")
+            seen["timeout"] = timeout
+            return _Resp()
+
+    def fake_build_opener(*handlers):
+        seen["handlers"] = handlers
+        return _Opener()
+
+    def plain_urlopen(*args, **kwargs):
+        raise AssertionError("plain urlopen follows redirects with the bearer")
+
+    monkeypatch.setattr(urllib.request, "build_opener", fake_build_opener)
+    monkeypatch.setattr(urllib.request, "urlopen", plain_urlopen)
+    out = led.Daemon("http://x/", "tok").get("/api/search", q="a", k=None)
+    assert out == {"ok": True}
+    assert seen["handlers"] == (_NoRedirectHandler,)
+    assert seen["url"] == "http://x/api/search?q=a"
+    assert seen["auth"] == "Bearer tok"
+    assert seen["timeout"] == 120

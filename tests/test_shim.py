@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+import uuid
 
 import pytest
 
@@ -14,8 +16,7 @@ from pseudolife_memory import shim as _shim
 from tests.helpers import (free_port as _free_port,
                            pg_reachable as _pg_reachable,
                            private_bank as _private_bank,
-                           spawn_serve as _spawn_serve,
-                           stop_daemon as _stop_daemon)
+                           serve_on_private_bank as _serve_on_private_bank)
 from tests.pg_fixtures import resolve_test_db_url
 
 pytest.importorskip("psycopg")
@@ -33,9 +34,13 @@ _OUTER_TIMEOUT_S = _shim._SPAWN_WAIT_ALIVE_S + 60
 
 def _shim_env(port: int, data_dir, **extra) -> dict:
     """The environment a shim subprocess is driven with: point it at a daemon
-    URL/port and a data dir, and drop the token (loopback needs none)."""
+    URL/port and a data dir, and drop the token (loopback needs none). The
+    runner's host identity is dropped too: run from a Claude Code session,
+    the shim would otherwise key its calls by that live session's id."""
+    inherited = {name: value for name, value in os.environ.items()
+                 if name not in ("CLAUDE_CODE_SESSION_ID", "PSEUDOLIFE_WRITER_ID")}
     env = {
-        **os.environ,
+        **inherited,
         "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
         "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
         "PSEUDOLIFE_MCP_PORT": str(port),
@@ -60,28 +65,26 @@ def shared_daemon(tmp_path_factory):
     ``test_shim_forwards_list_changed_on_toolset_expand`` deliberately does
     NOT use this: it needs a daemon booted at the minimal toolset tier, and
     the shim's own spawn of that daemon is also the autostart test.
+
+    Its bank is private, never the run's database: see
+    ``tests.helpers.serve_on_private_bank`` for the writer-lease failure
+    that sharing it caused here.
     """
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-    port = _free_port()
-    data_dir = tmp_path_factory.mktemp("shim_daemon")
     # Token removed rather than blanked: the shims below send no Authorization
     # header, so a daemon that inherited PSEUDOLIFE_MCP_TOKEN would 401 them.
-    proc, _ = _spawn_serve(port, data_dir, url,
-                           env_extra={"PSEUDOLIFE_MCP_TOKEN": None})
-    try:
-        yield {"port": port, "data_dir": data_dir}
-    finally:
-        _stop_daemon(proc)
+    with _serve_on_private_bank(
+            "shimdaemon", tmp_path_factory.mktemp("shim_daemon"),
+            env_extra={"PSEUDOLIFE_MCP_TOKEN": None}) as d:
+        yield d
 
 
 @pytest.fixture()
 def own_bank():
     """A private bank for a test whose shim autostarts its own daemon.
 
-    A bank has one writer (the writer lease): this daemon would otherwise
-    contend with ``shared_daemon`` for the run's database, and off Windows
+    A bank has one writer (the writer lease): on the run's database this
+    daemon would contend with in-process tests' services (see
+    ``tests.helpers.serve_on_private_bank``), and off Windows
     ``_reap_daemon`` cannot kill it, so it would outlive its test holding
     that database. Dropping the private bank cuts it off instead.
     """
@@ -328,7 +331,7 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path, own_bank):
     try:
         asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
     finally:
-        _reap_daemon(port)
+        _reap_daemon(port, tmp_path)
 
 
 def test_shim_forwards_stringified_list_param(shared_daemon):
@@ -450,6 +453,146 @@ def test_post_episode_is_best_effort(monkeypatch):
                        {"session_key": "x", "title": "t"})
 
 
+# One client session, one root episode (2026-09-25). The shim used to open a
+# root of its own at launch, keyed by a fresh uuid, beside the root the
+# plugin's SessionStart hook registers under the client's session id. On the
+# live bank that day, 189 of the 193 shim-keyed roots opened in 24 h held no
+# entry: 154 were titled after the shared shim runtime directory that Codex
+# launches from, and Codex keys every call by its thread anyway.
+
+_CLAUDE_SESSION = "0b9c5f3e-7a1d-4c2e-9f8a-2d4e6b8c0a1f"
+
+
+def _run_shim_lifecycle(monkeypatch, env: dict):
+    """Run ``run_shim`` with the daemon and the proxy stubbed out. Returns the
+    session key the proxy was given, the episode POSTs made before the proxy
+    started, and every episode POST by the time ``run_shim`` returned."""
+    from pseudolife_memory import shim
+
+    for name in ("CLAUDE_CODE_SESSION_ID", "PSEUDOLIFE_WRITER_ID"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "ensure_daemon", lambda url: {"status": "ok"})
+    posts = []
+    monkeypatch.setattr(
+        shim, "_post_episode",
+        lambda url, token, path, payload, **kwargs: posts.append((path, payload)))
+    seen = {}
+
+    async def proxy(url, token, session_uid, **kwargs):
+        seen["session_uid"] = session_uid
+        seen["posts_before_proxy"] = list(posts)
+
+    monkeypatch.setattr(shim, "_run_session_proxy", proxy)
+    shim.run_shim()
+    return seen["session_uid"], seen["posts_before_proxy"], posts
+
+
+@pytest.mark.parametrize("writer", [None, "claude-code"])
+def test_claude_code_shim_joins_the_host_session_and_leaves_its_lifecycle_to_it(
+        monkeypatch, writer):
+    """Claude Code exports its session id to the MCP servers it launches, and
+    the plugin hook registers the session's root under that same id. The shim
+    keys its calls by it, so a write without ``episode=`` and a
+    ``memory_session_title`` land on the hook's root, and it neither opens
+    nor closes that root: a shim exit is not a session end (a reconnect
+    restarts the shim mid-session), and an explicit end prunes an empty root
+    outright, which would orphan the handle the hook advertised."""
+    env = {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION}
+    if writer:
+        env["PSEUDOLIFE_WRITER_ID"] = writer
+    session_uid, _, posts = _run_shim_lifecycle(monkeypatch, env)
+    assert session_uid == _CLAUDE_SESSION
+    assert posts == []
+
+
+@pytest.mark.parametrize("env", [
+    {},
+    {"CLAUDE_CODE_SESSION_ID": "not-a-session"},
+    # Claude Code's ids are lowercase; the hook registers the raw string.
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION.upper()},
+    # Any other host started from a Claude Code Bash tool inherits the outer
+    # session's id and would forward it if it passes its environment through
+    # to MCP servers. Codex keys each call by its own thread instead.
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION, "PSEUDOLIFE_WRITER_ID": "codex"},
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION, "PSEUDOLIFE_WRITER_ID": "gemini"},
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION,
+     "PSEUDOLIFE_WRITER_ID": "claude-desktop"},
+], ids=["no-host-session", "not-a-uuid", "not-canonical", "codex-nested-in-claude",
+        "gemini-nested-in-claude", "claude-desktop"])
+def test_shim_without_a_host_session_opens_no_root_and_closes_only_its_own(
+        monkeypatch, env):
+    """Without a usable host session id the shim keeps a key of its own. It
+    opens nothing at launch: the daemon opens that key's root on the first
+    write that needs it, so an idle shim, or one that only searched, leaves
+    no episode behind. At exit it closes its own key (a no-op when nothing
+    was opened; prune-on-empty otherwise)."""
+    session_uid, before_proxy, posts = _run_shim_lifecycle(monkeypatch, env)
+    assert session_uid != _CLAUDE_SESSION
+    assert re.fullmatch(r"[0-9a-f]{32}", session_uid)
+    assert before_proxy == []
+    assert posts == [("/api/episode/end", {"session_key": session_uid})]
+
+
+def test_claude_code_session_through_the_shim_keeps_one_root_episode(shared_daemon):
+    """End to end on a real daemon: the hook registers the session, then the
+    real shim, launched with the same CLAUDE_CODE_SESSION_ID, stores once
+    with the advertised handle and once without. Both writes land on the
+    hook's root, no other root appears, and the shim's exit leaves the
+    host's session open."""
+    import asyncio
+    import urllib.request
+
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    base = f"http://127.0.0.1:{shared_daemon['port']}"
+    session = str(uuid.uuid4())
+
+    def roots() -> dict:
+        with urllib.request.urlopen(base + "/api/episodes?limit=100000",
+                                    timeout=30) as response:
+            episodes = json.loads(response.read())["episodes"]
+        return {e["id"]: e for e in episodes if not e.get("parent_id")}
+
+    before = set(roots())
+    with urllib.request.urlopen(
+            f"{base}/api/hook/session-start?session_id={session}&source=startup",
+            timeout=60) as response:
+        handle = re.search(r'episode="([0-9a-f]+)"',
+                           response.read().decode("utf-8")).group(1)
+
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"],
+                    CLAUDE_CODE_SESSION_ID=session)
+
+    async def drive():
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"], env=env)
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as client:
+                await client.initialize()
+                for arguments in (
+                        {"text": f"Fixture session {session} chose the blue "
+                                 "migration plan for the harbour database.",
+                         "source": "shim-root-test", "episode": handle},
+                        {"text": f"Fixture session {session} measured the "
+                                 "harbour replica lag at forty seconds.",
+                         "source": "shim-root-test"}):
+                    result = await client.call_tool("memory_store", arguments)
+                    assert not result.is_error, result
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=_OUTER_TIMEOUT_S))
+    after = roots()
+    new = [after[i] for i in set(after) - before]
+    assert [e["session_key"] for e in new] == [session], new
+    assert new[0]["entry_count"] == 2
+    # Holds only if the shim's exit ran inside the client's termination grace;
+    # the lifecycle unit test above is the strict guard on the exit.
+    assert new[0]["ended_at"] is None
+
+
 def test_spawn_daemon_never_allocates_a_console_window(monkeypatch):
     """The auto-started daemon must not cost the user a window.
 
@@ -524,22 +667,61 @@ def test_shipped_package_never_spawns_with_detached_process():
         f"CREATE_NO_WINDOW so no console window is ever allocated")
 
 
-def _reap_daemon(port: int) -> None:
-    """Best-effort cleanup of the detached daemon the shim auto-spawned."""
+def _reap_daemon(port: int, data_dir) -> None:
+    """Best-effort cleanup of the detached daemon the shim auto-spawned.
+
+    Only a listener on ``port`` whose environment names this test's
+    ``data_dir`` (the shim hands its own environment to the daemon it
+    spawns) is killed. If the spawn failed, the port may be another
+    session's by now, and killing by port alone would take that down.
+    """
     import urllib.request
+
+    import psutil
     try:
         urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
     except Exception:  # noqa: BLE001
         pass
-    if sys.platform == "win32":
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"Get-NetTCPConnection -LocalPort {port} -State Listen "
-             f"-ErrorAction SilentlyContinue | "
-             f"ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force "
-             f"-ErrorAction SilentlyContinue }}"],
-            capture_output=True,
-        )
+    if sys.platform != "win32":
+        return
+    for conn in psutil.net_connections(kind="tcp"):
+        if (conn.status != psutil.CONN_LISTEN or not conn.laddr
+                or conn.laddr.port != port or not conn.pid):
+            continue
+        try:
+            proc = psutil.Process(conn.pid)
+            if proc.environ().get("PSEUDOLIFE_MCP_DATA_DIR") == str(data_dir):
+                proc.kill()
+        except psutil.Error:
+            pass
+
+
+def test_reap_daemon_kills_only_the_daemon_this_test_started(tmp_path):
+    if sys.platform != "win32":
+        pytest.skip("the reaper only acts on Windows")
+    listen = ("import socket, time; s = socket.socket(); "
+              "s.bind(('127.0.0.1', 0)); s.listen(); "
+              "print(s.getsockname()[1], flush=True); time.sleep(60)")
+
+    def listener(data_dir):
+        proc = subprocess.Popen(
+            [sys.executable, "-c", listen], stdout=subprocess.PIPE, text=True,
+            env={**os.environ, "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir)},
+            creationflags=subprocess.CREATE_NO_WINDOW)
+        return proc, int(proc.stdout.readline())
+
+    theirs, their_port = listener(tmp_path / "another-session")
+    ours, our_port = listener(tmp_path)
+    try:
+        _reap_daemon(their_port, tmp_path)
+        _reap_daemon(our_port, tmp_path)
+        ours.wait(timeout=10)
+        assert theirs.poll() is None, "killed another session's listener"
+    finally:
+        for proc in (theirs, ours):
+            proc.kill()
+            proc.wait(timeout=10)
+            proc.stdout.close()
 
 
 # ── Spawn hardening (2026-08-29 port-shadowing incident) ─────────────────────
@@ -937,7 +1119,8 @@ def test_startup_exits_when_the_configured_token_file_is_unusable(
 def test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential(
         monkeypatch, capsys):
     """The check is load-bearing in run_shim: it fires after ensure_daemon
-    and before the episode-start POST (which would be the first 401)."""
+    and before the proxy's first upstream call (which would be the first
+    401) and the exit's episode-end POST."""
     from pseudolife_memory import shim
 
     _no_credential(monkeypatch)
@@ -946,6 +1129,9 @@ def test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential(
                         lambda url: {"status": "ok", "auth": True})
     monkeypatch.setattr(
         shim, "_post_episode",
+        lambda *a, **k: pytest.fail("must exit before any daemon traffic"))
+    monkeypatch.setattr(
+        shim, "_run_session_proxy",
         lambda *a, **k: pytest.fail("must exit before any daemon traffic"))
     with pytest.raises(SystemExit) as exc:
         shim.run_shim()

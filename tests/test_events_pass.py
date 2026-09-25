@@ -75,7 +75,7 @@ def test_extract_events_prompt_is_overridable(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(
-        "urllib.request.urlopen", _fake_urlopen)
+        "pseudolife_memory.utils.no_redirect.urlopen", _fake_urlopen)
     ex = OpenAICompatExtractor("http://x/v1", "m",
                                events_prompt="CUSTOM EVENTS PROMPT")
     ex.extract_events(["note one"])

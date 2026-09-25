@@ -14,10 +14,14 @@
 #                                    # tag is not the running daemon's image
 #   ops\update.ps1 -All              # after the daemon: shim, plugin cache,
 #                                    # Codex hooks (ops/update_clients.py)
+#   ops\update.ps1 -AllowDirty       # deploy a tree with uncommitted or
+#                                    # untracked files (stamped dirty=true),
+#                                    # or one git cannot describe (unknown)
 #
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
-# runs `down -v`. Run after `git pull` (or local edits) to deploy daemon changes.
+# runs `down -v`. Run after `git pull` to deploy daemon changes; local edits must
+# be committed first (or deployed with -AllowDirty).
 param(
     [string]$Tag = "",
     [switch]$NoBackup,
@@ -37,7 +41,9 @@ param(
     # Also move the client side once the daemon is healthy: the shim behind
     # each registration, the Claude Code plugin cache (compared by bytes
     # against the marketplace clone) and Codex's hook copy — ops/update_clients.py.
-    [switch]$All
+    [switch]$All,
+    # Override for the clean-tree guard in step 0 — see the comment there.
+    [switch]$AllowDirty
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,6 +60,69 @@ function Step($msg) {
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
+
+# 0. Build stamp + clean-tree guard, before anything has side effects. The
+#    image records the commit it was built from (labels + /health `build`),
+#    which is only true if the tree IS that commit. The maintainer's main
+#    checkout often carries another session's uncommitted work (2026-09-23
+#    review), and a deploy from it would ship that work under a commit that
+#    does not contain it. A tree whose state git cannot report is refused
+#    the same way. Step 3 probes again just before the build.
+function Get-TreeState {
+    # HEAD and `git status`, or git's own reason it could not report them
+    # (a missing repository, or safe.directory refusing a foreign owner).
+    # Only stdout is data: on success git can still write warnings or
+    # GIT_TRACE lines to stderr, which must not read as dirty paths. Its
+    # stderr is collected only once a command has failed.
+    $state = @{ Sha = "unknown"; Dirty = "unknown"; Lines = @(); Error = "git is not on PATH" }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $state }
+    $head = @(git -C $repo rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        $state.Error = ((git -C $repo rev-parse HEAD 2>&1 | ForEach-Object { "$_" }) -join " ").Trim()
+        return $state
+    }
+    $lines = @(git -C $repo status --porcelain --untracked-files=normal 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        $state.Error = ((git -C $repo status --porcelain 2>&1 | ForEach-Object { "$_" }) -join " ").Trim()
+        return $state
+    }
+    $state.Sha = $head[0].Trim()
+    $state.Lines = $lines
+    $state.Dirty = if ($lines.Count -gt 0) { "true" } else { "false" }
+    $state.Error = $null
+    return $state
+}
+function Write-TreeLines($lines) {
+    $lines | Select-Object -First 20 | ForEach-Object { Write-Warning "    $_" }
+    if ($lines.Count -gt 20) { Write-Warning "    ... and $($lines.Count - 20) more" }
+}
+$tree = Get-TreeState
+if ($tree.Dirty -ne "false") {
+    $why = if ($tree.Dirty -eq "true") {
+        "$repo has $($tree.Lines.Count) uncommitted or untracked path(s):"
+    } else {
+        "cannot tell whether $repo is a clean git checkout: $($tree.Error)"
+    }
+    if (-not $AllowDirty) {
+        Write-Warning "REFUSING to deploy: $why"
+        Write-TreeLines $tree.Lines
+        Write-Warning "Commit, stash or remove the listed paths, or re-run with -AllowDirty to deploy this tree as it is (stamped dirty, or unknown when git cannot describe it)."
+        exit 1
+    }
+    Write-Warning "-AllowDirty: deploying anyway. $why"
+    Write-TreeLines $tree.Lines
+}
+$buildSha = $tree.Sha
+$buildDirty = $tree.Dirty
+# InvariantCulture: a custom format's ':' is the culture's time separator
+# otherwise ('.' under fi-FI), which is not an RFC 3339 timestamp.
+$buildStamp = [ordered]@{
+    PSEUDOLIFE_BUILD_GIT_SHA = $buildSha
+    PSEUDOLIFE_BUILD_DIRTY = $buildDirty
+    PSEUDOLIFE_BUILD_TIME = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'",
+        [Globalization.CultureInfo]::InvariantCulture)
+}
+
 $composeFile = Join-Path $repo "ops\docker-compose.yml"
 $envFile = Join-Path $repo "ops\.env"
 $overrideFile = Join-Path $repo "ops\docker-compose.override.yml"
@@ -168,7 +237,14 @@ Step "Rebuilding the daemon only (Postgres + extractor untouched)..."
 # inherited from a client process. Restore that process environment even if
 # Compose fails; only this deployment invocation uses the file's authority.
 $savedAuthEnvironment = @{}
+# The step-0 build stamp reaches the build through compose's
+# ${PSEUDOLIFE_BUILD_*} args, scoped to this invocation like the credentials.
+$savedBuildEnvironment = @{}
 try {
+    foreach ($name in $buildStamp.Keys) {
+        $savedBuildEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+        [Environment]::SetEnvironmentVariable($name, $buildStamp[$name], 'Process')
+    }
     if (Test-Path -LiteralPath $envFile) {
         $authLines = [IO.File]::ReadAllLines($envFile)
         if ($authLines -match '^\s*(?:export\s+)?PSEUDOLIFE_MCP_TOKENS?\s*=') {
@@ -185,9 +261,24 @@ try {
             }
         }
     }
+    # The backup and the rollback tag took a while; in a checkout that other
+    # sessions share, HEAD or the tree may have moved since step 0, and the
+    # stamp would then describe a different tree than the one being built.
+    $now = Get-TreeState
+    if ($now.Sha -ne $tree.Sha -or $now.Dirty -ne $tree.Dirty) {
+        throw "the checkout changed during this deploy (HEAD $($tree.Sha) -> $($now.Sha), dirty $($tree.Dirty) -> $($now.Dirty)); nothing was built. Re-run the deploy."
+    }
+    Step "Build stamp: commit $buildSha, dirty=$buildDirty"
     docker compose @compose up -d --no-deps --build pseudolife-daemon
     if ($LASTEXITCODE -ne 0) { throw "daemon rebuild failed" }
 } finally {
+    foreach ($name in $savedBuildEnvironment.Keys) {
+        if ($null -eq $savedBuildEnvironment[$name]) {
+            Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $savedBuildEnvironment[$name], 'Process')
+        }
+    }
     foreach ($name in $savedAuthEnvironment.Keys) {
         $original = $savedAuthEnvironment[$name]
         if ($original.Present) {
