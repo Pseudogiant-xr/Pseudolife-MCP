@@ -135,7 +135,10 @@ unchanged, a one-line reminder rides every tenth tool result. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
-Code, whose per-session stdio shim does receive the id.
+Code, whose per-session stdio shim does receive the id. That shim serves the
+session's calls only while Desktop's app-level entry has a different name, so
+the installer names that entry `pseudolife-desktop` (see
+[Claude Desktop](providers.md#claude-desktop)).
 
 Claude Code hooks see the current session id, which `/clear` and an
 in-session `/resume` change, while the shim keeps the id it was launched with.
