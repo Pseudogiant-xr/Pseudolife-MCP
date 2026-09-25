@@ -232,7 +232,7 @@
    "p": "pseudolife_memory/cli.py",
    "d": [
     "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio · channel → optional preview transport",
-    "briefing / doctor / backup / export / import / coordination-recovery / wait-mail / episode-start / episode-end subcommands",
+    "briefing / doctor / backup / export / import / coordination-recovery / wait-mail / lease / episode-start / episode-end subcommands",
     "Heavy imports deferred into serve/embedded branches — shim start is near-instant"
    ]
   },
