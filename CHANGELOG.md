@@ -27,9 +27,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Schema v43 adds `outcome_signals.used_ids` (JSONB). It holds what the
   outcome's ids became: `{"credited", "unmatched", "served_elsewhere"}` id
   lists, or `{"unchecked", "reason"}` when the label write failed. It is
-  `NULL` when the outcome named no ids or the retrieval log is off. The
-  tool's response is unchanged. Ids the MCP layer drops before the service
-  sees them (`used_ids_ignored`, `used_ids_truncated`) are not recorded.
+  `NULL` when the outcome named no ids, the retrieval log is off, or the
+  record write itself failed. The tool's response is unchanged. Ids the MCP
+  layer drops before the service sees them (`used_ids_ignored`,
+  `used_ids_truncated`) are not recorded. The column is serving telemetry,
+  so `pseudolife-mcp export` leaves it out, as it leaves out the retrieval
+  log; the signals themselves still travel.
 - Both records are observational: a failed write is counted in
   `memory_stats` `retrieval_log.write_errors` and never fails the search
   or the outcome.

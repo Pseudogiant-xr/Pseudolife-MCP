@@ -3241,6 +3241,7 @@ class MemoryService(DreamOps):
                     logger.warning("retrieval-log health read failed",
                                    exc_info=True)
                     log = {"events": None, "uses": None,
+                           "lesson_searches": None,
                            "last_event_at": None, "unavailable": True}
                 log["enabled"] = bool(self.config.memory.retrieval_log.enabled)
                 log["write_errors"] = self._retrieval_log_errors

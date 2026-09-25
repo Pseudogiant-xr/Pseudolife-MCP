@@ -94,6 +94,11 @@ EXCLUDED_TABLES = (
     "coordination_events",
 )
 
+# Columns of an exported table that are serving telemetry under the same
+# rule: outcome_signals.used_ids (v43) records what an outcome's ids became
+# against this bank's retrieval_events, which stay behind.
+EXCLUDED_COLUMNS = {"outcome_signals": ("used_ids",)}
+
 # meta keys that must not travel: the target build owns its schema_version
 # and any extension lineage marker (the `*_schema_version` convention —
 # see docs/guide/configuration.md#extension-schemas), and the
@@ -241,10 +246,13 @@ def _export_table(conn, zf: zipfile.ZipFile, table: str) -> int:
         # FK the import defers regardless (belt and braces).
         cur.execute(f"SELECT * FROM {table} ORDER BY 1")
         cols = [d.name for d in cur.description]
+        dropped = EXCLUDED_COLUMNS.get(table, ())
         for row in cur:
             rec = dict(zip(cols, row))
             if table == "meta" and _skip_meta_key(rec.get("key")):
                 continue
+            for col in dropped:
+                rec.pop(col, None)
             text.write(json.dumps(
                 rec, default=_json_default, ensure_ascii=False) + "\n")
             n += 1

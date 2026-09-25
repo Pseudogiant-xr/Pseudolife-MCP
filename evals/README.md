@@ -4549,9 +4549,10 @@ mean every other NULL-session event) — writing
 the ordinary `retrieval_uses` row under `used_via="outcome"` — so
 `retrieval_replay.py`'s `uses` label source and this script's `by_via`
 breakdown pick it up with no harness change, and the two dereference vias
-stay distinguishable from the asserted one. No schema bump, and no join:
-nothing links a signal row to the use rows it caused — the labels stand on
-their own, and which outcome named which ids is deliberately not recorded.
+stay distinguishable from the asserted one. No join: nothing links a signal
+row to the use rows it caused, and the labels stand on their own. Since
+schema v43 the signal row's `used_ids` column does keep what its ids became
+(credited / unmatched / served elsewhere).
 The result reports `used_ids_recorded`, `used_ids_unmatched`,
 `used_ids_served_elsewhere` (an event in the window served it, under another
 session id) and `used_ids_errors`, because an id no event served must not

@@ -319,7 +319,9 @@ CREATE INDEX IF NOT EXISTS outcome_signals_pending_idx
 -- v43: what the outcome's used_ids became. {"credited", "unmatched",
 -- "served_elsewhere"}: entry-id lists from the one labelling statement;
 -- {"unchecked", "reason"} when that statement failed. NULL = the outcome
--- named no ids, the retrieval log was off, or the row predates v43.
+-- named no ids, the retrieval log was off, the row predates v43, or this
+-- best-effort write itself failed (counted in the log's write errors).
+-- Kept out of portable exports (transfer_cli.EXCLUDED_COLUMNS).
 ALTER TABLE outcome_signals ADD COLUMN IF NOT EXISTS used_ids JSONB;
 
 -- v43: one row per memory_lesson_search call: the query, the caller, and
@@ -533,8 +535,9 @@ SCHEMA_SQL += COORDINATION_SCHEMA_SQL
 #
 # Listing all of them (not just the FK-free roots) is deliberate.
 # `TRUNCATE ... CASCADE` only reaches tables holding a foreign key INTO the
-# named set, so 14 of these are roots nothing cascades into —
-# retrieval_events, entity_kinds, outcome_signals, dismissed_pairs,
+# named set, so many of these are roots nothing cascades into —
+# retrieval_events, lesson_search_events, entity_kinds, outcome_signals,
+# dismissed_pairs,
 # merge_decisions, communities, dream_runs, chronicle_events, meta,
 # episodes, entries, entities, relations, world_facts. Naming every table
 # means a future FK change cannot silently drop one out of the reset: the

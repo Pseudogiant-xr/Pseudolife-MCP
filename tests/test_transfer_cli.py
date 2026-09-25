@@ -598,6 +598,13 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "INSERT INTO dream_runs (started_at, cursor_before, status) "
             "VALUES (171.0, 0.0, 'running')"
         )
+        # v43: what an outcome's used_ids became is serving-history
+        # telemetry, like retrieval_events: the signal travels, the column
+        # does not.
+        conn.execute(
+            "UPDATE outcome_signals SET used_ids = "
+            "'{\"credited\": [1], \"unmatched\": [], "
+            "\"served_elsewhere\": []}'::jsonb")
         # An extension schema marker (the `*_schema_version` convention) is
         # build-owned like schema_version itself and must not travel.
         conn.execute(
@@ -637,6 +644,11 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         # remembers a higher one.
         assert "writer_lease_epoch" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
+        signals = [json.loads(line) for line in
+                   zf.read("outcome_signals.jsonl").decode().split("\n")
+                   if line]
+        assert [s["task"] for s in signals] == ["seed task"]
+        assert "used_ids" not in signals[0]
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["format_version"] == 1
         assert manifest["schema_version"] == SCHEMA_META_VERSION

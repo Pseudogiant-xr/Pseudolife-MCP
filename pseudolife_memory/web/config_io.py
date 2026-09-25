@@ -116,6 +116,8 @@ KNOBS: list[dict[str, Any]] = [
              "'used' labels when a served entry is later fetched/"
              "reinforced. Training data for a learned reranker; purely "
              "observational, no retrieval behaviour changes. Also gates "
+             "the lesson-search log and the outcome used_ids record "
+             "(schema v43), and "
              "the sweep-thread startup condition alongside dream.enabled "
              "(issue #178) — sweep thread starts at boot, so toggling "
              "needs a restart."},
@@ -123,7 +125,8 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Event retention (days)", "type": "int", "default": 365,
      "min": 1, "max": 3650, "step": 1, "restart": False,
      "help": "Events older than this are pruned on the dream-sweep tick "
-             "(their use labels cascade)."},
+             "(their use labels cascade), and lesson-search rows with "
+             "them."},
     {"path": "memory.retrieval_log.use_window_seconds", "group": "Retrieval log",
      "label": "Use-label window (s)", "type": "int", "default": 3600,
      "min": 60, "max": 86400, "step": 60, "restart": False,

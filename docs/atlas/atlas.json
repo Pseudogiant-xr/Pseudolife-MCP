@@ -274,7 +274,8 @@
     "ZIP of JSONL (one per table) + manifest — decoupled from Postgres major version and deployment tier, unlike pg_dump's physical backup",
     "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim",
     "Carries entry dream state but excludes the acknowledgement secret; an imported bank creates its own token identity",
-    "Operational coordination_agents, coordination_messages and the coordination_events audit log never enter portable knowledge exports; full database backups retain them"
+    "Operational coordination_agents, coordination_messages and the coordination_events audit log never enter portable knowledge exports; full database backups retain them",
+    "Serving telemetry stays behind too: retrieval_events/retrieval_uses, slot_reads, lesson_search_events, the dream-run journal, and the outcome_signals.used_ids column (EXCLUDED_COLUMNS)"
    ]
   },
   {

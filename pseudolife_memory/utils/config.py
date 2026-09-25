@@ -760,7 +760,9 @@ class RetrievalLogConfig:
     no retrieval behaviour changes, and nothing is computed for the log
     that ranking did not already compute. Requires Postgres storage (file
     mode skips silently); ``memory_stats`` reports the row counts and
-    write-failure count."""
+    write-failure count. The same switch and retention cover the v43
+    records: one ``lesson_search_events`` row per ``memory_lesson_search``
+    and the ``outcome_signals.used_ids`` partition."""
     enabled: bool = True
     # Events older than this are pruned on the dream-sweep tick (labels
     # CASCADE), bounding growth. Generous by default: the log IS the
