@@ -625,8 +625,9 @@ Claude Code do it:
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-The plugin replaces the settings.json hook **and** the CLAUDE.md block below
-— the same standing instructions arrive as session context from the daemon.
+The plugin replaces the settings.json hook, and the daemon serves a compact
+memory core and a live briefing as session context. The full CLAUDE.md block
+below is not served; append it if you want the complete guidance.
 It deliberately does **not** bundle the MCP server: Claude Code loads a
 plugin server alongside any user-registered one with no deduplication, which
 doubled every session's tool namespace next to the installer's registration
@@ -824,8 +825,10 @@ daemon:
 The server's value depends on the agent using it. The MCP server advertises
 the core loop through protocol-level `instructions`; the shim adds the
 messageboard check-in when its coordination adapter is up.
-The memory SessionStart hook delivers a short operating guide and a bounded
-briefing; a separate coordination hook asks the agent to set its project,
+The plugin's memory SessionStart hook (also used by verified Codex hooks)
+delivers a short operating guide and a bounded briefing; without the plugin,
+the installer's Claude Code `settings.json` hook delivers the briefing alone.
+A separate coordination hook asks the agent to set its project,
 task and status, discover peers, and read pending messages, but only where
 the board is on for that credential (it is on by default behind bearer
 authentication, so an open install or a disabled board adds no check-in).
@@ -834,9 +837,10 @@ guidance remains in the bundled standing block. Hooks add per-prompt reminders
 and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
 
-With verified hooks, a standing copy is optional. If you want it instead —
-or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
-hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
+Hooks serve at most that short guide; the detailed block reaches an agent
+only as a standing copy. For the complete guidance, for subagent
+visibility (subagents read `CLAUDE.md` but not hook output), or in place of
+hooks, append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
 per-project `CLAUDE.md` / `AGENTS.md`:
 

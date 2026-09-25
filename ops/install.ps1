@@ -686,7 +686,8 @@ $claudePluginInstalled = (Test-Path $installedPlugins) -and
     ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
 if ($claudePluginInstalled -and ($clients -contains "claude")) {
     Step "pseudolife-memory Claude Code plugin detected - skipping Claude"
-    Write-Host "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
+    Write-Host "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+    Write-Host "    compact memory core; the full block stays optional). The plugin no"
     Write-Host "    longer bundles an MCP server, so the transport is still wired below."
 }
 
@@ -882,6 +883,8 @@ foreach ($selectedClient in $clients) {
         continue
     }
     if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
+        # The plugin's SessionStart hook serves a compact memory core, not
+        # this block; the block stays optional and the summary says so.
         $instrState["claude"] = "covered-by-plugin"
         continue
     }
@@ -901,8 +904,9 @@ foreach ($selectedClient in $clients) {
     if ($choice -eq "auto") {
         switch ($selectedClient) {
             "claude" {
-                # The SessionStart hook already delivers the block — a
-                # standing-file copy would double-inject.
+                # Skipped by default. The settings.json SessionStart hook
+                # serves the live briefing only, not this block; the summary
+                # names the file to append it to.
                 $choice = "skip"
             }
             "gemini" {
@@ -1503,8 +1507,8 @@ function Describe-Instr($state) {
     switch -Wildcard ($state) {
         "appended:*" { "[x] Standing file        $tail" }
         "present:*" { "[x] Standing file        $tail" }
-        "covered-by-plugin" { "[-] Standing file        plugin briefing covers it" }
-        "covered-by-hooks" { "[x] Standing instructions verified session briefing covers them" }
+        "covered-by-plugin" { "[-] Standing file        skipped - the plugin serves a compact memory core; append examples\CLAUDE.memory.md for the full guide" }
+        "covered-by-hooks" { "[-] Standing file        skipped - verified hooks serve a compact memory core; append examples\CLAUDE.memory.md for the full guide" }
         "present" { "[x] Standing file        existing Codex memory fallback" }
         "appended" { "[x] Standing file        Codex memory fallback appended" }
         "skipped:*" { "[-] Standing file        skipped - append later to $tail" }

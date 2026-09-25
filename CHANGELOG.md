@@ -185,6 +185,60 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with no session identity, a `store()` (including the replacement entry
   of a supersede or consolidate) and `memory_episode_start` still fall
   back to the process-wide current episode.
+### Fixed (2026-09-25 — a session start can no longer hang while trimming its briefing)
+- `format_bounded_briefing`, which fits the memory briefing into the
+  SessionStart hook's byte budget, could loop forever. It re-packed items
+  until the omitted count stopped changing, but greedy packing is not
+  monotonic: a smaller budget can skip one long item and fit more short
+  ones, so when the count crossed from 9 to 10 the marker grew a byte and the
+  selection flipped between two sizes indefinitely. The 2026-09-25
+  post-merge audit reproduced it at 318 bytes; production-shaped 13-item
+  briefings hung at 620 and 1,849 bytes. It now packs once, leaving room for
+  the widest marker the call could print, so it always returns.
+- The same loop, when it did settle, kept a selection packed without room for
+  its omitted-items marker and fell back to "Briefing omitted." although
+  shorter items plus the marker fit (a 160-byte lesson ahead of three short
+  ones at 210–221 bytes). The final selection now always has room for the
+  marker, which states how many items were left out.
+- Tests run each repro under a thread-join timeout, so a regression fails
+  instead of hanging the suite, and sweep every budget from 0 to 2,000 bytes:
+  the output fits, no item is sliced (a recap keeps its summary line), and
+  the marker's count matches what was omitted.
+
+### Changed (2026-09-25 — the served memory core carries the rules only it can deliver)
+- Since #364 the SessionStart hook serves `STARTUP_MEMORY_CORE`, not the
+  detailed `MEMORY_LOOP_BLOCK`, yet several places still said the hook
+  delivered the full block. The maintainer kept the compact core (decision
+  2026-09-25), so it restates three of the detailed block's rules: search
+  before stating a "current" version, number or benchmark; trust the code
+  and correct drifted memory on the spot, at the same slot; route verified
+  external facts to `memory_world_set`. It points at the full guidance by its
+  public GitHub URL, which a pip install can open, and stays under the
+  2,000-char pin.
+- `examples/CLAUDE.memory.md`, the README, `docs/guide/providers.md`, the
+  System Atlas and both installers' messages and summaries now say the
+  plugin and verified Codex hooks serve a compact core, and that the full
+  block is an optional standing copy. The installers still skip the block by
+  default for Claude Code and for verified Codex hooks; `covered-by-hooks`
+  stays the report's state name. Without the plugin, Claude Code's
+  installer-written `settings.json` hook serves the briefing alone, not the
+  core; the installer summary names the file to append the block to.
+- `evals/agent_token_ledger.py` now prices the core the hook serves. The
+  published 7,492-char session-start row in `evals/README.md` is marked as
+  the pre-#364 measurement until the ledger is rerun against the live daemon.
+- Comment-only edits to `plugin/hooks/session-end.sh` and `stop-wake.sh`
+  change the hooks digest: deploy with `ops/update.ps1 -All` (or
+  `ops/update.sh --all`), or the session start reports hook drift until the
+  plugin cache is refreshed.
+
+### Changed (2026-09-25 — the regression gate reuses a correctly configured bench server)
+- Since the 2026-09-24 integration, `evals/regression_gate.ps1` exited 2
+  whenever any Qwen server was running, including one already serving the
+  reproducible config the gate needs. `Start-Qwen -Owned` now reuses such a
+  server without taking ownership, so the gate's cleanup leaves it running.
+  A fast (MTP), foreign or unresponsive server is still refused, with a
+  message naming it, and never displaced. A fresh launch keeps the GPU-busy
+  hold (more than 5 GB of VRAM in use) and the owned-process cleanup.
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
@@ -240,6 +294,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identity, credentials and optional wake behavior remain with the existing adapter.
 - MCP initialization instructions also request the startup check-in, so clients
   without lifecycle hooks receive the same core workflow guidance.
+- **Upgrading:** `<data_dir>/hook-instructions.md` no longer replaces the
+  served memory instructions. It is appended after the core and capped at
+  3.5 KB; a longer file is served in whole paragraphs with a notice that the
+  copy is partial. An override written to replace the old block now arrives
+  in addition to the core.
 
 ### Fixed (2026-09-24 — integration safety checks)
 - Coordination sends validate the writer epoch before committing. After a
@@ -1140,27 +1199,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hold and transaction as the write. A requeued row is left to a fresh
   first opinion on the next tick. The link and junk judges take one vote
   per row and never read an earlier one, so they were not affected.
-
-### Fixed (2026-09-23 — the curation judge stops re-judging a slot pair whose name contains a `|`)
-- A lesson or world slot with a literal `|` in its entity or attribute was
-  listed under a key that folds the pipe to `-`, but the store-curation judge
-  saved its memo, its automatic distinct dismissal and that dismissal's marker
-  under the raw key. Nothing that reads them found them: the pair went back to
-  the model on every tick that reached it instead of once per
-  `curation_rejudge_days`, `review_rejudge('curation')` could not
-  forget it, and an automatic "distinct" never hid it. All three are now
-  written under the listing's spelling (`curation_safety.curation_pair_keys`,
-  built on `service._slot_key`). The fingerprinted evidence keeps its raw key,
-  so no memo binding, marker fingerprint or retire audit changes and no other
-  pair is re-judged.
-- Rows written under the old spelling retire on their next touch rather than
-  through a migration: the first auto-dismissal refresh (the Console listing or
-  a judge tick) withdraws a raw-spelled marker together with the dismissal row
-  it owns, and the pair's next judgment, which the missed memo now triggers
-  once, deletes the raw-spelled memo row it replaces. A raw memo row whose
-  pair is never judged again (dismissed by a human, one side retired, or no
-  longer similar enough to list) stays behind unread; its key has at least two
-  `|` and cannot match a listing key, which has exactly one.
 
 ### Fixed (2026-09-23 — a rejudge that lands during a judge call is no longer undone)
 - `review_rejudge('candidate')` forgets opinions in the

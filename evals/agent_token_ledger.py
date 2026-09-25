@@ -14,8 +14,10 @@ This ledger measures that side, in four parts:
    through the same ``mcp.list_tools()`` + ``_visible_tool_names`` path
    ``tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets``
    meters, so the two can never disagree.
-2. **session_start** — ``web/session_hook.MEMORY_LOOP_BLOCK``, injected once
-   per session by the hook.
+2. **session_start** — ``web/session_hook.STARTUP_MEMORY_CORE``, injected
+   once per session by the hook (before #364, 2026-09-24, the hook served
+   the detailed ``MEMORY_LOOP_BLOCK``; artifacts from before then price
+   that block).
 3. **search / fact_get / recall** — the per-call response payloads, for real
    queries against a live bank.
 
@@ -313,11 +315,15 @@ def measure_session_block() -> dict[str, Any]:
     newlines and quotes), kept for comparability with every other cell in
     this ledger, which really is a JSON payload (2026-09-04 review
     finding: the README published the JSON size for a non-JSON surface).
+
+    This prices the fixed policy text only. The bounded briefing the hook
+    appends after it depends on the bank and can fill the rest of the
+    hook's 9,500-byte budget, so a published row must say it excludes it.
     """
-    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
-    return sized(MEMORY_LOOP_BLOCK) | {
-        "raw_chars": len(MEMORY_LOOP_BLOCK),
-        "raw_approx_tokens": approx_tokens(MEMORY_LOOP_BLOCK),
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    return sized(STARTUP_MEMORY_CORE) | {
+        "raw_chars": len(STARTUP_MEMORY_CORE),
+        "raw_approx_tokens": approx_tokens(STARTUP_MEMORY_CORE),
     }
 
 

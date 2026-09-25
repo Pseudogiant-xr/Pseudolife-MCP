@@ -419,7 +419,7 @@
    "s": "hook payload + identity tier 3",
    "p": "pseudolife_memory/web/session_hook.py",
    "d": [
-    "MEMORY_LOOP_BLOCK ≡ examples/CLAUDE.memory.md (guard-tested byte-identity)",
+    "Serves STARTUP_MEMORY_CORE, then a byte-bounded briefing; MEMORY_LOOP_BLOCK ≡ examples/CLAUDE.memory.md (guard-tested byte-identity) is the detailed standing copy",
     "Authorized: registers active session + prepends the episode handle",
     "Unauthorized callers get byte-identical public output — no identity minting"
    ]

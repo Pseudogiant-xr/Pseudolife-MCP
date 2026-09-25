@@ -298,16 +298,17 @@ content-specific paths so updating their code also changes the definitions.
 
 ### Hooks versus AGENTS.md
 
-The default SessionStart policy and `examples/CLAUDE.memory.md` contain the
-same standing memory instructions. This equivalence covers the **memory
-block**, not the rest of a project's `AGENTS.md`: personality, coding rules,
-project conventions, and other instructions still belong there. A custom
-daemon `hook-instructions.md` can override the default hook policy.
+The default SessionStart policy is a compact core of the memory
+instructions, not the full block in `examples/CLAUDE.memory.md`; append that
+block when you want the complete guidance. Neither replaces the rest of a
+project's `AGENTS.md`: personality, coding rules, project conventions, and
+other instructions still belong there. A custom daemon
+`hook-instructions.md` is served after the core, capped at 3.5 KB.
 
 | Mechanism | What it supplies |
 |---|---|
 | `AGENTS.md` memory block | Standing guidance to recall, capture, and reflect when the client loads instructions |
-| `SessionStart` | The memory policy, a live briefing, and session episode identity |
+| `SessionStart` | A compact memory policy, a live briefing, and session episode identity |
 | `UserPromptSubmit` | A short memory reminder on each prompt |
 | `SessionEnd` | Automatic session episode cleanup |
 
