@@ -16,10 +16,12 @@ already live and the metadata refresh needs every session closed, so it
 is named, not run. A pipx-managed one is ``pipx install --force``-ed
 from the checkout. A launcher or ``python -m pseudolife_memory.cli``
 inside some other virtualenv is upgraded through that interpreter's pip.
-Anything else is left alone and named. On Windows none of these runs while
-a session is running the shim (pip or pipx would strand it half-removed);
-the sessions are counted and the retry is named instead, and a pip run that
-fails anyway gets back what it moved aside.
+Anything else is left alone and named. On Windows a pip or pipx upgrade is
+skipped while any process runs from the shim's virtualenv or its registered
+launcher (either would strand it half-removed); the sessions are counted
+and the rerun named instead. A bare global interpreter registered with
+``-m`` names no path of its own and is not checked. A pip run that fails
+anyway gets back what it moved aside.
 
 Plugin: the version string is pinned to the package version, so a plugin
 change on master does not move ``/plugin update``. The marketplace clone
@@ -182,7 +184,7 @@ def _probe_install_kind(interpreter: Path) -> tuple[str, str, list[str]]:
     for lib in libs:
         try:
             if package.resolve().is_relative_to(Path(lib).resolve()):
-                return "site", "", libs
+                return "site", str(package), libs
         except (OSError, ValueError):
             continue
     return "editable", str(package.parent), libs
@@ -356,17 +358,47 @@ def _venv_root(path: Path) -> Path | None:
     return root if (root / "pyvenv.cfg").is_file() else None
 
 
-def _held_paths(command: Path, interpreter: Path | None) -> list[Path]:
-    """What a running session of this registration executes from: the whole
-    virtualenv when the shim lives in one (its launcher and the venv's
-    python.exe redirector both run from there), else the registered
-    launcher itself — a user scripts or pipx bin directory holds other
-    tools' launchers too. A bare interpreter outside any virtualenv is
-    shared with everything else Python on the machine and names nothing."""
+def _pipx_venv_roots(pipx_listing: dict) -> list[Path]:
+    """The pipx venv of ``pseudolife-mcp``, from the app paths its metadata
+    names inside it: ``install --force`` deletes all of it, so a session
+    running from it directly (not through the exposed launcher) holds it."""
+    venv = next((v for k, v in pipx_listing.get("venvs", {}).items() if k.lower() == PACKAGE), None)
+    paths = venv.get("metadata", {}).get("main_package", {}).get("app_paths", []) if isinstance(venv, dict) else []
+    roots = []
+    for entry in paths:
+        candidate = entry.get("__Path__") if isinstance(entry, dict) else entry
+        root = _venv_root(Path(str(candidate))) if candidate else None
+        if root and root not in roots:
+            roots.append(root)
+    return roots
+
+
+def _held_paths(command: Path, interpreter: Path | None, extra: list[Path] = ()) -> list[Path]:
+    """What a running session of this registration executes from: the
+    registered launcher itself, and the whole virtualenv the shim lives in
+    (its launcher and the venv's python.exe redirector both run from there;
+    ``interpreter`` only when pip installs into that interpreter's own
+    environment). A user scripts or pipx bin directory holds other tools'
+    launchers too, so only the registered one counts there. A bare
+    interpreter outside any virtualenv is shared with everything else
+    Python on the machine and names nothing by itself."""
     roots = {root for root in (_venv_root(command), interpreter and _venv_root(interpreter)) if root}
-    if not roots and not _PYTHON_STEM.fullmatch(command.name.lower().removesuffix(".exe")):
+    roots.update(extra)
+    if not _PYTHON_STEM.fullmatch(command.name.lower().removesuffix(".exe")):
         roots.add(command)
     return sorted(roots)
+
+
+def _path_forms(path) -> set[str]:
+    """A path as written and as resolved: Windows reports a process's image
+    by its final path, while a registration may go through a junction,
+    symlink or 8.3 short name."""
+    forms = {os.path.normcase(os.path.abspath(path))}
+    try:
+        forms.add(os.path.normcase(os.path.realpath(path)))
+    except (OSError, ValueError):
+        pass
+    return forms
 
 
 def _sessions_holding(paths: list[Path]) -> tuple[int, int] | None:
@@ -378,11 +410,11 @@ def _sessions_holding(paths: list[Path]) -> tuple[int, int] | None:
     rows = list_processes()
     if rows is None or not paths:
         return None
-    held = [os.path.normcase(os.path.abspath(p)) for p in paths]
+    held = {form for p in paths for form in _path_forms(p)}
 
     def inside(image: str) -> bool:
-        image = os.path.normcase(os.path.abspath(image))
-        return any(image == p or image.startswith(p.rstrip(os.sep) + os.sep) for p in held)
+        return any(form == p or form.startswith(p.rstrip(os.sep) + os.sep)
+                   for form in _path_forms(image) for p in held)
 
     own = {os.getpid(), os.getppid()}
     running = {pid: ppid for pid, ppid, image in rows if pid not in own and inside(image)}
@@ -393,6 +425,9 @@ def _sessions_holding(paths: list[Path]) -> tuple[int, int] | None:
 # temp_dir.py): a stashed directory is renamed to "~" + some of these + the
 # rest of its name, the same length, or failing that "~" + some + the whole name.
 _PIP_STASH_CHARS = set("-~.=%0123456789")
+# This distribution's entries in a library directory (its import package and
+# dist-info), normcased as Windows compares them.
+_OWN_NAMES = ("pseudolife_memory", "pseudolife_mcp-")
 
 
 def _stash_of(stash: str, original: str) -> bool:
@@ -425,9 +460,11 @@ def _restore_stashes(before: dict[Path, set[str]]) -> tuple[list[str], list[str]
 
     Only entries that vanished during this run are restored, each from the
     one ``~`` sibling that appeared during it and can be its stash — an
-    older failed run's leftover is not this run's and is never picked. What
-    has no single such sibling (a file pip moved to a temp directory, two
-    candidates) is named, not guessed. Returns ``(restored, missing)``."""
+    older failed run's leftover is not this run's and is never picked. Where
+    that is ambiguous, or this package's own files are simply gone (a file
+    pip moved to a temp directory), they are named, not guessed. A
+    dependency whose upgrade the same run completed before failing is
+    neither. Returns ``(restored, missing)``."""
     restored, missing = [], []
     for lib, names in before.items():
         now = _listing([lib]).get(lib, set())
@@ -442,19 +479,30 @@ def _restore_stashes(before: dict[Path, set[str]]) -> tuple[list[str], list[str]
                     continue
                 except OSError:
                     pass
-            missing.append(str(lib / original))
+            if found or os.path.normcase(original).startswith(_OWN_NAMES):
+                missing.append(str(lib / original))
     return restored, missing
 
 
-def _after_failed_pip(interpreter: Path, before: dict[Path, set[str]]) -> str:
-    """What the runtime is left with once pip has failed, in words."""
+def _after_failed_pip(interpreter: Path, before: dict[Path, set[str]], own_root: Path | None) -> str:
+    """What the runtime is left with once pip has failed, in words. With
+    system site-packages on, a venv also sees the user site and the base
+    interpreter's: a copy found there is not its own package, so the
+    package must import from inside ``own_root`` when there is one."""
     restored, missing = _restore_stashes(before)
-    kind = _probe_install_kind(interpreter)[0]
+    kind, where, _ = _probe_install_kind(interpreter)
+    if kind == "site" and own_root is not None:
+        try:
+            kind = "site" if Path(where).resolve().is_relative_to(own_root.resolve()) else f"elsewhere: {where}"
+        except (OSError, ValueError):
+            kind = f"elsewhere: {where}"
     notes = []
     if restored:
-        notes.append("pip had moved " + ", ".join(restored) + " aside and not put it back: restored")
+        notes.append("pip had moved " + ", ".join(restored) + " aside and not put "
+                     + ("them" if len(restored) > 1 else "it") + " back: restored")
     if missing:
-        notes.append("pip removed " + ", ".join(missing) + " and it could not be restored")
+        notes.append("pip removed " + ", ".join(missing) + " and "
+                     + ("they" if len(missing) > 1 else "it") + " could not be restored")
     if kind == "site":
         notes.append("the runtime still imports its own package" if not notes
                      else "the runtime imports its own package again")
@@ -505,7 +553,10 @@ def update_shim(repo: Path) -> dict:
             continue
         done.add(key)
         if kind in ("pipx", "pip", "pip-user"):
-            held = _held_paths(Path(command), interpreter)
+            # pip --user writes to the user site, not to its interpreter's
+            # environment; pipx --force deletes its whole venv.
+            held = _held_paths(Path(command), interpreter if kind == "pip" else None,
+                               _pipx_venv_roots(pipx_listing) if kind == "pipx" else [])
             try:
                 holding = _sessions_holding(held)
             except OSError as exc:
@@ -514,14 +565,18 @@ def update_shim(repo: Path) -> dict:
                                           f"session runs {command} ({exc}); left alone rather than upgraded. "
                                           f"With every session closed: {_retry_command(repo)}"})
                 continue
-            if holding and holding[0]:
-                sessions, processes = holding
+            # Gate on processes: the session count is for the message (a
+            # cycle of reused parent pids can leave a tree with no root).
+            if holding and holding[1]:
+                processes = holding[1]
+                sessions = max(holding[0], 1)
                 results.append({"state": "in-use",
                                 "detail": f"{client}: {sessions} session{'s are' if sessions != 1 else ' is'} "
                                           f"running the shim from {', '.join(map(str, held))} "
                                           f"({processes} process{'es' if processes != 1 else ''}); not "
                                           f"upgraded, since {'pipx' if kind == 'pipx' else 'pip'} would leave "
-                                          f"it half-removed. Close them and run: {_retry_command(repo)}"})
+                                          f"it half-removed. Close {'them' if sessions != 1 else 'it'} and run: "
+                                          f"{_retry_command(repo)}"})
                 continue
         if kind == "editable":
             venv_python = interpreter or _interpreter_beside(Path(command)) or Path(command).parent / "python"
@@ -556,7 +611,7 @@ def update_shim(repo: Path) -> dict:
                            {"state": "failed",
                             "detail": f"{client}: {shown} failed "
                                       f"({_failure_line(out, code)}); "
-                                      f"{_after_failed_pip(interpreter, before)}. "
+                                      f"{_after_failed_pip(interpreter, before, _venv_root(interpreter) if kind == 'pip' else None)}. "
                                       f"Close every session using the shim and run: {_retry_command(repo)}"})
         else:
             results.append({"state": "unmanaged",

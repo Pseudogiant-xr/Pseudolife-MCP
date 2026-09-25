@@ -72,6 +72,9 @@ class FakeCli:
                 return 1, "Traceback (most recent call last):\n  File \"<string>\", line 1\nRuntimeError: boom"
             if kind == "missing":
                 return 0, json.dumps({"package_dir": None, "libs": [lib]})
+            if kind == "user-site":
+                user = str(self.home / "AppData" / "Roaming" / "Python" / "site-packages")
+                return 0, json.dumps({"package_dir": str(Path(user) / "pseudolife_memory"), "libs": [lib, user]})
             if kind in ("editable", "noisy-editable"):
                 report = json.dumps({"package_dir": str(self.home / "src" / "pseudolife_memory"), "libs": [lib]})
                 if kind == "noisy-editable":
@@ -510,20 +513,92 @@ def test_a_runtime_that_sessions_are_running_is_not_pip_upgraded(cli, tmp_path):
     assert uc._marker(result["state"]) == "[!]"
 
 
+def _pipx_tree(tmp_path) -> tuple[Path, Path]:
+    """pipx's layout: the venv under ``pipx/venvs/<pkg>`` (its metadata names
+    the app paths inside it) and the exposed launcher copy in ``pipx/bin``."""
+    venv = _runtime(tmp_path / "pipx" / "venvs", "pseudolife-mcp")
+    exposed = tmp_path / "pipx" / "bin" / f"pseudolife-mcp{EXE}"
+    exposed.parent.mkdir(parents=True)
+    exposed.write_text("", encoding="utf-8")
+    return venv, exposed
+
+
+def _pipx_listing(venv: Path) -> tuple[int, str]:
+    return 0, json.dumps({"venvs": {"pseudolife-mcp": {"metadata": {"main_package": {
+        "app_paths": [{"__Path__": str(venv / "Scripts" / f"pseudolife-mcp{EXE}")}]}}}}})
+
+
 def test_a_pipx_shim_in_use_is_not_force_reinstalled(cli, tmp_path):
     """`pipx install --force` removes the venv with rmtree(ignore_errors=True)
     before rebuilding it: with the launcher running, site-packages is deleted
     outright and there is no stash to put back, so only the check before it
     protects a pipx runtime."""
-    launcher = tmp_path / "pipx-bin" / f"pseudolife-mcp{EXE}"
-    launcher.parent.mkdir()
-    cli.claude_get = (0, _claude_stdio(str(launcher)))
-    cli.pipx_list = (0, json.dumps({"venvs": {"pseudolife-mcp": {"metadata": {"main_package": {
-        "app_paths": [{"__Path__": str(launcher)}]}}}}}))
-    cli.processes = [(1000, 50, str(launcher))]
+    venv, exposed = _pipx_tree(tmp_path)
+    cli.claude_get = (0, _claude_stdio(str(exposed)))
+    cli.pipx_list = _pipx_listing(venv)
+    cli.processes = [(1000, 50, str(exposed))]
     result = uc.update_shim(ROOT)
-    assert result["state"] == "in-use" and "1 session" in result["detail"]
+    assert result["state"] == "in-use" and "1 session is" in result["detail"]
     assert not any(c[1:3] == ["install", "--force"] for c in cli.calls)
+
+
+def test_a_pipx_venv_a_session_runs_directly_is_not_force_reinstalled(cli, tmp_path):
+    """--force deletes the whole pipx venv, so a session running from inside
+    it (a Codex `<venv>/Scripts/python -m ...`) holds it too, even when no
+    session runs the exposed launcher (reviewer finding)."""
+    venv, exposed = _pipx_tree(tmp_path)
+    cli.claude_get = (0, _claude_stdio(str(exposed)))
+    cli.pipx_list = _pipx_listing(venv)
+    cli.processes = _sessions(venv, codex=1)
+    assert uc.update_shim(ROOT)["state"] == "in-use"
+    assert not any(c[1:3] == ["install", "--force"] for c in cli.calls)
+
+
+def test_a_runtime_reached_through_a_link_is_still_seen(cli, tmp_path):
+    """Windows reports a process's resolved image path; a registration made
+    through a junction (a relocated AppData, a `current` link) must still
+    match it (reviewer finding, reproduced with a junction)."""
+    root = _runtime(tmp_path)
+    link = tmp_path / "current"
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(root)], check=True, capture_output=True)
+    else:
+        link.symlink_to(root, target_is_directory=True)
+    cli.claude_get = (0, _claude_stdio(str(link / "Scripts" / f"pseudolife-mcp{EXE}")))
+    cli.processes = _sessions(root.resolve(), claude=1)
+    assert uc.update_shim(ROOT)["state"] == "in-use"
+    assert not _pip_calls(cli)
+
+
+def test_a_pip_user_launcher_owned_through_a_venv_python_is_still_held(cli, tmp_path):
+    """A venv's python reports the same user scripts directory, so a pip
+    --user owner can be a venv interpreter; the registered launcher must
+    still count, and processes in that unrelated venv must not (reviewer
+    finding)."""
+    scripts = tmp_path / "AppData" / "Roaming" / "Python" / "Python312" / "Scripts"
+    scripts.mkdir(parents=True)
+    owner_venv = _runtime(tmp_path, "some-venv")
+    cli.tools["python"] = str(owner_venv / "Scripts" / f"python{EXE}")
+    cli.user_scripts = scripts
+    cli.claude_get = (0, _claude_stdio(str(scripts / f"pseudolife-mcp{EXE}")))
+    cli.processes = _sessions(owner_venv, codex=1)
+    assert uc.update_shim(ROOT)["state"] == "reinstalled:pip-user"
+    cli.calls.clear()
+    uc._install_kinds.clear()
+    cli.processes = [(1001, 51, str(scripts / f"pseudolife-mcp{EXE}"))]
+    assert uc.update_shim(ROOT)["state"] == "in-use"
+    assert not _pip_calls(cli)
+
+
+def test_processes_with_no_tree_root_still_hold_the_runtime(cli, tmp_path):
+    """An orphan whose dead parent's pid was reused inside the runtime makes
+    a cycle with no root; the gate is on processes, not on the count."""
+    root = _runtime(tmp_path)
+    cli.claude_get = (0, _claude_stdio(str(root / "Scripts" / f"pseudolife-mcp{EXE}")))
+    cli.processes = [(1000, 1001, str(root / "Scripts" / f"pseudolife-mcp{EXE}")),
+                     (1001, 1000, str(root / "Scripts" / f"python{EXE}"))]
+    assert uc.update_shim(ROOT)["state"] == "in-use"
+    assert not _pip_calls(cli)
 
 
 def test_a_pip_user_launcher_in_use_is_not_upgraded(cli, tmp_path):
@@ -623,6 +698,45 @@ def test_a_vanished_package_with_no_stash_to_restore_is_named(cli, tmp_path):
     assert result["state"] == "failed"
     assert str(site / "pseudolife_memory") in result["detail"]
     assert "no package of its own" in result["detail"]
+
+
+def test_a_dependency_pip_upgraded_before_failing_is_not_reported_lost(cli, tmp_path):
+    """The same run can finish a dependency's upgrade (old dist-info gone,
+    its stash committed) before failing on this package: that is not
+    something the runtime lost (reviewer finding)."""
+    root = _runtime(tmp_path)
+    site = _site(root)
+    (site / "mcp-2.1.0.dist-info").mkdir()
+    stash = _pip24_stash_then_fail(site)
+
+    def effect(argv):
+        (site / "mcp-2.1.0.dist-info").rmdir()
+        (site / "mcp-2.2.0.dist-info").mkdir()
+        stash(argv)
+
+    cli.claude_get = (0, _claude_stdio(str(root / "Scripts" / f"pseudolife-mcp{EXE}")))
+    cli.pip_effect = effect
+    cli.pip_install = (1, WINERROR_32)
+    result = uc.update_shim(ROOT)
+    assert "mcp-2.1.0" not in result["detail"] and "could not be restored" not in result["detail"]
+    assert "imports its own package again" in result["detail"]
+
+
+def test_a_copy_outside_the_runtime_is_not_called_its_own_package(cli, tmp_path):
+    """With system site-packages on, a venv also sees the user site: a copy
+    there is not the runtime's own package, whatever the probe calls it
+    (reviewer finding)."""
+    root = _runtime(tmp_path)
+    site = _site(root)
+    python = root / "Scripts" / f"python{EXE}"
+    cli.claude_get = (0, _claude_stdio(str(root / "Scripts" / f"pseudolife-mcp{EXE}")))
+    cli.pip_effect = lambda argv: (
+        shutil.move(str(site / "pseudolife_memory"), str(tmp_path / "elsewhere")),
+        cli.install_kinds.__setitem__(str(python).lower(), "user-site"))
+    cli.pip_install = (1, WINERROR_32)
+    result = uc.update_shim(ROOT)
+    assert "no package of its own" in result["detail"]
+    assert "imports its own" not in result["detail"]
 
 
 def test_a_pip_failure_that_moved_nothing_says_the_runtime_is_intact(cli, tmp_path):
