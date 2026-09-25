@@ -15,6 +15,8 @@ import urllib.request  # noqa: E402
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
+from pseudolife_memory.utils import no_redirect
+
 
 def _mentions(text: str, name: str) -> bool:
     """Word-boundary, case-insensitive membership (hyphens are boundaries, so
@@ -408,7 +410,7 @@ def simple_complete(dream_cfg, prompt: str) -> str:
             headers["Authorization"] = f"Bearer {key}"
         req = urllib.request.Request(base.rstrip("/") + "/chat/completions",
                                      data=body, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=30.0) as resp:
+        with no_redirect.urlopen(req, timeout=30.0) as resp:
             data = json.loads(resp.read())
         return data["choices"][0]["message"]["content"] or ""
     except Exception:
