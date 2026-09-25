@@ -355,6 +355,27 @@ def build_console_app(
             await _send_json(send, 200, result)
             return
 
+        # 4c) plugin coordination SessionStart hook: the board check-in as
+        # plain text, or an empty body when this bearer cannot use the board
+        # (disabled, no or unknown bearer, unlisted principal, file mode).
+        # 200 always, like session-start; the check touches no storage.
+        if path == "/api/hook/coordination-start":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            from pseudolife_memory.coordination import CHECKIN_TEXT, unavailable_reason
+            headers = {k.decode().lower(): v.decode("latin-1")
+                       for k, v in scope.get("headers", [])}
+            reason = unavailable_reason(service, headers, token_map=token_map, token=token)
+            text = "" if reason else CHECKIN_TEXT + "\n"
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
         # 5) console REST API (token-gated like /mcp)
         if path.startswith("/api/") or path == "/api":
             denied = _browser_gate(scope)

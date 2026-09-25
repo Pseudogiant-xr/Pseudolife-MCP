@@ -171,3 +171,110 @@ def test_mailbox_malformed_utf8_is_a_bad_request():
     status, body = call(app, "POST", "/api/coordination/receive", body=b"\xff", headers=[
         (b"authorization", b"Bearer fixture-secret"), (b"content-type", b"application/json")])
     assert status == 400 and json.loads(body) == {"error": "invalid_json"}
+
+
+def _board_service(enabled=True, allowed=("default",), db_url="postgresql://fixture"):
+    service = FixtureService()
+    service.config = SimpleNamespace(coordination=SimpleNamespace(
+        enabled=enabled, allowed_principals=list(allowed)))
+    service._db_url = db_url
+    return service
+
+
+@pytest.mark.parametrize("token,token_map,bearer,settings,served", [
+    ("fixture-secret", None, b"Bearer fixture-secret", {}, True),
+    ("fixture-secret", None, b"Bearer fixture-secret", {"enabled": False}, False),
+    (None, None, None, {}, False),
+    ("fixture-secret", None, None, {}, False),
+    ("fixture-secret", None, b"Bearer wrong", {}, False),
+    (None, {"map-secret": "editor"}, b"Bearer map-secret", {}, False),
+    (None, {"map-secret": "editor"}, b"Bearer map-secret", {"allowed": ["editor"]}, True),
+    ("fixture-secret", None, b"Bearer fixture-secret", {"db_url": None}, False),
+], ids=["available", "disabled", "open-install", "no-bearer", "wrong-bearer",
+        "unlisted-principal", "listed-principal", "file-mode"])
+def test_startup_checkin_is_served_only_where_the_board_works(token, token_map, bearer,
+                                                              settings, served):
+    """A check-in the caller cannot complete is a guaranteed tool failure on
+    every session start, so the hook text is served only when this bearer
+    could register, update and receive right now."""
+    from pseudolife_memory.coordination import CHECKIN_TEXT
+    app = build_console_app(stub_mcp, token, lambda: {}, _board_service(**settings),
+                            token_map=token_map)
+    headers = [(b"authorization", bearer)] if bearer else []
+    status, body = call(app, "GET", "/api/hook/coordination-start", headers=headers)
+    assert status == 200
+    assert body == ((CHECKIN_TEXT + "\n").encode() if served else b"")
+
+
+def test_startup_checkin_route_is_get_only_and_browser_gated():
+    app = build_console_app(stub_mcp, None, lambda: {}, _board_service())
+    status, _ = call(app, "POST", "/api/hook/coordination-start")
+    assert status == 405
+    status, _ = call(app, "GET", "/api/hook/coordination-start",
+                     headers=[(b"origin", b"http://evil.example")])
+    assert status == 403
+
+
+class _CheckinResponse:
+    def __init__(self, body):
+        self._b = body
+
+    def read(self):
+        return self._b
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _checkin_cli(monkeypatch, body, argv, setting=None):
+    import sys
+    seen = []
+
+    def urlopen(req, timeout=5):
+        seen.append((req.full_url, req.get_header("Authorization")))
+        return _CheckinResponse(body)
+
+    monkeypatch.setattr("pseudolife_memory.shim.probe_health",
+                        lambda url, timeout=0.25: {"status": "ok"})
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-token")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", "http://fixture.invalid")
+    if setting is None:
+        monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION", raising=False)
+    else:
+        monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", setting)
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing", *argv])
+    from pseudolife_memory import briefing_cli as bc
+    bc.run_briefing()
+    return seen
+
+
+@pytest.mark.parametrize("hook_json", [False, True])
+def test_briefing_coordination_prints_the_daemon_served_checkin(monkeypatch, capsys, hook_json):
+    """The lightweight installers' check-in hook: whatever the daemon serves
+    for this bearer, which is nothing where the board is off."""
+    import json
+    argv = ["--coordination", *(["--hook-json"] if hook_json else [])]
+    seen = _checkin_cli(monkeypatch, b"Pseudolife coordination: fixture.\n", argv)
+    assert seen == [("http://fixture.invalid/api/hook/coordination-start", "Bearer fixture-token")]
+    out = capsys.readouterr().out
+    if hook_json:
+        context = json.loads(out)["hookSpecificOutput"]
+        assert context == {"hookEventName": "SessionStart",
+                           "additionalContext": "Pseudolife coordination: fixture."}
+    else:
+        assert out == "Pseudolife coordination: fixture.\n"
+
+
+def test_briefing_coordination_prints_nothing_where_the_board_is_off(monkeypatch, capsys):
+    _checkin_cli(monkeypatch, b"", ["--coordination", "--hook-json"])
+    assert capsys.readouterr().out == ""
+
+
+def test_briefing_coordination_honours_an_explicit_client_opt_out(monkeypatch, capsys):
+    seen = _checkin_cli(monkeypatch, b"Pseudolife coordination: fixture.\n",
+                        ["--coordination", "--hook-json"], setting="0")
+    assert seen == [] and capsys.readouterr().out == ""

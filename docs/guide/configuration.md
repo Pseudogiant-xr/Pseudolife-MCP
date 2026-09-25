@@ -41,9 +41,10 @@ the launching shell's environment is preserved after the deployment command.
 
 ## Experimental agent coordination
 
-Coordination adds peer awareness and addressed mail within one bank. It defaults
-off and does not reserve files or prevent conflicting edits. Configure it in the
-daemon's `config.yaml`, then restart the daemon:
+Coordination adds peer awareness and addressed mail within one bank. It is on
+by default, behind bearer authentication, and does not reserve files or prevent
+conflicting edits. Configure it in the daemon's `config.yaml`, then restart the
+daemon; `enabled: false` turns it off:
 
 ```yaml
 coordination:
@@ -63,8 +64,12 @@ identity. Last reported activity comes from attributed writes; an open episode
 does not prove a process is running. Refresh awareness before shared-resource
 work and on resume.
 
-The allowed names are principals from the bearer-token configuration above;
-the default list is empty. Mailbox operations require PostgreSQL, configured
+The allowed names are principals from the bearer-token configuration above.
+Without the key only `default`, the singular `PSEUDOLIFE_MCP_TOKEN` principal,
+is admitted: principals of a `PSEUDOLIFE_MCP_TOKENS` map are separately
+trusted identities and join the board only when listed (an explicit list
+replaces the default; include `default` to keep it). Mailbox operations
+require PostgreSQL, configured
 bearer authentication and a registered adapter's private instance credential.
 Two sessions sharing a principal still need distinct adapter identities. A
 public agent ID, episode handle or task label never grants mailbox access.
@@ -72,11 +77,20 @@ Clients lacking a per-session credential-injecting adapter can use awareness,
 but cannot send, receive or acknowledge another instance's mail. Awareness is
 gated on the same allowed-principal list: a bearer whose principal is not listed
 sees no peers and no awareness section in its briefing, and with no bearer token
-configured there is no principal to list, so awareness stays empty on an open
-loopback install.
+configured there is no principal to list, so the board stays dormant on an open
+loopback install: no awareness, no mail and no startup check-in.
 
-Enable the installed shim adapter with `PSEUDOLIFE_AGENT_COORDINATION=1` and set
-`PSEUDOLIFE_MCP_TOKEN` to that principal's bearer token. Optional
+The installed shim starts its adapter by default whenever it holds a bearer
+token (`PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`);
+`PSEUDOLIFE_AGENT_COORDINATION=0` (any value but `1`, `true`, `yes` or `on`)
+turns it off for that client. The startup check-in appears only where the
+board works: the daemon serves the hook text (`GET
+/api/hook/coordination-start`) only to a bearer that could register and
+receive right now, the plugin hook and the installers'
+`pseudolife-mcp briefing --coordination` hook print what it serves, and the
+shim appends a compact check-in to the MCP instructions only when its adapter
+is up (for Codex, when that route answers). Set the opt-out where the hooks
+see it too, since they cannot read the MCP env block. Optional
 `PSEUDOLIFE_AGENT_LABEL`, `PSEUDOLIFE_AGENT_PROJECT` and `PSEUDOLIFE_AGENT_TASK`
 provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a
@@ -330,7 +344,8 @@ PSEUDOLIFE_CODEX_BIN = 'C:\path\to\codex.exe'
 ```
 
 Reconnect the MCP server afterwards; the setup helper does not set either value,
-and the doorbell stays off without `PSEUDOLIFE_AGENT_COORDINATION=1`. The PATH
+and the doorbell stays off without the coordination adapter (on by default
+with a bearer token, off with `PSEUDOLIFE_AGENT_COORDINATION=0`). The PATH
 lookup uses absolute PATH directories only, never the working directory (the
 task's checkout), so a repository cannot supply its own `codex`. A
 `PSEUDOLIFE_CODEX_BIN` that is relative or does not exist turns the doorbell

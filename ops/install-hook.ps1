@@ -50,11 +50,28 @@ if (Test-Path $SettingsPath) {
     Write-Host "Backed up -> $bak"
 }
 
+function Remove-HookCommand($groups, $needle) {
+    $removed = $false
+    $keptGroups = @()
+    foreach ($group in @($groups)) {
+        if ($null -eq $group) { continue }
+        $keptHooks = @(@($group.hooks) | Where-Object { $_.command -notlike "*$needle*" })
+        if ($keptHooks.Count -ne @($group.hooks).Count) { $removed = $true }
+        if ($keptHooks.Count -gt 0) {
+            $group.hooks = $keptHooks
+            $keptGroups += $group
+        }
+    }
+    return @{ removed = $removed; groups = $keptGroups }
+}
+
 # Idempotency: check briefing hook independently.
 $hasBriefing = $false
 foreach ($group in @($obj.hooks.SessionStart)) {
     foreach ($h in @($group.hooks)) {
-        if ($h.command -like "*pseudolife-mcp briefing*") { $hasBriefing = $true }
+        if ($h.command -like "*pseudolife-mcp briefing*" -and $h.command -notlike "*--coordination*") {
+            $hasBriefing = $true
+        }
     }
 }
 if (-not $hasBriefing) {
@@ -73,22 +90,35 @@ if (-not $hasBriefing) {
     Write-Host "Briefing hook already present in $SettingsPath - skipping."
 }
 
-# Keep board setup separate from the daemon-backed memory briefing.
+# Board check-in, separate from the daemon-backed memory briefing. The daemon
+# serves it only where this bearer can use the board, so a board that is off
+# costs no failed tool call at every session start. $coordinationLine is the
+# unconditional echo older installers wrote: kept to replace it here, and
+# ops/setup-codex-hooks.py reads it to migrate Codex installs.
 $coordinationLine = "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+$coordinationCommand = if ($Command -like "*pseudolife-mcp briefing*") {
+    "$Command --coordination"
+} else {
+    "pseudolife-mcp briefing --hook-json --coordination"
+}
+$legacyCheckin = Remove-HookCommand $obj.hooks.SessionStart "Pseudolife coordination:"
+$obj.hooks.SessionStart = $legacyCheckin.groups
+if ($legacyCheckin.removed) { Write-Host "Removed the unconditional coordination check-in hook." }
 $hasCoordination = $false
 foreach ($group in @($obj.hooks.SessionStart)) {
     foreach ($h in @($group.hooks)) {
-        if ($h.command -like "*Pseudolife coordination:*") { $hasCoordination = $true }
+        if ($h.command -like "*pseudolife-mcp briefing*--coordination*") { $hasCoordination = $true }
     }
 }
 if (-not $hasCoordination) {
-    $coordinationHook = [pscustomobject]@{ type = 'command'; command = "echo '$coordinationLine'" }
+    $coordinationHook = [pscustomobject]@{ type = 'command'; command = $coordinationCommand }
     if ($Client -eq 'codex') {
-        $coordinationHook | Add-Member commandWindows "Write-Output '$coordinationLine'"
+        $coordinationHook | Add-Member commandWindows $coordinationCommand
         $coordinationHook | Add-Member timeout 5
     }
     $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + [pscustomobject]@{ hooks = @($coordinationHook) }
     Write-Host "Installed SessionStart coordination hook -> $SettingsPath"
+    Write-Host "  command: $coordinationCommand"
 }
 
 # Every-turn memory-discipline line (UserPromptSubmit), both clients.
@@ -127,21 +157,6 @@ if ($Client -in "claude", "codex") {
 # rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
 # (see docs/guide/episodes.md). Earlier installer versions added
 # them — remove any we find so old installs converge too.
-function Remove-HookCommand($groups, $needle) {
-    $removed = $false
-    $keptGroups = @()
-    foreach ($group in @($groups)) {
-        if ($null -eq $group) { continue }
-        $keptHooks = @(@($group.hooks) | Where-Object { $_.command -notlike "*$needle*" })
-        if ($keptHooks.Count -ne @($group.hooks).Count) { $removed = $true }
-        if ($keptHooks.Count -gt 0) {
-            $group.hooks = $keptHooks
-            $keptGroups += $group
-        }
-    }
-    return @{ removed = $removed; groups = $keptGroups }
-}
-
 $r = Remove-HookCommand $obj.hooks.SessionStart "pseudolife-mcp episode-start"
 $obj.hooks.SessionStart = $r.groups
 if ($r.removed) { Write-Host "Removed obsolete episode-start hook (daemon owns episodes now)." }
