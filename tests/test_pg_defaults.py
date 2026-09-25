@@ -203,6 +203,85 @@ def test_is_auth_failure_classifies_psycopg_messages():
         'connection failed: FATAL:  database "pseudolife_memory_test_1" does not exist'))
 
 
+# -- Windows loopback port errors on connect ---------------------------------
+# libpq renders a Windows socket error as "<text> (0x%08X/%d)". Two of them
+# name this host's port table, not the server: WSAEADDRINUSE, which a
+# loopback connect() returns when the local port it picked still has a
+# TIME_WAIT entry to the same server, and WSAENOBUFS, when the ephemeral
+# range is exhausted. WSAEADDRINUSE reached pg_conn setup and PostgresStorage
+# in full runs on 2026-09-25 (see tests/pg_defaults.py); WSAENOBUFS is its
+# exhaustion sibling, covered by reasoning rather than a sighting.
+ADDR_IN_USE_MSG = ('connection failed: connection to server at "127.0.0.1", '
+                   'port 5433 failed: Address already in use '
+                   '(0x00002740/10048)')
+NO_BUFFERS_MSG = ('connection failed: connection to server at "127.0.0.1", '
+                  'port 5433 failed: No buffer space available '
+                  '(0x00002747/10055)')
+
+
+def test_local_port_exhaustion_is_told_apart_from_server_failures():
+    assert pg_defaults.is_local_port_exhaustion(
+        psycopg.OperationalError(ADDR_IN_USE_MSG))
+    assert pg_defaults.is_local_port_exhaustion(
+        psycopg.OperationalError(NO_BUFFERS_MSG))
+    for other in (psycopg.OperationalError(REFUSED_MSG),
+                  psycopg.OperationalError(AUTH_MSG),
+                  psycopg.errors.InvalidPassword("x (0x00002740/10048)"),
+                  TimeoutError("timed out")):
+        assert not pg_defaults.is_local_port_exhaustion(other), other
+
+
+def _flaky_connect(failures: int, message: str):
+    calls = {"n": 0}
+
+    def connect(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] <= failures:
+            raise psycopg.OperationalError(message)
+        return ("connected", args, kwargs)
+    return connect, calls
+
+
+def test_connect_retries_local_port_exhaustion_then_succeeds():
+    connect, calls = _flaky_connect(2, ADDR_IN_USE_MSG)
+    sleeps: list[float] = []
+    wrapped = pg_defaults.retry_local_port_exhaustion(connect,
+                                                      sleep=sleeps.append)
+    assert wrapped("dsn", autocommit=True) == (
+        "connected", ("dsn",), {"autocommit": True})
+    assert calls["n"] == 3
+    assert len(sleeps) == 2 and sum(sleeps) < 1.0
+
+
+def test_connect_gives_up_after_its_attempts_with_the_real_error():
+    connect, calls = _flaky_connect(99, NO_BUFFERS_MSG)
+    wrapped = pg_defaults.retry_local_port_exhaustion(
+        connect, attempts=3, sleep=lambda s: None)
+    with pytest.raises(psycopg.OperationalError, match="10055"):
+        wrapped("dsn")
+    assert calls["n"] == 3
+
+
+def test_connect_does_not_retry_any_other_failure():
+    """A refused, timed-out or rejected connect is an answer about the
+    server; retrying it would only slow the skip or the error down."""
+    for message in (REFUSED_MSG, AUTH_MSG):
+        connect, calls = _flaky_connect(99, message)
+        wrapped = pg_defaults.retry_local_port_exhaustion(
+            connect, sleep=lambda s: pytest.fail("must not retry"))
+        with pytest.raises(psycopg.OperationalError):
+            wrapped("dsn")
+        assert calls["n"] == 1
+
+
+def test_conftest_retries_local_port_exhaustion_on_every_connect():
+    """Installed once, at conftest import, on psycopg.connect itself: the
+    suite's fixtures and the storage code under test all connect through
+    that attribute, so a single wrapper covers both (tests that patch
+    psycopg.connect put this wrapper back when they finish)."""
+    assert getattr(psycopg.connect, "retries_local_port_exhaustion", False)
+
+
 def _fake_connect(exc):
     calls = {"n": 0}
 
