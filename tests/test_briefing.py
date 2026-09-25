@@ -94,10 +94,44 @@ def test_fetch_markdown_parses_api_response(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *a): return False
 
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda req, timeout=5: _Resp('{"markdown": "## hi\\n- x", "available": true}'))
+    class _Opener:
+        def open(self, req, timeout=5):
+            return _Resp('{"markdown": "## hi\\n- x", "available": true}')
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: _Opener())
     assert bc._fetch_markdown("http://x", None, 3, 3, 3) == "## hi\n- x"
+
+
+def test_fetch_markdown_refuses_redirects(monkeypatch):
+    """urllib's default redirect handler copies the Authorization header to
+    the redirect target, so the briefing fetch must use the shim's
+    no-redirect opener, as the shim's own episode calls do."""
+    from pseudolife_memory import briefing_cli as bc
+    from pseudolife_memory.shim import _NoRedirectHandler
+    seen = {}
+
+    class _Resp:
+        def read(self): return b'{"markdown": "## hi"}'
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class _Opener:
+        def open(self, req, timeout=None):
+            seen["auth"], seen["timeout"] = req.get_header("Authorization"), timeout
+            return _Resp()
+
+    def _build_opener(*handlers):
+        seen["handlers"] = handlers
+        return _Opener()
+
+    def _plain_urlopen(*a, **k):
+        raise AssertionError("plain urlopen follows redirects with the bearer")
+
+    monkeypatch.setattr("urllib.request.build_opener", _build_opener)
+    monkeypatch.setattr("urllib.request.urlopen", _plain_urlopen)
+    assert bc._fetch_markdown("http://x", "tok", 3, 3, 3) == "## hi"
+    assert seen == {"handlers": (_NoRedirectHandler,), "auth": "Bearer tok",
+                    "timeout": 5}
 
 
 def test_world_block_renders_fresh_facts():

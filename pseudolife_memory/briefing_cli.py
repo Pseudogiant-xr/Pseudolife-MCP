@@ -30,13 +30,17 @@ def _as_hook_json(md: str) -> str:
 def _fetch_markdown(url: str, token: str | None, max_unsure: int, max_lessons: int,
                     max_world: int = 3) -> str:
     """GET ``/api/briefing`` and return its ``markdown`` field. Plain HTTP — no MCP
-    ``initialize`` handshake — so it's fast enough for a per-session hook."""
+    ``initialize`` handshake — so it's fast enough for a per-session hook. A
+    redirect is refused rather than followed, since urllib would carry the
+    bearer to its target."""
+    from pseudolife_memory.shim import _NoRedirectHandler
     qs = urllib.parse.urlencode({"max_unsure": max_unsure, "max_lessons": max_lessons,
                                  "max_world": max_world})
     req = urllib.request.Request(f"{url}/api/briefing?{qs}")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=5) as r:
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    with opener.open(req, timeout=5) as r:
         data = json.loads(r.read().decode("utf-8"))
     return (data or {}).get("markdown", "") or ""
 

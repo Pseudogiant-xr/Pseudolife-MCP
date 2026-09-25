@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — the session-start briefing no longer hands its bearer to a redirect target)
+- `pseudolife-mcp briefing` (the SessionStart hook that `ops/install-hook.ps1`
+  and `ops/install-hook.sh` install) fetched `/api/briefing` with plain
+  `urllib.request.urlopen`. urllib follows redirects and copies every header
+  except the content headers to the target, so a daemon URL answering with a
+  redirect would have sent `Authorization: Bearer <token>` to whatever host
+  it named. The fetch now uses the shim's no-redirect opener, as the shim's
+  own episode calls do: a redirect fails the fetch, and the hook prints
+  nothing. The five-second timeout is unchanged.
+
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing
   items within its output budget, with explicit notices when content is omitted.
