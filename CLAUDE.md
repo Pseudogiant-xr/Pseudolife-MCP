@@ -127,8 +127,11 @@ took 143 CUDA OOMs.
   sides touched (plus the doc guards if docs overlapped), push, and let CI
   gate it: its `pull_request` jobs use `actions/checkout`'s default merge
   ref, so the run for the newly pushed head tests the PR merged with master
-  as of that push, and it must be green before merge. If any conflict in
-  code was resolved by hand, the local full suite is still required.
+  as of that push, and it must be green before merge. Before clicking merge,
+  if master has moved since the PR's last CI run, press **Update branch**
+  (or push a new commit) and wait for that run to go green. Re-running the
+  old run doesn't help: it reuses the original merge commit. If any conflict
+  in code was resolved by hand, the local full suite is still required.
 
 ## Review discipline
 
