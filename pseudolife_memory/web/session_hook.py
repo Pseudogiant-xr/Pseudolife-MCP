@@ -429,14 +429,18 @@ def session_start_context(service: Any, authorized: bool, *,
 def _episode_advertisement(session_id: str, source: str | None, service: Any) -> str:
     """Register the session (idempotent per ``session_id``) and return the
     one-line episode-handle advertisement, or "" on any failure (fail-open —
-    a registration hiccup must not break session start)."""
+    a registration hiccup must not break session start). The registration
+    also writes the session's durable ``client_sessions`` row (schema v43)
+    with the memory-policy variant this hook serves it."""
     try:
         # Generic-shaped title so the auto-titler recognises and replaces it
         # at close (GENERIC_TITLE_RE) — a literal "session" would stick
         # forever (2026-07-19 whole-branch review, finding 2).
         import time as _t
         ep = service.episode_start_session(
-            session_id, _t.strftime("session - %Y-%m-%d %H:%M"))
+            session_id, _t.strftime("session - %Y-%m-%d %H:%M"),
+            registered_via="hook",
+            policy_variant=memory_policy_variant(service, session_id))
         service.set_active_session(session_id)
         short = (ep.get("id") or "")[:12]
         if not short:
@@ -453,14 +457,10 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
 
 
 def _log_memory_policy(service: Any, session_id: str) -> None:
-    """Log the policy variant a registered session was served. The arm is a
-    pure function of the session id and the configured arm list
-    (``ab_arm_index``), so it can be recomputed wherever that id survives
-    (``episodes.session_key`` of a root that stored something; the
-    ``session_id`` of its searches when no shim sits in between). The bank
-    deletes roots that end with no stored entry and keeps no registration
-    record, so this log line is the only complete account; a durable
-    per-session record needs a schema bump and is left to a follow-up."""
+    """Log the policy variant a registered session was served. The durable
+    account is the session's ``client_sessions.policy_variant`` (schema
+    v43), written by the registration itself and kept when the session's
+    root is pruned; this line is its copy in the daemon log."""
     try:
         logger.info("memory-policy variant %s for session %s",
                     memory_policy_variant(service, session_id), session_id[:12])

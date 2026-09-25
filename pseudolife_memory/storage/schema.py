@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 42
+SCHEMA_META_VERSION = 43
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -416,6 +416,37 @@ CREATE TABLE IF NOT EXISTS entity_sources (
   PRIMARY KEY (entity_id, source)
 );
 CREATE INDEX IF NOT EXISTS entity_sources_source_idx ON entity_sources (source);
+
+-- v43 durable client-session registrations: one row per session key the
+-- daemon registered (the SessionStart hook, or POST /api/episode/start from
+-- the stdio shim and the CLI episode hooks). A session root is deleted when
+-- it ends holding no entry (prune-on-empty), which left the searches and
+-- outcomes of read-only sessions naming nothing; this row is never pruned.
+-- started_at is the first registration and never moves; ended_at and
+-- end_reason are the most recent close ('end' = SessionEnd, shim exit or an
+-- episode end that closes the root; 'idle' = the idle reaper), cleared when
+-- the session registers again or a store or handle reopens its root.
+-- policy_variant is the startup memory policy the hook assigned (NULL on
+-- the api path, which serves none); principal is the bearer's principal
+-- name (NULL when the registration arrived outside a request). Both, and
+-- registered_via, keep their first non-NULL value. episode_ids is a JSON
+-- array of every root episode id the session was given, so a row stamped
+-- with a pruned root still attributes; start_times is every registration's
+-- time (a resumed client starts a new shim near the latest one). No FK: it
+-- outlives the episodes it names.
+CREATE TABLE IF NOT EXISTS client_sessions (
+  session_key    TEXT PRIMARY KEY,
+  registered_via TEXT NOT NULL,
+  principal      TEXT,
+  started_at     DOUBLE PRECISION NOT NULL,
+  ended_at       DOUBLE PRECISION,
+  end_reason     TEXT,
+  policy_variant TEXT,
+  episode_ids    JSONB NOT NULL DEFAULT '[]',
+  start_times    JSONB NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS client_sessions_started_idx
+  ON client_sessions (started_at);
 """
 
 # Keep DDL independent of database-driver imports: daemon health and warmup
@@ -529,7 +560,7 @@ BENCH_RESET_TABLES = (
     "dismissed_pairs", "facts", "world_facts", "lessons", "outcome_signals",
     "communities", "entity_communities", "memory_traces",
     "memory_trace_invalidations", "entry_reinstatement_decisions",
-    "entity_sources",
+    "entity_sources", "client_sessions",
     # Declared by the additive-migration tail of ensure_schema, not SCHEMA_SQL.
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
     "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",

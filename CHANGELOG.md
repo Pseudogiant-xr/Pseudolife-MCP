@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-25 — every registered session leaves a record)
+- A session that only searched, set facts or logged outcomes left no trace
+  that it had happened: its root episode is deleted when it ends holding no
+  stored entry, and its searches and outcomes were left naming nothing (on
+  2026-09-25, 43 surviving client sessions in 24 h beside 94 pruned ones
+  with searches and 67 with outcomes). Schema v43 adds `client_sessions`:
+  one row per session key the SessionStart hook or `POST
+  /api/episode/start` (the stdio shim, the CLI episode hooks) registered,
+  never pruned, holding how it registered, the bearer's principal, its
+  first start and every registration since, its most recent close and why
+  (`end` or `idle`, cleared when the session is reopened), the
+  memory-policy variant the hook assigned (so a `memory_policy.ab_arms`
+  test keeps each session's arm), and every root episode id it was given.
+  Best-effort: a failed write never fails a session start. Excluded from
+  `pseudolife-mcp export`. See
+  [Episodes — session record](docs/guide/episodes.md#session-record).
+- `evals/capture_metrics.py` counts sessions from that record, which lifts
+  the limit the capture-metrics entry below describes for sessions that
+  register: a session whose roots were all pruned still counts, its
+  searches attribute by session key and its outcomes by the pruned root's
+  id, a resumed session's new shim pairs with the start it began beside,
+  and the report adds sessions per memory-policy variant. Roots without a
+  record (banks before v43) count as before, except that a key's several
+  roots are now one session (a session outliving the 6 h resume window
+  gets a new root; each used to count separately, with the key's searches
+  credited to its last root only), and "searched early" is measured from
+  the latest start before the search instead of the last root's. On the
+  live bank (read-only, 2026-09-25 16:01) the 24 h window is unchanged; 7
+  days goes from 130 to 117 sessions and 60 days from 348 to 264.
+
 ### Added (2026-09-25 — measure what the startup memory policy changes)
 - `memory_policy.variant` selects the standing memory policy session start
   serves: `none`, `compact` (the default, unchanged), `compact_gaps` (the

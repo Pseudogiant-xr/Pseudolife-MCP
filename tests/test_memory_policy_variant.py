@@ -167,7 +167,7 @@ def test_registered_session_logs_its_arm(svc, caplog):
     """The arm is a pure function of the session key the bank keeps; the
     daemon log names it too, for audit without a schema change."""
     _set(svc, "compact", arms=["compact", "compact_gaps"])
-    svc.episode_start_session = lambda sid, title: {"id": "episode-123456789"}
+    svc.episode_start_session = lambda sid, title, **_: {"id": "episode-123456789"}
     svc.set_active_session = lambda sid: None
     with caplog.at_level("INFO", logger="pseudolife-mcp.web"):
         hook_session_start(svc, "session-xyz")

@@ -21,26 +21,39 @@ shim runtime directory, so every per-session denominator was inflated. Now:
 * shim roots (32-hex key) count only when they carry memory activity (an
   entry or outcome in their subtree, or a search under their episode or
   session key); idle ones are transport artifacts and are dropped;
-* a hook root and an active shim root that started within
+* a hook session and an active shim session that started within
   ``PAIR_WINDOW_S`` of each other are ONE session when each is the other's
   only candidate (both can be active: writes that pass ``episode=`` land on
-  the hook root while the searches carry the shim's key). Anything less
+  the hook root while the searches carry the shim's key). Every start of
+  the hook session is compared (each registration, each surviving root): a
+  resumed client keeps its session id but starts a new shim. Anything less
   certain stays unmerged and is reported as ``ambiguous_pairs``.
 
 A search is attributed by its ``session_id`` (the caller); its
 ``episode_id`` is only the daemon's process-wide current episode, used when
 no session id was recorded.
 
-What the bank cannot show. The daemon DELETES a session's root when it
-ends holding no stored entry (prune-on-empty at SessionEnd, or later by the
-idle reaper) and keeps no record of the registration. A session that only
-searched, set facts or logged outcomes therefore has no root; its searches
-and outcomes remain and are counted under ``roots.pruned_with_searches`` /
-``pruned_with_outcomes`` instead of ``sessions``, and a session that never
-touched memory leaves nothing at all. ``sessions`` is thus the sessions
-that stored something or have not ended cleanly yet, and every rate here
-is over those survivors: read coverage figures as upper bounds. Counting
-every session needs the daemon to keep a registration record.
+Where sessions come from (schema v43). The daemon DELETES a session's root
+when it ends holding no stored entry (prune-on-empty at SessionEnd, or later
+by the idle reaper), so a session that only searched, set facts or logged
+outcomes leaves no root. Since v43 every registration (the SessionStart
+hook, and ``POST /api/episode/start`` from the stdio shim) also writes a
+``client_sessions`` row that is never pruned, naming the session key, its
+first start, and every root episode id it was given. Candidates are those
+rows, one per session key, plus keyed roots whose key has no row (banks
+from before v43; roots the daemon opened lazily for a key that never
+registered). A record's kind is ``hook`` when the hook registered it, else
+the key shape decides as for roots. A candidate is in the window when its
+first start is, so a later root of a session that started earlier does not
+count. An outcome stamped with a pruned root still attributes through the
+record's ``episode_ids``; a search through the session key.
+
+What the bank still cannot show: activity from before v43, or from a client
+that never registered, whose root is gone. It is counted under
+``roots.pruned_with_searches`` / ``pruned_with_outcomes`` instead of
+``sessions``, and a session of that kind that never touched memory leaves
+nothing at all. ``roots.registered_without_root`` counts the sessions the
+record recovered.
 
 Headless helper runs (``claude -p`` / ``codex exec`` behind a judge or
 extractor shim) fire the same hooks and are indistinguishable from an
@@ -92,9 +105,10 @@ DSN = os.environ.get(
 # a hook root nearby sat 1-8 s from it, the next nearest 135 s. A wider
 # window only adds fleet-start candidates, which the uniqueness rule refuses.
 PAIR_WINDOW_S = 5.0
-# "Searched early": the session's first memory_search within this many
-# seconds of its start. A session-start policy asks for recall at task
-# start; fifteen minutes covers a slow first turn.
+# "Searched early": a memory_search within this many seconds after any start
+# of the session (its first registration, a resume or compaction that
+# registers it again, or a root's start). A session-start policy asks for
+# recall at task start; fifteen minutes covers a slow first turn.
 EARLY_SEARCH_S = 900.0
 REUSE_WINDOW_S = 14 * 86_400.0
 NON_SUBSTANTIVE_SOURCES = ("status", "log")
@@ -134,10 +148,29 @@ class _Session:
     inferred: int = 0
     searches: list[float] = field(default_factory=list)
     credited_ids: int = 0
+    registered: bool = False
+    variant: str | None = None
+    # Every start of the session: each registration (a resumed client
+    # registers again) and each surviving root's start. Pairing anchors.
+    starts: list[float] = field(default_factory=list)
 
     @property
     def active(self) -> bool:
         return bool(self.total or self.explicit or self.inferred or self.searches)
+
+
+def _searched_early(s: _Session) -> bool:
+    """A search within ``EARLY_SEARCH_S`` of the latest start before it:
+    each start (a resume, a compaction) re-serves the startup policy. A
+    search before every recorded start counts too: the session began no
+    later than that search (a root the daemon opens lazily starts at the
+    first store, after any searches)."""
+    starts = sorted({s.started_at, *s.starts})
+    for t in s.searches:
+        before = [a for a in starts if a <= t]
+        if not before or t <= before[-1] + EARLY_SEARCH_S:
+            return True
+    return False
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -164,28 +197,59 @@ def _root_of(conn) -> dict[str, str]:
     return {eid: root for eid, root in rows}
 
 
+def _registrations(conn) -> list[tuple]:
+    """Every ``client_sessions`` row (schema v43), or none on an older bank."""
+    if conn.execute(
+            "SELECT to_regclass('public.client_sessions')").fetchone()[0] is None:
+        return []
+    return conn.execute(
+        "SELECT session_key, registered_via, started_at, policy_variant, "
+        "episode_ids, start_times FROM client_sessions").fetchall()
+
+
 def _sessions(conn, since: float, now: float, root_of: dict[str, str]):
     roots = conn.execute(
         "SELECT id, session_key, started_at FROM episodes "
         "WHERE parent_id IS NULL AND session_key IS NOT NULL "
         "AND started_at >= %s AND started_at <= %s ORDER BY started_at, id",
         (since, now)).fetchall()
-    by_root = {rid: _Session([rid], {key}, root_kind(key), started)
-               for rid, key, started in roots}
-    by_key = {key: rid for rid, key, _ in roots}
+    registrations = _registrations(conn)
+    registered_keys = {key for key, *_ in registrations}
+    registered_episodes = {eid for _, _, _, _, eids, _ in registrations
+                           for eid in eids}
+    # One candidate per session key: its registration record when it has
+    # one (started in the window), else its surviving roots.
+    by_key: dict[str, _Session] = {}
+    for key, via, started, variant, episode_ids, start_times in registrations:
+        if since <= started <= now:
+            by_key[key] = _Session(
+                list(episode_ids), {key},
+                "hook" if via == "hook" else root_kind(key), started,
+                registered=True, variant=variant,
+                starts=list(start_times or [started]))
+    for rid, key, started in roots:
+        s = by_key.get(key)
+        if s is None:
+            if key in registered_keys:     # its session started before the window
+                continue
+            s = by_key[key] = _Session([], {key}, root_kind(key), started)
+        if rid not in s.roots:
+            s.roots.append(rid)
+        s.started_at = min(s.started_at, started)
+        s.starts.append(started)
+    by_root = {rid: s for s in by_key.values() for rid in s.roots}
     pruned_search_keys: set[str] = set()
     pruned_outcome_episodes: set[str] = set()
 
     def by_episode(episode_id):
-        return by_root.get(root_of.get(episode_id)) if episode_id else None
+        # A pruned root is its own root: the record still names it.
+        return by_root.get(root_of.get(episode_id, episode_id)) if episode_id else None
 
     def by_event(session_id, episode_id):
         # A search row's episode_id is the daemon's process-wide current
         # episode, not the caller's; its session_id is the caller's own.
         if session_id:
-            if session_id in by_key:
-                return by_root[by_key[session_id]]
-            return None
+            return by_key.get(session_id)
         return by_episode(episode_id)
 
     for episode_id, source, ts in conn.execute(
@@ -200,7 +264,8 @@ def _sessions(conn, since: float, now: float, root_of: dict[str, str]):
             "WHERE episode_id IS NOT NULL AND created_at >= %s", (since,)).fetchall():
         s = by_episode(episode_id)
         if s is None:
-            if episode_id not in root_of:        # its episode was pruned
+            # Pruned, and no registration names it.
+            if episode_id not in root_of and episode_id not in registered_episodes:
                 pruned_outcome_episodes.add(episode_id)
             continue
         if origin == "inferred":
@@ -209,7 +274,7 @@ def _sessions(conn, since: float, now: float, root_of: dict[str, str]):
             s.explicit += 1
     known_keys = set(conn.execute(
         "SELECT session_key FROM episodes WHERE session_key IS NOT NULL").fetchall())
-    known_keys = {k for (k,) in known_keys}
+    known_keys = {k for (k,) in known_keys} | registered_keys
     for session_id, episode_id, created in conn.execute(
             "SELECT session_id, episode_id, created_at FROM retrieval_events "
             "WHERE created_at >= %s", (since,)).fetchall():
@@ -226,22 +291,31 @@ def _sessions(conn, since: float, now: float, root_of: dict[str, str]):
         if s:
             s.credited_ids += 1
 
-    ordered = list(by_root.values())
+    ordered = sorted(by_key.values(), key=lambda s: (s.started_at, min(s.keys)))
     hooks = [s for s in ordered if s.kind == "hook"]
     active_shims = [s for s in ordered if s.kind != "hook" and s.active]
-    # Any hook root may pair: a session that passes `episode=` writes to the
-    # hook root while its searches carry the shim's key, so both are active.
-    near = {id(h): [s for s in active_shims
-                    if abs(s.started_at - h.started_at) <= PAIR_WINDOW_S]
-            for h in hooks}
-    merged: set[int] = set()
+    # Any hook session may pair: a session that passes `episode=` writes to
+    # the hook root while its searches carry the shim's key, so both are
+    # active. Each start of a hook session is an anchor, because a resumed
+    # client keeps its session id but starts a new shim beside the new
+    # start; a shim pairs when it is the only one near an anchor and no
+    # other hook session has an anchor near it.
+    anchors = [(h, [s for s in active_shims
+                    if abs(s.started_at - t) <= PAIR_WINDOW_S])
+               for h in hooks for t in sorted(set(h.starts or [h.started_at]))]
+    hooks_near: dict[int, set[int]] = {}
+    for h, candidates in anchors:
+        for s in candidates:
+            hooks_near.setdefault(id(s), set()).add(id(h))
+    merged_into: dict[int, _Session] = {}
     merged_pairs = ambiguous = 0
-    for h in hooks:
-        candidates = near.get(id(h), [])
-        if not candidates:
+    for h, candidates in anchors:
+        # Nothing near, or only a shim this session already took (a hook
+        # retry a second after the first registration is a second anchor).
+        if all(merged_into.get(id(s)) is h for s in candidates):
             continue
-        if len(candidates) == 1 and sum(
-                any(x is candidates[0] for x in c) for c in near.values()) == 1:
+        if (len(candidates) == 1 and hooks_near[id(candidates[0])] == {id(h)}
+                and id(candidates[0]) not in merged_into):
             shim = candidates[0]
             h.roots += shim.roots
             h.keys |= shim.keys
@@ -249,23 +323,33 @@ def _sessions(conn, since: float, now: float, root_of: dict[str, str]):
             for name in ("substantive", "total", "explicit", "inferred", "credited_ids"):
                 setattr(h, name, getattr(h, name) + getattr(shim, name))
             h.searches += shim.searches
-            merged.add(id(shim))
+            h.registered = h.registered or shim.registered
+            h.variant = h.variant or shim.variant
+            merged_into[id(shim)] = h
             merged_pairs += 1
         else:
             ambiguous += 1
-    sessions = hooks + [s for s in active_shims if id(s) not in merged]
+    sessions = hooks + [s for s in active_shims if id(s) not in merged_into]
     roots_report = {
-        "keyed_in_window": len(ordered),
+        "keyed_in_window": len(roots),
+        # One per session key: a registration record, or the surviving
+        # roots of a key that has none. The kinds below count these.
+        "session_keys": len(ordered),
         "hook": len(hooks),
         "shim": sum(s.kind == "shim" for s in ordered),
         "other": sum(s.kind == "other" for s in ordered),
+        "registered": sum(s.registered for s in ordered),
         "idle_shim_dropped": sum(s.kind != "hook" and not s.active for s in ordered),
         "merged_pairs": merged_pairs,
         "ambiguous_pairs": ambiguous,
-        # Sessions whose root the daemon deleted (a root that holds no
-        # entry is pruned when the session ends) but whose activity
-        # remains; they are NOT in `sessions`. One session may show under
-        # both counts.
+        # Sessions known only from their registration record: every root
+        # they were given has been pruned. They ARE in `sessions`.
+        "registered_without_root": sum(
+            s.registered and not any(r in root_of for r in s.roots)
+            for s in sessions),
+        # Activity whose root the daemon deleted and that no registration
+        # record claims (a bank from before v43, or a client that never
+        # registered); NOT in `sessions`. One session may show under both.
         "pruned_with_searches": len(pruned_search_keys),
         "pruned_with_outcomes": len(pruned_outcome_episodes),
     }
@@ -320,8 +404,7 @@ def collect_from(conn, since_epoch: float, now: float | None = None) -> dict:
     working = [s for s in sessions if s.active]
     substantive = [s for s in sessions if s.substantive]
     with_outcome = [s for s in sessions if s.explicit or s.inferred]
-    early = [s for s in sessions
-             if any(t <= s.started_at + EARLY_SEARCH_S for t in s.searches)]
+    early = [s for s in sessions if _searched_early(s)]
     credited = [s for s in with_outcome if s.credited_ids]
     mix = conn.execute(
         "SELECT COALESCE(origin, '') = 'inferred' AS inferred, outcome, COUNT(*) "
@@ -337,10 +420,18 @@ def collect_from(conn, since_epoch: float, now: float | None = None) -> dict:
         return {"n": len(group), "of_sessions": _rate(len(group), len(sessions)),
                 "of_working": _rate(len(group), len(working))}
 
+    variants: dict[str, int] = {}
+    for s in sessions:
+        # "unrecorded": no hook registration recorded a variant (a session
+        # from before v43, or a client without the SessionStart hook).
+        name = s.variant or "unrecorded"
+        variants[name] = variants.get(name, 0) + 1
+
     return {
         "sessions": len(sessions),
         "working_sessions": len(working),
         "roots": roots,
+        "policy_variants": dict(sorted(variants.items())),
         "substantive_sessions": len(substantive),
         "capture_coverage": (round(len(substantive) / len(sessions), 3)
                              if sessions else None),
@@ -399,13 +490,19 @@ def main(argv: list[str] | None = None) -> int:
     r, loop = stats["roots"], stats["loop"]
     print(f"\nmemory-loop capture metrics (since {args.since})")
     print(f"{'root episodes with a session key':<40}{r['keyed_in_window']:>8}")
+    print(f"{'session keys (records, unrecorded roots)':<40}{r['session_keys']:>8}")
     print(f"{'  hook / shim / other':<40}{r['hook']:>8} / {r['shim']} / {r['other']}")
-    print(f"{'  idle shim roots dropped':<40}{r['idle_shim_dropped']:>8}")
+    print(f"{'  registered (client_sessions)':<40}{r['registered']:>8}")
+    print(f"{'  idle shim keys dropped':<40}{r['idle_shim_dropped']:>8}")
     print(f"{'  hook+shim pairs merged':<40}{r['merged_pairs']:>8}")
     print(f"{'  ambiguous pairs (upper bound)':<40}{r['ambiguous_pairs']:>8}")
-    print(f"{'client sessions (surviving roots)':<40}{stats['sessions']:>8}")
-    print(f"{'  + pruned, with searches / outcomes':<40}{r['pruned_with_searches']:>8} / "
+    print(f"{'client sessions':<40}{stats['sessions']:>8}")
+    print(f"{'  known only from the record':<40}{r['registered_without_root']:>8}"
+          f"   (every root pruned)")
+    print(f"{'  + unattributed searches / outcomes':<40}{r['pruned_with_searches']:>8} / "
           f"{r['pruned_with_outcomes']}   (not in the rates below)")
+    print(f"{'  by memory-policy variant':<40}"
+          + ", ".join(f"{k} {v}" for k, v in stats["policy_variants"].items()))
     print(f"{'  working (>=1 memory interaction)':<40}{stats['working_sessions']:>8}")
     print(f"{'  with >=1 substantive store':<40}{stats['substantive_sessions']:>8}"
           f"   ({_pct(stats['capture_coverage'])})")
