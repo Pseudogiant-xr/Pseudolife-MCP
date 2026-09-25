@@ -86,7 +86,7 @@ EXPORTED_TABLES = (
 # telemetry is training signal tied to this deployment's serving history.
 EXCLUDED_TABLES = (
     "dream_runs", "dream_run_slots", "retrieval_events", "retrieval_uses",
-    "slot_reads",
+    "slot_reads", "lesson_search_events",
     # Mail and instance credentials belong to the source bank's runtime.
     "coordination_agents", "coordination_messages",
     # The board's audit log holds message bodies (paths, usernames) and its

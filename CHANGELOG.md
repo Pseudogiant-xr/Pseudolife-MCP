@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-25 — lesson searches and used_ids outcomes are recorded, schema v43)
+- Two memory-loop questions could not be answered from the bank: whether a
+  session consulted its lessons, and what share of the ids an outcome names
+  in `used_ids` a search had actually served. `memory_lesson_search` wrote
+  no log row, and lessons have no read counter. `memory_outcome` persisted
+  only the credited ids, and nothing linked those to the outcome; the
+  unmatched and served-elsewhere ids went back to the caller and were
+  dropped. Found 2026-09-25 by the memory-policy bench.
+- Schema v43 adds `lesson_search_events`: one row per `memory_lesson_search`
+  call, with the query, the caller's session and episode, and the lessons
+  served by `(entity_norm, attribute_norm)` slot key with rank and score.
+  A search that found nothing gets a row too. It is a separate table from
+  `retrieval_events` on purpose: `evals/retrieval_replay.py`, the telemetry
+  review and the graph ablation re-run every retrieval event as a
+  `memory_search`, so a lesson query there would contaminate them. It
+  shares the retrieval log's switch and retention, and `memory_stats`
+  reports its size as `retrieval_log.lesson_searches`. Lessons shown in
+  the session-start briefing are not counted.
+- Schema v43 adds `outcome_signals.used_ids` (JSONB). It holds what the
+  outcome's ids became: `{"credited", "unmatched", "served_elsewhere"}` id
+  lists, or `{"unchecked", "reason"}` when the label write failed. It is
+  `NULL` when the outcome named no ids or the retrieval log is off. The
+  tool's response is unchanged. Ids the MCP layer drops before the service
+  sees them (`used_ids_ignored`, `used_ids_truncated`) are not recorded.
+- Both records are observational: a failed write is counted in
+  `memory_stats` `retrieval_log.write_errors` and never fails the search
+  or the outcome.
+
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
   on by default: `coordination.enabled` defaults to `true`, and without an

@@ -1588,6 +1588,15 @@ class PostgresStorage:
             ).fetchone()
         return int(row[0])
 
+    def set_signal_used_ids(self, signal_id: int, used_ids: dict) -> bool:
+        """Record what an outcome's ``used_ids`` became (schema v43) on its
+        signal row. False when no row has that id."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE outcome_signals SET used_ids = %s WHERE id = %s",
+                (Jsonb(used_ids), int(signal_id)))
+        return cur.rowcount == 1
+
     def count_signals_for_episodes(self, episode_ids: list[str]) -> int:
         """Total outcome signals (consumed or not) across ``episode_ids`` —
         the auto-inference candidate scan's "already has a signal" check."""
@@ -1940,6 +1949,35 @@ class PostgresStorage:
             )
         return cur.rowcount
 
+    def add_lesson_search_event(self, query_text: str, served: list[dict],
+                                session_id: str | None = None,
+                                episode_id: str | None = None,
+                                now: float | None = None) -> int:
+        """One row per ``memory_lesson_search`` call (schema v43), in its own
+        table so nothing that replays ``retrieval_events`` as a
+        ``memory_search`` ever sees a lesson query. ``served`` names each
+        lesson by slot key (``entity_norm`` / ``attribute_norm``) with its
+        rank and score; an empty list records a search that found none."""
+        t = time.time() if now is None else float(now)
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO lesson_search_events "
+                "(query_text, session_id, episode_id, served, created_at) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (query_text, session_id, episode_id, Jsonb(served), t),
+            ).fetchone()
+        return int(row[0])
+
+    def prune_lesson_search_events(self, older_than_ts: float) -> int:
+        """Delete lesson-search rows older than the cutoff (the retrieval
+        log's retention)."""
+        with self._txn():
+            cur = self.conn.execute(
+                "DELETE FROM lesson_search_events WHERE created_at < %s",
+                (float(older_than_ts),),
+            )
+        return cur.rowcount
+
     def retrieval_events_window(self, since_ts: float = 0.0,
                                 limit: int = 1000) -> list[dict]:
         """Events (oldest first) with use labels aggregated — the training
@@ -1965,8 +2003,9 @@ class PostgresStorage:
     def retrieval_log_health(self) -> dict:
         """Row counts + newest event timestamp for ``memory_stats``.
 
-        Both log-write paths are exception-guarded, so a broken log is
-        otherwise invisible (zero rows, green /health). Two aggregate
+        Every log-write path is exception-guarded, so a broken log is
+        otherwise invisible (zero rows, green /health). ``lesson_searches``
+        counts the v43 ``memory_lesson_search`` log. Three aggregate
         queries, computed on demand rather than cached: the MAX is O(1) off
         ``retrieval_events_created_idx``, but the COUNTs are honestly
         O(rows) (an index-only scan at best — PG has no cheap exact count).
@@ -1982,10 +2021,13 @@ class PostgresStorage:
         ).fetchone()
         uses = self.conn.execute(
             "SELECT COUNT(*) FROM retrieval_uses").fetchone()
+        lessons = self.conn.execute(
+            "SELECT COUNT(*) FROM lesson_search_events").fetchone()
         return {
             "events": int(ev[0]),
             "last_event_at": None if ev[1] is None else float(ev[1]),
             "uses": int(uses[0]),
+            "lesson_searches": int(lessons[0]),
         }
 
     def read_audit(self, now: float | None = None) -> dict:

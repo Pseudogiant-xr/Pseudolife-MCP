@@ -137,6 +137,8 @@ _COLUMN_TYPES = [
     ("slot_reads", "last_read_at", "double precision"),
     ("entries", "explicit_reinforcements", "integer"),
     ("entries", "dream_state", "text"),           # v38
+    ("outcome_signals", "used_ids", "jsonb"),     # v43: read back as a dict
+    ("lesson_search_events", "served", "jsonb"),  # v43
 ]
 
 _NULLABLE_COLUMNS = [
@@ -164,6 +166,7 @@ _NULLABLE_COLUMNS = [
     ("facts", "authority"),
     ("facts", "distortion_tolerance"),
     ("entries", "dream_state"),                   # v38: NULL = pre-bump row
+    ("outcome_signals", "used_ids"),              # v43: NULL = named no ids
 ]
 
 
