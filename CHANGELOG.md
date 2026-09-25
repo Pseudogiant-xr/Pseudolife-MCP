@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-09-25 — the fallback dream extractor stops receiving the primary's API key)
+- The fallback extractor was built with the primary's key
+  (`PSEUDOLIFE_DREAM_API_KEY` / `memory.dream.extractor_api_key`), so a hosted
+  primary's provider key rode every fallback dream as a bearer header to the
+  fallback host — usually the in-stack sidecar over plain HTTP, which needs no
+  key. The fallback now sends its own key, the new
+  `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` / `memory.dream.fallback_api_key`, or
+  none. Like the primary's key it never appears in the Console, is honoured
+  under either settings source, and `ops/docker-compose.yml` forwards it to
+  the daemon. Forced `fallback` mode, `auto` falling back, and the
+  review-queue judges (which reuse the selected extractor, including under
+  their second-opinion model) all follow the rule; the primary still
+  receives its own key.
+- Migration: a fallback that relied on sharing the primary's key — a second
+  model on the same hosted provider, or one key-protected server behind both
+  URLs — now gets a 401. Set `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` to the same
+  value. Until then fallback dreams fail like any fallback outage: pulled
+  entries stay pending and retry, except that a batch of exactly one entry
+  (an idle dream with a backlog of one) failing three dreams running is
+  quarantined and never extracted — its memory stays in the bank — and
+  pending outcome signals stop being offered for lesson synthesis after
+  `signal_retry_days` (30). No shipped configuration is affected: the
+  installer never writes a dream key, and the bundled sidecar and both CLI
+  shims check none.
+
 ### Added (2026-09-25 — every registered session leaves a record)
 - A session that only searched, set facts or logged outcomes left no trace
   that it had happened: its root episode is deleted when it ends holding no
@@ -248,7 +273,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lessons and rules, relations, the review-queue judges, outcome inference,
   session digest) and the `driver="llm"` recall controller's seed call
   (`recall.simple_complete`) send `PSEUDOLIFE_DREAM_API_KEY` /
-  `extractor_api_key` as a bearer header. They used plain
+  `extractor_api_key` (on a fallback dream, the fallback's own
+  `PSEUDOLIFE_DREAM_FALLBACK_API_KEY`) as a bearer header. They used plain
   `urllib.request.urlopen`, which on every supported Python (checked on
   3.11, 3.12 and current CPython main) answers a
   301/302/303 to a POST by re-sending it as a body-less GET to the
