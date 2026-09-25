@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-09-25 — the extractor API key no longer follows a redirect to another host)
+- **Requests to the configured OpenAI-compatible extractor now refuse HTTP
+  redirects.** The dream extractor's seven calls (claims, events pass,
+  lessons and rules, relations, the review-queue judges, outcome inference,
+  session digest) and the `driver="llm"` recall controller's seed call
+  (`recall.simple_complete`) send `PSEUDOLIFE_DREAM_API_KEY` /
+  `extractor_api_key` as a bearer header. They used plain
+  `urllib.request.urlopen`, which on every supported Python (checked on
+  3.11, 3.12 and current CPython main) answers a
+  301/302/303 to a POST by re-sending it as a body-less GET to the
+  `Location` target with every header except Content-Length and
+  Content-Type, `Authorization` included. An endpoint that redirected,
+  whether misconfigured, compromised or hostile, handed the key to
+  whatever host it named. Reproduced on loopback: the redirect target
+  received `GET /v1/chat/completions` carrying the bearer and an empty
+  body.
+- These calls now open through `pseudolife_memory/utils/no_redirect.py`, a
+  stdlib-only `urlopen` whose redirect handler raises `HTTPError` with the
+  redirect's status and target instead of following it. Timeouts, the
+  proxy environment and TLS verification are unchanged. A redirecting
+  endpoint now fails the call with `ExtractorError` (for example
+  `HTTP Error 301: Moved Permanently; redirect to https://… refused --
+  configure the final URL directly`), the same cursor-holding failure as
+  any other transport error; `simple_complete` still returns `""`.
+- No working configuration relied on a redirect. The re-sent request was a
+  GET without the prompt, which no OpenAI-compatible server answers with a
+  completion, and the stdlib already refused 307/308 on a POST. An
+  endpoint configured as `http://` for an https-only host, or with a path
+  that redirects, was already failing and now says why. The endpoint health
+  probes (`probe_endpoint`, `fetch_served_model`) are unauthenticated GETs
+  and are unchanged.
+
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing
   items within its output budget, with explicit notices when content is omitted.
