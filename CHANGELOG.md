@@ -130,8 +130,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the backlog at once. A count that is not a whole number from 1 to 8 is a
   usage error that names its source; the file may carry a UTF-8 byte-order
   mark, and a UTF-16 file (Windows PowerShell 5.1's `>`) is reported as
-  such. The default stays 1, so other machines behave as before; the
-  maintainer's host runs 2 after trimming memory.
+  such. The default stays 1, and so does the maintainer's host: a two-slot
+  trial on 2026-09-25 ran each suite in ~50 min instead of ~17, with
+  load-timeout failures.
 
 ### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
 - **Hydration fails closed.** If loading cortex facts, world facts or lessons

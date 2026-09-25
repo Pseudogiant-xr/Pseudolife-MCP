@@ -82,9 +82,8 @@ python -m pytest tests/ > /tmp/pytest-last.log 2>&1; ec=$?; tail -60 /tmp/pytest
 
 or `set -o pipefail; ... | tee /tmp/pytest-last.log | tail -60`.
 
-**One full suite at a time per machine — two on the maintainer's host** —
-every session, worktree and harness (Claude Code, Codex, anything else) —
-**and CPU-only.** Measured
+**One full suite at a time per machine** — every session, worktree and
+harness (Claude Code, Codex, anything else) — **and CPU-only.** Measured
 2026-09-23 on the maintainer's Windows host: a full CPU suite commits ~20 GB
 (pytest ~14.9 GB, its spawned test daemons ~4.5 GB) against a ~120 GB commit
 limit of which the desktop, WSL and ~75 MCP shims already hold ~100 GB. Two
@@ -103,14 +102,13 @@ took 143 CUDA OOMs.
   instead; `=off` skips the lock (the default on GitHub Actions: one job per
   VM). Targeted runs are never locked. The lock lives in your home
   directory: a WSL or other-user run does not see it.
-- The lock has `PSEUDOLIFE_SUITE_SLOTS` slots, default 1 (every other
-  machine; CI turns the lock off). The maintainer's Windows host runs 2
-  since 2026-09-25, after trimming memory, with paging to NVMe accepted: up
-  to two full runs hold the lock at once, waiters still take free slots in
-  arrival order, and the waiting notice names every holder. The host's
-  count lives in `~/.pseudolife-mcp/locks/full-suite.slots` (the variable
-  overrides it for one run); a worktree whose base predates slots only ever
-  uses the first.
+- The lock has a slot count, default 1: `PSEUDOLIFE_SUITE_SLOTS`, else
+  `~/.pseudolife-mcp/locks/full-suite.slots`. Leave it at 1 on the
+  maintainer's host (maintainer decision 2026-09-25 ~19:15). A two-slot
+  trial that afternoon ran each suite in ~50 min instead of ~17, with
+  load-timeout failures, so two at once finished fewer suites than one after
+  another. With more slots, waiters still take free ones in arrival order
+  and the waiting notice names every holder.
 - The suite sets `CUDA_VISIBLE_DEVICES=-1` itself (`PSEUDOLIFE_TEST_CUDA=1`
   opts back in). Never `""`: on Windows an empty value leaves the GPU usable.
 - With several sessions active, still announce `SUITE-START` / `SUITE-END` on

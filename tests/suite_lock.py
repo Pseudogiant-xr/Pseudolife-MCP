@@ -49,8 +49,9 @@ Configuration:
     This file's tests still run both lock backends in CI.
 ``PSEUDOLIFE_SUITE_SLOTS``, else a ``full-suite.slots`` file in the lock directory
     How many full runs may hold the lock at once; 1 when neither is set.
-    The maintainer's Windows host runs 2 since 2026-09-25, after memory was
-    trimmed (paging to NVMe accepted). Slot 0 keeps the historical file
+    Measured 2026-09-25 on the maintainer's Windows host: two slots ran each
+    suite in ~50 min instead of ~17, with load-timeout failures, so it stays
+    on 1. Slot 0 keeps the historical file
     names, so runs from older code share it and never see a second slot;
     waiters take free slots in arrival order, and notices name every holder.
     Queued runs re-read the count at every poll, so a change reaches the
