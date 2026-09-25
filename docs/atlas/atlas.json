@@ -215,7 +215,7 @@
    "d": [
     "Fresh upstream HTTP connection PER TOOL CALL — dodges idle-connection reaping that used to hang post-pause calls",
     "Probes /health; spawns `pseudolife-mcp serve` detached if daemon absent",
-    "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
+    "X-PL-Session = Claude Code's session id when the writer is Claude Code (joins the hook's root), else one uid per process; opens no episode (the daemon lazy-opens on the first write); closes only its own key at exit",
     "Re-emits tools/list_changed downstream after memory_toolset tier changes",
     "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification",
     "By default asks /api/hook/coordination-start once at startup and builds its coordination adapter (Codex: per-thread registry) only where the daemon serves its bearer the board; appends the compact board check-in to the MCP instructions only when the adapter is up"
@@ -419,7 +419,7 @@
    "s": "hook payload + identity tier 3",
    "p": "pseudolife_memory/web/session_hook.py",
    "d": [
-    "MEMORY_LOOP_BLOCK ≡ examples/CLAUDE.memory.md (guard-tested byte-identity)",
+    "Serves STARTUP_MEMORY_CORE, then a byte-bounded briefing; MEMORY_LOOP_BLOCK ≡ examples/CLAUDE.memory.md (guard-tested byte-identity) is the detailed standing copy",
     "Authorized: registers active session + prepends the episode handle",
     "Unauthorized callers get byte-identical public output — no identity minting"
    ]
@@ -1109,7 +1109,8 @@
    "p": "ops/install-hook.ps1",
    "d": [
     "Adds `pseudolife-mcp briefing --hook-json` and its `--coordination` check-in to settings.json / hooks.json, replacing the unconditional check-in echo older installers wrote",
-    "Backs up the settings file first; strips obsolete episode hooks"
+    "Backs up the settings file first; strips obsolete episode hooks",
+    "--remove-legacy: drops its exact Claude entries once the plugin owns them"
    ]
   },
   {
@@ -1133,6 +1134,8 @@
    "s": "safe daemon-only redeploy",
    "p": "ops/update.ps1",
    "d": [
+    "Refuses a dirty tree, or one git cannot describe, unless -AllowDirty",
+    "Stamps git sha / dirty / build time into image labels + /health build",
     "backup → rollback tag <tag>-pre-update-<ts> → prune (keep 2)",
     "compose up -d --no-deps --build pseudolife-daemon ONLY",
     "Health poll; prints the exact rollback one-liner",

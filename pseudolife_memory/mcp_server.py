@@ -442,8 +442,15 @@ _SUPERSESSION_SERVICE_KEYS = (
 
 def _compact_entry(e: dict[str, Any],
                    text_chars: int | None = None) -> dict[str, Any]:
-    """{id, text, source, tags, score} plus, on a superseded hit, a short
-    ``replaced_by`` pointer to the note recorded as replacing it.
+    """{id, text, source, tags, score, date} plus, on a superseded hit, a
+    short ``replaced_by`` pointer to the note recorded as replacing it.
+
+    ``date`` is the entry's write date (local YYYY-MM-DD, as in
+    ``replaced_by.at``), omitted when the stamp is missing. Age is a signal
+    agents act on: in the 2026-09-23 review's used_ids labels, status notes
+    were used 51% of the time under 3 days old and 24% at 3-14 days, and
+    knowledge entries decayed the same way. The full ``timestamp`` stays
+    under ``verbose``.
 
     ``text_chars`` caps the entry's own ``text`` (2026-09-04 agent token
     ledger: it alone was 64% of a served ``memory_search`` payload, mean
@@ -456,6 +463,9 @@ def _compact_entry(e: dict[str, Any],
     agents to use in place of the entry although about 4 in 10 legacy links
     point at an unrelated note. The full text stays under ``verbose``."""
     out = {k: e[k] for k in ("id", "text", "source", "tags", "score") if k in e}
+    written = _iso_seconds(e.get("timestamp"))
+    if written:
+        out["date"] = written[:10]
     if e.get("superseded"):
         out["superseded"] = True
     if e.get("superseded_by_text"):
@@ -558,6 +568,14 @@ def _world_correct_with(e: dict[str, Any]) -> str | None:
 def memory_search(
     query: Annotated[str, Field(
         description="Natural-language description; specific beats vague.")],
+    # 8, kept by maintainer decision (2026-09-25) on this evidence. The
+    # serving-policy replay (evals/serving_policy_replay.py, artifact
+    # evals/results/serving-policy-replay-20260925-r3.json) simulated a
+    # narrower default over the 276 default-width agent searches of
+    # 2026-09-06..25: 6 keeps 85.4% of the hits agents reported using
+    # (Wilson 79.6-89.8) at 75% of the rows, 7 keeps 93.0% at 87.5%. The
+    # 2026-09-23 review's ~90.5% for 6 read a width-6 list as a prefix of
+    # the width-8 one, which the dense pool's cosine cut makes untrue.
     top_k: Annotated[int, Field(
         description="Max entries; caps cortex facts at "
                     "min(5, top_k).")] = 8,
@@ -591,9 +609,9 @@ def memory_search(
     leads about the PAST, so check each against the task in front of
     you before letting it steer, and re-derive when today's context
     differs from the one it was written in. ``cortex``
-    facts arrive AHEAD of ``entries`` — the current, deduped answer
-    (``contested: true`` awaits ``memory_fact_resolve``).
-    ``low_confidence=True``: no confident match, prefer abstaining. A
+    facts arrive AHEAD of ``entries`` and may bear on it (``contested:
+    true`` awaits ``memory_fact_resolve``). ``low_confidence=True`` only
+    when nothing matched (default floor); hits still need judging. A
     superseded hit's ``replaced_by`` names its recorded replacement;
     ``verified: false`` = not confirmed as an explicit correction (often
     an old detector link, ~4 in 10 unrelated), so the entry may still
@@ -785,8 +803,14 @@ def _project_search(result: dict[str, Any], facts: list[dict[str, Any]], *,
         result["entries"] = kept
         result["count"] = len(kept)
 
-    # A confident cortex answer must never be flagged low-confidence: the
-    # cortex block IS the answer even when associative recall is weak/empty.
+    # Any served cortex fact suppresses the flag, so at the shipped
+    # settings (floor 0, guard 0.2) it means "nothing matched at all": it
+    # fired on 0 of 1,072 agent searches (all but one served entries, and
+    # that one served facts), and the 2026-09-23 review's in-domain
+    # absent-answer probes all got entries AND facts
+    # (evals/results/serving-policy-replay-20260925-r3.json, abstention). The
+    # override stays until a real answerability signal exists; the tool
+    # description states what the flag means instead of promising more.
     result["low_confidence"] = result.get("low_confidence", False) and not result.get("cortex")
     if compact:
         result = _compact_entries(result, text_chars=text_chars)
