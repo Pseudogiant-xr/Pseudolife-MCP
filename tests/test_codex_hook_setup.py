@@ -8,9 +8,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -406,6 +408,34 @@ def test_failed_setup_keeps_promised_fallback_and_redacts_errors(tmp_path, monke
     result = setup.setup(options(trust="yes"))
     assert result["status"] == "unavailable" and result["instructions"] == "appended"
     assert "secret-token" not in json.dumps(result)
+
+
+def test_close_does_not_wait_on_a_process_holding_the_app_servers_stdout(tmp_path):
+    """A hook Codex killed can linger holding an inherited copy of the
+    app-server's stdout: seen 2026-09-25 on Windows under load, a PowerShell
+    hook stuck mid-exit for minutes while setup waited on the pipe forever."""
+    # Codex(executable, ...) runs `<executable> app-server --stdio` in cwd.
+    (tmp_path / "app-server").write_text(
+        "import json, subprocess, sys\n"
+        "for line in sys.stdin:\n"
+        "    message = json.loads(line)\n"
+        "    if message.get('method') == 'initialize':\n"
+        "        print(json.dumps({'id': message['id'], 'result': {}}), flush=True)\n"
+        "holder = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],\n"
+        "                          close_fds=False)\n"
+        "open('holder.pid', 'w').write(str(holder.pid))\n", encoding="utf-8")
+    client = setup.Codex(sys.executable, tmp_path, tmp_path)
+    started = time.monotonic()
+    try:
+        client.close()
+        assert time.monotonic() - started < 10
+    finally:
+        try:
+            os.kill(int((tmp_path / "holder.pid").read_text()), signal.SIGTERM)
+        except OSError:  # already gone
+            pass
+        client.reader.join(timeout=5)
+        client.proc.stdout.close()
 
 
 @pytest.mark.parametrize("existing_config", [True, False])
