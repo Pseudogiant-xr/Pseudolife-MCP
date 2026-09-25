@@ -50,6 +50,21 @@ if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
     os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = bench_admin_url()
     os.environ["_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"] = "1"
 
+# Windows can fail a loopback connect for want of a local port, which says
+# nothing about the server (tests/pg_defaults.py, is_local_port_exhaustion).
+# The fixtures and the storage code under test all connect through
+# psycopg.connect, so one wrapper, installed here before any test module
+# imports, covers every connect in this process. Spawned daemons are other
+# processes and run psycopg as shipped.
+try:
+    import psycopg
+except ImportError:  # the PG-backed suites skip themselves
+    pass
+else:
+    from tests.pg_defaults import retry_local_port_exhaustion  # noqa: E402
+
+    psycopg.connect = retry_local_port_exhaustion(psycopg.connect)
+
 # Isolate client configuration before test-module imports can snapshot it.
 # Model caches and ordinary home-directory lookup stay intact; only the Codex
 # connection and its credentials/state are redirected to this owned temp home.
