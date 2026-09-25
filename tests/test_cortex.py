@@ -443,6 +443,20 @@ def test_restore_settled_contender_re_parks_only_what_a_write_settled():
     assert store.restore_settled_contender("svc", "region", "us-east-2", since=0.0) is None
 
 
+def test_restore_settled_contender_refuses_while_another_contender_is_parked():
+    """At most one contender per slot: a restore never parks a second one
+    beside a different value already parked."""
+    store = CortexStore()
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(93), support="user", now=1.0)
+    store.write_fact(Slot("svc", "region", "us-east-2"), _unit(94), support="agent", now=2.0)
+    store.write_fact(Slot("svc", "region", "us-east-2"), _unit(94), support="user", now=3.0)
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(93), support="user", now=4.0)
+    store.write_fact(Slot("svc", "region", "ap-south-1"), _unit(95), support="agent", now=5.0)
+    assert [c.value for c in store.contenders_for("svc", "region")] == ["ap-south-1"]
+    assert store.restore_settled_contender("svc", "region", "us-east-2", since=0.0) is None
+    assert [c.value for c in store.contenders_for("svc", "region")] == ["ap-south-1"]
+
+
 def test_restore_settled_contender_stays_inside_the_run_window():
     """A contender settled AFTER the reverted run finished was not that
     run's doing, and re-parking it would invent a contest the pre-run
@@ -466,10 +480,12 @@ def test_restore_settled_contender_ignores_a_dedup_merge_lookalike():
     (it was a current, never a contender)."""
     store = CortexStore()
     store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(92), support="user", now=1.0)
+    # Asserted at its own superseded_at: the record itself must not count as
+    # the sibling the settle made current.
     store.records.append(CortexRecord(
         entity="svc", attribute="region", value="us-east-2",
         status="superseded", superseded_by_value="us-east-2",
-        superseded_at=3.0, asserted_at=2.0, last_confirmed=2.0))
+        superseded_at=3.0, asserted_at=3.0, last_confirmed=3.0))
     assert store.restore_settled_contender(
         "svc", "region", "us-east-2", since=0.0) is None
     assert store.contenders_for("svc", "region") == []

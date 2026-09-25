@@ -343,6 +343,49 @@ def test_rollback_re_parks_a_contender_the_runs_supersession_settled(svc):
     assert out.get("error") is None, out
     assert svc.cortex_lookup("team", "mascot")["value"] == "fox"
     assert _contenders(svc, "team", "mascot") == ["owl"]
+    assert [d.get("contender_restored") for d in out["details"]] == ["owl"]
+
+
+def test_rollback_of_a_flip_flopping_run_still_ends_with_the_contender(svc):
+    """Review finding (2026-09-25): a run that writes owl, hawk, owl at one
+    slot. Unwinding it in reverse, the middle row's rewrite of owl settles
+    the contender AGAIN, at rollback time, outside the run's window; the
+    first row's restore must still find it."""
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="agent")
+    svc.cortex_write("team", "mascot", "owl", confidence=0.5, support="agent")
+    for note in ("the mascot is an owl", "no, the mascot is a hawk",
+                 "final answer: the mascot is an owl"):
+        svc.store(note, source="notes")
+    svc.dream_run(_Stub([
+        _scalar("team", "mascot", "owl", source=0, confidence=0.95),
+        _scalar("team", "mascot", "hawk", source=1, confidence=0.95),
+        _scalar("team", "mascot", "owl", source=2, confidence=0.95)]))
+    assert svc.cortex_lookup("team", "mascot")["value"] == "owl"
+    assert [r["action"] for r in _journal(svc, _runs(svc)[0]["id"])] == [
+        "superseded", "superseded", "superseded"]
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    assert svc.cortex_lookup("team", "mascot")["value"] == "fox"
+    assert _contenders(svc, "team", "mascot") == ["owl"]
+
+
+def test_rollback_leaves_alone_a_contender_settled_after_the_run(svc):
+    """The run window's upper bound, end to end: a contender parked and
+    settled by writes AFTER the run was never the run's doing, so reverting
+    the run must not re-park it."""
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="agent")
+    svc.store("the mascot is an owl", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl", confidence=0.95)]))
+    svc.cortex_write("team", "mascot", "crow", confidence=0.95, support="user")
+    svc.cortex_write("team", "mascot", "owl", support="agent")    # parks owl
+    assert _contenders(svc, "team", "mascot") == ["owl"]
+    svc.cortex_write("team", "mascot", "owl", confidence=0.95,
+                     support="user")                               # settles it
+    assert _contenders(svc, "team", "mascot") == []
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    assert svc.cortex_lookup("team", "mascot")["value"] == "fox"
+    assert _contenders(svc, "team", "mascot") == []
 
 
 def test_rollback_re_parks_a_contender_the_runs_insert_settled(svc):

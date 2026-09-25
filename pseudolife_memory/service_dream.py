@@ -2116,6 +2116,7 @@ class DreamOps:
 
         counts = {"reverted": 0, "skipped": 0, "partial": 0}
         details: list[dict[str, Any]] = []
+        rollback_started = _time.time()
 
         def _prev_stance(row: dict) -> str | None:
             # v29: the journal's fixed columns carry no stance (spec
@@ -2175,13 +2176,18 @@ class DreamOps:
             # A write that made a parked contender's value current settled
             # that contender (2026-09-25), and the journal has no contender
             # column: re-park it once the write is reverted, or the pending
-            # review item is lost where it used to survive the run.
+            # review item is lost where it used to survive the run. Two
+            # windows: the run's own, and this rollback's, because unwinding
+            # a run that wrote the same value twice re-settles the contender
+            # through _rewrite_prev before the earlier row is reached.
+            args = (row["entity"], row["attribute"], row["new_value"] or "")
             with self._lock:
-                rec = self._cortex.restore_settled_contender(
-                    row["entity"], row["attribute"], row["new_value"] or "",
-                    since=float(target["started_at"]),
-                    until=(None if target.get("finished_at") is None
-                           else float(target["finished_at"])))
+                rec = (self._cortex.restore_settled_contender(
+                           *args, since=float(target["started_at"]),
+                           until=(None if target.get("finished_at") is None
+                                  else float(target["finished_at"])))
+                       or self._cortex.restore_settled_contender(
+                           *args, since=rollback_started))
             return rec.value if rec is not None else None
 
         for row in reversed(journal):
