@@ -405,6 +405,24 @@ def test_a_legacy_run_keeps_its_exit_status_when_regraded(tmp_path):
     assert meta["db"].startswith("plbench_")
 
 
+@pytest.mark.parametrize("url,ok", [
+    ("https://www.sqlite.org/limits.html", True),
+    ("https://sqlite.org/limits.html", True),
+    ("https://evil.example/?ref=sqlite.org", False),
+    ("https://sqlite.org.evil.example/", False),
+    ("", False),
+    (None, False),
+])
+def test_world_fact_citation_host_is_parsed_not_substring_matched(url, ok):
+    assert mb.host_is(url, "sqlite.org") is ok
+
+
+def test_proxied_header_values_cannot_split_a_response():
+    assert mb.header_value("text/event-stream\r\nSet-Cookie: x=1") == (
+        "text/event-streamSet-Cookie: x=1")
+    assert set(mb.CaptureProxy._FORWARD) >= {"content-type", "content-encoding"}
+
+
 def test_used_ids_parse_like_the_daemon():
     assert mb.parse_ids([True, 3.0, 2.5, 7]) == [3, 7]
     assert len(mb.parse_ids(list(range(80)))) == 50

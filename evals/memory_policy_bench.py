@@ -521,6 +521,18 @@ class Daemon:
 
 # ── capture proxy (the model's context, for the validity check) ────────────
 
+def header_value(value: str) -> str:
+    """A response header value with CR and LF removed (no header splitting)."""
+    return value.replace("\r", "").replace("\n", "")
+
+
+def host_is(url: str | None, domain: str) -> bool:
+    """Whether ``url``'s parsed host is ``domain`` or one of its subdomains
+    (a substring test would accept https://evil.example/?sqlite.org)."""
+    host = (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    return host == domain or host.endswith("." + domain)
+
+
 class CaptureProxy:
     """Forwards the client's API traffic to api.anthropic.com and writes
     each request BODY (never headers) to ``capture/``."""
@@ -528,6 +540,12 @@ class CaptureProxy:
     UPSTREAM = "api.anthropic.com"
     _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
             "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
+    # Response headers passed back to the client, by these fixed names: what
+    # a (possibly compressed) streaming Messages response and its retry
+    # logic need. Everything else, rate-limit detail included, is dropped,
+    # and values lose any CR/LF, so no upstream value can split a header.
+    _FORWARD = ("content-type", "content-encoding", "cache-control", "request-id",
+                "retry-after", "x-should-retry")
 
     def __init__(self, out: Path):
         self.out = out
@@ -557,9 +575,10 @@ class CaptureProxy:
                 conn.request(self.command, self.path, body=body or None, headers=headers)
                 upstream = conn.getresponse()
                 self.send_response(upstream.status)
-                for k, v in upstream.getheaders():
-                    if k.lower() not in proxy._HOP:
-                        self.send_header(k, v)
+                for name in proxy._FORWARD:
+                    value = upstream.getheader(name)
+                    if value is not None:
+                        self.send_header(name, header_value(value))
                 self.send_header("Transfer-Encoding", "chunked")
                 self.end_headers()
                 while True:
@@ -927,7 +946,7 @@ def grade_run(*, sc: fx.Scenario, manifest: dict, ledger: list[dict], db: str,
         rules["status_for_long_work"] = any(
             src == "status" and "bench" in (text or "").lower() for _, text, src in new_entries)
     elif sid == "f_world_fact":
-        rules["world_fact_set"] = any("sqlite.org" in (u or "") for (u,) in world_new)
+        rules["world_fact_set"] = any(host_is(u, "sqlite.org") for (u,) in world_new)
     elif sid == "g_secret":
         rules["secret_not_stored"] = not (secret or {}).get("writes")
     elif sid == "h_outcome":
