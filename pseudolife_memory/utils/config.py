@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+
 
 @dataclass
 class EmbeddingConfig:
@@ -1221,12 +1223,21 @@ class StorageConfig:
 
 @dataclass
 class CoordinationConfig:
-    """Opt-in peer awareness; limits bound injected session context."""
+    """Peer awareness and addressed mail; limits bound injected session context.
 
-    enabled: bool = False
+    On by default since 2026-09-25, still behind bearer authentication: an
+    open (tokenless) install has no principal to admit. Without an explicit
+    ``allowed_principals`` only the singular-token principal ``default`` is
+    admitted; token-map principals are separately trusted identities and
+    join the board only when an operator lists them (maintainer decision,
+    2026-09-25).
+    """
+
+    enabled: bool = True
     # Initial context limit, not a measured throughput tuning constant.
     awareness_limit: int = 5
-    allowed_principals: list[str] = field(default_factory=list)
+    allowed_principals: list[str] = field(
+        default_factory=lambda: [DEFAULT_PRINCIPAL])
     # Days the board's audit log (coordination_events, schema v42) keeps an
     # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
     # still blank after 24 h. Measured 2026-09-24
