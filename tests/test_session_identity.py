@@ -266,6 +266,76 @@ def test_outcome_with_header_and_handle(pg_service):
     assert len(sigs) == 1
 
 
+# Without a handle a signal takes the CALLER's open episode. It used to take
+# the process-wide current_id — just the root someone started last — so with
+# several sessions on one daemon it landed on whichever session started most
+# recently (the retrieval-log attribution bug, 2026-09-25).
+
+
+def _two_started_roots(svc):
+    a = svc.episode_start_session("own-key-A", "session A")
+    b = svc.episode_start_session("own-key-B", "session B")
+    assert svc._cms.episodes.current_id == b["id"]   # B started last
+    return a, b
+
+
+def test_outcome_without_handle_lands_on_callers_episode(pg_service):
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        svc.record_outcome(task="own outcome", outcome="success")
+    finally:
+        reset_writer_context(tok)
+    svc.record_outcome(task="anonymous outcome", outcome="success")
+    sigs = {s["task"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)}
+    assert sigs["own outcome"] == a["id"]
+    assert sigs["anonymous outcome"] is None      # no identity -> no episode
+
+
+def test_outcome_with_bad_handle_degrades_to_callers_episode(pg_service):
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        res = svc.record_outcome(task="bad handle outcome", outcome="success",
+                                 episode="ffffffffffff")
+    finally:
+        reset_writer_context(tok)
+    assert res["episode_warning"] == "unknown or closed episode handle"
+    sigs = {s["task"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)}
+    assert sigs["bad handle outcome"] == a["id"]
+
+
+def test_correction_signal_lands_on_callers_episode(pg_service):
+    """A user-tier supersession emits a correction signal; it follows the
+    same rule as record_outcome — the handle's root when one is passed,
+    else the caller's open episode."""
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        svc.cortex_write("server", "port", "8080", support="user")
+        svc.cortex_write("server", "port", "9090", support="user")
+    finally:
+        reset_writer_context(tok)
+    # Header session B, handle A: the handle wins attribution, as it does
+    # for record_outcome (test_outcome_with_header_and_handle).
+    tok = set_writer_context("w", "own-key-B")
+    try:
+        svc.cortex_write("widget", "color", "blue", support="user")
+        svc.cortex_write("widget", "color", "red", support="user",
+                         episode=a["id"][:12])
+    finally:
+        reset_writer_context(tok)
+    corr = {s["about"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)
+            if s["outcome"] == "correction"}
+    assert corr == {"server": a["id"], "widget": a["id"]}
+
+
 # ── Task 5: hook endpoints — register on start, close on end (identity
 # tier 3, spec 2026-07-18) ────────────────────────────────────────────────
 
@@ -600,8 +670,8 @@ def test_hook_resume_touch_survives_the_next_reaper_sweep(pg_service):
     assert resumed["id"] == ep["id"]
     root = svc._cms.episodes.episodes[ep["id"]]
     assert root.ended_at is None               # resumed, not forked
-    # Outcome-only return: no episode handle (attributes via the current
-    # pointer the resume just moved), so neither a band entry nor a
+    # Outcome-only return: no episode handle and no session identity (the
+    # signal attributes to no episode), so neither a band entry nor a
     # handle-path touch is written — the resume itself must protect.
     svc.record_outcome(task="t", outcome="success")
     svc.reap_idle_sessions(7_200)
