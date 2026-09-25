@@ -546,22 +546,47 @@ to trigger physical cleanup. Full queues and rate limits return explicit errors.
 Live delivery attempts a message at most three times in total across
 attachments; past that it is left for explicit receive, so one unacknowledged
 message cannot wake the host on every restart. The same prune pass removes an
-address that holds no lease, is referenced by no retained message and has been
-idle for seven days, or for one hour when its adapter registered without a
-state file (`capabilities.resumable: false`), since nothing can attach to that
-address again; for those the lease too must have been gone for the hour, so a
-daemon restart cannot retire a parked shim's address, and if it ever is
-retired the state-less adapter registers a fresh one instead of stopping.
+address that is referenced by no retained message and has had neither its own
+activity nor a lease for seven days, or for one hour when its adapter
+registered without a state file (`capabilities.resumable: false`), since
+nothing can attach to that address again. A held lease keeps a live shim's
+address even while it is idle, so a daemon restart or a host sleep shorter than
+that window cannot retire it; if a state-less address is ever retired, its
+adapter registers a fresh one instead of stopping.
 Addresses that predate the flag keep the seven-day rule. Idle
-means no register, update, attach, send, acknowledgment or forwarded tool call:
-the adapter's lease heartbeat counts as activity only when the shim forwarded a
-tool call since the previous one, so a parked shim is neither ranked nor
-retained as a working one. A client that only reads must acknowledge what it
+means no register, update, new attachment, send, acknowledgment or forwarded
+tool call: the adapter's lease heartbeat counts as activity only when the shim
+forwarded a tool call since the previous one, and an adapter re-attaching under
+its own attachment ID (after a daemon outage or a host sleep) is recovering its
+lease, not acting, so a parked shim is neither ranked nor retained as a working
+one. A client that only reads must acknowledge what it
 reads, or hold a lease, to stay registered. `memory_agents(action="list")`
-shows peers that hold a lease or were active within the last hour, leased
-first, reports the number of other matching peers as `idle_omitted` and sets
-`truncated` when the page cut listed peers; a peer's public agent ID stays
-addressable while its row exists. A
+shows peers active within the last hour, or within the last three hours while
+they hold a lease, leased first; it reports the number of other matching peers
+as `idle_omitted` and sets `truncated` when the page cut listed peers; a peer's
+public agent ID stays addressable while its row exists. Each listed peer
+carries `status_set_at`, `status_age` and `status_stale`. The time comes from
+the [audit log](#audit-log): the newest registration or status update. A status
+the log no longer covers is reported as older than the log's oldest event, for
+example `more than 21 hours ago`. A non-empty status older than two hours is
+marked stale. The two-hour and three-hour windows come from the first day of
+the live audit log (2026-09-25). Working agents refreshed their status within
+34 minutes at p95 and never went more than 51 minutes between board actions
+inside a work block. Idle stretches ran 5.4 hours or longer.
+
+Claude Desktop's app-level entry (writer ID `claude-desktop`) is one process
+serving every conversation in the app, so it registers no coordination
+address: whichever conversation called it would post, set status and read
+mail as all of them. It refuses `memory_agents(action="update")` and
+`memory_message` with an error saying why, prepends the same advice to its MCP
+instructions, and its `memory_agents(action="list")` shows open sessions only,
+not the board. A Claude Code session makes those calls on its own per-session
+server. In the Desktop app's Code tab that works only while the two entries have
+different names: the installer registers both as `pseudolife-memory`, and
+where the names match, Desktop serves the Code tab from its app-level entry.
+The writer ID is operator configuration, not authentication: the guard keeps
+honestly configured clients apart, while the daemon itself refuses any board
+write that carries no instance credential. A
 legacy adapter registers a fresh address on its next start only when the authenticated
 daemon explicitly confirms that the saved address no longer exists. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance

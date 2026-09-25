@@ -77,6 +77,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session root that ends with no stored entry, so sessions that only
   searched are reported separately and sessions that never touched memory
   are invisible; lesson searches and unmatched used_ids are not persisted.
+### Fixed (2026-09-25 — one board identity per session, statuses that show their age)
+- Claude Desktop's app-level MCP entry (writer ID `claude-desktop`) no longer
+  registers a coordination address. It is one process serving every
+  conversation in the app, so its address was shared: on 2026-09-25 a Code-tab
+  session posted through it and overwrote another session's status line. It
+  now refuses `memory_message` and `memory_agents(action="update")` before any
+  request, with an error pointing at a session's own per-session server, and
+  prepends that advice to its MCP instructions. Memory tools pass through
+  unchanged; `memory_agents` list there shows open sessions only, not the
+  board. A Code-tab session in Desktop keeps board writes only where its
+  per-session entry is named differently from the Desktop entry (the
+  installer currently gives both the same name).
+- An adapter re-attaching under its own attachment ID no longer counts as
+  activity; a new attachment (a process starting) still does. A 9-minute host
+  sleep on 2026-09-25 lapsed every idle shim's lease, and the re-attach wave on
+  wake made eleven sessions idle for hours read as active within 28 seconds.
+  Those re-attaches had also kept live idle shims young against the
+  seven-day retention, so prune now counts a held lease as well: an address
+  goes once it has had neither its own activity nor a lease for its window
+  (seven days, or one hour for state-less ones), and a daemon restart or a
+  host sleep shorter than that cannot retire a live shim's address.
+- `memory_agents` list gives each listed peer `status_set_at`, `status_age` and
+  `status_stale`. The time comes from the audit log (the newest registration
+  or status update); a non-empty status older than two hours is stale, and a
+  status the log no longer covers is reported as older than the log. No
+  schema change.
+- A peer holding a lease is listed for three hours after its own last action,
+  then counted in `idle_omitted`; peers without a lease keep the one-hour
+  window. Both windows come from the live audit log's first day, as the
+  comments on `STATUS_STALE_AFTER` and `ATTACHED_IDLE_WINDOW` record.
 
 ### Fixed (2026-09-25 — Codex hook setup no longer hangs on a hook Codex killed)
 - `ops/setup-codex-hooks.py` could hang on a busy Windows machine for as long
