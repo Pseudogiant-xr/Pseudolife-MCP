@@ -320,11 +320,15 @@ def test_an_xdist_worker_never_takes_the_lock(held):
     assert suite_lock.take_for_session(worker, environ, TESTS) is None
 
 
+def _lock_backend():
+    return ((suite_lock.msvcrt, "locking") if os.name == "nt"
+            else (suite_lock.fcntl, "flock"))
+
+
 def _lock_backend_raises(monkeypatch, code: int, only: Path | None = None) -> None:
     """Make the lock backend raise ``code`` — for every file, or ``only``
     for the one given (a queue ticket's lock keeps working)."""
-    module, name = ((suite_lock.msvcrt, "locking") if os.name == "nt"
-                    else (suite_lock.fcntl, "flock"))
+    module, name = _lock_backend()
     real = getattr(module, name)
 
     def refuse(fd, *args, **kwargs):
@@ -343,11 +347,15 @@ def test_contention_errors_read_as_busy(tmp_path, monkeypatch, code):
     assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
 
 
-def test_any_other_lock_error_is_raised_instead_of_waited_on(tmp_path, monkeypatch):
+@pytest.mark.parametrize("which", ["every lock", "the main lock"])
+def test_any_other_lock_error_is_raised_instead_of_waited_on(tmp_path, monkeypatch,
+                                                             which):
     # Read as "busy", a filesystem without locks would queue the run forever
     # behind a holder that does not exist. (Fail mode, so a regression fails
-    # the test rather than hanging it.)
-    _lock_backend_raises(monkeypatch, errno.ENOLCK)
+    # the test rather than hanging it.) The ticket is locked first, so "the
+    # main lock" is the case that reaches the main lock's error handling.
+    only = tmp_path / suite_lock.LOCK_FILE if which == "the main lock" else None
+    _lock_backend_raises(monkeypatch, errno.ENOLCK, only=only)
     with pytest.raises(OSError) as raised:
         suite_lock.acquire(tmp_path, "fail", worktree="w")
     assert raised.value.errno == errno.ENOLCK
@@ -419,8 +427,7 @@ class _GatedClock:
                 f"no {what} within {START_TIMEOUT}s")
 
 
-@pytest.mark.parametrize("liveness", ["ticket lock", "grace window"])
-def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch, liveness):
+def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch):
     # 2026-09-25: with eight full suites queued, one waited from 13:48 to
     # past 14:57 while later arrivals took the lock ahead of it — whichever
     # waiter polled first after a release won. Here the earlier waiter is
@@ -428,10 +435,6 @@ def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch, li
     # every 10 ms: on a first-poller-wins lock it takes the lock every time.
     clock = _GatedClock()
     monkeypatch.setattr(suite_lock, "time", clock)
-    if liveness == "ticket lock":
-        # Past the grace window at once: liveness is read from the ticket's
-        # own OS lock alone.
-        monkeypatch.setattr(suite_lock, "TICKET_GRACE_NS", 0, raising=False)
     order: list[str] = []
 
     def queue_up(name: str) -> None:
@@ -477,12 +480,15 @@ def _ticket_file(directory: Path, *, age_s: float, pid: int) -> Path:
     return queue_dir / f"{arrived:020d}-{pid}{suite_lock.TICKET_SUFFIX}"
 
 
-@pytest.mark.parametrize(("age_s", "locked", "abandoned"), [
-    (3600, True, False),    # an hour in the queue, its owner still holding it
-    (3600, False, True),    # its owner died: the OS dropped the ticket's lock
-    (0, False, False),      # created a moment ago, not locked yet
-], ids=["old-and-held", "owner-dead", "just-created"])
-def test_a_ticket_counts_while_its_owner_holds_it(tmp_path, age_s, locked, abandoned):
+@pytest.mark.parametrize(("age_s", "locked", "outcome"), [
+    (3600, True, "queued"),    # an hour in the queue, its owner still holding it
+    (0, True, "queued"),       # arrived a moment ago and holding it
+    (3600, False, "deleted"),  # its owner died: the OS dropped the ticket's lock
+    # Not locked yet, or its owner died young: passed over, but kept until
+    # past the grace window, since its owner may be about to lock it.
+    (0, False, "skipped"),
+], ids=["old-and-held", "new-and-held", "owner-dead", "new-and-free"])
+def test_a_ticket_counts_while_its_owner_holds_it(tmp_path, age_s, locked, outcome):
     path = _ticket_file(tmp_path, age_s=age_s, pid=4242)
     handle = open(path, "xb")  # noqa: SIM115 — closed below
     try:
@@ -490,23 +496,33 @@ def test_a_ticket_counts_while_its_owner_holds_it(tmp_path, age_s, locked, aband
             assert suite_lock._try_lock(handle)
         else:
             handle.close()
-        if abandoned:
-            suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="w"))
-            assert not path.exists(), "an abandoned ticket stays behind"
-        else:
-            with pytest.raises(suite_lock.SuiteLockBusy,
-                               match=r"1 earlier arrival queued ahead \(pid 4242\)"):
+        if outcome == "queued":
+            with pytest.raises(
+                    suite_lock.SuiteLockBusy,
+                    match=r"no recorded holder, 1 earlier arrival queued ahead "
+                          r"\(pid 4242; if pid 4242 never takes the lock"):
                 suite_lock.acquire(tmp_path, "fail", worktree="w")
-            assert path.exists()
+        else:
+            suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="w"))
     finally:
         handle.close()
     # A refused or finished run leaves no ticket of its own either way.
     remaining = [p.name for p in (tmp_path / suite_lock.QUEUE_DIR).iterdir()]
-    assert remaining == ([] if abandoned else [path.name])
+    assert remaining == ([] if outcome == "deleted" else [path.name])
 
 
-def test_a_waiter_killed_while_queued_does_not_hold_up_the_queue(held, procs,
-                                                                monkeypatch):
+def test_the_refusal_names_the_holder_and_the_waiters_ahead(held):
+    path = _ticket_file(held.dir, age_s=60, pid=4242)
+    with open(path, "xb") as ticket:
+        assert suite_lock._try_lock(ticket)
+        with pytest.raises(
+                suite_lock.SuiteLockBusy,
+                match=rf"held by holder-wt \(pid {held.pid}\) since \d\d:\d\d, "
+                      rf"with 1 earlier arrival queued ahead \(pid 4242\);"):
+            suite_lock.acquire(held.dir, "fail", worktree="w")
+
+
+def test_a_waiter_killed_while_queued_does_not_hold_up_the_queue(held, procs):
     waiter = _lock_process(procs, held.dir, "waiter-wt")
     waiter_pid = int(waiter.expect("PID").split()[1])
     waiter.expect("waiting for the full-suite lock")
@@ -517,10 +533,9 @@ def test_a_waiter_killed_while_queued_does_not_hold_up_the_queue(held, procs,
     _kill_pid(waiter_pid)                      # no cleanup: the ticket stays
     held.holder.send_release()
     held.holder.expect("RELEASED")
-    # The dead waiter's ticket is seconds old; skip the grace window so only
-    # its (released) OS lock decides.
-    monkeypatch.setattr(suite_lock, "TICKET_GRACE_NS", 0)
-    deadline = time.monotonic() + START_TIMEOUT
+    # The dead ticket is seconds old, inside its grace window: it must be
+    # passed over as soon as the OS drops its lock, not when the window ends.
+    deadline = time.monotonic() + suite_lock.TICKET_GRACE_NS / 2e9
     while True:
         try:
             next_lock = suite_lock.acquire(held.dir, "fail", worktree="next")
@@ -530,7 +545,30 @@ def test_a_waiter_killed_while_queued_does_not_hold_up_the_queue(held, procs,
             assert time.monotonic() < deadline, "a dead waiter still heads the queue"
             time.sleep(0.05)
     suite_lock.release(next_lock)
-    assert not list((held.dir / suite_lock.QUEUE_DIR).iterdir())
+    # Only the dead waiter's ticket may remain (young tickets are not deleted).
+    assert {p.name for p in (held.dir / suite_lock.QUEUE_DIR).iterdir()} <= {
+        t.name for t in tickets}
+
+
+def test_a_new_ticket_a_checker_is_testing_is_retried_not_refused(tmp_path,
+                                                                 monkeypatch):
+    # A later arrival testing a brand-new ticket holds its lock for a moment;
+    # the owner must wait that out, not fail the run.
+    module, name = _lock_backend()
+    real = getattr(module, name)
+    lock_file = tmp_path / suite_lock.LOCK_FILE
+    busy = {"left": 1}
+
+    def ticket_busy_once(fd, *args, **kwargs):
+        if busy["left"] and not os.path.samestat(os.fstat(fd), os.stat(lock_file)):
+            busy["left"] -= 1
+            raise OSError(errno.EACCES, os.strerror(errno.EACCES))
+        return real(fd, *args, **kwargs)
+
+    monkeypatch.setattr(module, name, ticket_busy_once)
+    suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="w"))
+    assert busy["left"] == 0
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
 
 
 class _InterruptedClock:
@@ -553,8 +591,8 @@ def test_ctrl_c_while_queued_takes_the_ticket_with_it(tmp_path, monkeypatch):
     finally:
         suite_lock.release(holder)
     assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
-    # Nothing is left to queue behind: a leaked ticket would still be inside
-    # its grace window and refuse this run.
+    # Nothing is left to queue behind: a leaked ticket, still locked through
+    # this process's open handle, would refuse this run.
     suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="next"))
 
 

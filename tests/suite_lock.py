@@ -25,12 +25,15 @@ polled first after a release won. Now each waiter drops a ticket in
 ``full-suite.queue/`` beside the lock, named for its arrival time and pid,
 and holds an OS lock on that ticket while it waits; only a waiter with no
 live ticket ahead of it may try the lock. A waiter that dies loses its
-ticket's lock with everything else, and the next waiter to look deletes the
-ticket. Liveness is that lock, not the pid: Windows reuses pids quickly, and
-``os.kill(pid, 0)`` there sends CTRL_C_EVENT (which is 0) rather than
-probing. A run from code older than the queue takes no ticket and races for
-the lock as before; it still excludes and is excluded, since the lock file
-is unchanged.
+ticket's lock with everything else: later waiters pass the ticket over at
+once, and delete it once it is past a grace window. Liveness is that lock,
+not the pid: Windows reuses pids quickly, and ``os.kill(pid, 0)`` there
+sends CTRL_C_EVENT (which is 0) rather than probing. A waiter stopped while
+first in line (a debugger, SIGSTOP, a Windows console mid-selection) keeps
+its place, and holds up the queue even while the lock is free; the waiting
+notice names its pid. A run from code older than the queue takes no ticket
+and races for the lock as before; it still excludes and is excluded, since
+the lock file is unchanged.
 
 Configuration:
 
@@ -79,11 +82,12 @@ HOLDER_FILE = "full-suite.holder.json"
 QUEUE_DIR = "full-suite.queue"
 TICKET_SUFFIX = ".ticket"
 
-# A waiter creates its ticket, then locks it: until then the ticket looks
-# abandoned. One younger than this counts as live regardless, so a waiter
-# that looks in between cannot delete it. Two adjacent syscalls take
-# microseconds; 30 s only bounds how long a waiter that died within 30 s
-# of arriving can hold up the queue.
+# A waiter creates its ticket, then locks it, so for a moment a new ticket
+# looks abandoned. A free ticket younger than this is passed over but not
+# deleted: deleted then, its owner would lock an unlinked file on POSIX and
+# drop out of the queue. Older, its owner is gone, and the next waiter to
+# look deletes it. Two adjacent syscalls take microseconds; 30 s only
+# delays the tidying up.
 TICKET_GRACE_NS = 30 * 10**9
 
 # pytest options under which a session runs no test. (--help needs no entry:
@@ -245,8 +249,10 @@ def _ticket_key(name: str) -> tuple[int, int] | None:
 def _enqueue(queue_dir: Path) -> _Ticket:
     """Create this waiter's ticket and lock it."""
     queue_dir.mkdir(parents=True, exist_ok=True)
-    # Wall-clock time, which every process on the machine reads alike;
-    # arrivals within one clock tick (15.6 ms on Windows) go in pid order.
+    # Wall-clock time, which every process on the machine reads alike.
+    # Arrivals within one clock tick (15.6 ms on Windows) go in pid order,
+    # and a clock stepped back lets later arrivals sort first: both cost
+    # fairness only, never exclusion.
     arrived, pid = time.time_ns(), os.getpid()
     while True:
         path = queue_dir / f"{arrived:020d}-{pid}{TICKET_SUFFIX}"
@@ -257,15 +263,15 @@ def _enqueue(queue_dir: Path) -> _Ticket:
             arrived += 1  # another thread of this process, same clock tick
     ticket = _Ticket(path, handle, (arrived, pid))
     try:
-        # Nobody else locks a ticket inside its grace window, so this fails
-        # only if two adjacent syscalls were TICKET_GRACE_NS apart.
-        if not _try_lock(handle):
-            raise OSError(errno.EAGAIN, f"another process locked the new queue "
-                                        f"ticket {path}")
+        # A later arrival testing the new ticket holds its lock for a moment.
+        for _ in range(100):
+            if _try_lock(handle):
+                return ticket
+            time.sleep(0.01)
+        raise OSError(errno.EAGAIN, f"cannot lock the new queue ticket {path}")
     except BaseException:
         _leave(ticket)
         raise
-    return ticket
 
 
 def _leave(ticket: _Ticket) -> None:
@@ -274,14 +280,14 @@ def _leave(ticket: _Ticket) -> None:
     try:
         ticket.path.unlink()
     except OSError:
-        # Windows refuses while a waiter has it open to test it; that waiter
-        # finds it unlocked and deletes it.
+        # Windows refuses while a waiter has it open to test it; unlocked
+        # now, it is deleted by a later look once past its grace window.
         pass
 
 
-def _still_held(path: Path) -> bool:
-    """Whether a ticket's owner still holds it. One whose owner is gone is
-    deleted on the way."""
+def _still_held(path: Path, *, young: bool) -> bool:
+    """Whether a ticket's owner still holds it. A free one past its grace
+    window is deleted on the way."""
     try:
         handle = open(path, "rb")  # not "a": that would recreate a deleted one
     except OSError:
@@ -292,10 +298,11 @@ def _still_held(path: Path) -> bool:
         _unlock(handle)
     finally:
         handle.close()
-    try:
-        path.unlink()
-    except OSError:
-        pass  # another waiter has it open to test it, and deletes it
+    if not young:
+        try:
+            path.unlink()
+        except OSError:
+            pass  # another waiter has it open to test it; a later look deletes it
     return False
 
 
@@ -306,16 +313,24 @@ def _queued_ahead(ticket: _Ticket) -> list[int]:
     earlier = sorted((key, name) for name in os.listdir(ticket.path.parent)
                      if (key := _ticket_key(name)) is not None and key < ticket.key)
     return [key[1] for key, name in earlier
-            if now - key[0] < TICKET_GRACE_NS
-            or _still_held(ticket.path.parent / name)]
+            if _still_held(ticket.path.parent / name,
+                           young=now - key[0] < TICKET_GRACE_NS)]
 
 
-def _describe_queue(ahead: list[int]) -> str:
+def _describe_wait(record: dict | None, ahead: list[int]) -> str:
+    """What this run is queued behind: the holder, and earlier waiters."""
     if not ahead:
-        return ""
+        return f"held by {describe_holder(record)}"
     plural = "s" if len(ahead) > 1 else ""
-    return (f", with {len(ahead)} earlier arrival{plural} queued ahead "
-            f"(pid{plural} {', '.join(map(str, ahead))})")
+    queued = (f"{len(ahead)} earlier arrival{plural} queued ahead "
+              f"(pid{plural} {', '.join(map(str, ahead))}")
+    if record:
+        return f"held by {describe_holder(record)}, with {queued})"
+    # The lock is free, or between holders. A first waiter that stays first
+    # is stopped (a debugger, SIGSTOP, a Windows console mid-selection) and
+    # keeps its place until it resumes or ends.
+    return (f"with no recorded holder, {queued}; if pid {ahead[0]} never "
+            f"takes the lock, it is paused or hung: resume or end it)")
 
 
 def read_holder(directory: Path) -> dict | None:
@@ -356,10 +371,10 @@ def acquire(directory: Path, mode: str, *, worktree: str,
                 ahead = _queued_ahead(ticket)
                 if not ahead and _try_lock(handle):
                     break
-                holder = describe_holder(read_holder(directory)) + _describe_queue(ahead)
+                situation = _describe_wait(read_holder(directory), ahead)
                 if mode == "fail":
                     raise SuiteLockBusy(
-                        f"full-suite lock held by {holder}; {LOCK_ENV}=fail refuses "
+                        f"full-suite lock {situation}; {LOCK_ENV}=fail refuses "
                         f"to queue (unset it to wait, or run a targeted subset)")
                 now = time.monotonic()
                 hint = ""
@@ -367,7 +382,7 @@ def acquire(directory: Path, mode: str, *, worktree: str,
                     waited_from = next_notice = now
                     hint = f" ({lock_path}; {LOCK_ENV}=fail exits instead, =off skips it)"
                 if now >= next_notice:
-                    print(f"waiting for the full-suite lock held by {holder}{hint}",
+                    print(f"waiting for the full-suite lock {situation}{hint}",
                           file=out, flush=True)
                     next_notice = now + notice_every
                 time.sleep(poll)

@@ -105,12 +105,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lock. Before, every waiter polled the lock and whichever polled first
   after a release won: on 2026-09-25, with eight suites queued, one run
   waited from 13:48 to past 14:57 while later arrivals went ahead. A waiter
-  that dies loses its ticket's OS lock and the next waiter deletes the
-  ticket; Ctrl-C and a `fail` refusal remove it at once. `fail` now also
-  refuses while an earlier waiter is queued, and the waiting notice names
-  the waiters ahead. A run from a checkout older than this change takes no
-  ticket and races for the lock as before; the lock file is unchanged, so
-  old and new runs still exclude each other.
+  that dies loses its ticket's OS lock, so later waiters pass its ticket
+  over at once (and delete it after 30 s); Ctrl-C and a `fail` refusal
+  remove it at once. `fail` now also refuses while an earlier waiter is
+  queued, and the waiting notice names the waiters ahead. A waiter stopped
+  while first in line (a debugger, a Windows console mid-selection) keeps
+  its place until it resumes or ends; the notice names its pid. A run from
+  a checkout older than this change takes no ticket and races for the lock
+  as before; the lock file is unchanged, so old and new runs still exclude
+  each other.
 - `CONTRIBUTING.md`: a docs-only change can skip the local full suite and
   run the doc guards plus the tests naming each touched file; CI must still
   pass before merge.

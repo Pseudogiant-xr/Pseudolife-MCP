@@ -94,8 +94,8 @@ took 143 CUDA OOMs.
   the lock `~/.pseudolife-mcp/locks/full-suite.lock` and waits its turn,
   naming the holder about once a minute, so start full runs in the
   background. Waiters are served in arrival order: each holds a ticket in
-  `full-suite.queue/` beside the lock, and a later run never overtakes an
-  earlier one (a worktree whose base predates the queue takes no ticket and
+  `full-suite.queue/` beside the lock, and only the earliest live waiter may
+  try it (a worktree whose base predates the queue takes no ticket and
   still races for the lock — rebase it). `PSEUDOLIFE_SUITE_LOCK=fail` exits
   instead; `=off` skips the lock (the default on GitHub Actions: one job per
   VM). Targeted runs are never locked. The lock lives in your home
