@@ -1,0 +1,410 @@
+{
+ "harness": "evals/coordination_report.py",
+ "report_version": 1,
+ "generated_at": "2026-09-25T19:27:47+00:00",
+ "input": {
+  "format": "legacy-board-export",
+  "sha256": "a04f7e88987ed9c544d9607736fbe7ab3fc8ce058f7c11ba30cde9fffbceb90f",
+  "records": 816,
+  "messages": 816,
+  "status_history": false,
+  "window_start": "2026-09-23T06:00:00+00:00",
+  "window_end": "2026-09-23T21:02:03+00:00",
+  "first_message": "2026-09-23T06:49:04+00:00",
+  "last_message": "2026-09-23T21:01:48+00:00",
+  "acks_without_send": 0,
+  "bodies_missing": 0
+ },
+ "privacy": "Aggregate-only: no message text, label, status, task, project, path or raw id. Agents are <principal>-<n> in first-seen order (a principal that is not a plain role name is replaced by principal-<n>). Keyword classification ran in memory; only counts are written.",
+ "parameters": {
+  "pair_window_s": 3600,
+  "pair_thresholds": [
+   3,
+   6,
+   10
+  ],
+  "batch_min": 3,
+  "fanout_window_s": 60.0,
+  "fanout_min_recipients": 3,
+  "fanout_similarity": 0.8,
+  "copy_window_s": 180.0,
+  "proposal_min": 2,
+  "stale_after_s": 7200,
+  "windows": [
+   {
+    "label": "16:00-21:30 AEST",
+    "start": "2026-09-23T06:00:00+00:00",
+    "end": "2026-09-23T11:30:00+00:00"
+   },
+   {
+    "label": "21:30-01:00 AEST",
+    "start": "2026-09-23T11:30:00+00:00",
+    "end": "2026-09-23T15:00:00+00:00"
+   },
+   {
+    "label": "01:00-07:05 AEST",
+    "start": "2026-09-23T15:00:00+00:00",
+    "end": "2026-09-23T21:05:00+00:00"
+   }
+  ]
+ },
+ "coordinator": {
+  "agent": "claude-code-2",
+  "chosen_by": "auto: the agent with the most distinct counterparties (24)"
+ },
+ "volume": {
+  "messages": 816,
+  "agents": 26,
+  "senders": 25,
+  "directed_pairs": 171,
+  "self_messages": 2,
+  "by_sender_principal": {
+   "claude-code": 753,
+   "codex": 63
+  }
+ },
+ "metrics": {
+  "ack_latency": {
+   "definition": "Seconds from a message's send to its recipient's first acknowledgment, grouped by the recipient's bearer principal (all = every recipient). A window takes messages by send time, start inclusive, end exclusive. median_s and p90_s interpolate linearly between ranks. never_acked counts messages with no acknowledgment by the end of the input, including any sent too close to its end to have been answered.",
+   "overall": {
+    "all": {
+     "messages": 816,
+     "acked": 804,
+     "never_acked": 12,
+     "median_s": 96.4,
+     "p90_s": 1559.0
+    },
+    "claude-code": {
+     "messages": 788,
+     "acked": 779,
+     "never_acked": 9,
+     "median_s": 95.3,
+     "p90_s": 1544.2
+    },
+    "codex": {
+     "messages": 28,
+     "acked": 25,
+     "never_acked": 3,
+     "median_s": 125.3,
+     "p90_s": 1151.0
+    }
+   },
+   "windows": {
+    "16:00-21:30 AEST": {
+     "start": "2026-09-23T06:00:00+00:00",
+     "end": "2026-09-23T11:30:00+00:00",
+     "by_principal": {
+      "all": {
+       "messages": 367,
+       "acked": 364,
+       "never_acked": 3,
+       "median_s": 290.1,
+       "p90_s": 5177.6
+      },
+      "claude-code": {
+       "messages": 358,
+       "acked": 355,
+       "never_acked": 3,
+       "median_s": 296.8,
+       "p90_s": 5261.2
+      },
+      "codex": {
+       "messages": 9,
+       "acked": 9,
+       "never_acked": 0,
+       "median_s": 114.0,
+       "p90_s": 1615.5
+      }
+     }
+    },
+    "21:30-01:00 AEST": {
+     "start": "2026-09-23T11:30:00+00:00",
+     "end": "2026-09-23T15:00:00+00:00",
+     "by_principal": {
+      "all": {
+       "messages": 203,
+       "acked": 199,
+       "never_acked": 4,
+       "median_s": 87.2,
+       "p90_s": 1158.4
+      },
+      "claude-code": {
+       "messages": 201,
+       "acked": 197,
+       "never_acked": 4,
+       "median_s": 87.1,
+       "p90_s": 1060.5
+      },
+      "codex": {
+       "messages": 2,
+       "acked": 2,
+       "never_acked": 0,
+       "median_s": 2752.6,
+       "p90_s": 4844.1
+      }
+     }
+    },
+    "01:00-07:05 AEST": {
+     "start": "2026-09-23T15:00:00+00:00",
+     "end": "2026-09-23T21:05:00+00:00",
+     "by_principal": {
+      "all": {
+       "messages": 246,
+       "acked": 241,
+       "never_acked": 5,
+       "median_s": 33.4,
+       "p90_s": 196.0
+      },
+      "claude-code": {
+       "messages": 229,
+       "acked": 227,
+       "never_acked": 2,
+       "median_s": 31.7,
+       "p90_s": 140.2
+      },
+      "codex": {
+       "messages": 17,
+       "acked": 14,
+       "never_acked": 3,
+       "median_s": 154.5,
+       "p90_s": 413.4
+      }
+     }
+    }
+   }
+  },
+  "batch_acks": {
+   "definition": "Share of acknowledged messages whose acknowledgment shared one instant (same recipient, same millisecond) with at least 2 others: one acknowledgment covering 3+ messages.",
+   "min_batch": 3,
+   "acked_messages": 804,
+   "batch_instants": 53,
+   "messages_in_batches": 263,
+   "share": 0.3271
+  },
+  "pair_peak_60min": {
+   "definition": "For each directed sender->recipient pair, the most messages it sent within any 3600-second window (half-open: a message exactly 3600 s older has left it). max is the busiest pair; pairs_over counts pairs whose peak is strictly greater than each threshold.",
+   "window_s": 3600,
+   "pairs": 171,
+   "max": 10,
+   "pairs_over": {
+    "3": 49,
+    "6": 6,
+    "10": 0
+   },
+   "top_pairs": [
+    {
+     "pair": "codex-2 -> claude-code-2",
+     "peak": 10
+    },
+    {
+     "pair": "claude-code-7 -> claude-code-2",
+     "peak": 9
+    },
+    {
+     "pair": "codex-1 -> claude-code-2",
+     "peak": 9
+    },
+    {
+     "pair": "claude-code-2 -> codex-2",
+     "peak": 9
+    },
+    {
+     "pair": "claude-code-5 -> claude-code-6",
+     "peak": 7
+    }
+   ]
+  },
+  "fanout_bursts": {
+   "definition": "A burst is one sender's messages to 3+ distinct recipients within 60 s of the burst's first message, each at least 0.8 similar to it (difflib ratio over lowercased text with digit runs and 8+ hex runs masked, whitespace collapsed, first 600 characters). Greedy per sender in send order; a message joins at most one burst. share = messages in bursts / all messages.",
+   "bursts": 35,
+   "messages": 165,
+   "share": 0.2022
+  },
+  "kind_mix": {
+   "definition": "One kind per message: a declared kind field when the event carries one (values outside NOTICE/REQUEST/CLAIM/HANDOFF/NEEDS-HUMAN count as OTHER), otherwise the tag-first heuristic over the body's first token and fixed phrase lists: CLAIM/RELEASE tags are CLAIM; SUITE-END is HANDOFF unless sent to the coordinator within 180 s of the same sender's SUITE-END to a peer (a NOTICE copy); SUITE-START is NOTICE; present-tense grants (you're up, go ahead) are HANDOFF; acknowledgments are NOTICE; DEPLOY-NEEDED or an ask for the maintainer's decision sent to the coordinator is NEEDS-HUMAN; questions and asks are REQUEST; the rest NOTICE. Hand-calibrated on the 2026-09-23/24 trial: a heuristic, not a label.",
+   "heuristic": true,
+   "declared_messages": 0,
+   "heuristic_messages": 816,
+   "counts": {
+    "NOTICE": 542,
+    "REQUEST": 92,
+    "CLAIM": 89,
+    "HANDOFF": 84,
+    "NEEDS-HUMAN": 9
+   },
+   "shares": {
+    "NOTICE": 0.6642,
+    "REQUEST": 0.1127,
+    "CLAIM": 0.1091,
+    "HANDOFF": 0.1029,
+    "NEEDS-HUMAN": 0.011
+   }
+  },
+  "suite_baton": {
+   "definition": "suite_start and suite_end count messages whose first token is SUITE-START or SUITE-END. baton_passes groups SUITE-END messages in send order: one from the sender of the current group within 180 s of that group's first message is a copy of the same pass.",
+   "suite_start": 99,
+   "suite_end": 93,
+   "baton_passes": 39
+  },
+  "status_staleness": {
+   "definition": "At the end of the input, the age of each agent's status: agents whose status-setting event (register, or an update carrying status) is in the input, whose status is not blank, and that were not pruned or revoked since. stale counts ages at or over threshold_s (the board's own STATUS_STALE_AFTER unless --stale-after says otherwise).",
+   "available": false,
+   "value": null,
+   "note": "This input records no status history (the legacy board export keeps only each agent's latest status, not when it was set)."
+  },
+  "proposals": {
+   "definition": "Resources agents coordinated by hand. A message counts for a resource when it carries the resource's START/END tag (SUITE-START) or pairs a coordination word (hold, busy, wait for/on, lock) with a mention of the resource, both matched in memory against a fixed vocabulary (suite, gpu, daemon, database, deploy, master, port); tags outside it are counted, never named. A pair (either direction) or reply thread with 2+ such messages coordinated it repeatedly; a resource that 2+ pairs or 2+ threads coordinated repeatedly is a candidate lease declaration. Proposals only: nothing is enforced.",
+   "resources": [
+    {
+     "resource": "suite",
+     "messages": 416,
+     "senders": 24,
+     "pairs": 74,
+     "repeated_pairs": 62,
+     "max_pair_messages": 23,
+     "repeated_threads": 26,
+     "start_tags": 152,
+     "end_tags": 260,
+     "markers": {
+      "hold": 108,
+      "busy": 1,
+      "wait_for": 14,
+      "lock": 120
+     },
+     "proposed": true,
+     "proposal": "declare a 'suite' lease (owner, expiry) instead of coordinating it by hand"
+    },
+    {
+     "resource": "gpu",
+     "messages": 49,
+     "senders": 12,
+     "pairs": 25,
+     "repeated_pairs": 15,
+     "max_pair_messages": 6,
+     "repeated_threads": 2,
+     "start_tags": 0,
+     "end_tags": 0,
+     "markers": {
+      "hold": 23,
+      "busy": 1,
+      "wait_for": 0,
+      "lock": 28
+     },
+     "proposed": true,
+     "proposal": "declare a 'gpu' lease (owner, expiry) instead of coordinating it by hand"
+    },
+    {
+     "resource": "daemon",
+     "messages": 45,
+     "senders": 13,
+     "pairs": 26,
+     "repeated_pairs": 11,
+     "max_pair_messages": 8,
+     "repeated_threads": 0,
+     "start_tags": 0,
+     "end_tags": 0,
+     "markers": {
+      "hold": 24,
+      "busy": 1,
+      "wait_for": 5,
+      "lock": 25
+     },
+     "proposed": true,
+     "proposal": "declare a 'daemon' lease (owner, expiry) instead of coordinating it by hand"
+    },
+    {
+     "resource": "deploy",
+     "messages": 21,
+     "senders": 11,
+     "pairs": 18,
+     "repeated_pairs": 2,
+     "max_pair_messages": 3,
+     "repeated_threads": 0,
+     "start_tags": 0,
+     "end_tags": 0,
+     "markers": {
+      "hold": 3,
+      "busy": 0,
+      "wait_for": 3,
+      "lock": 15
+     },
+     "proposed": true,
+     "proposal": "declare a 'deploy' lease (owner, expiry) instead of coordinating it by hand"
+    },
+    {
+     "resource": "master",
+     "messages": 15,
+     "senders": 8,
+     "pairs": 12,
+     "repeated_pairs": 2,
+     "max_pair_messages": 3,
+     "repeated_threads": 0,
+     "start_tags": 0,
+     "end_tags": 0,
+     "markers": {
+      "hold": 8,
+      "busy": 0,
+      "wait_for": 1,
+      "lock": 7
+     },
+     "proposed": true,
+     "proposal": "declare a 'master' lease (owner, expiry) instead of coordinating it by hand"
+    },
+    {
+     "resource": "database",
+     "messages": 11,
+     "senders": 5,
+     "pairs": 11,
+     "repeated_pairs": 0,
+     "max_pair_messages": 1,
+     "repeated_threads": 0,
+     "start_tags": 0,
+     "end_tags": 0,
+     "markers": {
+      "hold": 6,
+      "busy": 1,
+      "wait_for": 1,
+      "lock": 5
+     },
+     "proposed": false,
+     "proposal": null
+    },
+    {
+     "resource": "port",
+     "messages": 1,
+     "senders": 1,
+     "pairs": 1,
+     "repeated_pairs": 0,
+     "max_pair_messages": 1,
+     "repeated_threads": 0,
+     "start_tags": 0,
+     "end_tags": 0,
+     "markers": {
+      "hold": 1,
+      "busy": 1,
+      "wait_for": 0,
+      "lock": 0
+     },
+     "proposed": false,
+     "proposal": null
+    }
+   ],
+   "unlisted_tagged_messages": 1
+  },
+  "wakes_per_session_hour": {
+   "definition": "Host wakes caused by board mail per hour of attached session time.",
+   "value": null,
+   "note": "Needs a wake event the audit log does not record yet: attempt events count live-delivery attempts, which are not host wakes."
+  },
+  "requests_past_reply_by": {
+   "definition": "REQUEST messages still unanswered after their reply-by time.",
+   "value": null,
+   "note": "Needs a reply_by field on send; no schema carries one yet."
+  },
+  "needs_human_time_to_answer": {
+   "definition": "Seconds from a NEEDS-HUMAN message to the maintainer's answer.",
+   "value": null,
+   "note": "Needs a declared NEEDS-HUMAN kind and an answer event; the heuristic kind cannot say when a human answered."
+  }
+ }
+}

@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-26 — a coordination report, and the trial baseline to beat)
+- Coordination changes had nothing to be measured against: the 2026-09-23/24
+  trial's figures came from one-off scripts over a private board export.
+  `evals/coordination_report.py` reads an audit export
+  (`pseudolife-mcp board-audit export --out`) or that older whole-board export
+  and writes an aggregate-only JSON report plus a Markdown rendering, refusing
+  to replace either without `--force`. It measures acknowledgement latency per
+  recipient principal (overall and per `--window`), the share of
+  acknowledgements covering three or more messages at once, each directed
+  pair's busiest 60 minutes, near-identical fan-out bursts, the kind mix (a
+  declared `kind`, else a tag-first heuristic marked as such),
+  SUITE-START/SUITE-END baton traffic, status staleness at the end of an audit
+  export, and resources coordinated by hand repeatedly, listed as candidate
+  lease declarations (proposals only, nothing enforced). Wakes per
+  session-hour, requests past their reply-by time and the time to answer a
+  NEEDS-HUMAN message are `null` until the schema records what they need.
+- The committed baseline (`evals/results/coordination-baseline-20260924.json`)
+  is the report over the trial's final export, and it reproduces the trial
+  analysis's figures exactly. Over 816 messages, acknowledgements to Claude
+  Code sessions took a median 296.8 s (p90 5261.2 s) from 16:00 to 21:30 AEST
+  and 31.7 s (p90 140.2 s) from 01:00 to 07:05; 12 messages were never
+  acknowledged; 32.7% of acknowledgements came in batches of three or more;
+  35 fan-out bursts covered 20.2% of messages; and SUITE-END traffic amounted
+  to 39 baton passes. The older export has no status history, so the
+  baseline's staleness is `null`.
+- Aggregate-only by construction: bodies, labels, statuses and paths are
+  matched in memory against fixed keyword lists and only counts are written;
+  agents appear as `<principal>-<n>` in first-seen order, a principal that is
+  not a plain role name is replaced too, and no raw id or input path is
+  written. A test sends bodies, statuses and labels carrying a sentinel and
+  machine paths through both input formats and checks that neither output
+  file contains any of them.
+
 ### Fixed (2026-09-25 — Postgres connects retry a Windows local-port failure)
 - A daemon running natively on Windows (including the daemons the test suite
   spawns) now tries its own Postgres connects again (the storage connection

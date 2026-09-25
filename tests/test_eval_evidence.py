@@ -9873,6 +9873,46 @@ CLAIMS.append(Claim(
     stated=144.5, places=1))
 
 
+# -- the coordination report's trial baseline (2026-09-26) -----------------
+# evals/coordination_report.py over the 2026-09-23/24 trial's final board
+# export; every later coordination change is judged against it.
+COORD_BASELINE = RESULTS + "coordination-baseline-20260924.json"
+
+
+def _coord_window(label: str, principal: str, stat: str) -> Callable[[dict], float]:
+    return lambda d: (d["metrics"]["ack_latency"]["windows"][label]
+                      ["by_principal"][principal][stat])
+
+
+for _cid, _needle, _val, _stated, _places in [
+    ("coord-baseline-messages", "Over 816 messages",
+     lambda d: d["volume"]["messages"], 816, 0),
+    ("coord-baseline-evening-median", "median 296.8 s (p90 5261.2 s)",
+     _coord_window("16:00-21:30 AEST", "claude-code", "median_s"), 296.8, 1),
+    ("coord-baseline-evening-p90", "median 296.8 s (p90 5261.2 s)",
+     _coord_window("16:00-21:30 AEST", "claude-code", "p90_s"), 5261.2, 1),
+    ("coord-baseline-night-median", "31.7 s (p90 140.2 s)",
+     _coord_window("01:00-07:05 AEST", "claude-code", "median_s"), 31.7, 1),
+    ("coord-baseline-night-p90", "31.7 s (p90 140.2 s)",
+     _coord_window("01:00-07:05 AEST", "claude-code", "p90_s"), 140.2, 1),
+    ("coord-baseline-never-acked", "12 messages were never",
+     lambda d: d["metrics"]["ack_latency"]["overall"]["all"]["never_acked"], 12, 0),
+    ("coord-baseline-batch-share", "32.7% of acknowledgements came in batches",
+     lambda d: 100 * d["metrics"]["batch_acks"]["messages_in_batches"]
+     / d["metrics"]["batch_acks"]["acked_messages"], 32.7, 1),
+    ("coord-baseline-bursts", "35 fan-out bursts covered 20.2% of messages",
+     lambda d: d["metrics"]["fanout_bursts"]["bursts"], 35, 0),
+    ("coord-baseline-burst-share", "35 fan-out bursts covered 20.2% of messages",
+     lambda d: 100 * d["metrics"]["fanout_bursts"]["messages"] / d["volume"]["messages"],
+     20.2, 1),
+    ("coord-baseline-baton-passes", "39 baton passes",
+     lambda d: d["metrics"]["suite_baton"]["baton_passes"], 39, 0),
+]:
+    CLAIMS.append(Claim(id=_cid, doc=CHANGELOG, needle=_needle,
+                        artifacts=(COORD_BASELINE,), value=_val, stated=_stated,
+                        places=_places))
+
+
 # ── the memory-policy bench sanity check (2026-09-25) ────────────────────
 # evals/README.md reports that the bench could not separate no policy from
 # the full policy at 3 replicates. The regraded artifact is the one the
