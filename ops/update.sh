@@ -13,13 +13,15 @@
 #   ops/update.sh --all                # after the daemon: shim, plugin cache,
 #                                      # Codex hooks (ops/update_clients.py)
 #   ops/update.sh --allow-dirty        # deploy a tree with uncommitted or
-#                                      # untracked files (stamped dirty=true)
+#                                      # untracked files (stamped dirty=true),
+#                                      # or one git cannot describe (unknown)
 #
 # HEALTH_RETRIES / HEALTH_DELAY_MS (environment) size the step-4 health wait.
 #
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
-# runs `down -v`. Run after `git pull` (or local edits) to deploy daemon changes.
+# runs `down -v`. Run after `git pull` to deploy daemon changes; local edits must
+# be committed first (or deployed with --allow-dirty).
 set -euo pipefail
 
 TAG=""
@@ -76,32 +78,59 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 #    which is only true if the tree IS that commit: a checkout carrying
 #    uncommitted work would ship it under a commit that does not contain it
 #    (2026-09-23 review). A tree whose state git cannot report is refused
-#    the same way.
-build_sha=unknown
-build_dirty=unknown
-dirty_lines=""
-if command -v git >/dev/null 2>&1     && head_sha="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"     && dirty_lines="$(git -C "$repo" status --porcelain --untracked-files=normal 2>/dev/null)"; then
-    build_sha="$head_sha"
-    if [ -n "$dirty_lines" ]; then build_dirty=true; else build_dirty=false; fi
-fi
-if [ "$build_dirty" != "false" ]; then
-    if [ "$build_dirty" = "true" ]; then
-        why="$repo has $(printf '%s
-' "$dirty_lines" | wc -l | tr -d ' ') uncommitted or untracked path(s):"
+#    the same way. Step 3 probes again just before the build.
+#
+# tree_state sets tree_sha, tree_dirty (true/false/unknown), tree_lines and
+# tree_error (git's own reason when it could not report, e.g. safe.directory
+# refusing a foreign owner).
+tree_state() {
+    tree_sha=unknown
+    tree_dirty=unknown
+    tree_lines=""
+    tree_error="git is not on PATH"
+    command -v git >/dev/null 2>&1 || return 0
+    local out
+    if ! out="$(git -C "$repo" rev-parse HEAD 2>&1)"; then
+        tree_error="$out"
+        return 0
+    fi
+    local sha="$out"
+    if ! out="$(git -C "$repo" status --porcelain --untracked-files=normal 2>&1)"; then
+        tree_error="$out"
+        return 0
+    fi
+    tree_sha="$sha"
+    tree_lines="$out"
+    tree_error=""
+    if [ -n "$tree_lines" ]; then tree_dirty=true; else tree_dirty=false; fi
+}
+print_tree_lines() {
+    [ -n "$tree_lines" ] || return 0
+    local n
+    n="$(printf '%s\n' "$tree_lines" | wc -l | tr -d ' ')"
+    printf '%s\n' "$tree_lines" | sed -n '1,20s/^/WARNING:     /p' >&2
+    if [ "$n" -gt 20 ]; then
+        echo "WARNING:     ... and $((n - 20)) more" >&2
+    fi
+}
+tree_state
+if [ "$tree_dirty" != "false" ]; then
+    if [ "$tree_dirty" = "true" ]; then
+        why="$repo has $(printf '%s\n' "$tree_lines" | wc -l | tr -d ' ') uncommitted or untracked path(s):"
     else
-        why="cannot tell whether $repo is a clean git checkout (git missing, or not a repository)."
+        why="cannot tell whether $repo is a clean git checkout: $tree_error"
     fi
     if [ "$ALLOW_DIRTY" != "1" ]; then
         echo "WARNING: REFUSING to deploy: $why" >&2
-        [ -n "$dirty_lines" ] && printf '%s
-' "$dirty_lines" | sed -n '1,20s/^/WARNING:     /p' >&2
-        echo "WARNING: deploy from a clean checkout of the commit you mean to ship, or re-run with --allow-dirty to deploy this tree as it is (the image is then stamped dirty)." >&2
+        print_tree_lines
+        echo "WARNING: commit, stash or remove the listed paths, or re-run with --allow-dirty to deploy this tree as it is (stamped dirty, or unknown when git cannot describe it)." >&2
         exit 1
     fi
     echo "WARNING: --allow-dirty: deploying anyway. $why" >&2
-    [ -n "$dirty_lines" ] && printf '%s
-' "$dirty_lines" | sed -n '1,20s/^/WARNING:     /p' >&2
+    print_tree_lines
 fi
+build_sha="$tree_sha"
+build_dirty="$tree_dirty"
 build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 compose_file="$repo/ops/docker-compose.yml"
@@ -212,9 +241,19 @@ step "Rebuilding the daemon only (Postgres + extractor untouched)..."
     if [ -f "$env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?PSEUDOLIFE_MCP_TOKENS?[[:space:]]*=' "$env_file"; then
         unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS
     fi
+    # The backup and the rollback tag took a while; in a checkout that other
+    # sessions share, HEAD or the tree may have moved since step 0, and the
+    # stamp would then describe a different tree than the one being built.
+    tree_state
+    if [ "$tree_sha" != "$build_sha" ] || [ "$tree_dirty" != "$build_dirty" ]; then
+        echo "the checkout changed during this deploy (HEAD $build_sha -> $tree_sha, dirty $build_dirty -> $tree_dirty); nothing was built. Re-run the deploy." >&2
+        exit 1
+    fi
     # The step-0 build stamp reaches the build through compose's
     # ${PSEUDOLIFE_BUILD_*} args; the subshell scopes it like the credentials.
-    export PSEUDOLIFE_BUILD_GIT_SHA="$build_sha"         PSEUDOLIFE_BUILD_DIRTY="$build_dirty"         PSEUDOLIFE_BUILD_TIME="$build_time"
+    export PSEUDOLIFE_BUILD_GIT_SHA="$build_sha" \
+        PSEUDOLIFE_BUILD_DIRTY="$build_dirty" \
+        PSEUDOLIFE_BUILD_TIME="$build_time"
     step "Build stamp: commit $build_sha, dirty=$build_dirty"
     docker compose "${compose[@]}" up -d --no-deps --build pseudolife-daemon
 )

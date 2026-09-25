@@ -16,18 +16,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as a bare `docker compose up --build` or the first install, reports
   `"unknown"`, and a pip install omits the key. Until now the only answer
   to "what is deployed?" was the package version, which moves only with a
-  release.
+  release. Because the build time is part of the image, every deploy now
+  builds a new image and recreates the daemon container, even when the
+  commit has not changed.
 - `ops/update.ps1` and `ops/update.sh` refuse to deploy a tree with
   uncommitted or untracked files, or one whose state git cannot report,
-  before the backup or any docker call. The refusal lists the paths.
-  `-AllowDirty` / `--allow-dirty` deploys it anyway, stamped `dirty: true`.
-  The maintainer's main checkout often carries another session's
+  before the backup or any docker call. The refusal lists the paths, or
+  quotes git's own reason (such as its `safe.directory` advice).
+  `-AllowDirty` / `--allow-dirty` deploys it anyway, stamped `dirty: true`,
+  or `unknown` when git cannot describe it. Just before the build, the
+  scripts check the tree again and stop if HEAD or its clean state moved
+  meanwhile, so an image is never stamped with a tree it was not built
+  from. The maintainer's main checkout often carries another session's
   uncommitted work, and a deploy from it would ship that work under a
   commit that does not contain it.
 - The test suite dumps every thread's stack when one test runs longer than
-  600 s (`faulthandler_timeout`). A master CI run hung until the 50-minute
-  job timeout on 2026-09-22, and the cancelled job kept no log. The slowest
-  legitimate test on CI takes about 72 s.
+  600 s (`faulthandler_timeout`); the slowest legitimate test on CI takes
+  about 72 s. CI's `ops/ci_tests.sh` now also ends a pytest run at 40
+  minutes, inside the step, so a hang fails the step while the runner is
+  still up: its log keeps the stack dump, and the diagnostics upload still
+  runs. A master CI run hung until the 50-minute job timeout on 2026-09-22,
+  and that cancelled job kept no log at all. Neither helps if the runner
+  itself stops responding.
 
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing

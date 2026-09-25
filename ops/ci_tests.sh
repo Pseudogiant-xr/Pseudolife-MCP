@@ -48,8 +48,15 @@ trap cleanup EXIT
 
 # No pipeline: a failing pytest must remain a failing job. GNU time waits for
 # pytest and records its CPU, peak RSS, faults, context switches and exit code.
+# `timeout` ends a hung run inside the step (exit 124), so the step log with
+# pyproject's faulthandler stack dump survives and the always() diagnostics
+# upload still runs. When the job timeout cancelled the hung 2026-09-22 run,
+# GitHub kept neither. 40 min: pytest took 11.8-15.5 min in the four green
+# master runs of 2026-09-23/24, and install plus embedder warm-up must still
+# fit inside the job's 50.
 set +e
 /usr/bin/time -v -o ci-results/process.txt \
+    timeout --kill-after=60s 40m \
     python -m pytest -q -n 2 --dist loadfile -ra \
     --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml "$@"
 test_status=$?
