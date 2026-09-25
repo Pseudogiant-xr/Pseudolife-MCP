@@ -1,4 +1,4 @@
-<!-- i18n-source: v10 (2026-09-04) — canonical English text for the translated
+<!-- i18n-source: v12 (2026-09-25) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -85,16 +85,22 @@ missing) and asks which dream extractor to use — a Claude model via your
 Max plan (the lightest install), the Claude shim with the bundled local
 model as automatic fallback, the same two shapes with a GPT-5.6 model on a
 ChatGPT plan (via the Codex CLI), or the bundled local model alone, which
-needs no plan at all. It then brings the stack up, wires the selected clients (the
-session-start briefing hook, which delivers the memory-loop guidance every
-session, and the MCP transport registration), and health-checks the
-daemon. It is idempotent: re-run it any time; `--extractor <mode>`
-switches extractor setups.
+needs no plan at all. It then brings the stack up, wires the selected
+clients (session hooks where the client has a hook system, and the MCP
+transport registration), and health-checks the daemon. It is idempotent:
+re-run it any time; `--extractor <mode>` switches extractor setups.
 
-With the daemon running, the Claude Code **plugin** adds the session-start
-memory briefing, the standing memory-loop guidance, and the `/dream` +
-`/memory-status` commands — the MCP server itself is registered by the
-installer, so the plugin never doubles its tools:
+When Claude Code is a selected client, the installer also adds the Claude
+Code **plugin** (`--claude-plugin skip` / `-ClaudePlugin skip` opts out).
+The plugin's memory session-start hook — the same one verified Codex hooks
+run — serves a compact core of the memory-loop guidance and a bounded live
+briefing; the plugin also adds per-prompt reminders and the `/dream` +
+`/memory-status` commands. Without the plugin, the installer's Claude Code
+`settings.json` hook delivers the briefing alone. Neither serves the full
+memory-loop guidance: for that, append `examples/CLAUDE.memory.md` to your
+`CLAUDE.md` or `AGENTS.md`. The MCP server itself is registered by the
+installer, so the plugin never doubles its tools. To add the plugin by
+hand, inside Claude Code:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
@@ -113,9 +119,14 @@ alternative, and non-default ports/tokens:
 The agent stores one claim at a time as it works (`memory_store`,
 `memory_fact_set`). Between
 sessions, the **dream** distils the stream into canonical facts, graph
-relations, and procedural lessons. At every session start, a briefing
-injects what the memory is unsure about, lessons from past work, and where
-you left off. Retrieval blends semantic search over the associative store
+relations, and procedural lessons. Where session hooks are installed — the
+Claude Code plugin, the installer's Claude Code `settings.json` hook, or
+verified Codex hooks — a briefing at every session start injects what the
+memory is unsure about, lessons from past work, and where you left off. The
+two-command Quickstart installs no hooks, and the installer wires none for
+Gemini CLI or other MCP agents, so those setups get no briefing; the MCP
+server's own short instructions still ask the agent to search memory at
+task start. Retrieval blends semantic search over the associative store
 with the canonical fact store, so corrected answers win over stale ones.
 
 ## Documentation (English)

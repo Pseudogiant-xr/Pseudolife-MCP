@@ -198,8 +198,11 @@ owns the mailbox; this handler does not create another identity or grant
 permissions. The memory and coordination hooks have independent output budgets
 and do not depend on execution order.
 
-The lightweight `install-hook` scripts install the briefing, coordination
-check-in instruction, and per-turn discipline line; they do not register an
+The lightweight `install-hook` scripts install the briefing, the coordination
+check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
+the daemon serves it: a board that is on and usable by that bearer), and the
+per-turn discipline line. Re-running them replaces the unconditional check-in
+echo older versions wrote. They do not register an
 agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing` reads `/api/briefing` and
 forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven

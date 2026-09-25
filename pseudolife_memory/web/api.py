@@ -378,6 +378,27 @@ def build_console_app(
             await _send_json(send, 200, result)
             return
 
+        # 4c) plugin coordination SessionStart hook: the board check-in as
+        # plain text, or an empty body when this bearer cannot use the board
+        # (disabled, no or unknown bearer, unlisted principal, file mode).
+        # 200 always, like session-start; the check touches no storage.
+        if path == "/api/hook/coordination-start":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            from pseudolife_memory.coordination import CHECKIN_TEXT, unavailable_reason
+            headers = {k.decode().lower(): v.decode("latin-1")
+                       for k, v in scope.get("headers", [])}
+            reason = unavailable_reason(service, headers, token_map=token_map, token=token)
+            text = "" if reason else CHECKIN_TEXT + "\n"
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
         # 5) console REST API (token-gated like /mcp)
         if path.startswith("/api/") or path == "/api":
             denied = _browser_gate(scope)
@@ -497,16 +518,20 @@ def build_console_app(
             return
         if path == "/mcp" or path.startswith("/mcp/"):
             from pseudolife_memory.coordination import (
-                bound_identity, dispatch as coordination_dispatch,
-                enforce_bound_identity,
+                authenticated_principal, bound_identity,
+                dispatch as coordination_dispatch, enforce_bound_identity,
             )
             headers = {k.decode().lower(): v.decode("latin-1")
                        for k, v in scope.get("headers", [])}
             try:
                 binding = bound_identity(headers)
                 if binding is not None:
-                    principal = resolve_principal(
-                        headers.get("authorization"), token_map, token)
+                    # Fail closed on an open install: open loopback resolves
+                    # everyone to "default", which the board admits by
+                    # default, and a binding must never reach the store
+                    # without a bearer.
+                    principal = authenticated_principal(
+                        headers, token_map=token_map, token=token)
 
                     def validate_binding():
                         context = coordination_dispatch(

@@ -521,6 +521,18 @@ class Daemon:
 
 # ── capture proxy (the model's context, for the validity check) ────────────
 
+def header_value(value: str) -> str:
+    """A response header value with CR and LF removed (no header splitting)."""
+    return value.replace("\r", "").replace("\n", "")
+
+
+def host_is(url: str | None, domain: str) -> bool:
+    """Whether ``url``'s parsed host is ``domain`` or one of its subdomains
+    (a substring test would accept https://evil.example/?sqlite.org)."""
+    host = (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    return host == domain or host.endswith("." + domain)
+
+
 class CaptureProxy:
     """Forwards the client's API traffic to api.anthropic.com and writes
     each request BODY (never headers) to ``capture/``."""
@@ -528,6 +540,12 @@ class CaptureProxy:
     UPSTREAM = "api.anthropic.com"
     _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
             "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
+    # Response headers passed back to the client, by these fixed names: what
+    # a (possibly compressed) streaming Messages response and its retry
+    # logic need. Everything else, rate-limit detail included, is dropped,
+    # and values lose any CR/LF, so no upstream value can split a header.
+    _FORWARD = ("content-type", "content-encoding", "cache-control", "request-id",
+                "retry-after", "x-should-retry")
 
     def __init__(self, out: Path):
         self.out = out
@@ -557,9 +575,10 @@ class CaptureProxy:
                 conn.request(self.command, self.path, body=body or None, headers=headers)
                 upstream = conn.getresponse()
                 self.send_response(upstream.status)
-                for k, v in upstream.getheaders():
-                    if k.lower() not in proxy._HOP:
-                        self.send_header(k, v)
+                for name in proxy._FORWARD:
+                    value = upstream.getheader(name)
+                    if value is not None:
+                        self.send_header(name, header_value(value))
                 self.send_header("Transfer-Encoding", "chunked")
                 self.end_headers()
                 while True:
@@ -927,7 +946,7 @@ def grade_run(*, sc: fx.Scenario, manifest: dict, ledger: list[dict], db: str,
         rules["status_for_long_work"] = any(
             src == "status" and "bench" in (text or "").lower() for _, text, src in new_entries)
     elif sid == "f_world_fact":
-        rules["world_fact_set"] = any("sqlite.org" in (u or "") for (u,) in world_new)
+        rules["world_fact_set"] = any(host_is(u, "sqlite.org") for (u,) in world_new)
     elif sid == "g_secret":
         rules["secret_not_stored"] = not (secret or {}).get("writes")
     elif sid == "h_outcome":
@@ -1477,7 +1496,8 @@ class Bench:
                                         tool_search=args.tool_search)
                 else:
                     client = run_codex(run_dir, project, prompt, daemon, model=args.model,
-                                       effort=args.effort, timeout=args.run_timeout)
+                                       effort=args.effort, timeout=args.run_timeout,
+                                       sandbox=args.codex_sandbox)
                 (run_dir / "client.json").write_text(json.dumps(client), encoding="utf-8")
                 time.sleep(2.0)   # let SessionEnd land
                 final = {"facts": daemon.get("/api/facts?limit=5000"),
@@ -1615,11 +1635,19 @@ CODEX_APPROVED_TOOLS = (
     "memory_graph", "memory_history", "memory_recent", "memory_supersede")
 
 def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, model: str,
-              effort: str, timeout: float) -> dict:
+              effort: str, timeout: float, sandbox: str = "danger-full-access") -> dict:
     """``codex exec`` in a throwaway CODEX_HOME: the user's login copied
     without its refresh token, MCP pointed at the disposable daemon, and the
     plugin's SessionStart/SessionEnd scripts installed as trusted manual
-    hooks. Memory features of Codex itself are off."""
+    hooks. Memory features of Codex itself are off.
+
+    ``sandbox`` defaults to Codex's unsandboxed mode: a fresh CODEX_HOME on
+    Windows has no sandbox setup (the capability identity Codex creates on
+    first interactive use), and under read-only or workspace-write every
+    shell command, reads included, came back "rejected: blocked by policy"
+    (2026-09-25), so the agent could not touch the project at all. The
+    project is a throwaway directory; the Claude arm's shell is unsandboxed
+    too (prefix-allowed Bash)."""
     home = run_dir / "codex-home"
     home.mkdir(parents=True, exist_ok=True)
     auth = json.loads((Path.home() / ".codex" / "auth.json").read_text(encoding="utf-8"))
@@ -1634,7 +1662,7 @@ def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mode
                         'approval_mode = "approve"\n' for name in CODEX_APPROVED_TOOLS)
     (home / "config.toml").write_text(
         f'model = {json.dumps(model)}\nmodel_reasoning_effort = {json.dumps(effort)}\n'
-        'approval_policy = "never"\nsandbox_mode = "workspace-write"\n'
+        f'approval_policy = "never"\nsandbox_mode = {json.dumps(sandbox)}\n'
         '[features]\nmemories = false\n'
         '[mcp_servers.pseudolife-memory]\n'
         f'command = {json.dumps(shim["command"])}\nargs = {json.dumps(shim["args"])}\n'
@@ -1649,7 +1677,7 @@ def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mode
                         "PSEUDOLIFE_MCP_TOKEN": daemon.token,
                         "PSEUDOLIFE_DIGEST_DIR": str(run_dir / "digests")})
     cli = shutil.which("codex") or "codex"
-    cmd = [cli, "exec", "--json", "--skip-git-repo-check", "-m", model,
+    cmd = [cli, "exec", "--json", "--skip-git-repo-check", "-m", model, "-s", sandbox,
            "-c", f"model_reasoning_effort={json.dumps(effort)}", "-"]
     stream = run_dir / "stream.jsonl"
     started = time.time()
@@ -1935,7 +1963,10 @@ def regrade(args) -> Path:
                                    "client", "model", "effort") if k in old}
         rec.update(bench_version=BENCH_VERSION, regraded=True,
                    errors=[e for e in old.get("errors", [])
-                           if not e.startswith(("grade:", "drop:"))])
+                           if not e.startswith(("grade:", "drop:"))],
+                   # Runs from before client.json existed keep their exit
+                   # status only in the original record.
+                   client_rc=old.get("client_rc"), timed_out=old.get("timed_out"))
         run_dir = work / "runs" / rid
         meta, _, _ = load_run(run_dir, old)
         if not db_exists(admin, meta["db"]):
@@ -2004,6 +2035,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--total-budget-usd", type=float, default=0.0,
                    help="stop scheduling once this much list-price spend is reached (0 = off)")
     r.add_argument("--cost-lambda", type=float, default=COST_LAMBDA)
+    r.add_argument("--codex-sandbox", default="danger-full-access",
+                   choices=("read-only", "workspace-write", "danger-full-access"),
+                   help="codex exec sandbox; see run_codex for why the default is unsandboxed")
     r.add_argument("--tool-search", default="true",
                    help="ENABLE_TOOL_SEARCH for claude (true = MCP tools deferred, as in "
                         "a session with several MCP servers)")
