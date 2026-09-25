@@ -217,7 +217,8 @@
     "Probes /health; spawns `pseudolife-mcp serve` detached if daemon absent",
     "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
     "Re-emits tools/list_changed downstream after memory_toolset tier changes",
-    "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification"
+    "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification",
+    "By default asks /api/hook/coordination-start once at startup and builds its coordination adapter (Codex: per-thread registry) only where the daemon serves its bearer the board; appends the compact board check-in to the MCP instructions only when the adapter is up"
    ]
   },
   {
@@ -243,7 +244,7 @@
    "s": "manual / Codex hook path",
    "p": "pseudolife_memory/briefing_cli.py",
    "d": [
-    "GET /api/briefing → markdown or hookSpecificOutput JSON",
+    "GET /api/briefing → markdown or hookSpecificOutput JSON; --coordination prints the board check-in from /api/hook/coordination-start instead, empty where the board is off",
     "Never auto-starts the daemon; prints nothing on any failure",
     "Wired by ops/install-hook for non-plugin installs"
    ]
@@ -766,7 +767,7 @@
     "~20 sub-configs; unknown YAML keys ignored",
     "DSN resolved in service.py from PSEUDOLIFE_MCP_DATABASE_URL",
     "No DSN → legacy file mode (.pt + ChromaDB under data_dir)",
-    "coordination.enabled defaults off; awareness_limit bounds peer summaries and allowed_principals defaults empty; audit_retention_days (default 90, 0 = forever) bounds the board audit log"
+    "coordination.enabled defaults on (bearer authentication still required); awareness_limit bounds peer summaries; without the key allowed_principals admits only the singular-token principal default, so token-map principals must be listed; audit_retention_days (default 90, 0 = forever) bounds the board audit log"
    ]
   },
   {
@@ -783,7 +784,8 @@
     "Runs the store on a dedicated mailbox connection under the coordination lock; the service lock is used for cold durable-tier initialization and for full initialization before send, including clock-reseed retries; initialized mailbox calls avoid it, so a dream holding it cannot expire an adapter lease; send waits for clock history before stamping the message",
     "Failures re-raise through public_error, so callers see a stable code and never a supplied value",
     "The prune pass (at most once a minute, on register, send or heartbeat) hands coordination.audit_retention_days to the store",
-    "Disabled configuration answers {enabled: false} rather than an error, so a disabled bank stays quiet"
+    "Disabled configuration answers {enabled: false} rather than an error, so a disabled bank stays quiet",
+    "unavailable_reason applies the same gates (enabled, bearer, listed principal, PostgreSQL) without storage I/O; GET /api/hook/coordination-start serves the startup check-in only when it returns none"
    ]
   },
   {
@@ -1106,7 +1108,7 @@
    "s": "SessionStart hook wiring",
    "p": "ops/install-hook.ps1",
    "d": [
-    "Adds `pseudolife-mcp briefing --hook-json` to settings.json / hooks.json",
+    "Adds `pseudolife-mcp briefing --hook-json` and its `--coordination` check-in to settings.json / hooks.json, replacing the unconditional check-in echo older installers wrote",
     "Backs up the settings file first; strips obsolete episode hooks",
     "--remove-legacy: drops its exact Claude entries once the plugin owns them"
    ]
@@ -1945,7 +1947,7 @@
   {
    "f": "shim",
    "t": "adapter",
-   "l": "attaches when PSEUDOLIFE_AGENT_COORDINATION=1 · wake only with PSEUDOLIFE_AGENT_WAKE",
+   "l": "attaches by default when the daemon serves the shim's bearer the board (PSEUDOLIFE_AGENT_COORDINATION=0 opts out) · wake only with PSEUDOLIFE_AGENT_WAKE",
    "k": "control"
   },
   {

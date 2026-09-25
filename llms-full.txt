@@ -381,7 +381,7 @@ is agent context every session, so it stays lean.
 | `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
-| `memory_agents(action, project?, task?, status?)` | Experimental, opt-in peer awareness or update of the caller's registered context; lists peers holding a lease or active within the hour and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_agents(action, project?, task?, status?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers holding a lease or active within the hour and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
 | `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
@@ -818,10 +818,14 @@ daemon:
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
 The server's value depends on the agent using it. The MCP server advertises
-the core loop and messageboard check-in through protocol-level `instructions`.
+the core loop through protocol-level `instructions`; the shim adds the
+messageboard check-in when its coordination adapter is up.
 The memory SessionStart hook delivers a short operating guide and a bounded
 briefing; a separate coordination hook asks the agent to set its project,
-task and status, discover peers, and read pending messages. Detailed memory
+task and status, discover peers, and read pending messages, but only where
+the board is on for that credential (it is on by default behind bearer
+authentication, so an open install or a disabled board adds no check-in).
+Detailed memory
 guidance remains in the bundled standing block. Hooks add per-prompt reminders
 and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
@@ -881,10 +885,13 @@ If `[features] hooks = false` is intentional, keep it and use the standing
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** setup approval is limited to PseudoLife's current hook
-definitions: the three lifecycle hooks, plus the plugin's `Stop` entry (Claude
-Code's opt-in wake hook, a no-op in Codex). It does not approve other
-plugins or bypass future trust checks. Changed definitions need approval
-again. If automatic setup cannot
+definitions: the memory and coordination SessionStart and UserPromptSubmit
+handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's opt-in
+wake hook, a no-op in Codex). It does not approve other plugins or bypass
+future trust checks. Changed definitions need approval again, and so does a
+handler a plugin update adds; Codex skips an unapproved one silently in the
+desktop app, which `ops/update.ps1 -All` (or `ops/update_clients.py`) now
+reports as `needs-approval`. If automatic setup cannot
 use the installed runtime's trust interface, it reports the problem and
 asks you to open `/hooks` to review and trust the definitions. Approved standing
 instructions remain available as fallback. Installed files alone do not
@@ -3507,8 +3514,11 @@ owns the mailbox; this handler does not create another identity or grant
 permissions. The memory and coordination hooks have independent output budgets
 and do not depend on execution order.
 
-The lightweight `install-hook` scripts install the briefing, coordination
-check-in instruction, and per-turn discipline line; they do not register an
+The lightweight `install-hook` scripts install the briefing, the coordination
+check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
+the daemon serves it: a board that is on and usable by that bearer), and the
+per-turn discipline line. Re-running them replaces the unconditional check-in
+echo older versions wrote. They do not register an
 agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing` reads `/api/briefing` and
 forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven
@@ -3600,9 +3610,10 @@ the launching shell's environment is preserved after the deployment command.
 
 ## Experimental agent coordination
 
-Coordination adds peer awareness and addressed mail within one bank. It defaults
-off and does not reserve files or prevent conflicting edits. Configure it in the
-daemon's `config.yaml`, then restart the daemon:
+Coordination adds peer awareness and addressed mail within one bank. It is on
+by default, behind bearer authentication, and does not reserve files or prevent
+conflicting edits. Configure it in the daemon's `config.yaml`, then restart the
+daemon; `enabled: false` turns it off:
 
 ```yaml
 coordination:
@@ -3622,8 +3633,12 @@ identity. Last reported activity comes from attributed writes; an open episode
 does not prove a process is running. Refresh awareness before shared-resource
 work and on resume.
 
-The allowed names are principals from the bearer-token configuration above;
-the default list is empty. Mailbox operations require PostgreSQL, configured
+The allowed names are principals from the bearer-token configuration above.
+Without the key only `default`, the singular `PSEUDOLIFE_MCP_TOKEN` principal,
+is admitted: principals of a `PSEUDOLIFE_MCP_TOKENS` map are separately
+trusted identities and join the board only when listed (an explicit list
+replaces the default; include `default` to keep it). Mailbox operations
+require PostgreSQL, configured
 bearer authentication and a registered adapter's private instance credential.
 Two sessions sharing a principal still need distinct adapter identities. A
 public agent ID, episode handle or task label never grants mailbox access.
@@ -3631,11 +3646,29 @@ Clients lacking a per-session credential-injecting adapter can use awareness,
 but cannot send, receive or acknowledge another instance's mail. Awareness is
 gated on the same allowed-principal list: a bearer whose principal is not listed
 sees no peers and no awareness section in its briefing, and with no bearer token
-configured there is no principal to list, so awareness stays empty on an open
-loopback install.
+configured there is no principal to list, so the board stays dormant on an open
+loopback install: no awareness, no mail and no startup check-in.
 
-Enable the installed shim adapter with `PSEUDOLIFE_AGENT_COORDINATION=1` and set
-`PSEUDOLIFE_MCP_TOKEN` to that principal's bearer token. Optional
+The installed shim starts its adapter (for Codex, its per-thread registry) by
+default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
+`PSEUDOLIFE_MCP_TOKEN_FILE`) and the daemon serves that bearer the board; it
+asks once at startup and otherwise stays quiet. `PSEUDOLIFE_AGENT_COORDINATION=0`
+(any value but `1`, `true`, `yes` or `on`) turns it off for that client, and
+`=1` skips the question and reports any refusal on stderr.
+
+The startup check-in follows the board. The daemon serves the hook text
+(`GET /api/hook/coordination-start`) only where the board is on for that
+bearer: enabled, authenticated, a listed principal, PostgreSQL. The plugin
+hook and the installers' `pseudolife-mcp briefing --coordination` hook print
+what it serves, and the shim appends a compact check-in to the MCP
+instructions only when its adapter is up. The daemon cannot see whether a
+client has an adapter, so a check-in can still reach one that cannot complete
+it: a client connected over HTTP without the shim whose hooks hold a token; a
+client that opted out only in its MCP env block (set the opt-out where the
+hooks see it too, since they cannot read that block); and a Docker install
+wired by `ops/install-hook.*`, whose `docker exec` check-in asks with the
+daemon container's own token. The check-in tells the agent to say so and
+continue when the tools are unavailable. Optional
 `PSEUDOLIFE_AGENT_LABEL`, `PSEUDOLIFE_AGENT_PROJECT` and `PSEUDOLIFE_AGENT_TASK`
 provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a
@@ -3889,7 +3922,8 @@ PSEUDOLIFE_CODEX_BIN = 'C:\path\to\codex.exe'
 ```
 
 Reconnect the MCP server afterwards; the setup helper does not set either value,
-and the doorbell stays off without `PSEUDOLIFE_AGENT_COORDINATION=1`. The PATH
+and the doorbell stays off without the coordination adapter (on by default
+with a bearer token, off with `PSEUDOLIFE_AGENT_COORDINATION=0`). The PATH
 lookup uses absolute PATH directories only, never the working directory (the
 task's checkout), so a repository cannot supply its own `codex`. A
 `PSEUDOLIFE_CODEX_BIN` that is relative or does not exist turns the doorbell
@@ -5181,8 +5215,9 @@ credentials and requires deliberate rebinds.
    adapters. Keep them stopped through recovery; editing configuration cannot
    disable a daemon that already loaded its configuration.
 2. Set `coordination.enabled: false` in the configuration the restored daemon
-   will use. Retain the explicit `allowed_principals` list needed for later
-   mailbox ownership checks.
+   will use; coordination is on by default, so a configuration without the key
+   is refused. Retain the `allowed_principals` list needed for later mailbox
+   ownership checks (without the key, only `default` is allowed).
 3. Restore the database using the normal backup procedure. Set
    `PSEUDOLIFE_MCP_DATABASE_URL` in the operator's environment to the restored
    database. Recovery uses this environment variable only: it does not start
@@ -5295,7 +5330,7 @@ Portable knowledge exports exclude agent mailboxes, credentials, the audit log,
 bank identity and operational metadata. Import also ignores any bank identity in an archive,
 preserving the destination's identity. Full database backups retain it. See
 [configuration](configuration.md#experimental-agent-coordination) for the
-default-off feature and [the experimental design](../specs/2026-09-11-agent-coordination-design.md)
+feature's defaults and [the experimental design](../specs/2026-09-11-agent-coordination-design.md)
 for delivery and acknowledgment semantics.
 
 ---

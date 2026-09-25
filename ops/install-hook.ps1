@@ -245,7 +245,9 @@ if (Test-Path $SettingsPath) {
 $hasBriefing = $false
 foreach ($group in @($obj.hooks.SessionStart)) {
     foreach ($h in @($group.hooks)) {
-        if ($h.command -like "*pseudolife-mcp briefing*") { $hasBriefing = $true }
+        if ($h.command -like "*pseudolife-mcp briefing*" -and $h.command -notlike "*--coordination*") {
+            $hasBriefing = $true
+        }
     }
 }
 if (-not $hasBriefing) {
@@ -264,22 +266,47 @@ if (-not $hasBriefing) {
     Write-Host "Briefing hook already present in $SettingsPath - skipping."
 }
 
-# Keep board setup separate from the daemon-backed memory briefing
-# ($coordinationLine is defined at the top, shared with -RemoveLegacy).
+# Board check-in, separate from the daemon-backed memory briefing. The daemon
+# serves it only where this bearer can use the board, so a board that is off
+# costs no failed tool call at every session start. $coordinationLine (defined
+# at the top) is the unconditional echo older installers wrote: kept to
+# replace it here, and ops/setup-codex-hooks.py reads it to migrate Codex
+# installs.
+$coordinationCommand = if ($Command -like "*pseudolife-mcp briefing*") {
+    "$Command --coordination"
+} else {
+    "pseudolife-mcp briefing --hook-json --coordination"
+}
+# Exact commands only: a user's own hook that mentions the phrase stays.
+$legacyCommands = @("echo '$coordinationLine'", "Write-Output '$coordinationLine'")
+$legacyRemoved = $false
+$keptGroups = @()
+foreach ($group in @($obj.hooks.SessionStart)) {
+    if ($null -eq $group) { continue }
+    $keptHooks = @(@($group.hooks) | Where-Object { $_.command -notin $legacyCommands })
+    if ($keptHooks.Count -ne @($group.hooks).Count) { $legacyRemoved = $true }
+    if ($keptHooks.Count -gt 0) {
+        $group.hooks = $keptHooks
+        $keptGroups += $group
+    }
+}
+$obj.hooks.SessionStart = $keptGroups
+if ($legacyRemoved) { Write-Host "Removed the unconditional coordination check-in hook." }
 $hasCoordination = $false
 foreach ($group in @($obj.hooks.SessionStart)) {
     foreach ($h in @($group.hooks)) {
-        if ($h.command -like "*Pseudolife coordination:*") { $hasCoordination = $true }
+        if ($h.command -like "*pseudolife-mcp briefing*--coordination*") { $hasCoordination = $true }
     }
 }
 if (-not $hasCoordination) {
-    $coordinationHook = [pscustomobject]@{ type = 'command'; command = "echo '$coordinationLine'" }
+    $coordinationHook = [pscustomobject]@{ type = 'command'; command = $coordinationCommand }
     if ($Client -eq 'codex') {
-        $coordinationHook | Add-Member commandWindows "Write-Output '$coordinationLine'"
+        $coordinationHook | Add-Member commandWindows $coordinationCommand
         $coordinationHook | Add-Member timeout 5
     }
     $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + [pscustomobject]@{ hooks = @($coordinationHook) }
     Write-Host "Installed SessionStart coordination hook -> $SettingsPath"
+    Write-Host "  command: $coordinationCommand"
 }
 
 # Every-turn memory-discipline line (UserPromptSubmit), both clients.
