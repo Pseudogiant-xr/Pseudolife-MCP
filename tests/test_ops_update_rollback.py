@@ -61,6 +61,19 @@ _FAST_HEALTH_SH = "export HEALTH_RETRIES=2\nexport HEALTH_DELAY_MS=50"
 _HEALTHY = "@{ status = 'ok'; schema = 22; persist_errors = 0 }"
 _UNHEALTHY = "throw 'connection refused'"
 
+# A clean checkout for update's step-0 guard (tests/test_ops_update_build_stamp.py
+# covers the guard itself); without it these runs would read the real tree.
+_CLEAN_GIT_PS = """
+function global:git {
+    $global:LASTEXITCODE = 0
+    if ("$args" -match "rev-parse") { return "0123456789abcdef0123456789abcdef01234567" }
+}
+"""
+_CLEAN_GIT_SH = """
+git() { case "$*" in *rev-parse*) echo 0123456789abcdef0123456789abcdef01234567 ;; esac; }
+export -f git
+"""
+
 
 def _health_stub(healthy: bool) -> str:
     body = _HEALTHY if healthy else _UNHEALTHY
@@ -156,7 +169,7 @@ def _ps1_scenarios(root: Path) -> list[Scenario]:
         sdir = scenario_dir(root, name)
         calls_log = sdir / "calls.log"
         calls_log.write_text("", encoding="utf-8")
-        setup = f'$global:CallsLog = "{calls_log}"\n{docker}{health}'
+        setup = f'$global:CallsLog = "{calls_log}"\n{_CLEAN_GIT_PS}{docker}{health}'
         invoke = (f'& "{UPDATE_PS1}" -NoBackup -Tag unittest '
                   f'{_FAST_HEALTH_PS} {extra}')
         scenarios.append(Scenario(name, setup, invoke, exit_code=exit_code))
@@ -199,7 +212,7 @@ curl() {{
 }}
 export -f docker
 export -f curl
-'''
+{_CLEAN_GIT_SH}'''
         invoke = f'bash "{UPDATE_SH.as_posix()}" --no-backup --tag unittest'
         scenarios.append(Scenario(name, setup, invoke))
     return scenarios
