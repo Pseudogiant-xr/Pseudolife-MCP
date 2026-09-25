@@ -102,6 +102,14 @@ transport comes from the installer either way (stdio shim by default),
 registered with `PSEUDOLIFE_WRITER_ID=claude-code` so writes are
 attributed per provider.
 
+Upgrading from the fallback to the plugin leaves its hooks in
+`~/.claude/settings.json`, where they duplicate the plugin's. The installer
+offers to remove them once the plugin is installed and enabled for all
+projects (`--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove` does
+it unattended), and `ops/install-hook.* --remove-legacy` does the same by
+hand. Only the exact entries the installers wrote are removed, after a
+backup; an edited copy of one is listed for review and kept.
+
 With the coordination adapter enabled, the same UserPromptSubmit hook also
 prints the session's coordination digest — pending addressed mail, rendered
 by the shim into a per-session file — but only on the turn after it changed;
@@ -290,16 +298,17 @@ content-specific paths so updating their code also changes the definitions.
 
 ### Hooks versus AGENTS.md
 
-The default SessionStart policy and `examples/CLAUDE.memory.md` contain the
-same standing memory instructions. This equivalence covers the **memory
-block**, not the rest of a project's `AGENTS.md`: personality, coding rules,
-project conventions, and other instructions still belong there. A custom
-daemon `hook-instructions.md` can override the default hook policy.
+The default SessionStart policy is a compact core of the memory
+instructions, not the full block in `examples/CLAUDE.memory.md`; append that
+block when you want the complete guidance. Neither replaces the rest of a
+project's `AGENTS.md`: personality, coding rules, project conventions, and
+other instructions still belong there. A custom daemon
+`hook-instructions.md` is served after the core, capped at 3.5 KB.
 
 | Mechanism | What it supplies |
 |---|---|
 | `AGENTS.md` memory block | Standing guidance to recall, capture, and reflect when the client loads instructions |
-| `SessionStart` | The memory policy, a live briefing, and session episode identity |
+| `SessionStart` | A compact memory policy, a live briefing, and session episode identity |
 | `UserPromptSubmit` | A short memory reminder on each prompt |
 | `SessionEnd` | Automatic session episode cleanup |
 

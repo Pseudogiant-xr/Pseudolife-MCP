@@ -407,8 +407,8 @@ is agent context every session, so it stays lean.
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
 The five recall-path tools return **compact entries** by default (result
-payloads are agent context on every retrieval); pass `verbose=true` for full
-metadata. Full-table dumps and topology views live in the **Cortex Console**
+payloads are agent context on every retrieval; search and recent entries
+keep their write `date`); pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
@@ -549,6 +549,16 @@ every healthy deploy; see
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
+The image records the commit it was built from, and `/health` reports it
+as `build` (`git_sha`, `dirty`, `built_at`). So the script refuses a tree
+with uncommitted or untracked files, and lists them. It also refuses a
+tree git cannot describe (no git, not a clone, or git's `safe.directory`
+refusal, which it quotes). Commit or clean up first, or pass
+`-AllowDirty` / `--allow-dirty` to deploy the tree as it is: stamped
+`dirty: true`, or `unknown` when git cannot describe it. Each deploy
+builds a new image, so the daemon container is recreated even when the
+commit has not changed.
+
 **Everything at once:** the daemon is one of three installs. The **shim**
 your clients launch and the **Claude Code plugin** are separate and do not
 move with it. `-All` / `--all` moves them in the same run, after the
@@ -615,13 +625,17 @@ Claude Code do it:
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-The plugin replaces the settings.json hook **and** the CLAUDE.md block below
-— the same standing instructions arrive as session context from the daemon.
+The plugin replaces the settings.json hook, and the daemon serves a compact
+memory core and a live briefing as session context. The full CLAUDE.md block
+below is not served; append it if you want the complete guidance.
 It deliberately does **not** bundle the MCP server: Claude Code loads a
 plugin server alongside any user-registered one with no deduplication, which
 doubled every session's tool namespace next to the installer's registration
 — so the transport is registered exactly once, by `ops/install.*` (stdio
 shim by default — per-session episode identity) or the one-liner below.
+Hooks an earlier install wrote to `~/.claude/settings.json` would duplicate
+the plugin's; the installer offers to remove them once the plugin runs
+(`--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove` unattended).
 Details, non-default ports/tokens, and migration:
 [plugin/README.md](plugin/README.md).
 
@@ -811,8 +825,10 @@ daemon:
 The server's value depends on the agent using it. The MCP server advertises
 the core loop through protocol-level `instructions`; the shim adds the
 messageboard check-in when its coordination adapter is up.
-The memory SessionStart hook delivers a short operating guide and a bounded
-briefing; a separate coordination hook asks the agent to set its project,
+The plugin's memory SessionStart hook (also used by verified Codex hooks)
+delivers a short operating guide and a bounded briefing; without the plugin,
+the installer's Claude Code `settings.json` hook delivers the briefing alone.
+A separate coordination hook asks the agent to set its project,
 task and status, discover peers, and read pending messages, but only where
 the board is on for that credential (it is on by default behind bearer
 authentication, so an open install or a disabled board adds no check-in).
@@ -821,9 +837,10 @@ guidance remains in the bundled standing block. Hooks add per-prompt reminders
 and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
 
-With verified hooks, a standing copy is optional. If you want it instead —
-or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
-hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
+Hooks serve at most that short guide; the detailed block reaches an agent
+only as a standing copy. For the complete guidance, for subagent
+visibility (subagents read `CLAUDE.md` but not hook output), or in place of
+hooks, append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
 per-project `CLAUDE.md` / `AGENTS.md`:
 
@@ -1054,7 +1071,7 @@ bank.
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
-| Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
+| Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |

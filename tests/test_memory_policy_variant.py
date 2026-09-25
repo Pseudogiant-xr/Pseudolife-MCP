@@ -20,7 +20,7 @@ from pseudolife_memory.web.api import build_console_app
 from pseudolife_memory.web.fixtures import FixtureService
 from pseudolife_memory.web.session_hook import (
     HOOK_CONTEXT_MAX_CHARS, MEMORY_LOOP_BLOCK, STARTUP_MEMORY_CORE,
-    STARTUP_MEMORY_GAPS, ab_arm_index, hook_memory_policy, hook_session_start,
+    ab_arm_index, hook_memory_policy, hook_session_start,
     memory_policy_variant, session_start_context)
 from tests.asgi_helpers import call, call_with_headers, stub_mcp
 
@@ -50,8 +50,7 @@ def _app(svc, token=None):
 def test_default_variant_is_todays_compact_core():
     assert AppConfig().memory_policy.variant == "compact"
     assert AppConfig().memory_policy.ab_arms == []
-    assert MEMORY_POLICY_VARIANTS == ("none", "compact", "compact_gaps",
-                                      "full_separate_hook")
+    assert MEMORY_POLICY_VARIANTS == ("none", "compact", "full_separate_hook")
 
 
 def test_yaml_selects_variant_and_arms(tmp_path):
@@ -68,6 +67,8 @@ def test_yaml_selects_variant_and_arms(tmp_path):
     {"ab_arms": ["compact", "verbose"]},      # unknown arm
     {"ab_arms": ["compact"]},                 # one arm is not a test
     {"ab_arms": "compact,none"},              # not a list
+    # Retired 2026-09-25: #397 put its three rules into the core itself.
+    {"variant": "compact_gaps"},
 ])
 def test_invalid_policy_config_is_refused(kwargs):
     with pytest.raises(ValueError, match="memory_policy"):
@@ -80,7 +81,6 @@ def test_compact_serves_the_core_and_no_separate_block(svc):
     _set(svc, "compact")
     out = session_start_context(svc, True)
     assert out.startswith(STARTUP_MEMORY_CORE)
-    assert STARTUP_MEMORY_GAPS not in out
     assert "(fixture)" in out                      # briefing still follows
     assert hook_memory_policy(svc) == ""
 
@@ -101,19 +101,6 @@ def test_none_drops_the_cold_bank_onboarding_too(svc):
     out = session_start_context(svc, True)
     assert "memory bank is EMPTY" not in out
     assert not _TOOL.search(out)
-
-
-def test_compact_gaps_is_core_plus_three_rules_under_two_thousand_chars(svc):
-    _set(svc, "compact_gaps")
-    out = session_start_context(svc, True)
-    policy = STARTUP_MEMORY_CORE + "\n\n" + STARTUP_MEMORY_GAPS
-    assert out.startswith(policy)
-    assert len(policy) < 2_000
-    gaps = " ".join(STARTUP_MEMORY_GAPS.split())
-    assert "version" in gaps and "benchmark" in gaps      # recall before stating
-    assert "memory_world_set" in gaps                     # route external facts
-    assert "memory_fact_set" in gaps                      # correct drift on the spot
-    assert hook_memory_policy(svc) == ""
 
 
 def test_full_separate_hook_moves_the_full_block_out_of_the_briefing_output(svc):
@@ -166,7 +153,7 @@ def test_ab_arms_override_variant_per_session_and_both_hooks_agree(svc):
 def test_registered_session_logs_its_arm(svc, caplog):
     """The arm is a pure function of the session key the bank keeps; the
     daemon log names it too, for audit without a schema change."""
-    _set(svc, "compact", arms=["compact", "compact_gaps"])
+    _set(svc, "compact", arms=["compact", "none"])
     svc.episode_start_session = lambda sid, title, **_: {"id": "episode-123456789"}
     svc.set_active_session = lambda sid: None
     with caplog.at_level("INFO", logger="pseudolife-mcp.web"):
@@ -177,7 +164,7 @@ def test_registered_session_logs_its_arm(svc, caplog):
 
 def test_unregistered_session_logs_no_arm(svc, caplog):
     """No session id (or a failed registration): nothing to attribute."""
-    _set(svc, "compact", arms=["compact", "compact_gaps"])
+    _set(svc, "compact", arms=["compact", "none"])
 
     def boom(*a):
         raise RuntimeError("db down")

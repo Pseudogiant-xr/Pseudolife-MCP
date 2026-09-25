@@ -423,9 +423,9 @@ CREATE INDEX IF NOT EXISTS entity_sources_source_idx ON entity_sources (source);
 -- it ends holding no entry (prune-on-empty), which left the searches and
 -- outcomes of read-only sessions naming nothing; this row is never pruned.
 -- started_at is the first registration and never moves; ended_at and
--- end_reason are the most recent close ('end' = SessionEnd, shim exit or an
--- episode end that closes the root; 'idle' = the idle reaper), cleared when
--- the session registers again or a store or handle reopens its root.
+-- end_reason are the most recent close ('end' = SessionEnd or shim exit,
+-- 'idle' = the idle reaper), cleared when the session registers again or a
+-- store or handle reopens its root.
 -- policy_variant is the startup memory policy the hook assigned (NULL on
 -- the api path, which serves none); principal is the bearer's principal
 -- name (NULL when the registration arrived outside a request). Both, and

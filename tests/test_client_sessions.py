@@ -149,13 +149,13 @@ def test_principal_is_recorded_from_the_bearer(pg_service, pg_conn, monkeypatch)
 
 def test_ab_arm_is_recorded_per_session(pg_service, pg_conn):
     pg_service.config.memory_policy = MemoryPolicyConfig(
-        ab_arms=["none", "compact_gaps"])
+        ab_arms=["none", "compact"])
     keys = [f"{n:08x}-1111-4222-8333-444455556666" for n in range(8)]
     for key in keys:
         hook_session_start(pg_service, session_id=key, source="startup")
     served = {key: _row(pg_conn, key)["policy_variant"] for key in keys}
     assert served == {key: memory_policy_variant(pg_service, key) for key in keys}
-    assert set(served.values()) == {"none", "compact_gaps"}
+    assert set(served.values()) == {"none", "compact"}
 
 
 def test_registration_failure_never_breaks_session_start(pg_service, monkeypatch):
@@ -248,19 +248,3 @@ def test_tombstone_recreation_reopens_the_record(pg_service, pg_conn):
     pg_service.store("after a long break", source="t", episode=_handle(text))
     row = _row(pg_conn, HOOK)
     assert row["ended_at"] is None and row["episode_ids"] == [root_id]
-
-
-def test_episode_end_that_closes_the_root_is_stamped_end(pg_service, pg_conn):
-    """A handle-less memory_episode_end with no sub-episode open closes the
-    session root itself; the SessionEnd that follows finds nothing open."""
-    from pseudolife_memory.writer_context import (
-        reset_writer_context, set_writer_context)
-    pg_service.episode_start_session(SHIM, "t")
-    token = set_writer_context("w", SHIM)
-    try:
-        closed = pg_service.episode_end()
-    finally:
-        reset_writer_context(token)
-    assert closed.get("parent_id") is None and closed.get("ended_at")
-    row = _row(pg_conn, SHIM)
-    assert row["end_reason"] == "end" and row["ended_at"] is not None

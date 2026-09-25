@@ -894,6 +894,9 @@ def standing_instructions(home, choice, fallback_allowed, ready, report):
     if choice == "skip":
         return "skipped"
     if choice == "auto" and ready:
+        # Verified hooks serve a compact memory core, not this block; the
+        # append stays optional (--instructions append). The state name is
+        # read by both installers, which print what it means.
         return "covered-by-hooks"
     if choice != "append" and not fallback_allowed:
         return "skipped"

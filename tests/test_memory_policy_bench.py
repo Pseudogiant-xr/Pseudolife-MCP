@@ -346,6 +346,15 @@ def test_default_arm_order_still_yields_verdicts_in_both_directions():
     assert not art["acceptance"]["none over full_separate_hook"]["accept"]
 
 
+def test_the_validity_check_knows_exactly_the_daemons_variants():
+    """Each variant the daemon can serve has its expected policy texts, and
+    no retired variant keeps one (compact_gaps, 2026-09-25)."""
+    from pseudolife_memory.utils.config import MEMORY_POLICY_VARIANTS
+    assert set(mb.EXPECTED) == set(MEMORY_POLICY_VARIANTS)
+    texts = mb.policy_texts()
+    assert all(key in texts for keys in mb.EXPECTED.values() for key in keys)
+
+
 BF16 = {"backend": "torch", "device": "cpu", "dtype": "bf16"}
 FP32 = {"backend": "torch", "device": "cpu", "dtype": "fp32"}
 

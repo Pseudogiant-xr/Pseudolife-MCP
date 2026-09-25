@@ -1022,7 +1022,7 @@ def mcp_instructions() -> str:
 
 def policy_texts() -> dict[str, str]:
     from pseudolife_memory.web import session_hook as sh
-    texts = {"core": sh.STARTUP_MEMORY_CORE, "gaps": sh.STARTUP_MEMORY_GAPS,
+    texts = {"core": sh.STARTUP_MEMORY_CORE,
              "full_block": sh.MEMORY_LOOP_BLOCK, "onboarding": sh.ONBOARDING_BLOCK}
     for rel, key in (("plugin/hooks/user-prompt-submit.sh", "discipline_line"),
                      ("plugin/hooks/coordination-start.sh", "coordination_line")):
@@ -1032,8 +1032,7 @@ def policy_texts() -> dict[str, str]:
     return texts
 
 
-EXPECTED = {"none": (), "compact": ("core",), "compact_gaps": ("core", "gaps"),
-            "full_separate_hook": ("full_block",)}
+EXPECTED = {"none": (), "compact": ("core",), "full_separate_hook": ("full_block",)}
 # Anything that talks about memory policy. After the constant surfaces are
 # removed, none of these may remain in the model's context.
 _MARKER = re.compile(r"(?i)\bmemory_[a-z_]+|pseudolife|used_ids|memory bank|\blessons?\b"

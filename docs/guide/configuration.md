@@ -491,10 +491,12 @@ inside the daemon container, which already has the database URL:
 What `verify` shows: no row was edited, inserted or reordered, and none was
 removed except the oldest, behind a cut record whose own fields add up (written
 by the daemon, a window of at least a day, the cutoff that window gives at its
-time, and no surviving row older than that cutoff). What it cannot show on its
-own, because no secret is involved: that the newest rows were not dropped; that
-the table was not rewritten with every hash recomputed; and that the oldest
-rows were not removed by someone who also appended a consistent cut record.
+time, and a first surviving row no older than that cutoff; retention removes
+only an expired prefix, so a later row stamped before the cutoff can remain).
+What it cannot show on its own, because no secret is involved: that the
+newest rows were not dropped; that the table was not rewritten with every
+hash recomputed; and that the oldest rows were not removed by someone who
+also appended a consistent cut record.
 Record `head_seq:head_hash` and `head_created_at` from each `verify` somewhere
 outside the bank, and later run `verify --expect-head SEQ:HASH`. That catches
 the first two. The third needs a series of recorded heads: retention never
@@ -695,15 +697,14 @@ variants exist so their effect on agent behaviour can be measured
 
 ```yaml
 memory_policy:
-  variant: compact          # none | compact | compact_gaps | full_separate_hook
-  ab_arms: []               # e.g. [compact, compact_gaps] for an online A/B test
+  variant: compact          # none | compact | full_separate_hook
+  ab_arms: []               # e.g. [compact, full_separate_hook] for an online A/B test
 ```
 
 | Variant | What session start serves |
 |---|---|
 | `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
-| `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. |
-| `compact_gaps` | The core plus three rules the tool descriptions do not carry: recall before stating a current version, number or benchmark; route verified external facts to `memory_world_set`; correct memory-vs-code drift on the spot. |
+| `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. Since 2026-09-25 it restates three of the full block's rules: search before stating a "current" version, number or benchmark; correct memory-vs-code drift on the spot; route verified external facts to `memory_world_set`. |
 | `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
 
 The separate output is the plugin's third SessionStart handler
@@ -900,10 +901,14 @@ every variant.
   debug/audit switch. Before 2026-07-30 this knob was mis-registered as
   `memory.show_superseded` and did nothing.
 - **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
-  above zero and `memory_search` returns `low_confidence: true` whenever
-  the top match scores below the floor. Calibrated as a pair with
-  `memory.cortex.guard_min_score`; the recommended abstention-on values
-  and the calibration story: [Retrieval](retrieval.md#abstention--confidence-floors).
+  above zero and `memory_search` also returns `low_confidence: true` when
+  the top match scores below the floor and no cortex fact clears
+  `memory.cortex.guard_min_score`. No value is calibrated for the current
+  embedder, and the pair this guide used to recommend would flag a fifth
+  of real searches whose hits agents used:
+  [Retrieval](retrieval.md#abstention--confidence-floors). The dense
+  relevance floor under it, `memory.search.min_score` (`0.25`), is a
+  separate knob and not an abstention signal either.
 - **Dream slot resolver off** (`memory.cortex.dream_slot_match_threshold =
   0.0`) — a positive cosine floor lets the dream pass map a paraphrased
   `(entity, attribute)` onto an existing slot before writing, to catch
@@ -1183,7 +1188,8 @@ every variant.
   payloads verbatim (superseded hits keep the `replaced_by` pointer, which
   `memory_get` also serves for a superseded entry, and
   `memory_episode_summary` still compacts its `recent_entries` like
-  `memory_recent` — none of the three follows the knob); raise
+  `memory_recent`, and every compact entry keeps its write `date`
+  (2026-09-25) — none of the four follows the knob); raise
   `entry_text_chars` for long-form corpora where
   the tail of a note carries the answer.
 
@@ -1248,8 +1254,12 @@ daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the
 mechanism that gives **concurrent** Claude Code sessions distinct identity —
-a per-process `X-PL-Session` header, the strongest of the five
-[session-identity](#session-identity) tiers. The shim works against
+an `X-PL-Session` header, the strongest of the five
+[session-identity](#session-identity) tiers. Under Claude Code (writer id
+unset or `claude-code`) the header is the session id Claude Code launched the
+shim with, the same id its SessionStart hook registers, so the shim and the
+hook share one session episode. Other hosts get one id per shim process. The
+shim opens no episode itself; see [Episodes](episodes.md). The shim works against
 **either** daemon deployment, host-process or the containerized stack — it's
 just an HTTP client to `PSEUDOLIFE_MCP_DAEMON_URL` and only spawns a new host
 daemon when nothing answers there already (a cross-process lock keeps
@@ -1327,14 +1337,14 @@ through one chokepoint, evaluated in strict precedence order:
 
 | tier | source | scope | notes |
 |---|---|---|---|
-| 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
+| 1 | `X-PL-Session` header | per session | the stdio shim sends this on every call: Claude Code's own session id under Claude Code (the id tier 3 registers), one id per shim process elsewhere, the thread id on each Codex call; any integrator can |
 | 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`, and on the lifecycle tools `memory_episode_start` / `memory_episode_end` / `memory_session_title` — where a resolved handle wins outright (they never consult the header tiers); the daemon mints it and advertises it in the SessionStart briefing |
 | 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it. A singleton — concurrent sessions race it, which is why the lifecycle tools take the per-call handle |
 | 4 | `mcp-session-id` header | per connection | **retired** — the header names the connection (concurrent sessions share it) and the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes it from the protocol. `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one release as a rollback hatch |
 | 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
 
 **Why the header outranks the handle when both are present.** A shim
-header is infrastructure-asserted per OS process; an `episode` handle is
+header is infrastructure-asserted, by the host or per OS process; an `episode` handle is
 model-supplied and can be confused between two concurrent sessions'
 briefings. But identity and target episode are separable — a write still
 lands in the handle's named episode even when the header wins identity for
@@ -1621,7 +1631,7 @@ The milestones:
 | v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
 | v41 | Audited continuum entry reinstatement (2026-09-22). Adds `entry_reinstatement_decisions`, an operation-keyed, FK-free append-only audit that survives later entry deletion. A single Postgres transaction binds the reviewed retirement preimage to the decision and clears only the entry's retirement fields; retries use the operation UUID. The first version refuses entries with trace invalidations and leaves all cortex state unchanged. Additive/idempotent; existing banks start with an empty decision table. |
 | v42 | Board audit log (2026-09-24). Adds `coordination_events`, an append-only, FK-free, sha256-hash-chained record of every agent-board mutation (register, update with the replaced values, attach, detach, send with its body, first read, ack, attempt, expire, prune, bank identity, restore recover/rebind), written in the mutation's own transaction and pruned only by its own `coordination.audit_retention_days` window (default 90, `0` keeps it forever), which logs its cuts. Adds `coordination_messages.first_read_at`. Operational data, excluded from portable exports like the other coordination tables; read and verified with `pseudolife-mcp board-audit`. The log is cut at most once a day, on UTC day boundaries, and only while the board is in use. Additive/idempotent; existing banks start with an empty log, and history before the upgrade is not reconstructed: a message still unacknowledged at the upgrade has no `send` event, and its first read afterwards is logged as its first read. |
-| v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd, shim exit or an episode end that closes the root, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
+| v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or shim exit, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

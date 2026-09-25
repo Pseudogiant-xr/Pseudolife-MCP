@@ -385,6 +385,56 @@ def test_daemon_request_refuses_redirect_without_forwarding_authorization(
             worker.join(timeout=2)
 
 
+# Every status urllib's default handler follows for a GET (308 since Python 3.11).
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_installer_credential_check_refuses_redirect_without_forwarding_authorization(
+        status):
+    """A followed redirect would carry the installer's bearer to the Location's
+    host, and a 200 there would pass the credential check."""
+    sent, forwarded = [], []
+
+    class Target(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            forwarded.append(bool(self.headers.get("Authorization")))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"episodes":[]}')
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+
+    class Redirect(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            sent.append(hmac.compare_digest(
+                self.headers.get("Authorization") or "", "Bearer fixture-token"))
+            self.send_response(status)
+            self.send_header("Location", f"http://127.0.0.1:{target.server_port}{self.path}")
+            self.end_headers()
+
+    redirect = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    workers = [threading.Thread(target=server.serve_forever, daemon=True)
+               for server in (target, redirect)]
+    for worker in workers:
+        worker.start()
+    try:
+        valid = setup.installer_credential_valid(
+            f"http://127.0.0.1:{redirect.server_port}", "fixture-token")
+        assert sent == [True]  # The check really ran, with the bearer.
+        assert forwarded == []
+        assert valid is False
+    finally:
+        for server in (redirect, target):
+            server.shutdown()
+            server.server_close()
+        for worker in workers:
+            worker.join(timeout=2)
+
+
 @pytest.mark.parametrize("extra", [{"currentHash": "unknown"}, {"isManaged": True},
                                   {"trustStatus": "future-policy"}])
 def test_unknown_or_managed_trust_never_written(tmp_path, extra):

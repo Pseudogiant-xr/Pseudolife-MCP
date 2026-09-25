@@ -629,7 +629,7 @@ def _run_prompt_hook(shell, env, session_id="fixture-session"):
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
-def test_prompt_hook_prints_a_new_digest_once_then_only_the_static_line(shell, tmp_path):
+def test_prompt_hook_prints_a_new_digest_once_then_stays_silent(shell, tmp_path):
     env, key = _digest_env(tmp_path)
     quiet = _run_prompt_hook(shell, env)
     assert quiet == ""
