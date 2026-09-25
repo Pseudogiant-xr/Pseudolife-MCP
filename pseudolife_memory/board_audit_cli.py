@@ -1,19 +1,22 @@
-"""Operator-only, read-only access to the agent board's audit log (schema v42).
+"""Operator-only access to the agent board's audit log (schema v42).
 
 ``export`` streams ``coordination_events`` as JSON lines, one event per line,
-in chain order; ``verify`` walks the hash chain and prints one JSON report.
+in chain order; ``verify`` walks the hash chain and prints one JSON report;
+``redact`` (schema v46) removes one message body and records why.
 
-Both read the bank directly, through ``PSEUDOLIFE_MCP_DATABASE_URL`` or the
-lite tier's embedded instance, in a read-only snapshot, so they need the
-database owner's credentials, never a bearer token, and are safe to run beside
-a live daemon. There is deliberately
-no MCP tool and no REST route: the log holds message bodies verbatim, and
-bodies carry machine paths and usernames. Treat the output as private: keep it
-out of repositories and anywhere public.
+All three reach the bank directly, through ``PSEUDOLIFE_MCP_DATABASE_URL`` or
+the lite tier's embedded instance, so they need the database owner's
+credentials, never a bearer token. ``export`` and ``verify`` read one
+read-only snapshot; ``redact`` writes one transaction under the same locks as
+the daemon's own writes. All are safe to run beside a live daemon. There is
+deliberately no MCP tool and no REST route: the log holds message bodies
+verbatim, and bodies carry machine paths and usernames. Treat the output as
+private: keep it out of repositories and anywhere public.
 
-Exit status: 0 success, 1 the chain failed verification or an expected head
-could not be confirmed, 2 nothing could be checked (bad arguments, no bank, no
-audit log, an unreadable file, output closed early).
+Exit status: 0 success, 1 the chain failed verification, an expected head
+could not be confirmed, or a redaction was refused (the JSON result says why),
+2 nothing could be checked or changed (bad arguments, no bank, no audit log, a
+log that predates v46 for ``redact``, an unreadable file, output closed early).
 """
 from __future__ import annotations
 
@@ -27,10 +30,27 @@ from pathlib import Path
 import sys
 
 from pseudolife_memory.storage.coordination import (
-    AUDIT_COLUMNS, audit_events, verify_audit_chain,
+    AUDIT_COLUMNS, CoordinationError, CoordinationStore, audit_events, audit_has_body_column,
+    verify_audit_chain,
 )
 
 EXIT_OK, EXIT_BROKEN, EXIT_ERROR = 0, 1, 2
+
+# What each redaction refusal means, for the operator's terminal. None of
+# them repeats the reason or the body.
+_REDACT_REFUSALS = {
+    "invalid_message_id": "--message-id must be one message id as the audit log shows it",
+    "invalid_reason": "--reason must be 1-240 characters with no control or format "
+                      "characters (one line)",
+    "secret_like_body": "the reason looks like it holds a credential, and the reason is "
+                        "kept in the log for good; describe the mistake without repeating it",
+    "message_not_found": "no send event for this message id in the audit log: an unknown "
+                         "id, or one audit retention already removed",
+    "body_in_hashed_payload": "this message was sent before schema v46, when the body was "
+                              "part of the hashed payload; removing it would break the "
+                              "chain, so it stays until audit retention removes the event",
+    "already_redacted": "this message's body is already redacted",
+}
 
 
 class AuditCliError(ValueError):
@@ -64,10 +84,11 @@ class _ReaderClosed(Exception):
 
 
 @contextmanager
-def _bank():
-    """A read-only connection to the bank, found the way ``export`` finds it:
+def _bank(*, write=False):
+    """A connection to the bank, found the way ``export`` finds it:
     PSEUDOLIFE_MCP_DATABASE_URL, else the lite tier's embedded instance
-    (attached, or started for the duration and stopped afterwards)."""
+    (attached, or started for the duration and stopped afterwards).
+    Read-only unless ``write``, which ``redact`` alone asks for."""
     from pseudolife_memory.backup_cli import _default_data_dir
     from pseudolife_memory.transfer_cli import _resolve_dsn
     dsn, own_instance = _resolve_dsn(_default_data_dir(os.environ))
@@ -76,25 +97,52 @@ def _bank():
             raise AuditCliError("no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's "
                                 "database URL, or run where the lite tier's data dir holds one")
         import psycopg
-        conn = psycopg.connect(dsn, connect_timeout=5)
+        conn = psycopg.connect(dsn, connect_timeout=5, autocommit=write)
         try:
-            # One read-only, repeatable-read snapshot: a daemon appending
-            # while this runs cannot tear the chain being read.
-            conn.read_only = True
-            conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+            if write:
+                # The daemon's own lock timeout: a redaction waits on the
+                # chain lock like any board write, never indefinitely.
+                conn.execute("SET lock_timeout = '5s'")
+            else:
+                # One read-only, repeatable-read snapshot: a daemon appending
+                # while this runs cannot tear the chain being read.
+                conn.read_only = True
+                conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
             conn.execute("SET search_path TO public")
             present = conn.execute(
                 "SELECT to_regclass('public.coordination_events') IS NOT NULL").fetchone()[0]
-            conn.commit()
+            if not write:
+                conn.commit()
             if not present:
                 raise AuditCliError("this bank has no audit log yet (schema older than v42); "
                                     "start a v42 daemon once to create it")
+            if write and not audit_has_body_column(conn):
+                raise AuditCliError("this bank's audit log predates schema v46, so no body in it "
+                                    "can be redacted: every send body is part of the hashed "
+                                    "payload. Start a v46 daemon once to add the body column; "
+                                    "bodies sent before it stay unredactable")
             yield conn
         finally:
             conn.close()
     finally:
         if own_instance is not None:
             own_instance.stop()
+
+
+class _Storage:
+    """What ``CoordinationStore`` needs to write: the connection, and a
+    transaction that never reports a commit the server did not confirm."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    @contextmanager
+    def _txn(self):
+        with self.conn.transaction() as transaction:
+            yield
+        if transaction.status is not transaction.Status.COMMITTED:
+            raise AuditCliError("the database did not confirm the commit; run verify to see "
+                                "whether the redaction landed before retrying")
 
 
 def _write_error(target, exc):
@@ -164,12 +212,15 @@ def _read_export(path: Path):
                 row = json.loads(line)
             except ValueError:
                 raise AuditCliError(f"{path} line {number} is not JSON") from None
+            # ``body`` is absent from exports written before v46, whose send
+            # bodies are inside the hashed payload; read it as none.
             if (not isinstance(row, dict) or set(AUDIT_COLUMNS) - set(row)
                     or type(row["seq"]) is not int
                     or type(row["created_at"]) not in (int, float)
                     or not all(isinstance(row[k], str) for k in (
                         "event", "actor", "principal", "agent_id", "project", "task",
-                        "hlc", "prev_hash", "hash"))):
+                        "hlc", "prev_hash", "hash"))
+                    or not isinstance(row.setdefault("body", None), (str, type(None)))):
                 raise AuditCliError(f"{path} line {number} is not an exported audit event")
             yield row
 
@@ -184,11 +235,23 @@ def _verify(args) -> int:
     return EXIT_OK if report["ok"] else EXIT_BROKEN
 
 
+def _redact(args) -> int:
+    with _bank(write=True) as conn:
+        try:
+            result = CoordinationStore(_Storage(conn)).redact(args.message_id, args.reason)
+        except CoordinationError as exc:
+            print(json.dumps({"ok": False, "message_id": args.message_id, "reason": exc.code}))
+            print(f"board-audit: {_REDACT_REFUSALS.get(exc.code, exc.code)}", file=sys.stderr)
+            return EXIT_BROKEN
+    print(json.dumps({"ok": True, **result}))
+    return EXIT_OK
+
+
 def main(argv=None) -> int:
     """CLI entry point; accepts the arguments after ``board-audit``."""
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp board-audit",
-        description="Export or verify the agent board's audit log (operator-only, read-only). "
+        description="Export, verify or redact the agent board's audit log (operator-only). "
                     "Reads PSEUDOLIFE_MCP_DATABASE_URL, or the lite tier's bank. The output "
                     "holds message bodies: "
                     "keep it private.")
@@ -204,12 +267,18 @@ def main(argv=None) -> int:
     verify.add_argument("--expect-head", type=_head, metavar="SEQ:HASH",
                         help="a head recorded earlier; fails if it was dropped or rewritten")
     verify.add_argument("--input", help="verify an unfiltered export file instead of the bank")
+    redact = actions.add_parser(
+        "redact", help="remove one message body (sent from schema v46 on) and log why")
+    redact.add_argument("--message-id", required=True, help="the message whose body to remove")
+    redact.add_argument("--reason", required=True,
+                        help="why, kept in the log for good (at most 240 characters; "
+                             "never repeat the secret)")
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return EXIT_ERROR if exc.code else EXIT_OK
     try:
-        return _export(args) if args.action == "export" else _verify(args)
+        return {"export": _export, "verify": _verify, "redact": _redact}[args.action](args)
     except AuditCliError as exc:
         print(f"board-audit: {exc}", file=sys.stderr)
     except _ReaderClosed:

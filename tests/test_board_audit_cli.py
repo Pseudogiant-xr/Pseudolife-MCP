@@ -1,7 +1,9 @@
-"""``pseudolife-mcp board-audit``: the operator's read-only view of the log.
+"""``pseudolife-mcp board-audit``: the operator's view of the log.
 
 Export is JSON lines on stdout (or a new file); verify prints one report and
-exits 0 intact, 1 on tamper evidence, 2 when it could not check at all.
+exits 0 intact, 1 on tamper evidence, 2 when it could not check at all;
+redact (v46) removes one body, printing one result: 0 done, 1 refused, 2 could
+not run.
 """
 from __future__ import annotations
 
@@ -43,10 +45,12 @@ def test_export_writes_json_lines_filtered_by_task_agent_and_time(store, cli):
 
     by_task = export("--task", "t1")
     assert [(e["event"], e["task"]) for e in by_task] == [("register", "t1"), ("send", "t1")]
-    assert by_task[1]["payload"]["text"] == "from t1 ✓"
+    assert by_task[1]["body"] == "from t1 ✓"
+    assert "text" not in by_task[1]["payload"] and by_task[1]["payload"]["text_bytes"] == 11
+    assert by_task[0]["body"] is None
     assert set(by_task[1]) == {"seq", "event", "actor", "principal", "agent_id",
                                "recipient_agent_id", "project", "task", "message_id",
-                               "payload", "created_at", "hlc", "prev_hash", "hash"}
+                               "payload", "created_at", "hlc", "prev_hash", "hash", "body"}
     assert [e["event"] for e in export("--agent", b["agent_id"])] == ["register", "send", "send"]
     assert [e["seq"] for e in export("--project", "p", "--since", "2000")] == [3, 4]
     assert [e["seq"] for e in export("--until", "2000")] == [1, 2]
@@ -253,3 +257,132 @@ def test_the_console_script_routes_board_audit(monkeypatch):
         console.main()
     assert (exit_.value.code, seen) == (0, [["verify"]])
     assert "board-audit" in console._USAGE
+
+
+# ── redaction (schema v46) ────────────────────────────────────────────────
+
+
+def _send(store, text="pasted by mistake"):
+    a, b = pair(store)
+    return store.send(*creds(a), to=b["agent_id"], text=text, request_id="r")["message_id"]
+
+
+def test_redact_removes_a_body_prints_json_and_the_chain_still_verifies(store, cli, tmp_path):
+    message_id = _send(store)
+    code, output = cli("redact", "--message-id", message_id, "--reason", "wrong paste")
+    assert code == 0, output.err
+    assert json.loads(output.out) == {"ok": True, "message_id": message_id, "seq": 3,
+                                      "redact_seq": 4, "live_body_cleared": True}
+    archive = tmp_path / "board-audit.jsonl"
+    assert cli("export", "--out", str(archive))[0] == 0
+    events = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()]
+    assert [(e["event"], e["body"]) for e in events[2:]] == [("send", None), ("redact", None)]
+    assert events[3]["payload"] == {"message_id": message_id, "seq": 3, "reason": "wrong paste"}
+    assert "pasted by mistake" not in archive.read_text(encoding="utf-8")
+    code, output = cli("verify")
+    assert code == 0 and json.loads(output.out)["ok"]
+    assert cli("verify", "--input", str(archive))[0] == 0
+
+    code, output = cli("redact", "--message-id", message_id, "--reason", "again")
+    assert code == 1
+    assert json.loads(output.out) == {"ok": False, "message_id": message_id,
+                                      "reason": "already_redacted"}
+    assert "already" in output.err
+
+
+def test_redact_refuses_a_body_written_before_v46_and_says_why(store, cli):
+    from tests.test_coordination_audit import _legacy_send
+    a, b = pair(store)
+    message_id = _legacy_send(store, a, b)
+    code, output = cli("redact", "--message-id", message_id, "--reason", "too old")
+    assert code == 1
+    assert json.loads(output.out)["reason"] == "body_in_hashed_payload"
+    assert "before schema v46" in output.err and "an old body" not in output.out + output.err
+    code, output = cli("redact", "--message-id", "0" * 32, "--reason", "unknown")
+    assert (code, json.loads(output.out)["reason"]) == (1, "message_not_found")
+
+
+@pytest.mark.parametrize("args", [
+    ("redact", "--reason", "no id"),
+    ("redact", "--message-id", "0" * 32),
+])
+def test_redact_needs_both_a_message_id_and_a_reason(cli, args):
+    code, output = cli(*args)
+    assert code == 2 and output.out == "" and "usage:" in output.err
+
+
+def test_a_redaction_reason_is_checked_before_anything_is_written(store, cli):
+    message_id = _send(store)
+    for reason, code in (("bell\x07", "invalid_reason"), ("x" * 241, "invalid_reason"),
+                         ("token=" + "q7Hd2kLm9Pz4" + "Rt6Wv8Xy1Bc3", "secret_like_body")):
+        exit_code, output = cli("redact", "--message-id", message_id, "--reason", reason)
+        assert (exit_code, json.loads(output.out)["reason"]) == (1, code)
+        assert reason not in output.out + output.err
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_events WHERE event='redact'").fetchone() == (0,)
+
+
+def test_verify_input_names_a_tampered_or_stripped_body_in_an_export(store, cli, tmp_path):
+    _send(store, "the body")
+    archive = tmp_path / "board-audit.jsonl"
+    assert cli("export", "--out", str(archive))[0] == 0
+    rows = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()]
+
+    def verify_rows(rows, name):
+        path = tmp_path / name
+        path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        code, output = cli("verify", "--input", str(path))
+        return code, json.loads(output.out) if output.out else output.err
+
+    edited = [dict(row) for row in rows]
+    edited[2]["body"] = "another body"
+    assert verify_rows(edited, "edited.jsonl") == (
+        1, {"ok": False, "seq": 3, "reason": "body_mismatch"})
+    stripped = [{k: v for k, v in row.items() if k != "body"} for row in rows]
+    assert verify_rows(stripped, "stripped.jsonl") == (
+        1, {"ok": False, "seq": 3, "reason": "body_missing"})
+    wrong_type = [dict(row) for row in rows]
+    wrong_type[2]["body"] = 7
+    code, err = verify_rows(wrong_type, "wrong-type.jsonl")
+    assert code == 2 and "line 3 is not an exported audit event" in err
+
+
+def test_an_export_written_before_v46_still_verifies(store, cli, tmp_path):
+    """Exports from v42-v45 have no body field; their sends carry the body
+    inside the hashed payload, and they must keep verifying."""
+    from tests.test_coordination_audit import _legacy_send
+    a, b = pair(store)
+    _legacy_send(store, a, b)
+    store.update(*creds(a), status="later")
+    archive = tmp_path / "board-audit.jsonl"
+    assert cli("export", "--out", str(archive))[0] == 0
+    rows = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()]
+    old = tmp_path / "v45.jsonl"
+    old.write_text("".join(json.dumps({k: v for k, v in row.items() if k != "body"}) + "\n"
+                           for row in rows), encoding="utf-8")
+    code, output = cli("verify", "--input", str(old))
+    assert code == 0 and json.loads(output.out)["events"] == 4
+
+
+def test_a_bank_before_v46_exports_and_verifies_but_cannot_redact(store, cli):
+    """A restored v42-v45 bank, read before any v46 daemon has started."""
+    from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+    from tests.test_coordination_audit import _legacy_send
+    a, b = pair(store)
+    message_id = _legacy_send(store, a, b)
+    store.storage.conn.execute("ALTER TABLE coordination_events DROP COLUMN body")
+    try:
+        code, output = cli("export")
+        assert code == 0 and [e["body"] for e in lines(output)] == [None, None, None]
+        code, output = cli("verify")
+        assert code == 0 and json.loads(output.out)["events"] == 3
+        code, output = cli("redact", "--message-id", message_id, "--reason", "why")
+        assert code == 2 and output.out == "" and "v46" in output.err
+    finally:
+        store.storage.conn.execute(COORDINATION_SCHEMA_SQL)
+
+
+def test_the_usage_names_redaction():
+    from pseudolife_memory import cli as console
+    line = next(line for line in console._USAGE.splitlines() if "board-audit" in line)
+    assert "redact" in line
