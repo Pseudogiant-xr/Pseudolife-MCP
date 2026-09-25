@@ -521,7 +521,7 @@ def test_hook_session_start_capped_under_hook_stdout_limit(svc):
 def test_hook_session_start_preserves_notice_core_and_late_briefing_items(svc):
     from pseudolife_memory.memory.briefing import format_briefing
     from pseudolife_memory.web.session_hook import hook_session_start
-    svc.episode_start_session = lambda *a: {"id": "episode-123456789"}
+    svc.episode_start_session = lambda *a, **_: {"id": "episode-123456789"}
     svc.set_active_session = lambda *a: None
     md = format_briefing(
         [{"src": "a", "dst": "b", "why": "x" * 20000}], [],
@@ -569,17 +569,57 @@ def test_hook_session_start_post_rejected(svc):
     assert st == 405
 
 
-def test_hook_session_start_override_file_replaces_instructions(svc):
-    """<data_dir>/hook-instructions.md lets a user serve their own standing
-    instructions instead of the shipped block (briefing still appended)."""
+def test_hook_session_start_override_file_is_appended_after_the_core(svc):
+    """<data_dir>/hook-instructions.md adds a user's standing instructions
+    after the served core; since #364 it no longer replaces it. The
+    briefing still follows both."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
     (svc.data_dir / "hook-instructions.md").write_text(
         "## My house rules\nAlways check the runbook first.", encoding="utf-8")
     st, body = call(_app(svc), "GET", "/api/hook/session-start")
     text = body.decode("utf-8")
     assert st == 200
-    assert "My house rules" in text
-    assert "RECALL" not in text          # shipped block replaced
-    assert "(fixture)" in text           # briefing still appended
+    assert text.startswith(STARTUP_MEMORY_CORE + "\n\n## My house rules\n"
+                           "Always check the runbook first.\n\n")
+    assert "Custom instructions are partial" not in text
+    assert text.index("(fixture)") > text.index("Always check the runbook first.")
+
+
+def test_hook_session_start_override_is_capped_at_3_5_kb_with_a_notice(svc):
+    """The override's share of the hook is at most 3,500 bytes even when the
+    hook budget has room for more; complete paragraphs only, plus a notice
+    that the served copy is partial."""
+    from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
+                                                    STARTUP_MEMORY_CORE,
+                                                    session_start_context)
+    cap = 3_500
+    notice = ("Custom instructions are partial. Obtain the complete daemon-side "
+              "`<data_dir>/hook-instructions.md` before relying on this override.")
+    override = svc.data_dir / "hook-instructions.md"
+
+    # Two paragraphs plus the notice fill the cap exactly: a lower cap would
+    # drop the second paragraph.
+    first = "## Rule A\n" + "a" * 1_490
+    second = "## Rule B\n" + "b" * (cap - len(first) - 2 - 2 - len(notice) - 10)
+    third = "## Rule C\n" + "c" * 990
+    override.write_text("\n\n".join([first, second, third]), encoding="utf-8")
+    out = session_start_context(svc, True)
+    assert out.startswith(STARTUP_MEMORY_CORE + "\n\n" + first + "\n\n" + second
+                          + "\n\n" + notice + "\n\n")
+    assert len((first + "\n\n" + second + "\n\n" + notice).encode("utf-8")) == cap
+    assert third not in out
+    # The third paragraph would have fit the hook budget; the cap dropped it.
+    assert len(out.encode("utf-8")) + len(third) + 2 <= HOOK_CONTEXT_MAX_CHARS
+    assert "(fixture)" in out
+
+    # A file one byte over the cap is not served whole: a higher cap would.
+    head = "## Rule X\n" + "x" * 1_490
+    tail = "## Rule Y\n" + "y" * (cap + 1 - len(head) - 2 - 10)
+    override.write_text(head + "\n\n" + tail, encoding="utf-8")
+    assert len((head + "\n\n" + tail).encode("utf-8")) == cap + 1
+    out = session_start_context(svc, True)
+    assert out.startswith(STARTUP_MEMORY_CORE + "\n\n" + head + "\n\n" + notice)
+    assert tail not in out
 
 
 def test_hook_session_start_blank_override_falls_back(svc):

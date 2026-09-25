@@ -1217,6 +1217,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         texts = [t for t in (texts or []) if t]
         if not texts:
             return []
@@ -1250,7 +1252,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             # Chatty/reasoning models often wrap the object in ```json fences or
@@ -1322,6 +1324,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         texts = [t for t in (texts or []) if t]
         if not texts:
             return []
@@ -1345,7 +1349,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1363,6 +1367,8 @@ class OpenAICompatExtractor:
         rather than consuming them on a failed call."""
         import json
         import urllib.request
+
+        from pseudolife_memory.utils import no_redirect
 
         headers = {"content-type": "application/json"}
         if self.api_key:
@@ -1383,7 +1389,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1502,6 +1508,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         texts = [t for t in (texts or []) if t]
         if not texts:
             return []
@@ -1523,7 +1531,7 @@ class OpenAICompatExtractor:
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1596,6 +1604,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
@@ -1615,7 +1625,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
         except Exception as exc:  # noqa: BLE001 — transport, not content
@@ -1631,6 +1641,8 @@ class OpenAICompatExtractor:
         transport/parse failure so a failed batch marks nothing."""
         import json
         import urllib.request
+
+        from pseudolife_memory.utils import no_redirect
 
         headers = {"content-type": "application/json"}
         if self.api_key:
@@ -1673,7 +1685,7 @@ class OpenAICompatExtractor:
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             # The model the endpoint actually SERVED (OpenAI-compatible
             # responses echo it). A name-agnostic endpoint (llama-server
@@ -1833,6 +1845,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
@@ -1854,7 +1868,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
         except Exception as exc:  # noqa: BLE001 — transport, not content

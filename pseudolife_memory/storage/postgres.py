@@ -1349,6 +1349,79 @@ class PostgresStorage:
             )
         return cur.rowcount or 0
 
+    # ── client sessions (v43) ───────────────────────────────────────────
+
+    def register_client_session(self, session_key: str, *, episode_id: str,
+                                registered_via: str, principal: str | None,
+                                policy_variant: str | None,
+                                now: float) -> None:
+        """Upsert the durable registration row for ``session_key``. The
+        first registration sets ``started_at``; a later one (resume,
+        compact, a shim restart) keeps it, clears the last close, appends
+        ``episode_id`` when it is new and its own time to ``start_times``,
+        and fills ``principal`` / ``policy_variant`` only where they are
+        still NULL."""
+        with self._txn():
+            self.conn.execute(
+                """
+                INSERT INTO client_sessions (session_key, registered_via,
+                    principal, started_at, policy_variant, episode_ids,
+                    start_times)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (session_key) DO UPDATE SET
+                  ended_at = NULL,
+                  end_reason = NULL,
+                  principal = COALESCE(client_sessions.principal,
+                                       EXCLUDED.principal),
+                  policy_variant = COALESCE(client_sessions.policy_variant,
+                                            EXCLUDED.policy_variant),
+                  episode_ids = CASE
+                    WHEN client_sessions.episode_ids @> EXCLUDED.episode_ids
+                      THEN client_sessions.episode_ids
+                    ELSE client_sessions.episode_ids || EXCLUDED.episode_ids
+                  END,
+                  start_times = client_sessions.start_times
+                                || EXCLUDED.start_times
+                """,
+                (session_key, registered_via, principal, now, policy_variant,
+                 Jsonb([episode_id]), Jsonb([now])),
+            )
+
+    def reopen_client_session(self, session_key: str) -> None:
+        """Clear the last close of a registered session whose root was
+        reopened without a registration (a store or an episode handle
+        resuming it after the idle reaper closed it)."""
+        with self._txn():
+            self.conn.execute(
+                "UPDATE client_sessions SET ended_at = NULL, end_reason = NULL "
+                "WHERE session_key = %s AND ended_at IS NOT NULL",
+                (session_key,),
+            )
+
+    def end_client_session(self, session_key: str, *, episode_id: str | None,
+                           ended_at: float, reason: str) -> None:
+        """Stamp the most recent close on a registered session and record
+        the root it closed (a root the daemon opened lazily for a registered
+        key after its first one was pruned). ``episode_id=None`` stamps an
+        end that closed no root (SessionEnd after the idle reaper already
+        had). No row, no write: a session that never registered is not
+        invented here."""
+        ids = Jsonb([episode_id] if episode_id else [])
+        with self._txn():
+            self.conn.execute(
+                """
+                UPDATE client_sessions SET
+                  ended_at = %s,
+                  end_reason = %s,
+                  episode_ids = CASE
+                    WHEN episode_ids @> %s THEN episode_ids
+                    ELSE episode_ids || %s
+                  END
+                WHERE session_key = %s
+                """,
+                (ended_at, reason, ids, ids, session_key),
+            )
+
     # ── cortex facts ────────────────────────────────────────────────────
 
     def upsert_fact(self, f: dict) -> int:

@@ -17,7 +17,9 @@ Plain module (no pytest import) so ``conftest.py``, ``pg_fixtures.py`` and
 from __future__ import annotations
 
 import errno
+import functools
 import os
+import time
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
@@ -321,6 +323,53 @@ def is_server_unavailable(exc: BaseException) -> bool:
     if isinstance(exc, OSError) and getattr(exc, "errno", None) in _UNAVAILABLE_ERRNOS:
         return True
     return any(marker in text for marker in _UNAVAILABLE_MARKERS)
+
+
+# libpq renders a Windows socket error as "<text> (0x%08X/%d)". These two
+# describe this host's own port table, not the server: WSAEADDRINUSE, which
+# a loopback connect() returns when the local port it picked still has a
+# TIME_WAIT entry to the same server (the client closed first), and
+# WSAENOBUFS, when the ephemeral range is exhausted. WSAEADDRINUSE failed
+# three connects to the dev server on 127.0.0.1:5433 in two full runs on
+# 2026-09-25 (twice in pg_conn setup, once in PostgresStorage), with about
+# twenty sessions testing against that server; a full run was measured
+# holding 250-600 TIME_WAIT entries to it. A second connect picks another
+# port. WSAENOBUFS was not seen; it is here as the exhaustion case of the
+# same port table.
+_LOCAL_PORT_ERRORS = ("/10048)", "/10055)")
+
+
+def is_local_port_exhaustion(exc: BaseException) -> bool:
+    """True when a connect failed for want of a usable local port, which
+    says nothing about the server; never for an answer from the server."""
+    if getattr(exc, "sqlstate", None):
+        return False
+    text = str(exc)
+    return any(code in text for code in _LOCAL_PORT_ERRORS)
+
+
+def retry_local_port_exhaustion(connect, *, attempts: int = 5,
+                                sleep=time.sleep):
+    """Wrap ``psycopg.connect`` to try again, up to ``attempts`` calls in all
+    and well under a second of backoff, when the local port was the problem
+    (:func:`is_local_port_exhaustion`). Every other failure is raised at
+    once, and the last one if the port never frees."""
+    @functools.wraps(connect)
+    def connect_retrying(*args, **kwargs):
+        # Hidden from pytest's tracebacks, whose argument listing would
+        # print the DSN, password included, for this frame.
+        __tracebackhide__ = True
+        for attempt in range(attempts - 1):
+            try:
+                return connect(*args, **kwargs)
+            except Exception as exc:
+                if not is_local_port_exhaustion(exc):
+                    raise
+            sleep(0.05 * 2 ** attempt)
+        return connect(*args, **kwargs)
+
+    connect_retrying.retries_local_port_exhaustion = True
+    return connect_retrying
 
 
 def redacted_error_text(exc: BaseException, conninfo: str) -> str:

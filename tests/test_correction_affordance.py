@@ -254,10 +254,16 @@ def test_fact_get_leaves_a_fresh_record_alone(tmp_path, monkeypatch):
 
 
 def test_trust_order_teaches_the_affordance():
-    """The briefing is where the norm is taught, the affordance is where it
-    is applied — TRUST ORDER must name `correct_with` and frame correction
-    as part of discovery, not a follow-up. (The examples/CLAUDE.memory.md
-    byte-pin in test_plugin_packaging keeps both halves identical.)"""
-    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    """Served instructions teach the norm, the affordance is where it is
+    applied. The standing block's TRUST ORDER (MEMORY_LOOP_BLOCK, byte-pinned
+    to examples/CLAUDE.memory.md in test_plugin_packaging) must name
+    `correct_with` and frame correction as part of discovery. Since #364 the
+    SessionStart hook serves only STARTUP_MEMORY_CORE, so the core must name
+    the correction step itself."""
+    from pseudolife_memory.web.session_hook import (MEMORY_LOOP_BLOCK,
+                                                    STARTUP_MEMORY_CORE)
     assert "correct_with" in MEMORY_LOOP_BLOCK
     assert "memory_outcome" in MEMORY_LOOP_BLOCK
+    core = " ".join(STARTUP_MEMORY_CORE.split())
+    assert "correct the memory on the spot" in core
+    assert "`memory_outcome` with `correction`" in core
