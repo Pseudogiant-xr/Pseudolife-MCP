@@ -118,6 +118,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   run the doc guards plus the tests naming each touched file; CI must still
   pass before merge.
 
+### Added (2026-09-25 — a machine can allow more than one full test suite at once)
+- The suite lock has a slot count: `PSEUDOLIFE_SUITE_SLOTS`, else a
+  `full-suite.slots` file in the lock directory, else 1. With 2, two full
+  runs hold the lock at once; waiters still take free slots in arrival
+  order, and the waiting notice and `fail` refusal name every holder. Slot 0
+  keeps the file names `full-suite.lock` and `full-suite.holder.json`, so
+  runs from older checkouts share it (and never see a second slot); slot k
+  is `full-suite.k.lock` with its own `full-suite.k.holder.json`. A count
+  that is not a whole number of at least 1 is a usage error. The default
+  stays 1, so other machines behave as before; the maintainer's host runs 2
+  after trimming memory.
+
 ### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
 - **Hydration fails closed.** If loading cortex facts, world facts or lessons
   from Postgres failed at startup, the daemon logged a warning and carried on

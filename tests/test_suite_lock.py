@@ -427,25 +427,27 @@ class _GatedClock:
                 f"no {what} within {START_TIMEOUT}s")
 
 
-def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch):
+@pytest.mark.parametrize("slots", [1, 2])
+def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch, slots):
     # 2026-09-25: with eight full suites queued, one waited from 13:48 to
     # past 14:57 while later arrivals took the lock ahead of it — whichever
     # waiter polled first after a release won. Here the earlier waiter is
-    # parked in its poll sleep when the lock frees, and the later one polls
-    # every 10 ms: on a first-poller-wins lock it takes the lock every time.
+    # parked in its poll sleep when a slot frees, and the later one polls
+    # every 10 ms: on a first-poller-wins lock it takes the slot every time.
     clock = _GatedClock()
     monkeypatch.setattr(suite_lock, "time", clock)
     order: list[str] = []
 
     def queue_up(name: str) -> None:
-        held_lock = suite_lock.acquire(tmp_path, "wait", worktree=name,
+        held_lock = suite_lock.acquire(tmp_path, "wait", worktree=name, slots=slots,
                                        poll=0.01, out=io.StringIO())
         with clock.cond:
             order.append(name)
             clock.cond.notify_all()
         suite_lock.release(held_lock)
 
-    holder = suite_lock.acquire(tmp_path, "fail", worktree="holder")
+    holders = [suite_lock.acquire(tmp_path, "fail", worktree=f"holder{i}", slots=slots)
+               for i in range(slots)]
     clock.gates["earlier"] = threading.Event()
     threads = []
     try:
@@ -457,18 +459,19 @@ def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch):
             clock.wait_for(lambda name=name: clock.sleeps[name] >= 1,
                            f"poll sleep from {name}")
         polls = clock.sleeps["later"]
-        suite_lock.release(holder)
-        holder = None
+        suite_lock.release(holders.pop(0))      # one slot frees
         clock.wait_for(lambda: order or clock.sleeps["later"] >= polls + 3,
                        "three more polls from the later waiter")
         assert order == [], (
-            f"{order[0]!r} took the freed lock while the earlier waiter was queued")
+            f"{order[0]!r} took the freed slot while the earlier waiter was queued")
     finally:
-        if holder is not None:
-            suite_lock.release(holder)
         clock.gates["earlier"].set()
+        # Any other holders keep their slots until both waiters are done, so
+        # the two take turns in the one freed slot and record in that order.
         for thread in threads:
             thread.join(START_TIMEOUT)
+        for holder in holders:
+            suite_lock.release(holder)
     assert order == ["earlier", "later"]
     assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
 
@@ -596,12 +599,78 @@ def test_ctrl_c_while_queued_takes_the_ticket_with_it(tmp_path, monkeypatch):
     suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="next"))
 
 
+# --- slots: more than one full run at once, where configured -----------------
+
+def test_the_slot_count_comes_from_the_env_then_the_file_then_one(tmp_path):
+    assert suite_lock.slot_count({}, tmp_path) == 1
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("2\n", encoding="utf-8")
+    assert suite_lock.slot_count({}, tmp_path) == 2
+    assert suite_lock.slot_count({"PSEUDOLIFE_SUITE_SLOTS": " 3 "}, tmp_path) == 3
+    for bad in ("0", "-1", "two", "", "1.5"):
+        with pytest.raises(ValueError, match="PSEUDOLIFE_SUITE_SLOTS"):
+            suite_lock.slot_count({"PSEUDOLIFE_SUITE_SLOTS": bad}, tmp_path)
+        (tmp_path / suite_lock.SLOTS_FILE).write_text(bad, encoding="utf-8")
+        with pytest.raises(ValueError, match="full-suite.slots"):
+            suite_lock.slot_count({}, tmp_path)
+
+
+def test_two_slots_hold_two_runs_and_a_third_names_both(tmp_path):
+    first = suite_lock.acquire(tmp_path, "fail", worktree="first", slots=2)
+    try:
+        second = suite_lock.acquire(tmp_path, "fail", worktree="second", slots=2)
+        try:
+            assert (first.slot, second.slot) == (0, 1)
+            # Slot 0 keeps the historical file names, so runs from older code
+            # share it; slot 1 has its own lock file and holder record.
+            assert suite_lock.read_holder(tmp_path)["worktree"] == "first"
+            assert (tmp_path / "full-suite.holder.json").exists()
+            assert (tmp_path / "full-suite.1.lock").exists()
+            assert suite_lock.read_holder(tmp_path, slot=1)["worktree"] == "second"
+            with pytest.raises(suite_lock.SuiteLockBusy,
+                               match=r"held by first \(pid \d+\) since \d\d:\d\d "
+                                     r"and second \(pid \d+\) since \d\d:\d\d;"):
+                suite_lock.acquire(tmp_path, "fail", worktree="third", slots=2)
+            # A run configured for one slot waits on slot 0 alone.
+            with pytest.raises(suite_lock.SuiteLockBusy):
+                suite_lock.acquire(tmp_path, "fail", worktree="one-slot")
+        finally:
+            suite_lock.release(second)
+        # Releasing a slot drops only its own record and frees it.
+        assert suite_lock.read_holder(tmp_path, slot=1) is None
+        assert suite_lock.read_holder(tmp_path)["worktree"] == "first"
+        third = suite_lock.acquire(tmp_path, "fail", worktree="third", slots=2)
+        assert third.slot == 1
+        suite_lock.release(third)
+    finally:
+        suite_lock.release(first)
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
+
+
+def test_a_full_run_takes_a_second_slot_when_the_file_allows_two(tmp_path):
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path),
+               "PSEUDOLIFE_SUITE_LOCK": "fail"}
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("2", encoding="utf-8")
+    first = suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+    second = suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+    try:
+        assert {first.slot, second.slot} == {0, 1}
+        with pytest.raises(pytest.UsageError, match=r"\) since \d\d:\d\d and "):
+            suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+    finally:
+        suite_lock.release(second)
+        suite_lock.release(first)
+    (tmp_path / suite_lock.SLOTS_FILE).write_text("many", encoding="utf-8")
+    with pytest.raises(pytest.UsageError, match="full-suite.slots"):
+        suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+
+
 # --- the conftest wiring, end to end ----------------------------------------
 
 def _pytest_env(directory: Path, mode: str) -> dict[str, str]:
     env = dict(os.environ)
     env["PSEUDOLIFE_SUITE_LOCK_DIR"] = str(directory)
     env["PSEUDOLIFE_SUITE_LOCK"] = mode
+    env.pop("PSEUDOLIFE_SUITE_SLOTS", None)  # each test sets its own
     # These runs never reach a PG test; don't provision a database for them.
     env.pop("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", None)
     return env
@@ -619,6 +688,16 @@ def test_a_full_pytest_run_refuses_to_queue_in_fail_mode(held, procs):
     run = procs(_full_run_collecting_nothing(), _pytest_env(held.dir, "fail"))
     assert run.drain() == pytest.ExitCode.USAGE_ERROR, run.seen
     assert any(f"holder-wt (pid {held.pid})" in line for line in run.seen), run.seen
+
+
+def test_a_full_pytest_run_takes_a_second_slot_beside_the_holder(held, procs):
+    # The same refusal as above, with the environment allowing two slots:
+    # conftest reads the count and the run takes slot 1 instead of queueing.
+    env = _pytest_env(held.dir, "fail")
+    env["PSEUDOLIFE_SUITE_SLOTS"] = "2"
+    run = procs(_full_run_collecting_nothing(), env)
+    assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
+    assert not any("full-suite lock held by" in line for line in run.seen), run.seen
 
 
 def test_a_full_pytest_run_waits_for_the_holder_then_runs(held, procs):

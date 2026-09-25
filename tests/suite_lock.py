@@ -1,4 +1,5 @@
-"""One full test suite at a time per machine, and CPU-only by default.
+"""One full test suite at a time per machine unless configured for more, and
+CPU-only by default.
 
 Measured 2026-09-23 on the maintainer's Windows host: one full CPU suite
 commits ~20 GB (the pytest process ~14.9 GB, its spawned test daemons
@@ -46,6 +47,13 @@ Configuration:
     VM of its own, so there is nothing to contend with, and a lock fault
     there would only turn into a silent hang until the job timeout.
     This file's tests still run both lock backends in CI.
+``PSEUDOLIFE_SUITE_SLOTS``, else a ``full-suite.slots`` file in the lock directory
+    How many full runs may hold the lock at once; 1 when neither is set.
+    The maintainer's Windows host runs 2 since 2026-09-25, after memory was
+    trimmed (paging to NVMe accepted). Slot 0 keeps the historical file
+    names, so runs from older code share it and never see a second slot;
+    waiters take free slots in arrival order, and notices name every holder.
+    A lowered count takes effect as the higher slots' holders finish.
 ``PSEUDOLIFE_SUITE_LOCK_DIR``
     Overrides ``~/.pseudolife-mcp/locks`` (the tests use a temp dir).
 ``PSEUDOLIFE_TEST_CUDA=1``
@@ -75,10 +83,12 @@ else:
 
 LOCK_ENV = "PSEUDOLIFE_SUITE_LOCK"
 LOCK_DIR_ENV = "PSEUDOLIFE_SUITE_LOCK_DIR"
+SLOTS_ENV = "PSEUDOLIFE_SUITE_SLOTS"
 CUDA_OPT_IN_ENV = "PSEUDOLIFE_TEST_CUDA"
 MODES = ("wait", "fail", "off")
 LOCK_FILE = "full-suite.lock"
 HOLDER_FILE = "full-suite.holder.json"
+SLOTS_FILE = "full-suite.slots"
 QUEUE_DIR = "full-suite.queue"
 TICKET_SUFFIX = ".ticket"
 
@@ -123,6 +133,17 @@ class SuiteLockBusy(RuntimeError):
 class HeldLock:
     file: IO[bytes]
     directory: Path
+    slot: int = 0
+
+
+def _slot_file(name: str, slot: int) -> str:
+    """Slot 0 keeps the historical names (``full-suite.lock``,
+    ``full-suite.holder.json``), so runs from older code share it; slot k
+    is ``full-suite.k.lock`` and ``full-suite.k.holder.json``."""
+    if slot == 0:
+        return name
+    stem, _, rest = name.partition(".")
+    return f"{stem}.{slot}.{rest}"
 
 
 def hide_cuda(environ) -> bool:
@@ -156,6 +177,26 @@ def lock_dir(environ) -> Path:
     if override:
         return Path(override)
     return Path.home() / ".pseudolife-mcp" / "locks"
+
+
+def slot_count(environ, directory: Path) -> int:
+    """How many full runs may hold the lock at once: ``PSEUDOLIFE_SUITE_SLOTS``,
+    else the ``full-suite.slots`` file in the lock directory, else 1."""
+    raw, source = environ.get(SLOTS_ENV), SLOTS_ENV
+    if raw is None:
+        path = directory / SLOTS_FILE
+        try:
+            raw, source = path.read_text(encoding="utf-8"), str(path)
+        except FileNotFoundError:
+            return 1
+    try:
+        count = int(raw.strip())
+    except ValueError:
+        count = 0
+    if count < 1:
+        raise ValueError(f"{source}={raw.strip()!r}: expected a whole number, "
+                         f"at least 1")
+    return count
 
 
 def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
@@ -317,25 +358,31 @@ def _queued_ahead(ticket: _Ticket) -> list[int]:
                            young=now - key[0] < TICKET_GRACE_NS)]
 
 
-def _describe_wait(record: dict | None, ahead: list[int]) -> str:
-    """What this run is queued behind: the holder, and earlier waiters."""
-    if not ahead:
-        return f"held by {describe_holder(record)}"
+def _describe_wait(records: list[dict | None], ahead: list[int]) -> str:
+    """What this run is queued behind: every slot's holder, and earlier
+    waiters. ``records`` has one entry per slot."""
+    if not ahead:  # every slot was tried, and every one is held
+        return "held by " + " and ".join(map(describe_holder, records))
     plural = "s" if len(ahead) > 1 else ""
     queued = (f"{len(ahead)} earlier arrival{plural} queued ahead "
               f"(pid{plural} {', '.join(map(str, ahead))}")
-    if record:
-        return f"held by {describe_holder(record)}, with {queued})"
-    # The lock is free, or between holders. A first waiter that stays first
-    # is stopped (a debugger, SIGSTOP, a Windows console mid-selection) and
-    # keeps its place until it resumes or ends.
-    return (f"with no recorded holder, {queued}; if pid {ahead[0]} never "
-            f"takes the lock, it is paused or hung: resume or end it)")
+    present = [record for record in records if record]
+    if len(present) < len(records):
+        # A slot is free, or between holders. A first waiter that stays first
+        # is stopped (a debugger, SIGSTOP, a Windows console mid-selection)
+        # and keeps its place until it resumes or ends.
+        queued += (f"; if pid {ahead[0]} never takes the lock, it is paused or "
+                   f"hung: resume or end it")
+    if present:
+        return ("held by " + " and ".join(map(describe_holder, present))
+                + f", with {queued})")
+    return f"with no recorded holder, {queued})"
 
 
-def read_holder(directory: Path) -> dict | None:
+def read_holder(directory: Path, slot: int = 0) -> dict | None:
+    path = directory / _slot_file(HOLDER_FILE, slot)
     try:
-        record = json.loads((directory / HOLDER_FILE).read_text(encoding="utf-8"))
+        record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return record if isinstance(record, dict) else None
@@ -353,25 +400,34 @@ def describe_holder(record: dict | None) -> str:
             f"since {since}")
 
 
-def acquire(directory: Path, mode: str, *, worktree: str,
+def acquire(directory: Path, mode: str, *, worktree: str, slots: int = 1,
             poll: float = 2.0, notice_every: float = 60.0,
             out: IO[str] | None = None) -> HeldLock:
-    """Take the lock in arrival order, waiting (``wait``) or raising
-    :class:`SuiteLockBusy` (``fail``) while another process holds it or
-    queued for it first."""
+    """Take one of ``slots`` lock slots in arrival order, waiting (``wait``)
+    or raising :class:`SuiteLockBusy` (``fail``) while every slot is held
+    or another process queued first."""
+    if slots < 1:
+        raise ValueError(f"slots={slots}: at least one is needed")
     out = out or sys.stderr
     directory.mkdir(parents=True, exist_ok=True)
     lock_path = directory / LOCK_FILE
-    handle = open(lock_path, "a+b")  # noqa: SIM115 — held until release()
+    handles: list[IO[bytes]] = []
+    slot = None
     waited_from = next_notice = None
     try:
+        for index in range(slots):
+            handles.append(open(directory / _slot_file(LOCK_FILE, index), "a+b"))  # noqa: SIM115
         ticket = _enqueue(directory / QUEUE_DIR)
         try:
             while True:
                 ahead = _queued_ahead(ticket)
-                if not ahead and _try_lock(handle):
-                    break
-                situation = _describe_wait(read_holder(directory), ahead)
+                if not ahead:
+                    slot = next((index for index, handle in enumerate(handles)
+                                 if _try_lock(handle)), None)
+                    if slot is not None:
+                        break
+                situation = _describe_wait(
+                    [read_holder(directory, index) for index in range(slots)], ahead)
                 if mode == "fail":
                     raise SuiteLockBusy(
                         f"full-suite lock {situation}; {LOCK_ENV}=fail refuses "
@@ -389,30 +445,36 @@ def acquire(directory: Path, mode: str, *, worktree: str,
         finally:
             _leave(ticket)  # taken, refused or interrupted: out of the queue
     except BaseException:  # refused, a lock error, or Ctrl-C while queued
-        handle.close()
+        for handle in handles:
+            handle.close()
         raise
+    for index, handle in enumerate(handles):
+        if index != slot:
+            handle.close()
     record = {
         "pid": os.getpid(),
         "worktree": str(worktree),
         "started": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
     try:
-        (directory / HOLDER_FILE).write_text(json.dumps(record), encoding="utf-8")
+        (directory / _slot_file(HOLDER_FILE, slot)).write_text(
+            json.dumps(record), encoding="utf-8")
     except OSError:
         pass  # the record is a courtesy to waiters; the lock is what counts
     if waited_from is not None:
         minutes, seconds = divmod(int(time.monotonic() - waited_from), 60)
-        print(f"full-suite lock acquired after waiting {minutes}m{seconds:02d}s",
-              file=out, flush=True)
-    return HeldLock(handle, directory)
+        which = f" (slot {slot + 1} of {slots})" if slots > 1 else ""
+        print(f"full-suite lock acquired{which} after waiting "
+              f"{minutes}m{seconds:02d}s", file=out, flush=True)
+    return HeldLock(handles[slot], directory, slot)
 
 
 def release(held: HeldLock) -> None:
     # Drop the record before unlocking, so it never describes a successor.
-    record = read_holder(held.directory)
+    record = read_holder(held.directory, held.slot)
     if record is not None and record.get("pid") == os.getpid():
         try:
-            (held.directory / HOLDER_FILE).unlink()
+            (held.directory / _slot_file(HOLDER_FILE, held.slot)).unlink()
         except OSError:
             pass  # a waiter is reading it; the next holder overwrites it
     _unlock(held.file)
@@ -444,8 +506,10 @@ def take_for_session(config, environ, tests_root: Path) -> HeldLock | None:
         return None
     directory = lock_dir(environ)
     try:
-        return acquire(directory, mode, worktree=str(tests_root.parent))
-    except SuiteLockBusy as exc:
+        slots = slot_count(environ, directory)
+        return acquire(directory, mode, worktree=str(tests_root.parent),
+                       slots=slots)
+    except (SuiteLockBusy, ValueError) as exc:  # busy in fail mode, or a bad count
         raise pytest.UsageError(str(exc)) from None
     except OSError as exc:
         raise pytest.UsageError(
