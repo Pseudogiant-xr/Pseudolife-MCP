@@ -5992,8 +5992,9 @@ class MemoryService(DreamOps):
             return out
 
     def episode_end(self, episode: str | None = None) -> dict[str, Any]:
-        """Close the caller's currently-open leaf episode and pop to its parent.
-        ``{}`` when nothing is open for the caller.
+        """Close the caller's currently-open sub-episode and pop to its parent.
+        ``{}`` when none is open for the caller; a session root is never
+        closed here, with or without a handle.
 
         ``episode`` (spec 2026-08-25): with a handle, ownership is the
         handle's subtree — strictly narrower than the shared connection key.
@@ -6037,6 +6038,13 @@ class MemoryService(DreamOps):
                 return {}
             if ep.session_key != session_id:
                 return {"closed": None, "reason": "no owned open session"}
+            if ep.parent_id is None and ep.session_key is not None:
+                # Only the session root is open: nothing to pop. The root
+                # belongs to the session lifecycle (SessionEnd, the shim's
+                # exit, the idle reaper), as on the handle path above; since
+                # 2026-09-25 a Claude Code shim's header names the root the
+                # hook registered.
+                return {}
             closed = em.end_leaf(session_key=session_id)
             self._persist_episodes()
             return self._episode_to_dict(closed) if closed is not None else {}
@@ -6520,7 +6528,8 @@ class MemoryService(DreamOps):
         client's project directory, so session titles default to a generic
         ``session - <date> <time>``; an agent that knows its project calls
         this to name the session. Opens a session episode if none is open yet
-        (so it can be called up front).
+        (so it can be called up front), reopening one the idle reaper closed
+        within the resume window instead of forking a second root.
         Returns ``{"ok": bool, "id": str, "title": str}`` or
         ``{"ok": False, "reason": ...}``."""
         title = (title or "").strip()
@@ -6548,6 +6557,10 @@ class MemoryService(DreamOps):
                  and e.ended_at is None),
                 None,
             )
+            if root is None:
+                # A root the idle reaper closed is reopened, as a store
+                # reopens it, rather than forked into a second one.
+                root = self._resume_closed_session_locked(session_id)
             if root is None:
                 root = em.start_session(title=title, session_key=session_id)
             else:

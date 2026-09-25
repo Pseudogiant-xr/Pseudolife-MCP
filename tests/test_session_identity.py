@@ -735,6 +735,50 @@ def test_episode_lifecycle_empty_handle_degrades_like_none(pg_service):
     svc.set_active_session(None)
 
 
+# ── Handle-less lifecycle calls on a hook-registered root (2026-09-25) ──────
+# Since the stdio shim sends Claude Code's own session id as X-PL-Session, a
+# handle-less lifecycle call resolves to the root the SessionStart hook
+# registered, not to a throwaway shim root. Neither may fork that root nor
+# close it.
+
+
+def test_session_title_after_a_reap_reopens_the_session_root(pg_service):
+    """A title set without a handle after the idle reaper closed the root
+    reopens that root (as a store would) instead of opening a second one."""
+    svc = pg_service
+    started = svc.episode_start_session("title-key", "session - 2026-09-25 10:00")
+    svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 10_000)
+    tok = set_writer_context("w", "title-key")
+    try:
+        out = svc.set_session_title("PseudoLife-MCP - one root per session")
+    finally:
+        reset_writer_context(tok)
+    assert out == {"ok": True, "id": started["id"],
+                   "title": "PseudoLife-MCP - one root per session"}
+    with svc._lock:
+        roots = [e for e in svc._cms.episodes.episodes.values()
+                 if e.session_key == "title-key" and e.parent_id is None]
+    assert [(e.id, e.ended_at) for e in roots] == [(started["id"], None)]
+
+
+def test_handleless_episode_end_pops_sub_episodes_but_never_the_session_root(
+        pg_service):
+    """memory_episode_end closes the current sub-episode; the session root
+    belongs to the hook lifecycle and the idle reaper, with or without a
+    handle."""
+    svc = pg_service
+    root = svc.episode_start_session("pop-key", "session - 2026-09-25 10:00")
+    tok = set_writer_context("w", "pop-key")
+    try:
+        sub = svc.episode_start("a sub-task")
+        assert svc.episode_end().get("id") == sub["id"]
+        assert svc.episode_end() == {}
+    finally:
+        reset_writer_context(tok)
+    with svc._lock:
+        assert svc._cms.episodes.episodes[root["id"]].ended_at is None
+
+
 def test_transport_session_fallback_retired(monkeypatch):
     from pseudolife_memory import writer_context as wc
     monkeypatch.setattr(wc, "_http_request_headers",
