@@ -690,7 +690,7 @@ describe_legacy_hooks() {  # $1 = state
         removed)  echo "[x] Old hooks            removed from ~/.claude/settings.json (backup: $LEGACY_CLAUDE_BACKUP)" ;;
         kept)     echo "[!] Old hooks            still in ~/.claude/settings.json, so they run twice - rerun with --claude-legacy-hooks remove" ;;
         inactive) echo "[-] Old hooks            kept in ~/.claude/settings.json - the plugin is not enabled for all projects" ;;
-        error)    echo "[!] Old hooks            not checked - remove them by hand (plugin/README.md, Migrating from installer hook wiring)" ;;
+        error)    echo "[!] Old hooks            not removed (see the error above) - remove them by hand (plugin/README.md, Migrating from installer hook wiring)" ;;
     esac
 }
 # <<< claude legacy hooks <<<

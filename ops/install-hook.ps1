@@ -37,8 +37,9 @@ if (-not $SettingsPath) {
     }
 }
 
-# Board setup stays separate from the daemon-backed memory briefing; the
-# discipline line is the every-turn reminder (see the UserPromptSubmit step).
+# The unconditional check-in echo older installers wrote (install mode
+# replaces it, -RemoveLegacy removes it), and the every-turn discipline line
+# (see the UserPromptSubmit step). Both are shared with -RemoveLegacy.
 $coordinationLine = "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
 $disciplineLine = "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
 
@@ -59,11 +60,14 @@ if ($RemoveLegacy) {
     # substring match would also delete a user's own command that merely
     # mentions one (ops/setup-codex-hooks.py applies the same rule). The
     # 2026-08-28..09-05 discipline line ended "-> memory_outcome."; derived,
-    # so this file keeps one copy of the line (test_plugin_packaging.py).
+    # so this file keeps one copy of the line (test_plugin_packaging.py). The
+    # check-in was an unconditional echo on 2026-09-24, then the briefing
+    # command with --coordination ($coordinationCommand below).
+    $briefings = @("pseudolife-mcp briefing --hook-json",
+        "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json")
     $shipped = [ordered]@{
-        SessionStart = @("pseudolife-mcp briefing --hook-json",
-            "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json",
-            "echo '$coordinationLine'", "pseudolife-mcp episode-start")
+        SessionStart = @($briefings + @($briefings | ForEach-Object { "$_ --coordination" }) +
+            @("echo '$coordinationLine'", "pseudolife-mcp episode-start"))
         UserPromptSubmit = @("echo '$disciplineLine'",
             "echo '$($disciplineLine -replace ' with used_ids\.$', '.')'")
         SessionEnd = @("pseudolife-mcp episode-end")
@@ -130,9 +134,16 @@ if ($RemoveLegacy) {
         Write-Output "No settings file at $SettingsPath - nothing to remove."
         exit 3
     }
+    function Assert-UniqueKeys($node) {
+        # A JsonObject rejects duplicate keys only when first read, so walk
+        # it all here: a duplicate means the file is left to the user.
+        if ($node -is [System.Text.Json.Nodes.JsonObject]) { foreach ($kv in $node) { Assert-UniqueKeys $kv.Value } }
+        elseif ($node -is [System.Text.Json.Nodes.JsonArray]) { foreach ($item in $node) { Assert-UniqueKeys $item } }
+    }
     try {
         $raw = [IO.File]::ReadAllText($SettingsPath)
         $root = [System.Text.Json.Nodes.JsonNode]::Parse($raw)
+        Assert-UniqueKeys $root
     } catch {
         Write-Output "Could not read ${SettingsPath}: $($_.Exception.InnerException.Message ?? $_.Exception.Message)"
         exit 1
@@ -199,21 +210,35 @@ if ($RemoveLegacy) {
         }
     }
 
-    $stamp = Get-Date -Format yyyyMMdd-HHmmss
-    $backup = "$SettingsPath.bak-$stamp"
-    for ($n = 1; Test-Path -LiteralPath $backup; $n++) { $backup = "$SettingsPath.bak-$stamp-$n" }
-    Copy-Item -LiteralPath $SettingsPath -Destination $backup
-    Write-Output "Backed up -> $backup"
     $options = [System.Text.Json.JsonSerializerOptions]::new()
     $options.WriteIndented = $true
     # Keep the user's text as written: the default encoder escapes quotes,
-    # angle brackets and every non-ASCII character.
+    # angle brackets and every non-ASCII character. Characters outside the
+    # Basic Multilingual Plane (emoji) still come out as \u pairs, which are
+    # the same JSON string.
     $options.Encoder = [System.Text.Encodings.Web.JavaScriptEncoder]::UnsafeRelaxedJsonEscaping
     $text = $root.ToJsonString($options).Replace("`r`n", "`n") + "`n"
     if ($raw.Contains("`r`n")) { $text = $text.Replace("`n", "`r`n") }
-    $tmp = "$SettingsPath.tmp-pseudolife"
-    [IO.File]::WriteAllText($tmp, $text, [Text.UTF8Encoding]::new($false))
-    [IO.File]::Replace($tmp, $SettingsPath, [NullString]::Value)
+    # Write through a symlink (dotfile setups link settings.json into a
+    # repo), as install mode does, rather than replacing the link with a file.
+    $target = $SettingsPath
+    $link = [IO.File]::ResolveLinkTarget($SettingsPath, $true)
+    if ($link) { $target = $link.FullName }
+    $tmp = $null
+    try {
+        $stamp = Get-Date -Format yyyyMMdd-HHmmss
+        $backup = "$SettingsPath.bak-$stamp"
+        for ($n = 1; Test-Path -LiteralPath $backup; $n++) { $backup = "$SettingsPath.bak-$stamp-$n" }
+        Copy-Item -LiteralPath $SettingsPath -Destination $backup
+        Write-Output "Backed up -> $backup"
+        $tmp = "$target.$([guid]::NewGuid().ToString('N')).tmp-pseudolife"
+        [IO.File]::WriteAllText($tmp, $text, [Text.UTF8Encoding]::new($false))
+        [IO.File]::Replace($tmp, $target, [NullString]::Value)
+    } catch {
+        if ($tmp -and (Test-Path -LiteralPath $tmp)) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        Write-Output "Could not write ${SettingsPath}: $($_.Exception.InnerException.Message ?? $_.Exception.Message)"
+        exit 1
+    }
     Write-Output "Removed $($found.Count) installer-written hook entries from $SettingsPath."
     exit 0
 }

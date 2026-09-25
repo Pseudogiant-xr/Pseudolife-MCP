@@ -138,13 +138,15 @@ the exact commands the installers wrote (`--claude-legacy-hooks remove` /
 on their own, `--dry-run` / `-DryRun` to list first). An entry you edited is
 listed for review and left alone. By hand:
 
-1. Delete the `pseudolife-mcp briefing` SessionStart entry from
-   `~/.claude/settings.json`
+1. Delete the `pseudolife-mcp briefing` SessionStart entries from
+   `~/.claude/settings.json`: the briefing, and the `--coordination`
+   check-in that installers write since 2026-09-25
 2. Delete the `mid-session discipline` UserPromptSubmit entry from
    `~/.claude/settings.json` (the plugin echoes the same line — keeping
    both injects it twice per turn)
-3. Remove any installer-added `Pseudolife coordination:` SessionStart entry
-   from `~/.claude/settings.json`; the plugin supplies its own check-in hook.
+3. Remove any installer-added `Pseudolife coordination:` SessionStart echo
+   (2026-09-24 installs) from `~/.claude/settings.json`; the plugin supplies
+   its own check-in hook.
    Keep the full standing memory policy if you rely on its detailed guidance.
 4. Delete any `pseudolife-mcp episode-start` SessionStart or
    `pseudolife-mcp episode-end` SessionEnd entry (installs from before

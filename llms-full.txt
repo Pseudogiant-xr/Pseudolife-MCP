@@ -5447,7 +5447,7 @@ offers to remove them once the plugin is installed and enabled for all
 projects (`--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove` does
 it unattended), and `ops/install-hook.* --remove-legacy` does the same by
 hand. Only the exact entries the installers wrote are removed, after a
-backup; anything else is listed for review.
+backup; an edited copy of one is listed for review and kept.
 
 With the coordination adapter enabled, the same UserPromptSubmit hook also
 prints the session's coordination digest — pending addressed mail, rendered

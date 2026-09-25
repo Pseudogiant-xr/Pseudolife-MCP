@@ -82,21 +82,25 @@ if [ -n "$REMOVE_LEGACY" ]; then
   LEGACY_UPS_COMMAND="echo '${DISCIPLINE_LINE% with used_ids.}.'"
   rc=0
   SETTINGS_PATH="$SETTINGS_PATH" DRY_RUN="$DRY_RUN" UPS_COMMAND="$UPS_COMMAND" \
-    LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" COORDINATION_COMMAND="$COORDINATION_COMMAND" \
+    LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" COORDINATION_LINE="$COORDINATION_LINE" \
     "$PYBIN" - <<'PY' || rc=$?
-import json, os, shutil, sys, time
+import json, os, shutil, stat, sys, tempfile, time
 
 sys.stdout.reconfigure(errors="replace")
 path = os.environ["SETTINGS_PATH"]
 plugin_id = "pseudolife-memory@pseudolife-mcp"
 # Exact commands this script and the installers ever wrote, by event. A
 # substring match would also delete a user's own command that merely
-# mentions one (ops/setup-codex-hooks.py applies the same rule).
+# mentions one (ops/setup-codex-hooks.py applies the same rule). The
+# check-in was an unconditional echo on 2026-09-24, then the briefing
+# command with --coordination (COORDINATION_COMMAND above).
+briefings = ("pseudolife-mcp briefing --hook-json",
+             "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json")
 shipped = {
     "SessionStart": {
-        "pseudolife-mcp briefing --hook-json",
-        "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json",
-        os.environ["COORDINATION_COMMAND"],
+        *briefings,
+        *(f"{b} --coordination" for b in briefings),
+        f"echo '{os.environ['COORDINATION_LINE']}'",
         "pseudolife-mcp episode-start",
     },
     "UserPromptSubmit": {os.environ["UPS_COMMAND"], os.environ["LEGACY_UPS_COMMAND"]},
@@ -107,10 +111,25 @@ needles = ("pseudolife-mcp briefing", "mid-session discipline", "Pseudolife coor
 
 
 def is_shipped(event, hook):
+    # Only strings can be ours; a list or object there is someone else's.
     known = shipped.get(event, ())
-    return (isinstance(hook, dict) and hook.get("type") == "command"
-            and hook.get("command") in known
-            and hook.get("commandWindows", hook.get("command")) in known)
+    if not isinstance(hook, dict) or hook.get("type") != "command":
+        return False
+    command = hook.get("command")
+    windows = hook.get("commandWindows", command)
+    return (isinstance(command, str) and command in known
+            and isinstance(windows, str) and windows in known)
+
+
+def unique_keys(pairs):
+    # A duplicate would be silently dropped on rewrite (.NET refuses the
+    # object outright): leave such a file to the user.
+    seen = set()
+    for key, _ in pairs:
+        if key in seen:
+            raise ValueError(f"duplicate key {key!r}")
+        seen.add(key)
+    return dict(pairs)
 
 
 def show(event, command):
@@ -141,7 +160,7 @@ if not os.path.exists(path):
 try:
     with open(path, "rb") as f:
         raw = f.read()
-    obj = json.loads(raw.decode("utf-8-sig"))
+    obj = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique_keys)
 except (OSError, ValueError) as exc:
     print(f"Could not read {path}: {exc}", file=sys.stderr)
     sys.exit(1)
@@ -196,21 +215,35 @@ for event in list(hooks):
         kept_groups.append(group)
     hooks[event] = kept_groups
 
-backup = f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
-n = 1
-while os.path.exists(backup):
-    backup = f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}-{n}"
-    n += 1
-shutil.copy2(path, backup)
-print(f"Backed up -> {backup}")
 text = json.dumps(obj, indent=2, ensure_ascii=False) + "\n"
 if b"\r\n" in raw:
     text = text.replace("\n", "\r\n")
-tmp = path + ".tmp-pseudolife"
-with open(tmp, "w", encoding="utf-8", newline="") as f:
-    f.write(text)
-shutil.copymode(path, tmp)
-os.replace(tmp, path)
+# Write through a symlink (dotfile setups link settings.json into a repo),
+# as install mode does, rather than replacing the link with a file.
+target = os.path.realpath(path)
+tmp = None
+try:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup, n = f"{path}.bak-{stamp}", 1
+    while os.path.exists(backup):
+        backup, n = f"{path}.bak-{stamp}-{n}", n + 1
+    shutil.copy2(path, backup)
+    print(f"Backed up -> {backup}")
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target),
+                               prefix=os.path.basename(target) + ".", suffix=".tmp-pseudolife")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    shutil.copymode(target, tmp)
+    os.replace(tmp, target)
+except OSError as exc:
+    if tmp and os.path.exists(tmp):
+        try:
+            os.chmod(tmp, stat.S_IREAD | stat.S_IWRITE)
+            os.remove(tmp)
+        except OSError:
+            pass
+    print(f"Could not write {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
 print(f"Removed {len(found)} installer-written hook entries from {path}.")
 PY
   exit "$rc"

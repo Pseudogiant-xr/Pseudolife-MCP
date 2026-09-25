@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -53,7 +54,11 @@ OLD_DISCIPLINE = (
 
 BRIEFING = "pseudolife-mcp briefing --hook-json"
 DOCKER_BRIEFING = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
+# The coordination check-in: an unconditional echo from 2026-09-24, then
+# (#367, 2026-09-25) the briefing command with --coordination.
 COORD_CMD = f"echo '{COORDINATION}'"
+GATED_COORD = BRIEFING + " --coordination"
+DOCKER_GATED_COORD = DOCKER_BRIEFING + " --coordination"
 UPS_CMD = f"echo '{DISCIPLINE}'"
 OLD_UPS_CMD = f"echo '{OLD_DISCIPLINE}'"
 EPISODE_START = "pseudolife-mcp episode-start"
@@ -70,7 +75,7 @@ USER_PROMPT = _hook("echo user-prompt")
 USER_TEXT = "bär <x> & 'y' -> z"
 
 
-def _upgraded_settings(ups: str = UPS_CMD) -> dict:
+def _upgraded_settings(ups: str = UPS_CMD, coord: str = COORD_CMD) -> dict:
     """What pre-plugin installs left behind, beside the user's own hooks."""
     return {
         "model": "opus",
@@ -80,7 +85,7 @@ def _upgraded_settings(ups: str = UPS_CMD) -> dict:
             "SessionStart": [
                 {"hooks": [USER_START]},
                 {"hooks": [_hook(DOCKER_BRIEFING)]},
-                {"hooks": [_hook(COORD_CMD)]},
+                {"hooks": [_hook(coord)]},
                 # The first Windows install-hook also wrote shell=bash, and a
                 # user may have moved our hook into a group of their own.
                 {"matcher": "startup",
@@ -198,11 +203,14 @@ def _out(proc) -> str:
 
 # ── install-hook --remove-legacy ────────────────────────────────────────────
 
-@pytest.mark.parametrize("ups", [UPS_CMD, OLD_UPS_CMD], ids=["current", "pre-2026-09-05"])
+@pytest.mark.parametrize("ups, coord", [
+    (UPS_CMD, COORD_CMD), (OLD_UPS_CMD, COORD_CMD),
+    (UPS_CMD, DOCKER_GATED_COORD), (UPS_CMD, GATED_COORD),
+], ids=["echo-checkin", "pre-2026-09-05-discipline", "gated-checkin-docker", "gated-checkin"])
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
-def test_removes_exactly_the_shipped_entries_after_a_backup(variant, ups, tmp_path):
+def test_removes_exactly_the_shipped_entries_after_a_backup(variant, ups, coord, tmp_path):
     env = _env(variant, tmp_path)
-    settings = _upgraded_settings(ups)
+    settings = _upgraded_settings(ups, coord)
     path = _write_home(Path(env["HOME"]), settings)
     original = path.read_bytes()
     proc = _run_hook(variant, env, path)
@@ -325,6 +333,96 @@ def test_unreadable_settings_are_an_error_not_a_rewrite(variant, tmp_path):
     assert proc.returncode == 1, _out(proc)
     assert "could not read" in _out(proc).lower()
     assert path.read_text(encoding="utf-8") == '{"hooks": {' and _backups(path) == []
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_non_string_commands_are_kept_not_a_crash(variant, tmp_path):
+    """A list or object where a command string belongs is not ours: it is
+    kept, and the entries beside it are still removed (reviewer finding,
+    2026-09-25: the bash set lookup raised on unhashable values)."""
+    listed = {"type": "command", "command": ["bash", "-c", "x"]}
+    windows_list = _hook(BRIEFING, commandWindows=["pwsh", "-File", "x.ps1"])
+    env = _env(variant, tmp_path)
+    path = _write_home(Path(env["HOME"]), {
+        "enabledPlugins": {PLUGIN_ID: True},
+        "hooks": {"SessionStart": [{"hooks": [_hook(DOCKER_BRIEFING), listed]},
+                                   {"hooks": [windows_list]}]}})
+    proc = _run_hook(variant, env, path)
+    assert proc.returncode == 0, _out(proc)
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["hooks"]["SessionStart"] == [{"hooks": [listed]}, {"hooks": [windows_list]}]
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_duplicate_keys_are_refused_not_rewritten(variant, tmp_path):
+    """Python keeps the last duplicate and .NET refuses the object, so a
+    rewrite would drop the other value in one shell and fail in the other.
+    Both refuse, and the file stays as the user wrote it."""
+    env = _env(variant, tmp_path)
+    path = _write_home(Path(env["HOME"]), None)
+    text = json.dumps(_upgraded_settings(), indent=2).replace(
+        '"model": "opus",', '"model": "opus",\n  "model": "sonnet",', 1)
+    path.write_text(text, encoding="utf-8")
+    proc = _run_hook(variant, env, path)
+    assert proc.returncode == 1, _out(proc)
+    assert "could not read" in _out(proc).lower()
+    assert path.read_text(encoding="utf-8") == text and _backups(path) == []
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_text_outside_the_basic_plane_keeps_its_value(variant, tmp_path):
+    """The rewrite never changes a value. bash also keeps an emoji
+    literal; .NET's encoder writes it as a \\u surrogate pair, which is the
+    same JSON string."""
+    env = _env(variant, tmp_path)
+    settings = _upgraded_settings()
+    settings["statusLine"] = {"type": "command", "command": "echo '\U0001F9E0 memory'"}
+    path = _write_home(Path(env["HOME"]), settings)
+    proc = _run_hook(variant, env, path)
+    assert proc.returncode == 0, _out(proc)
+    raw = path.read_text(encoding="utf-8")
+    assert json.loads(raw) == _cleaned(settings)
+    if variant[0] == "bash":
+        assert "\U0001F9E0" in raw
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="a read-only destination blocks a rename only on Windows")
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_a_failed_write_leaves_the_file_and_no_temp_behind(variant, tmp_path):
+    env = _env(variant, tmp_path)
+    path = _write_home(Path(env["HOME"]), _upgraded_settings())
+    original = path.read_bytes()
+    path.chmod(stat.S_IREAD)
+    try:
+        proc = _run_hook(variant, env, path)
+    finally:
+        path.chmod(stat.S_IREAD | stat.S_IWRITE)
+    out = _out(proc)
+    assert proc.returncode == 1, out
+    assert "could not write" in out.lower()
+    assert path.read_bytes() == original
+    assert list(path.parent.glob("*.tmp-pseudolife*")) == []
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_a_symlinked_settings_file_stays_a_symlink(variant, tmp_path):
+    """Dotfile setups link ~/.claude/settings.json into a repository;
+    install mode writes through the link, and so does the removal."""
+    env = _env(variant, tmp_path)
+    home = Path(env["HOME"])
+    path = _write_home(home, None)
+    real = home / "dotfiles" / "settings.json"
+    real.parent.mkdir()
+    real.write_text(json.dumps(_upgraded_settings(), indent=2) + "\n", encoding="utf-8")
+    try:
+        path.symlink_to(real)
+    except OSError:
+        pytest.skip("this host cannot create symlinks")
+    proc = _run_hook(variant, env, path)
+    assert proc.returncode == 0, _out(proc)
+    assert path.is_symlink()
+    assert json.loads(real.read_text(encoding="utf-8")) == _cleaned(_upgraded_settings())
 
 
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
@@ -502,6 +600,8 @@ def test_unreadable_settings_are_reported_not_fatal(variant, tmp_path):
     assert state == "error"
     assert path.read_text(encoding="utf-8") == '{"hooks": {'
     assert line.startswith("[!] Old hooks") and "plugin/README.md" in line
+    # The check may have run and only the write failed: say what is known.
+    assert "not removed" in line and "not checked" not in line
 
 
 # ── wiring ──────────────────────────────────────────────────────────────────

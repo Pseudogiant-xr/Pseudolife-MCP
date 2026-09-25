@@ -672,7 +672,7 @@ function Describe-LegacyHooks($state) {
         "removed" { "[x] Old hooks            removed from ~/.claude/settings.json (backup: $($script:legacyClaudeBackup))" }
         "kept" { "[!] Old hooks            still in ~/.claude/settings.json, so they run twice - rerun with -ClaudeLegacyHooks remove" }
         "inactive" { "[-] Old hooks            kept in ~/.claude/settings.json - the plugin is not enabled for all projects" }
-        "error" { "[!] Old hooks            not checked - remove them by hand (plugin/README.md, Migrating from installer hook wiring)" }
+        "error" { "[!] Old hooks            not removed (see the error above) - remove them by hand (plugin/README.md, Migrating from installer hook wiring)" }
     }
 }
 # <<< claude legacy hooks <<<

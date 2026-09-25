@@ -22,7 +22,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The removal is `ops/install-hook.sh --remove-legacy` /
   `ops/install-hook.ps1 -RemoveLegacy` (`--dry-run` / `-DryRun` lists
   only), usable on its own. It removes only the exact commands the
-  installers shipped (both briefing commands, the coordination line, both
+  installers shipped (both briefing commands, both coordination hooks: the
+  2026-09-24 echo and the gated `--coordination` briefing, both
   discipline-line versions, and the pre-2026-07-14 episode hooks), per
   event, as `ops/setup-codex-hooks.py` already does for Codex. An edited
   or compound command that merely mentions one is listed for review and
@@ -32,8 +33,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `installed_plugins.json` records a user-scope install and
   `enabledPlugins` enables the plugin in the same `settings.json`: a
   project-scoped or disabled plugin leaves these hooks as the only ones
-  that run. It writes a timestamped backup first and keeps the file's
-  text and line endings.
+  that run. It writes a timestamped backup first, writes through a
+  symlinked `settings.json`, keeps the line endings and never changes a
+  value (the PowerShell writer spells emoji as `\u` pairs). A file with
+  duplicate keys is refused and left alone, as is a hook whose command is
+  not a string.
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
