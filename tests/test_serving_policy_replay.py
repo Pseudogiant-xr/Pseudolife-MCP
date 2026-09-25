@@ -191,6 +191,49 @@ def test_digest_comparison_ignores_filtered_searches():
     assert rm["digest_rows"] == 0
 
 
+# ── abstention ───────────────────────────────────────────────────────────
+
+def _scored(eid, scores, dense, facts):
+    ev = _ev(eid, n=len(scores), scores=scores)
+    ev.rows = [spr.Row(r.entry_id, r.rank, r.score, False, d)
+               for r, d in zip(ev.rows, dense)]
+    ev.fact_scores = list(facts)
+    return ev
+
+
+def test_abstention_prices_the_flag_the_way_the_mcp_layer_sets_it():
+    evs = [
+        _scored(1, [], [], []),                       # nothing at all
+        _scored(2, [], [], [0.5]),                    # facts only
+        _scored(3, [0.8, 0.6], [0.62, 0.41], []),     # a strong entry
+        _scored(4, [0.55], [0.55], [0.3]),            # weak entry + fact
+    ]
+    evs[3].used = {evs[3].rows[0].entry_id}           # ...that was used
+    absent = _scored(3660, [0.49], [0.49], [0.58])
+    rep = spr.abstention_report(evs, [absent])
+    assert (rep["served_no_entries"], rep["served_nothing"]) == (2, 1)
+    cells = {(g["search_confidence_floor"], g["guard_min_score"]): g
+             for g in rep["floor_grid"]}
+    grid = {k: g["flagged"] for k, g in cells.items()}
+    # The old recommended pair drops every fact under 0.65, so a weak
+    # search flags even when facts were served.
+    assert grid[(0.70, 0.65)] == 3
+    assert grid[(0.70, 0.2)] == 1      # the fact at 0.3/0.5 suppresses it
+    assert grid[(0.50, 0.2)] == 1      # 0.55 clears a 0.5 floor
+    # The floor reads the FUSED served score: a 0.8 fused hit is never
+    # flagged at 0.70 even though its dense cosine is 0.62.
+    assert not spr._flagged(evs[2], 0.70, 0.65)
+    # Flagging a search whose hit was then used is a false abstention.
+    assert cells[(0.70, 0.65)]["flagged_labelled"] == 1
+    assert cells[(0.70, 0.2)]["flagged_labelled"] == 0
+    assert cells[(0.70, 0.65)]["absent_probes_flagged"] == 1
+    assert cells[(0.70, 0.2)]["absent_probes_flagged"] == 0
+    assert rep["absent_answer_probes"]["top_dense_cosine"] == [0.49]
+    assert rep["top_dense_cosine"]["searches"] == 2
+    assert rep["lowest_served_dense_cosine"]["below_0.30"] == 0
+    assert (rep["served_facts"], rep["served_facts_below_0.65"]) == (2, 2)
+
+
 # ── privacy + read-only ──────────────────────────────────────────────────
 
 def test_the_report_carries_aggregates_only():
@@ -244,8 +287,9 @@ class _FakeConn:
         if "FROM retrieval_events" in sql and "retrieval_uses" not in sql:
             return _FakeCursor([(1, S1, T0, False, [
                 {"entry_id": 7, "rank": 0, "score": 0.8,
-                 "components": {"supersession_mult": 0.55}}],
-                {"top_k": 8, "filters": {"sources": None}})])
+                 "components": {"supersession_mult": 0.55, "dense": 0.61}}],
+                {"top_k": 8, "filters": {"sources": None}},
+                [{"entity_norm": "e", "score": 0.52}])])
         if "FROM retrieval_uses" in sql:
             return _FakeCursor([(1, 7)])
         if "FROM entries" in sql:
@@ -272,6 +316,8 @@ def test_fetch_reads_inside_a_read_only_transaction(monkeypatch):
     assert conn.sql[1] == "SHOW transaction_read_only"
     assert conn.sql[-1] == "ROLLBACK"
     assert events[0].used == {7} and events[0].rows[0].superseded
+    assert events[0].rows[0].dense == 0.61
+    assert events[0].fact_scores == [0.52]
     assert entries[7] == spr.EntryInfo("status", 42)
 
 

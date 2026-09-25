@@ -162,8 +162,9 @@ class Row:
 
     entry_id: int
     rank: int
-    score: float | None
+    score: float | None        # the fused score as served
     superseded: bool           # superseded AT SERVE TIME (logged multiplier)
+    dense: float | None = None  # bi-encoder cosine; None = not a dense hit
 
 
 @dataclass
@@ -176,6 +177,9 @@ class Event:
     sources_filter: list[str] | None
     rows: list[Row] = field(default_factory=list)
     used: set[int] = field(default_factory=set)   # entry ids labelled used
+    # Scores of the cortex facts served above the entries (schema v34),
+    # all of them at or above the guard in force (0.2 over this window).
+    fact_scores: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -587,6 +591,128 @@ def digest_presence(events: list[Event],
     }
 
 
+def quantile(values: list[float], q: float) -> float | None:
+    """Linear-interpolated quantile (the ``capture_metrics`` convention)."""
+    if not values:
+        return None
+    vs = sorted(values)
+    idx = q * (len(vs) - 1)
+    lo, hi = int(idx), min(int(idx) + 1, len(vs) - 1)
+    return vs[lo] + (vs[hi] - vs[lo]) * (idx - lo)
+
+
+# (search_confidence_floor, cortex guard) pairs to price. (0.70, 0.65) is
+# the pair docs recommended from the 2026-06-19 sweep on the old MiniLM
+# embedder; the others relax one knob at a time.
+ABSTENTION_GRID = ((0.70, 0.65), (0.60, 0.65), (0.50, 0.65), (0.70, 0.2),
+                   (0.50, 0.2), (0.40, 0.2))
+
+# The only known-absent queries on the live log: the 2026-09-23 review's
+# four in-domain absent-answer probes (plausible questions about this
+# project whose answer is not in the bank) and its off-domain zebra probe.
+# Tiny, and excluded from every agent statistic above; reported only as the
+# other side of a floor's trade-off.
+ABSENT_ANSWER_PROBES = (3660, 3661, 3662, 3663)
+OFF_DOMAIN_PROBES = (3697,)
+
+
+def _flagged(e: Event, floor: float, guard: float) -> bool:
+    """Would ``low_confidence`` fire on this logged search under a floor
+    and guard? The service half compares the top served (fused) score, not
+    the dense cosine; the cortex half keeps facts at or above the guard."""
+    top = max((r.score for r in e.rows if r.score is not None), default=None)
+    weak = top is None or top < floor
+    return weak and not any(f >= guard for f in e.fact_scores)
+
+
+def abstention_report(events: list[Event],
+                      probes: Iterable[Event] = ()) -> dict[str, Any]:
+    """When ``low_confidence`` fires on real agent searches, and what a
+    score floor would do.
+
+    The MCP flag is ``service low_confidence AND no cortex fact``; the
+    service half is ``no entries`` at the shipped floor 0 and ``top served
+    score < floor`` above it (``memory/abstain.py``), and the cortex half
+    keeps only facts scoring at or above the guard. Both halves are in the
+    log: the served entry scores and the served facts' scores. Facts were
+    logged at the guard in force (0.2), so only guards at or above it
+    replay. ``flagged_labelled`` counts searches whose hits the agent then
+    reported using: flagging those is a false abstention. ``probes`` are
+    known-absent searches (``ABSENT_ANSWER_PROBES``), where flagging is
+    the point."""
+    n = len(events)
+    probes = list(probes)
+    nothing = no_entries = 0
+    top_dense: list[float] = []
+    min_dense: list[float] = []
+    fact_scores: list[float] = []
+    grid = Counter()
+    grid_labelled = Counter()
+    labelled = sum(1 for e in events if e.used)
+    for e in events:
+        if not e.rows:
+            no_entries += 1
+            nothing += not e.fact_scores
+        fact_scores.extend(e.fact_scores)
+        dense = [r.dense for r in e.rows if r.dense is not None]
+        if dense:
+            top_dense.append(max(dense))
+            min_dense.append(min(dense))
+        for floor, guard in ABSTENTION_GRID:
+            if _flagged(e, floor, guard):
+                grid[(floor, guard)] += 1
+                grid_labelled[(floor, guard)] += bool(e.used)
+    return {
+        "searches": n,
+        "served_no_entries": no_entries,
+        "served_nothing": nothing,
+        "note": ("served_nothing = no entries AND no cortex facts, the only "
+                 "case low_confidence fires at the shipped floor 0"),
+        "top_dense_cosine": {
+            "searches": len(top_dense),
+            **{f"p{int(q * 100):02d}": _r(quantile(top_dense, q))
+               for q in (0.05, 0.10, 0.25, 0.50)},
+            "below_0.40": sum(1 for v in top_dense if v < 0.40),
+            "below_0.45": sum(1 for v in top_dense if v < 0.45),
+        },
+        "lowest_served_dense_cosine": {
+            "searches": len(min_dense),
+            **{f"p{int(q * 100):02d}": _r(quantile(min_dense, q))
+               for q in (0.01, 0.05, 0.50)},
+            "below_0.30": sum(1 for v in min_dense if v < 0.30),
+        },
+        "labelled_searches": labelled,
+        "floor_grid": [
+            {"search_confidence_floor": floor, "guard_min_score": guard,
+             "flagged": grid[(floor, guard)],
+             "flagged_share": _r(_ratio(grid[(floor, guard)], n)),
+             "flagged_labelled": grid_labelled[(floor, guard)],
+             "flagged_labelled_share": _r(_ratio(
+                 grid_labelled[(floor, guard)], labelled)),
+             "absent_probes_flagged": sum(
+                 _flagged(p, floor, guard) for p in probes
+                 if p.id in ABSENT_ANSWER_PROBES),
+             "off_domain_probes_flagged": sum(
+                 _flagged(p, floor, guard) for p in probes
+                 if p.id in OFF_DOMAIN_PROBES)}
+            for floor, guard in ABSTENTION_GRID],
+        "absent_answer_probes": {
+            "found": sum(1 for p in probes if p.id in ABSENT_ANSWER_PROBES),
+            "top_dense_cosine": sorted(
+                _r(max((r.dense for r in p.rows if r.dense is not None),
+                       default=0.0))
+                for p in probes if p.id in ABSENT_ANSWER_PROBES),
+            "top_fact_score": sorted(
+                _r(max(p.fact_scores, default=0.0))
+                for p in probes if p.id in ABSENT_ANSWER_PROBES),
+        },
+        "served_facts": len(fact_scores),
+        "served_facts_below_0.65": sum(1 for f in fact_scores if f < 0.65),
+        "served_facts_below_0.65_share": _r(_ratio(
+            sum(1 for f in fact_scores if f < 0.65), len(fact_scores))),
+    }
+
+
 def top_k_distribution(events: list[Event]) -> list[dict[str, Any]]:
     c = Counter(e.top_k for e in events)
     n = len(events)
@@ -633,6 +759,9 @@ def build_report(events: list[Event], entries: dict[int, EntryInfo], *,
                    "entry_text_cap": text_cap,
                    "bootstrap_reps": reps, "bootstrap_seed": seed},
         "requested_top_k": top_k_distribution(agent),
+        "abstention": abstention_report(agent, [
+            e for e in events
+            if e.id in ABSENT_ANSWER_PROBES + OFF_DOMAIN_PROBES]),
         "strata": {},
         "digests": {
             "presence": digest_presence(agent, entries),
@@ -664,7 +793,7 @@ def build_report(events: list[Event], entries: dict[int, EntryInfo], *,
 
 _EVENTS_SQL = """
 SELECT id, session_id, created_at, (query_text = %(warmup)s) AS is_warmup,
-       served, params
+       served, params, served_facts
 FROM retrieval_events
 WHERE created_at >= %(since)s AND (%(until)s::float8 IS NULL
                                    OR created_at < %(until)s::float8)
@@ -703,23 +832,33 @@ def _row(served: dict) -> Row | None:
     if served.get("entry_id") is None:
         return None
     comps = served.get("components") or {}
-    mult = comps.get("supersession_mult") if isinstance(comps, dict) else None
+    if not isinstance(comps, dict):
+        comps = {}
+    mult = comps.get("supersession_mult")
+    dense = comps.get("dense")
     score = served.get("score")
     return Row(entry_id=int(served["entry_id"]),
                rank=int(served.get("rank", 0)),
                score=None if score is None else float(score),
-               superseded=mult is not None and float(mult) < 1.0)
+               superseded=mult is not None and float(mult) < 1.0,
+               dense=None if dense is None else float(dense))
+
+
+def _fact_scores(served_facts: list | None) -> list[float]:
+    return [float(f["score"]) for f in (served_facts or [])
+            if isinstance(f, dict) and f.get("score") is not None]
 
 
 def events_from_rows(ev_rows: list[tuple], use_rows: list[tuple]
                      ) -> list[Event]:
     events = {}
-    for eid, sid, created, warm, served, params in ev_rows:
+    for eid, sid, created, warm, served, params, facts in ev_rows:
         rows = [r for r in (_row(s) for s in (served or [])) if r]
         events[int(eid)] = Event(
             id=int(eid), session_id=sid, created_at=float(created),
             is_warmup=bool(warm), top_k=_requested_top_k(params),
-            sources_filter=_sources_filter(params), rows=rows)
+            sources_filter=_sources_filter(params), rows=rows,
+            fact_scores=_fact_scores(facts))
     for eid, entry_id in use_rows:
         ev = events.get(int(eid))
         if ev is not None:
@@ -788,6 +927,17 @@ def print_summary(report: dict[str, Any]) -> None:
                   f"{(_fmt(b[0]) + '-' + _fmt(b[1]).strip()) if b else '-':>16}"
                   f"{_fmt(p['rows_kept_share']):>8}"
                   f"{_fmt(p['entry_text_chars_kept_share']):>8}")
+    a = report["abstention"]
+    print(f"\nabstention: served nothing {a['served_nothing']}/"
+          f"{a['searches']}; top dense cosine p05/p50 "
+          f"{a['top_dense_cosine']['p05']}/{a['top_dense_cosine']['p50']}")
+    for g in a["floor_grid"]:
+        print(f"  floor {g['search_confidence_floor']:.2f} + guard "
+              f"{g['guard_min_score']:.2f} would flag "
+              f"{_fmt(g['flagged_share'])} of agent searches, "
+              f"{_fmt(g['flagged_labelled_share'])} of those with a used "
+              f"hit; absent probes {g['absent_probes_flagged']}/"
+              f"{a['absent_answer_probes']['found']}")
     d = report["digests"]
     for key in ("rank_matched_all_rows", "rank_matched_live_rows"):
         rm = d[key]
