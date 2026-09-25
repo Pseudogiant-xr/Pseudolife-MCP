@@ -35,6 +35,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the latest start before the search instead of the last root's. On the
   live bank (read-only, 2026-09-25 16:01) the 24 h window is unchanged; 7
   days goes from 130 to 117 sessions and 60 days from 348 to 264.
+
 ### Fixed (2026-09-25 — the daily backup can run current master)
 - `ops/install-backup-task.ps1 -ScriptCheckout <dir>` runs `ops\backup.ps1`
   from a dedicated checkout instead of the main one, which can lag master for
@@ -48,6 +49,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The installer now rejects a misspelled parameter instead of ignoring it:
   a typo in `-ScriptCheckout` would otherwise have reinstalled the main
   checkout's copy.
+
 ### Fixed (2026-09-25 — a fact set to the parked contender's value settles the contest)
 - A contested slot stayed contested after a write made its contender's
   value current. With `eu-west-1` current and `us-east-2` parked, setting
@@ -71,6 +73,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The live bank held no slot in this state on 2026-09-25 (read-only check:
   37 active contenders, none equal to a current value), so nothing heals
   existing rows at load.
+
 ### Fixed (2026-09-25 — the loop-health tile counts client sessions, not root episodes)
 - The Console's loop-health tile counted every root episode started in the
   window as a session and divided its per-session rates by that count.
@@ -139,6 +142,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session root that ends with no stored entry, so sessions that only
   searched are reported separately and sessions that never touched memory
   are invisible; lesson searches and unmatched used_ids are not persisted.
+
 ### Fixed (2026-09-25 — one board identity per session, statuses that show their age)
 - Claude Desktop's app-level MCP entry (writer ID `claude-desktop`) no longer
   registers a coordination address. It is one process serving every
@@ -169,6 +173,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   then counted in `idle_omitted`; peers without a lease keep the one-hour
   window. Both windows come from the live audit log's first day, as the
   comments on `STATUS_STALE_AFTER` and `ATTACHED_IDLE_WINDOW` record.
+
 ### Fixed (2026-09-25 — Claude Desktop's entry no longer hides Code-tab sessions' own server)
 - `ops/install.* --client claude-desktop` (through
   `ops/register_claude_desktop.py`) now names Claude Desktop's app-level MCP
