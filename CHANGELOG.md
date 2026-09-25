@@ -39,6 +39,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   them, and the diagnostics upload still runs. A master CI run hung until
   the 50-minute job timeout on 2026-09-22, and that cancelled job kept no
   log at all. Neither helps if the runner itself stops responding.
+
 ### Security (2026-09-25 — the extractor API key no longer follows a redirect to another host)
 - **Requests to the configured OpenAI-compatible extractor now refuse HTTP
   redirects.** The dream extractor's seven calls (claims, events pass,
@@ -70,6 +71,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that redirects, was already failing and now says why. The endpoint health
   probes (`probe_endpoint`, `fetch_served_model`) are unauthenticated GETs
   and are unchanged.
+
 ### Changed (2026-09-25 — dated search results, an honest low_confidence, and a replay gate for serving changes)
 - Every compact entry from `memory_search`, `memory_recent` and
   `memory_episode_summary` carries its write `date` (local `YYYY-MM-DD`,
@@ -119,6 +121,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Digests are 15% of the rows unfiltered searches serve, but 9% of the hits
   agents used from them. `memory.dream.digest_enabled` and default search
   are untouched pending a decision on digests.
+
 ### Fixed (2026-09-25 — upgraded Claude Code installs stop running their hooks twice)
 - Upgrading an installer-wired Claude Code to the plugin left the old hooks
   in `~/.claude/settings.json`. Since 2026-09-21 the installers add the
@@ -151,6 +154,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   value (the PowerShell writer spells emoji as `\u` pairs). A file with
   duplicate keys is refused and left alone, as is a hook whose command is
   not a string.
+
 ### Fixed (2026-09-25 — the search log and outcome signals name the caller's episode)
 - With several sessions sharing one daemon, every `retrieval_events` row
   was stamped with the episode of whichever session had started most
@@ -185,6 +189,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with no session identity, a `store()` (including the replacement entry
   of a supersede or consolidate) and `memory_episode_start` still fall
   back to the process-wide current episode.
+
 ### Fixed (2026-09-25 — a session start can no longer hang while trimming its briefing)
 - `format_bounded_briefing`, which fits the memory briefing into the
   SessionStart hook's byte budget, could loop forever. It re-packed items
