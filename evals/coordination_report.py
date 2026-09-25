@@ -11,7 +11,10 @@ either input:
   board.jsonl`` (one ``coordination_events`` row per line, chain order), which
   also carries the status history. Export the whole log and scope the report
   with ``--since``/``--until``: a filtered export loses the registrations and
-  statuses set before its cut, and the report flags one;
+  statuses set before its cut, and the report flags one. From schema v46 a
+  send's body is a top-level ``body`` beside the hashed payload (null once
+  redacted: the message still counts, without text); older sends keep it in
+  the payload, which is read whenever ``body`` is not a string;
 - the older whole-board export the 2026-09-23/24 fifteen-session trial was
   recorded in (a JSON object with ``agents`` and ``messages``), which does
   not.
@@ -221,7 +224,14 @@ def _audit(rows) -> Board:
             if row["message_id"] in sends:
                 raise ValueError(f"audit event {seq} repeats a message id "
                                  "(duplicate ids: not a real export)")
-            text = payload.get("text")
+            # Schema v46 keeps a send's body beside the hashed payload, which
+            # holds only its sha256 and byte count; null once redacted. Sends
+            # written before v46 keep the body in the payload, including in a
+            # v46 export of an upgraded bank (with a null body beside it), so
+            # a null body falls back to the payload rather than to no text.
+            text = row.get("body")
+            if not isinstance(text, str):
+                text = payload.get("text")
             sends[row["message_id"]] = Message(
                 sender=agent, recipient=row["recipient_agent_id"], sent=at, acked=None,
                 text=text if isinstance(text, str) else None, reply_to=payload.get("reply_to"),

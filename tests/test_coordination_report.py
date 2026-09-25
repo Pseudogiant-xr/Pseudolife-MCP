@@ -9,6 +9,7 @@ and agent ids never reach either output file.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -126,9 +127,31 @@ def write_legacy(tmp_path, board, exported_at=None, name="board.json"):
 
 
 def write_audit(tmp_path, board, name="board.jsonl"):
+    return write_rows(tmp_path, board.audit(), name)
+
+
+def write_rows(tmp_path, rows, name):
     path = tmp_path / name
-    path.write_text("".join(json.dumps(row) + "\n" for row in board.audit()), encoding="utf-8")
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
     return path
+
+
+def as_v46(rows, *, upgraded_at=None):
+    """Audit rows as a schema v46 export writes them: every row carries a
+    top-level ``body`` (null unless it is a send's); a send written from v46
+    on keeps its text there, with only its sha256 and byte count in the hashed
+    payload. Sends before ``upgraded_at`` predate v46: a v46 export of an
+    upgraded bank shows them with a null body and the text still inside the
+    payload."""
+    for row in rows:
+        row["body"] = None
+        if row["event"] == "send" and (upgraded_at is None or row["created_at"] >= upgraded_at):
+            text = row["payload"].pop("text")
+            raw = text.encode("utf-8")
+            row["payload"]["text_sha256"] = hashlib.sha256(raw).hexdigest()
+            row["payload"]["text_bytes"] = len(raw)
+            row["body"] = text
+    return rows
 
 
 def run(path, **kwargs):
@@ -611,6 +634,40 @@ def test_both_formats_agree_on_every_message_metric(tmp_path):
     assert legacy["coordinator"] == audit["coordinator"]
 
 
+def test_a_v46_export_reads_the_body_beside_the_hashed_digest(tmp_path):
+    """Schema v46 moves a send's body out of the hashed payload into a
+    top-level ``body``; read only from the payload, every v46 message would
+    lose its text and the body-driven metrics would degrade silently."""
+    board = kind_board()
+    v45 = run(write_audit(tmp_path, board))
+    rows = as_v46(board.audit())
+    v46 = run(write_rows(tmp_path, rows, "v46.jsonl"))
+    assert v46["metrics"] == v45["metrics"]
+    assert v46["input"]["bodies_missing"] == 0
+    # A redacted body is null: its message still counts, with no text to read.
+    first_send = next(row for row in rows if row["event"] == "send")
+    first_send["body"] = None
+    redacted = run(write_rows(tmp_path, rows, "redacted.jsonl"))
+    assert redacted["volume"] == v45["volume"]
+    assert redacted["input"]["bodies_missing"] == 1
+    kinds = redacted["metrics"]["kind_mix"]
+    assert kinds["heuristic_messages"] == 10
+    assert (v45["metrics"]["kind_mix"]["counts"]["CLAIM"], kinds["counts"]["CLAIM"]) == (2, 1)
+
+
+def test_a_v46_export_of_an_upgraded_bank_keeps_the_older_bodies(tmp_path):
+    """Sends written before the upgrade come out of a v46 export with a null
+    ``body`` and their text still in the payload: they are read, not lost."""
+    board = kind_board()
+    v45 = run(write_audit(tmp_path, board))
+    rows = as_v46(board.audit(), upgraded_at=T0 + 1000)
+    assert any(r["event"] == "send" and r["body"] is None for r in rows)
+    assert any(r["event"] == "send" and r["body"] is not None for r in rows)
+    mixed = run(write_rows(tmp_path, rows, "mixed.jsonl"))
+    assert mixed["metrics"] == v45["metrics"]
+    assert mixed["input"]["bodies_missing"] == 0
+
+
 # ---------------------------------------------------------------- windows
 
 def test_window_arguments_take_iso_with_an_offset_or_epoch_seconds():
@@ -756,10 +813,15 @@ def sentinel_board():
     return b
 
 
-@pytest.mark.parametrize("fmt", ["audit", "legacy"])
+@pytest.mark.parametrize("fmt", ["audit", "v46", "legacy"])
 def test_no_body_label_status_path_or_agent_id_reaches_either_output(tmp_path, fmt):
     board = sentinel_board()
-    source = (write_audit if fmt == "audit" else write_legacy)(tmp_path, board)
+    if fmt == "v46":
+        rows = as_v46(board.audit())
+        assert all(SENTINEL in r["body"] for r in rows if r["event"] == "send")
+        source = write_rows(tmp_path, rows, "board.jsonl")
+    else:
+        source = (write_audit if fmt == "audit" else write_legacy)(tmp_path, board)
     assert SENTINEL in source.read_text(encoding="utf-8")
     out = tmp_path / "out" / "report.json"
     out.parent.mkdir()

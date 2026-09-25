@@ -28,7 +28,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the report then still reads the registrations and statuses set before the
   scope, which an export filtered at the source drops. A filtered export
   (a gap in its sequence, or a start no retention cut anchors) is flagged in
-  both files, and staleness counts the agents with no status event.
+  both files, and staleness counts the agents with no status event. A schema
+  v46 export's top-level `body` is read (older sends' bodies still come from
+  the payload, including in an upgraded bank's export); a redacted body
+  counts its message without text, in `input.bodies_missing`.
 - The committed baseline (`evals/results/coordination-baseline-20260924.json`)
   is the report over the trial's final export. It matches every figure of
   the trial's one-off analysis except one, pinned in
