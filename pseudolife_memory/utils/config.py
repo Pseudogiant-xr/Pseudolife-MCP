@@ -1070,6 +1070,15 @@ class SearchConfig:
             raise ValueError(
                 f"memory.search.fusion: unknown mode {self.fusion!r} "
                 f"(expected one of {', '.join(map(repr, FUSION_MODES))})")
+        # Same reasoning: a null would raise inside every retrieval and a NaN
+        # would empty the dense pool without a word.
+        ms = self.min_score
+        if (isinstance(ms, bool) or not isinstance(ms, (int, float))
+                or not 0.0 <= ms <= 1.0):
+            raise ValueError(
+                f"memory.search.min_score: expected a cosine floor in "
+                f"[0, 1], got {ms!r}")
+        self.min_score = float(ms)
 
 
 @dataclass

@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import pytest
 import torch
 
 from pseudolife_memory.memory.cms import ContinuumMemorySystem
@@ -96,3 +97,15 @@ def test_only_a_callers_floor_bounds_the_slot_channel():
     explicit = _cms(MIXED).retrieve(
         _query(), top_k=4, query_text=MIXED_QUERY, min_score=0.7)
     assert SLOT_HIT not in [e.text for e in explicit.entries]
+
+
+@pytest.mark.parametrize("bad", ["null", ".nan", "-0.1", "1.5", "x", "true"])
+def test_a_floor_that_is_not_a_cosine_fails_at_load(tmp_path: Path, bad):
+    """A YAML null made every search raise inside ``cms.retrieve`` and NaN
+    emptied the dense pool silently; both now refuse to start, like an
+    unknown ``fusion`` mode beside it."""
+    p = tmp_path / "config.yaml"
+    p.write_text("memory:\n  search:\n    min_score: " + bad + "\n",
+                 encoding="utf-8")
+    with pytest.raises(ValueError, match="memory.search.min_score"):
+        load_config(p)
