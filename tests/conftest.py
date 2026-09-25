@@ -41,7 +41,8 @@ suite_lock.hide_cuda(os.environ)
 # Every report this process renders is scrubbed of PostgreSQL passwords:
 # psycopg's own connect frame shows the DSN as an argument, out of reach of
 # pg_defaults.RedactedUrl. Imported here, before scrub_live_bank_dsn below
-# pops the daemon DSN, so its password is in the snapshot the plugin takes.
+# pops the daemon DSN, so its password is in the snapshot the plugin takes
+# (in this process; an xdist worker never inherits that DSN at all).
 from tests.report_redaction import (  # noqa: E402, F401 — conftest hooks
     pytest_make_collect_report, pytest_runtest_makereport,
 )

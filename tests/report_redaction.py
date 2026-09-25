@@ -43,18 +43,32 @@ MASK = "***"
 _PASSWORD_ENV = ("PSEUDOLIFE_TEST_PG_PASSWORD", "PGPASSWORD")
 _DSN_ENV = ("PSEUDOLIFE_TEST_DATABASE_URL", "PSEUDOLIFE_BENCH_ADMIN_URL",
             "PSEUDOLIFE_MCP_DATABASE_URL")
+# Published defaults, never masked by value: the compose stack's (also the
+# role and package name) and the stock ``postgres`` (CONTRIBUTING.md's test
+# URL, pg0's default for the lite CI lane). Masking either everywhere turns
+# ``pseudolife_memory/storage/postgres.py`` into ``***.py`` and hides nothing;
+# the shape patterns still mask them inside a DSN.
+_PUBLIC_DEFAULTS = frozenset({COMPOSE_DEFAULT_PASSWORD, "postgres"})
 
+# Every character of a quoted value has exactly ONE way to match (a doubled
+# backslash plus the escaped character, a backslash plus a non-backslash, or
+# a plain character): overlapping alternatives backtrack exponentially on an
+# unclosed quote followed by backslashes — a Windows path after
+# ``password='`` took 0.2 s at 10 segments, x16 per two more (2026-09-25).
 # scheme://user:<password>@ — the value may not hold a raw '@' or whitespace.
+# The scheme is bounded so a long [a-z0-9+.-] run is not rescanned from
+# every start (16k chars of "a." took 0.4 s unbounded).
 _URI_USERINFO = re.compile(
-    r"(?i)\b([a-z][a-z0-9+.\-]*://[^\s:/@'\"]*:)[^\s@'\"]*@")
-# password=<value> as libpq and URI queries spell it: a quoted value (with
-# repr-doubled escapes), else everything up to whitespace or a quote.
-_KEYWORD = re.compile(
-    r"(?i)\b(\w*password=)('(?:\\\\.|\\.|[^'\\])*'|[^\s'\"]+)")
-# A quoted value assigned or mapped to a password-named key:
-# ``password = '...'`` (rendered argument or local), ``'password': '...'``.
+    r"(?i)\b([a-z][a-z0-9+.\-]{0,30}://[^\s:/@'\"]*:)[^\s@'\"]*@")
+# password=<value> as libpq and URI queries spell it, unquoted: everything
+# up to whitespace or a quote. A quoted value is _QUOTED's.
+_KEYWORD = re.compile(r"(?i)\b(\w*password=)[^\s'\"]+")
+# A quoted value assigned or mapped to a password-named key: libpq's
+# ``password='a b'``, ``password = '...'`` (rendered argument or local),
+# ``'password': '...'``. Repr-doubled escapes (``'it\\'s'``) stay inside.
 _QUOTED = re.compile(
-    r"(?i)\b(\w*password['\"]?\s*[=:]\s*)(['\"])(?:\\\\.|\\.|(?!\2).)*\2")
+    r"(?i)\b(\w*password['\"]?\s*[=:]\s*)(['\"])"
+    r"(?:\\\\.|\\[^\\\n]|(?!\2)[^\\\n])*\2")
 
 
 def _dsn_password(dsn: str) -> str | None:
@@ -67,11 +81,8 @@ def _dsn_password(dsn: str) -> str | None:
 
 
 def known_passwords(environ=None, env_file=None) -> frozenset[str]:
-    """Every PostgreSQL password this run could have been handed.
-
-    The public compose default is left out: it is also the role and package
-    name, so masking it would wreck every report and hide nothing.
-    """
+    """Every PostgreSQL password this run could have been handed, less the
+    published defaults (``_PUBLIC_DEFAULTS``)."""
     environ = os.environ if environ is None else environ
     try:
         found = {env_file_password(env_file)}
@@ -81,7 +92,7 @@ def known_passwords(environ=None, env_file=None) -> frozenset[str]:
     found.update(_dsn_password(environ[name]) for name in _DSN_ENV
                  if environ.get(name))
     return frozenset(value for value in found
-                     if value and value != COMPOSE_DEFAULT_PASSWORD)
+                     if value and value not in _PUBLIC_DEFAULTS)
 
 
 @functools.lru_cache(maxsize=8)
@@ -106,7 +117,9 @@ def redact_text(text: str, secrets: frozenset[str]) -> str:
 # it pops the daemon DSN, and before any test monkeypatches a variable. The
 # values it sets later (the seeded bench admin URL) carry the same ops/.env
 # password, so a per-report re-read would add a file read to every report
-# and nothing else.
+# and nothing else. An xdist worker starts after the controller's pop, so
+# its snapshot lacks the daemon DSN — as does its whole process, so nothing
+# in it can connect with that value.
 _STARTUP_SECRETS = known_passwords()
 
 

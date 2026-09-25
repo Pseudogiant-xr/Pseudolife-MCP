@@ -192,14 +192,20 @@ def test_with_the_plugin_no_channel_leaks(nested_reports):
     assert SECRET not in output
     assert REGISTERED not in output
     # Not vacuous: every channel rendered, with psycopg's own frame and its
-    # credential-bearing arguments still in the report, only masked.
+    # credential-bearing arguments still in the report, only masked. The
+    # names are psycopg's locals in Connection.connect (3.3) — pinned on
+    # purpose, since that frame is the leak; a psycopg refactor that renames
+    # them turns this red and wants a fresh look, not a silent pass.
     sections = _sections(output)
     assert sorted(name for name in _SECTIONS if name in sections) == sorted(_SECTIONS)
     for name in _PSYCOPG_FRAME_SECTIONS:
         body = sections[name]
         assert "conninfo = " in body and "params = " in body, name
         assert "password=***" in body and "'password': '***'" in body, name
-    assert re.search(r"4 failed, 1 skipped, 2 errors", output)
+    # Counted one by one: pytest puts "N warnings" between them, and the
+    # child loads whatever plugins are installed.
+    for count in ("4 failed", "1 skipped", "2 errors"):
+        assert re.search(rf"\b{count}\b", output), count
 
 
 def test_conftest_registers_the_report_hooks(request):
@@ -262,14 +268,37 @@ def test_known_passwords_come_from_every_place_a_run_reads_them(tmp_path):
         "from-bench-dsn", "from@daemon"}
 
 
-def test_the_public_compose_default_is_not_a_known_password(tmp_path):
-    """It is published in ops/docker-compose.yml and is also the role name:
-    masking it everywhere would wreck every report and hide nothing."""
+def test_the_published_defaults_are_not_known_passwords(tmp_path):
+    """The compose default is also the role and package name, and
+    ``postgres`` is CONTRIBUTING.md's and pg0's: masking either everywhere
+    would turn storage/postgres.py into ***.py and hide nothing."""
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=$UNSUPPORTED\n", encoding="utf-8")
     environ = {"PSEUDOLIFE_TEST_PG_PASSWORD": pg_defaults.COMPOSE_DEFAULT_PASSWORD,
+               "PGPASSWORD": "postgres",
                "PSEUDOLIFE_TEST_DATABASE_URL": "not a dsn = = ="}
     assert report_redaction.known_passwords(environ, env_file) == frozenset()
+
+
+def test_an_unclosed_quote_before_backslashes_does_not_stall_the_report():
+    """Overlapping escape alternatives backtracked exponentially here: 0.2 s
+    at 10 path segments, x16 per two more (2026-09-25). The hook runs on
+    every failing report, so that was a suite hang with no output."""
+    import time
+
+    path = "C:\\Users\\x" * 13
+    for text in (f"log: password='{path}", f"password = '{path}",
+                 "a." * 32_000):
+        started = time.perf_counter()
+        report_redaction.redact_text(text, frozenset())
+        assert time.perf_counter() - started < 0.5, text[:30]
+
+
+def test_a_repr_doubled_escape_does_not_end_the_value_early():
+    """libpq writes ``'it\\'s'``; repr doubles the backslash. The escape
+    must not be read as the closing quote, leaving the tail visible."""
+    text = repr("user=u password='it\\'sTAIL' host=h")
+    assert "TAIL" not in report_redaction.redact_text(text, frozenset())
 
 
 def test_an_unrecognised_report_shape_is_flattened_and_masked():
