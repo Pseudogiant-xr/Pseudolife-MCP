@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Register the pseudolife-memory stdio shim in Claude Desktop's config.
+"""Register the pseudolife-mcp stdio shim in Claude Desktop's config.
 
 Claude Desktop has no ``mcp add`` CLI; its servers live in
 ``claude_desktop_config.json``. Both installers (``ops/install.sh`` and
@@ -9,9 +9,18 @@ third-party packages; its package imports (the credential-file writer and
 token-map parser, both standard-library only) are taken lazily from this
 checkout when credential handling needs them.
 
-Four things make Desktop different from the CLI clients, and each shapes
+Five things make Desktop different from the CLI clients, and each shapes
 the entry this writes:
 
+* Desktop's Code tab runs Claude Code, which loads its own per-session
+  ``pseudolife-memory`` server beside the app's entries. Where an app-level
+  entry carries the same name, Desktop serves the session's
+  ``mcp__pseudolife-memory__*`` calls from the app-level entry and the
+  session's own server gets none (verified live 2026-09-21). So the entry is
+  named ``pseudolife-desktop``. An entry this script wrote under the old name
+  (its env sets ``PSEUDOLIFE_WRITER_ID=claude-desktop``) is moved there with
+  its other settings; a ``pseudolife-memory`` entry it did not write is left
+  untouched and reported.
 * Desktop launches MCP servers with a SANITIZED environment (PATH plus a
   few system variables). A bearer token exported in the OS environment
   never reaches the shim, so a token-protected daemon needs
@@ -74,7 +83,10 @@ import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Mapping
 
-SERVER = "pseudolife-memory"
+SERVER = "pseudolife-desktop"
+# The entry's name before 2026-09-25, and the name Claude Code's per-session
+# server keeps; see migrate_legacy_entry.
+LEGACY_SERVER = "pseudolife-memory"
 DEFAULT_WRITER_ID = "claude-desktop"
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
 # The env keys this script owns on the entry. Anything else a user added by
@@ -201,6 +213,75 @@ def current_entry(existing: dict) -> dict:
     servers = existing.get("mcpServers")
     entry = servers.get(SERVER) if isinstance(servers, dict) else None
     return entry if isinstance(entry, dict) else {}
+
+
+def _written_by_us(entry: object) -> bool:
+    """Whether a legacy-named entry is one this script wrote: its env sets the
+    writer ID both installers pass (so does the hand-written entry in the
+    README). Anything else under that name belongs to someone else."""
+    env = entry.get("env") if isinstance(entry, dict) else None
+    return isinstance(env, dict) and env.get("PSEUDOLIFE_WRITER_ID") == DEFAULT_WRITER_ID
+
+
+def migrate_legacy_entry(existing: dict, *,
+                         dry_run: bool = False) -> tuple[dict, list[str], bool]:
+    """Move an entry this script wrote as ``pseudolife-memory`` to ``SERVER``.
+
+    Returns ``(config, notes, foreign)``; ``foreign`` means a
+    ``pseudolife-memory`` entry this script did not write is present, and
+    ``config`` is then ``existing`` unchanged. When both names are present the
+    ``SERVER`` entry wins wherever both set a key and the old one fills the
+    gaps; the notes name any env key whose value was dropped, never a value."""
+    servers = existing.get("mcpServers")
+    if not isinstance(servers, dict) or LEGACY_SERVER not in servers:
+        return existing, [], False
+    if not _written_by_us(servers[LEGACY_SERVER]):
+        return existing, [], True
+    merged = json.loads(json.dumps(existing))  # deep copy, JSON-shaped
+    servers = merged["mcpServers"]
+    moved = servers.pop(LEGACY_SERVER)
+    target = servers.get(SERVER)
+    conflicts: list[str] = []
+    if target is not None:
+        if not isinstance(target, dict):
+            raise ConfigError(f"mcpServers.{SERVER} is not a JSON object; refusing to rewrite it")
+        target_env = target.get("env")
+        if target_env is None:
+            target_env = {}
+        if not isinstance(target_env, dict):
+            raise ConfigError(
+                f"mcpServers.{SERVER}.env is not a JSON object; refusing to rewrite it")
+        # A managed key other than the token file is rewritten on every run,
+        # so a conflict there loses nothing worth naming.
+        conflicts = sorted(
+            key for key in moved["env"].keys() & target_env.keys()
+            if moved["env"][key] != target_env[key]
+            and (key not in MANAGED_ENV or key == "PSEUDOLIFE_MCP_TOKEN_FILE"))
+        moved = {**moved, **target, "env": {**moved["env"], **target_env}}
+    servers[SERVER] = moved
+    verb, keep = ("would migrate", "would keep") if dry_run else ("migrated", "kept")
+    notes = [f"{verb} mcpServers.{LEGACY_SERVER} (written by this script) to {SERVER} "
+             f"with its other settings; Chat and Cowork list its tools as "
+             f"mcp__{SERVER}__*, and Code-tab sessions keep "
+             f"mcp__{LEGACY_SERVER}__* from their own server"]
+    if conflicts:
+        notes.append(f"both names were present: {keep} the {SERVER} value of "
+                     f"{', '.join(conflicts)}")
+    return merged, notes, False
+
+
+def _warn_foreign(path: Path) -> None:
+    print(
+        f"WARNING: mcpServers.{LEGACY_SERVER} in {path} was not written by this "
+        f"script (its env does not set PSEUDOLIFE_WRITER_ID={DEFAULT_WRITER_ID}), so "
+        f"it was left untouched, and this script's own entry, {SERVER}, goes "
+        f"beside it: Desktop loads both. Claude Code names its per-session "
+        f"server {LEGACY_SERVER} too, and while an app-level entry carries that "
+        f"name, Desktop serves a Code-tab session's mcp__{LEGACY_SERVER}__* calls "
+        f"from the app-level entry instead of the session's own server. Rename "
+        f"or remove it by hand unless that is what you want.",
+        file=sys.stderr,
+    )
 
 
 # -- can the shim read a token file? ------------------------------------------
@@ -457,7 +538,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         existing = _load(path)
-        entry_before = current_entry(existing)
+        config, migration_notes, foreign = migrate_legacy_entry(
+            existing, dry_run=args.dry_run)
+        if foreign:
+            _warn_foreign(path)
+        entry_before = current_entry(config)
         existing_env = entry_before.get("env")
         if existing_env is None:
             existing_env = {}
@@ -519,11 +604,13 @@ def main(argv: list[str] | None = None) -> int:
                 "no credential was available to restore it; existing config was preserved")
         entry = build_entry(command=args.command, writer_id=args.writer_id,
                             daemon_url=args.daemon_url, token_file=token_file)
-        merged, changed = merge_config(existing, entry, drop_literal_token=drop_literal)
+        merged, _ = merge_config(config, entry, drop_literal_token=drop_literal)
+        changed = merged != existing
     except (ConfigError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_REFUSED
 
+    notes = [*migration_notes, *notes]
     no_credential = bool(requested_file) and token_file is None
     if "args" in entry_before:
         notes.append("dropped the entry's stale 'args' list (the shim takes none)")

@@ -1,7 +1,9 @@
-<!-- The standing memory-loop instructions. Plugin users DON'T need this
-     file: the daemon serves the same text as session context via the
-     SessionStart hook (override it with <data_dir>/hook-instructions.md).
-     For non-plugin setups, copy this block into your CLAUDE.md
+<!-- The full standing memory-loop instructions. The SessionStart hook
+     (plugin or verified Codex hooks) does not serve this block: it serves a
+     compact core and a bounded briefing, and
+     <data_dir>/hook-instructions.md adds text after that core. For the
+     full guidance, for subagents (they read CLAUDE.md, not hook output),
+     or for setups without hooks, copy this block into your CLAUDE.md
      (Claude Code), AGENTS.md, or the equivalent standing-instructions file.
      Kept byte-identical to MEMORY_LOOP_BLOCK in
      pseudolife_memory/web/session_hook.py (guard-tested). -->

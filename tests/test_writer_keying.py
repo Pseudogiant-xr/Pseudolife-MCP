@@ -10,7 +10,8 @@ Two layers:
   session-task boundary into the single-writer service.
 
 The integration test mirrors ``test_daemon_http.py`` (spawns the real
-``serve`` process against the test DB) and skips cleanly without Postgres.
+``serve`` process on a private bank on the test server) and skips cleanly
+without Postgres.
 """
 
 from __future__ import annotations
@@ -19,11 +20,8 @@ import asyncio
 
 import pytest
 
-from tests.helpers import (free_port as _free_port,
-                           pg_reachable as _pg_reachable,
-                           spawn_serve as _spawn_serve,
-                           stop_daemon as _stop_daemon)
-from tests.pg_fixtures import resolve_test_db_url
+from tests.helpers import serve_on_private_bank as _serve_on_private_bank
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -57,29 +55,18 @@ def daemon(tmp_path_factory):
     per-request ``X-PL-Writer`` header beats the daemon's configured
     ``PSEUDOLIFE_WRITER_ID`` default, and it authenticates with a token — a
     daemon booted without both would make the test vacuous. It does share
-    the spawn/teardown helper (``tests/helpers.spawn_serve``) that
-    tests/test_shim.py's module daemon uses.
+    the spawn/teardown helper (``tests.helpers.serve_on_private_bank``)
+    that tests/test_shim.py's module daemon uses, and so a bank of its own.
     """
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-    port = _free_port()
-    try:
-        proc, _health_payload = _spawn_serve(
-            port, tmp_path_factory.mktemp("keying_data"), url,
+    with _serve_on_private_bank(
+            "keying", tmp_path_factory.mktemp("keying_data"),
             env_extra={
                 "PSEUDOLIFE_MCP_TOKEN": _TOKEN,
                 # The daemon's own default — the per-request header must
                 # override this.
                 "PSEUDOLIFE_WRITER_ID": "daemon-default",
-            },
-        )
-    except RuntimeError as exc:
-        pytest.fail(str(exc))
-    try:
-        yield {"port": port, "url": f"http://127.0.0.1:{port}", "db": url}
-    finally:
-        _stop_daemon(proc)
+            }) as d:
+        yield d
 
 
 async def _call_with_writer(url: str, writer: str, tool: str, args: dict):
@@ -110,9 +97,15 @@ def _fact_row(db_url: str, entity: str) -> dict | None:
 
 # ── ops: retire by writer ────────────────────────────────────────────────
 
-def test_retire_by_writer_supersedes_only_that_writer():
+def test_retire_by_writer_supersedes_only_that_writer(pg_conn, pg_url):
     """ops/retire_by_writer supersedes a rogue writer's current facts and leaves
-    everyone else's intact."""
+    everyone else's intact.
+
+    ``pg_conn`` is load-bearing, not just a wipe: its reaper runs before the
+    service below takes the bank's writer lease. Without it, a PG-backed
+    service an earlier test dropped but Python's GC had not yet freed still
+    held that lease, and this test was refused (seen with GC disabled,
+    2026-09-25)."""
     import tempfile
     import uuid
 
@@ -120,12 +113,7 @@ def test_retire_by_writer_supersedes_only_that_writer():
     from pseudolife_memory import writer_context
     from pseudolife_memory.service import MemoryService
 
-    pg_url = resolve_test_db_url()
-    if not _pg_reachable(pg_url):
-        pytest.skip("no test Postgres reachable")
-
-    # Unique writer + entity names → deterministic counts despite the persistent
-    # shared test DB.
+    # Unique writer + entity names keep the counts exact.
     tag = uuid.uuid4().hex[:8]
     rogue, ea, eb = f"rogue-{tag}", f"alpha-{tag}", f"beta-{tag}"
 

@@ -32,7 +32,7 @@ def test_memory_hook_skips_coordination_awareness():
     from pseudolife_memory.web.session_hook import hook_session_start
     service = FixtureService()
     service.config = SimpleNamespace(coordination=SimpleNamespace(enabled=True))
-    service.episode_start_session = lambda *a: {"id": "fixture-episode"}
+    service.episode_start_session = lambda *a, **_: {"id": "fixture-episode"}
     service.set_active_session = lambda *a: None
     service.session_briefing = lambda **kw: {"markdown": repr(kw)}
     text = hook_session_start(service, "own-session")
@@ -47,7 +47,7 @@ def test_hook_route_binds_request_headers_for_authorized_briefing():
     from pseudolife_memory.writer_context import _http_request_headers
     service = FixtureService()
     service.config = SimpleNamespace(coordination=SimpleNamespace(enabled=True))
-    service.episode_start_session = lambda *a: {"id": "fixture-episode"}
+    service.episode_start_session = lambda *a, **_: {"id": "fixture-episode"}
     service.set_active_session = lambda *a: None
     service.session_briefing = lambda **kw: {
         "markdown": "auth=" + str((_http_request_headers() or {}).get("authorization"))}
