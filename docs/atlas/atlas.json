@@ -215,7 +215,7 @@
    "d": [
     "Fresh upstream HTTP connection PER TOOL CALL — dodges idle-connection reaping that used to hang post-pause calls",
     "Probes /health; spawns `pseudolife-mcp serve` detached if daemon absent",
-    "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
+    "X-PL-Session = Claude Code's session id when the writer is Claude Code (joins the hook's root), else one uid per process; opens no episode (the daemon lazy-opens on the first write); closes only its own key at exit",
     "Re-emits tools/list_changed downstream after memory_toolset tier changes",
     "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification",
     "By default asks /api/hook/coordination-start once at startup and builds its coordination adapter (Codex: per-thread registry) only where the daemon serves its bearer the board; appends the compact board check-in to the MCP instructions only when the adapter is up"

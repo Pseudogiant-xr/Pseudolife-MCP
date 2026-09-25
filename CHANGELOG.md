@@ -6,6 +6,59 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — one session episode per client session)
+- The stdio shim no longer opens a session episode of its own at launch. It
+  opened one keyed by a fresh id and titled after its working directory,
+  beside the root the plugin's SessionStart hook registers, so every Claude
+  Code session had two roots: a write without an `episode=` handle, or a
+  `memory_session_title`, landed on the shim's root and the rest on the
+  hook's. A host that kills its MCP servers (Codex, the desktop app) never
+  reached the shim's close. In the 24 h to 2026-09-25 the live bank gained
+  193 shim-keyed roots, 189 of them empty, 154 titled after the shared shim
+  runtime directory Codex launches from. The idle reaper closed them and they
+  were deleted only after the resume window.
+- Under Claude Code (writer id unset or `claude-code`) the shim's
+  `X-PL-Session` is now the session id Claude Code launched it with
+  (`CLAUDE_CODE_SESSION_ID`, canonical UUIDs only), which is the id the hook
+  registers. The shim's calls land on the hook's root (see the limits
+  below), and the coordination adapter registers that id as its episode.
+  The shim's exit leaves the root to the host: the SessionEnd hook closes
+  it, or else the idle reaper, which is also what closes it on an install
+  without the plugin's hooks. A reconnect restarts the shim mid-session, and
+  an explicit close would prune an empty root outright, orphaning the handle
+  the hook advertised.
+- A host with any other writer id keeps one id per shim process, even when
+  started from inside a Claude Code session, whose id it inherits and
+  would forward if it passes its environment through to MCP servers (Codex
+  keys each call by its thread anyway). The daemon opens that session's episode on the first
+  write that needs one (a store, even one the surprise gate drops, or a
+  sub-episode or title call without a handle), as it does for a direct-HTTP
+  client. The shim closes it at exit when its host lets it exit, and the
+  idle reaper otherwise. A shim that is idle or only searches leaves no
+  episode.
+- Two daemon paths treated the shim's root as disposable, and now that
+  handle-less lifecycle calls reach the hook's root they must not. After the
+  idle reaper closed a root, `memory_session_title` without a handle opened
+  a second root; it now reopens the closed one within the resume window, as
+  a store does. `memory_episode_end` without a handle closed the session
+  root when no sub-episode was open; it now returns `{}` and leaves the root
+  to the session lifecycle, as the tool always described and as the handle
+  path already did.
+- Limits: `/clear` and an in-session `/resume` give the session a new id,
+  but the shim keeps its launch id. The first write after either, with or
+  without a handle, reopens the root under the launch id (the root
+  SessionEnd just closed, within the resume window) or, if SessionEnd pruned
+  it empty, opens a new empty one; the write itself still lands on its
+  handle's root. `--continue`, or `--resume` without an id, may launch the
+  shim with an id no hook registers, so its writes open a root of their own.
+  Shim sessions no longer take their title from the working directory: an
+  episode the daemon opens starts as `session - <time>`, store results carry
+  an `episode_hint` until the agent names it, and a title still generic at
+  close is derived from the content.
+- **Upgrading:** this changes the shim, a separate install that a
+  daemon-only deploy never touches. Deploy with `ops/update.ps1 -All` (or
+  `ops/update.sh --all`), then restart the clients.
+
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
   on by default: `coordination.enabled` defaults to `true`, and without an
