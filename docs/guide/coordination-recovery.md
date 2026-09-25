@@ -21,8 +21,9 @@ credentials and requires deliberate rebinds.
    adapters. Keep them stopped through recovery; editing configuration cannot
    disable a daemon that already loaded its configuration.
 2. Set `coordination.enabled: false` in the configuration the restored daemon
-   will use. Retain the explicit `allowed_principals` list needed for later
-   mailbox ownership checks.
+   will use; coordination is on by default, so a configuration without the key
+   is refused. Retain the `allowed_principals` list needed for later mailbox
+   ownership checks (without the key, only `default` is allowed).
 3. Restore the database using the normal backup procedure. Set
    `PSEUDOLIFE_MCP_DATABASE_URL` in the operator's environment to the restored
    database. Recovery uses this environment variable only: it does not start
@@ -135,5 +136,5 @@ Portable knowledge exports exclude agent mailboxes, credentials, the audit log,
 bank identity and operational metadata. Import also ignores any bank identity in an archive,
 preserving the destination's identity. Full database backups retain it. See
 [configuration](configuration.md#experimental-agent-coordination) for the
-default-off feature and [the experimental design](../specs/2026-09-11-agent-coordination-design.md)
+feature's defaults and [the experimental design](../specs/2026-09-11-agent-coordination-design.md)
 for delivery and acknowledgment semantics.

@@ -112,12 +112,11 @@ def test_shim_forwards_initialize_instructions_and_tool_annotations(shared_daemo
             async with ClientSession(r, w) as client:
                 downstream = await client.initialize()
                 assert upstream.instructions and "memory_search" in upstream.instructions
-                # Hookless clients need the same explicit startup check-in.
-                assert "memory_agents" in upstream.instructions
-                assert "project, task, and status" in upstream.instructions
-                assert "memory_message" in upstream.instructions
-                assert "acknowledge" in upstream.instructions
                 assert len(upstream.instructions) <= 512
+                # The board check-in is the shim's to add, and only with an
+                # adapter up (tests/test_shim_channel.py); this open daemon
+                # admits none, so the daemon's text passes through as is.
+                assert "memory_agents" not in upstream.instructions
                 assert downstream.instructions == upstream.instructions
                 proxied = {t.name: t.annotations for t in (await client.list_tools()).tools}
                 assert proxied == {t.name: t.annotations for t in direct_tools}
