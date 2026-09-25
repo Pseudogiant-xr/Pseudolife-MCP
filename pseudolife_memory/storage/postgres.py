@@ -65,8 +65,10 @@ _CONNECT_BACKOFF_SECONDS = 0.05
 
 def _local_port_error_code(exc: BaseException) -> str | None:
     """The Windows error code when a connect failed for want of a usable
-    local port; None for anything else, and always for an answer from the
-    server (it carries a SQLSTATE)."""
+    local port; None for anything else. A connect-time rejection from the
+    server (authentication, too many clients) arrives as libpq's message
+    with no SQLSTATE, so the code in the text is what excludes it; an error
+    that does carry a SQLSTATE is never a local-port failure either."""
     if not isinstance(exc, psycopg.OperationalError) or exc.sqlstate:
         return None
     match = _LOCAL_PORT_ERRORS.search(str(exc))

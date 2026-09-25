@@ -37,6 +37,15 @@ TIMEOUT = psycopg.OperationalError("connection failed: timeout expired")
 BAD_PASSWORD = psycopg.errors.InvalidPassword(
     'connection failed: FATAL:  password authentication failed for user '
     '"pseudolife"')
+# What a real connect-time rejection from the server looks like: psycopg
+# builds it from libpq's message alone, so it carries no SQLSTATE and only
+# its text keeps it from being retried.
+AUTH_REJECTED = psycopg.OperationalError(
+    'connection failed: connection to server at "127.0.0.1", port 5433 '
+    'failed: FATAL:  password authentication failed for user "pseudolife"')
+TOO_MANY = psycopg.OperationalError(
+    'connection failed: connection to server at "127.0.0.1", port 5433 '
+    "failed: FATAL:  sorry, too many clients already")
 
 
 class FakeConnection:
@@ -159,12 +168,14 @@ def test_backoff_is_short_exponential_and_jittered(monkeypatch, sleeps):
     REFUSED,
     TIMEOUT,
     BAD_PASSWORD,
+    AUTH_REJECTED,
+    TOO_MANY,
     # An answer from the server is never retried, whatever its text says.
     psycopg.errors.InvalidPassword("odd text (0x00002740/10048)"),
     # Only a connect failure qualifies, not a bad conninfo.
     psycopg.ProgrammingError("invalid dsn (0x00002740/10048)"),
-], ids=["refused", "timeout", "invalid-password", "sqlstate-with-code",
-        "not-operational"])
+], ids=["refused", "timeout", "invalid-password", "auth-rejected",
+        "too-many-clients", "sqlstate-with-code", "not-operational"])
 @pytest.mark.parametrize("site", sorted(SITES))
 def test_other_failures_raise_on_the_first_call(site, error, monkeypatch,
                                                sleeps):
