@@ -1217,8 +1217,12 @@ daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the
 mechanism that gives **concurrent** Claude Code sessions distinct identity —
-a per-process `X-PL-Session` header, the strongest of the five
-[session-identity](#session-identity) tiers. The shim works against
+an `X-PL-Session` header, the strongest of the five
+[session-identity](#session-identity) tiers. Under Claude Code (writer id
+unset or `claude-code`) the header is the session id Claude Code launched the
+shim with, the same id its SessionStart hook registers, so the shim and the
+hook share one session episode. Other hosts get one id per shim process. The
+shim opens no episode itself; see [Episodes](episodes.md). The shim works against
 **either** daemon deployment, host-process or the containerized stack — it's
 just an HTTP client to `PSEUDOLIFE_MCP_DAEMON_URL` and only spawns a new host
 daemon when nothing answers there already (a cross-process lock keeps
@@ -1296,14 +1300,14 @@ through one chokepoint, evaluated in strict precedence order:
 
 | tier | source | scope | notes |
 |---|---|---|---|
-| 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
+| 1 | `X-PL-Session` header | per session | the stdio shim sends this on every call: Claude Code's own session id under Claude Code (the id tier 3 registers), one id per shim process elsewhere, the thread id on each Codex call; any integrator can |
 | 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`, and on the lifecycle tools `memory_episode_start` / `memory_episode_end` / `memory_session_title` — where a resolved handle wins outright (they never consult the header tiers); the daemon mints it and advertises it in the SessionStart briefing |
 | 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it. A singleton — concurrent sessions race it, which is why the lifecycle tools take the per-call handle |
 | 4 | `mcp-session-id` header | per connection | **retired** — the header names the connection (concurrent sessions share it) and the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes it from the protocol. `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one release as a rollback hatch |
 | 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
 
 **Why the header outranks the handle when both are present.** A shim
-header is infrastructure-asserted per OS process; an `episode` handle is
+header is infrastructure-asserted, by the host or per OS process; an `episode` handle is
 model-supplied and can be confused between two concurrent sessions'
 briefings. But identity and target episode are separable — a write still
 lands in the handle's named episode even when the header wins identity for
