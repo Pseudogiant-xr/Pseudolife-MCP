@@ -116,6 +116,20 @@ INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$SRC" ] || SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"session_start_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+# The separate memory-policy hook (hooks.json runs this script again with
+# `memory-policy`): the full memory-loop block when the daemon's
+# memory_policy variant is full_separate_hook, otherwise an empty body and
+# no context. A hook output of its own, so the block never shares the
+# briefing's budget. Silent on any failure: the main hook reports an
+# unreachable daemon.
+if [ "${1:-}" = memory-policy ]; then
+    [ -z "$CONNECTION_ERROR" ] || exit 0
+    PQS=""
+    [ -n "$SID" ] && PQS="?session_id=${SID}"
+    curl -L --max-redirs 0 -sf --max-time 5 --retry 1 --retry-delay 1 \
+        "${AUTH[@]}" "${URL}/api/hook/memory-policy${PQS}" || true
+    exit 0
+fi
 # The plugin release this hook runs from, read beside the script so the
 # daemon can open the briefing with a notice when the two differ (a cached
 # plugin moves only on /plugin update; the daemon on every deploy). A copy

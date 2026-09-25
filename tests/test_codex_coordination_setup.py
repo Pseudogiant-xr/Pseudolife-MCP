@@ -628,6 +628,62 @@ def test_probe_rejects_other_status_and_error_pairs(monkeypatch, status, body):
     assert not setup.probe("http://127.0.0.1:8765", "fixture-token")
 
 
+# urllib's default handler re-sends a POST answered 301/302/303 as a GET
+# carrying every header except Content-Length/Content-Type.
+@pytest.mark.parametrize("status", [301, 302, 303])
+def test_probe_refuses_redirect_without_forwarding_authorization(status):
+    """A followed redirect would carry the bearer to the Location's host, and
+    that host's authentication error would pass the probe."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    sent, forwarded = [], []
+
+    class Target(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def reply(self):
+            forwarded.append((self.command, bool(self.headers.get("Authorization"))))
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(401)
+            self.end_headers()
+            self.wfile.write(b'{"error":"instance_authentication_required"}')
+
+        do_GET = do_POST = reply
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+
+    class Redirect(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            sent.append(hmac.compare_digest(
+                self.headers.get("Authorization") or "", "Bearer fixture-token"))
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(status)
+            self.send_header("Location", f"http://127.0.0.1:{target.server_port}{self.path}")
+            self.end_headers()
+
+    redirect = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    workers = [threading.Thread(target=server.serve_forever, daemon=True)
+               for server in (target, redirect)]
+    for worker in workers:
+        worker.start()
+    try:
+        passed = setup.probe(f"http://127.0.0.1:{redirect.server_port}", "fixture-token")
+        assert sent == [True]  # The probe really ran, with the bearer.
+        assert forwarded == []
+        assert passed is False
+    finally:
+        for server in (redirect, target):
+            server.shutdown()
+            server.server_close()
+        for worker in workers:
+            worker.join(timeout=2)
+
+
 def test_real_codex_config_writer_preserves_other_settings(tmp_path, monkeypatch):
     """Exercise actual TOML/CAS semantics without a model turn or a real bank."""
     import os

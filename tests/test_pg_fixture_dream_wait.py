@@ -32,6 +32,14 @@ def test_pg_conn_setup_waits_for_a_live_session_end_dream(
     from pseudolife_memory.service import MemoryService
     from pseudolife_memory.service_dream import SESSION_END_DREAM_THREAD_NAME
 
+    # A reap first, as pg_conn would give any other test: the service below
+    # takes the bank's writer lease, and a PG-backed service an earlier test
+    # dropped keeps that lease until Python's GC frees it (CI job
+    # 107963358803, 2026-09-25: WriterLeaseHeld here on an xdist worker).
+    before = pg_fixtures._pg_conn_session(pg_url)
+    next(before)
+    before.close()
+
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
     svc = MemoryService(data_dir=tmp_path)
     svc._ensure_init()

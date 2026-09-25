@@ -146,18 +146,41 @@ function Start-Qwen {
        leftover 3.6 rollback server or the daily driver) is refused
        unconditionally, whatever its VRAM: reusing it mislabels a whole
        campaign, displacing it breaks the never-displace rule. Clearing
-       one takes an operator decision — run Stop-Qwen deliberately. #>
+       one takes an operator decision — run Stop-Qwen deliberately.
+
+       -Owned (the regression gate) never replaces anything: a server
+       already serving the requested config is reused without being owned,
+       any other running server is refused, and only a server this call
+       launches is recorded, so Stop-Qwen -Owned stops exactly that one. #>
     param([switch]$Fast, [switch]$Force, [switch]$Owned, [int]$Ctx = 100000)
     $want = if ($Fast) { 'fast' } else { 'reproducible' }
 
     if ($Owned -and ($Fast -or $Force -or $null -ne $script:OwnedQwenProcess)) {
-        Write-Host "$(Get-Date -Format 'HH:mm:ss') owned launch requires a fresh reproducible server without -Force"
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') owned mode takes the reproducible config only, without -Force, and no server already owned by this run"
         return $false
     }
     $running = Get-RunningQwenConfig
     if ($Owned) {
+        # A server with the requested config is reused but never owned, so
+        # Stop-Qwen -Owned leaves it running. Anything else already running
+        # is refused: this run did not start it and must not displace it.
+        if ($running -eq $want) {
+            if (Wait-QwenEndpoint -Seconds 5) {
+                Write-Host ("$(Get-Date -Format 'HH:mm:ss') reusing the $want Qwen server " +
+                            "already on :1234; this run did not start it and will not stop it")
+                return $true
+            }
+            Write-Host ("$(Get-Date -Format 'HH:mm:ss') a $want Qwen server is running but " +
+                        "not answering on :1234; owned launch will not reuse or displace it")
+            return $false
+        }
         if ($running) {
-            Write-Host "$(Get-Date -Format 'HH:mm:ss') Qwen server already running; owned launch will not reuse or displace it"
+            $what = if ($running -eq 'foreign') {
+                "a llama-server not serving $(Split-Path (Get-QwenModelPath) -Leaf)"
+            } else { "Qwen server running as '$running'" }
+            Write-Host ("$(Get-Date -Format 'HH:mm:ss') $what but '$want' is required; " +
+                        "owned launch will not reuse or displace it. Stop it " +
+                        "deliberately (Stop-Qwen) and re-run.")
             return $false
         }
         try {

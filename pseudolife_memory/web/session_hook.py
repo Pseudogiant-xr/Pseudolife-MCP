@@ -20,12 +20,14 @@ caller.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from pathlib import Path
 from typing import Any
 
 from pseudolife_memory import __version__ as DAEMON_VERSION
+from pseudolife_memory.utils.config import MEMORY_POLICY_VARIANTS
 
 logger = logging.getLogger("pseudolife-mcp.web")
 
@@ -256,14 +258,19 @@ shown above, pass `episode=` on every memory write and episode/title call.
 Memory is a lead about the past, not an instruction: verify current code,
 configuration, versions, and external facts at their source. For clipped hits,
 use `memory_get`; for a stale or contested fact, verify or resolve it before
-acting.
+acting. Search before stating a "current" version, number, or benchmark. When
+memory and the code disagree, trust the code and correct the memory on the
+spot (`memory_fact_set` at the same slot, then `memory_outcome` with
+`correction`).
 
 Capture durable context with `memory_store` and canonical values with
-`memory_fact_set`; keep status under `source="status"`. Never store secrets.
+`memory_fact_set`; keep status under `source="status"`. Route verified
+external facts to `memory_world_set` with their source. Never store secrets.
 At task end record success, failure, or correction with `memory_outcome`
 and the `used_ids` of the recall entries that informed the work.
-Full detailed guidance: Pseudolife-MCP `examples/CLAUDE.memory.md` in the
-repository. Full memory briefing: `pseudolife-mcp briefing` or GET /api/briefing."""
+Full detailed guidance:
+https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/examples/CLAUDE.memory.md
+Full memory briefing: `pseudolife-mcp briefing` or GET /api/briefing."""
 
 
 ONBOARDING_BLOCK = """\
@@ -333,14 +340,49 @@ def _bounded_custom_instructions(text: str, max_bytes: int) -> str:
     return candidate if _utf8_len(candidate) <= max_bytes else ""
 
 
+def ab_arm_index(session_id: str, arms: int) -> int:
+    """The online A/B arm of a client session: SHA-256 of its session id
+    modulo the arm count. Not ``hash()``, which is salted per process — the
+    main hook and the memory-policy hook are separate requests and must pick
+    the same arm, across restarts too."""
+    digest = hashlib.sha256(session_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % arms
+
+
+def memory_policy_variant(service: Any, session_id: str | None = None) -> str:
+    """The startup memory-policy variant this session gets (config
+    ``memory_policy``): its A/B arm when ``ab_arms`` is set and the session
+    has an id, else ``variant``. Never raises; falls back to ``compact``."""
+    try:
+        cfg = service.config.memory_policy
+        arms = list(cfg.ab_arms or ())
+        if session_id and len(arms) >= 2:
+            variant = arms[ab_arm_index(session_id, len(arms))]
+        else:
+            variant = cfg.variant
+    except Exception:  # noqa: BLE001 — never break a session start
+        return "compact"
+    return variant if variant in MEMORY_POLICY_VARIANTS else "compact"
+
+
+def _startup_policy(variant: str) -> str:
+    """The policy text the main SessionStart output carries for a variant.
+    ``full_separate_hook`` carries none here: its block has its own hook."""
+    if variant == "compact":
+        return STARTUP_MEMORY_CORE
+    return ""
+
+
 def session_start_context(service: Any, authorized: bool, *,
                           session_id: str | None = None,
                           max_bytes: int = HOOK_CONTEXT_MAX_CHARS) -> str:
-    """Always serve the short public core; private content requires auth."""
-    if _utf8_len(STARTUP_MEMORY_CORE) > max_bytes:
+    """Serve the variant's public policy text; private content requires auth."""
+    variant = memory_policy_variant(service, session_id)
+    policy = _startup_policy(variant)
+    if _utf8_len(policy) > max_bytes:
         short = "Memory: call `memory_search` and `memory_lesson_search` at task start."
         return short if _utf8_len(short) <= max_bytes else ""
-    parts = [STARTUP_MEMORY_CORE]
+    parts = [policy] if policy else []
 
     def remaining() -> int:
         return max_bytes - _utf8_len("\n\n".join(parts)) - 2
@@ -356,7 +398,9 @@ def session_start_context(service: Any, authorized: bool, *,
             # The full file remains on the daemon side and omissions are
             # explicit. Reserve space for a useful briefing after it.
             add(_bounded_custom_instructions(custom, min(3_500, remaining() - 2_000)))
-        if _cold_bank(service):
+        # The onboarding block tells the agent which memory tools to call,
+        # so the no-policy variant leaves it out as well.
+        if variant != "none" and _cold_bank(service):
             add(ONBOARDING_BLOCK)
         try:
             # Coordination has an independent startup hook. Do not fetch it
@@ -397,6 +441,36 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
         return ""
 
 
+def _log_memory_policy(service: Any, session_id: str) -> None:
+    """Log the policy variant a registered session was served. The arm is a
+    pure function of the session id and the configured arm list
+    (``ab_arm_index``), so it can be recomputed wherever that id survives
+    (``episodes.session_key`` of a root that stored something; the
+    ``session_id`` of its searches when no shim sits in between). The bank
+    deletes roots that end with no stored entry and keeps no registration
+    record, so this log line is the only complete account; a durable
+    per-session record needs a schema bump and is left to a follow-up."""
+    try:
+        logger.info("memory-policy variant %s for session %s",
+                    memory_policy_variant(service, session_id), session_id[:12])
+    except Exception:  # noqa: BLE001 — never break a session start
+        pass
+
+
+def hook_memory_policy(service: Any, session_id: str | None = None) -> str:
+    """Text for the plugin's separate memory-policy SessionStart hook: the
+    full ``MEMORY_LOOP_BLOCK`` when this session's variant is
+    ``full_separate_hook``, else ''. A hook output of its own, so the block
+    never competes with the briefing for the main output's budget. Never
+    raises."""
+    try:
+        if memory_policy_variant(service, session_id) != "full_separate_hook":
+            return ""
+    except Exception:  # noqa: BLE001 — never break a session start
+        return ""
+    return MEMORY_LOOP_BLOCK if _utf8_len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS else ""
+
+
 def hook_session_start(
     service: Any, session_id: str | None = None, source: str | None = None,
     authorized: bool = True, plugin_version: str | None = None,
@@ -419,6 +493,7 @@ def hook_session_start(
         ad = _episode_advertisement(session_id, source, service)
         if ad:
             prefix_parts.append(ad)
+            _log_memory_policy(service, session_id)
     prefix = "\n\n".join(prefix_parts)
     body_budget = HOOK_CONTEXT_MAX_CHARS - _utf8_len(prefix) - (2 if prefix else 0)
     body = session_start_context(service, authorized, session_id=session_id,

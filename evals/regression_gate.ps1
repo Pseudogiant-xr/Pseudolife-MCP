@@ -73,7 +73,9 @@ if ($LASTEXITCODE -ne 0) { Log "rebuild failed"; exit 2 }
 
 # -- Stage 2: judge replicates --------------------------------------------
 try {
-    if (-not (Start-Qwen -Owned)) { Log "no owned Qwen endpoint"; exit 2 }
+    # Reuses a reproducible server that is already up (and leaves it
+    # running); refuses any other running server rather than displacing it.
+    if (-not (Start-Qwen -Owned)) { Log "no usable Qwen endpoint"; exit 2 }
     & $py $replicatePy run --extractor e4b-ft --tag arm1-gate
     if ($LASTEXITCODE -ne 0) { Log "run (r1) failed"; exit 2 }
     if ($Replicates -gt 1) {
