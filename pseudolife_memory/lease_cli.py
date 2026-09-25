@@ -27,22 +27,31 @@ A board failure never stops the command from running under the OS lock, and
 the OS lock is what excludes: a renewal that finds the lease lost warns once
 and the command keeps running.
 
-``--expect`` is sent until the board first answers ``held``, and once more
-when the command starts if the OS lock made it wait, so the board's expected
-end counts from the start of the work; renewals leave it alone.
+``--expect`` is sent on every ``lease`` call, the same value each time: the
+board keeps each hold's expect, so repeating it leaves the expected end alone
+(a changed value would be logged as a change, so it is never recomputed).
 
 The instance credential lives in this process's memory only: it is never
 printed, logged, or passed to the command. The command inherits stdio and the
 environment plus ``PSEUDOLIFE_LEASES_HELD`` (comma-separated, appended to any
-inherited value). The OS lock's handle is not inheritable, so a daemon the
-command leaves behind cannot pin the lock. The flip side: if this process is
-killed outright (SIGKILL, TerminateProcess), the OS drops the lock at once
-while the command, if it survives, carries on unguarded. Ctrl-C terminates
-the command first, then releases.
+inherited value). A run whose name is already in that list while its lock is
+held is nested inside a run of the same lease, and would wait for its own
+parent forever; it exits 64 at once instead. The OS lock's handle is not
+inheritable, so a daemon the command leaves behind cannot pin the lock. The
+flip side: if this process is killed outright (SIGKILL, TerminateProcess),
+the OS drops the lock at once while the command, if it survives, carries on
+unguarded.
 
-Exit codes: the command's own; 2 usage error; 71 the lock file is unusable;
-75 ``--timeout`` expired before the lease was held (the command did not run);
-126 the command could not be started; 127 it was not found; 130 interrupted.
+Ctrl-C, SIGTERM or SIGHUP stop the command before anything is released. A
+console Ctrl-C reaches the command too, so it first gets ``KILL_GRACE`` to
+clean up on its own; a stop signal is forwarded to it. Then it is interrupted
+(POSIX), terminated and killed, each after another grace.
+
+Exit codes: the command's own; 2 usage error; 64 nested inside a run of the
+same lease; 71 the lock file is unusable; 75 ``--timeout`` expired before the
+lease was held (the command did not run); 126 the command could not be
+started; 127 it was not found; 128+N stopped by signal N (130 Ctrl-C, 143
+SIGTERM, 129 SIGHUP).
 """
 from __future__ import annotations
 
@@ -52,6 +61,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -63,11 +73,12 @@ from pathlib import Path
 from pseudolife_memory import os_lock
 
 EXIT_USAGE = 2
+EXIT_NESTED = 64  # sysexits EX_USAGE: run inside a run of the same lease
 EXIT_LOCK_ERROR = 71  # sysexits EX_OSERR
 EXIT_TEMPFAIL = 75  # sysexits EX_TEMPFAIL
 EXIT_CANNOT_RUN = 126
 EXIT_NOT_FOUND = 127
-EXIT_INTERRUPTED = 130
+# A run stopped by signal N exits 128+N, as from a shell: 130 for Ctrl-C.
 
 DEFAULT_URL = "http://127.0.0.1:8765"
 HELD_ENV = "PSEUDOLIFE_LEASES_HELD"
@@ -169,7 +180,10 @@ def _printable(text: str) -> str:
 def _number(value) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value) if math.isfinite(value) else None
+    try:
+        return float(value) if math.isfinite(value) else None
+    except OverflowError:  # an int beyond float range
+        return None
 
 
 def _span(seconds: float) -> str:
@@ -368,7 +382,7 @@ class _Board:
             return
         try:
             self._post("release", {"name": name}, timeout=RELEASE_TIMEOUT)
-        except (_Refused, _Transient):
+        except Exception:  # noqa: BLE001 — cleanup must not replace the exit code
             pass
 
     def leases(self, name: str | None = None) -> tuple[list[dict], bool]:
@@ -407,8 +421,10 @@ class _Renewer:
     After ``queued`` it keeps renewing, since that same call is what takes
     the lease back when the board grants it again; after a refusal it stops."""
 
-    def __init__(self, board: _Board, name: str, ttl: int, purpose: str | None):
-        self._board, self._name, self._ttl, self._purpose = board, name, ttl, purpose
+    def __init__(self, board: _Board, name: str, ttl: int, expect: int | None,
+                 purpose: str | None):
+        self._board, self._name, self._ttl = board, name, ttl
+        self._expect, self._purpose = expect, purpose
         self._interval = _renew_interval(ttl)
         self._stop = threading.Event()
         self._warned = False
@@ -421,19 +437,16 @@ class _Renewer:
         self._stop.set()
         self._thread.join(timeout=REQUEST_TIMEOUT + 1)
 
-    def renew_now(self, *, expect: int | None = None) -> None:
-        if not self._stop.is_set():
-            self._renew(expect)
-
     def _loop(self) -> None:
         delay = self._interval
         while not self._stop.wait(delay):
             delay = self._renew()
 
-    def _renew(self, expect: int | None = None) -> float:
-        """One renewal; returns the delay until the next."""
+    def _renew(self) -> float:
+        """One renewal; returns the delay until the next. It repeats the
+        run's expect and purpose unchanged, so a re-grant carries them too."""
         try:
-            reply = self._board.lease(self._name, self._ttl, expect=expect,
+            reply = self._board.lease(self._name, self._ttl, expect=self._expect,
                                       purpose=self._purpose)
         except _Transient:
             return min(TRANSIENT_RETRY, self._interval)
@@ -471,6 +484,48 @@ class _CannotRun(Exception):
 
 class _LockError(Exception):
     """The lock file cannot be created or locked at all."""
+
+
+class _Signalled(BaseException):
+    """SIGTERM or SIGHUP arrived. A BaseException, like KeyboardInterrupt,
+    so no ``except Exception`` on the way swallows it."""
+
+    def __init__(self, signum: int):
+        super().__init__(signum)
+        self.signum = signum
+
+
+# Signals that stop a run the way Ctrl-C does: `kill`, `timeout`, a service or
+# CI stop, a closed terminal. SIGTERM is handled on Windows too, where only
+# this process can raise it.
+_STOP_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP")
+                      if hasattr(signal, name))
+
+
+def _install_stop_handlers(state: dict) -> dict:
+    """Raise _Signalled on a stop signal, unless ``state["cleaning"]``: the
+    bounded cleanup is not cut short by a second one. Returns the previous
+    handlers; empty off the main thread, where Python cannot set handlers."""
+    if threading.current_thread() is not threading.main_thread():
+        return {}
+
+    def stop(signum, frame):
+        if not state["cleaning"]:
+            raise _Signalled(signum)
+
+    previous = {}
+    for signum in _STOP_SIGNALS:
+        try:
+            previous[signum] = signal.signal(signum, stop)
+        except (OSError, ValueError):
+            pass
+    return previous
+
+
+def _restore_handlers(previous: dict) -> None:
+    for signum, handler in previous.items():
+        # None: a handler not set from Python, which cannot be put back.
+        signal.signal(signum, signal.SIG_DFL if handler is None else handler)
 
 
 def _pause(poll: float, deadline: float | None) -> None:
@@ -530,11 +585,10 @@ def _try_lock(lock: os_lock.OsLock) -> bool:
 
 
 def _wait_for_lock(lock: os_lock.OsLock, name: str, deadline: float | None, *,
-                   board_holds: bool) -> bool:
-    """Take the OS lock, polling while another process holds it. True when
-    it had to wait."""
+                   board_holds: bool) -> None:
+    """Take the OS lock, polling while another process holds it."""
     if _try_lock(lock):
-        return False
+        return
     next_notice = time.monotonic()
     while True:
         now = time.monotonic()
@@ -549,7 +603,7 @@ def _wait_for_lock(lock: os_lock.OsLock, name: str, deadline: float | None, *,
             next_notice = now + NOTICE_EVERY
         _pause(LOCK_POLL, deadline)
         if _try_lock(lock):
-            return True
+            return
 
 
 def _spawn(command: list[str], env: dict[str, str]) -> subprocess.Popen:
@@ -586,39 +640,90 @@ def _wait_up_to(child: subprocess.Popen, seconds: float | None) -> int:
                 raise
 
 
-def _stop_child(child: subprocess.Popen) -> None:
-    if child.poll() is not None:
-        return
+def _stop_child(child: subprocess.Popen, signum: int) -> None:
+    """Stop the command after this process got ``signum``.
+
+    A console Ctrl-C reached the command as well (one console on Windows, one
+    foreground process group on POSIX), so it first gets KILL_GRACE to finish
+    the cleanup that Ctrl-C started. Only then is SIGINT sent (POSIX), for an
+    interrupt aimed at this process alone (``kill -INT``); sent at once, it
+    would be a second interrupt to a command already cleaning up, which is
+    what cuts a Python program's teardown short. SIGTERM or SIGHUP, aimed at
+    this process, are forwarded at once. Then terminate, then kill, each after
+    another KILL_GRACE. Asked again while waiting, it kills at once."""
+    if signum == signal.SIGINT:
+        steps = [None] + ([signal.SIGINT] if os.name != "nt" else [])
+    else:
+        steps = [signum]
+    if signal.SIGTERM not in steps:
+        steps.append(signal.SIGTERM)  # Popen.terminate(): TerminateProcess on Windows
     try:
-        child.terminate()
-        _wait_up_to(child, KILL_GRACE)
-    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        for step in steps:
+            if child.poll() is not None:
+                return
+            if step is not None:
+                child.send_signal(step)
+            try:
+                _wait_up_to(child, KILL_GRACE)
+                return
+            except subprocess.TimeoutExpired:
+                pass
+    except (KeyboardInterrupt, _Signalled):
+        pass  # asked again: no more waiting
+    if child.poll() is None:
         child.kill()
-        child.wait()
+    child.wait()
+
+
+def _nested(name: str, lock: os_lock.OsLock) -> bool:
+    """Whether this run sits inside a run of the same lease, which it would
+    wait for forever: its name is in PSEUDOLIFE_LEASES_HELD (whole names
+    only) and the lock is held right now. A process an earlier run started
+    keeps that variable after the run ends; the lock tells the two apart."""
+    held = os.environ.get(HELD_ENV, "")
+    if f",{name}," not in f",{held},":
+        return False
+    try:
+        return os_lock.probe(lock.path) is True
+    except OSError:
+        return False
 
 
 def _run(args, command: list[str], transport) -> int:
     name = args.name
     lock = os_lock.OsLock(os_lock.lock_dir() / os_lock.lock_file_name(name))
+    if _nested(name, lock):
+        _say(f"lease: {name!r} is held by an enclosing lease run "
+             f"({HELD_ENV}={_clean(os.environ.get(HELD_ENV, ''), MAX_PURPOSE)}); a nested "
+             f"run of the same lease would wait for itself forever. Run the command "
+             f"directly, or use another name. If this process was not started by "
+             f"that run, unset {HELD_ENV}.")
+        return EXIT_NESTED
     deadline = None if args.timeout is None else time.monotonic() + args.timeout
     board = renewer = child = None
+    state = {"cleaning": False}
+    previous = _install_stop_handlers(state)
     try:
-        board, skipped = _connect(args.no_board, transport)
-        if board is not None:
-            try:
+        skipped = None
+        try:
+            board, skipped = _connect(args.no_board, transport)
+            if board is not None:
                 _wait_for_board(board, args, command, deadline)
-            except _Refused as exc:
-                skipped = str(exc)
-                board.release_quietly(name)  # give up any place in the queue now
-            else:
-                renewer = _Renewer(board, name, args.ttl, args.purpose)
-                renewer.start()
+                started = _Renewer(board, name, args.ttl, args.expect, args.purpose)
+                started.start()
+                renewer = started
+        except _TimedOut:
+            raise
+        except _Refused as exc:
+            skipped = str(exc)
+        except Exception as exc:  # noqa: BLE001 — a board failure never stops the command
+            skipped = f"the board failed unexpectedly ({type(exc).__name__})"
         if renewer is None:
+            if board is not None:
+                board.release_quietly(name)  # give up any place in the queue now
             _say(f"lease: board skipped: {skipped}; waiting on the local lock for "
                  f"{name!r} alone (not FIFO)")
-        waited = _wait_for_lock(lock, name, deadline, board_holds=renewer is not None)
-        if waited and renewer is not None and args.expect is not None:
-            renewer.renew_now(expect=args.expect)
+        _wait_for_lock(lock, name, deadline, board_holds=renewer is not None)
         child = _start(command, name)
         return _exit_status(_wait_up_to(child, None))
     except _TimedOut:
@@ -631,12 +736,16 @@ def _run(args, command: list[str], transport) -> int:
     except _LockError as exc:
         _say(str(exc))
         return EXIT_LOCK_ERROR
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, _Signalled) as stop:
+        signum = stop.signum if isinstance(stop, _Signalled) else signal.SIGINT
         if child is not None:
-            _stop_child(child)
-        _say(f"lease: interrupted; releasing {name!r}")
-        return EXIT_INTERRUPTED
+            _stop_child(child, signum)
+        what = ("interrupted" if signum == signal.SIGINT
+                else f"stopped by {signal.Signals(signum).name}")
+        _say(f"lease: {what}; releasing {name!r}")
+        return 128 + signum
     finally:
+        state["cleaning"] = True
         # The OS lock first: the work is over, and a renewal stuck on a slow
         # daemon (joined for up to REQUEST_TIMEOUT) must not hold it longer.
         lock.release()
@@ -645,6 +754,7 @@ def _run(args, command: list[str], transport) -> int:
         if board is not None:
             board.release_quietly(name)
             board.close()
+        _restore_handlers(previous)
 
 
 # --- lease list --------------------------------------------------------------------
@@ -681,7 +791,8 @@ def _lease_lines(lease: dict, now: float) -> list[str]:
     else:
         head = f"lease {name}: free"
     lines = [head]
-    queue = [entry for entry in lease.get("queue") or [] if isinstance(entry, dict)]
+    queue = lease.get("queue")
+    queue = [entry for entry in queue if isinstance(entry, dict)] if isinstance(queue, list) else []
     queued = lease.get("queued") if isinstance(lease.get("queued"), int) else len(queue)
     if queued:
         waiting = "; ".join(_describe_waiter(entry) for entry in queue)
@@ -700,7 +811,10 @@ def _list(args, transport) -> int:
         except OSError:
             state = None
         suite = None if state is None else ("held" if state else "free")
-    board, reason = _connect(False, transport)
+    try:
+        board, reason = _connect(False, transport)
+    except Exception as exc:  # noqa: BLE001 — the local state is still worth showing
+        board, reason = None, f"the board failed unexpectedly ({type(exc).__name__})"
     url = board.url if board is not None else None
     leases, truncated = [], False
     if board is not None:
@@ -708,6 +822,8 @@ def _list(args, transport) -> int:
             leases, truncated = board.leases(args.name)
         except (_Refused, _Transient) as exc:
             reason = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            reason = f"the board failed unexpectedly ({type(exc).__name__})"
         finally:
             board.close()
     available = reason is None
@@ -788,9 +904,13 @@ whose board is on, the board mirrors it: FIFO queue, holder, expected end.
 Otherwise, or with --no-board, the local lock alone decides (not FIFO). The
 command sees PSEUDOLIFE_LEASES_HELD=<names>.
 
-exit codes: the command's own; 2 usage error; 71 lock file unusable;
-75 --timeout expired (the command did not run); 126 cannot start the command;
-127 command not found; 130 interrupted.
+A stop (Ctrl-C, SIGTERM, SIGHUP) stops the command before releasing: it gets
+10 s to clean up on its own, then is interrupted, terminated and killed.
+
+exit codes: the command's own; 2 usage error; 64 nested inside a run of the
+same lease; 71 lock file unusable; 75 --timeout expired (the command did not
+run); 126 cannot start the command; 127 command not found; 128+N stopped by
+signal N (130 Ctrl-C).
 """
 
 

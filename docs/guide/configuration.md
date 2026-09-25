@@ -247,8 +247,9 @@ short-lived address (retired an hour after its last activity), queues for
 once a minute, then takes the OS lock and runs the command, renewing the board
 lease every third of `--ttl` (default 120 s, from 30 s to a day). When a lease
 frees, the head of the queue has 300 s to take it before the board passes it
-on. `--expect` sets the expected end the board shows, marked stale once past;
-`--purpose` says what the lease is for.
+on. `--expect` sets the expected end the board shows, counted from the grant
+and marked stale once past; every call repeats the same value, which leaves it
+alone. `--purpose` says what the lease is for.
 
 Without a token, with the daemon unreachable, the board off or refused for this
 bearer, or with `--no-board`, the run says once why and waits on the OS lock
@@ -262,14 +263,20 @@ The command inherits the terminal and the environment, plus
 `PSEUDOLIFE_LEASES_HELD` (comma-separated names, appended to any inherited
 value). Exit codes: the command's own; `75` when `--timeout` (`90`, `90s`,
 `20m`, `2h`) expired before the lease was held, and the command did not run;
-`130` on Ctrl-C, which terminates the command before releasing; `2` a usage
-error; `71` an unusable lock file; `126` or `127` a command that cannot start
-or is not found. The `lease` process holds the lock, not the command: kill it
-outright (SIGKILL, Task Manager) and the lock goes while the command may run
-on. Do not nest a run inside another of the same name; the inner one waits for
-the outer until its `--timeout`. On a case-insensitive filesystem, names that
-differ only in case share one lock file, which can only make one wait for the
-other.
+`128+N` when stopped by signal N (`130` Ctrl-C, `143` SIGTERM, `129` SIGHUP);
+`64` for a run nested inside a run of the same lease (its name is in
+`PSEUDOLIFE_LEASES_HELD` while that lease's lock is held), which would
+otherwise wait for itself forever; `2` a usage error; `71` an unusable lock
+file; `126` or `127` a command that cannot start or is not found.
+
+A stop never releases the lease under a running command. Ctrl-C reaches the
+command too, so it first gets 10 s to clean up on its own; SIGTERM or SIGHUP
+sent to the `lease` process is forwarded to it. After that it is interrupted
+(POSIX only), terminated and killed, 10 s apart. The `lease` process holds
+the lock, not the command: kill it outright (SIGKILL, Task Manager) and the
+lock goes while the command may run on. On a case-insensitive filesystem,
+names that differ only in case share one lock file, which can only make one
+wait for the other.
 
 `lease list` shows each board lease (holder, purpose, age, expected end,
 queue) beside the local lock files, each probed held or free, and whether the
