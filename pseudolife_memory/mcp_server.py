@@ -439,8 +439,15 @@ _SUPERSESSION_SERVICE_KEYS = (
 
 def _compact_entry(e: dict[str, Any],
                    text_chars: int | None = None) -> dict[str, Any]:
-    """{id, text, source, tags, score} plus, on a superseded hit, a short
-    ``replaced_by`` pointer to the note recorded as replacing it.
+    """{id, text, source, tags, score, date} plus, on a superseded hit, a
+    short ``replaced_by`` pointer to the note recorded as replacing it.
+
+    ``date`` is the entry's write date (local YYYY-MM-DD, as in
+    ``replaced_by.at``), omitted when the stamp is missing. Age is a signal
+    agents act on: in the 2026-09-23 review's used_ids labels, status notes
+    were used 51% of the time under 3 days old and 24% at 3-14 days, and
+    knowledge entries decayed the same way. The full ``timestamp`` stays
+    under ``verbose``.
 
     ``text_chars`` caps the entry's own ``text`` (2026-09-04 agent token
     ledger: it alone was 64% of a served ``memory_search`` payload, mean
@@ -453,6 +460,9 @@ def _compact_entry(e: dict[str, Any],
     agents to use in place of the entry although about 4 in 10 legacy links
     point at an unrelated note. The full text stays under ``verbose``."""
     out = {k: e[k] for k in ("id", "text", "source", "tags", "score") if k in e}
+    written = _iso_seconds(e.get("timestamp"))
+    if written:
+        out["date"] = written[:10]
     if e.get("superseded"):
         out["superseded"] = True
     if e.get("superseded_by_text"):

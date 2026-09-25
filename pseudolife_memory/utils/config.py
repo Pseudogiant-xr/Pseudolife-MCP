@@ -1075,7 +1075,8 @@ class McpConfig:
     ``compact_payloads: False`` restores the pre-cut payloads verbatim,
     except that a superseded hit still serves the short ``replaced_by``
     pointer rather than the replacement's full text (2026-09-23: a
-    correctness change, not a size cut; ``verbose=True`` serves the text).
+    correctness change, not a size cut; ``verbose=True`` serves the text),
+    and every entry keeps its write ``date`` (2026-09-25, same reason).
     All three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
     the service layer are untouched, so no eval number can move (the eval
     harness calls the service, pinned by

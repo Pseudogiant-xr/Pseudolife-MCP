@@ -680,9 +680,37 @@ def test_memory_search_entries_are_compact_by_default(tmp_path: Path, monkeypatc
     out = _invoke("memory_search", {"query": "widget port"})
     assert out["count"] >= 1
     e = out["entries"][0]
-    assert set(e) == {"id", "text", "source", "tags", "score"}
+    assert set(e) == {"id", "text", "source", "tags", "score", "date"}
     for noise in _ENTRY_NOISE + ("superseded", "superseded_by_text"):
         assert noise not in e
+
+
+def test_compact_entries_carry_their_write_date(
+        tmp_path: Path, monkeypatch) -> None:
+    """A hit's age is a signal agents act on, and compact entries had
+    dropped it with the rest of the bookkeeping. In the 2026-09-23
+    review's used_ids labels, status notes were used 51% of the time when
+    under 3 days old and 24% at 3-14 days, and knowledge entries decayed
+    the same way. ``date`` is the entry's write date, the local
+    YYYY-MM-DD that ``replaced_by.at`` already uses. It is omitted rather
+    than invented when the stamp is missing."""
+    from datetime import date, datetime
+
+    mod = _reload_mod(tmp_path, monkeypatch)
+    ts = 1_790_000_000.0
+    e = mod._compact_entry({"id": 1, "text": "t", "source": "s", "tags": [],
+                            "score": 0.5, "timestamp": ts})
+    assert e["date"] == datetime.fromtimestamp(ts).date().isoformat()
+    assert "timestamp" not in e
+    for missing in (None, 0):
+        assert "date" not in mod._compact_entry(
+            {"id": 2, "text": "t", "timestamp": missing})
+    _invoke("memory_store", {"text": "the widget port is 9191",
+                             "source": "notes"})
+    for tool, args in (("memory_search", {"query": "widget port"}),
+                       ("memory_recent", {"n": 5})):
+        hit = _invoke(tool, args)["entries"][0]
+        assert hit["date"] == date.today().isoformat(), tool
 
 
 def test_memory_search_verbose_restores_full_metadata(tmp_path: Path, monkeypatch) -> None:
@@ -894,7 +922,7 @@ def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monke
     _invoke("memory_store", {"text": "recent shape probe", "source": "notes",
                              "tags": ["probe"]})
     compact = _invoke("memory_recent", {"n": 5})["entries"][0]
-    assert set(compact) == {"id", "text", "source", "tags"}
+    assert set(compact) == {"id", "text", "source", "tags", "date"}
     full = _invoke("memory_recent", {"n": 5, "verbose": True})["entries"][0]
     for k in _ENTRY_NOISE + ("superseded",):
         assert k in full, f"verbose entry missing {k!r}"

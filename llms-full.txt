@@ -413,8 +413,8 @@ is agent context every session, so it stays lean.
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
 The five recall-path tools return **compact entries** by default (result
-payloads are agent context on every retrieval); pass `verbose=true` for full
-metadata. Full-table dumps and topology views live in the **Cortex Console**
+payloads are agent context on every retrieval; each entry keeps its write
+`date`); pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`

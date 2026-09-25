@@ -15,7 +15,8 @@ agent_token_ledger.py`` measures it; these tests pin the cuts it justified:
 
 All three ride ONE knob, ``memory.mcp.compact_payloads`` (default True);
 False restores the pre-cut payloads verbatim, except that a superseded hit
-keeps its ``replaced_by`` pointer (2026-09-23). Ranking, ``min_score`` and
+keeps its ``replaced_by`` pointer (2026-09-23) and every entry keeps its
+write ``date`` (2026-09-25). Ranking, ``min_score`` and
 the service layer are untouched — the eval harness calls ``service.*``, not
 these projections.
 """
@@ -45,7 +46,7 @@ def _stable(d):
     """Blank the wall-clock/score fields so the snapshot below pins SHAPE
     and content rather than the second the test ran in."""
     volatile = {"age", "asserted_at", "last_confirmed", "score", "id",
-                "tx_time", "valid_time", "superseded_at"}
+                "tx_time", "valid_time", "superseded_at", "date"}
     if isinstance(d, dict):
         return {k: ("*" if k in volatile else _stable(v))
                 for k, v in sorted(d.items())}
@@ -60,7 +61,9 @@ def _stable(d):
 # It now lives in the pure ``_project_search``. This snapshot was captured
 # from the PRE-refactor tool and must not move: the extraction is
 # behaviour-preserving, and every cut below is gated off here by
-# compact_payloads=False.
+# compact_payloads=False. Two additions are not size cuts and deliberately
+# ride through the switch: a superseded hit's ``replaced_by`` pointer
+# (2026-09-23) and each entry's write ``date`` (2026-09-25).
 
 
 _LEGACY_SEARCH = {
@@ -77,10 +80,11 @@ _LEGACY_SEARCH = {
     "count": 2,
     "entries": [
         {"id": "*", "score": "*", "source": "notes", "tags": [],
+         "date": "*",
          "text": "The bench Postgres listens on 127.0.0.1:5433 and the "
                  "daemon owns the bank volumes."},
         {"id": "*", "score": "*", "source": "notes", "tags": [],
-         "text": "deploy only via ops/update.ps1"},
+         "date": "*", "text": "deploy only via ops/update.ps1"},
     ],
     "low_confidence": False,
     "query": "bench postgres port",
