@@ -286,7 +286,7 @@ def test_an_unclosed_quote_before_backslashes_does_not_stall_the_report():
     every failing report, so that was a suite hang with no output."""
     import time
 
-    path = "C:\\Users\\x" * 13
+    path = "D:\\cache\\x" * 13
     for text in (f"log: password='{path}", f"password = '{path}",
                  "a." * 32_000):
         started = time.perf_counter()
