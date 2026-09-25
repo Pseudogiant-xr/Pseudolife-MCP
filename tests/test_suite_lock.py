@@ -483,7 +483,18 @@ def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch, sl
         for holder in holders:
             suite_lock.release(holder)
     assert order == ["earlier", "later"]
-    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
+    _assert_no_live_ticket(tmp_path)
+
+
+def _assert_no_live_ticket(directory: Path) -> None:
+    """Every ticket left in the queue is free. On Windows a waiter's unlink
+    fails while another waiter has the ticket open to test it (seen in 2 of
+    20 runs of the test above, 2026-09-25); the leftover is unlocked, so it
+    is skipped at once and deleted once past the grace window."""
+    for path in (directory / suite_lock.QUEUE_DIR).iterdir():
+        with open(path, "rb") as ticket:
+            assert suite_lock._try_lock(ticket), f"{path.name} is still held"
+            suite_lock._unlock(ticket)
 
 
 def _ticket_file(directory: Path, *, age_s: float, pid: int) -> Path:
