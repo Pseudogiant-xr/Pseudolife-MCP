@@ -42,7 +42,9 @@ from pseudolife_memory.credentials import (
 PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
 EVENTS = {"sessionStart": "SessionStart", "userPromptSubmit": "UserPromptSubmit",
           "sessionEnd": "SessionEnd"}
-MANUAL_ROLES = {"sessionStart": ("SessionStart", "CoordinationStart"),
+# MemoryPolicy is the separate memory-policy SessionStart output (the full
+# memory-loop block when the daemon's memory_policy variant asks for it).
+MANUAL_ROLES = {"sessionStart": ("SessionStart", "MemoryPolicy", "CoordinationStart"),
                 "userPromptSubmit": ("UserPromptSubmit", "CoordinationPrompt"),
                 "sessionEnd": ("SessionEnd",)}
 # The plugin's hooks.json also carries Claude Code's opt-in Stop wake hook,
@@ -337,10 +339,11 @@ def bundle_bytes(directory, names=SCRIPTS):
 
 
 def complete_set(hooks, source):
-    """Memory and coordination each have independent start and prompt hooks."""
+    """Memory and coordination each have independent start and prompt hooks,
+    and the memory-policy block has a start hook of its own."""
     from collections import Counter
     counts = Counter(h["eventName"] for h in hooks)
-    required = Counter(sessionStart=2, userPromptSubmit=2, sessionEnd=1)
+    required = Counter({event: len(roles) for event, roles in MANUAL_ROLES.items()})
     if source == "plugin" and counts.get("stop") == 1:
         del counts["stop"]
     return (counts == required
@@ -356,15 +359,18 @@ def bundle_digest(files, names=SCRIPTS):
 
 
 def manual_definitions(directory, codex_marker=True):
-    mapping = {"SessionStart": "session-start.sh", "UserPromptSubmit": "user-prompt-submit.sh",
+    mapping = {"SessionStart": "session-start.sh", "MemoryPolicy": "session-start.sh",
+               "UserPromptSubmit": "user-prompt-submit.sh",
                "CoordinationStart": "coordination-start.sh", "CoordinationPrompt": "coordination-prompt.sh",
                "SessionEnd": "session-end.sh"}
+    arguments = {"MemoryPolicy": " memory-policy"}
     # Literal single quotes protect $, backticks, and spaces in native paths.
     ps = str(directory / "lifecycle.ps1").replace("'", "''")
     bash_prefix = "env PSEUDOLIFE_CODEX_HOOK=1 bash " if codex_marker else "bash "
-    return {event: {"type": "command", "command": bash_prefix + shlex.quote(str(directory / script)),
+    return {event: {"type": "command",
+                    "command": bash_prefix + shlex.quote(str(directory / script)) + arguments.get(event, ""),
                     "commandWindows": f"pwsh -NoProfile -File '{ps}' -Event {event}",
-                    "timeout": {"SessionStart": 15, "UserPromptSubmit": 5,
+                    "timeout": {"SessionStart": 15, "MemoryPolicy": 15, "UserPromptSubmit": 5,
                                 "CoordinationStart": 5, "CoordinationPrompt": 5,
                                 "SessionEnd": 3}[event]}
             for event, script in mapping.items()}
@@ -553,8 +559,7 @@ def install_manual(home, report, plugin=False):
                     or (h.get("commandWindows") and h["commandWindows"] not in known)]
             if kept:
                 groups.append({**group, "hooks": kept})
-        for name in (event, {"SessionStart": "CoordinationStart",
-                             "UserPromptSubmit": "CoordinationPrompt"}.get(event)):
+        for name in MANUAL_ROLES[next(k for k, v in EVENTS.items() if v == event)]:
             if name in definitions:
                 groups.append({"hooks": [definitions[name]]})
         hooks[event] = groups
@@ -856,17 +861,19 @@ def verify(executable, home, cwd, config, hooks, selected):
                    "text": "Local hook verification.", "text_elements": []}]})
         deadline = time.monotonic() + 25
         completed = []
+        expected = {event: sum(h["eventName"] == event for h in selected)
+                    for event in ("sessionStart", "userPromptSubmit")}
         while time.monotonic() < deadline:
             completed = [e["params"]["run"] for e in client.events
                          if e.get("method") == "hook/completed"]
-            if all(sum(run.get("eventName") == event for run in completed) >= 2
-                   for event in ("sessionStart", "userPromptSubmit")):
+            if all(sum(run.get("eventName") == event for run in completed) >= expected[event]
+                   for event in expected):
                 break
             client.receive(deadline - time.monotonic())
         for event, text in (("sessionStart", "Session episode:"),
                             ("userPromptSubmit", "memory_lesson_search")):
             runs = [run for run in completed if run.get("eventName") == event]
-            if len(runs) != 2 or any(run.get("status") != "completed" for run in runs) or not any(
+            if len(runs) != expected[event] or any(run.get("status") != "completed" for run in runs) or not any(
                     text in entry.get("text", "") for run in runs for entry in run.get("entries", [])):
                 raise SetupError(f"{EVENTS[event]} did not return the expected memory context "
                                  f"({len(runs)} completed events, memory={any(text in entry.get('text', '') for run in runs for entry in run.get('entries', []))}). Check daemon access and /hooks.")
