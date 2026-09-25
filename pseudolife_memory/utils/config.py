@@ -389,6 +389,12 @@ class DreamConfig:
     # Timeout/max_tokens are shared with the primary — no fallback copies.
     fallback_base_url: str | None = None
     fallback_model: str | None = None
+    # The fallback's own bearer key (env PSEUDOLIFE_DREAM_FALLBACK_API_KEY,
+    # honoured in both settings-source modes like extractor_api_key). Unset =
+    # the fallback sends no key: the primary's key is never shared, since it
+    # belongs to the primary's provider and the usual fallback (the in-stack
+    # sidecar, plain HTTP) needs none.
+    fallback_api_key: str | None = None
     extractor_mode: str = "auto"
     # GAM #2 graph-from-text: the dream also extracts (src,relation,dst) triples
     # into the graph (separate extract_relations call — the bench winner). Edges
@@ -760,7 +766,7 @@ class RetrievalLogConfig:
     no retrieval behaviour changes, and nothing is computed for the log
     that ranking did not already compute. Requires Postgres storage (file
     mode skips silently); ``memory_stats`` reports the row counts and
-    write-failure count. The same switch and retention cover the v43
+    write-failure count. The same switch and retention cover the v44
     records: one ``lesson_search_events`` row per ``memory_lesson_search``
     and the ``outcome_signals.used_ids`` partition."""
     enabled: bool = True

@@ -187,3 +187,156 @@ def test_stored_entries_retrieved_again_by_another_session(pg_conn, pg_url, monk
     reuse = cm.collect(NOW - 40 * DAY, now=NOW)["reuse_14d"]
     assert reuse == {"entries": 4, "retrieved_again": 1,
                      "rate": pytest.approx(1 / 4, abs=1e-3), "unattributable": 1}
+
+
+def _register(conn, key, started, via="hook", variant=None, episode_ids=(), ended=None,
+              start_times=None):
+    conn.execute(
+        "INSERT INTO client_sessions (session_key, registered_via, started_at, "
+        "ended_at, policy_variant, episode_ids, start_times) "
+        "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)",
+        (key, via, started, ended, variant, json.dumps(list(episode_ids)),
+         json.dumps(start_times if start_times is not None else [started])))
+
+
+@pytest.fixture
+def registered_stats(pg_conn, pg_url, monkeypatch):
+    """Sessions the daemon registered (``client_sessions``, schema v43) count
+    whether or not their root survived; roots without a record (banks from
+    before v43) still count the old way."""
+    t = SINCE + 3600
+    # 1. A read-only session: hook and shim both registered, both roots
+    #    pruned at the end. Its search carries the shim's key; its outcome
+    #    names the hook root the briefing advertised, which no longer exists.
+    _register(pg_conn, hook_key(1), t, variant="none", episode_ids=["H1"], ended=t + 900)
+    _register(pg_conn, shim_key(1), t + 1, via="api", episode_ids=["S1"], ended=t + 901)
+    _search(pg_conn, t + 30, session=shim_key(1))
+    _outcome(pg_conn, "H1", t + 800)
+    # 2. A registered session that never touched memory; root pruned.
+    _register(pg_conn, hook_key(2), t + 3600, variant="compact", episode_ids=["H2"])
+    # 3. A registered session whose root survives (it stored something): one
+    #    session, not one per record.
+    t3 = t + 2 * 3600
+    _register(pg_conn, hook_key(3), t3, variant="compact", episode_ids=["H3"])
+    _root(pg_conn, "H3", hook_key(3), t3)
+    _entry(pg_conn, "H3", t3 + 60)
+    # 4. A root from before the record existed.
+    _root(pg_conn, "L1", hook_key(4), t + 3 * 3600)
+    # 5. An idle shim registration: a transport artifact, dropped.
+    _register(pg_conn, shim_key(5), t + 4 * 3600, via="api", episode_ids=["S5"])
+    # 6. A session registered before the window whose later root falls
+    #    inside it: the session started before the window, so neither counts.
+    _register(pg_conn, hook_key(6), SINCE - DAY, episode_ids=["OLD"])
+    _root(pg_conn, "OLD2", hook_key(6), t)
+    #    Its activity is its own, not residue: a search under its key, an
+    #    outcome on its surviving later root and one on its pruned first.
+    _search(pg_conn, t + 50, session=hook_key(6))
+    _outcome(pg_conn, "OLD2", t + 60)
+    _outcome(pg_conn, "OLD", t + 70)
+    # 7. Residue no root and no record can claim.
+    _search(pg_conn, t + 5 * 3600, session=shim_key(99))
+    _outcome(pg_conn, "gone-episode", t + 5 * 3600)
+    pg_conn.commit()
+    monkeypatch.setattr(cm, "DSN", pg_url)
+    return cm.collect(SINCE, now=NOW)
+
+
+def test_registered_sessions_count_after_their_roots_are_pruned(registered_stats):
+    stats = registered_stats
+    # H1+S1 (merged), H2, H3, L1.
+    assert stats["sessions"] == 4
+    roots = stats["roots"]
+    assert roots["registered"] == 5            # records started in the window
+    assert roots["registered_without_root"] == 2   # H1+S1 and H2: pruned roots
+    assert roots["merged_pairs"] == 1
+    assert roots["idle_shim_dropped"] == 1
+    # Only activity nothing can claim is left over.
+    assert roots["pruned_with_searches"] == 1
+    assert roots["pruned_with_outcomes"] == 1
+
+
+def test_pruned_sessions_activity_is_attributed_through_the_record(registered_stats):
+    stats = registered_stats
+    # H1+S1 searched and logged an outcome; H3 stored an entry.
+    assert stats["working_sessions"] == 2
+    loop = stats["loop"]
+    assert loop["searched_early"]["n"] == 1
+    assert loop["outcome_coverage"]["n"] == 1
+    assert stats["substantive_sessions"] == 1
+
+
+def test_sessions_by_policy_variant(registered_stats):
+    # The arm a hook registration recorded, per client session; the legacy
+    # root L1 has none on record.
+    assert registered_stats["policy_variants"] == {
+        "compact": 2, "none": 1, "unrecorded": 1}
+
+
+def test_a_resumed_session_pairs_each_run_with_its_own_shim(pg_conn, pg_url, monkeypatch):
+    """A resumed client keeps its session id but starts a new shim beside
+    the new registration, hours after the first; both runs are one
+    session."""
+    t = SINCE + 3600
+    t2 = t + 8 * 3600
+    _register(pg_conn, hook_key(1), t, variant="compact", episode_ids=["H1", "H1b"],
+              start_times=[t, t2])
+    _register(pg_conn, shim_key(1), t + 1, via="api", episode_ids=["S1"])
+    _register(pg_conn, shim_key(2), t2 + 1, via="api", episode_ids=["S2"])
+    _search(pg_conn, t + 30, session=shim_key(1))
+    _search(pg_conn, t2 + 30, session=shim_key(2))
+    # A hook retry a second after the first registration is one start,
+    # not a rival for the same shim.
+    _register(pg_conn, hook_key(2), t + 3600, episode_ids=["H2"],
+              start_times=[t + 3600, t + 3600.5])
+    _register(pg_conn, shim_key(3), t + 3601, via="api", episode_ids=["S3"])
+    _search(pg_conn, t + 3630, session=shim_key(3))
+    pg_conn.commit()
+    monkeypatch.setattr(cm, "DSN", pg_url)
+    stats = cm.collect(SINCE, now=NOW)
+    assert stats["sessions"] == 2
+    assert stats["roots"]["merged_pairs"] == 3
+    assert stats["roots"]["ambiguous_pairs"] == 0
+    assert stats["policy_variants"] == {"compact": 1, "unrecorded": 1}
+
+
+def test_a_keys_several_roots_are_one_session(pg_conn, pg_url, monkeypatch):
+    """Before v43: a session outliving the resume window got a second root
+    under the same key, and each run's shim started beside its own root."""
+    t = SINCE + 3600
+    t2 = t + 8 * 3600
+    _root(pg_conn, "H1", hook_key(1), t)
+    _root(pg_conn, "H1b", hook_key(1), t2)
+    _root(pg_conn, "S1", shim_key(1), t + 1)
+    _root(pg_conn, "S2", shim_key(2), t2 + 1)
+    _entry(pg_conn, "H1", t + 60)
+    _entry(pg_conn, "H1b", t2 + 60)
+    _search(pg_conn, t + 30, session=shim_key(1))
+    _search(pg_conn, t2 + 30, session=shim_key(2))
+    pg_conn.commit()
+    monkeypatch.setattr(cm, "DSN", pg_url)
+    stats = cm.collect(SINCE, now=NOW)
+    assert stats["sessions"] == 1
+    assert stats["roots"]["merged_pairs"] == 2
+    assert stats["substantive_sessions"] == 1
+    assert stats["loop"]["searched_early"]["n"] == 1
+
+
+def test_searched_early_counts_from_any_start_of_the_session(pg_conn, pg_url, monkeypatch):
+    """Every start re-serves the startup policy, so a resumed run that
+    recalls promptly searched early even though the session began hours
+    before; a search long after every start did not."""
+    t = SINCE + 3600
+    t2 = t + 8 * 3600
+    _register(pg_conn, hook_key(1), t, episode_ids=["H1"], start_times=[t, t2])
+    _search(pg_conn, t2 + 60, session=hook_key(1))
+    _register(pg_conn, hook_key(2), t, episode_ids=["H2"], start_times=[t, t2])
+    _search(pg_conn, t2 + 2 * 3600, session=hook_key(2))
+    # A root the daemon opened lazily at the first store, after a search:
+    # the session began no later than that search.
+    _root(pg_conn, "LAZY", "lazy-http-client", t + 600)
+    _search(pg_conn, t + 480, session="lazy-http-client")
+    pg_conn.commit()
+    monkeypatch.setattr(cm, "DSN", pg_url)
+    stats = cm.collect(SINCE, now=NOW)
+    assert stats["sessions"] == 3
+    assert stats["loop"]["searched_early"]["n"] == 2

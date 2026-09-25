@@ -598,7 +598,7 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "INSERT INTO dream_runs (started_at, cursor_before, status) "
             "VALUES (171.0, 0.0, 'running')"
         )
-        # v43: what an outcome's used_ids became is serving-history
+        # v44: what an outcome's used_ids became is serving-history
         # telemetry, like retrieval_events: the signal travels, the column
         # does not.
         conn.execute(

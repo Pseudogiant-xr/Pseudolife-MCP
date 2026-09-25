@@ -87,6 +87,9 @@ EXPORTED_TABLES = (
 EXCLUDED_TABLES = (
     "dream_runs", "dream_run_slots", "retrieval_events", "retrieval_uses",
     "slot_reads", "lesson_search_events",
+    # v43: which clients registered with THIS daemon, and when — the
+    # session half of the retrieval telemetry above.
+    "client_sessions",
     # Mail and instance credentials belong to the source bank's runtime.
     "coordination_agents", "coordination_messages",
     # The board's audit log holds message bodies (paths, usernames) and its
@@ -95,7 +98,7 @@ EXCLUDED_TABLES = (
 )
 
 # Columns of an exported table that are serving telemetry under the same
-# rule: outcome_signals.used_ids (v43) records what an outcome's ids became
+# rule: outcome_signals.used_ids (v44) records what an outcome's ids became
 # against this bank's retrieval_events, which stay behind.
 EXCLUDED_COLUMNS = {"outcome_signals": ("used_ids",)}
 

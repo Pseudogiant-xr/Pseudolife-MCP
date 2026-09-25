@@ -4778,7 +4778,7 @@ class MemoryService(DreamOps):
         are not a join). Reported back as ``used_ids_recorded`` (ids
         credited to at least one event), ``used_ids_unmatched`` (ids nothing
         in the window served) and ``used_ids_served_elsewhere`` (ids served
-        in the window only under another session id). Since schema v43 the
+        in the window only under another session id). Since schema v44 the
         signal row's ``used_ids`` column also keeps that partition as id
         lists, so a match rate can be measured from the bank (see
         :meth:`_label_used_entries`). The label is positive-only: an empty
@@ -4818,7 +4818,7 @@ class MemoryService(DreamOps):
 
     def _record_signal_used_ids(self, signal_id: int, record: dict) -> None:
         """Keep what an outcome's ``used_ids`` became on its signal row
-        (schema v43). Observational like the labels themselves: a failure
+        (schema v44). Observational like the labels themselves: a failure
         is counted in ``_retrieval_log_errors`` and never undoes the
         recorded outcome. Caller holds ``self._lock``."""
         try:
@@ -4836,7 +4836,7 @@ class MemoryService(DreamOps):
         writer resolved once, by :meth:`record_outcome`.
 
         Returns ``(report, record)``: the reporting keys for
-        :meth:`record_outcome`, and what the signal row keeps in its v43
+        :meth:`record_outcome`, and what the signal row keeps in its v44
         ``used_ids`` column — ``{"credited", "unmatched",
         "served_elsewhere"}`` id lists (deduplicated, in the caller's
         order), ``{"unchecked", "reason"}`` when the statement raised, or
@@ -5116,7 +5116,9 @@ class MemoryService(DreamOps):
     def loop_health(self, window_days: int = 7,
                     now: float | None = None) -> dict[str, Any]:
         """Is the memory loop actually being exercised? Windowed activity
-        counts + per-session rates for the Console tile. Needs Postgres —
+        counts + per-session rates for the Console tile. The rates divide by
+        client sessions, not root episodes (see
+        :meth:`PostgresStorage.loop_health`). Needs Postgres —
         ``{"available": False}`` without (never raises)."""
         retry_days = self.config.memory.lessons.signal_retry_days
         t = time.time() if now is None else float(now)
@@ -5718,7 +5720,7 @@ class MemoryService(DreamOps):
             return None
 
     def _log_lesson_search(self, query: str, hits: list) -> None:
-        """Append a ``lesson_search_events`` row (schema v43) for a
+        """Append a ``lesson_search_events`` row (schema v44) for a
         ``memory_lesson_search`` call: the query, the caller's session and
         the lessons served, named by slot key with rank and the score the
         caller saw. A search that found nothing is recorded too. Kept out
@@ -5812,7 +5814,7 @@ class MemoryService(DreamOps):
 
     def prune_retrieval_log(self) -> int:
         """Drop retrieval events older than the configured retention (their
-        use labels CASCADE), and lesson-search rows (v43) with them. Rides
+        use labels CASCADE), and lesson-search rows (v44) with them. Rides
         the dream-sweep tick, like the other append-only logs. The lock is
         load-bearing: the sweep thread calls this concurrently with
         lock-holding writers, and an unlocked storage call interleaves
@@ -6136,6 +6138,7 @@ class MemoryService(DreamOps):
 
     def episode_start_session(
         self, session_key: str | None, title: str, hint: str | None = None,
+        *, registered_via: str = "api", policy_variant: str | None = None,
     ) -> dict[str, Any]:
         """Idempotent open for a shim-driven session episode.
 
@@ -6145,6 +6148,13 @@ class MemoryService(DreamOps):
         rather than forking a new one (finding 5, 2026-07-19). Otherwise open
         a new root — WITHOUT closing any other session's open episode, so
         concurrent sessions (different projects) coexist cleanly.
+
+        Every keyed call also upserts the session's durable ``client_sessions``
+        row (schema v43), which outlives the root: ``registered_via`` is
+        ``"hook"`` from the SessionStart hook, ``"api"`` from ``POST
+        /api/episode/start`` (the stdio shim, the CLI episode hooks) and
+        in-process callers; ``policy_variant`` is the startup memory policy
+        the hook served.
         """
         with self._lock:
             self._ensure_init()
@@ -6152,14 +6162,42 @@ class MemoryService(DreamOps):
             existing = (self._cms.episodes.open_leaf_for(session_key)
                         if session_key is not None else None)
             if existing is not None:
-                return self._episode_to_dict(existing)
-            resumed = self._resume_closed_session_locked(session_key)
-            if resumed is not None:
-                return self._episode_to_dict(resumed)
-            ep = self._cms.episodes.start_session(
-                title=title, session_key=session_key, hint=hint)
-            self._persist_episodes()
+                ep = existing
+            else:
+                ep = self._resume_closed_session_locked(session_key)
+                if ep is None:
+                    ep = self._cms.episodes.start_session(
+                        title=title, session_key=session_key, hint=hint)
+                    self._persist_episodes()
+            self._register_client_session_locked(
+                session_key, ep, registered_via, policy_variant)
             return self._episode_to_dict(ep)
+
+    def _register_client_session_locked(
+        self, session_key: str | None, ep: Any, registered_via: str,
+        policy_variant: str | None,
+    ) -> None:
+        """Write-through of the durable registration row (see
+        :meth:`episode_start_session`). The row names the session's ROOT
+        (``open_leaf_for`` hands back an open sub-episode on a re-fire).
+        Best-effort like the other episode write-throughs: a registration
+        failure never fails a session start. No-op in file mode and for a
+        keyless start. Caller holds the lock."""
+        if self._storage is None or not session_key or self._cms is None:
+            return
+        from pseudolife_memory.writer_context import request_principal
+        em = self._cms.episodes
+        root, seen = ep, {ep.id}
+        while root.parent_id in em.episodes and root.parent_id not in seen:
+            root = em.episodes[root.parent_id]
+            seen.add(root.id)
+        try:
+            self._storage.register_client_session(
+                session_key, episode_id=root.id, registered_via=registered_via,
+                principal=request_principal(), policy_variant=policy_variant,
+                now=time.time())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("client-session registration failed: %s", exc)
 
     def episode_end_session(
         self, session_key: str | None, run_dream: bool = True,
@@ -6190,6 +6228,12 @@ class MemoryService(DreamOps):
             self._ensure_init()
             assert self._cms is not None
             result, fire, found = self._close_session_locked(session_key, run_dream)
+            if not found and not ownership_guard:
+                # Nothing open: the reaper closed the session during a break
+                # (or it already ended). The client's own end is still the
+                # session's real end on record. Not on the guarded path,
+                # whose key may be another session's pointer.
+                self._end_client_session_locked(session_key, None, "end")
         if ownership_guard and not found:
             return {"closed": None, "reason": "no owned open session"}
         if fire:
@@ -6198,7 +6242,7 @@ class MemoryService(DreamOps):
 
     def _close_session_locked(
         self, session_key: str | None, run_dream: bool,
-        prune_empty: bool = True,
+        prune_empty: bool = True, end_reason: str = "end",
     ) -> tuple[dict[str, Any], bool, bool]:
         """Cascade-close the session root for ``session_key`` and prune the
         subtree if it captured zero entries. Caller MUST hold the lock and have
@@ -6216,7 +6260,12 @@ class MemoryService(DreamOps):
         (shim exit, ``episode_end``) keeps the immediate prune: the session
         affirmatively finished, so no handle can legitimately return. An
         empty close never fires a dream and is never auto-titled, deferred
-        or not."""
+        or not.
+
+        A registered session's durable ``client_sessions`` row (v43) is
+        stamped with the close and ``end_reason`` (``"end"`` for an explicit
+        end, ``"idle"`` from the reaper) before any prune: the row is what
+        survives it."""
         assert self._cms is not None
         em = self._cms.episodes
         closed = em.end_session(session_key)
@@ -6225,6 +6274,7 @@ class MemoryService(DreamOps):
         pruned = False
         empty = False
         if closed is not None:
+            self._end_client_session_locked(closed.session_key, closed, end_reason)
             subtree = {closed.id} | {
                 e.id for e in em.episodes.values()
                 if em._descends_from(e, closed.id)
@@ -6248,6 +6298,36 @@ class MemoryService(DreamOps):
             self._persist_episodes()
         fire = bool(run_dream and result and not pruned and not empty)
         return ({} if pruned else result), fire, found
+
+    def _end_client_session_locked(
+        self, session_key: str | None, root: Any, end_reason: str,
+    ) -> None:
+        """Stamp a close on ``session_key``'s registration row, naming the
+        closed ``root`` (``None``: an explicit end that found nothing open,
+        because the idle reaper had already closed it). Best-effort; no-op
+        in file mode or for an unregistered key (the storage UPDATE matches
+        no row). Caller holds the lock."""
+        if self._storage is None or not session_key:
+            return
+        try:
+            self._storage.end_client_session(
+                session_key, episode_id=root.id if root is not None else None,
+                ended_at=float((root.ended_at if root is not None else None)
+                               or time.time()),
+                reason=end_reason)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("client-session end stamp failed: %s", exc)
+
+    def _reopen_client_session_locked(self, root: Any) -> None:
+        """Clear the recorded close of a session whose root a store or an
+        episode handle reopened (no registration runs on those paths).
+        Best-effort like the other record writes. Caller holds the lock."""
+        if self._storage is None or not root.session_key:
+            return
+        try:
+            self._storage.reopen_client_session(root.session_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("client-session reopen failed: %s", exc)
 
     def reap_idle_sessions(
         self, idle_seconds: float, now: float | None = None,
@@ -6292,7 +6372,7 @@ class MemoryService(DreamOps):
                     targets.append(root.session_key)
             for sk in targets:
                 _result, fire, _found = self._close_session_locked(
-                    sk, run_dream=True, prune_empty=False)
+                    sk, run_dream=True, prune_empty=False, end_reason="idle")
                 reaped.append(sk)
                 fired_any = fired_any or fire
             swept = self._sweep_stale_empty_roots_locked(now)
@@ -6511,6 +6591,7 @@ class MemoryService(DreamOps):
             ep.closed_by_new_start = False
             self._episode_touches[ep.id] = now
             self._persist_episodes()
+            self._reopen_client_session_locked(ep)
             logger.info("resumed session episode %s via handle", ep.id)
             return (ep.id, ep.session_key)
         # Tombstone recreation: the sweep deleted this root as an empty husk
@@ -6533,6 +6614,7 @@ class MemoryService(DreamOps):
         self._persist_tombstones()
         self._episode_touches[tid] = now
         self._persist_episodes()
+        self._reopen_client_session_locked(ep)
         logger.info("recreated swept session episode %s via handle", tid)
         return (tid, skey)
 
@@ -6600,6 +6682,7 @@ class MemoryService(DreamOps):
         # cortex writes) would be re-reaped on the next sweep without this.
         self._episode_touches[last.id] = time.time()
         self._persist_episodes()
+        self._reopen_client_session_locked(last)
         logger.info("resumed session episode %s (session_key=%s)",
                     last.id, session_key)
         return last
@@ -6626,7 +6709,7 @@ class MemoryService(DreamOps):
             resolved = self._resolve_episode_handle(episode or None)
             if resolved is not None:
                 root = self._cms.episodes.get(resolved[0])
-                root.title = title
+                self._retitle_locked(root, title)
                 self._persist_episodes()
                 return {"ok": True, "id": root.id, "title": title}
             if episode:

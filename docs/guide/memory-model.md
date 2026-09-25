@@ -637,7 +637,7 @@ when that event carried another label, scored as a miss). With no session
 identity at all the most-recent rule stays: "same session" would otherwise
 mean every other session-less search in the window.
 No foreign key links a signal to the labels it caused: the labels stand on
-their own. Since schema v43 the signal row's `used_ids` column keeps what
+their own. Since schema v44 the signal row's `used_ids` column keeps what
 the ids became, as id lists: `{"credited", "unmatched",
 "served_elsewhere"}`, or `{"unchecked", "reason"}` when the label write
 failed. So the share of named ids that matched a search can be measured
@@ -647,7 +647,7 @@ retrieval log is off, and also when this best-effort write itself failed
 over non-`NULL` rows skips those outcomes. Like the retrieval log, the
 column stays out of portable exports.
 
-`memory_lesson_search` calls are logged too (schema v43), in their own
+`memory_lesson_search` calls are logged too (schema v44), in their own
 `lesson_search_events` table: the query, the caller's session, and the
 lessons served by `(task, aspect)` slot key (stored as `entity_norm` /
 `attribute_norm`) with rank and score. A search

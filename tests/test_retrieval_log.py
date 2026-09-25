@@ -734,7 +734,7 @@ def test_record_outcome_labels_the_whole_list_in_one_storage_call(
     assert calls == {"storage": 1, "writer": 1}
 
 
-# ── lesson searches and used_ids outcomes, recorded (schema v43) ─────────
+# ── lesson searches and used_ids outcomes, recorded (schema v44) ─────────
 # The 2026-09-25 memory-policy bench could not measure two loop beats online:
 # whether a session consulted its lessons (memory_lesson_search logged
 # nothing, lessons carry no read counter), and how many of an outcome's

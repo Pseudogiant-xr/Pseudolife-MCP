@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added (2026-09-25 — lesson searches and used_ids outcomes are recorded, schema v43)
+### Added (2026-09-25 — lesson searches and used_ids outcomes are recorded, schema v44)
 - Two memory-loop questions could not be answered from the bank: whether a
   session consulted its lessons, and what share of the ids an outcome names
   in `used_ids` a search had actually served. `memory_lesson_search` wrote
@@ -14,7 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   only the credited ids, and nothing linked those to the outcome; the
   unmatched and served-elsewhere ids went back to the caller and were
   dropped. Found 2026-09-25 by the memory-policy bench.
-- Schema v43 adds `lesson_search_events`: one row per `memory_lesson_search`
+- Schema v44 adds `lesson_search_events`: one row per `memory_lesson_search`
   call, with the query, the caller's session and episode, and the lessons
   served by `(entity_norm, attribute_norm)` slot key with rank and score.
   A search that found nothing gets a row too. It is a separate table from
@@ -24,7 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shares the retrieval log's switch and retention, and `memory_stats`
   reports its size as `retrieval_log.lesson_searches`. Lessons shown in
   the session-start briefing are not counted.
-- Schema v43 adds `outcome_signals.used_ids` (JSONB). It holds what the
+- Schema v44 adds `outcome_signals.used_ids` (JSONB). It holds what the
   outcome's ids became: `{"credited", "unmatched", "served_elsewhere"}` id
   lists, or `{"unchecked", "reason"}` when the label write failed. It is
   `NULL` when the outcome named no ids, the retrieval log is off, or the
@@ -36,6 +36,126 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Both records are observational: a failed write is counted in
   `memory_stats` `retrieval_log.write_errors` and never fails the search
   or the outcome.
+
+### Security (2026-09-25 — the fallback dream extractor stops receiving the primary's API key)
+- The fallback extractor was built with the primary's key
+  (`PSEUDOLIFE_DREAM_API_KEY` / `memory.dream.extractor_api_key`), so a hosted
+  primary's provider key rode every fallback dream as a bearer header to the
+  fallback host — usually the in-stack sidecar over plain HTTP, which needs no
+  key. The fallback now sends its own key, the new
+  `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` / `memory.dream.fallback_api_key`, or
+  none. Like the primary's key it never appears in the Console, is honoured
+  under either settings source, and `ops/docker-compose.yml` forwards it to
+  the daemon. Forced `fallback` mode, `auto` falling back, and the
+  review-queue judges (which reuse the selected extractor, including under
+  their second-opinion model) all follow the rule; the primary still
+  receives its own key.
+- Migration: a fallback that relied on sharing the primary's key — a second
+  model on the same hosted provider, or one key-protected server behind both
+  URLs — now gets a 401. Set `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` to the same
+  value. Until then fallback dreams fail like any fallback outage: pulled
+  entries stay pending and retry, except that a batch of exactly one entry
+  (an idle dream with a backlog of one) failing three dreams running is
+  quarantined and never extracted — its memory stays in the bank — and
+  pending outcome signals stop being offered for lesson synthesis after
+  `signal_retry_days` (30). No shipped configuration is affected: the
+  installer never writes a dream key, and the bundled sidecar and both CLI
+  shims check none.
+
+### Added (2026-09-25 — every registered session leaves a record)
+- A session that only searched, set facts or logged outcomes left no trace
+  that it had happened: its root episode is deleted when it ends holding no
+  stored entry, and its searches and outcomes were left naming nothing (on
+  2026-09-25, 43 surviving client sessions in 24 h beside 94 pruned ones
+  with searches and 67 with outcomes). Schema v43 adds `client_sessions`:
+  one row per session key the SessionStart hook or `POST
+  /api/episode/start` (the stdio shim, the CLI episode hooks) registered,
+  never pruned, holding how it registered, the bearer's principal, its
+  first start and every registration since, its most recent close and why
+  (`end` or `idle`, cleared when the session is reopened), the
+  memory-policy variant the hook assigned (so a `memory_policy.ab_arms`
+  test keeps each session's arm), and every root episode id it was given.
+  Best-effort: a failed write never fails a session start. Excluded from
+  `pseudolife-mcp export`. See
+  [Episodes — session record](docs/guide/episodes.md#session-record).
+- `evals/capture_metrics.py` counts sessions from that record, which lifts
+  the limit the capture-metrics entry below describes for sessions that
+  register: a session whose roots were all pruned still counts, its
+  searches attribute by session key and its outcomes by the pruned root's
+  id, a resumed session's new shim pairs with the start it began beside,
+  and the report adds sessions per memory-policy variant. Roots without a
+  record (banks before v43) count as before, except that a key's several
+  roots are now one session (a session outliving the 6 h resume window
+  gets a new root; each used to count separately, with the key's searches
+  credited to its last root only), and "searched early" is measured from
+  the latest start before the search instead of the last root's. On the
+  live bank (read-only, 2026-09-25 16:01) the 24 h window is unchanged; 7
+  days goes from 130 to 117 sessions and 60 days from 348 to 264.
+
+### Fixed (2026-09-25 — the daily backup can run current master)
+- `ops/install-backup-task.ps1 -ScriptCheckout <dir>` runs `ops\backup.ps1`
+  from a dedicated checkout instead of the main one, which can lag master for
+  days while it holds uncommitted work. On 2026-09-24 and 09-25 the daily task
+  ran a `backup.ps1` from before the row-count gate: the nightly dumps were
+  ungated and `/health` `last_backup` did not advance. A worktree is refused
+  until `git worktree lock` protects it, and so is a script checkout that
+  would receive the dumps itself. Dumps and the log stay in the main
+  checkout's `data\backups` (the task now always passes `-OutDir`), where
+  replica pushes read them. Each run logs the script checkout's HEAD.
+- The installer now rejects a misspelled parameter instead of ignoring it:
+  a typo in `-ScriptCheckout` would otherwise have reinstalled the main
+  checkout's copy.
+
+### Fixed (2026-09-25 — a fact set to the parked contender's value settles the contest)
+- A contested slot stayed contested after a write made its contender's
+  value current. With `eu-west-1` current and `us-east-2` parked, setting
+  `us-east-2` superseded the slot but left the contender parked, so
+  `/api/facts` and `memory_search` kept reporting `contested: true` with a
+  `contender_value` equal to the current value (found 2026-09-25 by the
+  memory-policy bench). The write now also marks that contender
+  `superseded` (kept in `memory_history`) and logs it as `resolved` /
+  `contender_value_now_current`. Values match the way a confirm matches:
+  case and surrounding whitespace are ignored. The same fix covers the
+  first write at an empty slot that still holds a contender, and adding
+  the contender's value to a set (`memory_set_add`, including the
+  scalar-to-set conversion). A contender with any other value still
+  conflicts with the new current and stays parked. The contender's support
+  and provenance are not merged into the new current record.
+- `dream_rollback` re-parks a contender that the reverted run's write
+  settled. The run journal has no contender column, so without this a
+  rollback would have dropped a pending review item that used to survive
+  it untouched. The rollback's per-row details name it as
+  `contender_restored`.
+- The live bank held no slot in this state on 2026-09-25 (read-only check:
+  37 active contenders, none equal to a current value), so nothing heals
+  existing rows at load.
+
+### Fixed (2026-09-25 — the loop-health tile counts client sessions, not root episodes)
+- The Console's loop-health tile counted every root episode started in the
+  window as a session and divided its per-session rates by that count.
+  One client session can leave two roots (the SessionStart hook's and the
+  stdio shim's), and most new roots are idle shim roots: on 2026-09-25 the
+  live bank held 166 keyed roots in 24 h, against 34 client sessions by the
+  bench's first count (before its review revised the pairing rules). So
+  `sessions` read high and `stores_per_session` / `outcomes_per_session`
+  read low.
+- `sessions` in the `loop` block of `/api/overview` now uses the
+  client-session definition of the memory-policy bench's
+  `evals/capture_metrics.py`:
+  - hook-keyed roots always count;
+  - other keyed roots count only with an entry, an outcome or a search in
+    the window;
+  - a search counts for the root holding its session id, not for its
+    episode stamp, which is the daemon's current episode rather than the
+    caller's;
+  - a hook root and an active shim root opened within 5 s of each other
+    count once, when neither has another candidate.
+
+  The old count stays as `root_episodes`, and the tile shows both.
+- Still not counted: a session whose root was pruned because it stored
+  nothing. An explicit end prunes at once; the reaper prunes after the
+  resume window. So `sessions` undercounts those and the per-session rates
+  still lean high.
 
 ### Added (2026-09-25 — measure what the startup memory policy changes)
 - `memory_policy.variant` selects the standing memory policy session start
@@ -78,6 +198,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session root that ends with no stored entry, so sessions that only
   searched are reported separately and sessions that never touched memory
   are invisible; lesson searches and unmatched used_ids are not persisted.
+
+### Fixed (2026-09-25 — one board identity per session, statuses that show their age)
+- Claude Desktop's app-level MCP entry (writer ID `claude-desktop`) no longer
+  registers a coordination address. It is one process serving every
+  conversation in the app, so its address was shared: on 2026-09-25 a Code-tab
+  session posted through it and overwrote another session's status line. It
+  now refuses `memory_message` and `memory_agents(action="update")` before any
+  request, with an error pointing at a session's own per-session server, and
+  prepends that advice to its MCP instructions. Memory tools pass through
+  unchanged; `memory_agents` list there shows open sessions only, not the
+  board. A Code-tab session in Desktop keeps board writes only where its
+  per-session entry is named differently from the Desktop entry (the
+  installer currently gives both the same name).
+- An adapter re-attaching under its own attachment ID no longer counts as
+  activity; a new attachment (a process starting) still does. A 9-minute host
+  sleep on 2026-09-25 lapsed every idle shim's lease, and the re-attach wave on
+  wake made eleven sessions idle for hours read as active within 28 seconds.
+  Those re-attaches had also kept live idle shims young against the
+  seven-day retention, so prune now counts a held lease as well: an address
+  goes once it has had neither its own activity nor a lease for its window
+  (seven days, or one hour for state-less ones), and a daemon restart or a
+  host sleep shorter than that cannot retire a live shim's address.
+- `memory_agents` list gives each listed peer `status_set_at`, `status_age` and
+  `status_stale`. The time comes from the audit log (the newest registration
+  or status update); a non-empty status older than two hours is stale, and a
+  status the log no longer covers is reported as older than the log. No
+  schema change.
+- A peer holding a lease is listed for three hours after its own last action,
+  then counted in `idle_omitted`; peers without a lease keep the one-hour
+  window. Both windows come from the live audit log's first day, as the
+  comments on `STATUS_STALE_AFTER` and `ATTACHED_IDLE_WINDOW` record.
+
+### Fixed (2026-09-25 — Claude Desktop's entry no longer hides Code-tab sessions' own server)
+- `ops/install.* --client claude-desktop` (through
+  `ops/register_claude_desktop.py`) now names Claude Desktop's app-level MCP
+  entry `pseudolife-desktop` instead of `pseudolife-memory`. Claude Code
+  registers its per-session server as `pseudolife-memory`, and where both
+  carried that name Desktop served a Code-tab session's
+  `mcp__pseudolife-memory__*` calls from the app-level entry. The session's own
+  server got no calls, so the session had no board identity of its own (found
+  live 2026-09-21; the maintainer's hand rename restored per-session routing).
+- A re-run renames an entry the registrar wrote under the old name, recognised
+  by `PSEUDOLIFE_WRITER_ID=claude-desktop` in its `env`, and keeps its
+  hand-added `env` keys, its token-file path and any literal token still to
+  migrate. When both names exist, `pseudolife-desktop` wins where both set a
+  key and the old entry fills the gaps; the output names the `env` keys whose
+  old values were dropped, never a value. A `pseudolife-memory` entry the
+  registrar did not write is left untouched and reported on stderr, and
+  `pseudolife-desktop` is written beside it. The config is backed up before
+  every rewrite, as before.
+- Takes effect once the installer is re-run and Desktop is fully quit and
+  relaunched. Chat and Cowork then list the tools as
+  `mcp__pseudolife-desktop__*`, and the log file becomes
+  `mcp-server-pseudolife-desktop.log`. `ops/update.ps1 -All` does not apply it:
+  it never edits `claude_desktop_config.json`.
 
 ### Fixed (2026-09-25 — Codex hook setup no longer hangs on a hook Codex killed)
 - `ops/setup-codex-hooks.py` could hang on a busy Windows machine for as long
@@ -129,7 +304,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lessons and rules, relations, the review-queue judges, outcome inference,
   session digest) and the `driver="llm"` recall controller's seed call
   (`recall.simple_complete`) send `PSEUDOLIFE_DREAM_API_KEY` /
-  `extractor_api_key` as a bearer header. They used plain
+  `extractor_api_key` (on a fallback dream, the fallback's own
+  `PSEUDOLIFE_DREAM_FALLBACK_API_KEY`) as a bearer header. They used plain
   `urllib.request.urlopen`, which on every supported Python (checked on
   3.11, 3.12 and current CPython main) answers a
   301/302/303 to a POST by re-sending it as a body-less GET to the
@@ -410,6 +586,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   own episode calls do: a redirect fails the fetch, and the hook prints
   nothing. The five-second timeout is unchanged. The `--coordination`
   check-in fetch already refused redirects.
+
+### Fixed (2026-09-25 — naming a session by handle retitles its stored memories)
+- `memory_session_title` with an `episode` handle (the form the SessionStart
+  briefing asks for) now rewrites the `episode_title` stamp on the memories
+  already stored in that session, in memory and in the database, as the
+  handle-less form and `episode_rename` always did. Before, only the episode
+  itself took the new name, so everything written before the rename kept the
+  generic `session - <date> <time>` title. Memories mis-stamped before this
+  fix keep their old stamp until the episode is renamed again:
+  `episode_rename`, or `memory_session_title` once more (the same name
+  works).
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
