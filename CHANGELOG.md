@@ -98,6 +98,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Windows it left `torch.cuda.is_available()` true, so the embedder still
   loaded on the GPU.
 
+### Fixed (2026-09-25 — queued full test suites take the lock in arrival order)
+- A full run waiting for the suite lock now waits its turn. Each waiter
+  holds a ticket in `~/.pseudolife-mcp/locks/full-suite.queue/`, named for
+  its arrival time and pid, and only the earliest live waiter may take the
+  lock. Before, every waiter polled the lock and whichever polled first
+  after a release won: on 2026-09-25, with eight suites queued, one run
+  waited from 13:48 to past 14:57 while later arrivals went ahead. A waiter
+  that dies loses its ticket's OS lock and the next waiter deletes the
+  ticket; Ctrl-C and a `fail` refusal remove it at once. `fail` now also
+  refuses while an earlier waiter is queued, and the waiting notice names
+  the waiters ahead. A run from a checkout older than this change takes no
+  ticket and races for the lock as before; the lock file is unchanged, so
+  old and new runs still exclude each other.
+- `CONTRIBUTING.md`: a docs-only change can skip the local full suite and
+  run the doc guards plus the tests naming each touched file; CI must still
+  pass before merge.
+
 ### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
 - **Hydration fails closed.** If loading cortex facts, world facts or lessons
   from Postgres failed at startup, the daemon logged a warning and carried on

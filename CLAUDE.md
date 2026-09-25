@@ -28,7 +28,9 @@ exactly; they exist because each one was violated at least once.
    `llms-full.txt`). The v30 bump found the last two the hard way.
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
-   without it, which is not a pass.
+   without it, which is not a pass. **Docs-only changes skip the local full
+   suite** and run the doc guards instead — see "One full suite at a time
+   per machine" below for what counts as docs-only.
 4. **Deploy only via `ops/update.ps1`** (backup → rollback tag → daemon-only
    `--no-deps` rebuild → health). Never `docker compose down -v` — the bank
    volumes are external precisely so that this is survivable, but don't test it.
@@ -87,18 +89,35 @@ took 143 CUDA OOMs.
 
 - `tests/conftest.py` enforces it. A full run (all of `tests/`, half or more
   of its files, or a `-k`/`-m` that only excludes, like `not slow`) takes
-  the lock `~/.pseudolife-mcp/locks/full-suite.lock` and waits for the
-  holder, naming it about once a minute, so start full runs in the
-  background. `PSEUDOLIFE_SUITE_LOCK=fail` exits instead; `=off` skips the
-  lock (the default on GitHub Actions: one job per VM). Targeted runs are
-  never locked. The lock lives in your home directory: a WSL or other-user
-  run does not see it.
+  the lock `~/.pseudolife-mcp/locks/full-suite.lock` and waits its turn,
+  naming the holder about once a minute, so start full runs in the
+  background. Waiters are served in arrival order: each holds a ticket in
+  `full-suite.queue/` beside the lock, and a later run never overtakes an
+  earlier one (a worktree whose base predates the queue takes no ticket and
+  still races for the lock — rebase it). `PSEUDOLIFE_SUITE_LOCK=fail` exits
+  instead; `=off` skips the lock (the default on GitHub Actions: one job per
+  VM). Targeted runs are never locked. The lock lives in your home
+  directory: a WSL or other-user run does not see it.
 - The suite sets `CUDA_VISIBLE_DEVICES=-1` itself (`PSEUDOLIFE_TEST_CUDA=1`
   opts back in). Never `""`: on Windows an empty value leaves the GPU usable.
 - With several sessions active, still announce `SUITE-START` / `SUITE-END` on
   the coordination board (`memory_agents` / `memory_message`) and keep
   `suite=running|idle` in your status: the lock queues runs, the board lets
   peers plan around the queue.
+- **Docs-only changes skip the local full suite** (maintainer decision
+  2026-09-25). Docs-only means the diff against `origin/master`
+  (`git diff --name-only origin/master...`) touches only documentation:
+  `*.md` files anywhere (READMEs and their translations, `docs/**`,
+  `CHANGELOG.md`, `CONTRIBUTING.md`, `examples/*.md`, `plugin/README.md`,
+  skill `.md` files), `llms.txt` / `llms-full.txt`, and non-code files under
+  `docs/` such as `docs/atlas/atlas.json`. Any `.py`, `.ps1` or `.sh`, any
+  `.json` outside `docs/`, or any change under `tests/`, `ops/`, plugin
+  hooks, workflows or packaging means it is NOT docs-only. Run locally
+  instead the doc guards (`tests/test_release_ux.py`,
+  `tests/test_llms_txt.py`, `tests/test_atlas_currency.py`,
+  `tests/test_eval_evidence.py`, `tests/test_i18n_readme.py`) plus every
+  test file that names a touched path (`git grep -l <file basename> tests/`).
+  CI's full PostgreSQL job (`test`) must still be green before merge.
 
 ## Review discipline
 

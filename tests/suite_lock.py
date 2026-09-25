@@ -16,11 +16,29 @@ reaches every session, whatever agent runs it.
 So ``tests/conftest.py`` hides CUDA before anything imports torch, and a
 full run takes an OS-level exclusive lock shared by every worktree on the
 machine — released by the OS when its holder exits or dies, so there is no
-pid file to go stale. Configuration:
+pid file to go stale.
+
+Waiters are served first come, first served. On 2026-09-25, with eight full
+suites queued, one waited from 13:48 to past 14:57 while later arrivals took
+the lock ahead of it: each waiter polled a non-blocking lock, so whoever
+polled first after a release won. Now each waiter drops a ticket in
+``full-suite.queue/`` beside the lock, named for its arrival time and pid,
+and holds an OS lock on that ticket while it waits; only a waiter with no
+live ticket ahead of it may try the lock. A waiter that dies loses its
+ticket's lock with everything else, and the next waiter to look deletes the
+ticket. Liveness is that lock, not the pid: Windows reuses pids quickly, and
+``os.kill(pid, 0)`` there sends CTRL_C_EVENT (which is 0) rather than
+probing. A run from code older than the queue takes no ticket and races for
+the lock as before; it still excludes and is excluded, since the lock file
+is unchanged.
+
+Configuration:
 
 ``PSEUDOLIFE_SUITE_LOCK``
-    ``wait`` (default) queues behind the holder, naming it about once a
-    minute; ``fail`` exits with a usage error instead; ``off`` skips the
+    ``wait`` (default) queues behind the holder and any earlier waiters,
+    naming them about once a minute; ``fail`` exits with a usage error
+    instead of queueing, even when the lock is free but an earlier waiter
+    has not taken it yet; ``off`` skips the
     lock. Unset on GitHub Actions it means ``off``: each hosted job has a
     VM of its own, so there is nothing to contend with, and a lock fault
     there would only turn into a silent hang until the job timeout.
@@ -58,6 +76,15 @@ CUDA_OPT_IN_ENV = "PSEUDOLIFE_TEST_CUDA"
 MODES = ("wait", "fail", "off")
 LOCK_FILE = "full-suite.lock"
 HOLDER_FILE = "full-suite.holder.json"
+QUEUE_DIR = "full-suite.queue"
+TICKET_SUFFIX = ".ticket"
+
+# A waiter creates its ticket, then locks it: until then the ticket looks
+# abandoned. One younger than this counts as live regardless, so a waiter
+# that looks in between cannot delete it. Two adjacent syscalls take
+# microseconds; 30 s only bounds how long a waiter that died within 30 s
+# of arriving can hold up the queue.
+TICKET_GRACE_NS = 30 * 10**9
 
 # pytest options under which a session runs no test. (--help needs no entry:
 # pytest stops parsing before it sets config.args, so no path covers tests/.)
@@ -187,6 +214,110 @@ def _try_lock(handle: IO[bytes]) -> bool:
     return True
 
 
+def _unlock(handle: IO[bytes]) -> None:
+    try:
+        if os.name == "nt":
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass  # closing the handle releases it regardless
+
+
+@dataclass
+class _Ticket:
+    path: Path
+    file: IO[bytes]
+    key: tuple[int, int]  # (arrival ns, pid): the queue order
+
+
+def _ticket_key(name: str) -> tuple[int, int] | None:
+    if not name.endswith(TICKET_SUFFIX):
+        return None
+    arrived, _, pid = name[: -len(TICKET_SUFFIX)].partition("-")
+    try:
+        return int(arrived), int(pid)
+    except ValueError:
+        return None
+
+
+def _enqueue(queue_dir: Path) -> _Ticket:
+    """Create this waiter's ticket and lock it."""
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    # Wall-clock time, which every process on the machine reads alike;
+    # arrivals within one clock tick (15.6 ms on Windows) go in pid order.
+    arrived, pid = time.time_ns(), os.getpid()
+    while True:
+        path = queue_dir / f"{arrived:020d}-{pid}{TICKET_SUFFIX}"
+        try:
+            handle = open(path, "xb")  # noqa: SIM115 — held until _leave()
+            break
+        except FileExistsError:
+            arrived += 1  # another thread of this process, same clock tick
+    ticket = _Ticket(path, handle, (arrived, pid))
+    try:
+        # Nobody else locks a ticket inside its grace window, so this fails
+        # only if two adjacent syscalls were TICKET_GRACE_NS apart.
+        if not _try_lock(handle):
+            raise OSError(errno.EAGAIN, f"another process locked the new queue "
+                                        f"ticket {path}")
+    except BaseException:
+        _leave(ticket)
+        raise
+    return ticket
+
+
+def _leave(ticket: _Ticket) -> None:
+    _unlock(ticket.file)
+    ticket.file.close()
+    try:
+        ticket.path.unlink()
+    except OSError:
+        # Windows refuses while a waiter has it open to test it; that waiter
+        # finds it unlocked and deletes it.
+        pass
+
+
+def _still_held(path: Path) -> bool:
+    """Whether a ticket's owner still holds it. One whose owner is gone is
+    deleted on the way."""
+    try:
+        handle = open(path, "rb")  # not "a": that would recreate a deleted one
+    except OSError:
+        return False  # deleted, or being deleted
+    try:
+        if not _try_lock(handle):
+            return True
+        _unlock(handle)
+    finally:
+        handle.close()
+    try:
+        path.unlink()
+    except OSError:
+        pass  # another waiter has it open to test it, and deletes it
+    return False
+
+
+def _queued_ahead(ticket: _Ticket) -> list[int]:
+    """The pids of the live waiters that arrived before ``ticket``, oldest
+    first."""
+    now = time.time_ns()
+    earlier = sorted((key, name) for name in os.listdir(ticket.path.parent)
+                     if (key := _ticket_key(name)) is not None and key < ticket.key)
+    return [key[1] for key, name in earlier
+            if now - key[0] < TICKET_GRACE_NS
+            or _still_held(ticket.path.parent / name)]
+
+
+def _describe_queue(ahead: list[int]) -> str:
+    if not ahead:
+        return ""
+    plural = "s" if len(ahead) > 1 else ""
+    return (f", with {len(ahead)} earlier arrival{plural} queued ahead "
+            f"(pid{plural} {', '.join(map(str, ahead))})")
+
+
 def read_holder(directory: Path) -> dict | None:
     try:
         record = json.loads((directory / HOLDER_FILE).read_text(encoding="utf-8"))
@@ -210,30 +341,38 @@ def describe_holder(record: dict | None) -> str:
 def acquire(directory: Path, mode: str, *, worktree: str,
             poll: float = 2.0, notice_every: float = 60.0,
             out: IO[str] | None = None) -> HeldLock:
-    """Take the lock, waiting (``wait``) or raising :class:`SuiteLockBusy`
-    (``fail``) while another process holds it."""
+    """Take the lock in arrival order, waiting (``wait``) or raising
+    :class:`SuiteLockBusy` (``fail``) while another process holds it or
+    queued for it first."""
     out = out or sys.stderr
     directory.mkdir(parents=True, exist_ok=True)
     lock_path = directory / LOCK_FILE
     handle = open(lock_path, "a+b")  # noqa: SIM115 — held until release()
     waited_from = next_notice = None
     try:
-        while not _try_lock(handle):
-            holder = describe_holder(read_holder(directory))
-            if mode == "fail":
-                raise SuiteLockBusy(
-                    f"full-suite lock held by {holder}; {LOCK_ENV}=fail refuses "
-                    f"to queue (unset it to wait, or run a targeted subset)")
-            now = time.monotonic()
-            hint = ""
-            if waited_from is None:
-                waited_from = next_notice = now
-                hint = f" ({lock_path}; {LOCK_ENV}=fail exits instead, =off skips it)"
-            if now >= next_notice:
-                print(f"waiting for the full-suite lock held by {holder}{hint}",
-                      file=out, flush=True)
-                next_notice = now + notice_every
-            time.sleep(poll)
+        ticket = _enqueue(directory / QUEUE_DIR)
+        try:
+            while True:
+                ahead = _queued_ahead(ticket)
+                if not ahead and _try_lock(handle):
+                    break
+                holder = describe_holder(read_holder(directory)) + _describe_queue(ahead)
+                if mode == "fail":
+                    raise SuiteLockBusy(
+                        f"full-suite lock held by {holder}; {LOCK_ENV}=fail refuses "
+                        f"to queue (unset it to wait, or run a targeted subset)")
+                now = time.monotonic()
+                hint = ""
+                if waited_from is None:
+                    waited_from = next_notice = now
+                    hint = f" ({lock_path}; {LOCK_ENV}=fail exits instead, =off skips it)"
+                if now >= next_notice:
+                    print(f"waiting for the full-suite lock held by {holder}{hint}",
+                          file=out, flush=True)
+                    next_notice = now + notice_every
+                time.sleep(poll)
+        finally:
+            _leave(ticket)  # taken, refused or interrupted: out of the queue
     except BaseException:  # refused, a lock error, or Ctrl-C while queued
         handle.close()
         raise
@@ -261,14 +400,7 @@ def release(held: HeldLock) -> None:
             (held.directory / HOLDER_FILE).unlink()
         except OSError:
             pass  # a waiter is reading it; the next holder overwrites it
-    try:
-        if os.name == "nt":
-            held.file.seek(0)
-            msvcrt.locking(held.file.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            fcntl.flock(held.file.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        pass  # closing the handle releases it regardless
+    _unlock(held.file)
     held.file.close()
 
 

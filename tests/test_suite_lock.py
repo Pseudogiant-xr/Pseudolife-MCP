@@ -9,7 +9,9 @@ would wait forever.
 
 from __future__ import annotations
 
+import collections
 import errno
+import io
 import os
 import queue
 import signal
@@ -39,6 +41,7 @@ import os, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from tests import suite_lock
+print("PID", os.getpid(), flush=True)
 directory = Path(sys.argv[2])
 held = suite_lock.acquire(directory, "wait", worktree=sys.argv[3],
                           poll=0.05, notice_every=0.2, out=sys.stdout)
@@ -275,6 +278,8 @@ def test_a_full_run_takes_the_lock_and_records_its_holder(tmp_path):
         assert record["pid"] == os.getpid()
         assert record["worktree"] == str(ROOT)
         assert "started" in record
+        # The holder left the queue when it took the lock.
+        assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
         with pytest.raises(suite_lock.SuiteLockBusy):
             suite_lock.acquire(tmp_path, "fail", worktree="second")
     finally:
@@ -315,21 +320,27 @@ def test_an_xdist_worker_never_takes_the_lock(held):
     assert suite_lock.take_for_session(worker, environ, TESTS) is None
 
 
-def _lock_backend_raises(monkeypatch, code: int) -> None:
-    def refuse(*args, **kwargs):
-        raise OSError(code, os.strerror(code))
+def _lock_backend_raises(monkeypatch, code: int, only: Path | None = None) -> None:
+    """Make the lock backend raise ``code`` — for every file, or ``only``
+    for the one given (a queue ticket's lock keeps working)."""
+    module, name = ((suite_lock.msvcrt, "locking") if os.name == "nt"
+                    else (suite_lock.fcntl, "flock"))
+    real = getattr(module, name)
 
-    if os.name == "nt":
-        monkeypatch.setattr(suite_lock.msvcrt, "locking", refuse)
-    else:
-        monkeypatch.setattr(suite_lock.fcntl, "flock", refuse)
+    def refuse(fd, *args, **kwargs):
+        if only is None or os.path.samestat(os.fstat(fd), os.stat(only)):
+            raise OSError(code, os.strerror(code))
+        return real(fd, *args, **kwargs)
+
+    monkeypatch.setattr(module, name, refuse)
 
 
 @pytest.mark.parametrize("code", [errno.EACCES, errno.EAGAIN])
 def test_contention_errors_read_as_busy(tmp_path, monkeypatch, code):
-    _lock_backend_raises(monkeypatch, code)
+    _lock_backend_raises(monkeypatch, code, only=tmp_path / suite_lock.LOCK_FILE)
     with pytest.raises(suite_lock.SuiteLockBusy):
         suite_lock.acquire(tmp_path, "fail", worktree="w")
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
 
 
 def test_any_other_lock_error_is_raised_instead_of_waited_on(tmp_path, monkeypatch):
@@ -365,6 +376,7 @@ def test_a_second_process_waits_then_takes_the_lock_on_release(held, procs):
     held.holder.expect("RELEASED")
     waiter_pid = int(waiter.expect("ACQUIRED").split()[1])
     assert suite_lock.read_holder(held.dir)["pid"] == waiter_pid
+    assert not list((held.dir / suite_lock.QUEUE_DIR).iterdir())
 
 
 def test_the_lock_is_released_when_its_holder_crashes(held, procs):
@@ -375,6 +387,175 @@ def test_the_lock_is_released_when_its_holder_crashes(held, procs):
     waiter_pid = int(waiter.expect("ACQUIRED").split()[1])
     # The crashed holder's record was stale; the new holder replaced it.
     assert suite_lock.read_holder(held.dir)["pid"] == waiter_pid
+
+
+# --- first come, first served -----------------------------------------------
+
+class _GatedClock:
+    """Stands in for suite_lock's ``time``: counts each thread's poll sleeps,
+    and parks a thread that has a gate in its sleep until the gate opens.
+    Everything else is the real time module."""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.sleeps: collections.Counter[str] = collections.Counter()
+        self.gates: dict[str, threading.Event] = {}
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def sleep(self, seconds: float) -> None:
+        name = threading.current_thread().name
+        with self.cond:
+            self.sleeps[name] += 1
+            self.cond.notify_all()
+        if name in self.gates:
+            self.gates[name].wait(START_TIMEOUT)
+        time.sleep(seconds)
+
+    def wait_for(self, predicate, what: str) -> None:
+        with self.cond:
+            assert self.cond.wait_for(predicate, START_TIMEOUT), (
+                f"no {what} within {START_TIMEOUT}s")
+
+
+@pytest.mark.parametrize("liveness", ["ticket lock", "grace window"])
+def test_a_later_waiter_never_overtakes_an_earlier_one(tmp_path, monkeypatch, liveness):
+    # 2026-09-25: with eight full suites queued, one waited from 13:48 to
+    # past 14:57 while later arrivals took the lock ahead of it — whichever
+    # waiter polled first after a release won. Here the earlier waiter is
+    # parked in its poll sleep when the lock frees, and the later one polls
+    # every 10 ms: on a first-poller-wins lock it takes the lock every time.
+    clock = _GatedClock()
+    monkeypatch.setattr(suite_lock, "time", clock)
+    if liveness == "ticket lock":
+        # Past the grace window at once: liveness is read from the ticket's
+        # own OS lock alone.
+        monkeypatch.setattr(suite_lock, "TICKET_GRACE_NS", 0, raising=False)
+    order: list[str] = []
+
+    def queue_up(name: str) -> None:
+        held_lock = suite_lock.acquire(tmp_path, "wait", worktree=name,
+                                       poll=0.01, out=io.StringIO())
+        with clock.cond:
+            order.append(name)
+            clock.cond.notify_all()
+        suite_lock.release(held_lock)
+
+    holder = suite_lock.acquire(tmp_path, "fail", worktree="holder")
+    clock.gates["earlier"] = threading.Event()
+    threads = []
+    try:
+        for name in ("earlier", "later"):
+            thread = threading.Thread(target=queue_up, args=(name,), name=name,
+                                      daemon=True)
+            thread.start()
+            threads.append(thread)
+            clock.wait_for(lambda name=name: clock.sleeps[name] >= 1,
+                           f"poll sleep from {name}")
+        polls = clock.sleeps["later"]
+        suite_lock.release(holder)
+        holder = None
+        clock.wait_for(lambda: order or clock.sleeps["later"] >= polls + 3,
+                       "three more polls from the later waiter")
+        assert order == [], (
+            f"{order[0]!r} took the freed lock while the earlier waiter was queued")
+    finally:
+        if holder is not None:
+            suite_lock.release(holder)
+        clock.gates["earlier"].set()
+        for thread in threads:
+            thread.join(START_TIMEOUT)
+    assert order == ["earlier", "later"]
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
+
+
+def _ticket_file(directory: Path, *, age_s: float, pid: int) -> Path:
+    queue_dir = directory / suite_lock.QUEUE_DIR
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    arrived = time.time_ns() - int(age_s * 1e9)
+    return queue_dir / f"{arrived:020d}-{pid}{suite_lock.TICKET_SUFFIX}"
+
+
+@pytest.mark.parametrize(("age_s", "locked", "abandoned"), [
+    (3600, True, False),    # an hour in the queue, its owner still holding it
+    (3600, False, True),    # its owner died: the OS dropped the ticket's lock
+    (0, False, False),      # created a moment ago, not locked yet
+], ids=["old-and-held", "owner-dead", "just-created"])
+def test_a_ticket_counts_while_its_owner_holds_it(tmp_path, age_s, locked, abandoned):
+    path = _ticket_file(tmp_path, age_s=age_s, pid=4242)
+    handle = open(path, "xb")  # noqa: SIM115 — closed below
+    try:
+        if locked:
+            assert suite_lock._try_lock(handle)
+        else:
+            handle.close()
+        if abandoned:
+            suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="w"))
+            assert not path.exists(), "an abandoned ticket stays behind"
+        else:
+            with pytest.raises(suite_lock.SuiteLockBusy,
+                               match=r"1 earlier arrival queued ahead \(pid 4242\)"):
+                suite_lock.acquire(tmp_path, "fail", worktree="w")
+            assert path.exists()
+    finally:
+        handle.close()
+    # A refused or finished run leaves no ticket of its own either way.
+    remaining = [p.name for p in (tmp_path / suite_lock.QUEUE_DIR).iterdir()]
+    assert remaining == ([] if abandoned else [path.name])
+
+
+def test_a_waiter_killed_while_queued_does_not_hold_up_the_queue(held, procs,
+                                                                monkeypatch):
+    waiter = _lock_process(procs, held.dir, "waiter-wt")
+    waiter_pid = int(waiter.expect("PID").split()[1])
+    waiter.expect("waiting for the full-suite lock")
+    tickets = list((held.dir / suite_lock.QUEUE_DIR).iterdir())
+    assert [t.name.split("-")[1] for t in tickets] == [
+        f"{waiter_pid}{suite_lock.TICKET_SUFFIX}"]
+
+    _kill_pid(waiter_pid)                      # no cleanup: the ticket stays
+    held.holder.send_release()
+    held.holder.expect("RELEASED")
+    # The dead waiter's ticket is seconds old; skip the grace window so only
+    # its (released) OS lock decides.
+    monkeypatch.setattr(suite_lock, "TICKET_GRACE_NS", 0)
+    deadline = time.monotonic() + START_TIMEOUT
+    while True:
+        try:
+            next_lock = suite_lock.acquire(held.dir, "fail", worktree="next")
+            break
+        except suite_lock.SuiteLockBusy:
+            # Windows frees a killed process's locks soon, not at once.
+            assert time.monotonic() < deadline, "a dead waiter still heads the queue"
+            time.sleep(0.05)
+    suite_lock.release(next_lock)
+    assert not list((held.dir / suite_lock.QUEUE_DIR).iterdir())
+
+
+class _InterruptedClock:
+    """suite_lock's ``time``, with Ctrl-C arriving during the poll sleep."""
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def sleep(self, seconds: float) -> None:
+        raise KeyboardInterrupt
+
+
+def test_ctrl_c_while_queued_takes_the_ticket_with_it(tmp_path, monkeypatch):
+    holder = suite_lock.acquire(tmp_path, "fail", worktree="holder")
+    monkeypatch.setattr(suite_lock, "time", _InterruptedClock())
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            suite_lock.acquire(tmp_path, "wait", worktree="interrupted",
+                               out=io.StringIO())
+    finally:
+        suite_lock.release(holder)
+    assert not list((tmp_path / suite_lock.QUEUE_DIR).iterdir())
+    # Nothing is left to queue behind: a leaked ticket would still be inside
+    # its grace window and refuse this run.
+    suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="next"))
 
 
 # --- the conftest wiring, end to end ----------------------------------------
