@@ -1,8 +1,8 @@
-<!-- i18n-sync: v10 -->
+<!-- i18n-sync: v11 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v10 (2026-09-04)
+> Traducción del [README](../../README.md) canónico — sincronizado: v11 (2026-09-25)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -87,16 +87,26 @@ un modelo Claude a través de tu plan Max (la instalación más ligera), el
 shim de Claude con el modelo local incluido como respaldo automático, las
 mismas dos variantes con un modelo GPT-5.6 en un plan ChatGPT (vía Codex
 CLI), o el modelo local incluido por sí solo, que no necesita ningún plan. Luego
-levanta la pila, conecta los clientes seleccionados (el hook de resumen al
-inicio de sesión, que entrega la guía del ciclo de memoria en cada sesión,
-y el registro del transporte MCP), y verifica el estado del daemon. Es
-idempotente: puedes volver a ejecutarlo en cualquier momento;
-`--extractor <mode>` cambia la configuración del extractor.
+levanta la pila, conecta los clientes seleccionados (hooks de sesión en los
+clientes que tienen un sistema de hooks, y el registro del transporte MCP), y
+verifica el estado del daemon. Es idempotente: puedes volver a ejecutarlo
+en cualquier momento; `--extractor <mode>` cambia la configuración del
+extractor.
 
-Con el daemon en ejecución, el **plugin** de Claude Code añade el resumen
-de memoria al inicio de sesión, la guía permanente del ciclo de memoria y
-los comandos `/dream` + `/memory-status` — el propio servidor MCP lo
-registra el instalador, así que el plugin nunca duplica sus herramientas:
+Cuando Claude Code es uno de los clientes seleccionados, el instalador
+también añade el **plugin** de Claude Code (`--claude-plugin skip` /
+`-ClaudePlugin skip` lo omite). El hook de memoria al inicio de sesión del
+plugin — el mismo que ejecutan los hooks verificados de Codex — proporciona
+un núcleo compacto de la guía del ciclo de memoria y un resumen en vivo de
+tamaño acotado; el plugin también añade recordatorios en cada prompt y los
+comandos `/dream` + `/memory-status`. Sin el plugin, el hook de
+`settings.json` de Claude Code que escribe el instalador entrega solo el
+resumen. Ninguno de los dos proporciona la guía completa del ciclo de
+memoria: para eso, añade `examples/CLAUDE.memory.md` a tu `CLAUDE.md` o
+`AGENTS.md`.
+El propio servidor MCP lo registra el instalador, así que el plugin nunca
+duplica sus herramientas. Para añadir el plugin a mano, dentro de Claude
+Code:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP

@@ -1,8 +1,8 @@
-<!-- i18n-sync: v10 -->
+<!-- i18n-sync: v11 -->
 
 # Pseudolife-MCP
 
-[영어 원본 README](../../README.md)와 동기화됨 — synced: v10 (2026-09-04)
+[영어 원본 README](../../README.md)와 동기화됨 — synced: v11 (2026-09-25)
 
 **Claude Code, Codex, 그리고 그 밖의 MCP 클라이언트를 위한 영구적인 장기 메모리.**
 
@@ -80,15 +80,22 @@ ops\install.ps1         # Windows (pwsh 7+)
 통한 Claude 모델(가장 가벼운 설치), 번들 로컬 모델을 자동 폴백으로 사용하는
 Claude shim, ChatGPT 플랜에서 GPT-5.6 모델을 쓰는 같은 두 가지 구성(Codex
 CLI 경유), 또는 플랜이 전혀 필요 없는 번들 로컬 모델 단독 중에서 고를 수
-있습니다. 그런 다음 스택을 띄우고, 선택한 클라이언트를 연결하며(매 세션 메모리
-루프 안내를 전달하는 세션 시작 브리핑 훅과 MCP 전송 등록), 데몬 상태를 점검합니다.
+있습니다. 그런 다음 스택을 띄우고, 선택한 클라이언트를 연결하며(훅 시스템이
+있는 클라이언트의 세션 훅 설치와 MCP 전송 등록), 데몬 상태를 점검합니다.
 멱등적(idempotent)으로 동작하므로 언제든 다시 실행해도 안전하며,
 `--extractor <mode>`로 추출기 설정을 전환할 수 있습니다.
 
-데몬이 실행 중이라면, Claude Code **플러그인**은 세션 시작 시 메모리 브리핑,
-상시 메모리 루프 안내, 그리고 `/dream` + `/memory-status` 명령을 추가합니다 —
-MCP 서버 자체는 설치 스크립트가 등록하므로, 플러그인이 도구를 이중으로 등록하는
-일은 없습니다:
+Claude Code가 선택된 클라이언트에 포함되면, 설치 스크립트는 Claude Code
+**플러그인**도 함께 추가합니다(`--claude-plugin skip` / `-ClaudePlugin skip`으로
+제외할 수 있습니다). 플러그인의 메모리 세션 시작 훅(검증된 Codex 훅이 실행하는
+것도 같은 훅입니다)은 메모리 루프 안내의 간결한 핵심과 분량이 제한된 실시간
+브리핑을 제공합니다. 플러그인은 여기에 더해 프롬프트별 리마인더와
+`/dream` + `/memory-status` 명령도 추가합니다. 플러그인이 없으면 설치 스크립트가
+작성하는 Claude Code `settings.json` 훅이 브리핑만 전달합니다. 어느 쪽도 메모리
+루프 안내 전문을 제공하지는 않습니다: 전문이 필요하면
+`examples/CLAUDE.memory.md`를 `CLAUDE.md` 또는 `AGENTS.md`에 덧붙이세요. MCP
+서버 자체는 설치 스크립트가 등록하므로, 플러그인이 도구를 이중으로 등록하는
+일은 없습니다. 플러그인을 직접 추가하려면 Claude Code 안에서 다음을 실행하세요:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
