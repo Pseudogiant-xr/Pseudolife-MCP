@@ -5,7 +5,7 @@ processes against a per-run database the bench created:
 
 * ``seed`` — builds the template bank from ``memory_policy_scenarios``
   through the real service write paths, backdates it, and writes a manifest
-  of the planted ids.
+  of the planted ids and of the embedder that embedded the bank.
 * ``serve`` — the normal daemon (``pseudolife_memory.daemon.run_daemon``)
   with a recording layer around its ASGI app. The layer appends one JSON
   line per MCP ``tools/call`` (tool, arguments, result) and per
@@ -87,6 +87,7 @@ def seed(manifest_path: Path) -> dict:
     names (a fresh ``plbench_`` template), then backdate it."""
     import psycopg
 
+    import evals.embedder_stamp as embedder_stamp
     from evals import memory_policy_scenarios as fx
     from pseudolife_memory.service import MemoryService
 
@@ -133,6 +134,7 @@ def seed(manifest_path: Path) -> dict:
                         source_url=w.source_url, source_quote=w.source_quote,
                         freshness_class="slow")
     svc.flush()
+    manifest[embedder_stamp.KEY] = embedder_stamp.describe(svc)
     try:
         svc._storage.close()
     except Exception:  # noqa: BLE001

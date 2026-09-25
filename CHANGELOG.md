@@ -56,8 +56,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   scenario per policy rule, scored only from the daemon's records, with a
   per-run check that the arm's policy text is the only memory-policy text
   in the model's context, paired bootstrap statistics against an A/A noise
-  floor, and a hill-climb acceptance rule. It refuses the live bank and the
-  live daemon ports and never writes a real client configuration.
+  floor, and a hill-climb acceptance rule. Each run records the embedder
+  that seeded its bank and the one that served its queries. It refuses the
+  live bank and the live daemon ports and never writes a real client
+  configuration.
 
 ### Fixed (2026-09-25 — session counts in capture metrics)
 - `evals/capture_metrics.py` counted every keyed root episode as a session.

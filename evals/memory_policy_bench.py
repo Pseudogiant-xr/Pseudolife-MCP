@@ -76,6 +76,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from evals import embedder_stamp  # noqa: E402
 from evals import memory_policy_scenarios as fx  # noqa: E402
 from evals.memory_policy_daemon import (  # noqa: E402
     BENCH_DB_PREFIX, FORBIDDEN_PORTS, BenchSafetyError, check_database, check_port)
@@ -222,12 +223,14 @@ def create_db(admin: str, name: str, template: str | None = None) -> None:
 
 
 def drop_db(admin: str, name: str) -> None:
+    """Drop a ``plbench_`` database by name. The statement names the
+    database it removes, so the name check is the guard; FORCE ends its
+    sessions in the same statement (no separate reap)."""
     from psycopg import sql
     check_database(db_url(admin, name))
     with _admin_connect(admin) as conn:
-        conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                     "WHERE datname = %s AND pid <> pg_backend_pid()", (name,))
-        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+            sql.Identifier(name)))
 
 
 def db_exists(admin: str, name: str) -> bool:
@@ -464,6 +467,7 @@ class Daemon:
         self.token = secrets.token_urlsafe(24)
         self.ledger = run_dir / "ledger.jsonl"
         self.proc: subprocess.Popen | None = None
+        self.embedder: dict | None = None
 
     @property
     def url(self) -> str:
@@ -500,6 +504,8 @@ class Daemon:
         # Load the embedder and bank before the client starts: the session
         # start hook has fifteen seconds, and a cold CPU load can take longer.
         self.get("/api/briefing", timeout=timeout)
+        # It embeds every query the agent sends; /health describes it once built.
+        self.embedder = self.get("/health", auth=False).get("embedder")
 
     def get(self, path: str, *, auth: bool = True, timeout: float = 30.0) -> dict:
         req = urllib.request.Request(self.url + path)
@@ -1489,6 +1495,10 @@ class Bench:
                 with self.db_lock:     # one start at a time, so parallel runs see each other
                     wait_for_headroom(args.min_free_gb, self.log)
                     daemon.start()
+                # The template's vectors come from the seeder; the queries'
+                # from this daemon. Both precisions go on the record.
+                embedder_stamp.record_stage(rec, "seed", manifest.get(embedder_stamp.KEY))
+                embedder_stamp.record_stage(rec, "serve", daemon.embedder)
                 if args.client == "claude":
                     client = run_claude(run_dir, project, prompt, daemon, model=args.model,
                                         effort=args.effort, timeout=args.run_timeout,
@@ -1880,6 +1890,7 @@ def build_artifact(records: list[dict], arms: list[Arm], args, manifest: dict, t
         "scenarios": sorted({r["scenario"] for r in records}), "replicates": args.replicates,
         "seed": args.seed, "rotate": getattr(args, "rotate", False), "cost_lambda": lam, "fixture_digest": fixture_digest(),
         "planted": {"entries": manifest.get("entries"), "lessons": manifest.get("lessons")},
+        embedder_stamp.KEY: embedder_stamp.merge_rows(records),
         "constant_surfaces": [
             "MCP server instructions (pseudolife_memory.mcp_server._MCP_INSTRUCTIONS)",
             "memory tool names and descriptions (deferred behind ToolSearch in Claude Code)",
@@ -1967,6 +1978,7 @@ def regrade(args) -> Path:
                    # Runs from before client.json existed keep their exit
                    # status only in the original record.
                    client_rc=old.get("client_rc"), timed_out=old.get("timed_out"))
+        embedder_stamp.carry(old, rec)
         run_dir = work / "runs" / rid
         meta, _, _ = load_run(run_dir, old)
         if not db_exists(admin, meta["db"]):
