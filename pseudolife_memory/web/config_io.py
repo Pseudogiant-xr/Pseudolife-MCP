@@ -50,8 +50,9 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.search_confidence_floor", "group": "Retrieval",
      "label": "Abstention floor", "type": "float", "default": 0.0,
      "min": 0.0, "max": 1.0, "step": 0.01, "restart": False,
-     "help": "When the top search score is below this, search returns "
-             "low_confidence so the agent can abstain. 0 = off."},
+     "help": "When the top search score is below this and no cortex fact "
+             "clears the cortex guard, search returns low_confidence. "
+             "Uncalibrated for the current embedder. 0 = off."},
     {"path": "memory.top_k", "group": "Retrieval", "label": "Default top-k",
      "type": "int", "default": 8, "min": 1, "max": 50, "step": 1,
      "restart": False, "help": "Episodic retrieval slots across bands."},

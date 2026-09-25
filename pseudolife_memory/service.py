@@ -1826,7 +1826,8 @@ class MemoryService(DreamOps):
         ``source`` / ``bank`` match the supplied list survive. ``None`` means
         no filter on that axis.
 
-        ``min_score`` overrides the relevance keep-threshold (default 0.25).
+        ``min_score`` overrides the relevance keep-threshold
+        (``memory.search.min_score``, default 0.25).
         Lower it to widen recall when the bank is sparse; raise it to drop
         weak hits. ``disable_recency_boost=True`` short-circuits the
         per-band recency uplift so ranking depends on raw similarity ×

@@ -1042,6 +1042,21 @@ class SearchConfig:
     # evals/README.md. Ships "weighted_sum" for that reason, not for want
     # of measurement.
     fusion: str = "weighted_sum"
+    # Dense relevance floor: a dense candidate whose (recency-modified)
+    # cosine is below it never enters the pool. A per-call ``min_score``
+    # overrides it and, unlike this default, also bounds the slot and BM25
+    # injections, which carry their own scales. 0.25 is the initial-release
+    # literal (2026-05-27, MiniLM era), never recalibrated for the
+    # 2026-07-28 Qwen3-Embedding switch — and it stays put: measured
+    # 2026-09-25 over 1,030 real agent searches
+    # (evals/results/serving-policy-replay-20260925.json,
+    # abstention.lowest_served_dense_cosine), the weakest served dense hit
+    # had cosine p01 0.40 and none fell below 0.30, so today the floor
+    # binds only on off-domain queries (the 2026-09-23 review's zebra probe
+    # served hits at 0.28-0.29). Raising it would not make it an abstention
+    # signal: in-domain absent-answer probes topped out at 0.43-0.64, the
+    # range of real hits (same artifact, abstention.absent_answer_probes).
+    min_score: float = 0.25
 
     def __post_init__(self) -> None:
         # Fail at LOAD, not once per query. ``cms.retrieve`` also rejects
@@ -1174,10 +1189,15 @@ class MemoryConfig:
     # recall, so prefer the default outside of debugging.
     # Replaced the no-op ``show_superseded`` field on 2026-07-30.
     hide_superseded: bool = False
-    # Abstention: when the top search score is below this floor, memory_search
-    # returns low_confidence=True so the agent declines instead of using weak
-    # distractor hits. 0.0 = off (only an empty result is low-confidence).
-    # Tuned on a dev split by the benchmark ladder; default off to preserve recall.
+    # Abstention: when the top served (fused) score is below this floor and
+    # no cortex fact clears ``cortex.guard_min_score``, memory_search returns
+    # low_confidence=True. 0.0 = off (only an empty result is low-confidence).
+    # No value is calibrated for the Qwen3 embedder: measured 2026-09-25
+    # over 1,030 real agent searches
+    # (evals/results/serving-policy-replay-20260925.json, abstention), the
+    # 2026-06-19 MiniLM-era pair (floor 0.70 + guard 0.65) would flag 26% of
+    # them, including 20% of the searches whose hits the agent then used,
+    # and in-domain absent answers score like real hits.
     search_confidence_floor: float = 0.0
     # Shadow-verification of the slot-token index: on this fraction of
     # non-dirty slot-pool queries, recompute the index from the band

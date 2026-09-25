@@ -3704,9 +3704,12 @@ guard  floor   abstain_recall   false_abstain
 
 Raising the guard `0.3 → 0.65` (paired with `search_confidence_floor = 0.70`)
 **doubles** abstention recall at zero false-abstain. Pushing the floor higher
-trades into wrongly abstaining on answerable queries. **Recommended for an
+trades into wrongly abstaining on answerable queries. ~~**Recommended for an
 abstention-on deployment: `guard_min_score = 0.65`, `search_confidence_floor =
-0.70`.** Both knobs ship at their behaviour-preserving defaults (`0.3` / `0.0`).
+0.70`.**~~ **Retired 2026-09-25:** measured on the MiniLM embedder; on real
+agent searches under the current embedder the pair flags searches whose hits
+agents used (`docs/guide/retrieval.md`, "Abstention & confidence floors").
+Both knobs ship at their behaviour-preserving defaults (`0.3` / `0.0`).
 
 **Dream slot resolver (Feature A) — no measurable benefit; ships off.** Sweeping
 `dream_slot_match_threshold` (distractor-clean corpus) moved nothing:

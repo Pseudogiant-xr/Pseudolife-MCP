@@ -818,6 +818,24 @@ def test_memory_search_docstring_explains_replacement_currency() -> None:
     assert "current: false" in doc and "search again" in doc
 
 
+def test_memory_search_docstring_is_truthful_about_low_confidence() -> None:
+    """``low_confidence`` is ``no entries AND no cortex fact`` at the shipped
+    floor 0, and the cortex block (up to min(5, top_k) facts over a 0.2
+    guard) is almost never empty, so the flag fired on 0 of 1,030 real
+    agent searches (evals/results/serving-policy-replay-20260925.json). It
+    cannot tell an absent answer from a present one either: in-domain
+    absent-answer probes score like real hits. The description used to
+    promise "no confident match, prefer abstaining" and called the cortex
+    block "the current, deduped answer"; both overstate what is served."""
+    from pseudolife_memory import mcp_server
+
+    doc = " ".join((mcp_server.memory_search.__doc__ or "").split())
+    assert "prefer abstaining" not in doc
+    assert "the current, deduped answer" not in doc
+    assert "only when nothing matched" in doc
+    assert "may bear on" in doc
+
+
 _LIVE_GET = {"found": True, "entry_id": 5, "text": "port is 5433",
              "source": "correction", "reinforcements": 0,
              "explicit_reinforcements": 0, "access_count": 1,

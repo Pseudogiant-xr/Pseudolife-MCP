@@ -9431,6 +9431,69 @@ for _cid, _doc, _needle, _val, _stated, _places in [
         value=_val, stated=_stated, places=_places))
 
 
+# ── the serving-policy replay (2026-09-25) ───────────────────────────────
+# evals/serving_policy_replay.py scores logged served lists against the
+# used_ids labels agents record through memory_outcome. Its artifact backs
+# the retrieval guide's abstention section (what low_confidence means and
+# what the retired 0.70/0.65 pair would flag) and the configuration guide's
+# restatement of it.
+SERVING_REPLAY = RESULTS + "serving-policy-replay-20260925.json"
+_ABST = "abstention"
+
+
+def _floor_cell(floor: float, guard: float, key: str, scale: float = 1.0):
+    def read(d):
+        cell = next(c for c in d[_ABST]["floor_grid"]
+                    if c["search_confidence_floor"] == floor
+                    and c["guard_min_score"] == guard)
+        return scale * float(cell[key])
+    return read
+
+
+for _cid, _doc, _needle, _val, _stated, _places in [
+    ("replay-abst-searches", RETRIEVAL_GUIDE,
+     "Over 1,030 real agent searches",
+     lambda d: d[_ABST]["searches"], 1030, 0),
+    ("replay-abst-fired", RETRIEVAL_GUIDE, "it fired on none of them",
+     lambda d: d[_ABST]["served_nothing"], 0, 0),
+    ("replay-abst-probe-low", RETRIEVAL_GUIDE,
+     "0.43-0.64, inside the range of real hits",
+     lambda d: min(d[_ABST]["absent_answer_probes"]["top_dense_cosine"]),
+     0.43, 2),
+    ("replay-abst-probe-high", RETRIEVAL_GUIDE,
+     "0.43-0.64, inside the range of real hits",
+     lambda d: max(d[_ABST]["absent_answer_probes"]["top_dense_cosine"]),
+     0.64, 2),
+    ("replay-abst-top-cosine-median", RETRIEVAL_GUIDE,
+     "(median top cosine 0.61 across",
+     lambda d: d[_ABST]["top_dense_cosine"]["p50"], 0.61, 2),
+    ("replay-abst-old-pair-flags", RETRIEVAL_GUIDE,
+     "that pair would flag 26% of searches",
+     _floor_cell(0.70, 0.65, "flagged_share", 100.0), 26, 0),
+    ("replay-abst-old-pair-false", RETRIEVAL_GUIDE,
+     "including 20% of the searches whose",
+     _floor_cell(0.70, 0.65, "flagged_labelled_share", 100.0), 20, 0),
+    ("replay-abst-old-pair-probes", RETRIEVAL_GUIDE,
+     "it caught 3 of the 4 absent-answer",
+     _floor_cell(0.70, 0.65, "absent_probes_flagged"), 3, 0),
+    ("replay-abst-probes-found", RETRIEVAL_GUIDE,
+     "it caught 3 of the 4 absent-answer",
+     lambda d: d[_ABST]["absent_answer_probes"]["found"], 4, 0),
+    ("replay-abst-dense-p01", RETRIEVAL_GUIDE,
+     "99% served no dense hit below cosine 0.40",
+     lambda d: d[_ABST]["lowest_served_dense_cosine"]["p01"], 0.40, 2),
+    ("replay-abst-dense-none-below", RETRIEVAL_GUIDE,
+     "served one below 0.30",
+     lambda d: d[_ABST]["lowest_served_dense_cosine"]["below_0.30"], 0, 0),
+    ("replay-abst-config-fifth", CONFIG_GUIDE,
+     "embedder, and the pair this guide used to recommend would flag a fifth",
+     _floor_cell(0.70, 0.65, "flagged_labelled_share"), 0.2, 1),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(SERVING_REPLAY,),
+        value=_val, stated=_stated, places=_places))
+
+
 # ── the lazy reference-bank client (2026-09-23) ──────────────────────────
 # A ChromaDB client per service start leaked ~19 threads and ~3 MB for the
 # life of the process. The per-start numbers come from 50 isolated starts on

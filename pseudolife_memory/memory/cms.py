@@ -773,13 +773,20 @@ class ContinuumMemorySystem:
         Filters compose: ``bands`` is applied first, then ``sources``, then
         ``min_logical_turn``, then the score-based ranking.
         """
-        MIN_SCORE = 0.25 if min_score is None else float(min_score)
+        # The default floor is ``memory.search.min_score`` (0.25; see its
+        # comment for the measurement); the getattr guard mirrors the
+        # search-block idiom below for config objects predating the knob.
+        MIN_SCORE = (
+            float(getattr(getattr(self.config, "search", None),
+                          "min_score", 0.25))
+            if min_score is None else float(min_score))
         # An explicitly-passed floor is a contract over the whole result
         # set, including BM25-only injections (which otherwise bypass the
         # dense pool's gate entirely). The *default* floor deliberately
-        # does not bound them: injected scores are ``weight × normalised``
-        # (≤0.3 at the shipped weight), so applying 0.25 to them would
-        # admit only the single top lexical hit per query.
+        # does not bound them — a configured one included: injected scores
+        # are ``weight × normalised`` (≤0.3 at the shipped weight), so
+        # applying 0.25 to them would admit only the single top lexical
+        # hit per query.
         explicit_floor = min_score is not None
         # Gentle penalty for assistant-authored memories so user-authored
         # facts outrank assistant restatements of the same fact.
