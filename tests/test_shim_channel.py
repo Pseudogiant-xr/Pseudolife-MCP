@@ -652,3 +652,290 @@ def test_cached_unread_hint_preserves_upstream_result_without_network(
     assert seen["calls"] == [("memory_stats", {"detail": True})]
     assert seen["http_clients"] == 2  # Startup instructions and the actual tool call only.
     assert seen["hint_reads"] == int(callback_enabled)
+
+
+class _BoardAdapter:
+    """A registered adapter; records that the shim built one."""
+    built = []
+
+    def __init__(self, *args, **kwargs):
+        _BoardAdapter.built.append(kwargs)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+    instance_headers = {"X-PL-Agent": "a1", "X-PL-Agent-Key": "private-fixture"}
+
+    def deliver_hint(self):
+        return None
+
+
+def _board_env(monkeypatch, value, available=True):
+    """``available`` is the daemon's answer to the default-mode probe."""
+    from pseudolife_memory import coordination_adapter
+    _BoardAdapter.built = []
+    seen = {"probes": []}
+
+    async def proxy(*args, **kwargs):
+        seen.update(kwargs)
+
+    def probe(url, provider):
+        seen["probes"].append(url)
+        return available
+
+    monkeypatch.setattr(coordination_adapter, "CoordinationAdapter", _BoardAdapter)
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    monkeypatch.setattr(shim, "_board_available", probe)
+    monkeypatch.delenv("PSEUDOLIFE_WRITER_ID", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_STATE", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_STATE_DIR", raising=False)
+    if value is None:
+        monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION", raising=False)
+    else:
+        monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", value)
+    return seen
+
+
+def test_board_adapter_is_on_by_default_where_the_daemon_serves_the_board(monkeypatch):
+    seen = _board_env(monkeypatch, None)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert seen["probes"] == ["http://fixture.invalid"]
+    assert len(_BoardAdapter.built) == 1
+    assert seen["coordination_adapter"] is not None
+    assert seen["board_checkin"] is True
+
+
+def test_board_default_stays_quiet_where_the_daemon_refuses_it(monkeypatch, capsys):
+    """Disabled, an unlisted principal or file mode: the default asks the
+    daemon once and builds nothing, so no refused register, no warning."""
+    seen = _board_env(monkeypatch, None, available=False)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert seen["probes"] == ["http://fixture.invalid"]
+    assert _BoardAdapter.built == []
+    assert "coordination_adapter" not in seen and "board_checkin" not in seen
+    assert "coordination" not in capsys.readouterr().err
+
+
+def test_board_default_probe_is_bounded(monkeypatch):
+    """The probe runs before the startup handshake; a stalled daemon must not
+    stretch Codex's startup budget, and an unanswered question means no."""
+    import time
+    seen = _board_env(monkeypatch, None)
+
+    def slow_probe(url, provider):
+        time.sleep(1)
+        return True
+
+    handshake = []
+
+    async def proxy(*args, **kwargs):
+        handshake.append(time.monotonic())
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    monkeypatch.setattr(shim, "_board_available", slow_probe)
+    monkeypatch.setattr(shim, "_BOARD_PROBE_SECONDS", 0.05)
+    started = time.monotonic()
+    # The abandoned probe thread finishes on its own (urllib's 2 s timeout);
+    # asyncio.run waits for it only at teardown, after the handshake.
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert handshake and handshake[0] - started < 0.9
+    assert _BoardAdapter.built == []
+    assert "coordination_adapter" not in seen and "board_checkin" not in seen
+
+
+def test_board_default_stays_quiet_without_a_bearer(monkeypatch, capsys):
+    """An open install cannot use the board (bearer auth stays required), so
+    the default neither asks, nor builds an adapter, nor warns."""
+    seen = _board_env(monkeypatch, None)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", None, "s"))
+    assert seen["probes"] == [] and _BoardAdapter.built == []
+    assert "coordination_adapter" not in seen and "board_checkin" not in seen
+    assert "coordination" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", "OFF"])
+def test_explicit_opt_out_keeps_the_board_adapter_off(monkeypatch, value):
+    seen = _board_env(monkeypatch, value)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert seen["probes"] == [] and _BoardAdapter.built == []
+    assert "coordination_adapter" not in seen and "board_checkin" not in seen
+
+
+def test_explicit_opt_in_builds_the_adapter_without_asking(monkeypatch):
+    """An explicit opt-in keeps its diagnostics: the adapter's own refusal
+    says why, where a probe would only say no."""
+    seen = _board_env(monkeypatch, "1", available=False)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert seen["probes"] == [] and len(_BoardAdapter.built) == 1
+    assert seen["board_checkin"] is True
+
+
+def test_failed_board_adapter_leaves_the_checkin_out(monkeypatch):
+    from pseudolife_memory import coordination_adapter
+    seen = _board_env(monkeypatch, None)
+
+    class Refused(_BoardAdapter):
+        async def __aenter__(self):
+            raise coordination_adapter.AdapterError("coordination register refused (HTTP 403)")
+
+    monkeypatch.setattr(coordination_adapter, "CoordinationAdapter", Refused)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert "coordination_adapter" not in seen and "board_checkin" not in seen
+
+
+def _codex_board_env(monkeypatch, value, available):
+    from pseudolife_memory import codex_coordination
+    seen = {"probes": []}
+
+    class Registry:
+        def __init__(self, *args, **kwargs):
+            seen["registry"] = True
+
+        async def aclose(self):
+            pass
+
+    async def proxy(*args, **kwargs):
+        seen.update(kwargs)
+
+    def probe(url, provider):
+        seen["probes"].append(url)
+        return available
+
+    monkeypatch.setattr(codex_coordination, "CodexCoordinationRegistry", Registry)
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    monkeypatch.setattr(shim, "_board_available", probe)
+    monkeypatch.setenv("PSEUDOLIFE_WRITER_ID", "codex")
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_STATE", raising=False)
+    if value is None:
+        monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION", raising=False)
+    else:
+        monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", value)
+    return seen
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_codex_default_builds_its_registry_only_where_the_daemon_serves_the_board(
+        monkeypatch, available):
+    """A registry the daemon refuses would retry every tool call and append
+    a coordination error hint to each result, so the default asks first."""
+    seen = _codex_board_env(monkeypatch, None, available)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert seen["probes"] == ["http://fixture.invalid"]
+    if available:
+        assert seen["registry"] is True and seen["coordination_registry"] is not None
+        assert seen["board_checkin"] is True
+    else:
+        assert "registry" not in seen and "coordination_registry" not in seen
+        assert "board_checkin" not in seen
+
+
+def test_codex_explicit_opt_in_keeps_its_registry_and_probes_for_the_checkin(monkeypatch):
+    seen = _codex_board_env(monkeypatch, "1", True)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert seen["registry"] is True and seen["coordination_registry"] is not None
+    # The registry attaches per thread later; the instructions ask the daemon.
+    assert callable(seen["board_checkin"]) and seen["probes"] == []
+    assert asyncio.run(seen["board_checkin"]()) is True
+    assert seen["probes"] == ["http://fixture.invalid"]
+
+
+@pytest.mark.parametrize("status,body,expected", [
+    (200, b"Pseudolife coordination: check in.\n", True),
+    (200, b"", False),
+    (401, b"unauthorized", False),
+    (None, None, False),
+])
+def test_board_probe_reads_the_startup_checkin_route(monkeypatch, status, body, expected):
+    import io
+    import urllib.error
+    from pseudolife_memory.credentials import CredentialProvider
+    requests = []
+    openers = []
+
+    class Opener:
+        def open(self, req, timeout):
+            requests.append((req.full_url, req.get_header("Authorization"), timeout))
+            if status is None:
+                raise OSError("connection refused")
+            if status != 200:
+                raise urllib.error.HTTPError(req.full_url, status, "x", {}, io.BytesIO(body))
+            return io.BytesIO(body)
+
+    def build_opener(*handlers):
+        openers.append(handlers)
+        return Opener()
+
+    monkeypatch.setattr(shim.urllib.request, "build_opener", build_opener)
+    provider = CredentialProvider(token="fixture-token")
+    assert shim._board_available("http://fixture.invalid", provider) is expected
+    assert requests == [("http://fixture.invalid/api/hook/coordination-start",
+                         "Bearer fixture-token", 2)]
+    # A redirect must never carry the bearer to another host.
+    assert openers == [(shim._NoRedirectHandler,)]
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_board_checkin_is_appended_only_when_ready(ready):
+    from pseudolife_memory.coordination import CHECKIN_INSTRUCTION
+    from pseudolife_memory.mcp_server import _MCP_INSTRUCTIONS
+    composed = shim._with_board_checkin(_MCP_INSTRUCTIONS, ready)
+    assert (CHECKIN_INSTRUCTION in composed) is ready
+    assert composed.startswith(_MCP_INSTRUCTIONS)
+    # Codex needs the first 512 characters to stand alone.
+    assert len(composed) <= 512
+    if not ready:
+        assert composed == _MCP_INSTRUCTIONS
+    assert shim._with_board_checkin(None, ready) == (CHECKIN_INSTRUCTION if ready else None)
+
+
+@pytest.mark.parametrize("board_checkin,expected", [(True, True), (False, False)])
+def test_proxy_serves_the_board_checkin_it_was_told_to(monkeypatch, board_checkin, expected):
+    from mcp.client import session, streamable_http
+    from mcp.server import stdio
+    from pseudolife_memory.coordination import CHECKIN_INSTRUCTION
+    import sys
+
+    seen = {}
+
+    @asynccontextmanager
+    async def http_client(**kwargs):
+        yield object()
+
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        yield object(), object()
+
+    class Remote:
+        def __init__(self, *args):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def initialize(self):
+            return SimpleNamespace(instructions="Fixture daemon instructions")
+
+    @asynccontextmanager
+    async def inbox():
+        yield None
+
+    async def serve_channel(server, read, write, inbox_factory, **kwargs):
+        seen["instructions"] = server.instructions
+
+    monkeypatch.setattr(streamable_http, "create_mcp_http_client", http_client)
+    monkeypatch.setattr(streamable_http, "streamable_http_client", transport)
+    monkeypatch.setattr(session, "ClientSession", Remote)
+    monkeypatch.setattr(stdio, "stdio_server", transport)
+    monkeypatch.setitem(sys.modules, "pseudolife_memory.channel",
+                        SimpleNamespace(serve_channel=serve_channel))
+    asyncio.run(shim._proxy("http://fixture.invalid", "fixture-token", "fixture-session",
+                            channel_inbox=inbox, board_checkin=board_checkin))
+    assert seen["instructions"].startswith("Fixture daemon instructions")
+    assert (CHECKIN_INSTRUCTION in seen["instructions"]) is expected
