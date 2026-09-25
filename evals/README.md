@@ -4061,6 +4061,20 @@ SessionEnd scripts. Arms are values of `memory_policy.variant`;
         --arms none,full_separate_hook,full_separate_hook@aa --replicates 3
     python -m evals.memory_policy_bench report evals/results/memory-policy-bench-<tag>.json
     python -m evals.memory_policy_bench estimate evals/results/memory-policy-bench-<tag>.json
+    python -m evals.memory_policy_bench regrade --tag <tag> --arms <same> --replicates <n>
+    python -m evals.memory_policy_bench cleanup
+
+**Sanity check, 2026-09-25** (`memory-policy-bench-sanity-20260925-regraded.json`:
+claude-sonnet-5 at medium effort, memory tools deferred behind ToolSearch;
+`none` against `full_separate_hook` and an A/A copy of it, 8 scenarios x 3
+replicates, 72 valid runs, $7.04 at list prices). The bench could not tell
+the two policies apart. The full policy moved the score +0.19 over no policy,
+inside the A/A noise floor of 0.24, and every other metric stayed inside its
+own A/A noise. Most scenarios scored zero compliance in every arm: agents made
+0.4 (none) to 1.0 (full) memory calls per run and solved most tasks from the
+repository alone. At this size the instrument is not fit for purpose yet; it
+needs scenarios that cannot be solved without memory and more replicates (the
+A/A floor narrows roughly with the square root of the number of pairs).
 
 ---
 

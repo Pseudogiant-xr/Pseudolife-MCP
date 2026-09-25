@@ -1477,7 +1477,8 @@ class Bench:
                                         tool_search=args.tool_search)
                 else:
                     client = run_codex(run_dir, project, prompt, daemon, model=args.model,
-                                       effort=args.effort, timeout=args.run_timeout)
+                                       effort=args.effort, timeout=args.run_timeout,
+                                       sandbox=args.codex_sandbox)
                 (run_dir / "client.json").write_text(json.dumps(client), encoding="utf-8")
                 time.sleep(2.0)   # let SessionEnd land
                 final = {"facts": daemon.get("/api/facts?limit=5000"),
@@ -1615,11 +1616,19 @@ CODEX_APPROVED_TOOLS = (
     "memory_graph", "memory_history", "memory_recent", "memory_supersede")
 
 def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, model: str,
-              effort: str, timeout: float) -> dict:
+              effort: str, timeout: float, sandbox: str = "danger-full-access") -> dict:
     """``codex exec`` in a throwaway CODEX_HOME: the user's login copied
     without its refresh token, MCP pointed at the disposable daemon, and the
     plugin's SessionStart/SessionEnd scripts installed as trusted manual
-    hooks. Memory features of Codex itself are off."""
+    hooks. Memory features of Codex itself are off.
+
+    ``sandbox`` defaults to Codex's unsandboxed mode: a fresh CODEX_HOME on
+    Windows has no sandbox setup (the capability identity Codex creates on
+    first interactive use), and under read-only or workspace-write every
+    shell command, reads included, came back "rejected: blocked by policy"
+    (2026-09-25), so the agent could not touch the project at all. The
+    project is a throwaway directory; the Claude arm's shell is unsandboxed
+    too (prefix-allowed Bash)."""
     home = run_dir / "codex-home"
     home.mkdir(parents=True, exist_ok=True)
     auth = json.loads((Path.home() / ".codex" / "auth.json").read_text(encoding="utf-8"))
@@ -1634,7 +1643,7 @@ def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mode
                         'approval_mode = "approve"\n' for name in CODEX_APPROVED_TOOLS)
     (home / "config.toml").write_text(
         f'model = {json.dumps(model)}\nmodel_reasoning_effort = {json.dumps(effort)}\n'
-        'approval_policy = "never"\nsandbox_mode = "workspace-write"\n'
+        f'approval_policy = "never"\nsandbox_mode = {json.dumps(sandbox)}\n'
         '[features]\nmemories = false\n'
         '[mcp_servers.pseudolife-memory]\n'
         f'command = {json.dumps(shim["command"])}\nargs = {json.dumps(shim["args"])}\n'
@@ -1649,7 +1658,7 @@ def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mode
                         "PSEUDOLIFE_MCP_TOKEN": daemon.token,
                         "PSEUDOLIFE_DIGEST_DIR": str(run_dir / "digests")})
     cli = shutil.which("codex") or "codex"
-    cmd = [cli, "exec", "--json", "--skip-git-repo-check", "-m", model,
+    cmd = [cli, "exec", "--json", "--skip-git-repo-check", "-m", model, "-s", sandbox,
            "-c", f"model_reasoning_effort={json.dumps(effort)}", "-"]
     stream = run_dir / "stream.jsonl"
     started = time.time()
@@ -1935,7 +1944,10 @@ def regrade(args) -> Path:
                                    "client", "model", "effort") if k in old}
         rec.update(bench_version=BENCH_VERSION, regraded=True,
                    errors=[e for e in old.get("errors", [])
-                           if not e.startswith(("grade:", "drop:"))])
+                           if not e.startswith(("grade:", "drop:"))],
+                   # Runs from before client.json existed keep their exit
+                   # status only in the original record.
+                   client_rc=old.get("client_rc"), timed_out=old.get("timed_out"))
         run_dir = work / "runs" / rid
         meta, _, _ = load_run(run_dir, old)
         if not db_exists(admin, meta["db"]):
@@ -2004,6 +2016,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--total-budget-usd", type=float, default=0.0,
                    help="stop scheduling once this much list-price spend is reached (0 = off)")
     r.add_argument("--cost-lambda", type=float, default=COST_LAMBDA)
+    r.add_argument("--codex-sandbox", default="danger-full-access",
+                   choices=("read-only", "workspace-write", "danger-full-access"),
+                   help="codex exec sandbox; see run_codex for why the default is unsandboxed")
     r.add_argument("--tool-search", default="true",
                    help="ENABLE_TOOL_SEARCH for claude (true = MCP tools deferred, as in "
                         "a session with several MCP servers)")

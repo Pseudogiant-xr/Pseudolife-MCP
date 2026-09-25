@@ -388,6 +388,23 @@ def test_only_cleanly_finished_runs_are_skipped_on_resume(rec, done):
     assert mb.finished(rec) is done
 
 
+def test_a_legacy_run_keeps_its_exit_status_when_regraded(tmp_path):
+    """Runs recorded before client.json existed are rebuilt from their
+    stream and ledger; their exit status survives only in the old record,
+    which regrade must carry (the first regrade read every run as crashed)."""
+    run = tmp_path / "t-none-a_lesson-r0"
+    run.mkdir()
+    (run / "stream.jsonl").write_text(json.dumps(
+        {"type": "result", "subtype": "success", "usage": {}, "modelUsage": {}}) + "\n")
+    (run / "ledger.jsonl").write_text(json.dumps({"t": 100.0, "kind": "hook"}) + "\n")
+    rec = {"run_id": "t-none-a_lesson-r0", "arm": "none", "variant": "none",
+           "scenario": "a_lesson", "replicate": 0, "client_rc": 0, "timed_out": False}
+    meta, client, final = mb.load_run(run, rec)
+    assert client["rc"] == 0 and client["timed_out"] is False
+    assert client["started"] == pytest.approx(98.0)
+    assert meta["db"].startswith("plbench_")
+
+
 def test_used_ids_parse_like_the_daemon():
     assert mb.parse_ids([True, 3.0, 2.5, 7]) == [3, 7]
     assert len(mb.parse_ids(list(range(80)))) == 50
