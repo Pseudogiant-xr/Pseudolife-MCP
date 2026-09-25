@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — Postgres connects retry a Windows local-port failure)
+- A daemon running natively on Windows (including the daemons the test suite
+  spawns) now tries its own Postgres connects again (the storage connection
+  and its reconnect, the `/health` probe, the mailbox connection) when a
+  loopback connect fails for want of a local port: libpq's "Address already
+  in use (…/10048)" (WSAEADDRINUSE, the port it picked still has a TIME_WAIT
+  entry to the same server) or "…/10055" (WSAENOBUFS, the ephemeral range is
+  exhausted). Neither says anything about the server, and a second connect
+  picks another port. Until now the tool call or health probe that opened
+  the connection failed. Measured 2026-09-25 with about twenty sessions
+  against one Postgres on `127.0.0.1:5433`: three such failures in two full
+  test runs, one inside the storage connect, with 250-600 TIME_WAIT entries
+  to that port. At most four calls, with a jittered backoff from 0.05 s that
+  stays under a second, and one warning per retry naming only the attempt
+  and the code. Every other failure (refused, timeout, authentication, too
+  many clients) is still raised on the first call. The Docker daemon is a
+  Linux container that reaches Postgres over the compose network and never
+  sees these codes; the operator CLIs are unchanged.
+
 ### Fixed (2026-09-25 — the client-side updater no longer strands a shim runtime that sessions are running)
 - On 2026-09-25 `ops/update.ps1 -All` ran `pip install --upgrade` into the
   maintainer's shim runtime while about 36 sessions ran its
