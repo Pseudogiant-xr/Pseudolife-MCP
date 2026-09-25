@@ -429,7 +429,7 @@ def test_mail_send_after_a_plain_reconnect_follows_the_new_writer_epoch(
     are kept, so no reseed runs: only ``_ensure_init``'s no-handover branch
     moves the service's copy of the epoch. Without it the fenced send fails,
     its one retry fails the same way, and every later send is refused until
-    the daemon restarts."""
+    the daemon restarts or another writer's handover forces a re-read."""
     from pseudolife_memory.coordination import dispatch
     from pseudolife_memory.service import MemoryService
 
