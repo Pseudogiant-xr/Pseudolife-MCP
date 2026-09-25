@@ -62,6 +62,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interpreter: a real venv whose stub pip strands the package must import
   its own package again afterwards, and on Windows a real process started
   from a runtime's interpreter must block the upgrade.
+### Fixed (2026-09-25 — rerunning the installer no longer strands a shim that sessions are running)
+- On Windows, rerunning `ops/install.ps1` or `ops/install.sh` while a
+  Claude Code or Codex session was running the stdio shim could leave the
+  shim without its own package. The installers upgrade it with
+  `pipx install --force <checkout>` or `pip install --user --upgrade
+  <checkout>`, and neither puts back what it removed before failing on the
+  running launcher. pip 24.0 stashes an uninstall in sorted order, so
+  site-packages is already renamed to `~` siblings when WinError 32 is
+  raised from `uninstall()`, outside the `try` that rolls back. pipx
+  deletes the venv with `rmtree(ignore_errors=True)` first, so everything
+  that is not locked is gone. The client updater hit this on 2026-09-25.
+- Both installers now read the Windows process table
+  (`Get-CimInstance Win32_Process`; `install.sh` under Git Bash, MSYS2 or
+  Cygwin calls `powershell.exe` for it) before upgrading an installed shim.
+  If a process is running from the shim's pipx venv or from its installed
+  launcher, the upgrade is skipped. The warning names the number of
+  sessions (one per process tree: a Claude session is the launcher plus the
+  venv's redirector), the paths and the rerun, and it is repeated at the
+  end of the run. The installed shim stays in place and usable, so clients
+  are still registered against it. A registration the installer would have
+  reported as "upgraded" is reported as not upgraded, marked `[!]`. A
+  process table that cannot be read leaves an installed shim alone. A first
+  install, with nothing installed yet, is not checked. Off Windows nothing
+  changes, since a running file does not stop pip or pipx there.
+- Not covered: a session that starts between the check and pip's
+  uninstall. The installers do not restore pip's `~` stashes after a
+  failed pip run.
+- Tests: fake process tables cover a pipx venv with a Claude and a Codex
+  session, a pip `--user` launcher, lookalike paths that must not count,
+  an unreadable table, a first install and a non-Windows host, against
+  every available bash and PowerShell. The registration steps of both
+  installers are covered for Claude Code, Codex and Gemini CLI. On Windows
+  a real interpreter started from a disposable pipx venv must block the
+  upgrade, through the real process table.
 
 ### Security (2026-09-25 — the fallback dream extractor stops receiving the primary's API key)
 - The fallback extractor was built with the primary's key

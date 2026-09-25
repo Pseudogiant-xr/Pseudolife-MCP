@@ -986,6 +986,7 @@ done
 SHIM_TRIED=""
 SHIM_OK=""
 SHIM_PATH=""
+SHIM_HELD=""
 resolve_installed_shim() {  # optional $1 = pipx, python3, or python
     shim_manager="${1:-}"
     if [ -z "$shim_manager" ]; then
@@ -1015,25 +1016,119 @@ resolve_installed_shim() {  # optional $1 = pipx, python3, or python
     done
     return 1
 }
+# On Windows neither pipx nor pip can replace a shim that sessions are running,
+# and neither puts back what it removed first. pip 24.0 stashes an uninstall in
+# sorted order, so site-packages is already renamed to `~` siblings when the
+# running launcher raises WinError 32, from uninstall(), outside the try that
+# rolls back. `pipx install --force` deletes the venv with
+# rmtree(ignore_errors=True), taking everything that is not locked. On
+# 2026-09-25 this left a runtime without its own package. So an installed shim
+# that a session is running is left in place, still usable, and the rerun named.
+shim_process_table() {  # prints pid|parent pid|image rows; status 2 off Windows, 1 when unreadable
+    case "$(uname -s 2>/dev/null || true)" in
+        MINGW*|MSYS*|CYGWIN*) ;;
+        *) return 2 ;;  # an open or running file does not stop pip or pipx here
+    esac
+    shim_ps="$(command -v powershell.exe 2>/dev/null || true)"
+    shim_root="${SYSTEMROOT:-${SystemRoot:-${WINDIR:-}}}"
+    if [ -z "$shim_ps" ] && [ -n "$shim_root" ]; then
+        shim_ps="$(cygpath -u "$shim_root" 2>/dev/null || printf '%s' "$shim_root")/System32/WindowsPowerShell/v1.0/powershell.exe"
+    fi
+    if [ -z "$shim_ps" ] || [ ! -f "$shim_ps" ]; then return 1; fi
+    shim_rows="$("$shim_ps" -NoProfile -NonInteractive -Command '[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance -ClassName Win32_Process -Property ProcessId, ParentProcessId, ExecutablePath -ErrorAction Stop | ForEach-Object { "{0}|{1}|{2}" -f $_.ProcessId, $_.ParentProcessId, $_.ExecutablePath }' 2>/dev/null)" || return 1
+    if [ -z "$shim_rows" ]; then return 1; fi
+    printf '%s\n' "$shim_rows"
+}
+shim_held_paths() {  # $1 = pipx, python3 or python; prints what a running session of the installed shim executes from
+    # The whole pipx venv (its launcher and the venv's python.exe redirector
+    # both run there) and the installed launcher. A --user scripts directory
+    # holds other tools' launchers too, so only the shim's own launcher counts.
+    # Runs in a command substitution: resolve_installed_shim's SHIM_PATH stays put.
+    if [ "$1" = pipx ]; then
+        shim_pipx_home="$(pipx environment --value PIPX_HOME 2>/dev/null || true)"
+        if [ -n "$shim_pipx_home" ]; then
+            shim_pipx_home="$(cygpath -u "$shim_pipx_home" 2>/dev/null || printf '%s' "$shim_pipx_home")"
+            if [ -d "$shim_pipx_home/venvs/pseudolife-mcp" ]; then
+                cygpath -w "$shim_pipx_home/venvs/pseudolife-mcp" 2>/dev/null || printf '%s\n' "$shim_pipx_home/venvs/pseudolife-mcp"
+            fi
+        fi
+    fi
+    if resolve_installed_shim "$1"; then
+        cygpath -w "$SHIM_PATH" 2>/dev/null || printf '%s\n' "$SHIM_PATH"
+    fi
+}
+shim_upgrade_held() {  # $1 = pipx, python3 or python; status 0 = leave the installed shim alone (SHIM_HELD says why)
+    shim_table_status=0
+    shim_table="$(shim_process_table)" || shim_table_status=$?
+    if [ "$shim_table_status" -eq 2 ]; then return 1; fi
+    shim_held="$(shim_held_paths "$1")"
+    # Nothing installed yet: nothing a session could be running.
+    if [ -z "$shim_held" ]; then return 1; fi
+    shim_held_list="$(printf '%s\n' "$shim_held" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
+    shim_rerun="\"$repo/ops/install.sh\" (with the options you used)"
+    if [ "$shim_table_status" -ne 0 ]; then
+        SHIM_HELD="Could not read the Windows process table to see whether a session is running the pseudolife-mcp shim from $shim_held_list; it was left as it is rather than upgraded. Close every Claude Code / Codex session using it, then rerun: $shim_rerun"
+        echo "WARNING: $SHIM_HELD" >&2
+        return 0
+    fi
+    # A Claude session is the launcher plus the venv redirector it starts, a
+    # Codex one the redirector alone: each process tree counts once.
+    # powershell.exe writes CRLF rows. Git for Windows' awk drops the CR
+    # itself; the sub() below is for awks that keep it.
+    shim_counts="$(printf '%s\n' "$shim_table" | SHIM_HELD_ROOTS="$shim_held" awk -F'|' '
+        BEGIN {
+            n = split(ENVIRON["SHIM_HELD_ROOTS"], roots, "\n")
+            for (i = 1; i <= n; i++) { roots[i] = tolower(roots[i]); gsub(/\\/, "/", roots[i]); sub(/\/+$/, "", roots[i]) }
+        }
+        {
+            image = tolower($3); sub(/\r$/, "", image); gsub(/\\/, "/", image)
+            if (image == "") next
+            for (i = 1; i <= n; i++)
+                if (roots[i] != "" && (image == roots[i] || index(image, roots[i] "/") == 1)) { parent[$1] = $2; break }
+        }
+        END {
+            for (pid in parent) { processes++; if (!(parent[pid] in parent)) sessions++ }
+            printf "%d %d\n", sessions, processes
+        }')"
+    shim_sessions="${shim_counts% *}"
+    shim_processes="${shim_counts#* }"
+    if [ "$shim_processes" -eq 0 ]; then return 1; fi
+    if [ "$shim_sessions" -eq 1 ]; then shim_who="1 session is"; else shim_who="$shim_sessions sessions are"; fi
+    if [ "$shim_processes" -eq 1 ]; then shim_what="1 process"; else shim_what="$shim_processes processes"; fi
+    if [ "$1" = pipx ]; then shim_tool=pipx; else shim_tool=pip; fi
+    SHIM_HELD="$shim_who running the pseudolife-mcp shim from $shim_held_list ($shim_what); it was not upgraded, because on Windows $shim_tool cannot replace a running shim and would leave it half-removed. The installed shim stays in place and registered. Close every Claude Code / Codex session using it, then rerun: $shim_rerun"
+    echo "WARNING: $SHIM_HELD" >&2
+    return 0
+}
 ensure_shim() {
     if [ -n "$SHIM_TRIED" ]; then return 0; fi
     SHIM_TRIED=1
     shim_install_succeeded=""
     shim_manager=""
+    # A held shim counts as installed: the one in place stays usable.
     if command -v pipx >/dev/null 2>&1; then
+        if shim_upgrade_held pipx; then
+            shim_install_succeeded=1
+            shim_manager=pipx
         # --force replaces a stale same-version environment as well as
         # installing fresh, and the local path keeps shim and daemon aligned.
-        if pipx install --force "$repo"; then
+        elif pipx install --force "$repo"; then
             shim_install_succeeded=1
             shim_manager=pipx
         fi
     elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        if python3 -m pip install --user --upgrade "$repo"; then
+        if shim_upgrade_held python3; then
+            shim_install_succeeded=1
+            shim_manager=python3
+        elif python3 -m pip install --user --upgrade "$repo"; then
             shim_install_succeeded=1
             shim_manager=python3
         fi
     elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        if python -m pip install --user --upgrade "$repo"; then
+        if shim_upgrade_held python; then
+            shim_install_succeeded=1
+            shim_manager=python
+        elif python -m pip install --user --upgrade "$repo"; then
             shim_install_succeeded=1
             shim_manager=python
         fi
@@ -1247,7 +1342,10 @@ for selected_client in $CLIENTS; do
                 if [ -n "$managed_registered_shim" ]; then
                     ensure_shim
                     if [ -n "$SHIM_OK" ]; then
-                        if [ -z "$bare_registered_shim" ]; then
+                        if [ -n "${SHIM_HELD:-}" ]; then
+                            echo "WARNING: the existing Codex registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
+                            MCP_CODEX=failed
+                        elif [ -z "$bare_registered_shim" ]; then
                             step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
                             MCP_CODEX=present-upgraded
                         else
@@ -1355,7 +1453,10 @@ for selected_client in $CLIENTS; do
                 if [ -n "$managed_registered_shim" ]; then
                     ensure_shim
                     if [ -n "$SHIM_OK" ]; then
-                        if [ -z "$bare_registered_shim" ]; then
+                        if [ -n "${SHIM_HELD:-}" ]; then
+                            echo "WARNING: the existing Gemini CLI registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
+                            MCP_GEMINI=failed
+                        elif [ -z "$bare_registered_shim" ]; then
                             step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
                             MCP_GEMINI=present-upgraded
                         else
@@ -1449,7 +1550,10 @@ for selected_client in $CLIENTS; do
             if [ -n "$managed_registered_shim" ]; then
                 ensure_shim
                 if [ -n "$SHIM_OK" ]; then
-                    if [ -z "$bare_registered_shim" ]; then
+                    if [ -n "${SHIM_HELD:-}" ]; then
+                        echo "WARNING: the existing Claude Code registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
+                        MCP_CLAUDE=failed
+                    elif [ -z "$bare_registered_shim" ]; then
                         step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
                         MCP_CLAUDE=present-upgraded
                     else
@@ -1641,4 +1745,5 @@ esac
 if [ -n "$codex_shim_mode" ]; then
     echo "Note: Codex-served extraction quality is unmeasured — see the 'OpenAI primary' section of docs/guide/dreaming.md."
 fi
+if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
 echo "Done. First session: tell your coding agent to remember something."

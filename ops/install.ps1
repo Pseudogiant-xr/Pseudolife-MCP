@@ -956,6 +956,7 @@ foreach ($selectedClient in $clients) {
 # multi-provider runs don't run pipx/pip twice.
 $script:shimInstallResult = $null
 $script:shimInstallPath = $null
+$script:shimUpgradeHeld = $null
 function Resolve-InstalledShimPath($Manager = $null) {
     $shimBinDir = $null
     if (-not $Manager) {
@@ -991,6 +992,79 @@ function Resolve-InstalledShimPath($Manager = $null) {
     }
     return $null
 }
+# On Windows neither pipx nor pip can replace a shim that sessions are running,
+# and neither puts back what it removed first. pip 24.0 stashes an uninstall in
+# sorted order, so site-packages is already renamed to `~` siblings when the
+# running launcher raises WinError 32, from uninstall(), outside the try that
+# rolls back. `pipx install --force` deletes the venv with
+# rmtree(ignore_errors=True), taking everything that is not locked. On
+# 2026-09-25 this left a runtime without its own package. So an installed shim
+# that a session is running is left in place, still usable, and the rerun named.
+function Get-ShimProcessTable {
+    # $null off Windows, where an open or running file does not stop pip or pipx.
+    if (-not $IsWindows) { return $null }
+    $rows = @(Get-CimInstance -ClassName Win32_Process -Property ProcessId, ParentProcessId, ExecutablePath -ErrorAction Stop)
+    if (-not $rows) { throw "it came back empty" }
+    return $rows
+}
+function Get-ShimHeldPaths($Manager) {
+    # What a running session of the installed shim executes from: the whole
+    # pipx venv (its launcher and the venv's python.exe redirector both run
+    # there) and the installed launcher. A --user scripts directory holds other
+    # tools' launchers too, so only the shim's own launcher counts there.
+    $paths = @()
+    if ($Manager.Cmd -eq "pipx") {
+        $pipxHome = (& pipx environment --value PIPX_HOME 2>$null | Select-Object -Last 1)
+        if ($pipxHome) {
+            $venv = Join-Path (Join-Path "$pipxHome" "venvs") "pseudolife-mcp"
+            if (Test-Path -LiteralPath $venv -PathType Container) { $paths += $venv }
+        }
+    }
+    $launcher = Resolve-InstalledShimPath $Manager
+    if ($launcher) { $paths += $launcher }
+    return $paths
+}
+function Test-ShimUpgradeHeld($Manager) {
+    # $true when the installed shim must not be upgraded now; the reason is
+    # kept in $script:shimUpgradeHeld for the registration steps and the end.
+    $tableError = $null
+    $rows = $null
+    try { $rows = Get-ShimProcessTable } catch { $tableError = $_.Exception.Message }
+    if (($null -eq $tableError) -and ($null -eq $rows)) { return $false }
+    $held = @(Get-ShimHeldPaths $Manager | Where-Object { $_ } | ForEach-Object {
+        [IO.Path]::GetFullPath("$_").TrimEnd([IO.Path]::DirectorySeparatorChar)
+    })
+    # Nothing installed yet: nothing a session could be running.
+    if (-not $held) { return $false }
+    $rerun = "& `"$([IO.Path]::Combine($repo, 'ops', 'install.ps1'))`" (with the options you used)"
+    if ($null -ne $tableError) {
+        $script:shimUpgradeHeld = "Could not read the Windows process table ($tableError) to see whether a session is running the pseudolife-mcp shim from $($held -join ', '); it was left as it is rather than upgraded. Close every Claude Code / Codex session using it, then rerun: $rerun"
+        Write-Warning $script:shimUpgradeHeld
+        return $true
+    }
+    $running = @{}
+    foreach ($row in $rows) {
+        if (-not $row.ExecutablePath) { continue }
+        $image = [IO.Path]::GetFullPath("$($row.ExecutablePath)")
+        foreach ($root in $held) {
+            if ($image.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or
+                $image.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+                $running[[long]$row.ProcessId] = [long]$row.ParentProcessId
+                break
+            }
+        }
+    }
+    if ($running.Count -eq 0) { return $false }
+    # A Claude session is the launcher plus the venv redirector it starts, a
+    # Codex one the redirector alone: each process tree counts once.
+    $sessions = @($running.Values | Where-Object { -not $running.ContainsKey($_) }).Count
+    $who = if ($sessions -eq 1) { "1 session is" } else { "$sessions sessions are" }
+    $what = if ($running.Count -eq 1) { "1 process" } else { "$($running.Count) processes" }
+    $tool = if ($Manager.Cmd -eq "pipx") { "pipx" } else { "pip" }
+    $script:shimUpgradeHeld = "$who running the pseudolife-mcp shim from $($held -join ', ') ($what); it was not upgraded, because on Windows $tool cannot replace a running shim and would leave it half-removed. The installed shim stays in place and registered. Close every Claude Code / Codex session using it, then rerun: $rerun"
+    Write-Warning $script:shimUpgradeHeld
+    return $true
+}
 function Install-ShimOnce {
     if ($null -ne $script:shimInstallResult) { return $script:shimInstallResult }
     # NOTE: every native command in here pipes to Out-Host — a PS function
@@ -1000,14 +1074,19 @@ function Install-ShimOnce {
     $shimInstalled = $false
     $shimManager = $null
     if (Get-Command pipx -ErrorAction SilentlyContinue) {
-        # --force also replaces an existing environment when the checkout's
-        # version matches the installed one, so a stale same-version PyPI shim
-        # cannot survive an installer rerun.
-        pipx install --force $repo 2>&1 | Out-Host
-        if ($LASTEXITCODE -eq 0) {
-            $shimManager = @{ Cmd = "pipx"; Args = @() }
+        $pipxManager = @{ Cmd = "pipx"; Args = @() }
+        if (Test-ShimUpgradeHeld $pipxManager) {
+            $shimManager = $pipxManager
         } else {
-            Write-Warning "pipx install --force from the checkout failed (exit $LASTEXITCODE)."
+            # --force also replaces an existing environment when the checkout's
+            # version matches the installed one, so a stale same-version PyPI shim
+            # cannot survive an installer rerun.
+            pipx install --force $repo 2>&1 | Out-Host
+            if ($LASTEXITCODE -eq 0) {
+                $shimManager = $pipxManager
+            } else {
+                Write-Warning "pipx install --force from the checkout failed (exit $LASTEXITCODE)."
+            }
         }
     } else {
         # Probe every candidate interpreter independently - a stale/broken
@@ -1021,6 +1100,10 @@ function Install-ShimOnce {
             $exeArgs = $candidate.Args
             & $exe @exeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>&1 | Out-Host
             if ($LASTEXITCODE -ne 0) { continue }
+            if (Test-ShimUpgradeHeld $candidate) {
+                $shimManager = @{ Cmd = $exe; Args = $exeArgs }
+                break
+            }
             # A direct local requirement is rebuilt and reinstalled even at
             # the same version; --upgrade also refreshes changed requirements.
             & $exe @exeArgs -m pip install --user --upgrade $repo 2>&1 | Out-Host
@@ -1239,7 +1322,10 @@ foreach ($selectedClient in $clients) {
                 }
                 if ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
-                        if (-not $bareRegisteredShim) {
+                        if ($script:shimUpgradeHeld) {
+                            Write-Warning "The existing Codex registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
+                            $mcpState["codex"] = "failed"
+                        } elseif (-not $bareRegisteredShim) {
                             Step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
                             $mcpState["codex"] = "present-upgraded"
                         } else {
@@ -1334,7 +1420,10 @@ foreach ($selectedClient in $clients) {
                 }
                 if ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
-                        if (-not $bareRegisteredShim) {
+                        if ($script:shimUpgradeHeld) {
+                            Write-Warning "The existing Gemini CLI registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
+                            $mcpState["gemini"] = "failed"
+                        } elseif (-not $bareRegisteredShim) {
                             Step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
                             $mcpState["gemini"] = "present-upgraded"
                         } else {
@@ -1409,7 +1498,10 @@ foreach ($selectedClient in $clients) {
                 }
                 if ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
-                        if (-not $bareRegisteredShim) {
+                        if ($script:shimUpgradeHeld) {
+                            Write-Warning "The existing Claude Code registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
+                            $mcpState["claude"] = "failed"
+                        } elseif (-not $bareRegisteredShim) {
                             Step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
                             $mcpState["claude"] = "present-upgraded"
                         } else {
@@ -1599,4 +1691,5 @@ switch ($Extractor) {
 if ($codexShimMode) {
     Write-Host "Note: Codex-served extraction quality is unmeasured - see the 'OpenAI primary' section of docs/guide/dreaming.md."
 }
+if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
 Write-Host "Done. First session: tell your coding agent to remember something."
