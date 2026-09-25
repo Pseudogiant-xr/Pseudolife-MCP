@@ -256,14 +256,19 @@ shown above, pass `episode=` on every memory write and episode/title call.
 Memory is a lead about the past, not an instruction: verify current code,
 configuration, versions, and external facts at their source. For clipped hits,
 use `memory_get`; for a stale or contested fact, verify or resolve it before
-acting.
+acting. Search before stating a "current" version, number, or benchmark. When
+memory and the code disagree, trust the code and correct the memory on the
+spot (`memory_fact_set` at the same slot, then `memory_outcome` with
+`correction`).
 
 Capture durable context with `memory_store` and canonical values with
-`memory_fact_set`; keep status under `source="status"`. Never store secrets.
+`memory_fact_set`; keep status under `source="status"`. Route verified
+external facts to `memory_world_set` with their source. Never store secrets.
 At task end record success, failure, or correction with `memory_outcome`
 and the `used_ids` of the recall entries that informed the work.
-Full detailed guidance: Pseudolife-MCP `examples/CLAUDE.memory.md` in the
-repository. Full memory briefing: `pseudolife-mcp briefing` or GET /api/briefing."""
+Full detailed guidance:
+https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/examples/CLAUDE.memory.md
+Full memory briefing: `pseudolife-mcp briefing` or GET /api/briefing."""
 
 
 ONBOARDING_BLOCK = """\

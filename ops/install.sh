@@ -631,7 +631,8 @@ if grep -q "pseudolife-memory@pseudolife-mcp" \
     CLAUDE_PLUGIN_INSTALLED=1
     case " $CLIENTS " in *" claude "*)
         step "pseudolife-memory Claude Code plugin detected — skipping Claude"
-        echo "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
+        echo "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+        echo "    compact memory core; the full block stays optional). The plugin no"
         echo "    longer bundles an MCP server, so the transport is still wired below." ;;
     esac
 else
@@ -853,8 +854,9 @@ for selected_client in $CLIENTS; do
     if [ "$choice" = auto ]; then
         case "$selected_client" in
             claude)
-                # A session-start briefing hook already delivers the block —
-                # a standing-file copy would double-inject.
+                # Skipped by default. The settings.json SessionStart hook
+                # serves the live briefing only, not this block; the summary
+                # names the file to append it to.
                 choice=skip ;;
             gemini)
                 if [ -t 0 ]; then
@@ -1477,8 +1479,8 @@ describe_mcp() {  # $1 = state
 describe_instr() {  # $1 = state
     case "$1" in
         appended:*|present:*) echo "[x] Standing file        ${1#*:}" ;;
-        covered-by-plugin)    echo "[-] Standing file        plugin briefing covers it" ;;
-        covered-by-hooks)     echo "[x] Standing instructions verified session briefing covers them" ;;
+        covered-by-plugin)    echo "[-] Standing file        skipped - the plugin serves a compact memory core; append examples/CLAUDE.memory.md for the full guide" ;;
+        covered-by-hooks)     echo "[-] Standing file        skipped - verified hooks serve a compact memory core; append examples/CLAUDE.memory.md for the full guide" ;;
         present)             echo "[x] Standing file        existing Codex memory fallback" ;;
         appended)            echo "[x] Standing file        Codex memory fallback appended" ;;
         skipped:*) echo "[-] Standing file        skipped - append later: cat examples/CLAUDE.memory.md >> ${1#*:}" ;;

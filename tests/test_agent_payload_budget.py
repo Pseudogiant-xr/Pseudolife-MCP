@@ -470,6 +470,17 @@ def _ledger():
     return mod
 
 
+def test_ledger_session_block_is_the_text_the_hook_serves() -> None:
+    """Since #364 the SessionStart hook serves ``STARTUP_MEMORY_CORE``, not
+    ``MEMORY_LOOP_BLOCK``; a ledger that kept pricing the detailed block
+    would publish a per-session cost no session pays. The unauthorized hook
+    body is the policy text alone (no briefing, no custom file)."""
+    from pseudolife_memory.web.session_hook import session_start_context
+    served = session_start_context(object(), authorized=False)
+    block = _ledger().measure_session_block()
+    assert block["raw_chars"] == len(served)
+
+
 def test_ledger_meters_the_replacement_pointer_in_its_own_column() -> None:
     """Since 2026-09-23 a compact superseded hit carries ``replaced_by``
     instead of ``superseded_by_text``. The ledger must price the pointer

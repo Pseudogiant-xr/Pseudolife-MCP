@@ -5010,6 +5010,16 @@ raw chars, and the manifest by the new parameter's 81-char description in
 all three tiers — without a rerun of this ledger, which needs the live
 daemon.)
 
+**Superseded 2026-09-24 — the session-start row prices a block the hook no
+longer serves.** Since #364 the SessionStart hook serves
+`STARTUP_MEMORY_CORE`, a compact core that `tests/test_plugin_packaging.py`
+pins under 2,000 chars (the 7,500 cap above no longer applies), followed by
+a bounded briefing; `MEMORY_LOOP_BLOCK` remains the detailed standing copy in
+`examples/CLAUDE.memory.md`. `agent_token_ledger.py` now measures the core
+alone; the briefing after it depends on the bank and can fill the rest of the
+hook's 9,500-byte budget. The ledger has not been rerun, which needs the live
+daemon; until it is, the row above is the pre-#364 measurement.
+
 ## What a call costs — before and after the cuts
 
 Mean over the 15 queries, `memory_search` at the tool's default `top_k=8`:

@@ -467,10 +467,12 @@ inside the daemon container, which already has the database URL:
 What `verify` shows: no row was edited, inserted or reordered, and none was
 removed except the oldest, behind a cut record whose own fields add up (written
 by the daemon, a window of at least a day, the cutoff that window gives at its
-time, and no surviving row older than that cutoff). What it cannot show on its
-own, because no secret is involved: that the newest rows were not dropped; that
-the table was not rewritten with every hash recomputed; and that the oldest
-rows were not removed by someone who also appended a consistent cut record.
+time, and a first surviving row no older than that cutoff; retention removes
+only an expired prefix, so a later row stamped before the cutoff can remain).
+What it cannot show on its own, because no secret is involved: that the
+newest rows were not dropped; that the table was not rewritten with every
+hash recomputed; and that the oldest rows were not removed by someone who
+also appended a consistent cut record.
 Record `head_seq:head_hash` and `head_created_at` from each `verify` somewhere
 outside the bank, and later run `verify --expect-head SEQ:HASH`. That catches
 the first two. The third needs a series of recorded heads: retention never
