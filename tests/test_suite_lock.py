@@ -11,14 +11,17 @@ from __future__ import annotations
 
 import collections
 import errno
+import importlib.util
 import io
 import os
 import queue
+import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -55,9 +58,10 @@ print("RELEASED", flush=True)
 class _Proc:
     """A child process whose merged output is read line by line."""
 
-    def __init__(self, args: list[str], env: dict[str, str] | None = None):
+    def __init__(self, args: list[str], env: dict[str, str] | None = None,
+                 cwd: Path = ROOT):
         self.proc = subprocess.Popen(
-            args, cwd=ROOT, env=env, text=True, encoding="utf-8",
+            args, cwd=cwd, env=env, text=True, encoding="utf-8",
             errors="replace", stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -119,8 +123,9 @@ def _kill_pid(pid: int) -> None:
 def procs():
     started: list[_Proc] = []
 
-    def start(args: list[str], env: dict[str, str] | None = None) -> _Proc:
-        proc = _Proc(args, env)
+    def start(args: list[str], env: dict[str, str] | None = None,
+              cwd: Path = ROOT) -> _Proc:
+        proc = _Proc(args, env, cwd)
         started.append(proc)
         return proc
 
@@ -834,3 +839,106 @@ def test_a_targeted_pytest_run_is_not_locked(held, procs):
                  "-p", "no:cacheprovider", "-p", "no:xdist"],
                 _pytest_env(held.dir, "fail"))
     assert run.drain() == pytest.ExitCode.OK, run.seen
+
+
+# --- a tree that changes while its run is queued ------------------------------
+#
+# 2026-09-25: a full run launched at 14:59 got the lock at 17:46. At ~15:50
+# its session merged master, which changed CoordinationConfig's defaults in
+# pseudolife_memory/utils/config.py. conftest had imported that module
+# (through tests/fake_embedder.py) before the run queued, and everything else
+# was imported at collection, after the lock: the run tested the old defaults
+# against the new test files, and 9 tests failed that passed alone.
+
+def _copy_of_the_checkout(dest: Path) -> Path:
+    """What a full run imports before it queues, copied to ``dest``: the
+    package, the non-test files of tests/ (conftest and its helpers), and
+    pyproject.toml (rootdir, markers). No test files: nothing is collected."""
+    shutil.copytree(ROOT / "pseudolife_memory", dest / "pseudolife_memory",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    (dest / "tests").mkdir()
+    for path in TESTS.glob("*.py"):
+        if not path.name.startswith("test_"):
+            shutil.copy2(path, dest / "tests" / path.name)
+    shutil.copy2(ROOT / "pyproject.toml", dest / "pyproject.toml")
+    return dest
+
+
+@pytest.mark.parametrize("workers", [0, 1], ids=["one-process", "xdist"])
+def test_a_queued_run_whose_imported_code_changed_refuses_to_run(held, procs,
+                                                                 tmp_path, workers):
+    if workers:
+        pytest.importorskip("xdist")
+    checkout = _copy_of_the_checkout(tmp_path / "checkout")
+    run = procs([sys.executable, "-m", "pytest", "tests", "-q",
+                 "-p", "no:cacheprovider",
+                 *(["-n", str(workers)] if workers else ["-p", "no:xdist"]),
+                 f"--ignore-glob={checkout / 'tests' / '*'}"],
+                _pytest_env(held.dir, "wait"), cwd=checkout)
+    run.expect(f"waiting for the full-suite lock held by holder-wt (pid {held.pid})")
+    config = checkout / "pseudolife_memory" / "utils" / "config.py"
+    config.write_text(config.read_text(encoding="utf-8") + "\n# merged while queued\n",
+                      encoding="utf-8")
+    held.holder.send_release()
+
+    assert run.drain() == pytest.ExitCode.USAGE_ERROR, run.seen
+    refusal = [line for line in run.seen if "changed while this run was queued" in line]
+    assert refusal and "pseudolife_memory/utils/config.py" in refusal[0], run.seen
+    # Refused in the controller's pytest_configure, before xdist's
+    # pytest_sessionstart could start a worker: xdist prints "bringing up
+    # nodes..." as it starts them (seen at -q in this test's RED run).
+    assert not any("bringing up nodes" in line for line in run.seen), run.seen
+    # It let the lock go on the way out, record and all.
+    assert suite_lock.read_holder(held.dir) is None
+    suite_lock.release(suite_lock.acquire(held.dir, "fail", worktree="next"))
+
+
+def _imported(monkeypatch, path: Path, source: str) -> None:
+    """Write ``source`` to ``path`` and import it, as conftest imports a
+    module before its run queues. It leaves sys.modules with the test."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    name = f"_suite_lock_probe_{uuid.uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setitem(sys.modules, name, module)
+
+
+def test_changed_and_deleted_modules_are_named_and_an_identical_rewrite_is_not(
+        tmp_path, monkeypatch):
+    for name in ("same", "edited", "deleted"):
+        _imported(monkeypatch, tmp_path / "pkg" / f"{name}.py", f"NAME = {name!r}\n")
+    sources = suite_lock.imported_sources(tmp_path)
+    assert sorted(path.name for path in sources) == ["deleted.py", "edited.py", "same.py"]
+
+    same = tmp_path / "pkg" / "same.py"
+    same.write_text(same.read_text(encoding="utf-8"), encoding="utf-8")
+    later = time.time() + 60          # a checkout that rewrote it: content counts
+    os.utime(same, (later, later))
+    (tmp_path / "pkg" / "edited.py").write_text("NAME = 'new'\n", encoding="utf-8")
+    (tmp_path / "pkg" / "deleted.py").unlink()
+    assert suite_lock.changed_sources(sources, tmp_path) == [
+        "pkg/deleted.py (deleted)", "pkg/edited.py"]
+
+
+def test_the_interpreter_under_the_checkout_is_not_the_checkout_code(tmp_path,
+                                                                    monkeypatch):
+    # A .venv inside the checkout (as the maintainer's main one has) holds the
+    # interpreter's packages; they are not what a merge changes.
+    venv = tmp_path / ".venv"
+    _imported(monkeypatch, venv / "Lib" / "site-packages" / "vendored.py", "X = 1\n")
+    _imported(monkeypatch, tmp_path / "pkg" / "own.py", "X = 1\n")
+    monkeypatch.setattr(sys, "prefix", str(venv))
+    monkeypatch.setattr(sys, "exec_prefix", str(venv))
+    assert [path.name for path in suite_lock.imported_sources(tmp_path)] == ["own.py"]
+
+
+def test_this_session_fingerprinted_what_conftest_imported_before_the_lock():
+    # The scan reaches the modules conftest.py loads at import time, whose
+    # copies a queued run would otherwise keep: the lock itself, a test
+    # helper, and package code.
+    sources = {path.relative_to(ROOT).as_posix()
+               for path in suite_lock.imported_sources(ROOT)}
+    assert {"tests/conftest.py", "tests/suite_lock.py", "tests/fake_embedder.py",
+            "pseudolife_memory/utils/config.py"} <= sources

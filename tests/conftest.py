@@ -328,6 +328,9 @@ def pytest_configure(config: pytest.Config) -> None:
 
     # A full run queues for the suite lock first, while it holds ~50 MB:
     # the embedding import below commits ~1.3 GB (measured 2026-09-23).
+    # What it imported from the checkout by now (this file and its imports)
+    # is fingerprinted before the wait and re-checked after: a run whose
+    # copies changed on disk while it queued stops instead of running them.
     held = suite_lock.take_for_session(config, os.environ, ROOT / "tests")
     if held is not None:
         config.stash[_SUITE_LOCK] = held
