@@ -54,7 +54,7 @@ from tests.report_redaction import (  # noqa: E402, F401 — conftest hooks
 # resolver pg_fixtures uses (explicit test DSN, then password from ops/.env),
 # so a rotated dev password or alternate test server cannot turn those files
 # into silent skips. An operator's own bench value is left alone.
-from tests.pg_defaults import bench_admin_url, conninfo_with_dbname  # noqa: E402
+from tests.pg_defaults import ENV_FILE, bench_admin_url, conninfo_with_dbname  # noqa: E402
 
 if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
     os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = bench_admin_url()
@@ -353,7 +353,12 @@ def pytest_configure(config: pytest.Config) -> None:
 
     # A full run queues for the suite lock first, while it holds ~50 MB:
     # the embedding import below commits ~1.3 GB (measured 2026-09-23).
-    held = suite_lock.take_for_session(config, os.environ, ROOT / "tests")
+    # What it read from the checkout by now (this file, its imports, and
+    # ops/.env for the bench URL above) is fingerprinted and re-checked on
+    # every poll: a run whose copies changed while it queued stops instead
+    # of running them.
+    held = suite_lock.take_for_session(config, os.environ, ROOT / "tests",
+                                       read_files=(ENV_FILE,))
     if held is not None:
         config.stash[_SUITE_LOCK] = held
 
