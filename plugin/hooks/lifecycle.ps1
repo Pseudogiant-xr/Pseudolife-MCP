@@ -1,10 +1,11 @@
 #Requires -Version 7
 # Native Windows override for Codex. Claude keeps the existing Bash commands.
-param([ValidateSet('SessionStart', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop')][string]$Event)
+param([ValidateSet('SessionStart', 'MemoryPolicy', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop')][string]$Event)
 $ErrorActionPreference = 'Stop'
 
 function Write-Context([string]$text) {
     $hookEvent = switch ($Event) {
+        'MemoryPolicy' { 'SessionStart' }
         'CoordinationStart' { 'SessionStart' }
         'CoordinationPrompt' { 'UserPromptSubmit' }
         default { $Event }
@@ -278,7 +279,15 @@ try {
     if ($token) { $headers.Authorization = "Bearer $token" }
     $payload = $rawInput | ConvertFrom-Json
     $sid = [string]$payload.session_id
-    if ($Event -eq 'SessionStart') {
+    if ($Event -eq 'MemoryPolicy') {
+        # The separate memory-policy hook: the full block when the daemon's
+        # memory_policy variant is full_separate_hook, else an empty body and
+        # no context. Silent on failure; SessionStart reports a down daemon.
+        $query = if ($sid) { '?session_id=' + [Uri]::EscapeDataString($sid) } else { '' }
+        $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/memory-policy$query" -Headers $headers -TimeoutSec 5 -MaximumRedirection 0
+        $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+        if ($text) { Write-Context $text }
+    } elseif ($Event -eq 'SessionStart') {
         $pairs = @()
         if ($sid) {
             $pairs += 'session_id=' + [Uri]::EscapeDataString($sid)

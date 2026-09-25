@@ -229,10 +229,12 @@ def test_plugin_hook_wiring_user_prompt_submit():
 
 def test_coordination_has_independent_start_and_prompt_handlers():
     hooks = json.loads(_read("plugin/hooks/hooks.json"))["hooks"]
-    for event, script, native_event in (("SessionStart", "coordination-start.sh", "CoordinationStart"),
-                                        ("UserPromptSubmit", "coordination-prompt.sh", "CoordinationPrompt")):
+    # SessionStart also runs the separate memory-policy output.
+    for event, script, native_event, count in (
+            ("SessionStart", "coordination-start.sh", "CoordinationStart", 3),
+            ("UserPromptSubmit", "coordination-prompt.sh", "CoordinationPrompt", 2)):
         handlers = [h for group in hooks[event] for h in group["hooks"]]
-        assert len(handlers) == 2
+        assert len(handlers) == count
         assert any(script in h["command"] and native_event in h["commandWindows"]
                    for h in handlers)
         assert "curl" not in _read("plugin/hooks/" + script)

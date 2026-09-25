@@ -224,7 +224,7 @@ def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, l
 
 def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     """A user who disabled the no-op Stop entry in /hooks keeps that choice;
-    the five memory and coordination hooks are still approved."""
+    the six memory, memory-policy and coordination hooks are still approved."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     [stop] = [h for h in hooks if h["eventName"] == "stop"]
@@ -232,7 +232,7 @@ def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
-    assert len(writes[0]["edits"]) == 5
+    assert len(writes[0]["edits"]) == 6
     assert all(stop["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
 
 
@@ -269,6 +269,7 @@ def test_verification_counts_every_selected_hook(tmp_path, monkeypatch):
         events = [{"method": "hook/completed", "params": {"run": {
             "eventName": event, "status": "completed", "entries": [{"text": text}]}}}
             for event, text in (("sessionStart", "Session episode: fixture"),
+                                ("sessionStart", ""),
                                 ("sessionStart", "memory_agents(action=list)"),
                                 ("userPromptSubmit", "memory_lesson_search"),
                                 ("userPromptSubmit", ""))]
@@ -312,7 +313,7 @@ def test_legacy_migration_removes_exact_commands_and_preserves_lookalikes(tmp_pa
     data = json.loads(path.read_bytes())
     groups = data["hooks"]["SessionStart"]
     assert groups[0] == {"matcher": "startup", "hooks": custom}
-    assert len(groups) == 3
+    assert len(groups) == 4
     assert data["description"] == "User configuration"
     assert Path(result["backups"][0]).read_bytes() == original
 
@@ -336,7 +337,7 @@ def test_lightweight_coordination_hook_migrates_without_touching_other_hooks(tmp
     starts = [h["command"] for group in hooks["SessionStart"] for h in group["hooks"]]
     assert command not in starts
     assert unrelated["command"] in starts
-    assert len(starts) == (1 if source == "plugin" else 3)
+    assert len(starts) == (1 if source == "plugin" else 4)
 
 
 @pytest.mark.parametrize("custom_field", ["command", "commandWindows"])

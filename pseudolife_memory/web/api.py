@@ -27,7 +27,8 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from pseudolife_memory.web.routes import ConsoleRoutes
-from pseudolife_memory.web.session_hook import hook_session_end, hook_session_start
+from pseudolife_memory.web.session_hook import (
+    hook_memory_policy, hook_session_end, hook_session_start)
 
 logger = logging.getLogger("pseudolife-mcp.web")
 
@@ -318,6 +319,28 @@ def build_console_app(
                 finally:
                     unbind_request_headers(binding)
             text = await asyncio.get_running_loop().run_in_executor(None, start_hook)
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 4a) plugin memory-policy SessionStart hook: the full memory-loop
+        # block when the session's configured variant is full_separate_hook,
+        # else an empty body (the hook then adds nothing). Its own hook
+        # output, so the block never shares the briefing's budget. Public
+        # repo text, 200 always; session_id only picks an online A/B arm and
+        # is honoured only when authorized, as on session-start.
+        if path == "/api/hook/memory-policy":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            session_id = (_parse_query(scope).get("session_id")
+                          if _authorized(scope) else None)
+            text = await asyncio.get_running_loop().run_in_executor(
+                None, hook_memory_policy, service, session_id)
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")
             return
