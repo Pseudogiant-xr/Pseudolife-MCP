@@ -51,7 +51,8 @@ _GIT = shutil.which("git")
 # sandbox's git at another repository or index, or add trace output.
 _GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
             "GIT_COMMON_DIR", "GIT_TRACE", "GIT_TRACE2", "GIT_TRACE2_EVENT",
-            "GIT_TEST_ASSUME_DIFFERENT_OWNER")
+            "GIT_TEST_ASSUME_DIFFERENT_OWNER", "GIT_CONFIG_NOSYSTEM",
+            "GIT_CONFIG_GLOBAL")
 
 pytestmark = pytest.mark.skipif(_GIT is None, reason="git not available")
 
@@ -100,6 +101,30 @@ def _sandbox(sdir: Path, *, repo: bool, dirty: int = 0) -> tuple[Path, str]:
         for i in range(dirty - 1):
             (root / f"notes-{i:02d}.md").write_text("x\n", encoding="utf-8")
     return root, sha
+
+
+def _foreign_owner_env(sdir: Path) -> dict[str, str]:
+    """Make git treat the sandbox as owned by someone else.
+
+    Machine config is isolated because a ``safe.directory = *`` in the
+    system or global config (as on the GitHub Linux runners, 2026-09-25)
+    silences the ownership check the knob fakes.
+    """
+    empty = sdir / "empty.gitconfig"
+    empty.write_text("", encoding="utf-8")
+    return {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1", "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": str(empty)}
+
+
+def _git_honours_owner_knob(repo: Path, owner_env: dict[str, str]) -> bool:
+    env = _clean_git_env()
+    env.update(owner_env)
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                          capture_output=True, env=env).returncode != 0
+
+
+_NO_OWNER_KNOB = ("this git ignores GIT_TEST_ASSUME_DIFFERENT_OWNER even with the "
+                  "machine config isolated, so a foreign owner cannot be faked")
 
 
 def _env(root: Path, **extra) -> dict[str, str]:
@@ -161,8 +186,7 @@ _PS_SCENARIOS = {
     "not_a_repo_refused": (dict(repo=False), "", ""),
     "not_a_repo_allowed": (dict(repo=False), "-AllowDirty", ""),
     "changed_during_deploy": (dict(repo=True), "", "TOUCH"),
-    "foreign_owner_refused": (dict(repo=True), "",
-                              "$env:GIT_TEST_ASSUME_DIFFERENT_OWNER = '1'\n"),
+    "foreign_owner_refused": (dict(repo=True), "", "OWNER"),
     "clean_under_fi_culture": (dict(repo=True), "",
                                "[Threading.Thread]::CurrentThread.CurrentCulture = 'fi-FI'\n"),
     "clean_with_git_trace": (dict(repo=True), "", "$env:GIT_TRACE = '1'\n"),
@@ -174,11 +198,15 @@ def deploys(tmp_path_factory):
     if PWSH is None:
         pytest.skip("pwsh not available")
     root = tmp_path_factory.mktemp("update_build_stamp_ps1")
-    scenarios, shas = [], {}
+    scenarios, shas, owner_knob = [], {}, True
     for name, (sandbox, extra, extra_setup) in _PS_SCENARIOS.items():
         sdir = scenario_dir(root, name)
         (sdir / "calls.log").write_text("", encoding="utf-8")
         repo, shas[name] = _sandbox(sdir, **sandbox)
+        if extra_setup == "OWNER":
+            owner = _foreign_owner_env(sdir)
+            owner_knob = _git_honours_owner_knob(repo, owner)
+            extra_setup = "".join(f"$env:{k} = '{v}'\n" for k, v in owner.items())
         touch = (f'$global:TouchOnInspect = "{repo / "late-edit.txt"}"\n'
                  if extra_setup == "TOUCH" else "$global:TouchOnInspect = $null\n")
         setup = (f'$global:CallsLog = "{sdir / "calls.log"}"\n'
@@ -186,6 +214,8 @@ def deploys(tmp_path_factory):
                  "Remove-Item Env:\\PSEUDOLIFE_BUILD_DIRTY -ErrorAction SilentlyContinue\n"
                  "Remove-Item Env:\\GIT_TEST_ASSUME_DIFFERENT_OWNER -ErrorAction SilentlyContinue\n"
                  "Remove-Item Env:\\GIT_TRACE -ErrorAction SilentlyContinue\n"
+                 "Remove-Item Env:\\GIT_CONFIG_NOSYSTEM -ErrorAction SilentlyContinue\n"
+                 "Remove-Item Env:\\GIT_CONFIG_GLOBAL -ErrorAction SilentlyContinue\n"
                  "[Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::InvariantCulture\n"
                  + touch + (extra_setup if extra_setup != "TOUCH" else "") + _PS_DOCKER)
         # finally: a run that throws must still record the caller's env.
@@ -196,6 +226,7 @@ def deploys(tmp_path_factory):
                                   exit_code=EXIT_FROM_LASTEXITCODE))
     run = run_ps1_batch(root, scenarios, env=_env(root))
     run.shas = shas
+    run.owner_knob = owner_knob
     return run
 
 
@@ -265,6 +296,8 @@ def test_a_tree_git_cannot_describe_is_refused_with_gits_reason(deploys):
 def test_a_foreign_owned_checkout_names_the_git_fix(deploys):
     # sudo, or a checkout on a drive with foreign ownership: git refuses with
     # its safe.directory advice, which the operator needs, not a guess.
+    if not deploys.owner_knob:
+        pytest.skip(_NO_OWNER_KNOB)
     res = deploys["foreign_owner_refused"]
     out = res.stdout + res.stderr
     assert res.returncode == 1, res.detail()
@@ -323,7 +356,7 @@ export -f docker curl
 _SH_SCENARIOS = {
     "sh_clean": (dict(repo=True), "", False),
     "sh_clean_with_git_trace": (dict(repo=True), "", "export GIT_TRACE=1"),
-    "sh_foreign_owner_refused": (dict(repo=True), "", "export GIT_TEST_ASSUME_DIFFERENT_OWNER=1"),
+    "sh_foreign_owner_refused": (dict(repo=True), "", "OWNER"),
     "sh_dirty_refused": (dict(repo=True, dirty=2), "", False),
     "sh_many_dirty_refused": (dict(repo=True, dirty=25), "", False),
     "sh_dirty_allowed": (dict(repo=True, dirty=2), "--allow-dirty", False),
@@ -338,11 +371,16 @@ def sh_deploys(tmp_path_factory):
     if BASH is None:
         pytest.skip("bash not available")
     root = tmp_path_factory.mktemp("update_build_stamp_sh")
-    scenarios, shas = [], {}
+    scenarios, shas, owner_knob = [], {}, True
     for name, (sandbox, extra, touch) in _SH_SCENARIOS.items():
         sdir = scenario_dir(root, name)
         (sdir / "calls.log").write_text("", encoding="utf-8")
         repo, shas[name] = _sandbox(sdir, **sandbox)
+        if touch == "OWNER":
+            owner = _foreign_owner_env(sdir)
+            owner_knob = _git_honours_owner_knob(repo, owner)
+            touch = " ".join(["export"] + [f'{k}="{Path(v).as_posix() if k == "GIT_CONFIG_GLOBAL" else v}"'
+                                           for k, v in owner.items()])
         touch_line = (f'export TOUCH_ON_INSPECT="{(repo / "late-edit.txt").as_posix()}"\n'
                       if touch is True else "unset TOUCH_ON_INSPECT\n")
         if isinstance(touch, str):
@@ -355,6 +393,7 @@ def sh_deploys(tmp_path_factory):
         scenarios.append(Scenario(name, setup, invoke))
     run = run_sh_batch(root, scenarios, env=_env(root))
     run.shas = shas
+    run.owner_knob = owner_knob
     return run
 
 
@@ -375,6 +414,8 @@ def test_update_sh_ignores_git_chatter_on_stderr(sh_deploys):
 
 
 def test_update_sh_quotes_gits_safe_directory_advice(sh_deploys):
+    if not sh_deploys.owner_knob:
+        pytest.skip(_NO_OWNER_KNOB)
     res = sh_deploys["sh_foreign_owner_refused"]
     assert res.returncode == 1, res.detail()
     assert "safe.directory" in res.stderr, res.detail()
