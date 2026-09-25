@@ -6532,7 +6532,7 @@ class MemoryService(DreamOps):
             resolved = self._resolve_episode_handle(episode or None)
             if resolved is not None:
                 root = self._cms.episodes.get(resolved[0])
-                root.title = title
+                self._retitle_locked(root, title)
                 self._persist_episodes()
                 return {"ok": True, "id": root.id, "title": title}
             if episode:

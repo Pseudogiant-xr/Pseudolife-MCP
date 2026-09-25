@@ -499,6 +499,27 @@ def test_tombstone_recreation_preserves_agent_title(pg_service):
     assert root.title == "PseudoLife - deferred benchmark"
 
 
+def test_handle_title_rewrites_existing_entry_stamps(pg_service):
+    """Naming a session by handle must rewrite the denormalised
+    ``episode_title`` on entries already stored under it — in memory and in
+    the DB row — exactly as the header-session path does. The handle path
+    set only ``root.title``, so every entry stored before the rename kept
+    the generic ``session - <date> <time>`` stamp (found 2026-09-25)."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyST", "session - 2026-09-25 10:00")
+    handle = ep["id"][:12]
+    svc.store("work stored before the rename", source="t", episode=handle)
+    out = svc.set_session_title("X - y", episode=handle)
+    assert out["ok"] and out["id"] == ep["id"]
+    found = [e for band in svc._cms.bands for e in band.entries
+             if e.text == "work stored before the rename"]
+    assert found and found[0].episode_id == ep["id"]
+    assert found[0].episode_title == "X - y"
+    row = next(r for r in svc._storage.load_entries()
+               if r["id"] == found[0].db_id)
+    assert row["episode_title"] == "X - y"
+
+
 def test_tombstone_recreation_respects_handle_window(pg_service, monkeypatch):
     svc = pg_service
     ep = svc.episode_start_session("keyTW", "session TW")   # open, 0 entries

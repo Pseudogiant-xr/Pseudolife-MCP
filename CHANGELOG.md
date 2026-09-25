@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — naming a session by handle retitles its stored memories)
+- `memory_session_title` with an `episode` handle (the form the SessionStart
+  briefing asks for) now rewrites the `episode_title` stamp on the memories
+  already stored in that session, in memory and in the database, as the
+  handle-less form and `episode_rename` always did. Before, only the episode
+  itself took the new name, so everything written before the rename kept the
+  generic `session - <date> <time>` title. Memories mis-stamped before this
+  fix keep their old stamp until the episode is renamed again
+  (`episode_rename`, or `memory_session_title` once more).
+
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
   on by default: `coordination.enabled` defaults to `true`, and without an
