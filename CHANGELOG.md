@@ -555,6 +555,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   own episode calls do: a redirect fails the fetch, and the hook prints
   nothing. The five-second timeout is unchanged. The `--coordination`
   check-in fetch already refused redirects.
+
 ### Fixed (2026-09-25 — naming a session by handle retitles its stored memories)
 - `memory_session_title` with an `episode` handle (the form the SessionStart
   briefing asks for) now rewrites the `episode_title` stamp on the memories
