@@ -323,6 +323,60 @@ def test_rollback_forces_contested_revert(svc):
     assert cur is not None and cur["value"] == "fox"
 
 
+def _contenders(svc, entity, attribute):
+    return [c.value for c in svc._cortex.contenders_for(entity, attribute)]
+
+
+def test_rollback_re_parks_a_contender_the_runs_supersession_settled(svc):
+    """2026-09-25: a write that makes the parked contender's value current
+    settles the contender. A dream run can be that write, and the v27
+    journal has no contender column, so rollback must re-park it or the
+    pending review item is lost where it used to survive untouched."""
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="agent")
+    svc.cortex_write("team", "mascot", "owl", confidence=0.5, support="agent")
+    assert _contenders(svc, "team", "mascot") == ["owl"]      # below margin
+    svc.store("the mascot is definitely an owl now", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl", confidence=0.95)]))
+    assert svc.cortex_lookup("team", "mascot")["value"] == "owl"
+    assert _contenders(svc, "team", "mascot") == []
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    assert svc.cortex_lookup("team", "mascot")["value"] == "fox"
+    assert _contenders(svc, "team", "mascot") == ["owl"]
+
+
+def test_rollback_re_parks_a_contender_the_runs_insert_settled(svc):
+    """Same on the insert branch: a contender left currentless (here by a
+    retired current) is settled when a run inserts its value, and the
+    rollback's retire must hand it back."""
+    svc.cortex_write("team", "mascot", "fox", support="user")
+    svc.cortex_write("team", "mascot", "owl", support="agent")
+    with svc._lock:
+        svc._cortex.retire_current("team", "mascot")
+    assert svc.cortex_lookup("team", "mascot") is None
+    svc.store("the mascot is an owl", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl")]))
+    assert svc.cortex_lookup("team", "mascot")["value"] == "owl"
+    assert _contenders(svc, "team", "mascot") == []
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    assert svc.cortex_lookup("team", "mascot") is None
+    assert _contenders(svc, "team", "mascot") == ["owl"]
+
+
+def test_rollback_re_parks_a_contender_the_runs_member_add_settled(svc):
+    svc.cortex_write("team", "mascot", "fox", support="user")
+    svc.cortex_write("team", "mascot", "owl", support="agent")
+    svc.store("adding an owl to the mascots", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
+    assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
+    assert _contenders(svc, "team", "mascot") == []
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    assert svc.cortex_lookup("team", "mascot")["value"] == "fox"
+    assert _contenders(svc, "team", "mascot") == ["owl"]
+
+
 def test_rollback_removes_added_member(svc):
     svc.set_add("user", "restaurants tried", "Old Haunt")
     svc.store("tried Rosa's Diner tonight", source="notes")

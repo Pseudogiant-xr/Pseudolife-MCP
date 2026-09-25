@@ -351,6 +351,98 @@ def test_contender_confirm_reinforces_same_value():
     assert len(conts) == 1 and conts[0].confidence > c0   # reinforced, still one
 
 
+def test_supersede_to_the_parked_contender_value_clears_the_contender():
+    """2026-09-25 bench finding: a supersession whose new value equals the
+    parked contender left that contender parked, so the slot read as
+    contested with a contender identical to its own current value. The
+    contest is settled by the write; the contender stays as audit history."""
+    store = CortexStore()
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(80), support="user", now=1.0)
+    store.write_fact(Slot("svc", "region", "us-east-2"), _unit(81), support="agent", now=2.0)
+    assert len(store.contenders_for("svc", "region")) == 1
+    # Same value up to case/whitespace: the rule _norm_value applies to confirm.
+    res = store.write_fact(Slot("svc", "region", " US-East-2"), _unit(81),
+                           support="user", now=3.0)
+    assert res.action == "superseded"
+    assert store.lookup("svc", "region").value == " US-East-2"
+    assert store.contenders_for("svc", "region") == []
+    old = [r for r in store.records_for("svc", "region")
+           if r.status != "current" and r.value == "us-east-2"]
+    assert len(old) == 1 and old[0].status == "superseded"
+    assert old[0].superseded_at == 3.0
+    assert old[0].superseded_by_value == " US-East-2"
+    with tempfile.TemporaryDirectory() as d:     # settles across a reload too
+        store.save(Path(d) / "c.pt")
+        loaded = CortexStore()
+        loaded.load(Path(d) / "c.pt")
+        assert loaded.contenders_for("svc", "region") == []
+
+
+def test_supersede_to_a_third_value_leaves_the_contender_parked():
+    """The clearing is value-matched: a supersession to some OTHER value
+    still conflicts with the parked contender, which stays parked."""
+    store = CortexStore()
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(82), support="user", now=1.0)
+    store.write_fact(Slot("svc", "region", "us-east-2"), _unit(83), support="agent", now=2.0)
+    store.write_fact(Slot("svc", "region", "ap-south-1"), _unit(84), support="user", now=3.0)
+    assert store.lookup("svc", "region").value == "ap-south-1"
+    conts = store.contenders_for("svc", "region")
+    assert len(conts) == 1 and conts[0].value == "us-east-2"
+
+
+def test_insert_at_empty_slot_matching_a_currentless_contender_clears_it():
+    """The same defect on the insert branch: a quarantine park at an EMPTY
+    slot leaves a currentless contender, and a later plain write of that
+    value inserts the first current beside an identical contender."""
+    store = CortexStore()
+    parked = store.write_fact(Slot("svc", "owner", "alice"), _unit(85),
+                              support="agent", now=1.0, force_contend=True)
+    assert parked.action == "contested" and store.lookup("svc", "owner") is None
+    res = store.write_fact(Slot("svc", "owner", "Alice"), _unit(85),
+                           support="user", now=2.0)
+    assert res.action == "inserted"
+    assert store.contenders_for("svc", "owner") == []
+    old = [r for r in store.records_for("svc", "owner") if r.value == "alice"]
+    assert len(old) == 1 and old[0].status == "superseded"
+
+
+def test_member_add_of_the_parked_contender_value_clears_the_contender():
+    """The set-slot sibling (2026-09-25 review): adding the contender's value
+    as a member converts the scalar and makes that value current, so the
+    contender is settled the same way."""
+    store = CortexStore()
+    store.write_fact(Slot("user", "bikes", "road bike"), _unit(86), support="user", now=1.0)
+    store.write_fact(Slot("user", "bikes", "gravel bike"), _unit(87), support="agent", now=2.0)
+    res = store.add_member(Slot("user", "bikes", "Gravel Bike"), _unit(87),
+                           support="user", now=3.0)
+    assert res.action == "member_added"
+    assert sorted(m.value for m in store.members("user", "bikes")) == [
+        "Gravel Bike", "road bike"]
+    assert store.contenders_for("user", "bikes") == []
+
+
+def test_restore_settled_contender_re_parks_only_what_a_write_settled():
+    """The rollback half: a reverted write must hand back the contender it
+    settled, and nothing else — not while another contender is parked, not
+    when the value is current again, not a record settled before ``since``."""
+    store = CortexStore()
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(88), support="user", now=1.0)
+    store.write_fact(Slot("svc", "region", "us-east-2"), _unit(89), support="agent", now=2.0)
+    store.write_fact(Slot("svc", "region", "us-east-2"), _unit(89), support="user", now=3.0)
+    assert store.contenders_for("svc", "region") == []
+    # Value is current again: restoring would recreate the defect.
+    assert store.restore_settled_contender("svc", "region", "us-east-2", since=3.0) is None
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(88), support="user", now=4.0)
+    # Settled before ``since``: not this run's doing.
+    assert store.restore_settled_contender("svc", "region", "us-east-2", since=3.5) is None
+    back = store.restore_settled_contender("svc", "region", "us-east-2", since=3.0)
+    assert back is not None and back.value == "us-east-2"
+    assert back.status == "contested" and back.superseded_at is None
+    assert [c.value for c in store.contenders_for("svc", "region")] == ["us-east-2"]
+    # A contender is active now: a second restore is refused.
+    assert store.restore_settled_contender("svc", "region", "us-east-2", since=0.0) is None
+
+
 def test_unknown_tier_contests_known_but_known_supersedes_legacy_unknown():
     store = CortexStore()
     # known user fact, unknown-tier write -> contends

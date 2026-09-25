@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — a fact set to the parked contender's value settles the contest)
+- A contested slot stayed contested after a write made its contender's
+  value current. With `eu-west-1` current and `us-east-2` parked, setting
+  `us-east-2` superseded the slot but left the contender parked, so
+  `/api/facts` and `memory_search` kept reporting `contested: true` with a
+  `contender_value` equal to the current value (found 2026-09-25 by the
+  memory-policy bench). The write now also marks that contender
+  `superseded` (kept in `memory_history`) and logs it as `resolved` /
+  `contender_value_now_current`. Values match the way a confirm matches:
+  case and surrounding whitespace are ignored. The same fix covers the
+  first write at an empty slot that still holds a contender, and adding
+  the contender's value to a set (`memory_set_add`, including the
+  scalar-to-set conversion). A contender with any other value still
+  conflicts with the new current and stays parked. The contender's support
+  and provenance are not merged into the new current record.
+- `dream_rollback` re-parks a contender that the reverted run's write
+  settled. The run journal has no contender column, so without this a
+  rollback would have dropped a pending review item that used to survive
+  it untouched. The rollback's per-row details name it as
+  `contender_restored`.
+- The live bank held no slot in this state on 2026-09-25 (read-only check:
+  37 active contenders, none equal to a current value), so nothing heals
+  existing rows at load.
+
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
   on by default: `coordination.enabled` defaults to `true`, and without an

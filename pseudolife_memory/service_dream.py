@@ -2171,9 +2171,21 @@ class DreamOps:
                 return "reverted"
             return "partial:value_not_restored"
 
+        def _restore_contender(row: dict) -> str | None:
+            # A write that made a parked contender's value current settled
+            # that contender (2026-09-25), and the journal has no contender
+            # column: re-park it once the write is reverted, or the pending
+            # review item is lost where it used to survive the run.
+            with self._lock:
+                rec = self._cortex.restore_settled_contender(
+                    row["entity"], row["attribute"], row["new_value"] or "",
+                    since=float(target["started_at"]))
+            return rec.value if rec is not None else None
+
         for row in reversed(journal):
             action = row["action"]
             outcome = "skipped:no_reversal"
+            restored = None
             try:
                 if action == "contested":
                     cands = self._cortex.contenders_for(
@@ -2203,8 +2215,10 @@ class DreamOps:
                                 row["entity"], row["attribute"])
                         outcome = ("reverted" if res is not None
                                    else "skipped:already_gone")
+                        restored = _restore_contender(row)
                     elif action == "superseded":
                         outcome = _rewrite_prev(row)
+                        restored = _restore_contender(row)
                     elif action == "quarantine_promoted":
                         # Reversal of a two-man promotion: restore the
                         # previous current (the promoted value stays in
@@ -2243,6 +2257,7 @@ class DreamOps:
                                 outcome = _rewrite_prev(row)
                             else:
                                 outcome = "partial:set_retained"
+                        restored = _restore_contender(row)
                     elif action == "member_removed":
                         res = self.set_add(
                             row["entity"], row["attribute"],
@@ -2265,9 +2280,12 @@ class DreamOps:
                 outcome = f"partial:error:{type(exc).__name__}"
             bucket = outcome.split(":", 1)[0]
             counts[bucket] = counts.get(bucket, 0) + 1
-            details.append({"seq": row["seq"], "entity": row["entity"],
-                            "attribute": row["attribute"],
-                            "action": action, "outcome": outcome})
+            detail = {"seq": row["seq"], "entity": row["entity"],
+                      "attribute": row["attribute"],
+                      "action": action, "outcome": outcome}
+            if restored is not None:
+                detail["contender_restored"] = restored
+            details.append(detail)
         with self._lock:
             self._save_cortex()
             self._storage.mark_dream_run_rolled_back(

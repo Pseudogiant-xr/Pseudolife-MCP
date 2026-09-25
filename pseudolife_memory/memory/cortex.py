@@ -483,10 +483,12 @@ class CortexStore:
                                      sup, "quarantine_low_trust", semb,
                                      freshness_class=freshness_class,
                                      stance=stance, **lab, **stamp)
-            return WriteResult("inserted", self._insert(
+            new = self._insert(
                 slot, emb, confidence, prov, t, support=sup,
                 slot_embedding=semb, freshness_class=freshness_class,
-                stance=stance, **lab, **stamp))
+                stance=stance, **lab, **stamp)
+            self._settle_matching_contender(key, new, t, writer_id, session_id)
+            return WriteResult("inserted", new)
 
         cur = self.records[idx]
         if _norm_value(cur.value) == _norm_value(slot.value):
@@ -543,6 +545,7 @@ class CortexStore:
                                inherit_from=cur, support=sup, slot_embedding=semb,
                                freshness_class=freshness_class,
                                stance=stance, **lab, **stamp)
+            self._settle_matching_contender(key, new, t, writer_id, session_id)
             return WriteResult("superseded", new)
 
         reason = "tier_downgrade" if not tier_ok else "below_confidence_margin"
@@ -909,6 +912,7 @@ class CortexStore:
                                   {p for p in provenance if p}, t, hlc=hlc,
                                   writer_id=writer_id, session_id=session_id,
                                   support=support)
+        self._settle_matching_contender(key, rec, t, writer_id, session_id)
         return WriteResult("member_added", rec)
 
     def _insert_member(
@@ -1173,6 +1177,73 @@ class CortexStore:
                   "contested", reason,
                   writer_id=writer_id, session_id=session_id)
         return WriteResult("contested", rec)
+
+    def _settle_matching_contender(self, key, new, t, writer_id=None,
+                                   session_id=None) -> None:
+        """A write that made the parked contender's value current settles
+        the contest: the contender is superseded by ``new`` (kept as audit
+        history). Left parked, the slot reads contested with a contender
+        identical to its own current value (2026-09-25 bench finding).
+        Matching is ``_norm_value`` equality, the rule the confirm branch
+        uses; a contender holding any other value still conflicts with
+        ``new`` and stays parked. ``new`` may be a set member: adding the
+        contender's value to a set makes it current too. The caller has
+        already marked ``key`` dirty. :meth:`restore_settled_contender` is
+        the inverse, for a rollback of the write."""
+        contender = self._active_contender(key)
+        if contender is None or (
+                _norm_value(contender.value) != _norm_value(new.value)):
+            return
+        contender.status = "superseded"
+        contender.superseded_at = t
+        contender.superseded_by_value = new.value
+        self._log(contender, new.value, new.confidence, t, "resolved",
+                  "contender_value_now_current",
+                  writer_id=writer_id, session_id=session_id)
+
+    def restore_settled_contender(self, entity: str, attribute: str,
+                                  value: str, since: float,
+                                  now: float | None = None,
+                                  ) -> "CortexRecord | None":
+        """Re-park the contender :meth:`_settle_matching_contender` settled
+        when ``value`` was written at or after ``since``. For the dream
+        rollback: the v27 journal has no contender column, so reverting a
+        write that settled a contender would otherwise drop that pending
+        review item, which survived a rollback before settling existed.
+
+        A settled contender is the one record shape nothing else produces:
+        ``superseded`` with ``superseded_by_value`` equal to its own value
+        (a same-value write confirms, it never supersedes). Returns the
+        re-parked record, or None when there is nothing to restore: no such
+        record at or after ``since``, a contender already parked (at most
+        one per slot), or ``value`` current again at the slot, scalar or
+        member (re-parking would recreate the identical-contender state)."""
+        key = (_norm_key(entity), _norm_key(attribute))
+        want = _norm_value(value)
+        if self._active_contender(key) is not None:
+            return None
+        cur = self.lookup(entity, attribute)
+        if cur is not None and _norm_value(cur.value) == want:
+            return None
+        if any(_norm_value(m.value) == want
+               for m in self.members(entity, attribute)):
+            return None
+        settled = [r for r in self.records
+                   if r.status == "superseded" and r.key == key
+                   and _norm_value(r.value) == want
+                   and _norm_value(r.superseded_by_value or "") == want
+                   and (r.superseded_at or 0.0) >= float(since)]
+        if not settled:
+            return None
+        rec = max(settled, key=lambda r: r.superseded_at or 0.0)
+        rec.status = "contested"
+        rec.superseded_at = None
+        rec.superseded_by_value = None
+        self.dirty_slots.add(key)
+        t = time.time() if now is None else float(now)
+        self._log(cur or rec, rec.value, rec.confidence, t, "contested",
+                  "rollback_restored_contender")
+        return rec
 
     def resolve(self, entity, attribute, accept: bool, now: float | None = None,
                 support: str = "user", hlc: tuple[int, int] | None = None):
