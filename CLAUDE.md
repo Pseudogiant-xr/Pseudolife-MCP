@@ -28,9 +28,11 @@ exactly; they exist because each one was violated at least once.
    `llms-full.txt`). The v30 bump found the last two the hard way.
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
-   without it, which is not a pass. **Docs-only changes skip the local full
-   suite** and run the doc guards instead — see "One full suite at a time
-   per machine" below for what counts as docs-only.
+   without it, which is not a pass. Two exemptions, both spelled out under
+   "One full suite at a time per machine" below: **docs-only changes** run
+   the doc guards instead, and **merging origin/master into a branch that
+   already passed**, with no conflict in code resolved by hand, runs the
+   tests covering the overlap and lets CI gate it.
 4. **Deploy only via `ops/update.ps1`** (backup → rollback tag → daemon-only
    `--no-deps` rebuild → health). Never `docker compose down -v` — the bank
    volumes are external precisely so that this is survivable, but don't test it.
@@ -118,6 +120,15 @@ took 143 CUDA OOMs.
   `tests/test_eval_evidence.py`, `tests/test_i18n_readme.py`) plus every
   test file that names a touched path (`git grep -l <file basename> tests/`).
   CI's full PostgreSQL job (`test`) must still be green before merge.
+- **Merging origin/master forward needs no new local full suite**
+  (maintainer decision 2026-09-25) when the branch already passed its local
+  full suite and no conflict in code (`.py` / `.ps1` / `.sh`, tests, config)
+  was resolved by hand. Run locally the test files covering the files both
+  sides touched (plus the doc guards if docs overlapped), push, and let CI
+  gate it: its `pull_request` jobs use `actions/checkout`'s default merge
+  ref, so the run for the newly pushed head tests the PR merged with master
+  as of that push, and it must be green before merge. If any conflict in
+  code was resolved by hand, the local full suite is still required.
 
 ## Review discipline
 
