@@ -209,17 +209,22 @@ def format_bounded_briefing(markdown: str, max_bytes: int) -> str:
                 chosen.append(item)
         return chosen
 
+    def omitted_marker(omitted: int) -> str:
+        return (f"{omitted} briefing item(s) omitted. Full briefing: "
+                "`pseudolife-mcp briefing` or GET /api/briefing.")
+
     selected = pack(max_bytes)
     if len(selected) == len(items):
         return _render_items(selected)
-    while True:
-        omitted = len(items) - len(selected)
-        marker = (f"{omitted} briefing item(s) omitted. Full briefing: "
-                  "`pseudolife-mcp briefing` or GET /api/briefing.")
-        next_selected = pack(max_bytes - len(marker.encode("utf-8")) - 2)
-        if len(next_selected) == len(selected):
-            break
-        selected = next_selected
+    # Pack once, leaving room for the widest marker this call can print (at
+    # most every item is omitted). Greedy packing is not monotonic in its
+    # cap: a smaller cap can skip a long early item and fit more short ones,
+    # so re-packing until the omitted count settled could cycle forever, and
+    # its exit kept a selection packed without room for its marker
+    # (2026-09-25 post-merge audit).
+    reserve = len(omitted_marker(len(items)).encode("utf-8")) + 2
+    selected = pack(max_bytes - reserve)
+    marker = omitted_marker(len(items) - len(selected))
     result = _render_items(selected)
     if result:
         result += "\n\n"

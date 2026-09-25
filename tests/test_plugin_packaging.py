@@ -289,6 +289,28 @@ def test_memory_loop_block_leaves_briefing_headroom():
     assert len(MEMORY_LOOP_BLOCK) > len(STARTUP_MEMORY_CORE)
 
 
+def test_startup_core_carries_the_detailed_blocks_key_rules():
+    """Since #364 the SessionStart hook serves STARTUP_MEMORY_CORE, not the
+    detailed block, so three of that block's rules are restated in the core
+    itself (maintainer decision 2026-09-25): search before asserting a
+    "current" value, correct memory-vs-code drift on the spot at the same
+    slot, and route verified external facts to memory_world_set (whose own
+    description says so only once an agent reads that tool). Its pointer to
+    the full guidance must resolve for a pip install, which ships no
+    examples/."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    text = " ".join(STARTUP_MEMORY_CORE.split())
+    assert 'Search before stating a "current" version, number, or benchmark.' in text
+    assert "trust the code and correct the memory on the spot" in text
+    assert "`memory_fact_set` at the same slot" in text
+    assert "Route verified external facts to `memory_world_set`" in text
+    url = ("https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/"
+           "examples/CLAUDE.memory.md")
+    assert url in STARTUP_MEMORY_CORE.splitlines()
+    assert (ROOT / url.rsplit("/blob/master/", 1)[1]).is_file()
+    assert "in the repository" not in text
+
+
 def test_memory_loop_block_carries_recall_before_review_trigger():
     """Reviews recall memory FIRST, then compare against the files — codified
     in the served instructions so every install gets the rule (2026-08-28):
@@ -342,12 +364,15 @@ def test_instruction_blocks_reference_only_core_visible_tools():
     the block tells the model to call tools its tools/list doesn't carry."""
     from pseudolife_memory.mcp_server import _TOOL_TIERS
     from pseudolife_memory.web.session_hook import (MEMORY_LOOP_BLOCK,
-                                                    ONBOARDING_BLOCK)
+                                                    ONBOARDING_BLOCK,
+                                                    STARTUP_MEMORY_CORE)
     # The UserPromptSubmit line is injected every turn — same visibility bar.
     ups = re.findall(r"\b((?:memory|document)_[a-z_]+)",
                      _read("plugin/hooks/user-prompt-submit.sh"))
+    # STARTUP_MEMORY_CORE is what SessionStart actually serves since #364.
     referenced = (_referenced_tools(MEMORY_LOOP_BLOCK)
                   | _referenced_tools(ONBOARDING_BLOCK)
+                  | _referenced_tools(STARTUP_MEMORY_CORE)
                   | set(ups))
     assert len(referenced) >= 10          # regex sanity — the block names many
 
