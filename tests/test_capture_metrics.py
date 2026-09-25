@@ -79,11 +79,13 @@ def _seed_sessions(conn):
     _entry(conn, "S2", t2 + 90)
     # 3. Idle shim roots named after the shared runtime directory: dropped.
     _root(conn, "S3", shim_key(3), t2 + 600, title="coordination-e41a575a - 2026-07-16 14:10")
-    # 4. A shim-only client (no hook) that logged an outcome and searched late.
+    # 4. A shim-only client (no hook) that logged an outcome and searched
+    #    late. Its search row names H1 as the episode: a search's episode_id
+    #    is the daemon's current episode, not the caller's.
     t4 = t + 8 * 3600
     _root(conn, "S4", shim_key(4), t4, title="Desktop - 2026-07-16 18:00")
     _outcome(conn, "S4", t4 + 100)
-    _search(conn, t4 + 2000, session=shim_key(4))
+    _search(conn, t4 + 2000, session=shim_key(4), episode="H1")
     # 5. A hook-registered session that never touched memory: it counts.
     _root(conn, "H3", hook_key(3), t + 10 * 3600)
     # 6. An idle hook root with TWO active shim roots within five seconds:
@@ -94,6 +96,17 @@ def _seed_sessions(conn):
     _root(conn, "S6", shim_key(6), t6 + 3, title="b - 2026-07-16 22:00")
     _search(conn, t6 + 10, session=shim_key(5))
     _entry(conn, "S6", t6 + 50)
+    # 7. A compliant session: its writes pass episode= and land on the hook
+    #    root, its searches carry the shim's key. Both roots are active;
+    #    they are one session.
+    t7 = t + 14 * 3600
+    _root(conn, "H5", hook_key(5), t7)
+    _root(conn, "S7", shim_key(7), t7 + 2, title="PseudoLife-MCP - 2026-07-17 00:00")
+    _entry(conn, "H5", t7 + 60)
+    _search(conn, t7 + 20, session=shim_key(7), episode="H4")
+    # 8. Activity whose session root the daemon pruned at SessionEnd.
+    _search(conn, t7 + 100, session=shim_key(99))
+    _outcome(conn, "gone-episode", t7 + 200)
     # Outside the window, and a legacy root without a session key.
     _root(conn, "OLD", hook_key(9), SINCE - DAY)
     _root(conn, "NOKEY", None, t)
@@ -108,27 +121,33 @@ def stats(pg_conn, pg_url, monkeypatch):
 
 
 def test_sessions_are_client_sessions_not_root_episodes(stats):
-    # Ten keyed roots in the window; seven client sessions.
-    assert stats["sessions"] == 7
+    # Twelve keyed roots in the window; eight client sessions.
+    assert stats["sessions"] == 8
     roots = stats["roots"]
-    assert roots["keyed_in_window"] == 10
-    assert roots["hook"] == 4 and roots["shim"] == 6
+    assert roots["keyed_in_window"] == 12
+    assert roots["hook"] == 5 and roots["shim"] == 7
     assert roots["idle_shim_dropped"] == 2
-    assert roots["merged_pairs"] == 1
+    assert roots["merged_pairs"] == 2          # H2+S2 (idle hook), H5+S7 (both active)
     assert roots["ambiguous_pairs"] == 1
 
 
+def test_activity_of_pruned_sessions_is_reported_not_attributed(stats):
+    assert stats["roots"]["pruned_with_searches"] == 1
+    assert stats["roots"]["pruned_with_outcomes"] == 1
+
+
 def test_working_sessions_used_memory_at_least_once(stats):
-    # H1, H2+S2, S4, S5, S6 — H3 and H4 never called a memory tool.
-    assert stats["working_sessions"] == 5
+    # H1, H2+S2, S4, S5, S6, H5+S7 — H3 and H4 never called a memory tool.
+    assert stats["working_sessions"] == 6
 
 
 def test_online_loop_metrics(stats):
     loop = stats["loop"]
-    # Searched within 15 minutes of the session's start: H1, H2+S2, S5.
-    assert loop["searched_early"] == {"n": 3, "of_sessions": 3 / 7, "of_working": 3 / 5}
+    # Searched within 15 minutes of the session's start: H1, H2+S2, S5, H5+S7.
+    # S4's late search names H1's episode but is S4's (by its session key).
+    assert loop["searched_early"] == {"n": 4, "of_sessions": 4 / 8, "of_working": 4 / 6}
     # Outcome coverage: H1 and S4 logged one.
-    assert loop["outcome_coverage"] == {"n": 2, "of_sessions": 2 / 7, "of_working": 2 / 5}
+    assert loop["outcome_coverage"] == {"n": 2, "of_sessions": 2 / 8, "of_working": 2 / 6}
     # Of the two sessions with an outcome, one credited used_ids.
     assert loop["used_ids"]["sessions_with_credited_ids"] == 1
     assert loop["used_ids"]["of_sessions_with_outcome"] == 1 / 2
@@ -140,9 +159,9 @@ def test_online_loop_metrics(stats):
 
 
 def test_capture_coverage_uses_the_same_denominator(stats):
-    # Substantive stores: H1 (sub-episode), H2+S2, S6.
-    assert stats["substantive_sessions"] == 3
-    assert stats["capture_coverage"] == pytest.approx(3 / 7, abs=1e-3)
+    # Substantive stores: H1 (sub-episode), H2+S2, S6, H5+S7.
+    assert stats["substantive_sessions"] == 4
+    assert stats["capture_coverage"] == pytest.approx(4 / 8, abs=1e-3)
 
 
 def test_stored_entries_retrieved_again_by_another_session(pg_conn, pg_url, monkeypatch):
@@ -154,12 +173,17 @@ def test_stored_entries_retrieved_again_by_another_session(pg_conn, pg_url, monk
     reused = _entry(pg_conn, "A", t + 60)
     only_own = _entry(pg_conn, "A", t + 120)
     too_late = _entry(pg_conn, "A", t + 180)
+    anonymous = _entry(pg_conn, "A", t + 200)
     _entry(pg_conn, "A", t + 240, source="status")          # not substantive
     _entry(pg_conn, "B", NOW - 2 * DAY)                      # window still open
-    _search(pg_conn, t + 600, session=hook_key(10), episode="A", served=[only_own])
+    # Own session's search, even though the row names B as the episode.
+    _search(pg_conn, t + 600, session=hook_key(10), episode="B", served=[only_own])
     _search(pg_conn, t + 5 * DAY + 60, session=hook_key(11), episode="B", served=[reused])
     _search(pg_conn, t + 20 * DAY, session=hook_key(11), episode="B", served=[too_late])
+    # No caller identity: cannot say whose search it was.
+    _search(pg_conn, t + 3 * DAY, session=None, episode="B", served=[anonymous])
     pg_conn.commit()
     monkeypatch.setattr(cm, "DSN", pg_url)
     reuse = cm.collect(NOW - 40 * DAY, now=NOW)["reuse_14d"]
-    assert reuse == {"entries": 3, "retrieved_again": 1, "rate": pytest.approx(1 / 3, abs=1e-3)}
+    assert reuse == {"entries": 4, "retrieved_again": 1,
+                     "rate": pytest.approx(1 / 4, abs=1e-3), "unattributable": 1}

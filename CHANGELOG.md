@@ -35,11 +35,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stdio shim's), and idle shim roots dominate: on 2026-09-25 the live bank
   held 166 keyed roots in 24 h for 34 client sessions. It now counts hook
   roots plus shim roots with memory activity, merges a hook root with its
-  only nearby shim root, reports what it cannot attribute, and adds the
-  online loop metrics (searched early, outcome coverage, credited used_ids,
-  entries retrieved again within 14 days). It also says which metrics the
-  bank cannot provide: lesson searches and unmatched used_ids are not
-  persisted.
+  only nearby shim root, attributes searches by the caller's session id
+  (a search row's episode is the daemon's current one), reports what it
+  cannot attribute, and adds the online loop metrics (searched early,
+  outcome coverage, credited used_ids, entries retrieved again within 14
+  days). It also says what the bank cannot provide: the daemon deletes a
+  session root that ends with no stored entry, so sessions that only
+  searched are reported separately and sessions that never touched memory
+  are invisible; lesson searches and unmatched used_ids are not persisted.
 
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing

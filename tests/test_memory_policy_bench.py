@@ -256,10 +256,10 @@ def test_constant_surfaces_and_the_session_end_reply_do_not_count(tmp_path):
     """The plugin's slash commands appear in the skill list and the MCP
     instructions carry the server's name as a header: constant across arms.
     The SessionEnd reply never reaches the model and is not compared."""
-    from pseudolife_memory.mcp_server import _MCP_INSTRUCTIONS
     served = "\n\n".join((AD, BRIEFING))
     system = "\n".join(("Skills: - pseudolife-memory:dream - pseudolife-memory:memory-status",
-                        "# MCP Server Instructions", "## pseudolife-memory", _MCP_INSTRUCTIONS,
+                        "# MCP Server Instructions", "## pseudolife-memory",
+                        mb.mcp_instructions(),
                         "Deferred tools: mcp__pseudolife-memory__memory_search"))
     cap = _capture(tmp_path, f"SessionStart:startup hook success: {served}", system=system)
     ledger = [_hook(served), {"kind": "hook", "path": "/api/hook/session-end", "body": '{"ok": true}'}]
@@ -309,15 +309,118 @@ def test_paired_deltas_pair_on_scenario_and_replicate_and_skip_invalid_runs():
 def test_acceptance_needs_a_gain_beyond_aa_noise_and_no_guarded_regression():
     noise = {m: 0.1 for m in mb.METRICS}
     good = {m: {"delta": 0.0} for m in mb.METRICS}
-    good["score"] = {"delta": 0.3}
+    good["score"] = {"delta": 0.3, "pairs": 24, "scenarios": 8}
     assert mb.accept(good, noise)["accept"]
-    small = dict(good, score={"delta": 0.05})
+    small = dict(good, score={"delta": 0.05, "pairs": 24, "scenarios": 8})
     assert not mb.accept(small, noise)["accept"]
+    thin = dict(good, score={"delta": 0.3, "pairs": 4, "scenarios": 2})
+    assert "too little evidence" in mb.accept(thin, noise)["reasons"][0]
+    assert not mb.accept(good, noise, invalid_share={"x": 0.5})["accept"]
+    unknown = dict(good, used_ids_precision={"delta": None})
+    assert mb.accept(unknown, noise)["unevaluated_guards"] == ["used_ids_precision"]
     costly = dict(good, cost_bite={"delta": 0.5})          # cost up beyond noise
     verdict = mb.accept(costly, noise)
     assert not verdict["accept"] and "cost_bite" in verdict["reasons"][0]
     worse = dict(good, task_success={"delta": -0.2})
     assert not mb.accept(worse, noise)["accept"]
+
+
+def test_default_arm_order_still_yields_verdicts_in_both_directions():
+    """Reviewer finding H1: with --arms none,full,full@aa (the default) the
+    verdict lookup used the wrong key order and silently produced none."""
+    arms = mb.parse_arms("none,full_separate_hook,full_separate_hook@aa")
+    recs = []
+    for sid in ("a", "b", "c", "d"):
+        for rep in range(3):
+            recs.append(_record("none", sid, rep, 0.0, 0.0))
+            recs.append(_record("full_separate_hook", sid, rep, 1.0, 1.0))
+            recs.append(_record("full_separate_hook@aa", sid, rep, 1.0, 1.0))
+
+    class Args:
+        cost_lambda, client, model, effort, replicates, seed = 0.1, "claude", "m", "e", 3, 1
+
+    art = mb.build_artifact(recs, arms, Args, {"entries": {}, "lessons": {}}, "t")
+    assert set(art["acceptance"]) == {"full_separate_hook over none",
+                                      "none over full_separate_hook"}
+    assert art["acceptance"]["full_separate_hook over none"]["accept"]
+    assert not art["acceptance"]["none over full_separate_hook"]["accept"]
+
+
+def test_a_short_tag_cannot_blind_the_leak_scan(tmp_path):
+    """Reviewer finding M1: only path-like tokens carrying the run id go."""
+    served = "\n\n".join((AD, BRIEFING))
+    cap = _capture(tmp_path, "log memory_outcome at task end",
+                   f"SessionStart:startup hook success: {served}")
+    v = mb.validity(variant="none", capture_dir=cap, ledger=[_hook(served)], prompt=PROMPT,
+                    model="claude-sonnet-5", grade=GRADE, strip=("memory", "e"))
+    assert not v["valid"]
+
+
+def test_text_injected_after_the_first_request_is_scanned_but_not_the_agents_words(tmp_path):
+    served = "\n\n".join((AD, BRIEFING))
+    cap = _capture(tmp_path, f"SessionStart:startup hook success: {served}")
+    first = json.loads(json.loads((cap / "0001.json").read_text())["body"])
+    later = dict(first, messages=first["messages"] + [
+        {"role": "assistant", "content": [{"type": "text", "text": "I will call memory_search."}]},
+        {"role": "user", "content": [{"type": "tool_result", "content": "memory_outcome hit"}]}])
+    (cap / "0002.json").write_text(json.dumps({"path": "/v1/messages", "body": json.dumps(later)}))
+    v = mb.validity(variant="none", capture_dir=cap, ledger=[_hook(served)], prompt=PROMPT,
+                    model="claude-sonnet-5", grade=GRADE)
+    assert v["valid"], v["reasons"]
+    leaked = dict(first, messages=first["messages"] + [
+        {"role": "user", "content": [{"type": "text", "text": "Remember: memory_store it."}]}])
+    (cap / "0003.json").write_text(json.dumps({"path": "/v1/messages", "body": json.dumps(leaked)}))
+    v = mb.validity(variant="none", capture_dir=cap, ledger=[_hook(served)], prompt=PROMPT,
+                    model="claude-sonnet-5", grade=GRADE)
+    assert not v["valid"]
+
+
+@pytest.mark.parametrize("rec,done", [
+    ({"grade": {}, "validity": {}, "errors": [], "client_rc": 0, "timed_out": False}, False),
+    ({"grade": {"x": 1}, "validity": {"valid": True}, "errors": [], "client_rc": 0,
+      "timed_out": False}, True),
+    ({"grade": {"x": 1}, "validity": {"valid": True}, "errors": ["BenchSafetyError"],
+      "client_rc": 0, "timed_out": False}, False),
+    ({"grade": {"x": 1}, "validity": {"valid": False}, "errors": [], "client_rc": None,
+      "timed_out": True}, False),
+])
+def test_only_cleanly_finished_runs_are_skipped_on_resume(rec, done):
+    assert mb.finished(rec) is done
+
+
+def test_used_ids_parse_like_the_daemon():
+    assert mb.parse_ids([True, 3.0, 2.5, 7]) == [3, 7]
+    assert len(mb.parse_ids(list(range(80)))) == 50
+
+
+def test_mcp_instructions_are_read_without_importing_the_server(tmp_path):
+    """Importing mcp_server builds a MemoryService from the caller's
+    environment and creates ./data (reviewer finding); the bench reads the
+    constant from source instead. Checked in a fresh interpreter."""
+    import subprocess
+    import sys
+    code = ("import sys; from evals import memory_policy_bench as mb; "
+            "t = mb.mcp_instructions(); "
+            "print('memory_search' in t, 'pseudolife_memory.mcp_server' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True,
+                         text=True, timeout=120,
+                         env={**__import__("os").environ, "PYTHONPATH": str(mb.ROOT)})
+    assert out.stdout.split() == ["True", "False"], out.stderr[-2000:]
+    assert not (tmp_path / "data").exists()
+
+
+def test_children_do_not_inherit_unrelated_keys(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "x")
+    monkeypatch.setenv("HF_TOKEN", "x")
+    monkeypatch.setenv("PGPASSWORD", "x")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "x")
+    monkeypatch.setenv("SOME_SERVICE_API_KEY", "x")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    env = mb.scrubbed_env()
+    for key in ("GH_TOKEN", "HF_TOKEN", "PGPASSWORD", "AWS_SECRET_ACCESS_KEY",
+                "SOME_SERVICE_API_KEY"):
+        assert key not in env
+    assert "PATH" in env or "Path" in env
 
 
 def test_aa_noise_is_the_largest_difference_the_aa_ci_admits():

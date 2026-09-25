@@ -4247,9 +4247,12 @@ adds nothing. The `install-hook` scripts' settings hooks do not carry it, so
 
 `ab_arms` assigns each session the SessionStart hook registers one arm, by a
 SHA-256 of its client session id modulo the arm count; a variant may repeat
-for an A/A arm. The arm is logged by the daemon and can be recomputed from
-`episodes.session_key` for a window whose arm list is known; sessions that
-reach the hook without a session id keep `variant`. A custom
+for an A/A arm. Sessions that reach the hook without a session id keep
+`variant`. The daemon logs each assignment. The bank alone cannot
+reconstruct them all: a session root that ends with no stored entry is
+deleted, so an online comparison read from the bank sees only the sessions
+that stored something (see `evals/capture_metrics.py`). A durable
+per-session record is a follow-up that needs a schema change. A custom
 `hook-instructions.md` is served in every variant.
 
 ## Built-in defaults (tuned for Claude's use case)

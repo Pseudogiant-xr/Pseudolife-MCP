@@ -21,11 +21,26 @@ shim runtime directory, so every per-session denominator was inflated. Now:
 * shim roots (32-hex key) count only when they carry memory activity (an
   entry or outcome in their subtree, or a search under their episode or
   session key); idle ones are transport artifacts and are dropped;
-* an idle hook root and an active shim root that started within
+* a hook root and an active shim root that started within
   ``PAIR_WINDOW_S`` of each other are ONE session when each is the other's
-  only candidate. Anything less certain stays unmerged and is reported as
-  ``ambiguous_pairs`` — the session count is an upper bound by at most that
-  many.
+  only candidate (both can be active: writes that pass ``episode=`` land on
+  the hook root while the searches carry the shim's key). Anything less
+  certain stays unmerged and is reported as ``ambiguous_pairs``.
+
+A search is attributed by its ``session_id`` (the caller); its
+``episode_id`` is only the daemon's process-wide current episode, used when
+no session id was recorded.
+
+What the bank cannot show. The daemon DELETES a session's root when it
+ends holding no stored entry (prune-on-empty at SessionEnd, or later by the
+idle reaper) and keeps no record of the registration. A session that only
+searched, set facts or logged outcomes therefore has no root; its searches
+and outcomes remain and are counted under ``roots.pruned_with_searches`` /
+``pruned_with_outcomes`` instead of ``sessions``, and a session that never
+touched memory leaves nothing at all. ``sessions`` is thus the sessions
+that stored something or have not ended cleanly yet, and every rate here
+is over those survivors: read coverage figures as upper bounds. Counting
+every session needs the daemon to keep a registration record.
 
 Headless helper runs (``claude -p`` / ``codex exec`` behind a judge or
 extractor shim) fire the same hooks and are indistinguishable from an
@@ -158,51 +173,67 @@ def _sessions(conn, since: float, now: float, root_of: dict[str, str]):
     by_root = {rid: _Session([rid], {key}, root_kind(key), started)
                for rid, key, started in roots}
     by_key = {key: rid for rid, key, _ in roots}
+    pruned_search_keys: set[str] = set()
+    pruned_outcome_episodes: set[str] = set()
 
-    def owner(episode_id, session_id=None):
-        root = root_of.get(episode_id) if episode_id else None
-        if root in by_root:
-            return by_root[root]
-        if session_id in by_key:
-            return by_root[by_key[session_id]]
-        return None
+    def by_episode(episode_id):
+        return by_root.get(root_of.get(episode_id)) if episode_id else None
+
+    def by_event(session_id, episode_id):
+        # A search row's episode_id is the daemon's process-wide current
+        # episode, not the caller's; its session_id is the caller's own.
+        if session_id:
+            if session_id in by_key:
+                return by_root[by_key[session_id]]
+            return None
+        return by_episode(episode_id)
 
     for episode_id, source, ts in conn.execute(
             "SELECT episode_id, source, ts FROM entries "
             "WHERE episode_id IS NOT NULL AND ts >= %s", (since,)).fetchall():
-        s = owner(episode_id)
+        s = by_episode(episode_id)
         if s:
             s.total += 1
             s.substantive += source not in NON_SUBSTANTIVE_SOURCES
     for episode_id, origin in conn.execute(
             "SELECT episode_id, origin FROM outcome_signals "
             "WHERE episode_id IS NOT NULL AND created_at >= %s", (since,)).fetchall():
-        s = owner(episode_id)
-        if s:
-            if origin == "inferred":
-                s.inferred += 1
-            else:
-                s.explicit += 1
+        s = by_episode(episode_id)
+        if s is None:
+            if episode_id not in root_of:        # its episode was pruned
+                pruned_outcome_episodes.add(episode_id)
+            continue
+        if origin == "inferred":
+            s.inferred += 1
+        else:
+            s.explicit += 1
+    known_keys = set(conn.execute(
+        "SELECT session_key FROM episodes WHERE session_key IS NOT NULL").fetchall())
+    known_keys = {k for (k,) in known_keys}
     for session_id, episode_id, created in conn.execute(
             "SELECT session_id, episode_id, created_at FROM retrieval_events "
             "WHERE created_at >= %s", (since,)).fetchall():
-        s = owner(episode_id, session_id)
+        s = by_event(session_id, episode_id)
         if s:
             s.searches.append(created)
+        elif session_id and session_id not in known_keys:
+            pruned_search_keys.add(session_id)
     for session_id, episode_id in conn.execute(
             "SELECT e.session_id, e.episode_id FROM retrieval_uses u "
             "JOIN retrieval_events e ON e.id = u.event_id "
             "WHERE u.used_via = 'outcome' AND u.created_at >= %s", (since,)).fetchall():
-        s = owner(episode_id, session_id)
+        s = by_event(session_id, episode_id)
         if s:
             s.credited_ids += 1
 
     ordered = list(by_root.values())
     hooks = [s for s in ordered if s.kind == "hook"]
     active_shims = [s for s in ordered if s.kind != "hook" and s.active]
+    # Any hook root may pair: a session that passes `episode=` writes to the
+    # hook root while its searches carry the shim's key, so both are active.
     near = {id(h): [s for s in active_shims
                     if abs(s.started_at - h.started_at) <= PAIR_WINDOW_S]
-            for h in hooks if not h.active}
+            for h in hooks}
     merged: set[int] = set()
     merged_pairs = ambiguous = 0
     for h in hooks:
@@ -231,6 +262,12 @@ def _sessions(conn, since: float, now: float, root_of: dict[str, str]):
         "idle_shim_dropped": sum(s.kind != "hook" and not s.active for s in ordered),
         "merged_pairs": merged_pairs,
         "ambiguous_pairs": ambiguous,
+        # Sessions whose root the daemon deleted (a root that holds no
+        # entry is pruned when the session ends) but whose activity
+        # remains; they are NOT in `sessions`. One session may show under
+        # both counts.
+        "pruned_with_searches": len(pruned_search_keys),
+        "pruned_with_outcomes": len(pruned_outcome_episodes),
     }
     return sessions, roots_report
 
@@ -243,26 +280,37 @@ def _reuse(conn, since: float, now: float, root_of: dict[str, str]) -> dict:
         "AND source NOT IN ('status', 'log')",
         (since, now - REUSE_WINDOW_S)).fetchall()
     if not entries:
-        return {"entries": 0, "retrieved_again": 0, "rate": None}
+        return {"entries": 0, "retrieved_again": 0, "rate": None, "unattributable": 0}
     key_of_root = dict(conn.execute(
         "SELECT id, session_key FROM episodes WHERE parent_id IS NULL").fetchall())
-    root_of_key = {key: rid for rid, key in key_of_root.items() if key}
-    served: dict[int, list[tuple[float, str | None]]] = {}
+    served: dict[int, list[tuple[float, str | None, str | None]]] = {}
     for entry_id, session_id, episode_id, created in conn.execute("""
             SELECT (item->>'entry_id')::bigint, e.session_id, e.episode_id, e.created_at
             FROM retrieval_events e, jsonb_array_elements(e.served) item
             WHERE e.created_at >= %s AND item ? 'entry_id'""", (since,)).fetchall():
-        root = root_of.get(episode_id) if episode_id else None
-        served.setdefault(int(entry_id), []).append(
-            (created, root or root_of_key.get(session_id)))
-    again = 0
+        served.setdefault(int(entry_id), []).append((created, session_id, episode_id))
+    again = ambiguous = 0
     for entry_id, episode_id, ts in entries:
-        own = root_of.get(episode_id) if episode_id else None
-        if any(ts < created <= ts + REUSE_WINDOW_S and (root is None or root != own)
-               for created, root in served.get(entry_id, ())):
+        own_root = root_of.get(episode_id) if episode_id else None
+        own_key = key_of_root.get(own_root)
+        verdicts = set()
+        for created, session_id, ev_episode in served.get(entry_id, ()):
+            if not ts < created <= ts + REUSE_WINDOW_S:
+                continue
+            # Only the caller's session key identifies who searched; a row's
+            # episode is the daemon's current one, and a pruned root has no
+            # key left to compare.
+            if session_id and own_key:
+                verdicts.add("other" if session_id != own_key else "own")
+            else:
+                verdicts.add("unknown")
+        if "other" in verdicts:
             again += 1
+        elif "unknown" in verdicts:
+            ambiguous += 1
     return {"entries": len(entries), "retrieved_again": again,
-            "rate": _rate(again, len(entries))}
+            "rate": _rate(again, len(entries)),
+            "unattributable": ambiguous}
 
 
 def collect_from(conn, since_epoch: float, now: float | None = None) -> dict:
@@ -355,7 +403,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{'  idle shim roots dropped':<40}{r['idle_shim_dropped']:>8}")
     print(f"{'  hook+shim pairs merged':<40}{r['merged_pairs']:>8}")
     print(f"{'  ambiguous pairs (upper bound)':<40}{r['ambiguous_pairs']:>8}")
-    print(f"{'client sessions':<40}{stats['sessions']:>8}")
+    print(f"{'client sessions (surviving roots)':<40}{stats['sessions']:>8}")
+    print(f"{'  + pruned, with searches / outcomes':<40}{r['pruned_with_searches']:>8} / "
+          f"{r['pruned_with_outcomes']}   (not in the rates below)")
     print(f"{'  working (>=1 memory interaction)':<40}{stats['working_sessions']:>8}")
     print(f"{'  with >=1 substantive store':<40}{stats['substantive_sessions']:>8}"
           f"   ({_pct(stats['capture_coverage'])})")
@@ -370,7 +420,8 @@ def main(argv: list[str] | None = None) -> int:
           f" {u['credited_ids']} ids credited)")
     reuse = stats["reuse_14d"]
     print(f"{'entries retrieved again within 14 d':<40}{reuse['retrieved_again']:>8}"
-          f"   of {reuse['entries']} ({_pct(reuse['rate'])})")
+          f"   of {reuse['entries']} ({_pct(reuse['rate'])}; "
+          f"{reuse['unattributable']} served to an unidentifiable caller)")
     print(f"{'outcome coverage (substantive)':<40}"
           f"{_pct(stats['outcome_coverage_of_substantive']):>8}")
     print(f"{'median / p90 stores per session':<40}"

@@ -67,7 +67,7 @@ import time
 import urllib.parse
 import urllib.request
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -246,6 +246,9 @@ def free_port() -> int:
     raise BenchSafetyError("no free port")
 
 
+_SECRET_NAME = re.compile(r"(?i)(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|CREDENTIAL)")
+
+
 def production_database() -> str:
     """The live bank's database name, as the guard in
     ``pseudolife_memory.storage.schema`` resolves it in THIS process (the
@@ -273,8 +276,10 @@ def scrubbed_env(extra: dict | None = None) -> dict:
     bank's name is recorded for it instead, as tests/conftest.py does."""
     from pseudolife_memory.storage.schema import PRODUCTION_DATABASE_ENV
     drop = ("PSEUDOLIFE", "ANTHROPIC", "CLAUDE", "CODEX", "OPENAI", "PLUGIN_ROOT",
-            PRODUCTION_DATABASE_ENV)
-    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(drop)}
+            PRODUCTION_DATABASE_ENV, "PG", "AWS_", "AZURE_", "GH_", "GITHUB_", "HF_TOKEN",
+            "HUGGING_FACE", "GOOGLE_", "GEMINI_")
+    env = {k: v for k, v in os.environ.items()
+           if not k.upper().startswith(drop) and not _SECRET_NAME.search(k)}
     env.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
                 "CUDA_VISIBLE_DEVICES": "-1", "PYTHONUTF8": "1",
                 "PYTHONPATH": str(ROOT), PRODUCTION_DATABASE_ENV: production_database()})
@@ -324,10 +329,13 @@ def free_commit_gb() -> float | None:
 
 
 def wait_for_headroom(min_gb: float, log, poll_s: float = 30.0, max_wait_s: float = 7_200.0) -> None:
-    """Hold before a daemon start until ``min_gb`` of commit is free. A
-    disposable daemon commits about 4 GB (CPU embedder, bank, Python), and
-    this machine also runs full test suites and GPU servers; starting into a
-    full commit limit kills other sessions' processes (os error 1455)."""
+    """Hold before a daemon start until ``min_gb`` of commit is free. One run
+    peaked at 3.9 GB of commit: daemon 3.13 GB (CPU Qwen3-Embedding in bf16,
+    bank, Python), ``claude`` 0.46 GB, shim 0.28 GB (sampled over a full
+    run of the 2026-09-25 sanity check, Windows). The default 8 GB leaves
+    about the same again for everything else; this machine also runs full
+    test suites and GPU servers, and starting into a full commit limit kills
+    other sessions' processes (os error 1455)."""
     waited = 0.0
     while True:
         free = free_commit_gb()
@@ -382,18 +390,41 @@ memory_policy:
 """
 
 
+_LIKE_PREFIX = BENCH_DB_PREFIX.replace("_", "\\_")   # `_` is a LIKE wildcard
+
+
+def bench_databases(admin: str, *, templates: bool) -> list[tuple[str, int]]:
+    """(name, connected backends) of every bench database of one kind."""
+    kind = f"{_LIKE_PREFIX}tpl\\_%" if templates else f"{_LIKE_PREFIX}%"
+    with _admin_connect(admin) as conn:
+        rows = conn.execute(
+            "SELECT d.datname, (SELECT COUNT(*) FROM pg_stat_activity a "
+            "WHERE a.datname = d.datname) FROM pg_database d "
+            "WHERE d.datname LIKE %s ESCAPE '\\'", (kind,)).fetchall()
+    tpl = f"{BENCH_DB_PREFIX}tpl_"
+    return [(n, c) for n, c in rows if templates or not n.startswith(tpl)]
+
+
 def ensure_template(admin: str, work: Path, log) -> tuple[str, dict]:
+    """The seeded template for this fixture version, shared by every tag
+    under the work root (a bench started later must not rebuild, let alone
+    drop, the template a running bench clones from)."""
     digest = fixture_digest()
     name = f"{BENCH_DB_PREFIX}tpl_{digest}"
-    manifest_path = work / f"template-{digest}.json"
+    manifest_path = work.parent / f"template-{digest}.json"
+    legacy = work / f"template-{digest}.json"
+    if not manifest_path.exists() and legacy.exists():
+        shutil.copyfile(legacy, manifest_path)
     if manifest_path.exists() and db_exists(admin, name):
         return name, json.loads(manifest_path.read_text(encoding="utf-8"))
-    with _admin_connect(admin) as conn:
-        stale = [n for (n,) in conn.execute(
-            "SELECT datname FROM pg_database WHERE datname LIKE %s",
-            (f"{BENCH_DB_PREFIX}tpl_%",)).fetchall()]
-    for old in stale:          # earlier fixture versions, and a half-built one
-        drop_db(admin, old)
+    for old, backends in bench_databases(admin, templates=True):
+        # Earlier fixture versions nobody is using, and a half-built copy of
+        # this one (no manifest).
+        if backends == 0:
+            drop_db(admin, old)
+    if db_exists(admin, name):
+        raise RuntimeError(f"{name} exists without a manifest and is in use; wait for "
+                           f"its user, then rerun")
     create_db(admin, name)
     data_dir = work / f"template-data-{digest}"
     shutil.rmtree(data_dir, ignore_errors=True)
@@ -447,11 +478,11 @@ class Daemon:
             "PSEUDOLIFE_MCP_HOST": "127.0.0.1", "PSEUDOLIFE_MCP_PORT": str(self.port),
             "PSEUDOLIFE_MCP_DATABASE_URL": self.dsn, "PSEUDOLIFE_MCP_DATA_DIR": str(data),
             "PSEUDOLIFE_MCP_TOKEN": self.token, "PSEUDOLIFE_WRITER_ID": "bench-daemon"})
-        log = (self.dir / "daemon.log").open("w", encoding="utf-8")
+        self.log_file = (self.dir / "daemon.log").open("w", encoding="utf-8")
         self.proc = subprocess.Popen(
             [sys.executable, "-m", "evals.memory_policy_daemon", "serve",
              "--ledger", str(self.ledger)],
-            cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+            cwd=ROOT, env=env, stdout=self.log_file, stderr=subprocess.STDOUT)
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self.proc.poll() is not None:
@@ -481,6 +512,11 @@ class Daemon:
     def stop(self) -> None:
         if self.proc is not None:
             kill_tree(self.proc)
+
+    def close_log(self) -> None:
+        if getattr(self, "log_file", None) is not None:
+            self.log_file.close()
+            self.log_file = None
 
 
 # ── capture proxy (the model's context, for the validity check) ────────────
@@ -716,11 +752,17 @@ def parse_ids(value) -> list[int]:
         value = [value]
     out = []
     for v in value:
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, float):
+            if not v.is_integer():
+                continue
+            v = int(v)
         try:
             out.append(int(v))
         except (TypeError, ValueError):
             continue
-    return out
+    return out[:50]            # the daemon credits at most 50
 
 
 def birth_time(path: Path) -> float | None:
@@ -917,7 +959,10 @@ def grade_run(*, sc: fx.Scenario, manifest: dict, ledger: list[dict], db: str,
             "searched_before_acting": bool(searches and (first_write is None
                                                          or searches[0] <= first_write)),
             "lesson_search_used": bool(calls.get("memory_lesson_search")),
-            "outcome_logged": outcomes > 0,
+            # The agent's own memory_outcome calls: outcome_signals also gets
+            # rows the daemon emits itself (a user-origin supersession).
+            "outcome_logged": bool(calls.get("memory_outcome")),
+            "outcome_signals": outcomes,
             "session_titled": bool(calls.get("memory_session_title")),
             "memory_tool_calls": len(tools),
             "tool_counts": {k: len(v) for k, v in sorted(calls.items())},
@@ -936,6 +981,19 @@ def grade_run(*, sc: fx.Scenario, manifest: dict, ledger: list[dict], db: str,
 
 
 # ── validity ───────────────────────────────────────────────────────────────
+
+def mcp_instructions() -> str:
+    """The MCP server's initialize instructions, read from the source:
+    importing ``pseudolife_memory.mcp_server`` would build a MemoryService
+    from this process's environment and working directory."""
+    import ast
+    tree = ast.parse((ROOT / "pseudolife_memory/mcp_server.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "_MCP_INSTRUCTIONS"
+                                                 for t in node.targets)):
+            return ast.literal_eval(node.value)
+    raise RuntimeError("_MCP_INSTRUCTIONS not found in mcp_server.py")
+
 
 def policy_texts() -> dict[str, str]:
     from pseudolife_memory.web import session_hook as sh
@@ -962,6 +1020,14 @@ def _norm(text: str) -> str:
 
 
 def _request_text(body: dict) -> str:
+    return "\n".join(_request_parts(body))
+
+
+def _request_parts(body: dict) -> list[str]:
+    """The text a request put in front of the model that the agent did not
+    write: system blocks and user/system-role text. Assistant turns (the
+    agent's own words) and tool results (what its calls returned) are not
+    starting context."""
     parts = []
     system = body.get("system")
     if isinstance(system, str):
@@ -969,6 +1035,8 @@ def _request_text(body: dict) -> str:
     elif isinstance(system, list):
         parts += [s.get("text", "") for s in system if isinstance(s, dict)]
     for m in body.get("messages") or []:
+        if m.get("role") == "assistant":
+            continue
         content = m.get("content")
         if isinstance(content, str):
             parts.append(content)
@@ -979,7 +1047,7 @@ def _request_text(body: dict) -> str:
                         parts.append(p.get("text", ""))
                     elif p.get("type") == "tool_result":
                         continue   # agent-driven results, not starting context
-    return "\n".join(parts)
+    return parts
 
 
 _CONTEXT_HOOKS = ("/api/hook/session-start", "/api/hook/memory-policy")
@@ -995,8 +1063,6 @@ def policy_scan(text: str, variant: str, ledger: list[dict],
     known policy text may be, the served hook responses must have arrived
     intact, and once the arm's policy and the constant surfaces are removed
     nothing memory-related may remain."""
-    from pseudolife_memory.mcp_server import _MCP_INSTRUCTIONS
-
     reasons = []
     texts = {k: _norm(v) for k, v in policy_texts().items()}
     found = {k: v in text for k, v in texts.items()}
@@ -1010,7 +1076,7 @@ def policy_scan(text: str, variant: str, ledger: list[dict],
     residue = text
     for key in expected:
         residue = residue.replace(texts[key], " ")
-    residue = residue.replace(_norm(_MCP_INSTRUCTIONS), " ")
+    residue = residue.replace(_norm(mcp_instructions()), " ")
     served_in_context = []
     for r in ledger:
         if r.get("kind") != "hook" or r.get("path") not in _CONTEXT_HOOKS:
@@ -1024,10 +1090,13 @@ def policy_scan(text: str, variant: str, ledger: list[dict],
     if not all(served_in_context):
         reasons.append("a hook response did not reach the model's context intact")
     residue = _CONSTANT.sub(" ", residue)
-    # Paths carry the run id (a scenario id such as a_lesson); drop any
-    # token that contains it before looking for policy words.
-    for needle in strip:
-        residue = re.sub(r"\S*" + re.escape(needle) + r"\S*", " ", residue)
+    # Paths carry the run id (a scenario id such as a_lesson); drop the
+    # path-like tokens that contain it before looking for policy words. Only
+    # paths: a short tag stripped everywhere would blind the scan.
+    if strip:
+        residue = " ".join(
+            t for t in residue.split()
+            if not (("/" in t or "\\" in t) and any(n and n in t for n in strip)))
     leaks = sorted({residue[max(0, m.start() - 40): m.end() + 40]
                     for m in _MARKER.finditer(residue)})
     if leaks:
@@ -1061,7 +1130,15 @@ def validity(*, variant: str, capture_dir: Path, ledger: list[dict], prompt: str
     if main is None:
         return {"valid": False, "reasons": reasons + ["no captured request carries the task"],
                 "models": models}
-    scan = policy_scan(_norm(_request_text(main)), variant, ledger, strip)
+    # Every request, not just the first: text injected later in the session
+    # (a reminder, a hook on another event) is context too.
+    seen, parts = set(), []
+    for body in requests:
+        for part in _request_parts(body):
+            if part not in seen:
+                seen.add(part)
+                parts.append(part)
+    scan = policy_scan(_norm("\n".join(parts)), variant, ledger, strip)
     reasons += scan.pop("reasons")
     registered = grade.get("registered_session_ids") or []
     if not registered:
@@ -1178,7 +1255,17 @@ def paired(records: list[dict], a: str, b: str, lam: float, seed: int = 20260925
             if va is not None and vb is not None:
                 groups[sid].append(float(vb) - float(va))
         delta, ci = cluster_bootstrap(groups, rng)
-        out[metric] = {"delta": delta, "ci95": ci, "pairs": sum(len(v) for v in groups.values())}
+        out[metric] = {"delta": delta, "ci95": ci, "pairs": sum(len(v) for v in groups.values()),
+                       "scenarios": sum(1 for v in groups.values() if v)}
+    return out
+
+
+def invalid_shares(records: list[dict], labels: list[str]) -> dict[str, float]:
+    out = {}
+    for label in labels:
+        rows = [r for r in records if r["arm"] == label]
+        bad = sum(1 for r in rows if not (r.get("validity") or {}).get("valid"))
+        out[label] = bad / len(rows) if rows else 1.0
     return out
 
 
@@ -1191,24 +1278,125 @@ def aa_noise(aa: dict) -> dict:
     return noise
 
 
-def accept(challenger: dict, noise: dict) -> dict:
+# A verdict needs at least this many (scenario, replicate) pairs over at
+# least this many scenarios, and no more than this share of invalid runs in
+# either arm. Not measured values: the floor below which a paired bootstrap
+# over scenarios says nothing.
+MIN_PAIRS, MIN_SCENARIOS, MAX_INVALID_SHARE = 6, 3, 0.2
+
+
+def accept(challenger: dict, noise: dict, *, invalid_share: dict | None = None) -> dict:
     """The hill-climb rule: the challenger's score gain must exceed the A/A
-    noise, and no guarded metric may regress beyond its own A/A noise."""
+    noise, and no guarded metric may regress beyond its own A/A noise. A
+    guarded metric that cannot be evaluated is reported, not skipped."""
+    reasons, unevaluated = [], []
+    pairs = challenger["score"].get("pairs") or 0
+    scenarios = challenger["score"].get("scenarios") or 0
+    ok = True
+    if pairs < MIN_PAIRS or scenarios < MIN_SCENARIOS:
+        ok = False
+        reasons.append(f"too little evidence: {pairs} pairs over {scenarios} scenarios "
+                       f"(need {MIN_PAIRS} over {MIN_SCENARIOS})")
+    for arm, share in (invalid_share or {}).items():
+        if share > MAX_INVALID_SHARE:
+            ok = False
+            reasons.append(f"{arm}: {share:.0%} of runs invalid (max {MAX_INVALID_SHARE:.0%})")
     gain = challenger["score"]["delta"]
     floor = noise.get("score")
-    reasons = []
-    ok = gain is not None and floor is not None and gain > floor
-    if not ok:
+    if gain is None or floor is None or not gain > floor:
+        ok = False
         reasons.append(f"score gain {gain} does not exceed the A/A noise {floor}")
     for metric in GUARDED:
         d, n = challenger[metric]["delta"], noise.get(metric)
         if d is None or n is None:
+            unevaluated.append(metric)
             continue
         regression = -d * METRICS[metric]
         if regression > n:
             ok = False
             reasons.append(f"{metric} regresses by {regression:.3f} (> A/A noise {n:.3f})")
-    return {"accept": ok, "reasons": reasons}
+    return {"accept": ok, "reasons": reasons, "unevaluated_guards": unevaluated}
+
+
+# ── grading a finished run directory ───────────────────────────────────────
+
+def finished(rec: dict) -> bool:
+    """A run that needs no re-run: graded, and its client exited cleanly."""
+    return bool(rec.get("grade") and rec.get("validity") is not None and not rec.get("errors")
+                and not rec.get("timed_out") and rec.get("client_rc") == 0)
+
+
+def _canary_from_capture(run_dir: Path) -> str | None:
+    for f in sorted((run_dir / "capture").glob("*.json")):
+        m = re.search(r"stg-[0-9a-f]{24}", f.read_text(encoding="utf-8", errors="replace"))
+        if m:
+            return m.group(0)
+    return None
+
+
+def load_run(run_dir: Path, rec: dict) -> tuple[dict, dict, dict]:
+    """(meta, client, final) for grading. Runs written before run.json and
+    client.json existed are reconstructed from their stream, ledger and
+    captured requests; their DB name follows run_id()."""
+    meta_path = run_dir / "run.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    else:
+        meta = {"item": {k: rec[k] for k in ("arm", "variant", "scenario", "replicate")},
+                "canary": None, "client": rec.get("client", "claude"), "model": rec.get("model"),
+                "db": f"{BENCH_DB_PREFIX}{hashlib.sha256(rec['run_id'].encode()).hexdigest()[:16]}"}
+    if meta.get("canary") is None and fx.scenario(meta["item"]["scenario"]).canary:
+        meta["canary"] = _canary_from_capture(run_dir)
+    client_path = run_dir / "client.json"
+    if client_path.exists():
+        client = json.loads(client_path.read_text(encoding="utf-8"))
+    else:
+        parse = parse_claude_stream if meta.get("client", "claude") == "claude" else parse_codex_stream
+        client = parse(run_dir / "stream.jsonl")
+        stamps = [r["t"] for r in read_ledger(run_dir / "ledger.jsonl") if "t" in r]
+        stream = run_dir / "stream.jsonl"
+        client.update(started=(min(stamps) - 2.0) if stamps else None,
+                      ended=stream.stat().st_mtime if stream.exists() else None,
+                      rc=rec.get("client_rc"), timed_out=rec.get("timed_out"))
+    final_path = run_dir / "final.json"
+    final = json.loads(final_path.read_text(encoding="utf-8")) if final_path.exists() else {}
+    return meta, client, final
+
+
+def grade_into(rec: dict, run_dir: Path, *, manifest: dict, dsn: str, tag: str) -> None:
+    """Fill cost, grade and validity for one run from its directory and its
+    (kept or still live) run database."""
+    meta, client, final = load_run(run_dir, rec)
+    sc = fx.scenario(meta["item"]["scenario"])
+    canary = meta.get("canary")
+    prompt = sc.prompt.replace("{canary}", canary or "")
+    ledger = read_ledger(run_dir / "ledger.jsonl")
+    original = {rel: hashlib.sha256(text.encode()).hexdigest()
+                for rel, text in fx.PROJECT_FILES.items()}
+    rec["client_rc"], rec["timed_out"] = client.get("rc"), client.get("timed_out")
+    if client.get("started") and client.get("ended"):
+        rec["wall_s"] = round(client["ended"] - client["started"], 1)
+    rec["cost"] = client_cost(client)
+    rec["grade"] = grade_run(sc=sc, manifest=manifest, ledger=ledger, db=dsn, final=final,
+                             project=run_dir / "lanternfish", original=original, canary=canary,
+                             client_started=client.get("started") or 0.0)
+    strip = (rec["run_id"], rec["run_id"].replace("_", "-"), tag)
+    if meta.get("client", "claude") == "claude":
+        rec["validity"] = validity(variant=meta["item"]["variant"],
+                                   capture_dir=run_dir / "capture", ledger=ledger, prompt=prompt,
+                                   model=meta.get("model") or rec.get("model"),
+                                   grade=rec["grade"], client_session=client.get("session_id"),
+                                   strip=strip)
+    else:
+        rec["validity"] = codex_validity(run_dir, meta["item"]["variant"], rec["grade"], ledger,
+                                         client_session=client.get("session_id"), strip=strip)
+    # A killed or failed client left a partial transcript and no usage: its
+    # cost reads as zero and would reward whichever arm crashes more.
+    if client.get("timed_out") or client.get("rc") != 0 or not client.get("result"):
+        rec["validity"]["valid"] = False
+        rec["validity"]["reasons"].append(
+            f"the client did not finish (rc={client.get('rc')}, "
+            f"timed_out={client.get('timed_out')})")
 
 
 # ── orchestration ──────────────────────────────────────────────────────────
@@ -1233,6 +1421,11 @@ class Bench:
             f.write(line + "\n")
 
     def done(self) -> dict[str, dict]:
+        """The latest record per run id that FINISHED: graded, the client
+        exited on its own, no errors. Anything else runs again on resume."""
+        return {rid: rec for rid, rec in self.records().items() if finished(rec)}
+
+    def records(self) -> dict[str, dict]:
         out = {}
         if self.runs_path.exists():
             for line in self.runs_path.read_text(encoding="utf-8").splitlines():
@@ -1263,66 +1456,60 @@ class Bench:
                 drop_db(self.admin, db_name)
             create_db(self.admin, db_name, template)
         daemon = Daemon(run_dir, dsn, item["variant"])
+        # Everything grading needs stays in the run directory (outside the
+        # repository), so a grader fix can be re-applied: `regrade`.
+        (run_dir / "run.json").write_text(json.dumps(
+            {"item": item, "canary": canary, "db": db_name, "client": args.client,
+             "model": args.model, "effort": args.effort}), encoding="utf-8")
         rec = {"run_id": rid, **item, "client": args.client, "model": args.model,
                "effort": args.effort, "bench_version": BENCH_VERSION, "errors": []}
         started = time.time()
+        client = None
         try:
-            with self.db_lock:     # one start at a time, so parallel runs see each other
-                wait_for_headroom(args.min_free_gb, self.log)
-                daemon.start()
-            if args.client == "claude":
-                client = run_claude(run_dir, project, prompt, daemon, model=args.model,
-                                    effort=args.effort, timeout=args.run_timeout,
-                                    budget_usd=args.max_budget_usd, tool_search=args.tool_search)
-            else:
-                client = run_codex(run_dir, project, prompt, daemon, model=args.model,
-                                   effort=args.effort, timeout=args.run_timeout)
-            time.sleep(2.0)   # let SessionEnd land
-            final = {"facts": daemon.get("/api/facts?limit=5000"),
-                     "world": daemon.get("/api/world?limit=5000")}
-            (run_dir / "final.json").write_text(json.dumps(final), encoding="utf-8")
-        except Exception as exc:  # noqa: BLE001
-            rec["errors"].append(f"{type(exc).__name__}: {str(exc)[:300]}")
-            client, final = None, {}
+            try:
+                with self.db_lock:     # one start at a time, so parallel runs see each other
+                    wait_for_headroom(args.min_free_gb, self.log)
+                    daemon.start()
+                if args.client == "claude":
+                    client = run_claude(run_dir, project, prompt, daemon, model=args.model,
+                                        effort=args.effort, timeout=args.run_timeout,
+                                        budget_usd=args.max_budget_usd,
+                                        tool_search=args.tool_search)
+                else:
+                    client = run_codex(run_dir, project, prompt, daemon, model=args.model,
+                                       effort=args.effort, timeout=args.run_timeout)
+                (run_dir / "client.json").write_text(json.dumps(client), encoding="utf-8")
+                time.sleep(2.0)   # let SessionEnd land
+                final = {"facts": daemon.get("/api/facts?limit=5000"),
+                         "world": daemon.get("/api/world?limit=5000")}
+                (run_dir / "final.json").write_text(json.dumps(final), encoding="utf-8")
+            except Exception as exc:  # noqa: BLE001
+                rec["errors"].append(f"{type(exc).__name__}: {str(exc)[:300]}")
+            finally:
+                daemon.stop()
+                daemon.close_log()
+            rec["total_s"] = round(time.time() - started, 1)
+            if client is not None:
+                try:
+                    grade_into(rec, run_dir, manifest=manifest, dsn=dsn, tag=self.tag)
+                except Exception as exc:  # noqa: BLE001
+                    rec["errors"].append(f"grade: {type(exc).__name__}: {str(exc)[:300]}")
         finally:
-            daemon.stop()
-        rec["wall_s"] = round(time.time() - started, 1)
-        ledger = read_ledger(daemon.ledger)
-        if client is not None:
-            rec["client_rc"] = client.get("rc")
-            rec["timed_out"] = client.get("timed_out")
-            rec["cost"] = client_cost(client)
-            try:
-                rec["grade"] = grade_run(sc=sc, manifest=manifest, ledger=ledger, db=dsn,
-                                         final=final, project=project, original=original,
-                                         canary=canary, client_started=client["started"])
-            except Exception as exc:  # noqa: BLE001
-                rec["errors"].append(f"grade: {type(exc).__name__}: {str(exc)[:300]}")
-            if args.client == "claude" and rec.get("grade"):
-                rec["validity"] = validity(variant=item["variant"],
-                                           capture_dir=run_dir / "capture", ledger=ledger,
-                                           prompt=prompt, model=args.model, grade=rec["grade"],
-                                           client_session=client.get("session_id"),
-                                           strip=(rid, rid.replace("_", "-"), self.tag))
-            elif rec.get("grade"):
-                rec["validity"] = codex_validity(run_dir, item["variant"], rec["grade"], ledger,
-                                                 client_session=client.get("session_id"),
-                                                 strip=(rid, rid.replace("_", "-"), self.tag))
-        if not args.keep_dbs:
-            try:
-                drop_db(self.admin, db_name)
-            except Exception as exc:  # noqa: BLE001
-                rec["errors"].append(f"drop: {type(exc).__name__}")
-        scrub_record(rec, canary)
-        with self.cost_lock:
-            self.spent_usd += (rec.get("cost") or {}).get("usd") or 0.0
-        with self.runs_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
+            if not args.keep_dbs:
+                try:
+                    drop_db(self.admin, db_name)
+                except Exception as exc:  # noqa: BLE001
+                    rec["errors"].append(f"drop: {type(exc).__name__}")
+            scrub_record(rec, canary)
+            with self.cost_lock:
+                self.spent_usd += (rec.get("cost") or {}).get("usd") or 0.0
+            with self.runs_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
         v = rec.get("validity") or {}
         g = rec.get("grade") or {}
         self.log(f"{rid}: valid={v.get('valid')} compliance={g.get('compliance')} "
                  f"success={g.get('task_success')} bite={(rec.get('cost') or {}).get('bite')} "
-                 f"usd={(rec.get('cost') or {}).get('usd')} wall={rec['wall_s']}s "
+                 f"usd={(rec.get('cost') or {}).get('usd')} wall={rec.get('wall_s')}s "
                  f"errors={len(rec['errors'])} reasons={v.get('reasons')}")
         return rec
 
@@ -1342,20 +1529,26 @@ class Bench:
         self.log(f"plan: {len(items)} runs ({len(todo)} to go), arms={args.arms}, "
                  f"scenarios={len(scenarios)}, replicates={args.replicates}, "
                  f"client={args.client}, model={args.model}, effort={args.effort}")
+        # At most --parallel runs in flight; the budget is checked before each
+        # new submission, so it also binds in parallel mode.
+        pending = list(todo)
         with ThreadPoolExecutor(max_workers=args.parallel) as pool:
-            futures = []
-            for item in todo:
-                if args.total_budget_usd and self.spent_usd >= args.total_budget_usd:
-                    self.log(f"stopping: spent ${self.spent_usd:.2f} of the "
-                             f"${args.total_budget_usd:.2f} budget")
+            running = set()
+            while pending or running:
+                while pending and len(running) < args.parallel:
+                    if args.total_budget_usd and self.spent_usd >= args.total_budget_usd:
+                        self.log(f"stopping: spent ${self.spent_usd:.2f} of the "
+                                 f"${args.total_budget_usd:.2f} budget")
+                        pending.clear()
+                        break
+                    running.add(pool.submit(self.one, pending.pop(0), template, manifest))
+                if not running:
                     break
-                futures.append(pool.submit(self.one, item, template, manifest))
-                if args.parallel == 1:
-                    futures[-1].result()
-            for f in futures:
-                f.result()
-        records = [self.done()[run_id(self.tag, i)] for i in items
-                   if run_id(self.tag, i) in self.done()]
+                finished_now, running = wait(running, return_when=FIRST_COMPLETED)
+                for f in finished_now:
+                    f.result()
+        latest = self.records()
+        records = [latest[run_id(self.tag, i)] for i in items if run_id(self.tag, i) in latest]
         artifact = build_artifact(records, arms, args, manifest, self.tag)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("x", encoding="utf-8") as f:
@@ -1461,16 +1654,20 @@ def run_codex(run_dir: Path, project: Path, prompt: str, daemon: Daemon, *, mode
     stream = run_dir / "stream.jsonl"
     started = time.time()
     timed_out = False
-    with stream.open("wb") as out, (run_dir / "client.err").open("wb") as err:
-        proc = subprocess.Popen(cmd, cwd=project, env=env, stdin=subprocess.PIPE,
-                                stdout=out, stderr=err)
-        proc.stdin.write(prompt.encode("utf-8"))
-        proc.stdin.close()
-        try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            kill_tree(proc)
+    try:
+        with stream.open("wb") as out, (run_dir / "client.err").open("wb") as err:
+            proc = subprocess.Popen(cmd, cwd=project, env=env, stdin=subprocess.PIPE,
+                                    stdout=out, stderr=err)
+            proc.stdin.write(prompt.encode("utf-8"))
+            proc.stdin.close()
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                kill_tree(proc)
+    finally:
+        # The throwaway login copy carries the user's access and id tokens.
+        (home / "auth.json").unlink(missing_ok=True)
     return {"started": started, "ended": time.time(), "rc": proc.returncode,
             "timed_out": timed_out, **parse_codex_stream(stream)}
 
@@ -1602,9 +1799,13 @@ def client_version(client: str) -> str | None:
 
 
 def git_head() -> str | None:
+    """HEAD, suffixed ``-dirty`` when tracked files differ from it."""
     try:
-        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
                               text=True, timeout=30).stdout.strip() or None
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                               cwd=ROOT, capture_output=True, text=True, timeout=30).stdout.strip()
+        return f"{head}-dirty" if head and dirty else head
     except Exception:  # noqa: BLE001
         return None
 
@@ -1619,17 +1820,22 @@ def build_artifact(records: list[dict], arms: list[Arm], args, manifest: dict, t
             comparisons[f"{b.label} - {a.label}"] = paired(records, a.label, b.label, lam)
     aa = [(a, b) for i, a in enumerate(arms) for b in arms[i + 1:] if a.variant == b.variant]
     noise = aa_noise(comparisons[f"{aa[0][1].label} - {aa[0][0].label}"]) if aa else None
+    # Every ordered pair of distinct variants, challenger over incumbent,
+    # computed in that direction (a comparison key's order follows --arms).
     verdicts = {}
     if noise:
-        incumbent = aa[0][0]
+        invalid = invalid_shares(records, labels)
+        firsts = {}
         for arm in arms:
-            if arm.variant == incumbent.variant:
-                continue
-            key = f"{arm.label} - {incumbent.label}"
-            comp = comparisons.get(key)
-            if comp is None:
-                continue
-            verdicts[key] = accept(comp, noise)
+            firsts.setdefault(arm.variant, arm)
+        for incumbent in firsts.values():
+            for challenger in firsts.values():
+                if challenger.variant == incumbent.variant:
+                    continue
+                comp = paired(records, incumbent.label, challenger.label, lam)
+                verdicts[f"{challenger.label} over {incumbent.label}"] = accept(
+                    comp, noise, invalid_share={k: invalid[k] for k in
+                                                (incumbent.label, challenger.label)})
     totals = defaultdict(float)
     for r in records:
         for k in ("input_tokens", "output_tokens", "cache_read", "cache_creation", "bite", "usd"):
@@ -1705,6 +1911,62 @@ def render(artifact: dict) -> str:
     return "\n".join(lines)
 
 
+def regrade(args) -> Path:
+    """Re-apply the current grader and validity check to a tag's finished
+    runs, from their run directories and kept databases (``--keep-dbs``),
+    without re-running any client. Writes a new, separately named artifact."""
+    import types
+    work = check_work_root(args.work_root) / args.tag
+    runs_path = work / "runs.jsonl"
+    latest = {}
+    for line in runs_path.read_text(encoding="utf-8").splitlines():
+        rec = json.loads(line)
+        latest[rec["run_id"]] = rec
+    candidates = sorted(work.glob("template-*.json")) + sorted(work.parent.glob("template-*.json"))
+    manifest_path = args.manifest or (candidates[0] if len(candidates) == 1 else None)
+    if manifest_path is None:
+        raise SystemExit(f"pass --manifest; candidates: {[c.name for c in candidates]}")
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    arms = parse_arms(args.arms)
+    admin = admin_url()
+    out = []
+    for rid, old in latest.items():
+        rec = {k: old[k] for k in ("run_id", "arm", "variant", "scenario", "replicate",
+                                   "client", "model", "effort") if k in old}
+        rec.update(bench_version=BENCH_VERSION, regraded=True,
+                   errors=[e for e in old.get("errors", [])
+                           if not e.startswith(("grade:", "drop:"))])
+        run_dir = work / "runs" / rid
+        meta, _, _ = load_run(run_dir, old)
+        if not db_exists(admin, meta["db"]):
+            rec["errors"].append("regrade: the run database is gone (run without --keep-dbs)")
+        else:
+            try:
+                grade_into(rec, run_dir, manifest=manifest, dsn=db_url(admin, meta["db"]),
+                           tag=args.tag)
+            except Exception as exc:  # noqa: BLE001
+                rec["errors"].append(f"grade: {type(exc).__name__}: {str(exc)[:300]}")
+        scrub_record(rec, meta.get("canary"))
+        out.append(rec)
+    order = {run_id(args.tag, item): i for i, item in enumerate(
+        plan(arms, sorted({r["scenario"] for r in out}), args.replicates, args.seed))}
+    out.sort(key=lambda r: order.get(r["run_id"], len(order)))
+    first = out[0] if out else {}
+    ns = types.SimpleNamespace(client=first.get("client", "claude"), model=first.get("model"),
+                               effort=first.get("effort"), replicates=args.replicates,
+                               seed=args.seed, cost_lambda=args.cost_lambda,
+                               tool_search=args.tool_search, rotate=False)
+    artifact = build_artifact(out, arms, ns, manifest, args.tag)
+    artifact["fixture_digest"] = Path(manifest_path).stem.replace("template-", "")
+    artifact["regraded"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                            "runs": len(out), "note": args.note}
+    target = args.out or RESULTS_DIR / f"{ARTIFACT_PREFIX}{args.tag}-regraded.json"
+    with target.open("x", encoding="utf-8") as f:
+        json.dump(artifact, f, indent=2)
+    print(render(artifact))
+    return target
+
+
 def estimate(artifact: dict, variants: int, clients: int, replicates: int,
              scenarios: int | None) -> dict:
     """Extrapolate cost from an artifact's per-run means."""
@@ -1751,6 +2013,17 @@ def main(argv: list[str] | None = None) -> int:
                    help="hold each daemon start until this much commit is free")
     r.add_argument("--out", type=Path, default=None,
                    help="artifact path (default evals/results/memory-policy-bench-<tag>.json)")
+    g = sub.add_parser("regrade", help="re-grade a tag's kept runs with the current grader")
+    g.add_argument("--tag", required=True)
+    g.add_argument("--arms", required=True, help="the --arms the tag ran with, same order")
+    g.add_argument("--replicates", type=int, required=True)
+    g.add_argument("--seed", type=int, default=20260925)
+    g.add_argument("--cost-lambda", type=float, default=COST_LAMBDA)
+    g.add_argument("--tool-search", default="true")
+    g.add_argument("--manifest", type=Path, default=None)
+    g.add_argument("--work-root", type=Path, default=default_work_root())
+    g.add_argument("--out", type=Path, default=None)
+    g.add_argument("--note", default="")
     c = sub.add_parser("cleanup", help="drop leftover plbench_ run databases")
     c.add_argument("--all", action="store_true", help="templates too")
     p = sub.add_parser("report", help="re-render an artifact")
@@ -1765,17 +2038,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run":
         if "haiku" in args.model.lower():
             raise SystemExit("the bench never runs Haiku; pass an explicit model")
+        if args.client == "codex" and args.parallel > 1:
+            raise SystemExit("--client codex runs one at a time: its hook-trust step swaps "
+                             "the process environment for `codex app-server`")
         Bench(args).run()
+    elif args.cmd == "regrade":
+        regrade(args)
     elif args.cmd == "cleanup":
         admin = admin_url()
-        with _admin_connect(admin) as conn:
-            names = [n for (n,) in conn.execute(
-                "SELECT datname FROM pg_database WHERE datname LIKE %s",
-                (f"{BENCH_DB_PREFIX}%",)).fetchall()]
-        for name in names:
-            if args.all or not name.startswith(f"{BENCH_DB_PREFIX}tpl_"):
-                drop_db(admin, name)
-                print(f"dropped {name}")
+        rows = bench_databases(admin, templates=False)
+        if args.all:
+            rows += bench_databases(admin, templates=True)
+        for name, backends in rows:
+            if backends:          # a running bench's database
+                print(f"kept {name} ({backends} connection(s))")
+                continue
+            drop_db(admin, name)
+            print(f"dropped {name}")
     elif args.cmd == "report":
         print(render(json.loads(args.artifact.read_text(encoding="utf-8"))))
     else:

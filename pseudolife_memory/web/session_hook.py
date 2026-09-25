@@ -453,12 +453,14 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
 
 
 def _log_memory_policy(service: Any, session_id: str) -> None:
-    """Log the policy variant a registered session was served. The bank
-    keeps the session's key, and the arm is a pure function of that key and
-    the configured arm list (``ab_arm_index``), so an online A/B can be
-    recomputed from ``episodes.session_key`` for a window whose arm list is
-    known. A per-episode column would survive config changes too; that needs
-    a schema bump and is left to a follow-up."""
+    """Log the policy variant a registered session was served. The arm is a
+    pure function of the session id and the configured arm list
+    (``ab_arm_index``), so it can be recomputed wherever that id survives
+    (``episodes.session_key`` of a root that stored something; the
+    ``session_id`` of its searches when no shim sits in between). The bank
+    deletes roots that end with no stored entry and keeps no registration
+    record, so this log line is the only complete account; a durable
+    per-session record needs a schema bump and is left to a follow-up."""
     try:
         logger.info("memory-policy variant %s for session %s",
                     memory_policy_variant(service, session_id), session_id[:12])
