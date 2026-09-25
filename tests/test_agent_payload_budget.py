@@ -550,3 +550,48 @@ def test_committed_ledger_artifacts_carry_no_hostname() -> None:
             assert not led._HOST.search(text), (
                 f"{art.name} names the machine it was measured on")
         assert not led._UNSAFE.search(text), f"{art.name} carries PII"
+
+
+def test_ledger_daemon_get_refuses_redirects(monkeypatch) -> None:
+    """``Daemon.get`` sends the daemon bearer. Plain urlopen follows a 3xx
+    and copies Authorization to the redirect target, so the ledger must open
+    through the shim's no-redirect opener."""
+    import urllib.request
+
+    from pseudolife_memory.shim import _NoRedirectHandler
+
+    led = _ledger()
+    seen = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"ok": true}'
+
+    class _Opener:
+        def open(self, req, timeout=None):
+            seen["url"] = req.full_url
+            seen["auth"] = req.get_header("Authorization")
+            seen["timeout"] = timeout
+            return _Resp()
+
+    def fake_build_opener(*handlers):
+        seen["handlers"] = handlers
+        return _Opener()
+
+    def plain_urlopen(*args, **kwargs):
+        raise AssertionError("plain urlopen follows redirects with the bearer")
+
+    monkeypatch.setattr(urllib.request, "build_opener", fake_build_opener)
+    monkeypatch.setattr(urllib.request, "urlopen", plain_urlopen)
+    out = led.Daemon("http://x/", "tok").get("/api/search", q="a", k=None)
+    assert out == {"ok": True}
+    assert seen["handlers"] == (_NoRedirectHandler,)
+    assert seen["url"] == "http://x/api/search?q=a"
+    assert seen["auth"] == "Bearer tok"
+    assert seen["timeout"] == 120

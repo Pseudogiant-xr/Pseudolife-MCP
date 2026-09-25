@@ -300,6 +300,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Upgrading:** this changes the shim, a separate install that a
   daemon-only deploy never touches. Deploy with `ops/update.ps1 -All` (or
   `ops/update.sh --all`), then restart the clients.
+### Fixed (2026-09-25 — the daemon bearer is no longer forwarded across a redirect)
+- `pseudolife-mcp episode-start` / `episode-end` refuse HTTP redirects. They
+  POST with the `PSEUDOLIFE_MCP_TOKEN` bearer through `urllib`, whose
+  default opener follows 301/302/303 and copies `Authorization` to the
+  redirect target (verified on Python 3.11 and 3.12). A daemon URL that
+  redirected would therefore have handed the bearer to whichever host it
+  named. They now open through the shim's no-redirect handler, as the shim's
+  own episode calls already do. A 3xx fails the call, which the hook swallows
+  as it does any error. The installers stopped registering these hooks and
+  remove them when re-run, but a `settings.json` written before that still
+  calls these commands. The fix is in the client package, so it arrives with
+  an upgraded install, not a daemon redeploy.
+- `evals/agent_token_ledger.py` sends the daemon bearer on its REST reads and
+  now refuses redirects the same way.
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
