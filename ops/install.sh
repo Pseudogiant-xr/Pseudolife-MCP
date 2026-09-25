@@ -25,6 +25,10 @@
 #   --codex-hook-trust ask|yes|no     approve PseudoLife hooks (default: ask)
 #   --claude-plugin auto|skip        install the Claude Code plugin (hooks +
 #                                    commands) when claude is a client (default: auto)
+#   --claude-legacy-hooks ask|remove|keep  with the plugin installed, remove the
+#                                    hooks an earlier install wrote to
+#                                    ~/.claude/settings.json (default: ask -
+#                                    prompts; unattended runs keep them)
 #   --instructions append|skip|auto  standing memory block (default: auto -
 #                                    prompts only where no briefing hook exists)
 #   --claude-md append|skip          compatibility alias for --instructions
@@ -52,6 +56,7 @@ CLIENT=""
 CODEX_HOOKS=auto
 CODEX_HOOK_TRUST=ask
 CLAUDE_PLUGIN=auto
+CLAUDE_LEGACY_HOOKS=ask
 CLAUDE_MD=""
 INSTRUCTIONS=""
 AGENTS_FILE=""
@@ -74,6 +79,7 @@ while [ $# -gt 0 ]; do
         --codex-hooks) CODEX_HOOKS="$2"; shift 2 ;;
         --codex-hook-trust) CODEX_HOOK_TRUST="$2"; shift 2 ;;
         --claude-plugin) CLAUDE_PLUGIN="$2"; shift 2 ;;
+        --claude-legacy-hooks) CLAUDE_LEGACY_HOOKS="$2"; shift 2 ;;
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
         --instructions) INSTRUCTIONS="$2"; shift 2 ;;
         --agents-file) AGENTS_FILE="$2"; shift 2 ;;
@@ -107,6 +113,9 @@ case "$CODEX_HOOK_TRUST" in ask|yes|no) ;; *)
 esac
 case "$CLAUDE_PLUGIN" in auto|skip) ;; *)
     echo "invalid --claude-plugin '$CLAUDE_PLUGIN' (auto|skip)" >&2; exit 2 ;;
+esac
+case "$CLAUDE_LEGACY_HOOKS" in ask|remove|keep) ;; *)
+    echo "invalid --claude-legacy-hooks '$CLAUDE_LEGACY_HOOKS' (ask|remove|keep)" >&2; exit 2 ;;
 esac
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -622,6 +631,70 @@ describe_plugin() {  # $1 = state
 # <<< claude plugin <<<
 install_claude_plugin
 
+# >>> claude legacy hooks >>>
+# Installs from before the plugin wrote the briefing, coordination and
+# discipline hooks (and, before 2026-07-14, episode hooks) into
+# ~/.claude/settings.json. The plugin provides them now, so an upgraded user
+# runs each one twice. install-hook removes only the exact entries the
+# installers wrote, only while the plugin runs for every project, after a
+# backup. Section 9 calls this for a plugin-owned Claude; it asks first
+# unless --claude-legacy-hooks says otherwise.
+LEGACY_CLAUDE=""
+LEGACY_CLAUDE_BACKUP=""
+claude_legacy_answer() {  # prints the reply; fails when there is no terminal
+    [ -t 0 ] || return 1
+    printf 'Remove them from ~/.claude/settings.json (a timestamped backup is taken first)? [y/N] ' >&2
+    read -r legacy_reply || legacy_reply=""
+    printf '%s' "$legacy_reply"
+}
+cleanup_claude_legacy_hooks() {
+    legacy_rc=0
+    legacy_report=$("$repo/ops/install-hook.sh" --client claude --remove-legacy --dry-run \
+        </dev/null 2>&1) || legacy_rc=$?
+    case "$legacy_rc" in
+        0) ;;
+        3)  # Nothing to remove; a lookalike the user should review still shows.
+            case "$legacy_report" in *"by hand"*) printf '%s\n' "$legacy_report" ;; esac
+            return 0 ;;
+        4) LEGACY_CLAUDE=inactive; printf '%s\n' "$legacy_report"; return 0 ;;
+        *) LEGACY_CLAUDE=error; printf '%s\n' "$legacy_report" >&2; return 0 ;;
+    esac
+    step "Found hooks an earlier install wrote to ~/.claude/settings.json; the plugin provides them now:"
+    printf '%s\n' "$legacy_report"
+    legacy_choice="$CLAUDE_LEGACY_HOOKS"
+    if [ "$legacy_choice" = ask ]; then
+        if legacy_reply=$(claude_legacy_answer); then
+            case "$legacy_reply" in y|Y|yes|YES|Yes) legacy_choice=remove ;; *) legacy_choice=keep ;; esac
+        else
+            legacy_choice=keep
+            echo "    No terminal to ask: left them in place. Rerun with --claude-legacy-hooks remove to remove them."
+        fi
+    fi
+    if [ "$legacy_choice" != remove ]; then
+        LEGACY_CLAUDE=kept
+        return 0
+    fi
+    legacy_rc=0
+    legacy_report=$("$repo/ops/install-hook.sh" --client claude --remove-legacy \
+        </dev/null 2>&1) || legacy_rc=$?
+    printf '%s\n' "$legacy_report"
+    if [ "$legacy_rc" = 0 ]; then
+        LEGACY_CLAUDE=removed
+        LEGACY_CLAUDE_BACKUP=$(printf '%s\n' "$legacy_report" | sed -n 's/^Backed up -> //p')
+    else
+        LEGACY_CLAUDE=error
+    fi
+}
+describe_legacy_hooks() {  # $1 = state
+    case "$1" in
+        removed)  echo "[x] Old hooks            removed from ~/.claude/settings.json (backup: $LEGACY_CLAUDE_BACKUP)" ;;
+        kept)     echo "[!] Old hooks            still in ~/.claude/settings.json, so they run twice - rerun with --claude-legacy-hooks remove" ;;
+        inactive) echo "[-] Old hooks            kept in ~/.claude/settings.json - the plugin is not enabled for all projects" ;;
+        error)    echo "[!] Old hooks            not removed (see the error above) - remove them by hand (plugin/README.md, Migrating from installer hook wiring)" ;;
+    esac
+}
+# <<< claude legacy hooks <<<
+
 # ── 9. session lifecycle hooks (hook-capable providers only) ───────────────
 # Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
 # exact hook trust, runtime verification, and instruction fallback together.
@@ -631,7 +704,8 @@ if grep -q "pseudolife-memory@pseudolife-mcp" \
     CLAUDE_PLUGIN_INSTALLED=1
     case " $CLIENTS " in *" claude "*)
         step "pseudolife-memory Claude Code plugin detected — skipping Claude"
-        echo "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
+        echo "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+        echo "    compact memory core; the full block stays optional). The plugin no"
         echo "    longer bundles an MCP server, so the transport is still wired below." ;;
     esac
 else
@@ -656,6 +730,7 @@ for selected_client in $CLIENTS; do
     case "$selected_client" in claude|codex) ;; *) continue ;; esac
     if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
         HOOK_CLAUDE=plugin
+        cleanup_claude_legacy_hooks
         continue
     fi
     if [ "$selected_client" = codex ]; then
@@ -853,8 +928,9 @@ for selected_client in $CLIENTS; do
     if [ "$choice" = auto ]; then
         case "$selected_client" in
             claude)
-                # A session-start briefing hook already delivers the block —
-                # a standing-file copy would double-inject.
+                # Skipped by default. The settings.json SessionStart hook
+                # serves the live briefing only, not this block; the summary
+                # names the file to append it to.
                 choice=skip ;;
             gemini)
                 if [ -t 0 ]; then
@@ -1477,8 +1553,8 @@ describe_mcp() {  # $1 = state
 describe_instr() {  # $1 = state
     case "$1" in
         appended:*|present:*) echo "[x] Standing file        ${1#*:}" ;;
-        covered-by-plugin)    echo "[-] Standing file        plugin briefing covers it" ;;
-        covered-by-hooks)     echo "[x] Standing instructions verified session briefing covers them" ;;
+        covered-by-plugin)    echo "[-] Standing file        skipped - the plugin serves a compact memory core; append examples/CLAUDE.memory.md for the full guide" ;;
+        covered-by-hooks)     echo "[-] Standing file        skipped - verified hooks serve a compact memory core; append examples/CLAUDE.memory.md for the full guide" ;;
         present)             echo "[x] Standing file        existing Codex memory fallback" ;;
         appended)            echo "[x] Standing file        Codex memory fallback appended" ;;
         skipped:*) echo "[-] Standing file        skipped - append later: cat examples/CLAUDE.memory.md >> ${1#*:}" ;;
@@ -1502,6 +1578,7 @@ for selected_client in $CLIENTS; do
                 echo "    [x] Per-turn discipline  UserPromptSubmit hook"
             fi
             echo "    $(describe_plugin "$PLUGIN_CLAUDE")"
+            [ -z "$LEGACY_CLAUDE" ] || echo "    $(describe_legacy_hooks "$LEGACY_CLAUDE")"
             describe_instr "$INSTR_CLAUDE" | sed 's/^/    /' ;;
         claude-desktop)
             echo "  Claude Desktop"

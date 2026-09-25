@@ -450,10 +450,20 @@ class TestHealthCapacityFlag:
         # the daemon.
         assert payload["status"] == "ok"
 
-    def test_no_counts_leak_on_the_unauthenticated_probe(self):
-        payload = self._payload(_CmsWith({"band": "flat", "size": 4321}))
+    def test_no_counts_leak_on_the_unauthenticated_probe(self, monkeypatch):
+        from pseudolife_memory.utils import memory_headroom
+
+        # The payload also carries the host's memory byte counts. The old
+        # numeric sentinel 4321 matched a digit run in one of them on a CI
+        # runner (4321595392, 2026-09-25), so the sentinel is not a number
+        # and the counts are pinned to that value.
+        monkeypatch.setattr(memory_headroom, "read_memory_headroom",
+                            lambda: {"source": "cgroup",
+                                     "limit_bytes": 4321595392})
+        payload = self._payload(
+            _CmsWith({"band": "flat", "size": "count-sentinel"}))
         assert payload["capacity_warning"] is True
-        assert "4321" not in repr(payload)
+        assert "count-sentinel" not in repr(payload)
 
     def test_absent_below_threshold_or_before_init(self):
         assert "capacity_warning" not in self._payload(_CmsWith(None))

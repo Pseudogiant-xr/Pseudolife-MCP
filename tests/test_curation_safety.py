@@ -1036,7 +1036,8 @@ def test_requeue_before_a_fresh_action_forgets_that_opinion(
 ])
 def test_saved_opinion_guard_finds_a_slot_whose_name_contains_a_pipe(
         svc, mode, verdict, keep):
-    # Listing keys fold "|" to "-"; the judgment row keeps the evidence key.
+    # Listing keys escape "|" as "%7C"; the judgment row is written and read
+    # back under that same listing key (curation_pair_keys).
     svc.lesson_write(
         "ci|cd deploy", "approach", "Pin the runner image.", about="ci",
         outcome="correction", polarity="+", confidence=0.8, origin="agent")

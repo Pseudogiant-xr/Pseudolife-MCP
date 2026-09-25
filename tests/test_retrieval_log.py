@@ -214,6 +214,118 @@ def test_service_search_logs_and_get_reinforce_label(pg_conn, pg_url,
     assert svc._storage.retrieval_events_window() == []
 
 
+# ── episode attribution: the caller's episode, not the last-started one ──
+# One daemon serves many sessions, and the episode manager's process-wide
+# current_id is just the root someone started last. Events were stamped
+# with it (verified 2026-09-25 on master 59b87631), so a search from
+# session A after session B started landed under B's episode while the
+# same row's session_id said A.
+
+
+def _as_session(session_id):
+    from pseudolife_memory.writer_context import set_writer_context
+
+    return set_writer_context("w", session_id)
+
+
+def test_search_event_records_the_callers_episode(pg_conn, pg_url, tmp_path):
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.writer_context import reset_writer_context
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    a = svc.episode_start_session("sess-A", "session A")
+    b = svc.episode_start_session("sess-B", "session B")
+    # Precondition: B is the process-wide current episode, so the old
+    # attribution would name B.
+    assert svc._cms.episodes.current_id == b["id"]
+
+    tok = _as_session("sess-A")
+    try:
+        svc.store(text, source="test")
+        svc.search(text)
+    finally:
+        reset_writer_context(tok)
+
+    ev = svc._storage.retrieval_events_window()[-1]
+    assert ev["session_id"] == "sess-A"
+    assert ev["episode_id"] == a["id"]
+    # The same episode store() stamps on the caller's entries.
+    stored = [e for band in svc._cms.bands for e in band.entries
+              if e.text == text]
+    assert stored and stored[0].episode_id == ev["episode_id"]
+
+
+def test_search_event_takes_the_callers_open_sub_episode(pg_conn, pg_url,
+                                                         tmp_path):
+    """The leaf, as store() stamps it: an open sub-episode of the caller's
+    session wins over its root."""
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.writer_context import reset_writer_context
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.episode_start_session("sess-A", "session A")
+    tok = _as_session("sess-A")
+    try:
+        sub = svc.episode_start("A subtask")
+    finally:
+        reset_writer_context(tok)
+    svc.episode_start_session("sess-B", "session B")
+    assert svc._cms.episodes.current_id != sub["id"]
+
+    tok = _as_session("sess-A")
+    try:
+        svc.store(text, source="test")
+        svc.search(text)
+    finally:
+        reset_writer_context(tok)
+
+    assert svc._storage.retrieval_events_window()[-1]["episode_id"] == sub["id"]
+
+
+def test_search_event_without_a_session_has_no_episode(pg_conn, pg_url,
+                                                       tmp_path):
+    """No session identity (no X-PL-Session header, no fresh hook pointer)
+    records no episode rather than borrowing the last-started one."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.episode_start_session("sess-B", "session B")
+    svc.search(text)
+
+    ev = svc._storage.retrieval_events_window()[-1]
+    assert ev["session_id"] is None
+    assert ev["episode_id"] is None
+
+
+def test_search_event_opens_no_episode(pg_conn, pg_url, tmp_path):
+    """A session with nothing open logs no episode, and the search does not
+    open one to fill the column (store() lazily opens; search must not
+    leave empty episodes behind)."""
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.writer_context import reset_writer_context
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.episode_start_session("sess-B", "session B")
+    before = set(svc._cms.episodes.episodes)
+
+    tok = _as_session("sess-C")
+    try:
+        svc.search(text)
+    finally:
+        reset_writer_context(tok)
+
+    ev = svc._storage.retrieval_events_window()[-1]
+    assert ev["session_id"] == "sess-C"
+    assert ev["episode_id"] is None
+    assert set(svc._cms.episodes.episodes) == before
+
+
 class _StubReranker:
     """Cross-encoder stand-in (mirrors tests/test_reranker_margin_gate.py) —
     the component log must record ce scores without loading a model."""
@@ -665,6 +777,10 @@ def test_lesson_search_is_logged_apart_from_retrieval_events(
     assert served == [{"entity_norm": _norm_key("deploy engine to host"),
                        "attribute_norm": _norm_key("approach"),
                        "rank": 0, "score": res["entries"][0]["score"]}]
+    # The caller's own episode, resolved like the retrieval log's (#373).
+    stamped = pg_conn.execute(
+        "SELECT episode_id FROM lesson_search_events").fetchone()[0]
+    assert stamped == svc._caller_episode_id("s-1")
     assert len(svc._storage.retrieval_events_window()) == before
     # A miss is recorded too: "searched, found nothing" is the signal.
     assert svc.lesson_search("tune the reranker", min_score=0.99)["count"] == 0
