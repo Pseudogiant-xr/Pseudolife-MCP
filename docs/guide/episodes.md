@@ -44,11 +44,12 @@ reliably — without the agent having to remember:
      (default 6 h, the resume window; `0` disables) so a dead session stops
      attracting later tier-3 writes — SessionStart re-stamps it, so an active
      session (Claude Code re-fires the hook on resume/compact) stays live.
-   - **Ownership guard.** `memory_episode_end` and the direct
-     `POST /api/episode/end` with no `session_key` in the body can only
-     close a root episode whose `session_key` matches the caller's own
-     resolved identity — a session can no longer pop another, still-open
-     session's root by accident. No match is a no-op:
+   - **Ownership guard.** `memory_episode_end` pops only the caller's own
+     sub-episodes and never closes a session root, with or without a
+     handle. The direct `POST /api/episode/end` with no `session_key` in
+     the body can only close a root episode whose `session_key` matches the
+     caller's own resolved identity — a session can no longer pop another,
+     still-open session's root by accident. No match is a no-op:
      `{"closed": null, "reason": "no owned open session"}`. The idle
      reaper is separate: it closes any root idle past the threshold,
      using each root's own key — that's its job, not a guard bypass.
@@ -69,9 +70,12 @@ reliably — without the agent having to remember:
      2026-09-25 the shim opened a working-directory-titled episode at
      connect, which gave each Claude Code session a second root and left an
      empty root for every shim a host killed. One gap remains: `/clear` and
-     an in-session `/resume` give the session a new id but keep the shim's,
-     so the first write afterwards also reopens (or opens) a root under the
-     old id, even though the write itself lands on its handle's root.
+     an in-session `/resume` give the session a new id but keep the shim's.
+     Afterwards a write without a handle, and a `memory_store` even with
+     one, reopens the root under the old id (or opens one); a handle-less
+     write lands there, and a handle-less `memory_session_title` renames it.
+     `--continue`, or `--resume` without an id, can likewise launch the shim
+     with an id no hook registers.
    - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
      handle) still get episodes: the daemon **lazily opens** one on the
      first store of a new session (so empty sessions never leave a husk)

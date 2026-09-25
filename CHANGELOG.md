@@ -41,16 +41,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   idle reaper closed a root, `memory_session_title` without a handle opened
   a second root; it now reopens the closed one within the resume window, as
   a store does. `memory_episode_end` without a handle closed the session
-  root when no sub-episode was open; it now returns `{}` and leaves the root
-  to the session lifecycle, as the tool always described and as the handle
-  path already did.
+  root when no sub-episode was open; for a session-keyed root it now
+  returns `{}` and leaves the root to the session lifecycle, as the tool
+  always described and as the handle path already did. Keyless roots
+  (embedded and legacy callers) close as before.
 - Limits: `/clear` and an in-session `/resume` give the session a new id,
-  but the shim keeps its launch id. The first write after either, with or
-  without a handle, reopens the root under the launch id (the root
-  SessionEnd just closed, within the resume window) or, if SessionEnd pruned
-  it empty, opens a new empty one; the write itself still lands on its
-  handle's root. `--continue`, or `--resume` without an id, may launch the
-  shim with an id no hook registers, so its writes open a root of their own.
+  but the shim keeps its launch id. Afterwards any write without a handle,
+  and a `memory_store` even with one, reopens the root under the launch id
+  (the root SessionEnd just closed, within the resume window) or, if
+  SessionEnd pruned it empty, opens a new empty one. A handle-less write
+  lands on that root and a handle-less `memory_session_title` renames it; a
+  store's entry with a handle still lands on the handle's root. The
+  daemon-side fix is a follow-up. `--continue`, or `--resume` without an
+  id, may launch the shim with an id no hook registers, so its writes open
+  a root of their own.
   Shim sessions no longer take their title from the working directory: an
   episode the daemon opens starts as `session - <time>`, store results carry
   an `episode_hint` until the agent names it, and a title still generic at
