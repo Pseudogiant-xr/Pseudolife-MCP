@@ -158,6 +158,8 @@ ORDINARY = [
     "sort_key: created_at_2026_09_26_then_agent_id_asc_v2",
     "idempotency_key=send-2026-09-26-relay-6-retry-3-of-5",
     "keyboard=us-intl-2026-layout-with-dead-keys",
+    # A placeholder in a prefix's shape is not a key.
+    j("sk", "_live_", "xxxxxxxxxxxxxxxxxxxxxxxx"),
     "set PSEUDOLIFE_MCP_TOKENS=editor:<token>,reviewer:<token>",
     "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>",
     "Authorization: Bearer $PSEUDOLIFE_MCP_TOKEN",
@@ -206,6 +208,14 @@ def _refused(call, secret):
     assert secret not in repr(caught.value) and secret not in str(caught.value.args)
 
 
+def _clear_leases(store):
+    """The bench server also holds the production bank: prove this is a
+    disposable database before truncating anything."""
+    from pseudolife_memory.storage.schema import assert_disposable_database
+    assert_disposable_database(store.storage.conn)
+    store.storage.conn.execute("TRUNCATE coordination_leases, coordination_lease_waiters")
+
+
 def _log(store):
     return store.storage.conn.execute(
         "SELECT event, payload, body FROM coordination_events ORDER BY seq").fetchall()
@@ -236,7 +246,7 @@ def test_status_updates_and_registration_refuse_a_secret(store):
 
 
 def test_a_lease_purpose_refuses_a_secret(store):
-    store.storage.conn.execute("TRUNCATE coordination_leases, coordination_lease_waiters")
+    _clear_leases(store)
     a = store.register("alice")
     before = _log(store)
     _refused(lambda: store.acquire_lease(*creds(a), name="gpu", purpose=f"with {SLACK}"), SLACK)
@@ -259,7 +269,7 @@ def test_every_scope_field_an_agent_sets_refuses_a_secret(store, field):
 
 
 def test_a_lease_name_or_request_id_refuses_a_secret(store):
-    store.storage.conn.execute("TRUNCATE coordination_leases, coordination_lease_waiters")
+    _clear_leases(store)
     a, b = pair(store)
     before = _log(store)
     name = f"claim:{GITHUB}"
