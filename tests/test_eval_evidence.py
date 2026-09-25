@@ -9450,6 +9450,16 @@ def _floor_cell(floor: float, guard: float, key: str, scale: float = 1.0):
     return read
 
 
+def _policy(stratum: str, policy: str, key: str, scale: float = 1.0,
+            index: int | None = None):
+    def read(d):
+        row = next(p for p in d["strata"][stratum]["policies"]
+                   if p["policy"] == policy)
+        v = row[key] if index is None else row[key][index]
+        return scale * float(v)
+    return read
+
+
 for _cid, _doc, _needle, _val, _stated, _places in [
     ("replay-abst-searches", RETRIEVAL_GUIDE,
      "Over 1,030 real agent searches",
@@ -9488,6 +9498,61 @@ for _cid, _doc, _needle, _val, _stated, _places in [
     ("replay-abst-config-fifth", CONFIG_GUIDE,
      "embedder, and the pair this guide used to recommend would flag a fifth",
      _floor_cell(0.70, 0.65, "flagged_labelled_share"), 0.2, 1),
+    # The CHANGELOG entry (2026-09-25): the top_k 8 -> 6 default and the
+    # digest report restate the same artifact.
+    ("replay-cl-default-width-searches", CHANGELOG,
+     "scored what 262 default-width agent",
+     lambda d: d["strata"]["default_width"]["searches"], 262, 0),
+    ("replay-cl-k6-kept", CHANGELOG,
+     "Cutting to 6 kept 90.5% of the used hits (Wilson 95% 85.3-94.0)",
+     _policy("default_width", "top_k=6", "used_kept_share", 100.0), 90.5, 1),
+    ("replay-cl-k6-wilson-lo", CHANGELOG,
+     "Cutting to 6 kept 90.5% of the used hits (Wilson 95% 85.3-94.0)",
+     _policy("default_width", "top_k=6", "used_kept_wilson95", 100.0, 0),
+     85.3, 1),
+    ("replay-cl-k6-wilson-hi", CHANGELOG,
+     "Cutting to 6 kept 90.5% of the used hits (Wilson 95% 85.3-94.0)",
+     _policy("default_width", "top_k=6", "used_kept_wilson95", 100.0, 1),
+     94.0, 1),
+    ("replay-cl-k6-rows", CHANGELOG,
+     "at 75.0% of the rows; cutting to 4 kept 77.1%.",
+     _policy("default_width", "top_k=6", "rows_kept_share", 100.0), 75.0, 1),
+    ("replay-cl-k4-kept", CHANGELOG,
+     "at 75.0% of the rows; cutting to 4 kept 77.1%.",
+     _policy("default_width", "top_k=4", "used_kept_share", 100.0), 77.1, 1),
+    ("replay-cl-default-reach", CHANGELOG, "Only 25.4% of agent",
+     lambda d: 100.0 * next(x["share"] for x in d["requested_top_k"]
+                            if x["top_k"] == 8), 25.4, 1),
+    ("replay-cl-abst-searches", CHANGELOG,
+     "nothing matched, meaning no entry and no cortex fact; over 1,030 agent",
+     lambda d: d[_ABST]["searches"], 1030, 0),
+    ("replay-cl-abst-fired", CHANGELOG, "searches it fired on none.",
+     lambda d: d[_ABST]["served_nothing"], 0, 0),
+    ("replay-cl-old-pair-flags", CHANGELOG,
+     "on current agent traffic it would flag 26% of",
+     _floor_cell(0.70, 0.65, "flagged_share", 100.0), 26, 0),
+    ("replay-cl-old-pair-false", CHANGELOG,
+     "searches, including 20% of the searches whose hits the agent then used.",
+     _floor_cell(0.70, 0.65, "flagged_labelled_share", 100.0), 20, 0),
+    ("replay-cl-digest-ratio", CHANGELOG,
+     "served digests are used at 0.50x",
+     lambda d: d["digests"]["rank_matched_all_rows"]["rank_matched_ratio"],
+     0.50, 2),
+    ("replay-cl-digest-ratio-lo", CHANGELOG, "0.36-0.64). 52% of unfiltered",
+     lambda d: d["digests"]["rank_matched_all_rows"][
+         "rank_matched_ratio_session_bootstrap95"][0], 0.36, 2),
+    ("replay-cl-digest-ratio-hi", CHANGELOG, "0.36-0.64). 52% of unfiltered",
+     lambda d: d["digests"]["rank_matched_all_rows"][
+         "rank_matched_ratio_session_bootstrap95"][1], 0.64, 2),
+    ("replay-cl-digest-reach", CHANGELOG, "0.36-0.64). 52% of unfiltered",
+     lambda d: 100.0 * d["digests"]["presence"][
+         "searches_serving_a_digest_share"], 52, 0),
+    ("replay-cl-digest-rows", CHANGELOG,
+     "Digests are 15% of the rows unfiltered searches serve, but 8% of the hits",
+     lambda d: 100.0 * d["digests"]["presence"]["digest_row_share"], 15, 0),
+    ("replay-cl-digest-used", CHANGELOG,
+     "Digests are 15% of the rows unfiltered searches serve, but 8% of the hits",
+     lambda d: 100.0 * d["digests"]["presence"]["digest_used_share"], 8, 0),
 ]:
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(SERVING_REPLAY,),
