@@ -504,6 +504,46 @@ def test_hook_session_start_token_with_bearer_appends_briefing(svc):
     assert st == 200 and b"(fixture)" in body
 
 
+def test_installer_hook_command_injects_what_the_plugin_hook_serves(svc, monkeypatch, capsys):
+    """`pseudolife-mcp briefing --hook-json` is the SessionStart hook the
+    installer writes for Claude Code without the plugin. It must inject what
+    the plugin hook's endpoint serves — the memory core first, then the
+    briefing — not the bare /api/briefing (2026-09-25 review). The CLI's
+    HTTP read is routed through the real console app here."""
+    import sys
+    from urllib.parse import urlsplit
+    from pseudolife_memory import briefing_cli
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    app = _app(svc, token="secret")
+
+    class _Resp:
+        def __init__(self, body): self._b = body
+        def read(self): return self._b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class _Opener:
+        def open(self, req, timeout=5):
+            parts = urlsplit(req.full_url)
+            headers = [(k.lower().encode(), v.encode()) for k, v in req.header_items()]
+            st, body = call(app, "GET", parts.path, headers=headers, query=parts.query)
+            assert st == 200
+            return _Resp(body)
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: _Opener())
+    monkeypatch.setattr("pseudolife_memory.shim.probe_health",
+                        lambda url, timeout=0.25: {"status": "ok"})
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "secret")
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing", "--hook-json"])
+    briefing_cli.run_briefing()
+    context = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    plugin = call(app, "GET", "/api/hook/session-start",
+                  headers=[(b"authorization", b"Bearer secret")])[1].decode("utf-8")
+    assert context == plugin.strip()
+    assert context.startswith(STARTUP_MEMORY_CORE)
+    assert "(fixture)" in context
+
+
 def test_hook_session_start_briefing_failure_still_serves(svc):
     def boom(**kw):
         raise RuntimeError("boom")

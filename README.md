@@ -578,7 +578,10 @@ daemon is healthy:
 It reinstalls the shim behind each Claude Code / Codex registration where
 that is safe (pipx, or the registered interpreter's pip; a shim running
 straight from this checkout is already live and is named instead, since
-its metadata refresh needs every session closed), refreshes the plugin
+its metadata refresh needs every session closed; on Windows a shim whose
+virtualenv or launcher a session is running from is skipped, with the
+sessions counted and the rerun named, because pip or pipx would leave it
+half-removed), refreshes the plugin
 cache by comparing bytes against the marketplace clone (the plugin's
 version string only moves with a release, so `/plugin update` alone would
 say "already latest"), and reports whether Codex's hook copy matches the
@@ -843,7 +846,8 @@ the core loop through protocol-level `instructions`; the shim adds the
 messageboard check-in when its coordination adapter is up.
 The plugin's memory SessionStart hook (also used by verified Codex hooks)
 delivers a short operating guide and a bounded briefing; without the plugin,
-the installer's Claude Code `settings.json` hook delivers the briefing alone.
+the installer's Claude Code `settings.json` hook
+(`pseudolife-mcp briefing --hook-json`) delivers the same two.
 A separate coordination hook asks the agent to set its project,
 task and status, discover peers, and read pending messages, but only where
 the board is on for that credential (it is on by default behind bearer
@@ -1092,7 +1096,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v43 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v44 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 

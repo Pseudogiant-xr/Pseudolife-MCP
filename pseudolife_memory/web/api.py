@@ -274,7 +274,8 @@ def build_console_app(
                 await _send_bytes(send, 500, b"static error", "text/plain")
             return
 
-        # 4) plugin SessionStart hook context (plain text, 200 always). The
+        # 4) plugin SessionStart hook context (plain text, 200 always; also
+        # read by `pseudolife-mcp briefing --hook-json`). The
         # instructions half is public repo content, so an unauthorized
         # request (token set, no bearer) still gets it — but never the
         # briefing, which is memory content. Loopback gating as for /api.

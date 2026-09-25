@@ -127,6 +127,10 @@ CALLER_HOLDS_LOCK = {
     # record_outcome's lock, so it inherits the same requirement (the
     # fixpoint verifies it).
     "_label_used_entries",
+    # v44 records: the lesson-search log row (inside lesson_search's lock)
+    # and the used_ids partition on the signal row (inside record_outcome's).
+    "_log_lesson_search",
+    "_record_signal_used_ids",
     "_track_slot_reads",
     "_persist_episodes",
     "_persist_tombstones",
