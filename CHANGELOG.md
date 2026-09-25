@@ -521,6 +521,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Windows it left `torch.cuda.is_available()` true, so the embedder still
   loaded on the GPU.
 
+### Fixed (2026-09-25 — queued full test suites take the lock in arrival order)
+- A full run waiting for the suite lock now waits its turn. Each waiter
+  holds a ticket in `~/.pseudolife-mcp/locks/full-suite.queue/`, named for
+  its arrival time and pid, and only the earliest live waiter may take the
+  lock. Before, every waiter polled the lock and whichever polled first
+  after a release won: on 2026-09-25, with eight suites queued, one run
+  waited from 13:48 to past 14:57 while later arrivals went ahead. A waiter
+  that dies loses its ticket's OS lock, so later waiters pass its ticket
+  over at once (and delete it after 30 s); Ctrl-C and a `fail` refusal
+  remove it at once. `fail` now also refuses while an earlier waiter is
+  queued, and the waiting notice names the waiters ahead. A waiter stopped
+  while first in line (a debugger, a Windows console mid-selection) keeps
+  its place until it resumes or ends; the notice names its pid. A run from
+  a checkout older than this change takes no ticket and races for the lock
+  as before; the lock file is unchanged, so old and new runs still exclude
+  each other.
+- `CONTRIBUTING.md`: a docs-only change can skip the local full suite and
+  run the doc guards plus the tests naming each touched file; CI must still
+  pass before merge.
+
+### Added (2026-09-25 — a machine can allow more than one full test suite at once)
+- The suite lock has a slot count: `PSEUDOLIFE_SUITE_SLOTS`, else a
+  `full-suite.slots` file in the lock directory, else 1. With 2, two full
+  runs hold the lock at once; waiters still take free slots in arrival
+  order, and the waiting notice and `fail` refusal name every holder. Slot 0
+  keeps the file names `full-suite.lock` and `full-suite.holder.json`, so
+  runs from older checkouts share it (and never see a second slot); slot k
+  is `full-suite.k.lock` with its own `full-suite.k.holder.json`. Queued
+  runs re-read the count at every poll, so raising or lowering it reaches
+  the backlog at once. A count that is not a whole number from 1 to 8 is a
+  usage error that names its source; the file may carry a UTF-8 byte-order
+  mark, and a UTF-16 file (Windows PowerShell 5.1's `>`) is reported as
+  such. The default stays 1, and so does the maintainer's host: a two-slot
+  trial on 2026-09-25 ran each suite in ~50 min instead of ~17, with
+  load-timeout failures.
+
 ### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
 - **Hydration fails closed.** If loading cortex facts, world facts or lessons
   from Postgres failed at startup, the daemon logged a warning and carried on

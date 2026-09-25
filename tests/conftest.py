@@ -31,8 +31,9 @@ os.environ["PSEUDOLIFE_EMBEDDING_CPU_DTYPE"] = "fp32"
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# CPU-only unless PSEUDOLIFE_TEST_CUDA=1, and one full suite per machine —
-# tests/suite_lock.py carries the measurements. The GPU is hidden here,
+# CPU-only unless PSEUDOLIFE_TEST_CUDA=1, and one full suite per machine
+# unless its lock allows more slots — tests/suite_lock.py carries the
+# measurements. The GPU is hidden here,
 # before anything can import torch; the lock is taken in pytest_configure.
 from tests import suite_lock  # noqa: E402
 
