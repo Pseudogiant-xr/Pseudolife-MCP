@@ -17,17 +17,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   five minutes (or its own ttl, if shorter) or lose it to the next waiter.
   Every grant raises a fence number. Grants, releases, expiries and
   operator breaks are audit-log events; renewals are not, like heartbeats.
-  Every lease call, listing and prune pass first settles lapsed holds, so a
-  queue moves on even when its holder died without a word, and prune never
-  removes an agent that holds a live lease.
+  Every acquire, listing and prune pass first settles lapsed holds, so a
+  queue moves on even when its holder died without a word. Prune drops a
+  departed agent's place in every queue before anything is granted, never
+  removes an agent that holds a live lease, and forgets a lease row left
+  free and unqueued for a week. Restore recovery frees every lease and
+  empties every queue, since it revokes every credential.
+- A renewal only extends the hold: repeating the estimate a hold already
+  carries leaves its expected end alone, so a stalled holder that keeps
+  renewing still reads stale. A new estimate or purpose is logged as a
+  `lease_update`. Lease names refuse control and invisible format
+  characters (zero-width, bidi), so two names that look alike are one lease.
 - REST gains `lease` (acquire, renew or queue once), `release` and
   `leases` (a listing that needs only the bearer). A full queue is a
   transient 429.
 - `memory_agents` gains `claim` and `release`: a session-held lease such as
   `coordinator:<project>` or `claim:<path>`, whose `status` is its purpose.
   A model renews by claiming again; a `claim:` lease lasts a day between
-  renewals and any other an hour. The roster lists every held or queued
-  lease. A claim is advisory: it tells peers, it blocks no edit.
+  renewals and any other an hour. The roster lists held and queued leases,
+  resource leases before claims, and says when the page cut some off. A
+  claim is advisory: it tells peers, it blocks no edit. A queued model is
+  not told when its turn comes: it sees the grant the next time it lists or
+  claims, and must renew within the five-minute window.
 - A status can carry an expected duration: `memory_agents update` takes
   `expect` (seconds), and past it the roster marks the row
   `status_overdue`. The audit log records the expectation only when it

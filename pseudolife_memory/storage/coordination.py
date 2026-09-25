@@ -2,9 +2,13 @@
 
 Mutation paths: bank identity establishment, register, update, attach, heartbeat,
 detach, send, receive (first read), acknowledge, attempt, prune, restore
-recovery and operator rebind. Every one of them except heartbeat appends to the
-audit log (``coordination_events``) in its own transaction; see ``_append``.
-There is no derived cache.
+recovery and operator rebind, and the v45 resource leases: acquire (grant,
+queue, renew), release, operator break, and the settling any lease call,
+listing, prune or recovery does (expire, grant). Every one of them except a
+heartbeat and a plain lease renewal appends to the audit log
+(``coordination_events``) in its own transaction; see ``_append``. A renewal
+that changes a lease's purpose or estimate is logged. There is no derived
+cache.
 Callers serialize access to the mailbox connection with the coordination lock,
 never the service lock (``CoordinationConnection`` below). SQL row locks also
 protect independent connections; send locks both agents in ID order to avoid
@@ -689,8 +693,9 @@ class CoordinationStore:
                                        and now > row["status_expires_at"])
             agents.append(agent)
         self._stamp_status_age(agents, now)
+        leases = self.list_leases(limit=MAX_PAGE)
         return {"agents": agents, "truncated": len(rows) > limit, "idle_omitted": idle,
-                "leases": self.list_leases(limit=MAX_PAGE)["leases"]}
+                "leases": leases["leases"], "leases_truncated": leases["truncated"]}
 
     def _stamp_status_age(self, agents, now):
         """Say when each listed peer's status was set, and mark it stale past
@@ -740,10 +745,11 @@ class CoordinationStore:
 
     @staticmethod
     def _lease_args(name, ttl=None, expect=None, purpose=None):
+        # No control, format (zero-width, bidi), surrogate or unassigned
+        # characters: two names that render alike must be one lease.
         if (not isinstance(name, str) or not name or name != name.strip()
                 or len(name) > MAX_LEASE_NAME
-                or any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF
-                       for c in name)):
+                or any(unicodedata.category(c)[0] == "C" for c in name)):
             raise CoordinationError("invalid_lease")
         if ttl is not None and (type(ttl) is not int
                                 or not LEASE_TTL_MIN <= ttl <= LEASE_TTL_MAX):
@@ -757,16 +763,16 @@ class CoordinationStore:
     def _grant(self, name, agent_id, principal, *, now, hold, expect, purpose):
         return self._one(
             "UPDATE coordination_leases SET holder_agent_id=%s,holder_principal=%s,purpose=%s,"
-            "fence=fence+1,acquired_at=%s,expires_at=%s,expected_end=%s WHERE name=%s "
-            "RETURNING *",
-            (agent_id, principal, purpose, now, now + hold,
+            "fence=fence+1,acquired_at=%s,expires_at=%s,expect=%s,expected_end=%s,"
+            "freed_at=NULL WHERE name=%s RETURNING *",
+            (agent_id, principal, purpose, now, now + hold, expect,
              None if expect is None else now + expect, name))
 
-    def _vacate(self, name):
+    def _vacate(self, name, now):
         return self._one(
             "UPDATE coordination_leases SET holder_agent_id=NULL,holder_principal='',"
-            "purpose='',acquired_at=NULL,expires_at=NULL,expected_end=NULL "
-            "WHERE name=%s RETURNING *", (name,))
+            "purpose='',acquired_at=NULL,expires_at=NULL,expect=NULL,expected_end=NULL,"
+            "freed_at=%s WHERE name=%s RETURNING *", (now, name))
 
     def _settle(self, name, now, events):
         """Expire a lapsed hold on ``name`` and grant a free lease to the head
@@ -780,14 +786,15 @@ class CoordinationStore:
         if row["holder_agent_id"] is not None and row["expires_at"] <= now:
             events.append(self._event("lease_expire", {"name": name, "fence": row["fence"]},
                                       actor="daemon", agent_id=row["holder_agent_id"]))
-            row = self._vacate(name)
+            row = self._vacate(name, now)
         if row["holder_agent_id"] is None:
-            # A waiter whose address prune removed is passed over here and
-            # deleted by prune itself.
+            # A waiter whose address is gone (prune) or revoked (restore
+            # recovery) could never take its turn up; it is passed over here
+            # and its row removed by prune or recover.
             waiter = self._one(
                 "SELECT w.* FROM coordination_lease_waiters w JOIN coordination_agents a "
-                "ON a.agent_id=w.agent_id WHERE w.name=%s ORDER BY w.ticket LIMIT 1 "
-                "FOR UPDATE OF w", (name,))
+                "ON a.agent_id=w.agent_id AND a.credential_hash IS NOT NULL "
+                "WHERE w.name=%s ORDER BY w.ticket LIMIT 1 FOR UPDATE OF w", (name,))
             if waiter is not None:
                 self.storage.conn.execute(
                     "DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s",
@@ -866,16 +873,26 @@ class CoordinationStore:
             scope = {"principal": principal, "agent_id": agent_id,
                      "project": agent["project"], "task": agent["task"]}
             if row["holder_agent_id"] == agent_id:
-                sets, values = ["expires_at=%s"], [now + ttl]
-                if expect is not None:
-                    sets.append("expected_end=%s")
-                    values.append(now + expect)
-                if purpose is not None:
+                # A renewal only extends the hold. Repeating the estimate
+                # the hold already carries leaves its expected end alone,
+                # so a stalled holder that keeps renewing still reads
+                # stale; a new estimate or purpose is a logged change.
+                sets, values, changed = ["expires_at=%s"], [now + ttl], {}
+                if expect is not None and expect != row["expect"]:
+                    sets += ["expect=%s", "expected_end=%s"]
+                    values += [expect, now + expect]
+                    changed["expect"] = expect
+                if purpose is not None and purpose != row["purpose"]:
                     sets.append("purpose=%s")
                     values.append(purpose)
+                    changed["purpose"] = purpose
                 self.storage.conn.execute(
                     "UPDATE coordination_leases SET " + ",".join(sets) + " WHERE name=%s",
                     (*values, name))
+                if changed:
+                    events.append(self._event(
+                        "lease_update", {"name": name, "fence": row["fence"], **changed},
+                        **scope))
             elif row["holder_agent_id"] is None:
                 row = self._grant(name, agent_id, principal, now=now, hold=ttl, expect=expect,
                                   purpose=purpose or "")
@@ -912,7 +929,7 @@ class CoordinationStore:
             row = self._one("SELECT * FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
             events = []
             if row is not None and row["holder_agent_id"] == agent_id:
-                self._vacate(name)
+                self._vacate(name, now)
                 events.append(self._event("lease_release",
                                           {"name": name, "fence": row["fence"]}, **scope))
                 self._settle(name, now, events)
@@ -947,7 +964,10 @@ class CoordinationStore:
         rows = self._all(
             "SELECT l.*,a.label FROM coordination_leases l LEFT JOIN coordination_agents a "
             "ON a.agent_id=l.holder_agent_id WHERE " + busy
-            + (" AND l.name=%s" if name is not None else "") + " ORDER BY l.name LIMIT %s",
+            + (" AND l.name=%s" if name is not None else "")
+            # Resource leases (suite, GPU, coordinator) before the day-long
+            # work-area claims, so a page of claims never hides them.
+            + " ORDER BY l.name LIKE 'claim:%%', l.name LIMIT %s",
             ((name,) if name is not None else ()) + (limit + 1,))
         leases = []
         for row in rows[:limit]:
@@ -975,7 +995,7 @@ class CoordinationStore:
             row = self._one("SELECT * FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
             if row is None or row["holder_agent_id"] is None:
                 return {"name": name, "broken": False, "was_held_by": None}
-            self._vacate(name)
+            self._vacate(name, now)
             events = [self._event("lease_break", {"name": name, "fence": row["fence"]},
                                   actor="operator", agent_id=row["holder_agent_id"])]
             self._settle(name, now, events)
@@ -1331,9 +1351,21 @@ class CoordinationStore:
         now = self.clock()
         ephemeral = "a.capabilities->>'resumable'='false'"
         with self.storage._txn():
-            # Resource leases first: a lapsed hold expires (and its queue moves
-            # on) before the address that held it can be removed, so the log
-            # says who lost it; a live holder is never removed below.
+            # Resource leases first. A waiter whose address this pass will
+            # remove loses its place before anything is granted, so no turn
+            # goes to a session that is gone; then a lapsed hold expires (and
+            # its queue moves on) before the address that held it can be
+            # removed, so the log says who lost it. A live holder is never
+            # removed below.
+            window = f"CASE WHEN {ephemeral} THEN %s ELSE %s END"
+            removable = ("(a.lease_until IS NULL OR a.lease_until<={w}) AND a.last_activity<={w} "
+                         "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
+                         "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id)"
+                         ).format(w=window)
+            retention = (now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION) * 2
+            self.storage.conn.execute(
+                "DELETE FROM coordination_lease_waiters w USING coordination_agents a "
+                "WHERE a.agent_id=w.agent_id AND " + removable, retention)
             events = []
             self._settle_due(now, events)
             expired = sorted(r["message_id"] for r in self._all(
@@ -1347,26 +1379,29 @@ class CoordinationStore:
             # live shim cut off by a restart or a host sleep, whose recovery
             # re-attach does not refresh last_activity; only a lease gone for
             # the whole window, or a detach, says the process has ended.
-            window = f"CASE WHEN {ephemeral} THEN %s ELSE %s END"
             agents = sorted(r["agent_id"] for r in self._all(
-                "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR "
-                f"a.lease_until<={window}) AND a.last_activity<={window} "
-                "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
-                "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id) "
-                "AND NOT EXISTS (SELECT 1 FROM coordination_leases l "
-                "WHERE l.holder_agent_id=a.agent_id) "
-                "RETURNING a.agent_id",
-                (now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION) * 2))
+                "DELETE FROM coordination_agents a WHERE " + removable
+                + " AND NOT EXISTS (SELECT 1 FROM coordination_leases l "
+                "WHERE l.holder_agent_id=a.agent_id) RETURNING a.agent_id", retention))
             # A removed address leaves no place in any queue (the lease tables
             # carry no foreign keys; see the v45 DDL).
             self.storage.conn.execute(
                 "DELETE FROM coordination_lease_waiters w WHERE NOT EXISTS "
                 "(SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id)")
+            # A lease row outlives each hold so its fence keeps rising; one
+            # left free and unqueued for the request-key window is forgotten,
+            # well past the longest hold (a day) whose fence could matter.
+            leases = sorted(r["name"] for r in self._all(
+                "DELETE FROM coordination_leases l WHERE l.holder_agent_id IS NULL "
+                "AND l.freed_at<=%s AND NOT EXISTS (SELECT 1 FROM coordination_lease_waiters w "
+                "WHERE w.name=l.name) RETURNING l.name", (now - DEDUPE_RETENTION,)))
             if expired:
                 events.append(self._event("expire", {"message_ids": expired}, actor="daemon"))
-            if removed or agents:
-                events.append(self._event("prune", {"message_ids": removed, "agent_ids": agents},
-                                          actor="daemon"))
+            if removed or agents or leases:
+                pruned = {"message_ids": removed, "agent_ids": agents}
+                if leases:
+                    pruned["leases"] = leases
+                events.append(self._event("prune", pruned, actor="daemon"))
             head, audit_removed = None, 0
             if audit_retention_days:
                 cutoff = audit_cutoff(now, audit_retention_days)
@@ -1404,11 +1439,30 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET credential_hash=NULL,"
                 "wake_enabled=FALSE,attachment_id=NULL,lease_until=NULL,generation=generation+1,"
                 "lifecycle='revoked' RETURNING agent_id"))
+            # Every credential is revoked, so no holder can renew or release
+            # and no waiter can take a turn up: free every lease and empty
+            # every queue. A bank restored from before v45 has neither table.
+            freed, waiters = [], 0
+            if self._one("SELECT to_regclass('coordination_leases') IS NOT NULL "
+                         "AS present")["present"]:
+                now = self.clock()
+                freed = sorted(r["name"] for r in self._all(
+                    "UPDATE coordination_leases SET holder_agent_id=NULL,holder_principal='',"
+                    "purpose='',acquired_at=NULL,expires_at=NULL,expect=NULL,expected_end=NULL,"
+                    "freed_at=%s WHERE holder_agent_id IS NOT NULL RETURNING name", (now,)))
+                waiters = self.storage.conn.execute(
+                    "DELETE FROM coordination_lease_waiters").rowcount
             audited = self._audit_present()
             if audited:
-                self._append([self._event("recover", {"agent_ids": revoked}, actor="operator")],
+                recovered = {"agent_ids": revoked}
+                if freed or waiters:
+                    recovered.update(leases_freed=freed, waiters_removed=waiters)
+                self._append([self._event("recover", recovered, actor="operator")],
                              self.clock())
-        return {"revoked": len(revoked), "audited": audited}
+        result = {"revoked": len(revoked), "audited": audited}
+        if freed or waiters:
+            result.update(leases_freed=len(freed), waiters_removed=waiters)
+        return result
 
     def rebind(self, agent_id, principal):
         """Operator-only reissue to the same owner, retaining pending mail."""
