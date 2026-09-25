@@ -37,6 +37,8 @@ def _bridge(app):
 @pytest.fixture
 def board(pg_conn, pg_url, tmp_path, monkeypatch):
     storage = PostgresStorage(pg_url)
+    from pseudolife_memory.storage.schema import assert_disposable_database
+    assert_disposable_database(storage.conn)
     storage.conn.execute("TRUNCATE coordination_leases, coordination_lease_waiters")
     service = FixtureService()
     service.config.coordination.enabled = True

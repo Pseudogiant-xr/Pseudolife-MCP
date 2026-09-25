@@ -24,6 +24,8 @@ BEARER = {"Authorization": "Bearer fixture-bearer"}
 
 def _app(pg_url, *, token_map=None):
     storage = PostgresStorage(pg_url)
+    from pseudolife_memory.storage.schema import assert_disposable_database
+    assert_disposable_database(storage.conn)
     storage.conn.execute("TRUNCATE coordination_leases, coordination_lease_waiters")
     service = FixtureService()
     service.config.coordination.enabled = True
