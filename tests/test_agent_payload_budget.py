@@ -292,42 +292,6 @@ def test_cortex_block_width_follows_top_k(tmp_path: Path, monkeypatch) -> None:
     assert seen == [2, 5]
 
 
-def test_memory_search_serves_six_entries_by_default(
-        tmp_path: Path, monkeypatch) -> None:
-    """The MCP default ``top_k`` is 6 (8 until 2026-09-25).
-
-    Chosen by the serving-policy replay (``evals/serving_policy_replay.py``,
-    ``evals/results/serving-policy-replay-20260925.json``): over the
-    default-width agent searches of 2026-09-06..25, cutting 8 to 6 kept
-    90.5% of the hits agents reported using (Wilson 85.3-94.0) at 75.0% of
-    the rows. Only the default moves; an explicit ``top_k`` is served as
-    asked, and the cortex block stays at min(5, top_k) = 5."""
-    import asyncio
-
-    mod = _reload(tmp_path, monkeypatch)
-    widths: list[int | None] = []
-    facts: list[int] = []
-    real_search, real_cortex = mod.service.search, mod.service.cortex_search
-
-    def search_spy(**kw):
-        widths.append(kw.get("top_k"))
-        return real_search(**kw)
-
-    def cortex_spy(query, top_k=5, min_score=0.0, bm25=None):
-        facts.append(top_k)
-        return real_cortex(query, top_k=top_k, min_score=min_score, bm25=bm25)
-
-    monkeypatch.setattr(mod.service, "search", search_spy)
-    monkeypatch.setattr(mod.service, "cortex_search", cortex_spy)
-    mod.memory_search(query="bench postgres port")
-    mod.memory_search(query="bench postgres port", top_k=8)
-    assert widths == [6, 8]
-    assert facts == [5, 5]
-    tool = next(t for t in asyncio.run(mod.mcp.list_tools())
-                if t.name == "memory_search")
-    assert tool.input_schema["properties"]["top_k"]["default"] == 6
-
-
 def test_cortex_block_width_is_five_when_not_compacting(
         tmp_path: Path, monkeypatch) -> None:
     mod = _reload(tmp_path, monkeypatch)

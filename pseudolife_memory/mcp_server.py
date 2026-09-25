@@ -565,16 +565,17 @@ def _world_correct_with(e: dict[str, Any]) -> str | None:
 def memory_search(
     query: Annotated[str, Field(
         description="Natural-language description; specific beats vague.")],
-    # 6, down from 8 on 2026-09-25, by the serving-policy replay
-    # (evals/serving_policy_replay.py, artifact evals/results/
-    # serving-policy-replay-20260925.json): over the 262 default-width
-    # agent searches of 2026-09-06..25, a cut to 6 kept 90.5% of the hits
-    # agents reported using (Wilson 85.3-94.0) at 75.0% of the rows; 4
-    # kept 77.1%. Only ~25% of agent searches use the default. The cortex
-    # block is min(5, top_k), so it stays at 5.
+    # 8 stays pending a maintainer decision (2026-09-25). The
+    # serving-policy replay (evals/serving_policy_replay.py, artifact
+    # evals/results/serving-policy-replay-20260925-r2.json) simulated a
+    # narrower default over the 276 default-width agent searches of
+    # 2026-09-06..25: 6 keeps 85.4% of the hits agents reported using
+    # (Wilson 79.6-89.8) at 75% of the rows, 7 keeps 93.0% at 87.5%. The
+    # 2026-09-23 review's ~90.5% for 6 read a width-6 list as a prefix of
+    # the width-8 one, which the dense pool's cosine cut makes untrue.
     top_k: Annotated[int, Field(
         description="Max entries; caps cortex facts at "
-                    "min(5, top_k).")] = 6,
+                    "min(5, top_k).")] = 8,
     sources: Annotated[list[str] | None, Field(
         description="Keep only entries with one of these source tags.")] = None,
     bands: Annotated[list[str] | None, Field(
@@ -649,7 +650,7 @@ def memory_search(
         # The block follows the CALLER (2026-09-04 ledger, cut b): a
         # ``top_k=2`` search asked for two answers and got five facts
         # regardless. ``min`` keeps the historical width at the default
-        # (6, formerly 8) and every wider call. The narrowing is passed INTO
+        # (8) and every wider call. The narrowing is passed INTO
         # ``cortex_search`` rather than sliced off its output, because
         # constraint pinning budgets itself against that same ``top_k``
         # (``_pin_constraint_facts``) — a post-hoc slice would take the
