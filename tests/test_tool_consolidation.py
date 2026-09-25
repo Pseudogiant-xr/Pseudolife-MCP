@@ -375,8 +375,8 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # minimal 5,215, core 11,178, full 17,466.
     # The audit-log notice adds five characters to core/full descriptions.
     # 2026-09-25: memory_search's low_confidence and cortex sentences made
-    # truthful (+19, caps unchanged): minimal 5,234, core 11,202, full
-    # 17,490.
+    # truthful (+17, caps unchanged): minimal 5,232, core 11,200, full
+    # 17,488.
     budgets = {"minimal": 5250, "core": 11500, "full": 17500}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))

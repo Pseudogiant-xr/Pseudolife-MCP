@@ -654,8 +654,8 @@ class CortexConfig:
     # vs 28% at 0.2, with identical end-to-end accuracy. 0.1 was tried and served
     # more gold facts but measurably hurt: the extra weak facts dilute the context
     # and the consumer abstains ("distractor-induced under-confidence").
-    # Abstention-on deployments still override upward (see
-    # docs/guide/retrieval.md: the 0.65 pairing).
+    # The 0.65 pairing the docs once recommended for abstention-on
+    # deployments is retired (2026-09-25; see search_confidence_floor).
     guard_min_score: float = 0.2
     # Dream-path slot resolver: a paraphrased dreamed claim adopts an existing
     # current slot when its value-free slot embedding cosine >= this. <=0 disables
@@ -1048,14 +1048,15 @@ class SearchConfig:
     # injections, which carry their own scales. 0.25 is the initial-release
     # literal (2026-05-27, MiniLM era), never recalibrated for the
     # 2026-07-28 Qwen3-Embedding switch — and it stays put: measured
-    # 2026-09-25 over 1,030 real agent searches
-    # (evals/results/serving-policy-replay-20260925.json,
+    # 2026-09-25 over 1,072 real agent searches
+    # (evals/results/serving-policy-replay-20260925-r2.json,
     # abstention.lowest_served_dense_cosine), the weakest served dense hit
-    # had cosine p01 0.40 and none fell below 0.30, so today the floor
-    # binds only on off-domain queries (the 2026-09-23 review's zebra probe
-    # served hits at 0.28-0.29). Raising it would not make it an abstention
-    # signal: in-domain absent-answer probes topped out at 0.43-0.64, the
-    # range of real hits (same artifact, abstention.absent_answer_probes).
+    # had cosine p01 0.39 and fell below 0.30 in one search of 1,064, so
+    # today the floor binds only on off-domain queries (the 2026-09-23
+    # review's zebra probe served hits at 0.28-0.29,
+    # abstention.off_domain_probes). Raising it would not make it an
+    # abstention signal: in-domain absent-answer probes topped out at
+    # 0.43-0.64, the range of real hits (abstention.absent_answer_probes).
     min_score: float = 0.25
 
     def __post_init__(self) -> None:
@@ -1202,8 +1203,8 @@ class MemoryConfig:
     # no cortex fact clears ``cortex.guard_min_score``, memory_search returns
     # low_confidence=True. 0.0 = off (only an empty result is low-confidence).
     # No value is calibrated for the Qwen3 embedder: measured 2026-09-25
-    # over 1,030 real agent searches
-    # (evals/results/serving-policy-replay-20260925.json, abstention), the
+    # over 1,072 real agent searches
+    # (evals/results/serving-policy-replay-20260925-r2.json, abstention), the
     # 2026-06-19 MiniLM-era pair (floor 0.70 + guard 0.65) would flag 26% of
     # them, including 20% of the searches whose hits the agent then used,
     # and in-domain absent answers score like real hits.

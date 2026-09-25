@@ -694,7 +694,7 @@ def test_compact_entries_carry_their_write_date(
     the same way. ``date`` is the entry's write date, the local
     YYYY-MM-DD that ``replaced_by.at`` already uses. It is omitted rather
     than invented when the stamp is missing."""
-    from datetime import date, datetime
+    from datetime import datetime
 
     mod = _reload_mod(tmp_path, monkeypatch)
     ts = 1_790_000_000.0
@@ -707,10 +707,12 @@ def test_compact_entries_carry_their_write_date(
             {"id": 2, "text": "t", "timestamp": missing})
     _invoke("memory_store", {"text": "the widget port is 9191",
                              "source": "notes"})
+    stored = mod.service.recent(n=1)["entries"][0]["timestamp"]
+    written = datetime.fromtimestamp(stored).date().isoformat()
     for tool, args in (("memory_search", {"query": "widget port"}),
                        ("memory_recent", {"n": 5})):
         hit = _invoke(tool, args)["entries"][0]
-        assert hit["date"] == date.today().isoformat(), tool
+        assert hit["date"] == written, tool
 
 
 def test_memory_search_verbose_restores_full_metadata(tmp_path: Path, monkeypatch) -> None:
@@ -820,13 +822,13 @@ def test_memory_search_docstring_explains_replacement_currency() -> None:
 
 def test_memory_search_docstring_is_truthful_about_low_confidence() -> None:
     """``low_confidence`` is ``no entries AND no cortex fact`` at the shipped
-    floor 0, and the cortex block (up to min(5, top_k) facts over a 0.2
-    guard) is almost never empty, so the flag fired on 0 of 1,030 real
-    agent searches (evals/results/serving-policy-replay-20260925.json). It
-    cannot tell an absent answer from a present one either: in-domain
-    absent-answer probes score like real hits. The description used to
-    promise "no confident match, prefer abstaining" and called the cortex
-    block "the current, deduped answer"; both overstate what is served."""
+    floor 0. Search nearly always serves entries, and the one search in
+    1,072 real agent searches that served none still served facts, so the
+    flag fired on none of them (evals/results/serving-policy-replay-20260925-r2.json). It cannot tell an absent answer from
+    a present one either: in-domain absent-answer probes score like real
+    hits. The description used to promise "no confident match, prefer
+    abstaining" and called the cortex block "the current, deduped answer";
+    both overstate what is served."""
     from pseudolife_memory import mcp_server
 
     doc = " ".join((mcp_server.memory_search.__doc__ or "").split())

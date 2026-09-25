@@ -3709,7 +3709,8 @@ abstention-on deployment: `guard_min_score = 0.65`, `search_confidence_floor =
 0.70`.**~~ **Retired 2026-09-25:** measured on the MiniLM embedder; on real
 agent searches under the current embedder the pair flags searches whose hits
 agents used (`docs/guide/retrieval.md`, "Abstention & confidence floors").
-Both knobs ship at their behaviour-preserving defaults (`0.3` / `0.0`).
+Both knobs shipped at their behaviour-preserving defaults then (`0.3` /
+`0.0`); the guard has shipped at `0.2` since the 2026-07-06 replay sweep.
 
 **Dream slot resolver (Feature A) — no measurable benefit; ships off.** Sweeping
 `dream_slot_match_threshold` (distractor-clean corpus) moved nothing:

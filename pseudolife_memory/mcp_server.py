@@ -606,10 +606,10 @@ def memory_search(
     leads about the PAST, so check each against the task in front of
     you before letting it steer, and re-derive when today's context
     differs from the one it was written in. ``cortex``
-    facts arrive AHEAD of ``entries``: canonical facts that may bear on
-    it (``contested: true`` awaits ``memory_fact_resolve``).
-    ``low_confidence=True`` only when nothing matched; hits still need
-    judging. A superseded hit's ``replaced_by`` names its recorded replacement;
+    facts arrive AHEAD of ``entries`` and may bear on it (``contested:
+    true`` awaits ``memory_fact_resolve``). ``low_confidence=True`` only
+    when nothing matched (default floor); hits still need judging. A
+    superseded hit's ``replaced_by`` names its recorded replacement;
     ``verified: false`` = not confirmed as an explicit correction (often
     an old detector link, ~4 in 10 unrelated), so the entry may still
     hold — ``memory_get`` the replacement only if its ``preview`` is
@@ -802,9 +802,10 @@ def _project_search(result: dict[str, Any], facts: list[dict[str, Any]], *,
 
     # Any served cortex fact suppresses the flag, so at the shipped
     # settings (floor 0, guard 0.2) it means "nothing matched at all": it
-    # fired on 0 of 1,030 agent searches, and the 2026-09-23 review's
-    # in-domain absent-answer probes all got entries AND facts
-    # (evals/results/serving-policy-replay-20260925.json, abstention). The
+    # fired on 0 of 1,072 agent searches (all but one served entries, and
+    # that one served facts), and the 2026-09-23 review's in-domain
+    # absent-answer probes all got entries AND facts
+    # (evals/results/serving-policy-replay-20260925-r2.json, abstention). The
     # override stays until a real answerability signal exists; the tool
     # description states what the flag means instead of promising more.
     result["low_confidence"] = result.get("low_confidence", False) and not result.get("cortex")

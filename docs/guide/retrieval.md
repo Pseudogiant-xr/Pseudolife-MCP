@@ -152,10 +152,10 @@ rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 
 `low_confidence: true` means **nothing matched**: search served no entry
 and no cortex fact cleared `memory.cortex.guard_min_score`.
-It is not an answerability signal. Over 1,030 real agent searches
-(2026-09-06 to 2026-09-25) it fired on none of them: the cortex block
-almost always carries a fact above the guard, and a question whose answer
-is not in the bank still returns close-scoring hits. The 2026-09-23
+It is not an answerability signal. Over 1,072 real agent searches
+(2026-09-06 to 2026-09-25) it fired on none of them: all but one served
+entries, and that one served cortex facts. A question whose answer is not
+in the bank still returns close-scoring hits. The 2026-09-23
 review's four in-domain absent-answer probes topped out at dense cosine
 0.43-0.64, inside the range of real hits (median top cosine 0.61 across
 those agent searches). Judge the hits; do not read a served result as a
@@ -171,7 +171,7 @@ measured on the MiniLM embedder (2026-06-19). On the agent searches above
 that pair would flag 26% of searches, including 20% of the searches whose
 hits the agent then reported using, and it caught 3 of the 4 absent-answer
 probes (`evals/serving_policy_replay.py`, artifact
-`evals/results/serving-policy-replay-20260925.json`). Leave both knobs at
+`evals/results/serving-policy-replay-20260925-r2.json`). Leave both knobs at
 their defaults until a real answerability signal exists.
 
 `memory.cortex.guard_min_score` (default `0.2`) decides which cortex facts
@@ -183,9 +183,10 @@ context with weak facts). Any served fact suppresses `low_confidence`.
 
 The dense relevance floor, `memory.search.min_score` (default `0.25`), is a
 different knob: a dense candidate below it never enters the pool. On the
-same agent searches, 99% served no dense hit below cosine 0.40 and none
-served one below 0.30, so today the floor binds only on off-domain
-queries. Raising it is not a way to abstain.
+same agent searches the weakest served dense hit was at cosine 0.39 at
+the 1st percentile, and below 0.30 in one search of 1,064, so today the
+floor binds only on off-domain queries. Raising it is not a way to
+abstain.
 
 ## Superseded entries
 

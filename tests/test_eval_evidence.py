@@ -9435,10 +9435,12 @@ for _cid, _doc, _needle, _val, _stated, _places in [
 # evals/serving_policy_replay.py scores logged served lists against the
 # used_ids labels agents record through memory_outcome. Its artifact backs
 # the retrieval guide's abstention section (what low_confidence means and
-# what the retired 0.70/0.65 pair would flag) and the configuration guide's
-# restatement of it.
-SERVING_REPLAY = RESULTS + "serving-policy-replay-20260925.json"
+# what the retired 0.70/0.65 pair would flag), the configuration guide's
+# restatement of it, and the CHANGELOG entry (the width simulation's check
+# against real narrower searches, the top_k report, the digest report).
+SERVING_REPLAY = RESULTS + "serving-policy-replay-20260925-r2.json"
 _ABST = "abstention"
+_SIM = "width_simulation_check"
 
 
 def _floor_cell(floor: float, guard: float, key: str, scale: float = 1.0):
@@ -9460,12 +9462,29 @@ def _policy(stratum: str, policy: str, key: str, scale: float = 1.0,
     return read
 
 
+def _default_width_reach(d) -> float:
+    total = sum(x["searches"] for x in d["requested_top_k"])
+    width8 = next(x["searches"] for x in d["requested_top_k"]
+                  if x["top_k"] == 8)
+    return 100.0 * width8 / total
+
+
+_CL_SIM = ("list is not a prefix of a wider one. Checked against 146 real "
+           "narrower")
+_CL_K6 = "would keep 85.4% of the hits agents reported using (Wilson 95%"
+_CL_K6B = "79.6-89.8) at 75% of the rows, and 7 would keep 93.0%."
+_CL_DIG = ("Digests are 15% of the rows unfiltered searches serve, but 9% "
+           "of the hits")
 for _cid, _doc, _needle, _val, _stated, _places in [
     ("replay-abst-searches", RETRIEVAL_GUIDE,
-     "Over 1,030 real agent searches",
-     lambda d: d[_ABST]["searches"], 1030, 0),
-    ("replay-abst-fired", RETRIEVAL_GUIDE, "it fired on none of them",
+     "Over 1,072 real agent searches",
+     lambda d: d[_ABST]["searches"], 1072, 0),
+    ("replay-abst-fired", RETRIEVAL_GUIDE,
+     "it fired on none of them: all but one served",
      lambda d: d[_ABST]["served_nothing"], 0, 0),
+    ("replay-abst-no-entries", RETRIEVAL_GUIDE,
+     "it fired on none of them: all but one served",
+     lambda d: d[_ABST]["served_no_entries"], 1, 0),
     ("replay-abst-probe-low", RETRIEVAL_GUIDE,
      "0.43-0.64, inside the range of real hits",
      lambda d: min(d[_ABST]["absent_answer_probes"]["top_dense_cosine"]),
@@ -9490,42 +9509,21 @@ for _cid, _doc, _needle, _val, _stated, _places in [
      "it caught 3 of the 4 absent-answer",
      lambda d: d[_ABST]["absent_answer_probes"]["found"], 4, 0),
     ("replay-abst-dense-p01", RETRIEVAL_GUIDE,
-     "99% served no dense hit below cosine 0.40",
-     lambda d: d[_ABST]["lowest_served_dense_cosine"]["p01"], 0.40, 2),
-    ("replay-abst-dense-none-below", RETRIEVAL_GUIDE,
-     "served one below 0.30",
-     lambda d: d[_ABST]["lowest_served_dense_cosine"]["below_0.30"], 0, 0),
+     "same agent searches the weakest served dense hit was at cosine 0.39 at",
+     lambda d: d[_ABST]["lowest_served_dense_cosine"]["p01"], 0.39, 2),
+    ("replay-abst-dense-below-030", RETRIEVAL_GUIDE,
+     "the 1st percentile, and below 0.30 in one search of 1,064, so today the",
+     lambda d: d[_ABST]["lowest_served_dense_cosine"]["below_0.30"], 1, 0),
+    ("replay-abst-dense-searches", RETRIEVAL_GUIDE,
+     "the 1st percentile, and below 0.30 in one search of 1,064, so today the",
+     lambda d: d[_ABST]["lowest_served_dense_cosine"]["searches"], 1064, 0),
     ("replay-abst-config-fifth", CONFIG_GUIDE,
      "embedder, and the pair this guide used to recommend would flag a fifth",
      _floor_cell(0.70, 0.65, "flagged_labelled_share"), 0.2, 1),
-    # The CHANGELOG entry (2026-09-25): the top_k 8 -> 6 default and the
-    # digest report restate the same artifact.
-    ("replay-cl-default-width-searches", CHANGELOG,
-     "scored what 262 default-width agent",
-     lambda d: d["strata"]["default_width"]["searches"], 262, 0),
-    ("replay-cl-k6-kept", CHANGELOG,
-     "Cutting to 6 kept 90.5% of the used hits (Wilson 95% 85.3-94.0)",
-     _policy("default_width", "top_k=6", "used_kept_share", 100.0), 90.5, 1),
-    ("replay-cl-k6-wilson-lo", CHANGELOG,
-     "Cutting to 6 kept 90.5% of the used hits (Wilson 95% 85.3-94.0)",
-     _policy("default_width", "top_k=6", "used_kept_wilson95", 100.0, 0),
-     85.3, 1),
-    ("replay-cl-k6-wilson-hi", CHANGELOG,
-     "Cutting to 6 kept 90.5% of the used hits (Wilson 95% 85.3-94.0)",
-     _policy("default_width", "top_k=6", "used_kept_wilson95", 100.0, 1),
-     94.0, 1),
-    ("replay-cl-k6-rows", CHANGELOG,
-     "at 75.0% of the rows; cutting to 4 kept 77.1%.",
-     _policy("default_width", "top_k=6", "rows_kept_share", 100.0), 75.0, 1),
-    ("replay-cl-k4-kept", CHANGELOG,
-     "at 75.0% of the rows; cutting to 4 kept 77.1%.",
-     _policy("default_width", "top_k=4", "used_kept_share", 100.0), 77.1, 1),
-    ("replay-cl-default-reach", CHANGELOG, "Only 25.4% of agent",
-     lambda d: 100.0 * next(x["share"] for x in d["requested_top_k"]
-                            if x["top_k"] == 8), 25.4, 1),
+    # The CHANGELOG entry restates the same artifact.
     ("replay-cl-abst-searches", CHANGELOG,
-     "nothing matched, meaning no entry and no cortex fact; over 1,030 agent",
-     lambda d: d[_ABST]["searches"], 1030, 0),
+     "nothing matched, meaning no entry and no cortex fact; over 1,072 agent",
+     lambda d: d[_ABST]["searches"], 1072, 0),
     ("replay-cl-abst-fired", CHANGELOG, "searches it fired on none.",
      lambda d: d[_ABST]["served_nothing"], 0, 0),
     ("replay-cl-old-pair-flags", CHANGELOG,
@@ -9534,25 +9532,56 @@ for _cid, _doc, _needle, _val, _stated, _places in [
     ("replay-cl-old-pair-false", CHANGELOG,
      "searches, including 20% of the searches whose hits the agent then used.",
      _floor_cell(0.70, 0.65, "flagged_labelled_share", 100.0), 20, 0),
+    ("replay-cl-sim-pairs", CHANGELOG, _CL_SIM,
+     lambda d: d[_SIM]["pairs"], 146, 0),
+    ("replay-cl-sim-exact", CHANGELOG,
+     "searches, the simulation reproduced the exact served set in 98 and the",
+     lambda d: d[_SIM]["simulate_exact_set"], 98, 0),
+    ("replay-cl-prefix-exact", CHANGELOG,
+     "prefix in 20. It reads the bank in a read-only transaction and writes an",
+     lambda d: d[_SIM]["prefix_exact_set"], 20, 0),
+    ("replay-cl-default-width-searches", CHANGELOG,
+     "Reported, not changed: the default `top_k` stays 8. Over 276",
+     lambda d: d["strata"]["default_width"]["searches"], 276, 0),
+    ("replay-cl-k6-kept", CHANGELOG, _CL_K6,
+     _policy("default_width", "top_k=6", "used_kept_share", 100.0), 85.4, 1),
+    ("replay-cl-k6-wilson-lo", CHANGELOG, _CL_K6B,
+     _policy("default_width", "top_k=6", "used_kept_wilson95", 100.0, 0),
+     79.6, 1),
+    ("replay-cl-k6-wilson-hi", CHANGELOG, _CL_K6B,
+     _policy("default_width", "top_k=6", "used_kept_wilson95", 100.0, 1),
+     89.8, 1),
+    ("replay-cl-k6-rows", CHANGELOG, _CL_K6B,
+     _policy("default_width", "top_k=6", "rows_kept_share", 100.0), 75, 0),
+    ("replay-cl-k7-kept", CHANGELOG, _CL_K6B,
+     _policy("default_width", "top_k=7", "used_kept_share", 100.0), 93.0, 1),
+    ("replay-cl-k6-prefix", CHANGELOG,
+     "one; that method gives 90.3% on the same searches. At most 25.7% of",
+     _policy("default_width", "top_k=6 (prefix)", "used_kept_share", 100.0),
+     90.3, 1),
+    ("replay-cl-default-reach", CHANGELOG,
+     "one; that method gives 90.3% on the same searches. At most 25.7% of",
+     _default_width_reach, 25.7, 1),
     ("replay-cl-digest-ratio", CHANGELOG,
-     "served digests are used at 0.50x",
+     "- Digests, reported and left unchanged: served digests are used at 0.51x",
      lambda d: d["digests"]["rank_matched_all_rows"]["rank_matched_ratio"],
-     0.50, 2),
-    ("replay-cl-digest-ratio-lo", CHANGELOG, "0.36-0.64). 52% of unfiltered",
+     0.51, 2),
+    ("replay-cl-digest-ratio-lo", CHANGELOG,
+     "0.38-0.64). 53% of unfiltered agent searches serve at least one digest.",
      lambda d: d["digests"]["rank_matched_all_rows"][
-         "rank_matched_ratio_session_bootstrap95"][0], 0.36, 2),
-    ("replay-cl-digest-ratio-hi", CHANGELOG, "0.36-0.64). 52% of unfiltered",
+         "rank_matched_ratio_session_bootstrap95"][0], 0.38, 2),
+    ("replay-cl-digest-ratio-hi", CHANGELOG,
+     "0.38-0.64). 53% of unfiltered agent searches serve at least one digest.",
      lambda d: d["digests"]["rank_matched_all_rows"][
          "rank_matched_ratio_session_bootstrap95"][1], 0.64, 2),
-    ("replay-cl-digest-reach", CHANGELOG, "0.36-0.64). 52% of unfiltered",
+    ("replay-cl-digest-reach", CHANGELOG,
+     "0.38-0.64). 53% of unfiltered agent searches serve at least one digest.",
      lambda d: 100.0 * d["digests"]["presence"][
-         "searches_serving_a_digest_share"], 52, 0),
-    ("replay-cl-digest-rows", CHANGELOG,
-     "Digests are 15% of the rows unfiltered searches serve, but 8% of the hits",
+         "searches_serving_a_digest_share"], 53, 0),
+    ("replay-cl-digest-rows", CHANGELOG, _CL_DIG,
      lambda d: 100.0 * d["digests"]["presence"]["digest_row_share"], 15, 0),
-    ("replay-cl-digest-used", CHANGELOG,
-     "Digests are 15% of the rows unfiltered searches serve, but 8% of the hits",
-     lambda d: 100.0 * d["digests"]["presence"]["digest_used_share"], 8, 0),
+    ("replay-cl-digest-used", CHANGELOG, _CL_DIG,
+     lambda d: 100.0 * d["digests"]["presence"]["digest_used_share"], 9, 0),
 ]:
     CLAIMS.append(Claim(
         id=_cid, doc=_doc, needle=_needle, artifacts=(SERVING_REPLAY,),
