@@ -207,6 +207,10 @@ services:
       # FALLBACK unset (default) = single-extractor behavior, no probe.
       PSEUDOLIFE_DREAM_FALLBACK_BASE_URL: ${PSEUDOLIFE_DREAM_FALLBACK_BASE_URL:-}
       PSEUDOLIFE_DREAM_FALLBACK_MODEL: ${PSEUDOLIFE_DREAM_FALLBACK_MODEL:-}
+      # The fallback's own bearer key; DREAM_API_KEY above is the primary's
+      # and never goes to the fallback. Empty = the fallback sends no key
+      # (the sidecar needs none).
+      PSEUDOLIFE_DREAM_FALLBACK_API_KEY: ${PSEUDOLIFE_DREAM_FALLBACK_API_KEY:-}
       PSEUDOLIFE_DREAM_EXTRACTOR_MODE: ${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-auto}
       # How often the daemon returns heap memory glibc keeps after encode
       # bursts (malloc_trim). Empty = the 60 s default; 0 disables. See

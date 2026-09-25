@@ -2750,11 +2750,11 @@ dreams, not better answers. Two ways to switch:
 Console's config view edits the endpoint, model, timeout, and token budget
 live — flip its "Settings source" switch to `config` first (while it is
 `env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
-settings and the panel's values are ignored). The API key stays env-only
-either way. The *model alone* needs no source flip: the **Dreamer** card at
-the top of the same view writes a model-only override
-(`memory.dream.extractor_model_override`) that wins over both owners while
-the endpoint wiring keeps its owner.
+settings and the panel's values are ignored). The API keys (primary and
+fallback) stay env-only either way. The *model alone* needs no source
+flip: the **Dreamer** card at the top of the same view writes a model-only
+override (`memory.dream.extractor_model_override`) that wins over both
+owners while the endpoint wiring keeps its owner.
 
 *Via env:* for the Docker stack, set the override in `ops/.env` (the
 compose file interpolates it into the daemon) and restart the daemon
@@ -2848,6 +2848,14 @@ When the shim is unreachable or the CLI is logged out, dreams automatically
 use the fallback; the Console's Observatory shows which extractor is
 active. Leave `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` unset to keep the
 existing single-extractor behavior.
+
+**API keys are per endpoint.** `PSEUDOLIFE_DREAM_API_KEY` authenticates the
+primary only and is never sent to the fallback. The fallback sends its own
+key, `PSEUDOLIFE_DREAM_FALLBACK_API_KEY`, or none at all — right for the
+bundled sidecar and both CLI shims, none of which checks one, so the pairs on
+this page set neither. A fallback that needs the primary's credential, such
+as a second model on the same hosted provider, needs the key set again under
+the fallback name.
 
 ## OpenAI primary — the Codex CLI shim
 
