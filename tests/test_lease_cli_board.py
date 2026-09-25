@@ -24,14 +24,32 @@ from pseudolife_memory.web.api import build_console_app
 BEARER = "fixture-bearer"
 
 
+class _Bridge(httpx.BaseTransport):
+    """A synchronous httpx transport into the ASGI app. Each request goes
+    through Starlette's test client by its public ``request()`` and comes
+    back as a plain-bytes response, so any httpx/Starlette pairing works
+    (the test client's own transport object is private, and on the Linux CI
+    pairing its responses do not satisfy another client's sync-stream
+    check). The client is never entered as a context manager, so the app's
+    lifespan (the daemon's startup) never runs."""
+
+    _HOP = {"host", "content-length", "transfer-encoding", "connection"}
+
+    def __init__(self, app):
+        from starlette.testclient import TestClient
+        self.client = TestClient(app, base_url="http://fixture")
+
+    def handle_request(self, request):
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in self._HOP}
+        response = self.client.request(request.method, str(request.url), headers=headers,
+                                       content=request.read())
+        return httpx.Response(response.status_code, headers=response.headers,
+                              content=response.content, request=request)
+
+
 def _bridge(app):
-    """A synchronous httpx transport into the ASGI app: Starlette's test
-    client serves each request on a blocking portal, so the CLI's blocking
-    client reaches the real app in process. Not entered as a context
-    manager, so the app's lifespan (the daemon's startup) never runs."""
-    from starlette.testclient import TestClient
-    client = TestClient(app, base_url="http://fixture")
-    return client, client._transport
+    bridge = _Bridge(app)
+    return bridge.client, bridge
 
 
 @pytest.fixture
