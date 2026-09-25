@@ -1,4 +1,4 @@
-<!-- i18n-source: v11 (2026-09-25) — canonical English text for the translated
+<!-- i18n-source: v12 (2026-09-25) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -119,9 +119,14 @@ alternative, and non-default ports/tokens:
 The agent stores one claim at a time as it works (`memory_store`,
 `memory_fact_set`). Between
 sessions, the **dream** distils the stream into canonical facts, graph
-relations, and procedural lessons. At every session start, a briefing
-injects what the memory is unsure about, lessons from past work, and where
-you left off. Retrieval blends semantic search over the associative store
+relations, and procedural lessons. Where session hooks are installed — the
+Claude Code plugin, the installer's Claude Code `settings.json` hook, or
+verified Codex hooks — a briefing at every session start injects what the
+memory is unsure about, lessons from past work, and where you left off. The
+two-command Quickstart installs no hooks, and the installer wires none for
+Gemini CLI or other MCP agents, so those setups get no briefing; the MCP
+server's own short instructions still ask the agent to search memory at
+task start. Retrieval blends semantic search over the associative store
 with the canonical fact store, so corrected answers win over stale ones.
 
 ## Documentation (English)
