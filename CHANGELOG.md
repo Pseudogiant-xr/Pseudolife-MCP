@@ -53,6 +53,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shim, "its own" means imported from inside the venv. With system
   site-packages on, a copy in the user site or the base interpreter is
   what imports fell through to on 2026-09-25, not the runtime's package.
+- The metadata refresh named for a shim in the checkout's `.venv` put the
+  probe's failure reason into `pip install -e "<...>"` when the probe did
+  not answer. It now names a project directory only when the probe found
+  an editable install, and the checkout otherwise.
 - Tests: a fake process table covers each registration kind, and a stub
   pip reproduces pip 24.0's stash-then-fail. Two checks use a real
   interpreter: a real venv whose stub pip strands the package must import

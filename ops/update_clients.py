@@ -580,7 +580,10 @@ def update_shim(repo: Path) -> dict:
                 continue
         if kind == "editable":
             venv_python = interpreter or _interpreter_beside(Path(command)) or Path(command).parent / "python"
-            project = install_kind(venv_python)[1] if Path(venv_python).is_file() else ""
+            # The probe's detail is a project directory only for an editable
+            # answer (a package path for "site", a failure reason for "unknown").
+            probed, found = install_kind(venv_python) if Path(venv_python).is_file() else ("", "")
+            project = found if probed == "editable" else ""
             results.append({"state": "editable",
                             "detail": f"{client}: {command} runs a source tree directly"
                                       + (f" ({project})" if project else "")

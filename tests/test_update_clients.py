@@ -183,6 +183,26 @@ def test_editable_checkout_shim_is_reported_not_reinstalled(cli, tmp_path):
     assert not any(c[1:3] == ["-m", "pip"] or c[1:2] == ["install"] for c in cli.calls)
 
 
+@pytest.mark.parametrize("probed", ["site", "crashed"])
+def test_a_checkout_venv_whose_probe_is_not_editable_names_the_checkout(cli, tmp_path, probed):
+    """The refresh command names the project the probe found only when the
+    probe found an editable install; a plain install left in the checkout's
+    .venv (the 2026-09-21 state) or a probe failure must not put a
+    site-packages path or an error text into `pip install -e` (reviewer
+    finding)."""
+    repo = tmp_path / "checkout"
+    scripts = repo / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    python = scripts / f"python{EXE}"
+    python.write_text("", encoding="utf-8")
+    cli.install_kinds[str(python).lower()] = probed
+    cli.claude_get = (0, _claude_stdio(str(scripts / f"pseudolife-mcp{EXE}")))
+    result = uc.update_shim(repo)
+    assert result["state"] == "editable"
+    assert f"-m pip install -e \"{repo}\" --no-deps" in result["detail"]
+    assert "site-packages" not in result["detail"] and "boom" not in result["detail"]
+
+
 def test_pipx_managed_shim_is_reinstalled_from_the_checkout(cli, tmp_path):
     cli.claude_get = (0, _claude_stdio(str(tmp_path / "pipx-venv" / "bin" / "pseudolife-mcp")))
     cli.pipx_list = (0, json.dumps({"venvs": {"pseudolife-mcp": {}}}))
