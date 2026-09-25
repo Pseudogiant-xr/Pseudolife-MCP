@@ -3816,7 +3816,9 @@ class MemoryService(DreamOps):
             if (res.action == "superseded"
                     and (support or "").strip().lower() == "user"):
                 self._emit_correction_signal(
-                    entity, attribute, res.record.supersedes_value, value)
+                    entity, attribute, res.record.supersedes_value, value,
+                    resolved[0] if resolved is not None
+                    else self._caller_episode_id(session_id))
             out = {"action": res.action,
                    **_cortex_record_to_dict(
                        res.record, stale_policy=self._stale_policy)}
@@ -4713,22 +4715,33 @@ class MemoryService(DreamOps):
     # Procedural / outcome memory — lessons (schema v10)
     # ------------------------------------------------------------------
 
-    def _current_episode_id(self) -> str | None:
-        try:
-            return self._cms.episodes.current_id if self._cms is not None else None
-        except Exception:  # noqa: BLE001
+    def _caller_episode_id(self, session_id: str | None) -> str | None:
+        """The caller's open episode: the leaf ``store()`` stamps for
+        ``session_id`` (the identity :meth:`_resolve_writer` returned).
+        None when there is no identity or nothing is open for it — never
+        the episode manager's process-wide ``current_id``, which is only
+        the root someone started last, so with many sessions on one daemon
+        it named whichever session started most recently (2026-09-25).
+        Unlike ``store()`` this opens no episode, and a session-less caller
+        gets None rather than store()'s legacy global leaf. Caller holds
+        the lock."""
+        if not session_id or self._cms is None:
             return None
+        ep = self._cms.episodes.open_leaf_for(session_id)
+        return ep.id if ep is not None else None
 
-    def _emit_correction_signal(self, entity, attribute, old, new) -> None:
-        """Record a correction signal for a user-driven supersession. Caller holds
-        the lock. Best-effort: never let signal capture break a cortex write."""
+    def _emit_correction_signal(self, entity, attribute, old, new,
+                                episode_id: str | None) -> None:
+        """Record a correction signal for a user-driven supersession, under
+        the writer's ``episode_id``. Caller holds the lock. Best-effort:
+        never let signal capture break a cortex write."""
         if self._storage is None or not self.config.memory.lessons.enabled:
             return
         try:
             self._storage.add_signal(
                 task=entity, outcome="correction", about=entity,
                 detail=f"{attribute}: {old} → {new}", polarity=None,
-                origin="action", episode_id=self._current_episode_id())
+                origin="action", episode_id=episode_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("correction signal emit failed: %s", exc)
 
@@ -4743,9 +4756,10 @@ class MemoryService(DreamOps):
 
         ``episode`` (identity tier 2): an open episode id or unambiguous
         prefix (>=8 chars) — attributes this signal to that episode instead
-        of the global current one. An unknown/closed/ambiguous handle
-        degrades silently: the signal is still recorded, and
-        ``"episode_warning"`` is added to the result.
+        of the caller's own open episode (the leaf ``store()`` stamps; none
+        without a session identity). An unknown/closed/ambiguous handle
+        degrades silently to the caller's episode: the signal is still
+        recorded, and ``"episode_warning"`` is added to the result.
 
         ``used_ids``: entry ids the caller actually reasoned from. Each one
         credits EVERY search in this session's window
@@ -4761,8 +4775,9 @@ class MemoryService(DreamOps):
         the use rows it caused: the labels stand on their own, and which
         outcome named which ids is deliberately not recorded (the event's
         ``episode_id`` comes from the writer at search time, the signal's
-        from the ``episode=`` handle — they are not a join). That is what
-        costs no schema bump and no prose in ``detail``. Reported back as
+        from the ``episode=`` handle when one is given — they are not a
+        join). That is what costs no schema bump and no prose in
+        ``detail``. Reported back as
         ``used_ids_recorded`` (ids credited to at least one event),
         ``used_ids_unmatched`` (ids nothing in the window served) and
         ``used_ids_served_elsewhere`` (ids served in the window only under
@@ -4782,7 +4797,11 @@ class MemoryService(DreamOps):
                 return {"recorded": False, "reason": "lessons disabled"}
             resolved = self._resolve_episode_handle(episode)
             episode_warning = bool(episode) and resolved is None
-            episode_id = resolved[0] if resolved is not None else self._current_episode_id()
+            # One resolution serves both the attribution and the used_ids
+            # label, so the two can never disagree about who the caller is.
+            _, session_id = self._resolve_writer()
+            episode_id = (resolved[0] if resolved is not None
+                          else self._caller_episode_id(session_id))
             sid = self._storage.add_signal(
                 task=task, outcome=outcome, about=about, detail=detail,
                 polarity=polarity, origin=origin,
@@ -4791,14 +4810,15 @@ class MemoryService(DreamOps):
             if episode_warning:
                 out["episode_warning"] = "unknown or closed episode handle"
             if used_ids:
-                out.update(self._label_used_entries(used_ids))
+                out.update(self._label_used_entries(used_ids, session_id))
             return out
 
-    def _label_used_entries(self, used_ids: list[int]) -> dict[str, Any]:
-        """Credit each id in ``used_ids`` to every in-window search in this
-        session that served it — one storage statement for the whole list
-        (:meth:`PostgresStorage.credit_retrieval_uses`), the writer
-        resolved once.
+    def _label_used_entries(self, used_ids: list[int],
+                            session_id: str | None) -> dict[str, Any]:
+        """Credit each id in ``used_ids`` to every in-window search in
+        ``session_id``'s session that served it — one storage statement for
+        the whole list (:meth:`PostgresStorage.credit_retrieval_uses`), the
+        writer resolved once, by :meth:`record_outcome`.
 
         Returns the reporting keys for :meth:`record_outcome`. Per id the
         answer is one of four, and the agent is told which: credited;
@@ -4836,7 +4856,6 @@ class MemoryService(DreamOps):
         if not ids:
             return {"used_ids_recorded": 0}
         try:
-            _, session_id = self._resolve_writer()
             hits = self._storage.credit_retrieval_uses(
                 ids, session_id, "outcome", float(cfg.use_window_seconds))
         except Exception:  # noqa: BLE001
@@ -5662,10 +5681,13 @@ class MemoryService(DreamOps):
                 if comp is not None:
                     row["components"] = comp
                 served.append(row)
+            # Session and episode come from the one resolution: the episode
+            # is the caller's, not whichever session started last.
             _, session_id = self._resolve_writer()
             return self._storage.add_retrieval_event(
                 query, served, origin="search", session_id=session_id,
-                episode_id=self._current_episode_id(), params=params)
+                episode_id=self._caller_episode_id(session_id),
+                params=params)
         except Exception:  # noqa: BLE001
             self._retrieval_log_errors += 1
             logger.warning("retrieval-event log failed", exc_info=True)

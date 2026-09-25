@@ -151,6 +151,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   value (the PowerShell writer spells emoji as `\u` pairs). A file with
   duplicate keys is refused and left alone, as is a hook whose command is
   not a string.
+### Fixed (2026-09-25 — the search log and outcome signals name the caller's episode)
+- With several sessions sharing one daemon, every `retrieval_events` row
+  was stamped with the episode of whichever session had started most
+  recently, not the session that searched. The `session_id` on the same
+  row was already correct. Rows now record the caller's own open episode:
+  the leaf a handle-less `store()` stamps for that session identity. They
+  record no episode when the caller has no session identity or nothing
+  open. Search never opens an episode to fill the column.
+- Two more writers had the same fault: `memory_outcome` without an
+  `episode` handle (or with one that does not resolve), and the correction
+  signal a user-tier supersession emits. Both now use the handle's root
+  when a handle resolves, then the caller's open episode, then no episode.
+  The correction signal also honors a `memory_fact_set` handle for the
+  first time. A session-less caller, including an embedded single-session
+  one, now records these with no episode instead of the process-wide
+  current one.
+- Known limit under the stdio shim with the Claude Code session hook:
+  each session has two open roots. One is keyed by the shim's
+  `X-PL-Session` id, and one is keyed by the hook's session id, whose
+  handle the briefing tells agents to pass. Search takes no handle, so its
+  events land on the shim's root. Outcomes logged without the handle land
+  there too, while handle-carrying stores land on the hook's root. When
+  the shim root captured no entries, closing the session prunes it and
+  leaves those rows naming a deleted episode.
+- There is no schema change. `episode_id` stays nullable and has no
+  foreign key. `retrieval_replay` and `graph_ablation` never read the
+  column, `retrieval_telemetry_review` skips null, and the
+  `retrieval_events_window` export passes it through. Search-log rows
+  written before this fix keep their old episode, so attribute those by
+  their `session_id`. Earlier outcome signals cannot be re-attributed,
+  because `outcome_signals` records no session. Unchanged on purpose:
+  with no session identity, a `store()` (including the replacement entry
+  of a supersede or consolidate) and `memory_episode_start` still fall
+  back to the process-wide current episode.
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
