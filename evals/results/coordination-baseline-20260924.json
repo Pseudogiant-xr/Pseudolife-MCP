@@ -1,21 +1,28 @@
 {
  "harness": "evals/coordination_report.py",
  "report_version": 1,
- "generated_at": "2026-09-25T19:27:47+00:00",
+ "generated_at": "2026-09-25T20:09:02+00:00",
  "input": {
   "format": "legacy-board-export",
   "sha256": "a04f7e88987ed9c544d9607736fbe7ab3fc8ce058f7c11ba30cde9fffbceb90f",
   "records": 816,
+  "messages_in_input": 816,
   "messages": 816,
+  "scope": {
+   "since": null,
+   "until": null
+  },
   "status_history": false,
+  "filtered_export": null,
   "window_start": "2026-09-23T06:00:00+00:00",
   "window_end": "2026-09-23T21:02:03+00:00",
   "first_message": "2026-09-23T06:49:04+00:00",
   "last_message": "2026-09-23T21:01:48+00:00",
   "acks_without_send": 0,
+  "acks_before_send": 0,
   "bodies_missing": 0
  },
- "privacy": "Aggregate-only: no message text, label, status, task, project, path or raw id. Agents are <principal>-<n> in first-seen order (a principal that is not a plain role name is replaced by principal-<n>). Keyword classification ran in memory; only counts are written.",
+ "privacy": "Aggregate-only: no message text, label, status, task, project, path or raw id. Agents are <principal>-<n> in first-seen order; a principal is named only when it is a known role name or the operator kept it, otherwise principal-<n>. Keyword classification ran in memory; only counts are written.",
  "parameters": {
   "pair_window_s": 3600,
   "pair_thresholds": [
@@ -27,9 +34,18 @@
   "fanout_window_s": 60.0,
   "fanout_min_recipients": 3,
   "fanout_similarity": 0.8,
+  "fanout_autojunk": false,
   "copy_window_s": 180.0,
   "proposal_min": 2,
   "stale_after_s": 7200,
+  "known_principals": [
+   "default",
+   "claude-code",
+   "claude-desktop",
+   "codex",
+   "gemini",
+   "mcp-client"
+  ],
   "windows": [
    {
     "label": "16:00-21:30 AEST",
@@ -65,7 +81,7 @@
  },
  "metrics": {
   "ack_latency": {
-   "definition": "Seconds from a message's send to its recipient's first acknowledgment, grouped by the recipient's bearer principal (all = every recipient). A window takes messages by send time, start inclusive, end exclusive. median_s and p90_s interpolate linearly between ranks. never_acked counts messages with no acknowledgment by the end of the input, including any sent too close to its end to have been answered.",
+   "definition": "Seconds from a message's send to its recipient's first acknowledgment, grouped by the recipient's bearer principal (all = every recipient). A window takes messages by send time, start inclusive, end exclusive. median_s and p90_s interpolate linearly between ranks; an acknowledgment stamped before its send (a clock step, counted in input.acks_before_send) counts as 0 s. never_acked counts messages with no acknowledgment by the end of the input, including any sent too close to its end to have been answered.",
    "overall": {
     "all": {
      "messages": 816,
@@ -215,10 +231,10 @@
    ]
   },
   "fanout_bursts": {
-   "definition": "A burst is one sender's messages to 3+ distinct recipients within 60 s of the burst's first message, each at least 0.8 similar to it (difflib ratio over lowercased text with digit runs and 8+ hex runs masked, whitespace collapsed, first 600 characters). Greedy per sender in send order; a message joins at most one burst. share = messages in bursts / all messages.",
-   "bursts": 35,
-   "messages": 165,
-   "share": 0.2022
+   "definition": "A burst is one sender's messages to 3+ distinct recipients within 60 s of the burst's first message, each at least 0.8 similar to it (difflib ratio, autojunk off, over lowercased text with digit runs and 8+ hex runs masked, whitespace collapsed, first 600 characters). Greedy per sender in send order; a message joins at most one burst. share = messages in bursts / all messages.",
+   "bursts": 39,
+   "messages": 186,
+   "share": 0.2279
   },
   "kind_mix": {
    "definition": "One kind per message: a declared kind field when the event carries one (values outside NOTICE/REQUEST/CLAIM/HANDOFF/NEEDS-HUMAN count as OTHER), otherwise the tag-first heuristic over the body's first token and fixed phrase lists: CLAIM/RELEASE tags are CLAIM; SUITE-END is HANDOFF unless sent to the coordinator within 180 s of the same sender's SUITE-END to a peer (a NOTICE copy); SUITE-START is NOTICE; present-tense grants (you're up, go ahead) are HANDOFF; acknowledgments are NOTICE; DEPLOY-NEEDED or an ask for the maintainer's decision sent to the coordinator is NEEDS-HUMAN; questions and asks are REQUEST; the rest NOTICE. Hand-calibrated on the 2026-09-23/24 trial: a heuristic, not a label.",
@@ -241,13 +257,13 @@
    }
   },
   "suite_baton": {
-   "definition": "suite_start and suite_end count messages whose first token is SUITE-START or SUITE-END. baton_passes groups SUITE-END messages in send order: one from the sender of the current group within 180 s of that group's first message is a copy of the same pass.",
+   "definition": "suite_start and suite_end count messages whose first token is SUITE-START or SUITE-END. baton_passes groups each sender's SUITE-END messages: one within 180 s of the first message of that sender's current pass is a copy of it, whatever other senders sent in between.",
    "suite_start": 99,
    "suite_end": 93,
    "baton_passes": 39
   },
   "status_staleness": {
-   "definition": "At the end of the input, the age of each agent's status: agents whose status-setting event (register, or an update carrying status) is in the input, whose status is not blank, and that were not pruned or revoked since. stale counts ages at or over threshold_s (the board's own STATUS_STALE_AFTER unless --stale-after says otherwise).",
+   "definition": "At measured_at (--until, else the input's last event), the age of each status a peer could still read: agents whose last status-setting event (register, or an update carrying status) is in the input, whose status is not blank, and that were not pruned, revoked (recover without a later rebind) or detached (a detach with no later attach: an ended session, which the peer list does not show) since; the last two are counted in excluded_*. stale counts ages at or over threshold_s (the board's own STATUS_STALE_AFTER unless --stale-after says otherwise). agents_without_status_event counts agents in the reported messages with no such event in the input: an export filtered at the source loses them.",
    "available": false,
    "value": null,
    "note": "This input records no status history (the legacy board export keeps only each agent's latest status, not when it was set)."

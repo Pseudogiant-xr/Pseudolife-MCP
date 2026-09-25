@@ -9900,11 +9900,11 @@ for _cid, _needle, _val, _stated, _places in [
     ("coord-baseline-batch-share", "32.7% of acknowledgements came in batches",
      lambda d: 100 * d["metrics"]["batch_acks"]["messages_in_batches"]
      / d["metrics"]["batch_acks"]["acked_messages"], 32.7, 1),
-    ("coord-baseline-bursts", "35 fan-out bursts covered 20.2% of messages",
-     lambda d: d["metrics"]["fanout_bursts"]["bursts"], 35, 0),
-    ("coord-baseline-burst-share", "35 fan-out bursts covered 20.2% of messages",
+    ("coord-baseline-bursts", "39 fan-out bursts covered 22.8% of messages",
+     lambda d: d["metrics"]["fanout_bursts"]["bursts"], 39, 0),
+    ("coord-baseline-burst-share", "39 fan-out bursts covered 22.8% of messages",
      lambda d: 100 * d["metrics"]["fanout_bursts"]["messages"] / d["volume"]["messages"],
-     20.2, 1),
+     22.8, 1),
     ("coord-baseline-baton-passes", "39 baton passes",
      lambda d: d["metrics"]["suite_baton"]["baton_passes"], 39, 0),
 ]:

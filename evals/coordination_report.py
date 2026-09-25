@@ -3,24 +3,30 @@
 The instrument later coordination changes are judged by: a change has to beat
 the committed trial baseline
 (``evals/results/coordination-baseline-20260924.json``) by more than
-night-to-night noise. It reads either input:
+night-to-night noise. That noise is unmeasured until a second comparable night
+has been reported; one night is a reference point, not an interval. It reads
+either input:
 
 - the audit log's export, ``pseudolife-mcp board-audit export --out
   board.jsonl`` (one ``coordination_events`` row per line, chain order), which
-  also carries the status history;
+  also carries the status history. Export the whole log and scope the report
+  with ``--since``/``--until``: a filtered export loses the registrations and
+  statuses set before its cut, and the report flags one;
 - the older whole-board export the 2026-09-23/24 fifteen-session trial was
   recorded in (a JSON object with ``agents`` and ``messages``), which does
   not.
 
 It writes ``<out>.json`` and ``<out>.md`` beside it and never replaces either
-without ``--force``.
+without ``--force`` (nor, even then, its own input).
 
 Aggregate-only by construction. Message bodies, labels, statuses, tasks,
 projects and paths are read in memory (the kind and resource heuristics match
 fixed keyword lists against them) and only counts leave. Agents appear as
-``<principal>-<n>`` in first-seen order; a principal that is not a plain role
-name is itself replaced. No raw id and no input path is written. Both inputs
-hold bodies verbatim: keep them private and out of the repository.
+``<principal>-<n>`` in first-seen order; a principal is written by name only
+when it is a known role name (``KNOWN_PRINCIPALS``) or ``--keep-principal``
+names it, otherwise as ``principal-<n>``. No raw id and no input path is
+written. Both inputs hold bodies verbatim: keep them private and out of the
+repository.
 
 Run with ``python -m evals.coordination_report <export> --out <new-file.json>``.
 """
@@ -63,9 +69,9 @@ PROPOSAL_MIN = 2
 KINDS = ("NOTICE", "REQUEST", "CLAIM", "HANDOFF", "NEEDS-HUMAN")
 
 PRIVACY = ("Aggregate-only: no message text, label, status, task, project, path or raw "
-           "id. Agents are <principal>-<n> in first-seen order (a principal that is not "
-           "a plain role name is replaced by principal-<n>). Keyword classification ran "
-           "in memory; only counts are written.")
+           "id. Agents are <principal>-<n> in first-seen order; a principal is named only "
+           "when it is a known role name or the operator kept it, otherwise principal-<n>. "
+           "Keyword classification ran in memory; only counts are written.")
 
 
 # ---------------------------------------------------------------- input
@@ -88,13 +94,19 @@ class Board:
     messages: list          # Message, in send order
     principals: dict        # agent id -> principal as recorded
     agents: list            # every agent id, in input order
-    status: dict | None     # agent id -> (set_at, non-blank); None: no history
+    # (at, op, agent ids, value) in input order, replayed up to the report's
+    # end: op is status (value: non-blank), attach, detach, revoke, rebind or
+    # prune. None: the input records no status history.
+    state: list | None
     window_start: float | None
     window_end: float | None
     records: int
     sha256: str
     acks_without_send: int = 0
-    bodies_missing: int = 0
+    # An audit export with a gap in its sequence, or starting after seq 1
+    # with no retention cut anchoring it: an export filtered at the source,
+    # whose earlier state (registrations, statuses) the report cannot see.
+    filtered_export: bool | None = None
 
 
 def _number(value) -> bool:
@@ -106,7 +118,7 @@ def load_board(path) -> Board:
     path = Path(path)
     raw = path.read_bytes()
     try:
-        text = raw.decode("utf-8")
+        text = raw.decode("utf-8-sig")  # tolerate a byte-order mark
     except UnicodeDecodeError:
         raise ValueError(f"{path.name} is not UTF-8") from None
     try:
@@ -125,6 +137,11 @@ def load_board(path) -> Board:
     return board
 
 
+def _ids(value) -> list:
+    """The agent ids of a payload list; anything malformed names none."""
+    return [one for one in value if isinstance(one, str)] if isinstance(value, list) else []
+
+
 def _legacy(data: dict) -> Board:
     rows = data["messages"]
     if not isinstance(rows, list):
@@ -134,7 +151,7 @@ def _legacy(data: dict) -> Board:
         if isinstance(agent, dict) and isinstance(agent.get("agent_id"), str):
             principals[agent["agent_id"]] = agent.get("principal") or ""
             agents.append(agent["agent_id"])
-    messages = []
+    messages, seen = [], set()
     for number, row in enumerate(rows, 1):
         acked = row.get("acknowledged_at") if isinstance(row, dict) else None
         if (not isinstance(row, dict)
@@ -143,6 +160,10 @@ def _legacy(data: dict) -> Board:
                 or not _number(row.get("created_at"))
                 or not (acked is None or _number(acked))):
             raise ValueError(f"board export message {number} is not a message row")
+        if row["message_id"] in seen:
+            raise ValueError(f"board export message {number} repeats a message id "
+                             "(duplicate ids: not a real export)")
+        seen.add(row["message_id"])
         principals.setdefault(row["sender_agent_id"], row.get("sender_principal") or "")
         messages.append(Message(
             sender=row["sender_agent_id"], recipient=row["recipient_agent_id"],
@@ -154,11 +175,10 @@ def _legacy(data: dict) -> Board:
     start = data.get("window_start")
     end = data.get("exported_at")
     board = Board(format="legacy-board-export", messages=messages, principals=principals,
-                  agents=agents, status=None,
+                  agents=agents, state=None,
                   window_start=float(start) if _number(start) else (min(times) if times else None),
                   window_end=float(end) if _number(end) else (max(times) if times else None),
                   records=len(rows), sha256="")
-    board.bodies_missing = sum(m.text is None for m in messages)
     for m in messages:
         m.text = m.text or ""
     return board
@@ -166,11 +186,19 @@ def _legacy(data: dict) -> Board:
 
 def _audit(rows) -> Board:
     principals, agents, seen = {}, [], set()
-    sends, acks, status = {}, {}, {}
+    sends, acks, state = {}, {}, []
     first = last = None
     records = 0
+    first_seq = prev_seq = None
+    gaps, anchors = False, set()
     for row in rows:
         records += 1
+        seq = row["seq"]
+        if first_seq is None:
+            first_seq = seq
+        elif seq != prev_seq + 1:
+            gaps = True
+        prev_seq = seq
         at = float(row["created_at"])
         first = at if first is None else min(first, at)
         last = at if last is None else max(last, at)
@@ -190,6 +218,9 @@ def _audit(rows) -> Board:
         if row["actor"] == "agent" and agent and row["principal"]:
             principals.setdefault(agent, row["principal"])
         if event == "send" and row["message_id"] and row["recipient_agent_id"]:
+            if row["message_id"] in sends:
+                raise ValueError(f"audit event {seq} repeats a message id "
+                                 "(duplicate ids: not a real export)")
             text = payload.get("text")
             sends[row["message_id"]] = Message(
                 sender=agent, recipient=row["recipient_agent_id"], sent=at, acked=None,
@@ -198,22 +229,30 @@ def _audit(rows) -> Board:
         elif event == "ack" and row["message_id"]:
             acks.setdefault(row["message_id"], at)
         elif event == "register" and agent:
-            status[agent] = (at, bool(payload.get("status")))
+            state.append((at, "status", [agent], bool(payload.get("status"))))
         elif event == "update" and agent:
             fields = payload.get("fields")
             if isinstance(fields, dict) and "status" in fields:
-                status[agent] = (at, bool(fields["status"]))
-        elif event in ("prune", "recover"):
-            for gone in payload.get("agent_ids") or []:
-                status.pop(gone, None)
+                state.append((at, "status", [agent], bool(fields["status"])))
+        elif event in ("attach", "detach") and agent:
+            state.append((at, event, [agent], None))
+        elif event == "recover":
+            state.append((at, "revoke", _ids(payload.get("agent_ids")), None))
+        elif event == "rebind" and agent:
+            state.append((at, "rebind", [agent], None))
+        elif event == "prune":
+            state.append((at, "prune", _ids(payload.get("agent_ids")), None))
+        elif event == "audit_prune" and type(payload.get("through_seq")) is int:
+            anchors.add(payload["through_seq"])
     for message_id, message in sends.items():
         message.acked = acks.get(message_id)
     messages = sorted(sends.values(), key=lambda m: m.sent)
+    filtered = gaps or (first_seq is not None and first_seq > 1
+                        and first_seq - 1 not in anchors)
     board = Board(format="audit-export", messages=messages, principals=principals,
-                  agents=agents, status=status, window_start=first, window_end=last,
-                  records=records, sha256="",
+                  agents=agents, state=state, window_start=first, window_end=last,
+                  records=records, sha256="", filtered_export=filtered,
                   acks_without_send=sum(1 for message_id in acks if message_id not in sends))
-    board.bodies_missing = sum(m.text is None for m in messages)
     for m in messages:
         m.text = m.text or ""
     return board
@@ -239,6 +278,11 @@ def _instant(text: str) -> float:
     return value
 
 
+# A label is written to both files verbatim: a short plain name, never a path
+# or an address.
+_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9 :._+-]{0,39}")
+
+
 def parse_window(text: str):
     """``LABEL=START/END`` -> (label, start, end); either side may be empty
     (unbounded). Times are epoch seconds or ISO 8601 with an offset."""
@@ -247,6 +291,9 @@ def parse_window(text: str):
     parts = span.split("/")
     if not sep or not label or len(parts) != 2:
         raise ValueError(f"window {text!r}: expected LABEL=START/END")
+    if not _LABEL.fullmatch(label):
+        raise ValueError("a window label is up to 40 letters, digits, spaces and :._+- "
+                         "(it is written to the report verbatim)")
     start = _instant(parts[0]) if parts[0].strip() else None
     end = _instant(parts[1]) if parts[1].strip() else None
     if start is not None and end is not None and end <= start:
@@ -293,21 +340,37 @@ def _iso(epoch):
     return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="seconds")
 
 
-_PLAIN_PRINCIPAL = re.compile(r"[a-z0-9][a-z0-9._-]{0,39}")
+# Principals written by name: the role names the installer mints as writer
+# ids (ops/install.ps1) and the singular-token principal. Any other principal
+# is an operator's choice that can be a username, a host or an address, so it
+# is written as principal-<n> unless --keep-principal names it.
+KNOWN_PRINCIPALS = ("default", "claude-code", "claude-desktop", "codex", "gemini", "mcp-client")
 _RESERVED = re.compile(r"all|unknown|principal-\d+")
+
+
+def _kept(keep) -> frozenset:
+    names = set()
+    for name in keep:
+        plain = name.strip().lower() if isinstance(name, str) else ""
+        if not plain or _RESERVED.fullmatch(plain):
+            raise ValueError(f"--keep-principal {name!r}: a reserved or empty principal name")
+        names.add(plain)
+    return frozenset(names)
 
 
 class Names:
     """Pseudonyms: ``<principal>-<n>`` per agent, in first-seen order (the
     time-ordered message stream, sender before recipient, then silent agents
-    in input order). A principal is kept only when it is a plain role name."""
+    in input order). A principal is written by name only when it is a known
+    role name or the operator kept it."""
 
-    def __init__(self, board: Board):
+    def __init__(self, board: Board, messages, keep=frozenset()):
         self._principals = board.principals
+        self._keep = frozenset(KNOWN_PRINCIPALS) | keep
         self._principal_names: dict = {}
         self.agent: dict = {}
         counts: Counter = Counter()
-        order = [a for m in board.messages for a in (m.sender, m.recipient)] + board.agents
+        order = [a for m in messages for a in (m.sender, m.recipient)] + board.agents
         for agent in order:
             if agent not in self.agent:
                 principal = self.principal_of(agent)
@@ -317,34 +380,41 @@ class Names:
     def principal_of(self, agent: str) -> str:
         raw = self._principals.get(agent) or ""
         if raw not in self._principal_names:
-            plain = raw.lower()
-            if not raw:
+            plain = raw.strip().lower()
+            if not plain:
                 name = "unknown"
-            elif _PLAIN_PRINCIPAL.fullmatch(plain) and not _RESERVED.fullmatch(plain):
+            elif plain in self._keep:
                 name = plain
             else:
-                opaque = sum(1 for n in self._principal_names.values()
-                             if n.startswith("principal-"))
-                name = f"principal-{opaque + 1}"
+                # Two spellings of one principal ("Ops", "ops") share a name.
+                same = [n for r, n in self._principal_names.items()
+                        if r.strip().lower() == plain]
+                opaque = {n for n in self._principal_names.values() if n.startswith("principal-")}
+                name = same[0] if same else f"principal-{len(opaque) + 1}"
             self._principal_names[raw] = name
         return self._principal_names[raw]
 
 
-def pick_coordinator(board: Board, names: Names, choice: str):
+def pick_coordinator(messages, names: Names, choice: str):
     """The agent the kind heuristic treats as the coordinator (a hub-and-spoke
     board's NEEDS-HUMAN and SUITE-END copies are addressed to it)."""
     if choice == "none":
         return None, "none (--coordinator none)"
     if choice == "auto":
         peers = defaultdict(set)
-        for m in board.messages:
+        for m in messages:
             if m.sender != m.recipient:
                 peers[m.sender].add(m.recipient)
                 peers[m.recipient].add(m.sender)
         if not peers:
             return None, "auto: no messages between agents"
-        best = max(names.agent, key=lambda a: len(peers.get(a, ())))
-        return best, f"auto: the agent with the most distinct counterparties ({len(peers[best])})"
+        most = max(len(p) for p in peers.values())
+        hubs = [a for a in names.agent if len(peers.get(a, ())) == most]
+        if len(hubs) > 1:
+            return None, (f"auto: no single hub ({len(hubs)} agents tied at {most} distinct "
+                          "counterparties), so the coordinator rules are off; --coordinator "
+                          "names one")
+        return hubs[0], f"auto: the agent with the most distinct counterparties ({most})"
     matches = [a for a in names.agent
                if a == choice or (len(choice) >= 8 and a.startswith(choice))]
     if len(matches) != 1:
@@ -430,7 +500,7 @@ def heuristic_kinds(messages, coordinator) -> list:
 
 def declared_kind(value):
     """A declared kind, normalized; None when the event carries none."""
-    if value is None:
+    if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if isinstance(value, str):
         kind = value.strip().upper().replace("_", "-")
@@ -523,9 +593,10 @@ DEFINITIONS = {
         "Seconds from a message's send to its recipient's first acknowledgment, grouped "
         "by the recipient's bearer principal (all = every recipient). A window takes "
         "messages by send time, start inclusive, end exclusive. median_s and p90_s "
-        "interpolate linearly between ranks. never_acked counts messages with no "
-        "acknowledgment by the end of the input, including any sent too close to its end "
-        "to have been answered."),
+        "interpolate linearly between ranks; an acknowledgment stamped before its send (a "
+        "clock step, counted in input.acks_before_send) counts as 0 s. never_acked counts "
+        "messages with no acknowledgment by the end of the input, including any sent too "
+        "close to its end to have been answered."),
     "batch_acks": (
         f"Share of acknowledged messages whose acknowledgment shared one instant (same "
         f"recipient, same millisecond) with at least {BATCH_MIN - 1} others: one "
@@ -538,10 +609,10 @@ DEFINITIONS = {
     "fanout_bursts": (
         f"A burst is one sender's messages to {FANOUT_MIN_RECIPIENTS}+ distinct recipients "
         f"within {FANOUT_WINDOW:g} s of the burst's first message, each at least "
-        f"{FANOUT_SIMILARITY} similar to it (difflib ratio over lowercased text with digit "
-        f"runs and 8+ hex runs masked, whitespace collapsed, first {FANOUT_CHARS} "
-        f"characters). Greedy per sender in send order; a message joins at most one "
-        f"burst. share = messages in bursts / all messages."),
+        f"{FANOUT_SIMILARITY} similar to it (difflib ratio, autojunk off, over lowercased "
+        f"text with digit runs and 8+ hex runs masked, whitespace collapsed, first "
+        f"{FANOUT_CHARS} characters). Greedy per sender in send order; a message joins at "
+        f"most one burst. share = messages in bursts / all messages."),
     "kind_mix": (
         "One kind per message: a declared kind field when the event carries one (values "
         "outside NOTICE/REQUEST/CLAIM/HANDOFF/NEEDS-HUMAN count as OTHER), otherwise the "
@@ -555,15 +626,19 @@ DEFINITIONS = {
         "label."),
     "suite_baton": (
         "suite_start and suite_end count messages whose first token is SUITE-START or "
-        "SUITE-END. baton_passes groups SUITE-END messages in send order: one from the "
-        f"sender of the current group within {COPY_WINDOW:g} s of that group's first "
-        "message is a copy of the same pass."),
+        "SUITE-END. baton_passes groups each sender's SUITE-END messages: one within "
+        f"{COPY_WINDOW:g} s of the first message of that sender's current pass is a copy "
+        "of it, whatever other senders sent in between."),
     "status_staleness": (
-        "At the end of the input, the age of each agent's status: agents whose "
-        "status-setting event (register, or an update carrying status) is in the input, "
-        "whose status is not blank, and that were not pruned or revoked since. stale "
-        "counts ages at or over threshold_s (the board's own STATUS_STALE_AFTER unless "
-        "--stale-after says otherwise)."),
+        "At measured_at (--until, else the input's last event), the age of each status a "
+        "peer could still read: agents whose last status-setting event (register, or an "
+        "update carrying status) is in the input, whose status is not blank, and that "
+        "were not pruned, revoked (recover without a later rebind) or detached (a "
+        "detach with no later attach: an ended session, which the peer list does not "
+        "show) since; the last two are counted in excluded_*. stale counts ages at or "
+        "over threshold_s (the board's own STATUS_STALE_AFTER unless --stale-after says "
+        "otherwise). agents_without_status_event counts agents in the reported messages "
+        "with no such event in the input: an export filtered at the source loses them."),
     "proposals": (
         "Resources agents coordinated by hand. A message counts for a resource when it "
         "carries the resource's START/END tag (SUITE-START) or pairs a coordination word "
@@ -589,16 +664,76 @@ PLACEHOLDER_NOTES = {
 
 
 def _latency(messages) -> dict:
-    lat = [m.acked - m.sent for m in messages if m.acked is not None]
+    # An acknowledgment stamped before its send (a clock step) counts as 0 s.
+    lat = [max(0.0, m.acked - m.sent) for m in messages if m.acked is not None]
     return {"messages": len(messages), "acked": len(lat), "never_acked": len(messages) - len(lat),
             "median_s": _seconds(quantile(lat, 0.5)), "p90_s": _seconds(quantile(lat, 0.9))}
 
 
+def _replay(state, until):
+    """Status, lifecycle and revocation per agent from the rows before ``until``."""
+    status, lifecycle, revoked = {}, {}, set()
+    for at, op, agents, value in state:
+        if until is not None and at >= until:
+            continue
+        for agent in agents:
+            if op == "status":
+                status[agent] = (at, value)
+            elif op in ("attach", "detach"):
+                lifecycle[agent] = op
+            elif op == "revoke":
+                revoked.add(agent)
+            elif op == "rebind":
+                revoked.discard(agent)
+            elif op == "prune":
+                status.pop(agent, None)
+                lifecycle.pop(agent, None)
+                revoked.discard(agent)
+    return status, lifecycle, revoked
+
+
+def _staleness(board: Board, messages, until, stale_after) -> dict:
+    if board.state is None:
+        return {"available": False, "value": None,
+                "note": "This input records no status history (the legacy board export keeps "
+                        "only each agent's latest status, not when it was set)."}
+    end = until if until is not None else board.window_end
+    status, lifecycle, revoked = _replay(board.state, until)
+    ages, detached, excluded_revoked = [], 0, 0
+    for agent, (at, non_blank) in status.items():
+        if not non_blank:
+            continue
+        if agent in revoked:
+            excluded_revoked += 1
+        elif lifecycle.get(agent) == "detach":
+            detached += 1
+        else:
+            ages.append(end - at)
+    stale = sum(age >= stale_after for age in ages)
+    in_messages = {a for m in messages for a in (m.sender, m.recipient)}
+    return {"available": True, "measured_at": _iso(end), "threshold_s": stale_after,
+            "agents_with_status": len(ages), "stale": stale, "share": _share(stale, len(ages)),
+            "median_age_s": _seconds(quantile(ages, 0.5)),
+            "p90_age_s": _seconds(quantile(ages, 0.9)),
+            "excluded_detached": detached, "excluded_revoked": excluded_revoked,
+            "agents_without_status_event": len(in_messages - set(status))}
+
+
 def build_report(board: Board, *, windows=(), coordinator="auto",
-                 stale_after=STATUS_STALE_AFTER) -> dict:
-    names = Names(board)
-    messages = board.messages
-    hub, chosen_by = pick_coordinator(board, names, coordinator)
+                 stale_after=STATUS_STALE_AFTER, since=None, until=None,
+                 keep_principals=()) -> dict:
+    """``since``/``until`` scope the report to messages sent in [since, until)
+    and measure staleness at ``until``; every row before ``until`` still feeds
+    agent principals and status history."""
+    if type(stale_after) not in (int, float) or not math.isfinite(stale_after) \
+            or stale_after <= 0:
+        raise ValueError("--stale-after must be a positive number of seconds")
+    if since is not None and until is not None and until <= since:
+        raise ValueError("--until must be after --since")
+    messages = [m for m in board.messages if (since is None or m.sent >= since)
+                and (until is None or m.sent < until)]
+    names = Names(board, messages, _kept(keep_principals))
+    hub, chosen_by = pick_coordinator(messages, names, coordinator)
     recipients_by_principal = defaultdict(list)
     for m in messages:
         recipients_by_principal[names.principal_of(m.recipient)].append(m)
@@ -644,8 +779,7 @@ def build_report(board: Board, *, windows=(), coordinator="auto",
             for j in range(i + 1, len(sent)):
                 if sent[j].sent - first.sent > FANOUT_WINDOW:
                     break
-                if j not in used and difflib.SequenceMatcher(
-                        None, norms[i], norms[j]).ratio() >= FANOUT_SIMILARITY:
+                if j not in used and _similar(norms[i], norms[j]):
                     group.append(j)
             if len({sent[k].recipient for k in group}) >= FANOUT_MIN_RECIPIENTS:
                 used.update(group)
@@ -662,28 +796,17 @@ def build_report(board: Board, *, windows=(), coordinator="auto",
 
     tokens = [first_token(m.text) for m in messages]
     ends = [m for m, t in zip(messages, tokens) if t == "SUITE-END"]
-    passes, group_first = 0, None
+    # Per sender: two sessions finishing together interleave their copies.
+    passes, pass_start = 0, {}
     for m in ends:
-        if (group_first is not None and m.sender == group_first.sender
-                and m.sent - group_first.sent <= COPY_WINDOW):
+        start = pass_start.get(m.sender)
+        if start is not None and m.sent - start <= COPY_WINDOW:
             continue
         passes += 1
-        group_first = m
+        pass_start[m.sender] = m.sent
 
     resources, unlisted = proposals(messages)
-
-    if board.status is None:
-        staleness = {"available": False, "value": None,
-                     "note": "This input records no status history (the legacy board export "
-                             "keeps only each agent's latest status, not when it was set)."}
-    else:
-        ages = [board.window_end - at for at, set_ in board.status.values() if set_]
-        stale = sum(age >= stale_after for age in ages)
-        staleness = {"available": True, "threshold_s": stale_after,
-                     "agents_with_status": len(ages), "stale": stale,
-                     "share": _share(stale, len(ages)),
-                     "median_age_s": _seconds(quantile(ages, 0.5)),
-                     "p90_age_s": _seconds(quantile(ages, 0.9))}
+    staleness = _staleness(board, messages, until, stale_after)
 
     metrics = {
         "ack_latency": {"overall": by_principal(messages), "windows": window_rows},
@@ -717,18 +840,25 @@ def build_report(board: Board, *, windows=(), coordinator="auto",
         "report_version": REPORT_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "input": {"format": board.format, "sha256": board.sha256, "records": board.records,
-                  "messages": len(messages), "status_history": board.status is not None,
+                  "messages_in_input": len(board.messages), "messages": len(messages),
+                  "scope": {"since": _iso(since), "until": _iso(until)},
+                  "status_history": board.state is not None,
+                  "filtered_export": board.filtered_export,
                   "window_start": _iso(board.window_start), "window_end": _iso(board.window_end),
                   "first_message": _iso(messages[0].sent) if messages else None,
                   "last_message": _iso(messages[-1].sent) if messages else None,
                   "acks_without_send": board.acks_without_send,
-                  "bodies_missing": board.bodies_missing},
+                  "acks_before_send": sum(m.acked is not None and m.acked < m.sent
+                                          for m in messages),
+                  "bodies_missing": sum(not m.text for m in messages)},
         "privacy": PRIVACY,
         "parameters": {"pair_window_s": PAIR_WINDOW, "pair_thresholds": list(PAIR_THRESHOLDS),
                        "batch_min": BATCH_MIN, "fanout_window_s": FANOUT_WINDOW,
                        "fanout_min_recipients": FANOUT_MIN_RECIPIENTS,
-                       "fanout_similarity": FANOUT_SIMILARITY, "copy_window_s": COPY_WINDOW,
+                       "fanout_similarity": FANOUT_SIMILARITY, "fanout_autojunk": False,
+                       "copy_window_s": COPY_WINDOW,
                        "proposal_min": PROPOSAL_MIN, "stale_after_s": stale_after,
+                       "known_principals": list(KNOWN_PRINCIPALS),
                        "windows": [{"label": label, "start": _iso(start), "end": _iso(end)}
                                    for label, start, end in windows]},
         "coordinator": {"agent": names.agent[hub] if hub is not None else None,
@@ -748,6 +878,19 @@ def _fanout_norm(text: str) -> str:
     return " ".join(text.split())[:FANOUT_CHARS]
 
 
+def _similar(a: str, b: str) -> bool:
+    """difflib ratio at or over FANOUT_SIMILARITY, with autojunk off. Past 200
+    characters autojunk stops using common characters (letters, spaces) as
+    match anchors, and near-identical copies scored as unrelated: measured
+    2026-09-26, a 260-character pair differing only in its first word scored
+    0.012 with it and 0.983 without, and 44 of 300 synthetic one-word edits
+    fell under 0.8 only because of it. quick_ratio is an exact upper bound on
+    ratio, so checking it first changes no verdict."""
+    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    return (matcher.quick_ratio() >= FANOUT_SIMILARITY
+            and matcher.ratio() >= FANOUT_SIMILARITY)
+
+
 # ---------------------------------------------------------------- markdown
 
 def _table(headers, rows) -> list:
@@ -765,14 +908,24 @@ def _latency_rows(scope, stats):
 def render_markdown(report: dict) -> str:
     """The same report for a human; everything here is in the JSON."""
     inp, m = report["input"], report["metrics"]
+    scope = inp["scope"]
     lines = ["# Coordination report", "",
-             f"Input: {inp['format']}, {inp['messages']} messages, window "
+             f"Input: {inp['format']}, {inp['messages_in_input']} messages, window "
              f"{inp['window_start']} to {inp['window_end']} (UTC). "
              f"Input sha256 `{inp['sha256']}`. Generated {report['generated_at']} by "
              f"`{report['harness']}` (report version {report['report_version']}).", "",
-             report["privacy"], "",
-             f"Coordinator for the kind heuristic: {report['coordinator']['agent'] or 'none'} "
-             f"({report['coordinator']['chosen_by']}).", "", "## Volume", ""]
+             f"Reported: {inp['messages']} messages sent from {scope['since'] or 'the start'} "
+             f"to {scope['until'] or 'the end'}. Acknowledgments stamped before their send: "
+             f"{inp['acks_before_send']}; acknowledgments of messages not in the input: "
+             f"{inp['acks_without_send']}.", ""]
+    if inp["filtered_export"]:
+        lines += ["**Warning:** this audit export was filtered at the source (its sequence "
+                  "has a gap or an unanchored start), so registrations and statuses set "
+                  "outside it are missing. Export the whole log and scope the report with "
+                  "--since/--until instead.", ""]
+    lines += [report["privacy"], "",
+              f"Coordinator for the kind heuristic: {report['coordinator']['agent'] or 'none'} "
+              f"({report['coordinator']['chosen_by']}).", "", "## Volume", ""]
     vol = report["volume"]
     lines += _table(["messages", "agents", "senders", "directed pairs", "self messages"],
                     [[vol["messages"], vol["agents"], vol["senders"], vol["directed_pairs"],
@@ -821,12 +974,15 @@ def render_markdown(report: dict) -> str:
                     [[baton["suite_start"], baton["suite_end"], baton["baton_passes"]]])
 
     stale = m["status_staleness"]
-    lines += ["", "## Status staleness at the end of the input", "", stale["definition"], ""]
+    lines += ["", "## Status staleness", "", stale["definition"], ""]
     if stale["available"]:
+        lines += [f"Measured at {stale['measured_at']} (UTC).", ""]
         lines += _table(["agents with a status", f"stale (>= {stale['threshold_s']:g} s)",
-                         "share", "median age s", "p90 age s"],
+                         "share", "median age s", "p90 age s", "excluded: detached",
+                         "excluded: revoked", "agents without a status event"],
                         [[stale["agents_with_status"], stale["stale"], stale["share"],
-                          stale["median_age_s"], stale["p90_age_s"]]])
+                          stale["median_age_s"], stale["p90_age_s"], stale["excluded_detached"],
+                          stale["excluded_revoked"], stale["agents_without_status_event"]]])
     else:
         lines += [f"Not available: {stale['note']}"]
 
@@ -871,27 +1027,52 @@ def main(argv=None) -> int:
     parser.add_argument("--stale-after", type=float, default=STATUS_STALE_AFTER,
                         metavar="SECONDS", help="status staleness threshold "
                                                 f"(default {STATUS_STALE_AFTER})")
+    parser.add_argument("--since", metavar="TIME",
+                        help="report messages sent at or after TIME (epoch seconds or ISO 8601 "
+                             "with an offset); earlier rows still feed principals and statuses")
+    parser.add_argument("--until", metavar="TIME",
+                        help="report messages sent before TIME and measure status staleness "
+                             "at TIME")
+    parser.add_argument("--keep-principal", action="append", default=[], metavar="NAME",
+                        help="write this principal by name although it is not a known role "
+                             f"name ({', '.join(KNOWN_PRINCIPALS)}); repeatable. Only for a "
+                             "name that identifies no person or machine")
     args = parser.parse_args(argv)
     out = Path(args.out)
     if out.suffix != ".json":
         parser.error("--out must name a .json file (the .md is written beside it)")
     markdown = out.with_suffix(".md")
-    if not args.force:
-        for target in (out, markdown):
-            if target.exists():
-                parser.error(f"{target} exists; results are never overwritten "
-                             "(--force replaces it)")
+    source = Path(args.input)
+    for target in (out, markdown):
+        # Not even --force replaces the private export the report reads.
+        if target.exists() and source.exists() and target.samefile(source):
+            parser.error(f"{target} is the input; choose another --out")
+        if target.exists() and not args.force:
+            parser.error(f"{target} exists; results are never overwritten "
+                         "(--force replaces it)")
     try:
         windows = [parse_window(text) for text in args.window]
-        report = build_report(load_board(args.input), windows=windows,
-                              coordinator=args.coordinator, stale_after=args.stale_after)
+        since = _instant(args.since) if args.since else None
+        until = _instant(args.until) if args.until else None
+        report = build_report(load_board(source), windows=windows,
+                              coordinator=args.coordinator, stale_after=args.stale_after,
+                              since=since, until=until, keep_principals=args.keep_principal)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
+    # Render before writing anything: a failure must not leave a lone JSON
+    # that blocks the rerun.
+    rendered = json.dumps(report, indent=1) + "\n"
+    text = render_markdown(report)
     mode = "w" if args.force else "x"
     with out.open(mode, encoding="utf-8", newline="\n") as stream:
-        stream.write(json.dumps(report, indent=1) + "\n")
-    with markdown.open(mode, encoding="utf-8", newline="\n") as stream:
-        stream.write(render_markdown(report))
+        stream.write(rendered)
+    try:
+        with markdown.open(mode, encoding="utf-8", newline="\n") as stream:
+            stream.write(text)
+    except BaseException:
+        if mode == "x":
+            out.unlink(missing_ok=True)     # this run created it
+        raise
     lat = report["metrics"]["ack_latency"]["overall"]["all"]
     print(json.dumps({"messages": report["volume"]["messages"],
                       "ack_median_s": lat["median_s"], "ack_p90_s": lat["p90_s"],
