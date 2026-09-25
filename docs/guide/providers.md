@@ -129,6 +129,23 @@ installers call and which you can run by hand with
 entry). What Desktop does differently, and what the entry carries because
 of it:
 
+- **Its own name.** The entry is `pseudolife-desktop`. Desktop's Code tab
+  runs Claude Code, which starts its own per-session `pseudolife-memory`
+  server; where an app-level entry carries the same name, Desktop sends the
+  session's `mcp__pseudolife-memory__*` calls to the app-level entry and the
+  session's own server gets none (seen live on 2026-09-21), so the session
+  has no board identity of its own. The registrar renames an entry it wrote
+  under the old name, recognised by `PSEUDOLIFE_WRITER_ID=claude-desktop` in
+  its `env`, and keeps its other settings: hand-added `env` keys, a
+  configured token-file path, a literal token to migrate. When both names
+  exist, `pseudolife-desktop` wins wherever both set a key, the old entry
+  fills the gaps, and the output names the `env` keys whose old values were
+  dropped (names, never values), apart from the settings the registrar
+  rewrites on every run. A `pseudolife-memory` entry the registrar did not
+  write is left untouched and reported on every run, and `pseudolife-desktop`
+  is written beside it, so Desktop loads both. Every rewrite
+  backs the config up first (`claude_desktop_config.json.bak-<timestamp>`).
+  Afterwards Chat and Cowork list the tools as `mcp__pseudolife-desktop__*`.
 - **Sanitized launch environment.** Desktop starts MCP servers with PATH
   plus a few system variables — none of your shell's exports. So `command`
   is the shim's absolute path (a bare `pseudolife-mcp` would not resolve),
@@ -153,7 +170,9 @@ of it:
   answers without it is refused (exit 4, nothing written) with the
   upgrade named — `pipx upgrade pseudolife-mcp`, or `pipx install --force .` from
   the checkout for a change not yet released — and so is a shim from
-  before `--help` existed (it answers "unknown mode"). A probe that yields
+  before `--help` existed (it answers "unknown mode"). On Windows, run that
+  upgrade with every session using the shim closed (Desktop fully quit
+  from the tray), or it can leave the shim half-removed. A probe that yields
   no evidence (missing, not executable, timeout, any other non-zero exit,
   exit 0 with no output) is not blocking: the run proceeds and says the
   check did not happen, so a clean exit 0 from the registrar is proof only
@@ -366,6 +385,9 @@ upgrade the client or configure that entry manually before using the shim.
    `-m pip install --upgrade "pseudolife-mcp[lite]"`; for a source checkout,
    reinstall the intended checkout with `-m pip install -e .` to refresh
    dependencies and editable metadata. Docker shim-only hosts omit `[lite]`.
+   On Windows, run either with every session using that shim closed
+   (Claude Desktop fully quit from the tray), or it can leave the shim
+   half-removed.
    Re-running the Docker installer preserves existing registrations; it does
    not repair a different interpreter already registered with Codex.
 4. Reconnect and ask for a real memory search and lesson search. Confirm the

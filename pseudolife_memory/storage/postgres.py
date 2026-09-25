@@ -290,6 +290,51 @@ class BankChangedHands(RuntimeError):
     called :meth:`PostgresStorage.acknowledge_rehydration`."""
 
 
+# Two openers leave a root episode per client session: the plugin's
+# SessionStart hook keys its root by the client's own session id (a dashed
+# UUID), the stdio shim by a fresh 32-hex uuid. Same key pattern and pairing
+# rule as evals/capture_metrics.py (the memory-policy bench, 2026-09-25, as
+# of its review commit a0b1f533).
+_HOOK_SESSION_KEY = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# A hook root and its shim root open within a couple of seconds of each
+# other. Measured 2026-09-25 over 7 days of the live bank: the eight active
+# shim roots with a hook root nearby sat 1-8 s from it, the next nearest
+# 135 s. A wider window only adds fleet-start candidates, which the
+# uniqueness rule refuses.
+SESSION_PAIR_WINDOW_S = 5.0
+
+
+def count_client_sessions(roots, active_roots) -> int:
+    """Client sessions among keyed root episodes, counted the way
+    evals/capture_metrics.py counts them. ``roots`` holds
+    ``(id, session_key, started_at)`` per keyed root; ``active_roots`` the
+    ids with memory activity.
+
+    A hook root counts whether or not it was used: a session that never
+    touched memory is the miss a loop metric exists to show. Any other root
+    counts only when active, since an idle stdio-shim root is a transport
+    artifact. A hook root and an active non-hook root opened within
+    ``SESSION_PAIR_WINDOW_S`` of each other are one session when each is
+    the other's only candidate; both may be active, since writes that pass
+    ``episode=`` land on the hook root while the searches carry the shim's
+    key. Anything less certain stays unmerged, so the count is an upper
+    bound."""
+    hooks = [r for r in roots if _HOOK_SESSION_KEY.match(r[1])]
+    others = [r for r in roots
+              if not _HOOK_SESSION_KEY.match(r[1]) and r[0] in active_roots]
+    near = {h[0]: [o[0] for o in others
+                   if abs(o[2] - h[2]) <= SESSION_PAIR_WINDOW_S]
+            for h in hooks}
+    claims: dict[str, int] = {}
+    for cands in near.values():
+        for o in cands:
+            claims[o] = claims.get(o, 0) + 1
+    merged = sum(1 for cands in near.values()
+                 if len(cands) == 1 and claims[cands[0]] == 1)
+    return len(hooks) + len(others) - merged
+
+
 def _application_name() -> str:
     """How this process appears in ``pg_stat_activity``, so a refused
     writer can say who holds the bank: the daemon, a script, a test run.
@@ -1404,6 +1449,79 @@ class PostgresStorage:
             )
         return cur.rowcount or 0
 
+    # ── client sessions (v43) ───────────────────────────────────────────
+
+    def register_client_session(self, session_key: str, *, episode_id: str,
+                                registered_via: str, principal: str | None,
+                                policy_variant: str | None,
+                                now: float) -> None:
+        """Upsert the durable registration row for ``session_key``. The
+        first registration sets ``started_at``; a later one (resume,
+        compact, a shim restart) keeps it, clears the last close, appends
+        ``episode_id`` when it is new and its own time to ``start_times``,
+        and fills ``principal`` / ``policy_variant`` only where they are
+        still NULL."""
+        with self._txn():
+            self.conn.execute(
+                """
+                INSERT INTO client_sessions (session_key, registered_via,
+                    principal, started_at, policy_variant, episode_ids,
+                    start_times)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (session_key) DO UPDATE SET
+                  ended_at = NULL,
+                  end_reason = NULL,
+                  principal = COALESCE(client_sessions.principal,
+                                       EXCLUDED.principal),
+                  policy_variant = COALESCE(client_sessions.policy_variant,
+                                            EXCLUDED.policy_variant),
+                  episode_ids = CASE
+                    WHEN client_sessions.episode_ids @> EXCLUDED.episode_ids
+                      THEN client_sessions.episode_ids
+                    ELSE client_sessions.episode_ids || EXCLUDED.episode_ids
+                  END,
+                  start_times = client_sessions.start_times
+                                || EXCLUDED.start_times
+                """,
+                (session_key, registered_via, principal, now, policy_variant,
+                 Jsonb([episode_id]), Jsonb([now])),
+            )
+
+    def reopen_client_session(self, session_key: str) -> None:
+        """Clear the last close of a registered session whose root was
+        reopened without a registration (a store or an episode handle
+        resuming it after the idle reaper closed it)."""
+        with self._txn():
+            self.conn.execute(
+                "UPDATE client_sessions SET ended_at = NULL, end_reason = NULL "
+                "WHERE session_key = %s AND ended_at IS NOT NULL",
+                (session_key,),
+            )
+
+    def end_client_session(self, session_key: str, *, episode_id: str | None,
+                           ended_at: float, reason: str) -> None:
+        """Stamp the most recent close on a registered session and record
+        the root it closed (a root the daemon opened lazily for a registered
+        key after its first one was pruned). ``episode_id=None`` stamps an
+        end that closed no root (SessionEnd after the idle reaper already
+        had). No row, no write: a session that never registered is not
+        invented here."""
+        ids = Jsonb([episode_id] if episode_id else [])
+        with self._txn():
+            self.conn.execute(
+                """
+                UPDATE client_sessions SET
+                  ended_at = %s,
+                  end_reason = %s,
+                  episode_ids = CASE
+                    WHEN episode_ids @> %s THEN episode_ids
+                    ELSE episode_ids || %s
+                  END
+                WHERE session_key = %s
+                """,
+                (ended_at, reason, ids, ids, session_key),
+            )
+
     # ── cortex facts ────────────────────────────────────────────────────
 
     def upsert_fact(self, f: dict) -> int:
@@ -2129,9 +2247,20 @@ class PostgresStorage:
     def loop_health(self, window_s: float, now: float | None = None,
                     pending_since_ts: float | None = None) -> dict:
         """Windowed loop-activity counts for the Console tile: current vs the
-        immediately preceding window of stores + outcome signals, session
-        episodes (parent_id IS NULL), pending signals, lesson recency.
-        Read-only, all on indexed timestamp columns. Consumed signals still
+        immediately preceding window of stores + outcome signals, client
+        sessions, pending signals, lesson recency. Read-only.
+
+        ``sessions`` counts client sessions started in the window
+        (:func:`count_client_sessions` over keyed root episodes, activity
+        from :meth:`_active_roots`); ``root_episodes`` is the raw count of
+        root episodes started in the window, which the tile divided by
+        until 2026-09-25, when the live bank held 166 keyed roots in 24 h
+        against 34 client sessions by the bench's first count. Neither
+        counts a session whose root was
+        pruned because it stored nothing (an explicit end prunes at once,
+        the reaper after the resume window), so ``sessions`` still
+        undercounts sessions that ended without storing, and the
+        per-session rates lean high. Consumed signals still
         count as outcomes — consumption is the dream's drain cursor, not a
         judgement; the caveat is upstream retention (signal_retention_days)
         deleting rows older than its cutoff. ``pending_since_ts`` splits the
@@ -2153,10 +2282,13 @@ class PostgresStorage:
             o: n for o, n in self.conn.execute(
                 "SELECT outcome, COUNT(*) FROM outcome_signals "
                 "WHERE created_at >= %s GROUP BY outcome", (cutoff,))}
-        sessions = self.conn.execute(
-            "SELECT COUNT(*) FROM episodes "
-            "WHERE started_at >= %s AND parent_id IS NULL",
-            (cutoff,)).fetchone()[0]
+        roots = self.conn.execute(
+            "SELECT id, session_key, started_at FROM episodes "
+            "WHERE started_at >= %s AND parent_id IS NULL "
+            "ORDER BY started_at, id", (cutoff,)).fetchall()
+        keyed = [r for r in roots if r[1] is not None]
+        sessions = count_client_sessions(
+            keyed, self._active_roots(keyed, cutoff))
         if pending_since_ts is None:
             pending, expired = self.conn.execute(
                 "SELECT COUNT(*) FROM outcome_signals WHERE consumed_at IS NULL"
@@ -2172,10 +2304,44 @@ class PostgresStorage:
             "SELECT MAX(asserted_at), COUNT(*) FILTER (WHERE status = 'current') "
             "FROM lessons").fetchone()
         return {"stores": stores, "outcomes": outcomes, "sessions": sessions,
+                "root_episodes": len(roots),
                 "pending_signals": pending,
                 "pending_signals_expired": expired,
                 "last_lesson_at": last_lesson,
                 "lessons_current": lessons_current}
+
+    def _active_roots(self, roots, since: float) -> set[str]:
+        """Ids of ``roots`` (``(id, session_key, started_at)``) with memory
+        activity since ``since``: an entry or outcome signal stamped with an
+        episode in the root's subtree, or a search logged under the root's
+        session key. A search row's ``episode_id`` is the daemon's
+        process-wide current episode, not the caller's, so it is used only
+        for a row with no session id. The attribution evals/capture_metrics.py
+        uses; a later root wins a reused key, as there."""
+        if not roots:
+            return set()
+        root_of = dict(self.conn.execute(
+            "WITH RECURSIVE tree AS ("
+            "  SELECT id, id AS root_id FROM episodes WHERE id = ANY(%s)"
+            "  UNION ALL"
+            "  SELECT e.id, t.root_id FROM episodes e"
+            "  JOIN tree t ON e.parent_id = t.id"
+            ") SELECT id, root_id FROM tree",
+            ([r[0] for r in roots],)).fetchall())
+        root_of_key = {key: rid for rid, key, _ in roots}
+        active = {root_of[ep] for (ep,) in self.conn.execute(
+            "SELECT DISTINCT episode_id FROM entries "
+            "WHERE ts >= %s AND episode_id IS NOT NULL "
+            "UNION SELECT DISTINCT episode_id FROM outcome_signals "
+            "WHERE created_at >= %s AND episode_id IS NOT NULL",
+            (since, since)) if ep in root_of}
+        for ep, sid in self.conn.execute(
+                "SELECT DISTINCT episode_id, session_id FROM retrieval_events "
+                "WHERE created_at >= %s", (since,)):
+            root = root_of_key.get(sid) if sid else root_of.get(ep)
+            if root is not None:
+                active.add(root)
+        return active
 
     # ── meta ────────────────────────────────────────────────────────────
 

@@ -395,6 +395,7 @@ def test_overview_carries_loop_health(svc):
     assert loop["available"] is True
     assert loop["stores"]["current"] >= 0
     assert "stores_per_session" in loop and "last_lesson_at" in loop
+    assert "root_episodes" in loop and "sessions" in loop
 
 
 def test_asgi_unknown_api_404(svc):
@@ -521,7 +522,7 @@ def test_hook_session_start_capped_under_hook_stdout_limit(svc):
 def test_hook_session_start_preserves_notice_core_and_late_briefing_items(svc):
     from pseudolife_memory.memory.briefing import format_briefing
     from pseudolife_memory.web.session_hook import hook_session_start
-    svc.episode_start_session = lambda *a: {"id": "episode-123456789"}
+    svc.episode_start_session = lambda *a, **_: {"id": "episode-123456789"}
     svc.set_active_session = lambda *a: None
     md = format_briefing(
         [{"src": "a", "dst": "b", "why": "x" * 20000}], [],

@@ -35,11 +35,15 @@ def test_coordination_hooks_are_independent_of_memory_hooks():
     manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
     prompts = [h for group in manifest["UserPromptSubmit"] for h in group["hooks"]]
     starts = [h for group in manifest["SessionStart"] for h in group["hooks"]]
-    assert len(prompts) == 2 and len(starts) == 2
+    # SessionStart: the memory briefing, the memory-policy block, coordination.
+    assert len(prompts) == 2 and len(starts) == 3
     assert any("coordination-prompt.sh" in h["command"] and "CoordinationPrompt" in h["commandWindows"]
                for h in prompts)
     assert any("coordination-start.sh" in h["command"] and "CoordinationStart" in h["commandWindows"]
                for h in starts)
+    memory = [h for h in starts + prompts if "coordination" not in h["command"]]
+    assert len(memory) == 3
+    assert not any("Coordination" in h["commandWindows"] for h in memory)
 
 
 def _send(store, sender, recipient, text, request_id):

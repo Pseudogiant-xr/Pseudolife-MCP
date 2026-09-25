@@ -516,8 +516,10 @@ KNOBS: list[dict[str, Any]] = [
      "suggestions": ["http://pseudolife-extractor:8081/v1"],
      "help": "OpenAI-compatible /v1 endpoint used when the primary is "
              "unreachable (or mode = fallback). Empty disables selection "
-             "entirely — single-extractor behavior. Effective only when "
-             "settings source = config."},
+             "entirely — single-extractor behavior. It never receives the "
+             "primary's API key: a fallback that needs one reads "
+             "PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only "
+             "when settings source = config."},
     {"path": "memory.dream.fallback_model", "group": "Extractor",
      "label": "Fallback model", "type": "string", "default": None,
      "restart": False, "suggestions": ["extractor"],
