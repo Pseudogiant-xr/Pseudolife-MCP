@@ -535,6 +535,10 @@ logon autostart task:
 pip install -U "pseudolife-mcp[lite]"
 ```
 
+On Windows, first close every Claude Code, Codex and Claude Desktop
+session using the shim (quit Desktop from the tray): upgrading a shim
+that is running can leave it half-removed.
+
 **Docker tier:** after a `git pull` (or local code change), redeploy the
 **daemon only** — safely, without touching Postgres or the extractor:
 
@@ -734,7 +738,9 @@ the registrar probes `<command> --help` for the file form first and
 refuses an older shim (exit 4, nothing written) rather than register an
 entry that would fail with the same TaskGroup error — upgrade the shim
 (`pipx upgrade pseudolife-mcp`, or `pipx install --force .` from the checkout) and
-re-run. After any edit, fully quit Desktop from the tray or
+re-run. On Windows, run that upgrade with every session using the shim
+closed (Desktop fully quit from the tray), or it can leave the shim
+half-removed. After any edit, fully quit Desktop from the tray or
 menu-bar icon and relaunch — closing the window does not reload the
 config.
 
@@ -1152,7 +1158,9 @@ pseudolife-mcp-daemon`).
   shim predates token-file support (PyPI releases through 0.15.0 read only
   the literal token): `pseudolife-mcp --help` from a capable shim lists
   `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim and re-run the installer,
-  which now refuses to register an older one against a token file.
+  which now refuses to register an older one against a token file. On
+  Windows, upgrade with every session using the shim closed (Desktop
+  fully quit from the tray), or it can leave the shim half-removed.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —
@@ -5593,7 +5601,9 @@ of it:
   answers without it is refused (exit 4, nothing written) with the
   upgrade named — `pipx upgrade pseudolife-mcp`, or `pipx install --force .` from
   the checkout for a change not yet released — and so is a shim from
-  before `--help` existed (it answers "unknown mode"). A probe that yields
+  before `--help` existed (it answers "unknown mode"). On Windows, run that
+  upgrade with every session using the shim closed (Desktop fully quit
+  from the tray), or it can leave the shim half-removed. A probe that yields
   no evidence (missing, not executable, timeout, any other non-zero exit,
   exit 0 with no output) is not blocking: the run proceeds and says the
   check did not happen, so a clean exit 0 from the registrar is proof only
@@ -5806,6 +5816,9 @@ upgrade the client or configure that entry manually before using the shim.
    `-m pip install --upgrade "pseudolife-mcp[lite]"`; for a source checkout,
    reinstall the intended checkout with `-m pip install -e .` to refresh
    dependencies and editable metadata. Docker shim-only hosts omit `[lite]`.
+   On Windows, run either with every session using that shim closed
+   (Claude Desktop fully quit from the tray), or it can leave the shim
+   half-removed.
    Re-running the Docker installer preserves existing registrations; it does
    not repair a different interpreter already registered with Codex.
 4. Reconnect and ask for a real memory search and lesson search. Confirm the
