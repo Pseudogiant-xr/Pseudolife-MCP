@@ -18,6 +18,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   activity; a new attachment (a process starting) still does. A 9-minute host
   sleep on 2026-09-25 lapsed every idle shim's lease, and the re-attach wave on
   wake made eleven sessions idle for hours read as active within 28 seconds.
+  Those re-attaches had also kept live idle shims young against the
+  seven-day retention, so prune now keeps any address whose lease lapsed
+  less than an hour ago (as it already did for state-less ones): a daemon
+  restart or a host sleep cannot retire a live shim's address.
 - `memory_agents` list gives each listed peer `status_set_at`, `status_age` and
   `status_stale`. The time comes from the audit log (the newest registration
   or status update); a non-empty status older than two hours is stale, and a

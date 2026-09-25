@@ -217,6 +217,28 @@ def test_ephemeral_reap_waits_an_hour_after_the_lease_lapsed_not_after_the_last_
     assert parked["agent_id"] not in _remaining(store)
 
 
+def test_a_live_shim_idle_past_retention_survives_a_lease_lapse(store):
+    """Recovery re-attaches used to stamp last_activity, which kept a live
+    idle shim young against AGENT_RETENTION; they no longer do, since they
+    are not the agent's act. So the lease speaks for the process instead:
+    a resumable address, like a state-less one, goes only once its lease
+    has been gone for EPHEMERAL_AGENT_RETENTION, not the moment a daemon
+    restart or a host sleep lets it lapse."""
+    from pseudolife_memory.storage.coordination import (
+        AGENT_RETENTION, EPHEMERAL_AGENT_RETENTION)
+    parked = store.register("alice", capabilities={"resumable": True})
+    store.attach(*creds(parked), attachment_id="one")
+    store.test_time[0] += AGENT_RETENTION + 3600
+    store.attach(*creds(parked), attachment_id="one")   # recovery: not activity
+    store.test_time[0] += 61 + 60          # restart: lease lapsed, prune a minute later
+    store.prune()
+    assert parked["agent_id"] in _remaining(store)
+    store.attach(*creds(parked), attachment_id="one")
+    store.test_time[0] += 61 + EPHEMERAL_AGENT_RETENTION   # the process is gone
+    store.prune()
+    assert parked["agent_id"] not in _remaining(store)
+
+
 def test_prune_reaps_per_launch_addresses_after_an_hour_and_keeps_resumable_ones(store):
     """An address whose adapter declared ``resumable: false`` has no state
     file behind it, so nothing will ever attach to it again: once it is

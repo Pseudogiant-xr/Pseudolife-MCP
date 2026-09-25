@@ -109,9 +109,10 @@ MAX_PAGE = 50
 MAX_PENDING = 256
 MESSAGE_TTL = 86400
 DEDUPE_RETENTION = 7 * 86400
-# An address that has been idle this long, holds no lease and is referenced
-# by no retained message is removed by the same prune pass; idle means no
-# activity, and a lease renewal counts only when the shim saw a turn.
+# An address that has been idle this long, has held no lease for
+# EPHEMERAL_AGENT_RETENTION and is referenced by no retained message is
+# removed by the same prune pass; idle means no activity, and a lease renewal
+# counts only when the shim saw a turn.
 AGENT_RETENTION = DEDUPE_RETENTION
 # Peers the default list shows: holding a lease, or active this recently.
 # Measured 2026-09-20 on the live bank: 90 registered addresses, 11 leased,
@@ -1013,13 +1014,14 @@ class CoordinationStore:
         """Expire bodies, discard terminal retry metadata after seven days, and
         remove addresses that are idle, unleased and referenced by no retained
         message (the message rows go first, so a referenced address outlives
-        its mail by the retention window). An address registered as not
-        resumable goes once both its lease and its last activity are
-        EPHEMERAL_AGENT_RETENTION old: a parked shim whose lease lapsed
-        during a daemon restart keeps its address, because the first
-        heartbeat after the restart prunes before it is served and the
-        adapter re-attaches within a minute. Any other address goes after
-        AGENT_RETENTION of inactivity.
+        its mail by the retention window). A leased address goes only once
+        its lease has been gone for EPHEMERAL_AGENT_RETENTION: a parked shim
+        whose lease lapsed during a daemon restart or a host sleep keeps its
+        address, because the first heartbeat after the restart prunes before
+        it is served and the adapter re-attaches within a minute. Then an
+        address registered as not resumable goes after
+        EPHEMERAL_AGENT_RETENTION of inactivity, any other after
+        AGENT_RETENTION.
 
         The pass logs what it blanked (``expire``) and removed (``prune``).
         With ``audit_retention_days`` > 0 it also removes the audit log's
@@ -1038,14 +1040,18 @@ class CoordinationStore:
             removed = sorted(r["message_id"] for r in self._all(
                 "DELETE FROM coordination_messages WHERE created_at<=%s "
                 "AND expires_at<=%s RETURNING message_id", (now - DEDUPE_RETENTION, now)))
+            # A lease that lapsed less than EPHEMERAL_AGENT_RETENTION ago may
+            # belong to a live shim cut off by a restart or a host sleep, and
+            # its recovery re-attach does not refresh last_activity; only a
+            # lease gone that long, or a detach, says the process has ended.
             agents = sorted(r["agent_id"] for r in self._all(
                 "DELETE FROM coordination_agents a WHERE (a.lease_until IS NULL OR "
-                f"a.lease_until<=CASE WHEN {ephemeral} THEN %s ELSE %s END) "
+                "a.lease_until<=%s) "
                 f"AND a.last_activity<=CASE WHEN {ephemeral} THEN %s ELSE %s END "
                 "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
                 "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id) "
                 "RETURNING a.agent_id",
-                (now - EPHEMERAL_AGENT_RETENTION, now,
+                (now - EPHEMERAL_AGENT_RETENTION,
                  now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION)))
             events = []
             if expired:

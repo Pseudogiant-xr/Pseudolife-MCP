@@ -4079,9 +4079,10 @@ message cannot wake the host on every restart. The same prune pass removes an
 address that holds no lease, is referenced by no retained message and has been
 idle for seven days, or for one hour when its adapter registered without a
 state file (`capabilities.resumable: false`), since nothing can attach to that
-address again; for those the lease too must have been gone for the hour, so a
-daemon restart cannot retire a parked shim's address, and if it ever is
-retired the state-less adapter registers a fresh one instead of stopping.
+address again. Any lease it held must also have been gone for an hour, so a
+daemon restart or a host sleep cannot retire a live shim's address, and if a
+state-less address is ever retired its adapter registers a fresh one instead
+of stopping.
 Addresses that predate the flag keep the seven-day rule. Idle
 means no register, update, new attachment, send, acknowledgment or forwarded
 tool call: the adapter's lease heartbeat counts as activity only when the shim
