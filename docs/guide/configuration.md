@@ -1543,6 +1543,7 @@ Windows, register a daily run once:
 ```powershell
 ops\install-backup-task.ps1              # daily 03:00
 ops\install-backup-task.ps1 -At 02:15
+<dir>\ops\install-backup-task.ps1 -ScriptCheckout <dir>   # see below
 ops\install-backup-task.ps1 -Uninstall   # remove it
 ```
 
@@ -1551,7 +1552,26 @@ from a worktree; the installer warns if that copy predates the row-count
 gate. It catches up at the next boot or logon if the machine was off,
 waiting up to 10 minutes (`-DockerWaitSeconds`) for Docker to answer
 first, and it runs as you, so `PSEUDOLIFE_BACKUP_MIRROR` applies. Each run
-is appended to `data\backups\backup-task.log`. On Linux/macOS, a cron entry
+is appended to `data\backups\backup-task.log`, headed by the HEAD commit of
+the checkout whose `backup.ps1` it ran.
+
+If the main checkout cannot follow master (for example, it holds
+uncommitted work), run the backup from a dedicated worktree of master
+instead. Create it with `git worktree add --detach <dir> origin/master`
+from the main checkout, lock it with `git worktree lock <dir>`, then install
+with that worktree's own copy: `<dir>\ops\install-backup-task.ps1
+-ScriptCheckout <dir>`. The installer refuses an unlocked worktree, because
+worktree cleanup would otherwise delete the script the task runs. It also
+refuses a script checkout that would receive the dumps itself, such as a
+separate clone running its own installer. Dumps and the log still go to
+the main checkout's `data\backups`, where a replica push looks for them;
+`restore` from `<dir>` reads its own `data\backups`, so name the files
+there with `-BackupFile` (and `-StateArchive`). Move the worktree forward
+when you deploy (`git -C <dir> fetch origin master`, then
+`git -C <dir> checkout --detach origin/master`); the log shows which commit
+each night ran.
+
+On Linux/macOS, a cron entry
 that runs `ops/backup.sh` does the same job, but cron starts with a bare
 environment: set `PATH` (so it finds `docker`) and any
 `PSEUDOLIFE_BACKUP_MIRROR*` variables in the crontab itself.

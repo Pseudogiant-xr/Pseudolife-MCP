@@ -35,6 +35,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the latest start before the search instead of the last root's. On the
   live bank (read-only, 2026-09-25 16:01) the 24 h window is unchanged; 7
   days goes from 130 to 117 sessions and 60 days from 348 to 264.
+### Fixed (2026-09-25 — the daily backup can run current master)
+- `ops/install-backup-task.ps1 -ScriptCheckout <dir>` runs `ops\backup.ps1`
+  from a dedicated checkout instead of the main one, which can lag master for
+  days while it holds uncommitted work. On 2026-09-24 and 09-25 the daily task
+  ran a `backup.ps1` from before the row-count gate: the nightly dumps were
+  ungated and `/health` `last_backup` did not advance. A worktree is refused
+  until `git worktree lock` protects it, and so is a script checkout that
+  would receive the dumps itself. Dumps and the log stay in the main
+  checkout's `data\backups` (the task now always passes `-OutDir`), where
+  replica pushes read them. Each run logs the script checkout's HEAD.
+- The installer now rejects a misspelled parameter instead of ignoring it:
+  a typo in `-ScriptCheckout` would otherwise have reinstalled the main
+  checkout's copy.
 
 ### Added (2026-09-25 — measure what the startup memory policy changes)
 - `memory_policy.variant` selects the standing memory policy session start
