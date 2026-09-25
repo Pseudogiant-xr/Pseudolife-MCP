@@ -3263,6 +3263,7 @@ class MemoryService(DreamOps):
                     logger.warning("retrieval-log health read failed",
                                    exc_info=True)
                     log = {"events": None, "uses": None,
+                           "lesson_searches": None,
                            "last_event_at": None, "unavailable": True}
                 log["enabled"] = bool(self.config.memory.retrieval_log.enabled)
                 log["write_errors"] = self._retrieval_log_errors
@@ -4783,20 +4784,19 @@ class MemoryService(DreamOps):
         outcome follows a session), so the replay and telemetry harnesses
         read it unchanged. The window and the session identity are the
         label's invariant: an outcome logged under a different session id,
-        or after the window has lapsed, credits nothing. Nothing is written
-        on ``outcome_signals`` itself, and nothing links the signal row to
-        the use rows it caused: the labels stand on their own, and which
-        outcome named which ids is deliberately not recorded (the event's
-        ``episode_id`` comes from the writer at search time, the signal's
-        from the ``episode=`` handle when one is given — they are not a
-        join). That is what costs no schema bump and no prose in
-        ``detail``. Reported back as
-        ``used_ids_recorded`` (ids credited to at least one event),
-        ``used_ids_unmatched`` (ids nothing in the window served) and
-        ``used_ids_served_elsewhere`` (ids served in the window only under
-        another session id). The label is positive-only: an empty list is
-        the same as omitting it, and an outcome without ``used_ids`` says
-        nothing about what was used."""
+        or after the window has lapsed, credits nothing. The labels stand
+        on their own: no FK links the signal row to the use rows it caused
+        (the event's ``episode_id`` comes from the writer at search time,
+        the signal's from the ``episode=`` handle when one is given — they
+        are not a join). Reported back as ``used_ids_recorded`` (ids
+        credited to at least one event), ``used_ids_unmatched`` (ids nothing
+        in the window served) and ``used_ids_served_elsewhere`` (ids served
+        in the window only under another session id). Since schema v44 the
+        signal row's ``used_ids`` column also keeps that partition as id
+        lists, so a match rate can be measured from the bank (see
+        :meth:`_label_used_entries`). The label is positive-only: an empty
+        list is the same as omitting it, and an outcome without
+        ``used_ids`` says nothing about what was used."""
         # Refuse — never coerce — an unknown outcome: silently mapping e.g.
         # "failed" to "success" would invert a dead-end into a do-this lesson.
         if outcome not in ("success", "failure", "correction"):
@@ -4823,17 +4823,38 @@ class MemoryService(DreamOps):
             if episode_warning:
                 out["episode_warning"] = "unknown or closed episode handle"
             if used_ids:
-                out.update(self._label_used_entries(used_ids, session_id))
+                report, record = self._label_used_entries(used_ids, session_id)
+                out.update(report)
+                if record is not None:
+                    self._record_signal_used_ids(sid, record)
             return out
 
-    def _label_used_entries(self, used_ids: list[int],
-                            session_id: str | None) -> dict[str, Any]:
+    def _record_signal_used_ids(self, signal_id: int, record: dict) -> None:
+        """Keep what an outcome's ``used_ids`` became on its signal row
+        (schema v44). Observational like the labels themselves: a failure
+        is counted in ``_retrieval_log_errors`` and never undoes the
+        recorded outcome. Caller holds ``self._lock``."""
+        try:
+            self._storage.set_signal_used_ids(signal_id, record)
+        except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
+            logger.warning("used_ids record failed", exc_info=True)
+
+    def _label_used_entries(
+            self, used_ids: list[int], session_id: str | None,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         """Credit each id in ``used_ids`` to every in-window search in
         ``session_id``'s session that served it — one storage statement for
         the whole list (:meth:`PostgresStorage.credit_retrieval_uses`), the
         writer resolved once, by :meth:`record_outcome`.
 
-        Returns the reporting keys for :meth:`record_outcome`. Per id the
+        Returns ``(report, record)``: the reporting keys for
+        :meth:`record_outcome`, and what the signal row keeps in its v44
+        ``used_ids`` column — ``{"credited", "unmatched",
+        "served_elsewhere"}`` id lists (deduplicated, in the caller's
+        order), ``{"unchecked", "reason"}`` when the statement raised, or
+        None when there is nothing to keep (log off, or no usable id). Per
+        id the
         answer is one of four, and the agent is told which: credited;
         ``used_ids_unmatched`` (nothing in the window served it) — reported
         rather than dropped, because a silent zero reads the same as a
@@ -4850,7 +4871,7 @@ class MemoryService(DreamOps):
         cfg = self.config.memory.retrieval_log
         if not cfg.enabled:
             return {"used_ids_recorded": 0,
-                    "used_ids_reason": "retrieval log disabled"}
+                    "used_ids_reason": "retrieval log disabled"}, None
         ids: list[int] = []
         seen: set[int] = set()
         for raw in used_ids:
@@ -4867,29 +4888,31 @@ class MemoryService(DreamOps):
             seen.add(entry_id)
             ids.append(entry_id)
         if not ids:
-            return {"used_ids_recorded": 0}
+            return {"used_ids_recorded": 0}, None
         try:
             hits = self._storage.credit_retrieval_uses(
                 ids, session_id, "outcome", float(cfg.use_window_seconds))
         except Exception:  # noqa: BLE001
             self._retrieval_log_errors += 1
             logger.warning("retrieval-use labels failed", exc_info=True)
-            return {"used_ids_recorded": 0, "used_ids_errors": len(ids)}
-        credited, unmatched, elsewhere = 0, [], []
+            return ({"used_ids_recorded": 0, "used_ids_errors": len(ids)},
+                    {"unchecked": ids, "reason": "label write failed"})
+        credited, unmatched, elsewhere = [], [], []
         for entry_id in ids:
             hit = hits.get(entry_id)
             if hit is not None and hit["events"]:
-                credited += 1
+                credited.append(entry_id)
             elif hit is not None and hit["elsewhere"]:
                 elsewhere.append(entry_id)
             else:
                 unmatched.append(entry_id)
-        out: dict[str, Any] = {"used_ids_recorded": credited}
+        out: dict[str, Any] = {"used_ids_recorded": len(credited)}
         if unmatched:
             out["used_ids_unmatched"] = unmatched
         if elsewhere:
             out["used_ids_served_elsewhere"] = elsewhere
-        return out
+        return out, {"credited": credited, "unmatched": unmatched,
+                     "served_elsewhere": elsewhere}
 
     def lesson_write(self, task: str, aspect: str, lesson: str, *,
                      about: str | None = None, outcome: str = "success",
@@ -5090,6 +5113,7 @@ class MemoryService(DreamOps):
             entries = [{**_lesson_record_to_dict(r), "score": round(float(s), 4)}
                        for r, s in hits]
             self._annotate_lesson_staleness(entries)
+            self._log_lesson_search(query, hits)
             return {"count": len(entries), "entries": entries}
 
     def lessons_dump(self, limit: int = 120) -> dict[str, Any]:
@@ -5708,6 +5732,32 @@ class MemoryService(DreamOps):
             logger.warning("retrieval-event log failed", exc_info=True)
             return None
 
+    def _log_lesson_search(self, query: str, hits: list) -> None:
+        """Append a ``lesson_search_events`` row (schema v44) for a
+        ``memory_lesson_search`` call: the query, the caller's session and
+        the lessons served, named by slot key with rank and the score the
+        caller saw. A search that found nothing is recorded too. Kept out
+        of ``retrieval_events`` on purpose: the retrieval replay, the
+        telemetry review and the graph ablation re-run every row there as a
+        ``memory_search``. Gated and pruned with the retrieval log; lesson
+        reads in the session-start briefing are not counted. Never raises:
+        failures bump ``_retrieval_log_errors``. Caller holds
+        ``self._lock``."""
+        cfg = self.config.memory.retrieval_log
+        if self._storage is None or not cfg.enabled:
+            return
+        try:
+            served = [{"entity_norm": r.key[0], "attribute_norm": r.key[1],
+                       "rank": rank, "score": round(float(s), 4)}
+                      for rank, (r, s) in enumerate(hits)]
+            _, session_id = self._resolve_writer()
+            self._storage.add_lesson_search_event(
+                query, served, session_id=session_id,
+                episode_id=self._caller_episode_id(session_id))
+        except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
+            logger.warning("lesson-search log failed", exc_info=True)
+
     def attach_served_facts(self, event_id: int,
                             facts: list[dict]) -> None:
         """Record the cortex slots a search's cortex-first block served
@@ -5777,17 +5827,19 @@ class MemoryService(DreamOps):
 
     def prune_retrieval_log(self) -> int:
         """Drop retrieval events older than the configured retention (their
-        use labels CASCADE). Rides the dream-sweep tick, like the other
-        append-only logs. The lock is load-bearing: the sweep thread calls
-        this concurrently with lock-holding writers, and an unlocked storage
-        call interleaves psycopg transaction blocks on the shared connection,
-        wedging it in-transaction (2026-08-21 daemon incident)."""
+        use labels CASCADE), and lesson-search rows (v44) with them. Rides
+        the dream-sweep tick, like the other append-only logs. The lock is
+        load-bearing: the sweep thread calls this concurrently with
+        lock-holding writers, and an unlocked storage call interleaves
+        psycopg transaction blocks on the shared connection, wedging it
+        in-transaction (2026-08-21 daemon incident)."""
         if self._storage is None:
             return 0
         cfg = self.config.memory.retrieval_log
         cutoff = time.time() - cfg.retention_days * 86400
         with self._lock:
-            return self._storage.prune_retrieval_events(cutoff)
+            return (self._storage.prune_retrieval_events(cutoff)
+                    + self._storage.prune_lesson_search_events(cutoff))
 
     def get_entry(self, entry_id: int) -> dict[str, Any]:
         """Dereference a trace pointer: the dense episode + the facts it formed.
