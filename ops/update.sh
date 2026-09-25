@@ -12,6 +12,8 @@
 #                                      # tag is not the running daemon's image
 #   ops/update.sh --all                # after the daemon: shim, plugin cache,
 #                                      # Codex hooks (ops/update_clients.py)
+#   ops/update.sh --allow-dirty        # deploy a tree with uncommitted or
+#                                      # untracked files (stamped dirty=true)
 #
 # HEALTH_RETRIES / HEALTH_DELAY_MS (environment) size the step-4 health wait.
 #
@@ -32,6 +34,8 @@ ALL=0
 # Override for the "a build already ran without a completed deploy" guard in
 # step 2 — see the comment there before reaching for it.
 FORCE_ROLLBACK_TAG=0
+# Override for the clean-tree guard in step 0 — see the comment there.
+ALLOW_DIRTY=0
 # Health-wait budget (step 4). The defaults reproduce the previously
 # hard-coded loop exactly — 30 attempts, 1.5s apart, so ~45s before a deploy
 # is called unhealthy. Environment-overridable so the unhealthy branch can be
@@ -49,6 +53,7 @@ while [ $# -gt 0 ]; do
         --no-cache-prune)   NO_CACHE_PRUNE=1; shift ;;
         --force-rollback-tag) FORCE_ROLLBACK_TAG=1; shift ;;
         --all)            ALL=1; shift ;;
+        --allow-dirty)    ALLOW_DIRTY=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -65,6 +70,40 @@ step() {
 }
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
+
+# 0. Build stamp + clean-tree guard, before anything has side effects. The
+#    image records the commit it was built from (labels + /health `build`),
+#    which is only true if the tree IS that commit: a checkout carrying
+#    uncommitted work would ship it under a commit that does not contain it
+#    (2026-09-23 review). A tree whose state git cannot report is refused
+#    the same way.
+build_sha=unknown
+build_dirty=unknown
+dirty_lines=""
+if command -v git >/dev/null 2>&1     && head_sha="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"     && dirty_lines="$(git -C "$repo" status --porcelain --untracked-files=normal 2>/dev/null)"; then
+    build_sha="$head_sha"
+    if [ -n "$dirty_lines" ]; then build_dirty=true; else build_dirty=false; fi
+fi
+if [ "$build_dirty" != "false" ]; then
+    if [ "$build_dirty" = "true" ]; then
+        why="$repo has $(printf '%s
+' "$dirty_lines" | wc -l | tr -d ' ') uncommitted or untracked path(s):"
+    else
+        why="cannot tell whether $repo is a clean git checkout (git missing, or not a repository)."
+    fi
+    if [ "$ALLOW_DIRTY" != "1" ]; then
+        echo "WARNING: REFUSING to deploy: $why" >&2
+        [ -n "$dirty_lines" ] && printf '%s
+' "$dirty_lines" | sed -n '1,20s/^/WARNING:     /p' >&2
+        echo "WARNING: deploy from a clean checkout of the commit you mean to ship, or re-run with --allow-dirty to deploy this tree as it is (the image is then stamped dirty)." >&2
+        exit 1
+    fi
+    echo "WARNING: --allow-dirty: deploying anyway. $why" >&2
+    [ -n "$dirty_lines" ] && printf '%s
+' "$dirty_lines" | sed -n '1,20s/^/WARNING:     /p' >&2
+fi
+build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
 compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
 override_file="$repo/ops/docker-compose.override.yml"
@@ -173,6 +212,10 @@ step "Rebuilding the daemon only (Postgres + extractor untouched)..."
     if [ -f "$env_file" ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?PSEUDOLIFE_MCP_TOKENS?[[:space:]]*=' "$env_file"; then
         unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS
     fi
+    # The step-0 build stamp reaches the build through compose's
+    # ${PSEUDOLIFE_BUILD_*} args; the subshell scopes it like the credentials.
+    export PSEUDOLIFE_BUILD_GIT_SHA="$build_sha"         PSEUDOLIFE_BUILD_DIRTY="$build_dirty"         PSEUDOLIFE_BUILD_TIME="$build_time"
+    step "Build stamp: commit $build_sha, dirty=$build_dirty"
     docker compose "${compose[@]}" up -d --no-deps --build pseudolife-daemon
 )
 

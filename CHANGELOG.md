@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-25 — deploys name their commit and refuse a dirty tree)
+- `/health` reports the commit the running image was built from:
+  `build: {git_sha, dirty, built_at}`. The daemon image carries the same
+  values as OCI labels (`org.opencontainers.image.revision`,
+  `org.opencontainers.image.created`, `pseudolife.build.dirty`).
+  `ops/update.ps1|.sh` pass them from the checkout, and the release
+  workflow passes them for the GHCR image. An image built another way, such
+  as a bare `docker compose up --build` or the first install, reports
+  `"unknown"`, and a pip install omits the key. Until now the only answer
+  to "what is deployed?" was the package version, which moves only with a
+  release.
+- `ops/update.ps1` and `ops/update.sh` refuse to deploy a tree with
+  uncommitted or untracked files, or one whose state git cannot report,
+  before the backup or any docker call. The refusal lists the paths.
+  `-AllowDirty` / `--allow-dirty` deploys it anyway, stamped `dirty: true`.
+  The maintainer's main checkout often carries another session's
+  uncommitted work, and a deploy from it would ship that work under a
+  commit that does not contain it.
+- The test suite dumps every thread's stack when one test runs longer than
+  600 s (`faulthandler_timeout`). A master CI run hung until the 50-minute
+  job timeout on 2026-09-22, and the cancelled job kept no log. The slowest
+  legitimate test on CI takes about 72 s.
+
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing
   items within its output budget, with explicit notices when content is omitted.
