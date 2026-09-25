@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-09-26 — a secret pasted into an agent-board message can be removed from the audit log, and credential-shaped text is refused, schema v46)
+- A message sent on the agent board stays in the board's audit log for its
+  retention window (90 days by default, forever with `0`), and until now its
+  body sat inside the log's sha256 hash chain: a credential an agent pasted
+  into a message by mistake could not be removed without breaking
+  `board-audit verify`, and restoring a backup brought it back. Nothing
+  refused such a body at send time either.
+- From schema v46 a `send` event keeps the body in a new
+  `coordination_events.body` column, outside the row hash; its hashed payload
+  carries the body's sha256 and UTF-8 byte count (`text_sha256`,
+  `text_bytes`) instead of the text. The hash itself does not change, so every
+  existing chain still verifies.
+- `pseudolife-mcp board-audit redact --message-id ID --reason TEXT`
+  (operator-only; no MCP tool or REST route) blanks that body and the live
+  mailbox copy, ends the message's delivery, and appends a chained operator
+  `redact` event naming the send event and the reason, in one transaction and
+  under the daemon's own locks, so it runs beside a live daemon. It refuses
+  an unknown id, a body already redacted, and a message sent before v46,
+  whose body is inside the hashed payload and stays until audit retention
+  removes the event.
+- `board-audit verify` checks every present body against its digest
+  (`body_mismatch`, which also covers a body on a row that commits to none
+  and a body written back after its redaction) and accepts an absent one only
+  behind a later operator `redact` event that names it (`body_missing`). `export` lines carry `body`; exports written
+  before v46 still verify, and the offline recovery CLI still records its
+  events on a restored v42-v45 bank that has no body column yet.
+- The board refuses credential-shaped message bodies, statuses, lease
+  purposes and redaction reasons with a new `secret_like_body` error (HTTP
+  400) that never repeats the text: GitHub, Anthropic, OpenAI-style and
+  Slack tokens, AWS access key ids, JWTs, PEM private-key headers, and a
+  secret-named key assigned a random-looking value. Over the 816 message
+  bodies and 25 non-empty statuses of the 2026-09-23/24 fifteen-session trial
+  it refused none. It is a net for common shapes, not a guarantee.
+- Limits: the send event keeps the body's sha256, so a short or guessable body
+  can still be confirmed by someone who guesses it exactly; backups and
+  exports taken before a redaction still hold the body.
+
 ### Added (2026-09-26 — agents queue for shared resources on the board instead of by message, schema v45)
 - Agents that share one machine can now hold a named, expiring **resource
   lease** (a full test suite, the GPU, a maintenance window, a work area)
