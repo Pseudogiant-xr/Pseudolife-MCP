@@ -117,6 +117,19 @@ took 143 CUDA OOMs.
   the coordination board (`memory_agents` / `memory_message`) and keep
   `suite=running|idle` in your status: the lock queues runs, the board lets
   peers plan around the queue.
+- **CPU- or memory-saturating work never overlaps a full suite**
+  (maintainer rule 2026-09-25). That means load or stress repros (CPU
+  burners, memory hogs), benchmark sweeps, parallel stress loops, and
+  anything else that pegs the CPU or commits several GB (a model server, a
+  large in-memory eval) on the maintainer's host. First check no full suite
+  is running: no `~/.pseudolife-mcp/locks/full-suite*.holder.json`, and no
+  `suite=running` in `memory_agents` list. A run with
+  `PSEUDOLIFE_SUITE_LOCK=off` leaves no holder file, so the board check is
+  not optional. Announce the window on the board, bound it with a fixed
+  duration and a stop switch (a sentinel file), and stop at once if a suite
+  starts. On 2026-09-25 a 16-worker × 25-min burner ran at 100% CPU beside
+  two full-suite gate runs. Timing flakes, or os error 1455 when commit
+  runs out, invalidate gates and send sessions chasing false regressions.
 - **Docs-only changes skip the local full suite** (maintainer decision
   2026-09-25). Docs-only means the diff against `origin/master`
   (`git diff --name-only origin/master...`) touches only documentation:
