@@ -1627,7 +1627,8 @@ class MemoryService(DreamOps):
         ``episode`` (identity tier 2, spec 2026-07-18): an open episode id or
         unambiguous prefix (>=8 chars) — attributes this entry to that
         episode. A header session (tier 1) still wins overall identity, but
-        the entry's ``episode_id`` targets the handle regardless. An unknown/
+        the entry's ``episode_id`` targets the handle regardless, and no root
+        is opened or reopened for the header session. An unknown/
         closed/ambiguous handle degrades silently: the store still proceeds,
         and ``"episode_warning"`` is added to the result.
 
@@ -1662,7 +1663,13 @@ class MemoryService(DreamOps):
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
                     session_id = resolved[1]
-            self._ensure_session_episode(session_id)
+            else:
+                # A resolved handle is the entry's episode, open by now; the
+                # header session stays the identity stamp but gets no root
+                # of its own. After /clear the shim's header still names the
+                # session SessionEnd just closed, and ensuring a root for it
+                # reopened that root or opened an empty one (2026-09-25).
+                self._ensure_session_episode(session_id)
             # Attribution always targets the handle's episode, even when a
             # header session won identity above (spec: identity and target
             # episode are separable) — passed into CMS.store so it lands
@@ -1706,10 +1713,12 @@ class MemoryService(DreamOps):
                 out["authority"] = auth
             if dt is not None:
                 out["distortion_tolerance"] = dt
-            # Nudge the agent while the lazily-opened session episode still
+            # Nudge the agent while the session episode the entry landed on
+            # (the handle's root, else the caller's session root) still
             # carries the generic fallback title (the daemon has no project
             # signal of its own; the agent does).
-            root = self._session_root_locked(session_id)
+            root = (self._cms.episodes.get(resolved[0]) if resolved is not None
+                    else self._session_root_locked(session_id))
             if root is not None and GENERIC_TITLE_RE.match(root.title or ""):
                 out["episode_hint"] = (
                     "session episode is untitled — call "
@@ -6159,7 +6168,10 @@ class MemoryService(DreamOps):
             else:
                 self._auto_title_locked(closed, subtree)
                 result = self._episode_to_dict(closed)
-        if not pruned:
+        # No match changed nothing: skip the full upsert sweep (one committed
+        # upsert per episode in the log, under the lock) that a SessionEnd or
+        # shim exit for a reaped or never-written session used to pay.
+        if found and not pruned:
             self._persist_episodes()
         fire = bool(run_dream and result and not pruned and not empty)
         return ({} if pruned else result), fire, found

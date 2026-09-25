@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — `/clear` no longer revives the old session's root)
+- After `/clear` or an in-session `/resume`, a `memory_store` that passed the
+  new session's handle still reopened the old session's root under the
+  shim's launch id (the root SessionEnd had just closed, within the resume
+  window) or, if SessionEnd had pruned it empty, opened a new empty one that
+  lingered until the idle reaper and the sweep. The entry itself already
+  landed on the handle's root. The store path opened a root for the
+  `X-PL-Session` header session whenever one was present; it now does so only
+  when no handle resolves. The header stays the identity stamp (writer and
+  session keying of auto-promoted facts, HLC), as the documented split
+  between identity and target episode says. Such a store also no longer
+  moves the daemon's global current-episode pointer back to the old root,
+  which a handle-less `memory_outcome` is attributed through.
+- A store's `episode_hint` now reads the root the entry landed on (the
+  handle's root when one resolves), not the header session's root.
+- `memory_episode_start` with a handle already nested under the handle's root
+  without opening one for the header session; a test now pins it.
+- A session end that matches no open root (a SessionEnd for a reaped
+  session, the exit of a non-Claude-Code shim that never wrote) no longer
+  re-upserts every episode row, one committed statement each, under the
+  service lock. A close that matched still writes through.
+
 ### Fixed (2026-09-25 — one session episode per client session)
 - The stdio shim no longer opens a session episode of its own at launch. It
   opened one keyed by a fresh id and titled after its working directory,
@@ -31,9 +53,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   started from inside a Claude Code session, whose id it inherits and
   would forward if it passes its environment through to MCP servers (Codex
   keys each call by its thread anyway). The daemon opens that session's episode on the first
-  write that needs one (a store, even one the surprise gate drops, or a
-  sub-episode or title call without a handle), as it does for a direct-HTTP
-  client. The shim closes it at exit when its host lets it exit, and the
+  write that needs one (a store, sub-episode or title call without a
+  handle, even a store the surprise gate drops), as it does for a
+  direct-HTTP client. The shim closes it at exit when its host lets it exit, and the
   idle reaper otherwise. A shim that is idle or only searches leaves no
   episode.
 - Two daemon paths treated the shim's root as disposable, and now that
@@ -46,15 +68,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   always described and as the handle path already did. Keyless roots
   (embedded and legacy callers) close as before.
 - Limits: `/clear` and an in-session `/resume` give the session a new id,
-  but the shim keeps its launch id. Afterwards any write without a handle,
-  and a `memory_store` even with one, reopens the root under the launch id
-  (the root SessionEnd just closed, within the resume window) or, if
-  SessionEnd pruned it empty, opens a new empty one. A handle-less write
-  lands on that root and a handle-less `memory_session_title` renames it; a
-  store's entry with a handle still lands on the handle's root. The
-  daemon-side fix is a follow-up. `--continue`, or `--resume` without an
-  id, may launch the shim with an id no hook registers, so its writes open
-  a root of their own.
+  but the shim keeps its launch id. Afterwards a `memory_store` or
+  `memory_episode_start` without a handle reopens the root under the launch
+  id (the root SessionEnd just closed, within the resume window) or, if
+  SessionEnd pruned it empty, opens a new one, and lands there; a
+  `memory_session_title` without a handle renames that root. A call that
+  passes the handle SessionStart advertised lands on the new root and opens
+  nothing under the launch id (see the `/clear` entry above). Without a
+  coordination adapter, `memory_agents` then excludes only the launch id's
+  roots from its peers, so it can list the session's own new root.
+  `--continue`, or `--resume` without an id, may launch the shim with an id
+  no hook registers, so its writes open a root of their own.
   Shim sessions no longer take their title from the working directory: an
   episode the daemon opens starts as `session - <time>`, store results carry
   an `episode_hint` until the agent names it, and a title still generic at
