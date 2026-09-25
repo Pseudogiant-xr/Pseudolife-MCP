@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-25 — Postgres connects retry a Windows local-port failure)
+- The daemon's own Postgres connects (the storage connection and its
+  reconnect, the `/health` probe, the mailbox connection) now try again when
+  a Windows loopback connect fails for want of a local port: libpq's
+  "Address already in use (…/10048)" (WSAEADDRINUSE, the port it picked still
+  has a TIME_WAIT entry to the same server) or "…/10055" (WSAENOBUFS, the
+  ephemeral range is exhausted). Neither says anything about the server, and
+  a second connect picks another port. Measured 2026-09-25 with about twenty
+  sessions against one Postgres on `127.0.0.1:5433`: three such failures in
+  two full test runs, one inside the storage connect, with 250-600 TIME_WAIT
+  entries to that port; until now the tool call or health probe that opened
+  the connection failed. At most four calls, with a jittered backoff from
+  0.05 s that stays under a second, and one warning per retry naming only the
+  attempt and the code. Every other failure (refused, timeout, any answer
+  from the server) is still raised on the first call. The operator CLIs are
+  unchanged.
+
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is
   on by default: `coordination.enabled` defaults to `true`, and without an
