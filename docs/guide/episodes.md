@@ -71,11 +71,12 @@ reliably — without the agent having to remember:
      connect, which gave each Claude Code session a second root and left an
      empty root for every shim a host killed. One gap remains: `/clear` and
      an in-session `/resume` give the session a new id but keep the shim's.
-     Afterwards a write without a handle, and a `memory_store` even with
-     one, reopens the root under the old id (or opens one); a handle-less
-     write lands there, and a handle-less `memory_session_title` renames it.
-     `--continue`, or `--resume` without an id, can likewise launch the shim
-     with an id no hook registers.
+     Afterwards a `memory_store` or `memory_episode_start` without a handle
+     reopens the root under the old id (or opens one) and lands there, and
+     a `memory_session_title` without one renames that root. A call that
+     passes the handle SessionStart advertised lands on the new root and
+     opens nothing under the old id. `--continue`, or `--resume` without an
+     id, can likewise launch the shim with an id no hook registers.
    - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
      handle) still get episodes: the daemon **lazily opens** one on the
      first store of a new session (so empty sessions never leave a husk)
@@ -113,7 +114,8 @@ reliably — without the agent having to remember:
    Session titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an
-   `episode_hint` until you do); a session closing still-generic gets an
+   `episode_hint` until you do, naming the handle when the store passed
+   one); a session closing still-generic gets an
    auto-derived `"{dominant source} - {stamp}: {first-entry snippet}"`
    title. Fragmented history is repairable over REST:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
