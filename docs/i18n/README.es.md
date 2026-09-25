@@ -1,8 +1,8 @@
-<!-- i18n-sync: v11 -->
+<!-- i18n-sync: v12 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v11 (2026-09-25)
+> Traducción del [README](../../README.md) canónico — sincronizado: v12 (2026-09-25)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -126,9 +126,16 @@ puertos/tokens no predeterminados:
 El agente guarda una afirmación a la vez mientras trabaja (`memory_store`,
 `memory_fact_set`).
 Entre sesiones, el **sueño** destila el flujo en hechos canónicos,
-relaciones de grafo y lecciones de procedimiento. Al inicio de cada
-sesión, un resumen inyecta aquello de lo que la memoria no está segura,
-las lecciones del trabajo anterior y dónde quedaste. La recuperación
+relaciones de grafo y lecciones de procedimiento. Donde hay hooks de
+sesión instalados — el plugin de Claude Code, el hook de `settings.json`
+de Claude Code que escribe el instalador o los hooks verificados de
+Codex —, al inicio de cada sesión un resumen inyecta aquello de lo que la
+memoria no está segura, las lecciones del trabajo anterior y dónde
+quedaste. El Inicio rápido de dos comandos no instala ningún hook, y el
+instalador no conecta ninguno para Gemini CLI ni para otros agentes MCP,
+así que esas configuraciones no reciben resumen; aun así, las breves
+instrucciones del propio servidor MCP le piden al agente que busque en la
+memoria al comenzar una tarea. La recuperación
 combina la búsqueda semántica sobre el almacén asociativo con el almacén
 de hechos canónicos, de modo que las respuestas corregidas prevalecen
 sobre las obsoletas.

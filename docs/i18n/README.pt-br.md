@@ -1,8 +1,8 @@
-<!-- i18n-sync: v11 -->
+<!-- i18n-sync: v12 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v11 (2026-09-25)
+[README original em inglês](../../README.md) — sincronizado: v12 (2026-09-25)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -115,15 +115,22 @@ usado para o Claude, mantendo `PSEUDOLIFE_MCP_NO_SPAWN=1` definido na
 camada Docker para que uma sessão do Codex tenha sua própria identidade
 em vez de herdar o episódio de uma sessão concorrente do Claude. Comandos
 exatos, a alternativa via HTTP direto, e portas/tokens não padrão:
-[README — Wire into your coding agent](../../README.md#wire-into-your-coding-agent).
+[README — Conectar ao seu agente de codificação](../../README.md#wire-into-your-coding-agent).
 
 ## Como funciona
 
 O agente armazena uma afirmação de cada vez enquanto trabalha
 (`memory_store`, `memory_fact_set`). Entre sessões, o **sonho** destila o
-fluxo em fatos canônicos, relações de grafo e lições procedurais. No início de cada
-sessão, um briefing injeta o que a memória tem incerteza, lições de
-trabalhos anteriores e onde você parou. A recuperação combina busca
+fluxo em fatos canônicos, relações de grafo e lições procedurais. Onde há
+hooks de sessão instalados — o plugin do Claude Code, o hook do
+`settings.json` do Claude Code gravado pelo instalador ou os hooks
+verificados do Codex —, no início de cada sessão um briefing injeta aquilo
+de que a memória não tem certeza, lições de trabalhos anteriores e onde
+você parou. O Início rápido de dois comandos não instala nenhum hook, e o
+instalador não conecta nenhum para o Gemini CLI nem para outros agentes
+MCP, então essas configurações não recebem briefing; ainda assim, as
+instruções curtas do próprio servidor MCP pedem ao agente que busque na
+memória ao começar uma tarefa. A recuperação combina busca
 semântica sobre o armazenamento associativo com o repositório de fatos
 canônicos, de modo que respostas corrigidas prevalecem sobre as
 desatualizadas.
