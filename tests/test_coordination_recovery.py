@@ -136,3 +136,14 @@ def test_rebind_state_failure_rolls_back_credential_issuance(store, pg_url, tmp_
                                       (a["agent_id"],)).fetchone() == (None,)
     output = capsys.readouterr()
     assert "fixture-secret" not in output.out + output.err
+
+
+def test_recovery_refuses_a_config_that_only_inherits_the_default(tmp_path, capsys):
+    """Coordination is on by default (2026-09-25), so a restored config
+    without the key runs the board: the refusal names the setting to write."""
+    from pseudolife_memory.coordination_recovery import main
+    config = tmp_path / "config.yaml"
+    config.write_text("memory:\n  preset: flat\n")
+    assert main(["recover", "--config", str(config), "--confirm-daemon-stopped",
+                 "--confirm-restore"]) == 1
+    assert "coordination.enabled: false" in capsys.readouterr().err

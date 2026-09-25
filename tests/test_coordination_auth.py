@@ -33,6 +33,37 @@ def test_unmatched_bearer_or_principal_cannot_register(monkeypatch, headers, all
         dispatch(service(allowed=allowed), "register", {}, headers=headers)
 
 
+def _default_service():
+    from pseudolife_memory.utils.config import CoordinationConfig
+    svc = service()
+    svc.config.coordination = CoordinationConfig()
+    return svc
+
+
+def test_default_config_admits_the_singular_token_principal_only(monkeypatch):
+    """Maintainer decision 2026-09-25: a token-map principal is a separately
+    trusted identity and stays off the board until an operator lists it."""
+    from pseudolife_memory.coordination import dispatch
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "map-secret:editor")
+    with pytest.raises(ValueError, match="principal_not_allowed"):
+        dispatch(_default_service(), "update", {},
+                 headers={"authorization": "Bearer map-secret"})
+    # The singular token passes the principal gate and stops at the next
+    # one: an update still needs a registered instance.
+    with pytest.raises(ValueError, match="instance_authentication_required"):
+        dispatch(_default_service(), "update", {},
+                 headers={"authorization": "Bearer fixture-secret"})
+
+
+def test_default_config_still_requires_bearer_authentication(monkeypatch):
+    from pseudolife_memory.coordination import dispatch
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    with pytest.raises(ValueError, match="authentication_required"):
+        dispatch(_default_service(), "register", {}, headers={})
+
+
 def test_model_send_never_accepts_sender_override(monkeypatch):
     from pseudolife_memory.coordination import dispatch
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")

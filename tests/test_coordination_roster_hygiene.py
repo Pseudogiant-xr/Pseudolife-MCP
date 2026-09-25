@@ -625,6 +625,28 @@ def test_the_desktop_app_process_registers_no_board_identity(monkeypatch, tmp_pa
     assert "skip memory_agents update and memory_message" in seen["instructions_note"]
 
 
+def test_the_desktop_app_process_does_not_wait_on_the_default_board_probe(monkeypatch):
+    """Coordination on by default asks the daemon whether it serves this
+    bearer the board before building an adapter (#367). The shared process
+    builds none whatever the answer, so it must not spend its startup on
+    the question."""
+    from pseudolife_memory import shim
+    _desktop_env(monkeypatch)
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION")
+    asked = []
+    monkeypatch.setattr(shim, "_board_available", lambda *args: asked.append(args) or True)
+    seen = {}
+
+    async def proxy(*args, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    asyncio.run(shim._run_session_proxy("http://fixture", "token", "process-session"))
+    assert asked == []
+    assert _RecordingAdapter.constructed == []
+    assert "per-session Pseudolife server" in seen["coordination_refusal"]
+
+
 def test_the_shared_process_refuses_board_writes_and_forwards_everything_else(monkeypatch):
     """Board writes from the shared process are refused before any request,
     with the way out in the error text, which is what the model reads; list

@@ -68,6 +68,12 @@ _NO_SPAWN_WAIT_S = _SPAWN_WAIT_ALIVE_S
 # wait_for also awaits bounded adapter cleanup; the subsequent instruction fetch
 # has its own 5s timeout. These limits do not guarantee a 10s host startup deadline.
 _ADAPTER_STARTUP_SECONDS = 3.0
+# Bound on the default-mode board probe (GET /api/hook/coordination-start),
+# which runs before the downstream handshake: a design bound, not a measured
+# tuning constant. A healthy daemon answers it without storage I/O in a
+# loopback round trip; a stalled one must not stretch the startup budget
+# above, and an unanswered probe counts as no board for this process.
+_BOARD_PROBE_SECONDS = 1.5
 # The provider guide's 2026-08-31 cold-start check budgets 180 s for a first
 # model-loading tool call. This replaces the MCP SDK's 300 s SSE default while
 # preserving that measured/documented path; deployments may set any finite,
@@ -652,6 +658,44 @@ def _post_episode(url: str, token: str | None, path: str, payload: dict, *,
         pass
 
 
+def _board_available(url: str, provider) -> bool:
+    """Whether the daemon would give this bearer the board check-in now:
+    the same answer the plugin's startup hook reads. False on any failure,
+    so an unreachable daemon never adds a check-in that must fail."""
+    try:
+        token = provider.snapshot().token
+        req = urllib.request.Request(url + "/api/hook/coordination-start")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        opener = urllib.request.build_opener(_NoRedirectHandler)
+        with opener.open(req, timeout=2) as r:
+            return bool(r.read().strip())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _holds_bearer(provider) -> bool:
+    try:
+        return bool(provider.snapshot().token)
+    except Exception:  # noqa: BLE001 - an unusable credential file holds no bearer
+        return False
+
+
+def _with_board_checkin(instructions: str | None, ready: bool) -> str | None:
+    """Append the compact board check-in when this client can use the board.
+
+    A daemon from before 2026-09-25 still carries its own board clause in
+    the instructions; that one is left alone rather than doubled."""
+    if not ready:
+        return instructions
+    from pseudolife_memory.coordination import CHECKIN_INSTRUCTION
+    if not instructions:
+        return CHECKIN_INSTRUCTION
+    if "memory_agents" in instructions:
+        return instructions
+    return f"{instructions} {CHECKIN_INSTRUCTION}"
+
+
 def _toolset_changed(result) -> bool:
     """True when a memory_toolset call actually moved the tier (its result
     carries ``changed: true``). Reads structured content first, falls back
@@ -682,9 +726,10 @@ def _requires_coordination_identity(name: str, arguments: dict | None) -> bool:
 # Returned, instead of a board identity, by a process that answers for every
 # conversation in its host (see _serves_many_conversations). It is the MCP
 # error message, which is the text a model reads, so it carries the way out.
-# It names no server: the installer gives the per-session server and the
-# Desktop entry the same name, and where both carry it, Desktop serves the
-# Code tab from its own entry, so there may be no other server to name.
+# It names no server: the per-session server and the Desktop entry can carry
+# the same name (installs registered so far give both pseudolife-memory), and
+# where both carry it Desktop serves the Code tab from its own entry, so there
+# may be no other server to name.
 _SHARED_PROCESS_REFUSAL = (
     "This Pseudolife server is one process shared by every conversation in the "
     "Claude desktop app, so it has no board identity of its own: posting, "
@@ -722,7 +767,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                  channel_inbox=None, agent_headers=None, coordination_hint=None,
                  coordination_adapter=None, codex_metadata: bool = False,
                  coordination_registry=None, instructions_note: str = "",
-                 coordination_refusal: str = "") -> None:
+                 board_checkin=False, coordination_refusal: str = "") -> None:
     import asyncio
     import contextlib
     import anyio
@@ -974,17 +1019,33 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             return initialization.instructions
         return await _perform("initialize", fetch)
 
-    instructions = None
-    try:
-        # Reserve time within Codex's default 10s startup budget for the
-        # downstream handshake; the upstream HTTP read default is 300s.
-        instructions = await asyncio.wait_for(_fetch_instructions(), timeout=5)
-    except Exception as exc:
-        # This optional enhancement must not turn a transient MCP refusal
-        # into a dead stdio process. Fresh per-call connections can recover.
-        # Exception text may contain credentials; report only its type.
-        print(f"pseudolife-mcp: instructions unavailable ({type(exc).__name__}); "
-              "check daemon MCP access and reconnect for startup guidance.", file=sys.stderr)
+    async def _startup_instructions():
+        try:
+            # Reserve time within Codex's default 10s startup budget for the
+            # downstream handshake; the upstream HTTP read default is 300s.
+            return await asyncio.wait_for(_fetch_instructions(), timeout=5)
+        except Exception as exc:
+            # This optional enhancement must not turn a transient MCP refusal
+            # into a dead stdio process. Fresh per-call connections can recover.
+            # Exception text may contain credentials; report only its type.
+            print(f"pseudolife-mcp: instructions unavailable ({type(exc).__name__}); "
+                  "check daemon MCP access and reconnect for startup guidance.",
+                  file=sys.stderr)
+            return None
+
+    async def _board_ready() -> bool:
+        # A bool from an adapter that is (or is not) up, or, for Codex's
+        # per-thread registry, a daemon probe run beside the fetch above.
+        if not callable(board_checkin):
+            return bool(board_checkin)
+        try:
+            return bool(await asyncio.wait_for(board_checkin(), timeout=3))
+        except Exception:  # noqa: BLE001 - an unanswered probe adds no check-in
+            return False
+
+    instructions, board_ready = await asyncio.gather(
+        _startup_instructions(), _board_ready())
+    instructions = _with_board_checkin(instructions, board_ready)
     if instructions_note:
         # The version mismatch goes first: it explains any other oddity.
         instructions = instructions_note + "\n\n" + (instructions or "")
@@ -1108,8 +1169,27 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
     if provider is None:
         provider = CredentialProvider(token=token or None)
 
-    enabled = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower() in {
-        "1", "true", "yes", "on"}
+    # Agent coordination is on by default (2026-09-25): unset enables the
+    # adapter, any other value that is not truthy turns it off. The board
+    # requires bearer authentication, so without a credential the default
+    # stays quiet instead of failing, and warning, on every launch. With one,
+    # the default asks the daemon first: a board it will not serve this
+    # bearer (disabled, an unlisted principal, file mode) gets no adapter or
+    # Codex registry, whose refusals would otherwise ride every tool result.
+    # An explicit opt-in skips the question and keeps the adapter's own
+    # diagnostics.
+    setting = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower()
+    explicit = setting in {"1", "true", "yes", "on"}
+    enabled = explicit
+    # A process serving many conversations binds no board identity whatever
+    # the daemon says, so it does not wait on the question.
+    if not setting and _holds_bearer(provider) and not _serves_many_conversations():
+        try:
+            enabled = await asyncio.wait_for(
+                asyncio.to_thread(_board_available, url, provider),
+                timeout=_BOARD_PROBE_SECONDS)
+        except (TimeoutError, asyncio.TimeoutError):  # 3.10 raises the latter
+            enabled = False
     codex_pull = (not channel
                   and os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
                   == "codex")
@@ -1173,10 +1253,22 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                         url, token, provider=provider, **registry_options)
                     stack.push_async_callback(registry.aclose)
                     kwargs["coordination_registry"] = registry
+                    if explicit:
+                        # The registry attaches per thread, later; whether
+                        # the board check-in belongs in the instructions is
+                        # the daemon's call for this bearer.
+                        async def board_ready():
+                            return await asyncio.to_thread(_board_available, url, provider)
+                        kwargs["board_checkin"] = board_ready
+                    else:
+                        kwargs["board_checkin"] = True  # the daemon said so above
             elif os.environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower() in {
                     "1", "true", "yes", "on"}:
-                print("pseudolife-mcp: PSEUDOLIFE_CODEX_DOORBELL needs "
-                      "PSEUDOLIFE_AGENT_COORDINATION=1; doorbell off.", file=sys.stderr)
+                needs = ("agent coordination, which is off here (no bearer token, or "
+                         "the daemon does not serve the board to it)"
+                         if not setting else "PSEUDOLIFE_AGENT_COORDINATION=1")
+                print(f"pseudolife-mcp: PSEUDOLIFE_CODEX_DOORBELL needs {needs}; "
+                      "doorbell off.", file=sys.stderr)
             await _proxy(url, token, session_uid, provider=provider, **kwargs)
             return
 
@@ -1215,12 +1307,14 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             except (AdapterError, CredentialError, TimeoutError):
                 where = f" ({state_path})" if state_path else ""
                 print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
-                      f"Check daemon opt-in, authentication and private adapter state{where}.",
+                      "Check the daemon's coordination setting, authentication and "
+                      f"private adapter state{where}.",
                       file=sys.stderr)
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_adapter"] = adapter
             kwargs["coordination_hint"] = adapter.deliver_hint
+            kwargs["board_checkin"] = True
         if channel:
             kwargs["channel_inbox"] = adapter.inbox if adapter is not None else idle_inbox
         await _proxy(url, token, session_uid, provider=provider, **kwargs)
