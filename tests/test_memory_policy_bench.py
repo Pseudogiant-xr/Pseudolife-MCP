@@ -346,6 +346,44 @@ def test_default_arm_order_still_yields_verdicts_in_both_directions():
     assert not art["acceptance"]["none over full_separate_hook"]["accept"]
 
 
+BF16 = {"backend": "torch", "device": "cpu", "dtype": "bf16"}
+FP32 = {"backend": "torch", "device": "cpu", "dtype": "fp32"}
+
+
+def test_the_daemon_keeps_the_embedder_its_health_reports(tmp_path, monkeypatch):
+    class _Proc:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(mb.subprocess, "Popen", lambda *a, **kw: _Proc())
+    served = {"/health": {"storage": "postgres", "embedder": BF16},
+              "/api/briefing": {"text": "briefing"}}
+    daemon = mb.Daemon(tmp_path, "postgresql://u@127.0.0.1:5433/plbench_x", "compact")
+    monkeypatch.setattr(daemon, "get", lambda path, **kw: served[path])
+    daemon.start(timeout=5)
+    daemon.close_log()
+    assert daemon.embedder == BF16
+
+
+def test_the_artifact_merges_each_runs_seed_and_serve_embedder():
+    arms = mb.parse_arms("none,compact")
+    recs = [_record(arm, sid, 0, 1.0, 1.0) for arm in ("none", "compact")
+            for sid in ("a", "b")]
+    for rec in recs:
+        rec["embedder"] = {"seed": BF16, "serve": BF16}
+    recs[-1]["embedder"] = {"seed": BF16, "serve": FP32}
+
+    class Args:
+        cost_lambda, client, model, effort, replicates, seed = 0.1, "claude", "m", "e", 1, 1
+
+    art = mb.build_artifact(recs, arms, Args, {"entries": {}, "lessons": {}}, "t")
+    assert art["embedder"]["seed"] == BF16
+    assert art["embedder"]["serve"] == {"mixed": [{"embedder": BF16, "rows": 3},
+                                                  {"embedder": FP32, "rows": 1}]}
+
+
 def test_a_short_tag_cannot_blind_the_leak_scan(tmp_path):
     """Reviewer finding M1: only path-like tokens carrying the run id go."""
     served = "\n\n".join((AD, BRIEFING))
@@ -403,6 +441,31 @@ def test_a_legacy_run_keeps_its_exit_status_when_regraded(tmp_path):
     assert client["rc"] == 0 and client["timed_out"] is False
     assert client["started"] == pytest.approx(98.0)
     assert meta["db"].startswith("plbench_")
+
+
+def test_regrade_carries_each_runs_embedder_stamp(tmp_path, monkeypatch):
+    import types
+    work = tmp_path / "t"
+    run = work / "runs" / "t-none-a_lesson-r0"
+    run.mkdir(parents=True)
+    (run / "stream.jsonl").write_text(json.dumps(
+        {"type": "result", "subtype": "success", "usage": {}, "modelUsage": {}}) + "\n")
+    (run / "ledger.jsonl").write_text(json.dumps({"t": 100.0, "kind": "hook"}) + "\n")
+    stamp = {"seed": BF16, "serve": BF16}
+    (work / "runs.jsonl").write_text(json.dumps(
+        {"run_id": "t-none-a_lesson-r0", "arm": "none", "variant": "none",
+         "scenario": "a_lesson", "replicate": 0, "client_rc": 0, "timed_out": False,
+         "embedder": stamp}) + "\n")
+    (work / "template-abc.json").write_text(json.dumps({"entries": {}, "lessons": {}}))
+    monkeypatch.setattr(mb, "check_work_root", lambda p: Path(p))
+    monkeypatch.setattr(mb, "admin_url", lambda: "postgresql://u@127.0.0.1:5433/postgres")
+    monkeypatch.setattr(mb, "db_exists", lambda admin, name: False)
+    args = types.SimpleNamespace(work_root=tmp_path, tag="t", manifest=None, arms="none",
+                                 replicates=1, seed=1, cost_lambda=0.1, tool_search=None,
+                                 note=None, out=tmp_path / "regraded.json")
+    art = json.loads(mb.regrade(args).read_text(encoding="utf-8"))
+    assert art["runs"][0]["embedder"] == stamp
+    assert art["embedder"] == stamp
 
 
 @pytest.mark.parametrize("url,ok", [
