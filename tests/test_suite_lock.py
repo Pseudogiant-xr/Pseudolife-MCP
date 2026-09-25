@@ -864,9 +864,16 @@ def _copy_of_the_checkout(dest: Path) -> Path:
     return dest
 
 
-@pytest.mark.parametrize("workers", [0, 1], ids=["one-process", "xdist"])
+@pytest.mark.parametrize(("workers", "changed", "named"), [
+    (0, "pseudolife_memory/utils/config.py", "pseudolife_memory/utils/config.py"),
+    (1, "pseudolife_memory/utils/config.py", "pseudolife_memory/utils/config.py"),
+    # conftest read ops/.env for the bench URL; a worktree's pre-flight
+    # copies it in, and a copy made while the run queued is a change too.
+    (0, "ops/.env", "ops/.env (created)"),
+], ids=["one-process", "xdist", "env-file"])
 def test_a_queued_run_whose_imported_code_changed_refuses_to_run(held, procs,
-                                                                 tmp_path, workers):
+                                                                 tmp_path, workers,
+                                                                 changed, named):
     if workers:
         pytest.importorskip("xdist")
     checkout = _copy_of_the_checkout(tmp_path / "checkout")
@@ -876,21 +883,75 @@ def test_a_queued_run_whose_imported_code_changed_refuses_to_run(held, procs,
                  f"--ignore-glob={checkout / 'tests' / '*'}"],
                 _pytest_env(held.dir, "wait"), cwd=checkout)
     run.expect(f"waiting for the full-suite lock held by holder-wt (pid {held.pid})")
-    config = checkout / "pseudolife_memory" / "utils" / "config.py"
-    config.write_text(config.read_text(encoding="utf-8") + "\n# merged while queued\n",
-                      encoding="utf-8")
-    held.holder.send_release()
+    target = checkout / changed
+    target.parent.mkdir(exist_ok=True)
+    before = target.read_text(encoding="utf-8") if target.exists() else ""
+    target.write_text(before + "\n# changed while queued\n", encoding="utf-8")
 
-    assert run.drain() == pytest.ExitCode.USAGE_ERROR, run.seen
+    # The holder keeps the lock throughout: the run must see the change on
+    # its next poll and leave the queue, not wait out its turn to find out.
+    assert run.drain(timeout=START_TIMEOUT) == pytest.ExitCode.USAGE_ERROR, run.seen
     refusal = [line for line in run.seen if "changed while this run was queued" in line]
-    assert refusal and "pseudolife_memory/utils/config.py" in refusal[0], run.seen
+    assert refusal and refusal[0].endswith(f": {named}"), run.seen
+    assert not any("full-suite lock acquired" in line for line in run.seen), run.seen
     # Refused in the controller's pytest_configure, before xdist's
     # pytest_sessionstart could start a worker: xdist prints "bringing up
     # nodes..." as it starts them (seen at -q in this test's RED run).
     assert not any("bringing up nodes" in line for line in run.seen), run.seen
-    # It let the lock go on the way out, record and all.
-    assert suite_lock.read_holder(held.dir) is None
-    suite_lock.release(suite_lock.acquire(held.dir, "fail", worktree="next"))
+    # The holder was never disturbed, and the refused run left no ticket
+    # for later arrivals to queue behind.
+    assert suite_lock.read_holder(held.dir)["pid"] == held.pid
+    assert not list((held.dir / suite_lock.QUEUE_DIR).iterdir())
+
+
+@pytest.mark.parametrize("changed", ["ini", "read file"])
+def test_a_queued_run_also_refuses_when_its_ini_or_a_file_conftest_read_changed(
+        tmp_path, changed):
+    # pytest reads the ini before conftest loads, and conftest reads ops/.env
+    # for the bench URL at import; neither is read again at collection.
+    checkout = tmp_path / "checkout"
+    (checkout / "tests").mkdir(parents=True)
+    ini = checkout / "pyproject.toml"
+    ini.write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    env_file = checkout / "ops" / ".env"
+    env_file.parent.mkdir()
+    env_file.write_text("POSTGRES_PASSWORD=old\n", encoding="utf-8")
+    config = _config([str(checkout / "tests")], cwd=checkout)
+    config.inipath = ini
+    locks = tmp_path / "locks"
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(locks), "PSEUDOLIFE_SUITE_LOCK": "wait"}
+    holder = suite_lock.acquire(locks, "fail", worktree="holder")
+    result: dict = {}
+
+    def run():
+        try:
+            result["held"] = suite_lock.take_for_session(
+                config, environ, checkout / "tests", read_files=(env_file,))
+        except BaseException as exc:  # noqa: BLE001 — handed to the test thread
+            result["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        queue_dir = locks / suite_lock.QUEUE_DIR
+        deadline = time.monotonic() + START_TIMEOUT
+        while thread.is_alive() and not any(queue_dir.iterdir()):
+            assert time.monotonic() < deadline, "the run never queued"
+            time.sleep(0.02)
+        if changed == "ini":
+            ini.write_text("[tool.pytest.ini_options]\naddopts = \"-x\"\n",
+                           encoding="utf-8")
+        else:
+            env_file.write_text("POSTGRES_PASSWORD=new\n", encoding="utf-8")
+        thread.join(START_TIMEOUT)
+        assert isinstance(result.get("error"), pytest.UsageError), result
+        assert ("pyproject.toml" if changed == "ini" else "ops/.env") in str(result["error"])
+        assert suite_lock.read_holder(locks)["worktree"] == "holder"
+    finally:
+        suite_lock.release(holder)
+        thread.join(START_TIMEOUT)
+        if "held" in result:
+            suite_lock.release(result["held"])
 
 
 def _imported(monkeypatch, path: Path, source: str) -> None:
@@ -905,12 +966,14 @@ def _imported(monkeypatch, path: Path, source: str) -> None:
     monkeypatch.setitem(sys.modules, name, module)
 
 
-def test_changed_and_deleted_modules_are_named_and_an_identical_rewrite_is_not(
+def test_changed_deleted_and_created_files_are_named_and_an_identical_rewrite_is_not(
         tmp_path, monkeypatch):
     for name in ("same", "edited", "deleted"):
         _imported(monkeypatch, tmp_path / "pkg" / f"{name}.py", f"NAME = {name!r}\n")
     sources = suite_lock.imported_sources(tmp_path)
     assert sorted(path.name for path in sources) == ["deleted.py", "edited.py", "same.py"]
+    absent = tmp_path / "ops" / ".env"      # a read file that was not there yet
+    sources[absent.resolve()] = None
 
     same = tmp_path / "pkg" / "same.py"
     same.write_text(same.read_text(encoding="utf-8"), encoding="utf-8")
@@ -918,8 +981,10 @@ def test_changed_and_deleted_modules_are_named_and_an_identical_rewrite_is_not(
     os.utime(same, (later, later))
     (tmp_path / "pkg" / "edited.py").write_text("NAME = 'new'\n", encoding="utf-8")
     (tmp_path / "pkg" / "deleted.py").unlink()
+    absent.parent.mkdir()
+    absent.write_text("X=1\n", encoding="utf-8")
     assert suite_lock.changed_sources(sources, tmp_path) == [
-        "pkg/deleted.py (deleted)", "pkg/edited.py"]
+        "ops/.env (created)", "pkg/deleted.py (deleted)", "pkg/edited.py"]
 
 
 def test_the_interpreter_under_the_checkout_is_not_the_checkout_code(tmp_path,
@@ -931,13 +996,16 @@ def test_the_interpreter_under_the_checkout_is_not_the_checkout_code(tmp_path,
     _imported(monkeypatch, tmp_path / "pkg" / "own.py", "X = 1\n")
     monkeypatch.setattr(sys, "prefix", str(venv))
     monkeypatch.setattr(sys, "exec_prefix", str(venv))
+    # A prefix that holds the checkout (a system Python's /usr over
+    # /usr/src/app) must not hide the checkout's own code.
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path.parent))
     assert [path.name for path in suite_lock.imported_sources(tmp_path)] == ["own.py"]
 
 
-def test_this_session_fingerprinted_what_conftest_imported_before_the_lock():
-    # The scan reaches the modules conftest.py loads at import time, whose
-    # copies a queued run would otherwise keep: the lock itself, a test
-    # helper, and package code.
+def test_the_scan_finds_the_modules_conftest_imports_at_load():
+    # Only that the scanner reaches them in a real session: the lock itself,
+    # a test helper, and package code. That they are fingerprinted before a
+    # queued run waits is the end-to-end test's job.
     sources = {path.relative_to(ROOT).as_posix()
                for path in suite_lock.imported_sources(ROOT)}
     assert {"tests/conftest.py", "tests/suite_lock.py", "tests/fake_embedder.py",

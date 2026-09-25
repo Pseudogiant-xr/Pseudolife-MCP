@@ -142,17 +142,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   collection, after the lock. On 2026-09-25 a run queued from 14:59 to 17:46
   while its session merged master at ~15:50, and it tested the old
   `CoordinationConfig` defaults against the new test files: 9 failures that
-  all passed alone. Now a full run fingerprints the checkout's modules it
-  has imported (SHA-256 of each file) before it queues and compares them
-  once it holds the lock. If any changed or disappeared, it lets the lock go
-  and stops with a usage error, "the tree changed while this run was
-  queued; rerun it", naming the files. It never reloads them. Files it has
-  not imported yet are read at collection as before. The interpreter's own
-  files are not fingerprinted, even in a `.venv` inside the checkout. xdist
-  workers need no check of their own: they start after their controller
-  holds the lock and import from disk then, and a controller that refuses
-  stops the run before any worker starts. The fingerprint takes ~120 ms
-  per full run (834 modules loaded, 11 of them the checkout's).
+  all passed alone. Now a full run fingerprints (SHA-256) what it has
+  already read from the checkout before it queues: the modules it imported,
+  pytest's ini file, and `ops/.env`, which conftest reads for the bench URL.
+  It compares them on every poll of the queue, the last time just before it
+  takes the lock. On a change it leaves the queue within seconds, without
+  ever holding the lock, and stops with a usage error, "the tree changed
+  while this run was queued; rerun it", naming the files (marked deleted or
+  created where they went or came). It never reloads them. Modules not yet
+  imported are read at collection as before. An interpreter environment
+  inside the checkout (a `.venv`) is not fingerprinted. xdist workers need
+  no check of their own: they start after their controller holds the lock
+  and import from disk then, and a controller that refuses stops the run
+  before any worker starts. Unseen: a change within the first second of
+  startup, between an import and the fingerprint. The fingerprint takes
+  ~120 ms per full run (834 modules loaded, 11 of them the checkout's); the
+  per-poll check about a millisecond (0.7 ms measured for the 11 modules).
 
 ### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
 - **Hydration fails closed.** If loading cortex facts, world facts or lessons

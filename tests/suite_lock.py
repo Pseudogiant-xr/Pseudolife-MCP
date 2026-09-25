@@ -43,17 +43,24 @@ brings in pseudolife_memory/utils/config.py). pytest imports everything else
 at collection, after the lock. On 2026-09-25 a run queued from 14:59 to
 17:46, its session merged master at ~15:50 (new CoordinationConfig
 defaults), and the run tested the old defaults against the new test files:
-9 failures, each passing alone. So a full run fingerprints the tree's
-modules it has imported before it queues and compares them once it holds
-the lock; if any changed, it lets the lock go and stops with a usage error
-asking for a rerun. Reloading them instead is unsound: other modules keep
-references to the old objects. A change to any file not yet imported is
-simply picked up at collection. xdist workers start after the controller
-holds the lock (in pytest_sessionstart) and import from disk then, so the
-controller's check covers them. Taking the lock before those imports cannot
-close the gap on its own: pytest sets ``config.args``, which decide whether
-a run is full, only after importing conftest.py, and this module must be
-imported to take the lock at all.
+9 failures, each passing alone. So a full run fingerprints what it has
+already read from the tree before it queues: the modules it imported, the
+ini file pytest read, and files conftest names (ops/.env, read for the
+bench URL). It compares them on every poll, the last time just before it
+takes the lock, and on a change it leaves the queue with a usage error
+asking for a rerun: within seconds of the change, not when its turn comes,
+and without ever holding the lock. Reloading instead is unsound: other
+modules keep references to the old objects. Modules not yet imported are
+read at collection, after the lock. What goes unseen: a change in the
+first second of startup, between a module's import and the fingerprint
+(0.7 s measured, most of it the mcp import and plugin setup). xdist workers
+start after the controller holds the lock (in pytest_sessionstart) and
+import from disk then, so the controller's check covers them; an xdist run
+refuses all the same, since its controller's hooks would still run the old
+code. Taking the lock before those imports cannot close the gap on its
+own: pytest sets ``config.args``, which decide whether a run is full, only
+after importing conftest.py, and this module must be imported to take the
+lock at all.
 
 Configuration:
 
@@ -440,11 +447,14 @@ def _take_a_slot(directory: Path, handles: dict[int, IO[bytes]],
 def acquire(directory: Path, mode: str, *, worktree: str,
             slots: int | Callable[[], int] = 1,
             poll: float = 2.0, notice_every: float = 60.0,
-            out: IO[str] | None = None) -> HeldLock:
+            out: IO[str] | None = None,
+            check: Callable[[], None] | None = None) -> HeldLock:
     """Take one of ``slots`` lock slots in arrival order, waiting (``wait``)
     or raising :class:`SuiteLockBusy` (``fail``) while every slot is held
     or another process queued first. A callable ``slots`` is read again on
-    every poll, so a changed count reaches runs already queued."""
+    every poll, so a changed count reaches runs already queued. ``check``
+    runs on every poll, just before each try for the lock; whatever it
+    raises abandons the wait."""
     count = slots() if callable(slots) else slots
     if count < 1:
         raise ValueError(f"slots={count}: at least one is needed")
@@ -463,6 +473,8 @@ def acquire(directory: Path, mode: str, *, worktree: str,
                     except (OSError, ValueError):
                         pass  # a bad edit mid-queue: keep the last good count
                 ahead = _queued_ahead(ticket)
+                if check is not None:
+                    check()  # every poll, the last time just before the lock
                 if not ahead:
                     slot = _take_a_slot(directory, handles, count)
                     if slot is not None:
@@ -527,20 +539,25 @@ def _digest(path: Path) -> str | None:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:
-        return None  # deleted, or unreadable: no content to compare
+        return None  # absent, or unreadable: no content to compare
 
 
 def imported_sources(root: Path) -> dict[Path, str | None]:
     """The source file of every module this process has imported from
-    ``root``, with a digest of its content now. The interpreter's own files
-    are left out even when its environment lives under ``root`` (a .venv in
-    the checkout): they are not the tree's code."""
+    ``root``, with a digest of its content now. An interpreter environment
+    inside ``root`` (a .venv in the checkout) is left out: it is not the
+    tree's code."""
     root = root.resolve()
-    interpreter = {Path(prefix).resolve() for prefix in (
-        sys.prefix, sys.exec_prefix, sys.base_prefix, sys.base_exec_prefix)}
+    interpreter = {prefix for prefix in (Path(p).resolve() for p in (
+        sys.prefix, sys.exec_prefix, sys.base_prefix, sys.base_exec_prefix))
+        if root in prefix.parents}
     sources: dict[Path, str | None] = {}
     for module in list(sys.modules.values()):
-        file = getattr(module, "__file__", None)
+        try:
+            # vars(), not getattr(): a lazy module's __getattr__ must not run.
+            file = vars(module).get("__file__")
+        except TypeError:
+            continue  # not a module object
         if not isinstance(file, str):
             continue  # built-in, or a namespace package
         try:
@@ -554,23 +571,34 @@ def imported_sources(root: Path) -> dict[Path, str | None]:
 
 
 def changed_sources(sources: dict[Path, str | None], root: Path) -> list[str]:
-    """The files of ``sources`` whose content differs now, relative to
-    ``root`` and sorted; a deleted one is marked so."""
+    """The files of ``sources`` whose content differs now, sorted, relative
+    to ``root`` where they lie under it; one that went or came is marked."""
     root = root.resolve()
     changed = []
     for path, digest in sorted(sources.items()):
         now = _digest(path)
         if now != digest:
-            name = path.relative_to(root).as_posix()
-            changed.append(name if now is not None else f"{name} (deleted)")
+            name = (path.relative_to(root).as_posix() if root in path.parents
+                    else str(path))
+            if now is None:
+                name += " (deleted)"
+            elif digest is None:
+                name += " (created)"
+            changed.append(name)
     return changed
 
 
-def take_for_session(config, environ, tests_root: Path) -> HeldLock | None:
+class TreeChanged(RuntimeError):
+    """Files a queued run already read changed on disk while it waited."""
+
+
+def take_for_session(config, environ, tests_root: Path,
+                     read_files=()) -> HeldLock | None:
     """The conftest entry point: the held lock, or None when this session
     does not take it (targeted run, ``off``, or an xdist worker). A usage
-    error, with the lock let go, when tree code this process imported before
-    queueing changed on disk while it waited."""
+    error, without ever taking the lock, when tree code this process
+    imported, its ini file, or one of ``read_files`` (files conftest read
+    at import) changed on disk while it queued."""
     import pytest
 
     if hasattr(config, "workerinput"):
@@ -592,24 +620,32 @@ def take_for_session(config, environ, tests_root: Path) -> HeldLock | None:
                              for name in LISTING_OPTIONS)):
         return None
     directory = lock_dir(environ)
-    # What this process already runs from the tree, fingerprinted before it
-    # can wait: the module docstring has the 2026-09-25 run that went stale.
-    sources = imported_sources(tests_root.parent)
+    # What this process already runs or read from the tree, fingerprinted
+    # before it can wait: the module docstring has the 2026-09-25 run that
+    # went stale. pytest read the ini file before conftest was imported.
+    worktree = tests_root.parent
+    sources = imported_sources(worktree)
+    inipath = getattr(config, "inipath", None)
+    for path in ([inipath] if inipath else []) + list(read_files):
+        sources[Path(path).resolve()] = _digest(Path(path))
+
+    def unchanged() -> None:
+        changed = changed_sources(sources, worktree)
+        if changed:
+            raise TreeChanged(
+                f"the tree changed while this run was queued; rerun it. It "
+                f"read these before queueing and they differ on disk now, so "
+                f"it would test their old contents against the new files: "
+                f"{', '.join(changed)}")
+
     try:
         slot_count(environ, directory)  # a bad count fails before queueing
-        held = acquire(directory, mode, worktree=str(tests_root.parent),
-                       slots=lambda: slot_count(environ, directory))
-    except (SuiteLockBusy, ValueError) as exc:  # busy in fail mode, or a bad count
-        raise pytest.UsageError(str(exc)) from None
+        return acquire(directory, mode, worktree=str(worktree),
+                       slots=lambda: slot_count(environ, directory),
+                       check=unchanged)
+    except (SuiteLockBusy, TreeChanged, ValueError) as exc:
+        raise pytest.UsageError(str(exc)) from None  # busy (fail), stale, bad count
     except OSError as exc:
         raise pytest.UsageError(
             f"cannot take the full-suite lock in {directory}: {exc} "
             f"({LOCK_ENV}=off skips it)") from None
-    changed = changed_sources(sources, tests_root.parent)
-    if changed:
-        release(held)  # the next waiter need not wait for this process to exit
-        raise pytest.UsageError(
-            f"the tree changed while this run was queued; rerun it. It imported "
-            f"these before queueing and they differ on disk now, so it would "
-            f"test their old code against the new files: {', '.join(changed)}")
-    return held
