@@ -71,6 +71,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The live bank held no slot in this state on 2026-09-25 (read-only check:
   37 active contenders, none equal to a current value), so nothing heals
   existing rows at load.
+### Fixed (2026-09-25 — the loop-health tile counts client sessions, not root episodes)
+- The Console's loop-health tile counted every root episode started in the
+  window as a session and divided its per-session rates by that count.
+  One client session can leave two roots (the SessionStart hook's and the
+  stdio shim's), and most new roots are idle shim roots: on 2026-09-25 the
+  live bank held 166 keyed roots in 24 h, against 34 client sessions by the
+  bench's first count (before its review revised the pairing rules). So
+  `sessions` read high and `stores_per_session` / `outcomes_per_session`
+  read low.
+- `sessions` in the `loop` block of `/api/overview` now uses the
+  client-session definition of the memory-policy bench's
+  `evals/capture_metrics.py`:
+  - hook-keyed roots always count;
+  - other keyed roots count only with an entry, an outcome or a search in
+    the window;
+  - a search counts for the root holding its session id, not for its
+    episode stamp, which is the daemon's current episode rather than the
+    caller's;
+  - a hook root and an active shim root opened within 5 s of each other
+    count once, when neither has another candidate.
+
+  The old count stays as `root_episodes`, and the tile shows both.
+- Still not counted: a session whose root was pruned because it stored
+  nothing. An explicit end prunes at once; the reaper prunes after the
+  resume window. So `sessions` undercounts those and the per-session rates
+  still lean high.
 
 ### Added (2026-09-25 — measure what the startup memory policy changes)
 - `memory_policy.variant` selects the standing memory policy session start
