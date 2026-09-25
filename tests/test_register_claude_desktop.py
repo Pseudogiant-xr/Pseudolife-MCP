@@ -187,32 +187,32 @@ def test_merge_preserves_every_other_key_and_server():
     assert changed is True
     assert merged["preferences"] == existing["preferences"]
     assert merged["mcpServers"]["pdf-tools"] == existing["mcpServers"]["pdf-tools"]
-    assert merged["mcpServers"]["pseudolife-memory"]["command"] == "/abs/pseudolife-mcp"
+    assert merged["mcpServers"]["pseudolife-desktop"]["command"] == "/abs/pseudolife-mcp"
 
 
 def test_merge_keeps_user_added_env_keys_and_the_literal_token_by_default():
     """Unmanaged keys survive; the literal token is only dropped when the
     caller says its value now lives in the token file."""
-    existing = {"mcpServers": {"pseudolife-memory": {
+    existing = {"mcpServers": {"pseudolife-desktop": {
         "command": "old", "env": {"PSEUDOLIFE_MCP_TOKEN": "keep-me",
                                   "HTTPS_PROXY": "http://proxy:3128",
                                   "PSEUDOLIFE_WRITER_ID": "stale"}}}}
     merged, changed = reg.merge_config(existing, _entry())
-    env = merged["mcpServers"]["pseudolife-memory"]["env"]
+    env = merged["mcpServers"]["pseudolife-desktop"]["env"]
     assert changed is True
     assert env["PSEUDOLIFE_MCP_TOKEN"] == "keep-me"
     assert env["HTTPS_PROXY"] == "http://proxy:3128"
     assert env["PSEUDOLIFE_WRITER_ID"] == "claude-desktop"
     dropped, _ = reg.merge_config(existing, _entry("/abs/t.token"), drop_literal_token=True)
-    assert "PSEUDOLIFE_MCP_TOKEN" not in dropped["mcpServers"]["pseudolife-memory"]["env"]
-    assert dropped["mcpServers"]["pseudolife-memory"]["env"]["HTTPS_PROXY"] == "http://proxy:3128"
+    assert "PSEUDOLIFE_MCP_TOKEN" not in dropped["mcpServers"]["pseudolife-desktop"]["env"]
+    assert dropped["mcpServers"]["pseudolife-desktop"]["env"]["HTTPS_PROXY"] == "http://proxy:3128"
 
 
 def test_merge_drops_a_stale_args_list():
-    existing = {"mcpServers": {"pseudolife-memory": {
+    existing = {"mcpServers": {"pseudolife-desktop": {
         "command": "old", "args": ["--legacy"], "env": {}}}}
     merged, _ = reg.merge_config(existing, _entry())
-    assert "args" not in merged["mcpServers"]["pseudolife-memory"]
+    assert "args" not in merged["mcpServers"]["pseudolife-desktop"]
 
 
 def test_merge_is_idempotent():
@@ -226,14 +226,14 @@ def test_merge_is_idempotent():
 def test_merge_rejects_non_object_shapes():
     with pytest.raises(reg.ConfigError, match="mcpServers"):
         reg.merge_config({"mcpServers": []}, _entry())
-    with pytest.raises(reg.ConfigError, match="mcpServers.pseudolife-memory"):
-        reg.merge_config({"mcpServers": {"pseudolife-memory": "not-an-object"}}, _entry())
+    with pytest.raises(reg.ConfigError, match="mcpServers.pseudolife-desktop"):
+        reg.merge_config({"mcpServers": {"pseudolife-desktop": "not-an-object"}}, _entry())
 
 
 def test_merge_treats_a_null_mcp_servers_as_empty():
     merged, changed = reg.merge_config({"mcpServers": None}, _entry())
     assert changed is True
-    assert merged["mcpServers"]["pseudolife-memory"]["command"] == "/abs/pseudolife-mcp"
+    assert merged["mcpServers"]["pseudolife-desktop"]["command"] == "/abs/pseudolife-mcp"
 
 
 # -- main: files, backups, output ---------------------------------------------
@@ -248,7 +248,7 @@ def test_main_creates_a_missing_config(tmp_path, capsys):
     cfg, rc = _run(tmp_path)
     assert rc == 0
     data = json.loads(cfg.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["pseudolife-memory"]["command"] == "/abs/pseudolife-mcp"
+    assert data["mcpServers"]["pseudolife-desktop"]["command"] == "/abs/pseudolife-mcp"
     out = capsys.readouterr().out
     assert str(cfg) in out
     assert "quit Claude Desktop" in out  # the relaunch reminder
@@ -309,7 +309,7 @@ def test_main_dry_run_prints_the_entry_and_writes_nothing(tmp_path, capsys):
 
 def test_main_notes_a_dropped_args_list(tmp_path, capsys):
     cfg = tmp_path / "claude_desktop_config.json"
-    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-desktop": {
         "command": "old", "args": ["--x"]}}}), encoding="utf-8")
     _, rc = _run(tmp_path, config=cfg)
     assert rc == 0
@@ -326,6 +326,331 @@ def test_main_resolves_the_config_path_when_not_given(tmp_path, monkeypatch, cap
     assert "resolved.json" in capsys.readouterr().out
 
 
+# -- the entry's name ---------------------------------------------------------
+#
+# Claude Code registers its per-session stdio shim as pseudolife-memory. While
+# Desktop's app-level entry carried the same name, a Desktop Code-tab
+# session's mcp__pseudolife-memory__* calls were served by the app-level entry
+# and the session's own shim got none (verified live 2026-09-21); renaming the
+# Desktop entry gave each session its own server back. The registrar writes
+# pseudolife-desktop and moves an entry it wrote under the old name, which it
+# recognises by the writer ID it always sets.
+
+LEGACY = "pseudolife-memory"
+
+
+def _servers(cfg):
+    return json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]
+
+
+def _owned_legacy(**env):
+    return {"command": "/old/pseudolife-mcp",
+            "env": {"PSEUDOLIFE_WRITER_ID": "claude-desktop", **env}}
+
+
+def test_the_desktop_entry_is_named_apart_from_the_claude_code_server():
+    import re
+
+    assert reg.SERVER == "pseudolife-desktop"
+    claude_code_names = set()
+    for rel in ("ops/install.sh", "ops/install.ps1"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        claude_code_names |= set(re.findall(r"claude mcp add\b[^\n]*?--scope user (\S+)", text))
+    assert claude_code_names == {LEGACY}
+    assert reg.SERVER not in claude_code_names
+
+
+def test_installers_name_the_desktop_entry_in_their_success_line():
+    for rel in ("ops/install.sh", "ops/install.ps1"):
+        lines = [line for line in (ROOT / rel).read_text(encoding="utf-8").splitlines()
+                 if "Wired into Claude Desktop" in line]
+        assert lines, rel
+        assert all(reg.SERVER in line for line in lines), rel
+
+
+def test_a_fresh_config_gets_only_the_desktop_name(tmp_path):
+    cfg, rc = _run(tmp_path)
+    assert rc == 0
+    assert list(_servers(cfg)) == ["pseudolife-desktop"]
+
+
+def test_an_owned_legacy_entry_is_moved_with_its_hand_added_settings(tmp_path, capsys):
+    cfg = tmp_path / "claude_desktop_config.json"
+    legacy = _owned_legacy(PSEUDOLIFE_MCP_NO_SPAWN="1",
+                           PSEUDOLIFE_MCP_DAEMON_URL="http://127.0.0.1:8765",
+                           HTTPS_PROXY="http://proxy:3128")
+    legacy["args"] = ["--legacy"]
+    legacy["x-note"] = "hand-added"
+    original = {"mcpServers": {"pdf-tools": {"command": "/abs/pdf"}, LEGACY: legacy},
+                "preferences": {"theme": "dark"}}
+    cfg.write_text(json.dumps(original), encoding="utf-8")
+
+    _, rc = _run(tmp_path, config=cfg)
+
+    assert rc == 0
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert LEGACY not in data["mcpServers"]
+    assert data["mcpServers"]["pdf-tools"] == original["mcpServers"]["pdf-tools"]
+    assert data["preferences"] == original["preferences"]
+    entry = data["mcpServers"]["pseudolife-desktop"]
+    assert entry == {
+        "command": "/abs/pseudolife-mcp",
+        "x-note": "hand-added",
+        "env": {"PSEUDOLIFE_WRITER_ID": "claude-desktop",
+                "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+                "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
+                "HTTPS_PROXY": "http://proxy:3128"},
+    }
+    (backup,) = tmp_path.glob("claude_desktop_config.json.bak-*")
+    assert json.loads(backup.read_text(encoding="utf-8")) == original
+    out = capsys.readouterr().out
+    assert f"migrated mcpServers.{LEGACY}" in out and "pseudolife-desktop" in out
+
+
+def test_an_otherwise_current_legacy_entry_is_still_renamed(tmp_path, capsys):
+    """The common upgrade: the installer re-run with the same shim, so the
+    old entry differs from what this run writes in its name alone."""
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {LEGACY: _entry()}}), encoding="utf-8")
+
+    _, rc = _run(tmp_path, config=cfg)
+
+    assert rc == 0
+    assert _servers(cfg) == {"pseudolife-desktop": _entry()}
+    assert len(list(tmp_path.glob("claude_desktop_config.json.bak-*"))) == 1
+    assert "entry: written" in capsys.readouterr().out
+
+
+def test_an_owned_legacy_literal_token_is_moved_into_the_file(tmp_path, capsys):
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {
+        LEGACY: _owned_legacy(PSEUDOLIFE_MCP_TOKEN=TOKEN)}}), encoding="utf-8")
+    token_file = tmp_path / "claude-desktop.token"
+
+    _, rc = _run(tmp_path, "--default-token-file", str(token_file), config=cfg)
+
+    assert rc == 0
+    assert CredentialProvider(path=token_file).snapshot().token == TOKEN
+    servers = _servers(cfg)
+    assert LEGACY not in servers
+    env = servers["pseudolife-desktop"]["env"]
+    assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(token_file)
+    assert "PSEUDOLIFE_MCP_TOKEN" not in env
+    captured = capsys.readouterr()
+    assert TOKEN not in captured.out + captured.err
+
+
+def test_an_owned_legacy_token_file_path_survives_the_rename(tmp_path):
+    custom = tmp_path / "custom" / "desktop.token"
+    default = tmp_path / "default.token"
+    _write_token_file(custom, TOKEN)
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {
+        LEGACY: _owned_legacy(PSEUDOLIFE_MCP_TOKEN_FILE=str(custom))}}), encoding="utf-8")
+
+    _, rc = _run(tmp_path, "--default-token-file", str(default), config=cfg)
+
+    assert rc == 0
+    env = _servers(cfg)["pseudolife-desktop"]["env"]
+    assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(custom)
+    assert not default.exists()
+
+
+@pytest.mark.parametrize("foreign", [
+    pytest.param({"command": "/abs/pseudolife-mcp",
+                  "env": {"PSEUDOLIFE_WRITER_ID": "claude-code", "PSEUDOLIFE_MCP_TOKEN": TOKEN}},
+                 id="other-writer"),
+    pytest.param({"command": "/abs/pseudolife-mcp"}, id="no-env"),
+    pytest.param({"command": "/abs/pseudolife-mcp", "env": "claude-desktop"}, id="env-not-an-object"),
+    pytest.param("not-an-object", id="not-an-object"),
+])
+def test_a_legacy_entry_this_script_did_not_write_is_left_alone_and_reported(
+    tmp_path, capsys, foreign,
+):
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {LEGACY: foreign}}), encoding="utf-8")
+
+    _, rc = _run(tmp_path, config=cfg)
+
+    assert rc == 0
+    servers = _servers(cfg)
+    assert servers[LEGACY] == foreign
+    assert servers["pseudolife-desktop"]["command"] == "/abs/pseudolife-mcp"
+    captured = capsys.readouterr()
+    assert f"mcpServers.{LEGACY}" in captured.err and "left untouched" in captured.err
+    assert "Desktop loads both" in captured.err
+    assert TOKEN not in captured.out + captured.err
+    # Every run says so, including one with nothing left to change.
+    _, rc = _run(tmp_path, config=cfg)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "unchanged" in captured.out and "left untouched" in captured.err
+
+
+def test_a_foreign_entry_s_literal_token_is_not_harvested(tmp_path, capsys):
+    """Ownership also gates credentials: a token in someone else's entry is
+    never copied into the file this script writes."""
+    foreign = {"command": "/abs/pseudolife-mcp",
+               "env": {"PSEUDOLIFE_WRITER_ID": "claude-code", "PSEUDOLIFE_MCP_TOKEN": TOKEN}}
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {LEGACY: foreign}}), encoding="utf-8")
+    token_file = tmp_path / "claude-desktop.token"
+
+    _, rc = _run(tmp_path, "--default-token-file", str(token_file), config=cfg)
+
+    assert rc == reg.EXIT_NO_CREDENTIAL
+    assert not token_file.exists()
+    servers = _servers(cfg)
+    assert servers[LEGACY] == foreign
+    assert "PSEUDOLIFE_MCP_TOKEN" not in servers["pseudolife-desktop"]["env"]
+    captured = capsys.readouterr()
+    assert TOKEN not in captured.out + captured.err
+
+
+def test_when_both_names_exist_the_desktop_entry_wins_and_the_old_one_fills_gaps(
+    tmp_path, capsys,
+):
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {
+        LEGACY: _owned_legacy(HTTPS_PROXY="http://old-proxy:3128", NO_PROXY="localhost"),
+        "pseudolife-desktop": {"command": "/renamed/pseudolife-mcp", "env": {
+            "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+            "HTTPS_PROXY": "http://new-proxy:3128"}},
+    }}), encoding="utf-8")
+
+    _, rc = _run(tmp_path, config=cfg)
+
+    assert rc == 0
+    servers = _servers(cfg)
+    assert LEGACY not in servers
+    env = servers["pseudolife-desktop"]["env"]
+    assert env["HTTPS_PROXY"] == "http://new-proxy:3128"
+    assert env["NO_PROXY"] == "localhost"
+    captured = capsys.readouterr()
+    assert "kept the pseudolife-desktop value of HTTPS_PROXY" in captured.out
+    assert "old-proxy" not in captured.out + captured.err  # key names, never values
+
+
+def test_when_both_names_carry_credentials_the_desktop_entry_s_file_is_used(
+    tmp_path, capsys,
+):
+    legacy_file = tmp_path / "legacy" / "desktop.token"
+    target_file = tmp_path / "target" / "desktop.token"
+    _write_token_file(legacy_file, OTHER_TOKEN)
+    _write_token_file(target_file, TOKEN)
+    legacy_before = legacy_file.read_bytes()
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {
+        LEGACY: _owned_legacy(PSEUDOLIFE_MCP_TOKEN_FILE=str(legacy_file),
+                              PSEUDOLIFE_MCP_TOKEN=OTHER_TOKEN),
+        "pseudolife-desktop": {"command": "/renamed/pseudolife-mcp", "env": {
+            "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+            "PSEUDOLIFE_MCP_TOKEN_FILE": str(target_file),
+            "PSEUDOLIFE_MCP_TOKEN": TOKEN}},
+    }}), encoding="utf-8")
+
+    _, rc = _run(tmp_path, "--default-token-file", str(tmp_path / "default.token"),
+                 config=cfg)
+
+    assert rc == 0
+    servers = _servers(cfg)
+    assert LEGACY not in servers
+    env = servers["pseudolife-desktop"]["env"]
+    assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(target_file)
+    assert "PSEUDOLIFE_MCP_TOKEN" not in env  # superseded by the validated file
+    assert legacy_file.read_bytes() == legacy_before
+    assert CredentialProvider(path=target_file).snapshot().token == TOKEN
+    captured = capsys.readouterr()
+    assert "value of PSEUDOLIFE_MCP_TOKEN, PSEUDOLIFE_MCP_TOKEN_FILE" in captured.out
+    for value in (TOKEN, OTHER_TOKEN, str(legacy_file)):
+        assert value not in captured.out + captured.err
+
+
+def test_a_dry_run_with_both_names_says_what_it_would_keep(tmp_path, capsys):
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {
+        LEGACY: _owned_legacy(HTTPS_PROXY="http://old-proxy:3128"),
+        "pseudolife-desktop": {"command": "/renamed/pseudolife-mcp", "env": {
+            "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+            "HTTPS_PROXY": "http://new-proxy:3128"}},
+    }}), encoding="utf-8")
+    before = cfg.read_bytes()
+
+    _, rc = _run(tmp_path, "--dry-run", config=cfg)
+
+    assert rc == 0
+    assert cfg.read_bytes() == before
+    assert "would keep the pseudolife-desktop value of HTTPS_PROXY" in capsys.readouterr().out
+
+
+def test_a_migrated_config_is_stable_on_rerun(tmp_path, capsys):
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {LEGACY: _owned_legacy()}}), encoding="utf-8")
+    _run(tmp_path, config=cfg)
+    capsys.readouterr()
+    before = cfg.read_bytes()
+    backups = sorted(tmp_path.glob("*.bak-*"))
+
+    _, rc = _run(tmp_path, config=cfg)
+
+    assert rc == 0
+    assert cfg.read_bytes() == before
+    assert sorted(tmp_path.glob("*.bak-*")) == backups
+    assert "unchanged" in capsys.readouterr().out
+
+
+def test_dry_run_reports_the_migration_and_writes_nothing(tmp_path, capsys):
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {LEGACY: _owned_legacy()}}), encoding="utf-8")
+    before = cfg.read_bytes()
+
+    _, rc = _run(tmp_path, "--dry-run", config=cfg)
+
+    assert rc == 0
+    assert cfg.read_bytes() == before
+    assert not list(tmp_path.glob("*.bak-*"))
+    assert f"would migrate mcpServers.{LEGACY}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("credential", ["token-file", "literal"])
+def test_a_refused_run_leaves_the_legacy_entry_in_place(tmp_path, monkeypatch, credential):
+    if credential == "token-file":
+        custom = tmp_path / "custom.token"
+        _write_token_file(custom, TOKEN)
+        legacy = _owned_legacy(PSEUDOLIFE_MCP_TOKEN_FILE=str(custom))
+    else:
+        legacy = _owned_legacy(PSEUDOLIFE_MCP_TOKEN=TOKEN)
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {LEGACY: legacy}}), encoding="utf-8")
+    before = cfg.read_bytes()
+    default = tmp_path / "d.token"
+    _probe_returning(monkeypatch, RELEASED_HELP)
+
+    _, rc = _run(tmp_path, "--default-token-file", str(default), config=cfg)
+
+    assert rc == reg.EXIT_OLD_SHIM
+    assert cfg.read_bytes() == before
+    assert not default.exists()
+    assert not list(tmp_path.glob("*.bak-*"))
+
+
+@pytest.mark.parametrize("target", [
+    pytest.param("junk", id="entry"),
+    pytest.param({"command": "/abs/pseudolife-mcp", "env": "junk"}, id="env"),
+])
+def test_migration_refuses_a_desktop_entry_that_is_not_an_object(tmp_path, capsys, target):
+    cfg = tmp_path / "claude_desktop_config.json"
+    cfg.write_text(json.dumps({"mcpServers": {
+        LEGACY: _owned_legacy(), "pseudolife-desktop": target}}), encoding="utf-8")
+    before = cfg.read_bytes()
+
+    _, rc = _run(tmp_path, config=cfg)
+
+    assert rc == reg.EXIT_REFUSED
+    assert cfg.read_bytes() == before
+    assert "mcpServers.pseudolife-desktop" in capsys.readouterr().err
+
+
 # -- the credential file: never point at a file we did not write or validate --
 
 def test_token_from_env_is_written_owner_only_and_never_printed(tmp_path, monkeypatch, capsys):
@@ -335,7 +660,7 @@ def test_token_from_env_is_written_owner_only_and_never_printed(tmp_path, monkey
                    "--token-from-env", "PL_TEST_DESKTOP_TOKEN")
     assert rc == 0
     assert CredentialProvider(path=token_file).snapshot().token == TOKEN
-    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["env"]
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-desktop"]["env"]
     assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(token_file)
     assert "PSEUDOLIFE_MCP_TOKEN" not in env
     captured = capsys.readouterr()
@@ -348,7 +673,7 @@ def test_a_literal_token_already_in_the_entry_is_migrated_into_the_file(tmp_path
     must move it into the file and drop it from the config — never leave a
     working literal shadowed by a path to a file nobody created."""
     cfg = tmp_path / "claude_desktop_config.json"
-    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp",
         "env": {"PSEUDOLIFE_MCP_TOKEN": TOKEN, "PSEUDOLIFE_WRITER_ID": "claude-desktop"}}}}),
         encoding="utf-8")
@@ -356,7 +681,7 @@ def test_a_literal_token_already_in_the_entry_is_migrated_into_the_file(tmp_path
     _, rc = _run(tmp_path, "--token-file", str(token_file), config=cfg)
     assert rc == 0
     assert CredentialProvider(path=token_file).snapshot().token == TOKEN
-    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["env"]
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-desktop"]["env"]
     assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(token_file)
     assert "PSEUDOLIFE_MCP_TOKEN" not in env
     captured = capsys.readouterr()
@@ -367,7 +692,7 @@ def test_a_literal_token_already_in_the_entry_is_migrated_into_the_file(tmp_path
 
 def test_env_token_wins_over_a_stale_literal(tmp_path, monkeypatch):
     cfg = tmp_path / "claude_desktop_config.json"
-    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp", "env": {"PSEUDOLIFE_MCP_TOKEN": OTHER_TOKEN}}}}),
         encoding="utf-8")
     monkeypatch.setenv("PL_TEST_DESKTOP_TOKEN", TOKEN)
@@ -376,7 +701,7 @@ def test_env_token_wins_over_a_stale_literal(tmp_path, monkeypatch):
                  "--token-from-env", "PL_TEST_DESKTOP_TOKEN", config=cfg)
     assert rc == 0
     assert CredentialProvider(path=token_file).snapshot().token == TOKEN
-    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["env"]
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-desktop"]["env"]
     assert "PSEUDOLIFE_MCP_TOKEN" not in env
 
 
@@ -385,7 +710,7 @@ def test_an_existing_valid_token_file_is_used_as_is(tmp_path, capsys):
     _write_token_file(token_file, TOKEN)
     cfg, rc = _run(tmp_path, "--token-file", str(token_file))
     assert rc == 0
-    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["env"]
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-desktop"]["env"]
     assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(token_file)
     assert CredentialProvider(path=token_file).snapshot().token == TOKEN
     assert "using the existing" in capsys.readouterr().out
@@ -413,7 +738,7 @@ def test_no_token_anywhere_registers_without_a_credential_and_exits_3(tmp_path, 
     token_file = tmp_path / "claude-desktop.token"
     cfg, rc = _run(tmp_path, "--default-token-file", str(token_file))
     assert rc == 3
-    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["env"]
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-desktop"]["env"]
     assert "PSEUDOLIFE_MCP_TOKEN_FILE" not in env
     assert not token_file.exists()
     err = capsys.readouterr().err
@@ -442,7 +767,7 @@ def test_default_token_file_preserves_and_validates_existing_custom_file(
     default = tmp_path / "default" / "desktop.token"
     _write_token_file(custom, TOKEN)
     cfg = tmp_path / "claude_desktop_config.json"
-    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp",
         "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(custom)},
     }}}), encoding="utf-8")
@@ -451,7 +776,7 @@ def test_default_token_file_preserves_and_validates_existing_custom_file(
 
     assert rc == 0
     env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
-        "pseudolife-memory"]["env"]
+        "pseudolife-desktop"]["env"]
     assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(custom)
     assert not default.exists()
     assert "using the existing" in capsys.readouterr().out
@@ -464,7 +789,7 @@ def test_missing_explicit_replacement_refuses_without_rewriting_working_config(
     replacement = tmp_path / "missing.token"
     _write_token_file(old_file, TOKEN)
     cfg = tmp_path / "claude_desktop_config.json"
-    original = {"mcpServers": {"pseudolife-memory": {
+    original = {"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp",
         "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(old_file)},
     }}}
@@ -482,7 +807,7 @@ def test_missing_existing_custom_file_is_refused_on_ordinary_rerun(
 ):
     missing = tmp_path / "missing-custom.token"
     cfg = tmp_path / "claude_desktop_config.json"
-    original = {"mcpServers": {"pseudolife-memory": {
+    original = {"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp",
         "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(missing)},
     }}}
@@ -506,7 +831,7 @@ def test_existing_custom_file_is_not_rotated_by_installer_sources(
     _write_token_file(custom, TOKEN)
     before = custom.read_bytes()
     cfg = tmp_path / "claude_desktop_config.json"
-    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp",
         "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(custom)},
     }}}), encoding="utf-8")
@@ -526,7 +851,7 @@ def test_existing_custom_file_is_not_rotated_by_installer_sources(
     assert rc == 0
     assert custom.read_bytes() == before
     env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
-        "pseudolife-memory"]["env"]
+        "pseudolife-desktop"]["env"]
     assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(custom)
     captured = capsys.readouterr()
     assert TOKEN not in captured.out and TOKEN not in captured.err
@@ -543,7 +868,7 @@ def test_explicit_existing_file_is_validated_not_overwritten_by_auto_source(
     before = chosen.read_bytes()
     monkeypatch.setenv("PL_TEST_TOKEN", TOKEN)
     cfg = tmp_path / "claude_desktop_config.json"
-    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp",
         "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(old_file)},
     }}}), encoding="utf-8")
@@ -556,7 +881,7 @@ def test_explicit_existing_file_is_validated_not_overwritten_by_auto_source(
     assert rc == 0
     assert chosen.read_bytes() == before
     env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
-        "pseudolife-memory"]["env"]
+        "pseudolife-desktop"]["env"]
     assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(chosen)
 
 
@@ -566,7 +891,7 @@ def test_validated_existing_file_removes_superseded_literal(tmp_path, capsys, ex
     _write_token_file(token_file, TOKEN)
     before = token_file.read_bytes()
     cfg = tmp_path / "claude_desktop_config.json"
-    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+    cfg.write_text(json.dumps({"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp",
         "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(token_file),
                 "PSEUDOLIFE_MCP_TOKEN": OTHER_TOKEN},
@@ -576,7 +901,7 @@ def test_validated_existing_file_removes_superseded_literal(tmp_path, capsys, ex
     assert rc == 0
     assert token_file.read_bytes() == before
     env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
-        "pseudolife-memory"]["env"]
+        "pseudolife-desktop"]["env"]
     assert "PSEUDOLIFE_MCP_TOKEN" not in env
     captured = capsys.readouterr()
     assert TOKEN not in captured.out + captured.err
@@ -601,7 +926,7 @@ def test_map_only_auth_writes_unique_desktop_principal_without_printing_secret(
     assert rc == 0
     assert CredentialProvider(path=token_file).snapshot().token == desktop_token
     env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"][
-        "pseudolife-memory"]["env"]
+        "pseudolife-desktop"]["env"]
     assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(token_file)
     captured = capsys.readouterr()
     assert desktop_token not in captured.out and desktop_token not in captured.err
@@ -761,7 +1086,7 @@ def test_registrar_probes_preserved_configured_token_path_before_writing(
     default = tmp_path / "default.token"
     _write_token_file(custom, TOKEN)
     cfg = tmp_path / "claude_desktop_config.json"
-    original = {"mcpServers": {"pseudolife-memory": {
+    original = {"mcpServers": {"pseudolife-desktop": {
         "command": "/old/pseudolife-mcp",
         "env": {"PSEUDOLIFE_MCP_TOKEN_FILE": str(custom)},
     }}}
@@ -815,7 +1140,7 @@ def test_registrar_accepts_a_shim_whose_help_lists_the_token_file(tmp_path, monk
     cfg, token_file, rc = _gated_run(tmp_path, monkeypatch)
     assert rc == 0
     assert probe.argv == [["/abs/pseudolife-mcp", "--help"]]
-    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["env"]
+    env = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-desktop"]["env"]
     assert env["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(token_file)
     assert CredentialProvider(path=token_file).snapshot().token == TOKEN
     out = capsys.readouterr().out

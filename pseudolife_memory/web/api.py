@@ -27,7 +27,8 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from pseudolife_memory.web.routes import ConsoleRoutes
-from pseudolife_memory.web.session_hook import hook_session_end, hook_session_start
+from pseudolife_memory.web.session_hook import (
+    hook_memory_policy, hook_session_end, hook_session_start)
 
 logger = logging.getLogger("pseudolife-mcp.web")
 
@@ -322,6 +323,28 @@ def build_console_app(
                               "text/plain; charset=utf-8", "no-store")
             return
 
+        # 4a) plugin memory-policy SessionStart hook: the full memory-loop
+        # block when the session's configured variant is full_separate_hook,
+        # else an empty body (the hook then adds nothing). Its own hook
+        # output, so the block never shares the briefing's budget. Public
+        # repo text, 200 always; session_id only picks an online A/B arm and
+        # is honoured only when authorized, as on session-start.
+        if path == "/api/hook/memory-policy":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            session_id = (_parse_query(scope).get("session_id")
+                          if _authorized(scope) else None)
+            text = await asyncio.get_running_loop().run_in_executor(
+                None, hook_memory_policy, service, session_id)
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
         # 4b) plugin SessionEnd hook: closes the session's episode and clears
         # the active-session pointer (only if still owned). Fail-open, always
         # 200 — mirrors session-start's contract. Unlike session-start there
@@ -353,6 +376,27 @@ def build_console_app(
             result = await asyncio.get_running_loop().run_in_executor(
                 None, hook_session_end, service, body.get("session_id"))
             await _send_json(send, 200, result)
+            return
+
+        # 4c) plugin coordination SessionStart hook: the board check-in as
+        # plain text, or an empty body when this bearer cannot use the board
+        # (disabled, no or unknown bearer, unlisted principal, file mode).
+        # 200 always, like session-start; the check touches no storage.
+        if path == "/api/hook/coordination-start":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            from pseudolife_memory.coordination import CHECKIN_TEXT, unavailable_reason
+            headers = {k.decode().lower(): v.decode("latin-1")
+                       for k, v in scope.get("headers", [])}
+            reason = unavailable_reason(service, headers, token_map=token_map, token=token)
+            text = "" if reason else CHECKIN_TEXT + "\n"
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
             return
 
         # 5) console REST API (token-gated like /mcp)
@@ -426,7 +470,11 @@ def build_console_app(
                     await _send_json(send, 200, result)
                     return
                 def dispatch():
-                    if path not in ("/api/agents", "/api/briefing"):
+                    # Headers are bound only where a handler reads the
+                    # caller's principal: the awareness section, and the
+                    # session registration record (v43) episode/start writes.
+                    if path not in ("/api/agents", "/api/briefing",
+                                    "/api/episode/start"):
                         return routes.dispatch(method, path, params, body)
                     from pseudolife_memory.writer_context import (
                         bind_request_headers, unbind_request_headers)
@@ -470,16 +518,20 @@ def build_console_app(
             return
         if path == "/mcp" or path.startswith("/mcp/"):
             from pseudolife_memory.coordination import (
-                bound_identity, dispatch as coordination_dispatch,
-                enforce_bound_identity,
+                authenticated_principal, bound_identity,
+                dispatch as coordination_dispatch, enforce_bound_identity,
             )
             headers = {k.decode().lower(): v.decode("latin-1")
                        for k, v in scope.get("headers", [])}
             try:
                 binding = bound_identity(headers)
                 if binding is not None:
-                    principal = resolve_principal(
-                        headers.get("authorization"), token_map, token)
+                    # Fail closed on an open install: open loopback resolves
+                    # everyone to "default", which the board admits by
+                    # default, and a binding must never reach the store
+                    # without a bearer.
+                    principal = authenticated_principal(
+                        headers, token_map=token_map, token=token)
 
                     def validate_binding():
                         context = coordination_dispatch(

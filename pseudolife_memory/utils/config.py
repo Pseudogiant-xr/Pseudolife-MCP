@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+
 
 @dataclass
 class EmbeddingConfig:
@@ -387,6 +389,12 @@ class DreamConfig:
     # Timeout/max_tokens are shared with the primary — no fallback copies.
     fallback_base_url: str | None = None
     fallback_model: str | None = None
+    # The fallback's own bearer key (env PSEUDOLIFE_DREAM_FALLBACK_API_KEY,
+    # honoured in both settings-source modes like extractor_api_key). Unset =
+    # the fallback sends no key: the primary's key is never shared, since it
+    # belongs to the primary's provider and the usual fallback (the in-stack
+    # sidecar, plain HTTP) needs none.
+    fallback_api_key: str | None = None
     extractor_mode: str = "auto"
     # GAM #2 graph-from-text: the dream also extracts (src,relation,dst) triples
     # into the graph (separate extract_relations call — the bench winner). Edges
@@ -654,8 +662,8 @@ class CortexConfig:
     # vs 28% at 0.2, with identical end-to-end accuracy. 0.1 was tried and served
     # more gold facts but measurably hurt: the extra weak facts dilute the context
     # and the consumer abstains ("distractor-induced under-confidence").
-    # Abstention-on deployments still override upward (see
-    # docs/guide/retrieval.md: the 0.65 pairing).
+    # The 0.65 pairing the docs once recommended for abstention-on
+    # deployments is retired (2026-09-25; see search_confidence_floor).
     guard_min_score: float = 0.2
     # Dream-path slot resolver: a paraphrased dreamed claim adopts an existing
     # current slot when its value-free slot embedding cosine >= this. <=0 disables
@@ -1042,6 +1050,22 @@ class SearchConfig:
     # evals/README.md. Ships "weighted_sum" for that reason, not for want
     # of measurement.
     fusion: str = "weighted_sum"
+    # Dense relevance floor: a dense candidate whose (recency-modified)
+    # cosine is below it never enters the pool. A per-call ``min_score``
+    # overrides it and, unlike this default, also bounds the slot and BM25
+    # injections, which carry their own scales. 0.25 is the initial-release
+    # literal (2026-05-27, MiniLM era), never recalibrated for the
+    # 2026-07-28 Qwen3-Embedding switch — and it stays put: measured
+    # 2026-09-25 over 1,072 real agent searches
+    # (evals/results/serving-policy-replay-20260925-r3.json,
+    # abstention.lowest_served_dense_cosine), the weakest served dense hit
+    # had cosine p01 0.39 and fell below 0.30 in one search of 1,064, so
+    # today the floor rarely binds on a real search; it does on off-domain
+    # ones (the 2026-09-23 review's zebra probe served hits at 0.28-0.29,
+    # abstention.off_domain_probes). Raising it would not make it an
+    # abstention signal: in-domain absent-answer probes topped out at
+    # 0.43-0.64, the range of real hits (abstention.absent_answer_probes).
+    min_score: float = 0.25
 
     def __post_init__(self) -> None:
         # Fail at LOAD, not once per query. ``cms.retrieve`` also rejects
@@ -1055,6 +1079,15 @@ class SearchConfig:
             raise ValueError(
                 f"memory.search.fusion: unknown mode {self.fusion!r} "
                 f"(expected one of {', '.join(map(repr, FUSION_MODES))})")
+        # Same reasoning: a null would raise inside every retrieval and a NaN
+        # would empty the dense pool without a word.
+        ms = self.min_score
+        if (isinstance(ms, bool) or not isinstance(ms, (int, float))
+                or not 0.0 <= ms <= 1.0):
+            raise ValueError(
+                f"memory.search.min_score: expected a cosine floor in "
+                f"[0, 1], got {ms!r}")
+        self.min_score = float(ms)
 
 
 @dataclass
@@ -1075,7 +1108,8 @@ class McpConfig:
     ``compact_payloads: False`` restores the pre-cut payloads verbatim,
     except that a superseded hit still serves the short ``replaced_by``
     pointer rather than the replacement's full text (2026-09-23: a
-    correctness change, not a size cut; ``verbose=True`` serves the text).
+    correctness change, not a size cut; ``verbose=True`` serves the text),
+    and every entry keeps its write ``date`` (2026-09-25, same reason).
     All three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
     the service layer are untouched, so no eval number can move (the eval
     harness calls the service, pinned by
@@ -1173,10 +1207,15 @@ class MemoryConfig:
     # recall, so prefer the default outside of debugging.
     # Replaced the no-op ``show_superseded`` field on 2026-07-30.
     hide_superseded: bool = False
-    # Abstention: when the top search score is below this floor, memory_search
-    # returns low_confidence=True so the agent declines instead of using weak
-    # distractor hits. 0.0 = off (only an empty result is low-confidence).
-    # Tuned on a dev split by the benchmark ladder; default off to preserve recall.
+    # Abstention: when the top served (fused) score is below this floor and
+    # no cortex fact clears ``cortex.guard_min_score``, memory_search returns
+    # low_confidence=True. 0.0 = off (only an empty result is low-confidence).
+    # No value is calibrated for the Qwen3 embedder: measured 2026-09-25
+    # over 1,072 real agent searches
+    # (evals/results/serving-policy-replay-20260925-r3.json, abstention), the
+    # 2026-06-19 MiniLM-era pair (floor 0.70 + guard 0.65) would flag 26% of
+    # them, including 20% of the searches whose hits the agent then used,
+    # and in-domain absent answers score like real hits.
     search_confidence_floor: float = 0.0
     # Shadow-verification of the slot-token index: on this fraction of
     # non-dirty slot-pool queries, recompute the index from the band
@@ -1219,14 +1258,68 @@ class StorageConfig:
     write_mode: str = "snapshot"
 
 
+# The standing memory policies session start can serve; see
+# :class:`MemoryPolicyConfig` and ``pseudolife_memory.web.session_hook``.
+MEMORY_POLICY_VARIANTS = ("none", "compact", "full_separate_hook")
+
+
+@dataclass
+class MemoryPolicyConfig:
+    """Which standing memory policy the session-start hooks serve.
+
+    This is the knob ``evals/memory_policy_bench.py`` measures. ``variant``
+    applies to every session:
+
+    * ``compact`` (default) — the short core served since 2026-09-24
+      (``STARTUP_MEMORY_CORE``), ahead of the briefing in one hook output;
+    * ``none`` — no policy text; the briefing and the episode line still serve;
+    * ``full_separate_hook`` — the full ``MEMORY_LOOP_BLOCK`` (7.5 KB), served
+      by the plugin's separate memory-policy hook, because block plus
+      briefing overflow the 9,500-byte budget of one hook output.
+
+    ``ab_arms`` turns on an online A/B test: a non-empty list assigns each
+    hook-registered session one arm by a stable hash of its client session
+    id, in place of ``variant``. A variant may repeat (an A/A test). Sessions
+    that reach the hook without a session id keep ``variant``.
+    """
+
+    variant: str = "compact"
+    ab_arms: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.variant not in MEMORY_POLICY_VARIANTS:
+            raise ValueError(
+                f"memory_policy.variant must be one of "
+                f"{', '.join(MEMORY_POLICY_VARIANTS)} (got {self.variant!r})")
+        if not isinstance(self.ab_arms, list) or any(
+                arm not in MEMORY_POLICY_VARIANTS for arm in self.ab_arms):
+            raise ValueError(
+                f"memory_policy.ab_arms must be a list of variants from "
+                f"{', '.join(MEMORY_POLICY_VARIANTS)} (got {self.ab_arms!r})")
+        if len(self.ab_arms) == 1:
+            raise ValueError(
+                "memory_policy.ab_arms needs at least two arms; set "
+                "memory_policy.variant to serve one variant to every session")
+        self.ab_arms = list(self.ab_arms)
+
+
 @dataclass
 class CoordinationConfig:
-    """Opt-in peer awareness; limits bound injected session context."""
+    """Peer awareness and addressed mail; limits bound injected session context.
 
-    enabled: bool = False
+    On by default since 2026-09-25, still behind bearer authentication: an
+    open (tokenless) install has no principal to admit. Without an explicit
+    ``allowed_principals`` only the singular-token principal ``default`` is
+    admitted; token-map principals are separately trusted identities and
+    join the board only when an operator lists them (maintainer decision,
+    2026-09-25).
+    """
+
+    enabled: bool = True
     # Initial context limit, not a measured throughput tuning constant.
     awareness_limit: int = 5
-    allowed_principals: list[str] = field(default_factory=list)
+    allowed_principals: list[str] = field(
+        default_factory=lambda: [DEFAULT_PRINCIPAL])
     # Days the board's audit log (coordination_events, schema v42) keeps an
     # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
     # still blank after 24 h. Measured 2026-09-24
@@ -1264,6 +1357,7 @@ class AppConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     time: TimeConfig = field(default_factory=TimeConfig)
     coordination: CoordinationConfig = field(default_factory=CoordinationConfig)
+    memory_policy: MemoryPolicyConfig = field(default_factory=MemoryPolicyConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
@@ -1394,5 +1488,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.time = _dict_to_dataclass(TimeConfig, raw["time"])
     if "coordination" in raw:
         config.coordination = _dict_to_dataclass(CoordinationConfig, raw["coordination"])
+    if "memory_policy" in raw:
+        config.memory_policy = _dict_to_dataclass(MemoryPolicyConfig, raw["memory_policy"])
 
     return config

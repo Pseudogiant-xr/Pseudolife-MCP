@@ -39,6 +39,15 @@ from tests import suite_lock  # noqa: E402
 
 suite_lock.hide_cuda(os.environ)
 
+# Every report this process renders is scrubbed of PostgreSQL passwords:
+# psycopg's own connect frame shows the DSN as an argument, out of reach of
+# pg_defaults.RedactedUrl. Imported here, before scrub_live_bank_dsn below
+# pops the daemon DSN, so its password is in the snapshot the plugin takes
+# (in this process; an xdist worker never inherits that DSN at all).
+from tests.report_redaction import (  # noqa: E402, F401 — conftest hooks
+    pytest_make_collect_report, pytest_runtest_makereport,
+)
+
 # The eval-backed suites (test_recall, test_memcot_bench,
 # test_constraint_pinning) and evals/ladder_sweep.py read the bench admin
 # URL from PSEUDOLIFE_BENCH_ADMIN_URL. Seed it once, here, from the same
@@ -50,6 +59,21 @@ from tests.pg_defaults import ENV_FILE, bench_admin_url, conninfo_with_dbname  #
 if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
     os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = bench_admin_url()
     os.environ["_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"] = "1"
+
+# Windows can fail a loopback connect for want of a local port, which says
+# nothing about the server (tests/pg_defaults.py, is_local_port_exhaustion).
+# The fixtures and the storage code under test all connect through
+# psycopg.connect, so one wrapper, installed here before any test module
+# imports, covers every connect in this process. Spawned daemons are other
+# processes and run psycopg as shipped.
+try:
+    import psycopg
+except ImportError:  # the PG-backed suites skip themselves
+    pass
+else:
+    from tests.pg_defaults import retry_local_port_exhaustion  # noqa: E402
+
+    psycopg.connect = retry_local_port_exhaustion(psycopg.connect)
 
 # Isolate client configuration before test-module imports can snapshot it.
 # Model caches and ordinary home-directory lookup stay intact; only the Codex
@@ -72,6 +96,7 @@ EXTRACTOR_ENDPOINT_ENV = (
     "PSEUDOLIFE_DREAM_BASE_URL", "PSEUDOLIFE_DREAM_MODEL",
     "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL", "PSEUDOLIFE_DREAM_FALLBACK_MODEL",
     "PSEUDOLIFE_DREAM_EXTRACTOR_MODE", "PSEUDOLIFE_DREAM_API_KEY",
+    "PSEUDOLIFE_DREAM_FALLBACK_API_KEY",
 )
 
 

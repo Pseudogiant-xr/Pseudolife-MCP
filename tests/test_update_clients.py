@@ -503,22 +503,60 @@ def test_codex_hooks_not_configured_without_a_hooks_root(cli):
     assert uc.check_codex_hooks(ROOT)["state"] == "not-configured"
 
 
-def _codex_plugin_config(cli):
+def _plugin_handler_keys():
+    """Codex's approval key for each handler position in the checkout's
+    hooks.json (as written to ~/.codex/config.toml, checked 2026-09-25)."""
+    manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))
+    event_keys = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit",
+                  "SessionEnd": "session_end", "Stop": "stop"}
+    return [f"pseudolife-memory@pseudolife-mcp:hooks/hooks.json:{event_keys[event]}:{g}:{h}"
+            for event, groups in manifest["hooks"].items()
+            for g, group in enumerate(groups) for h, _ in enumerate(group["hooks"])]
+
+
+def _codex_plugin_config(cli, approved=()):
     codex_home = cli.home / "codex"
     codex_home.mkdir(parents=True, exist_ok=True)
-    (codex_home / "config.toml").write_text(
-        '[plugins."pseudolife-memory@pseudolife-mcp"]\nenabled = true\n', encoding="utf-8")
+    text = '[plugins."pseudolife-memory@pseudolife-mcp"]\nenabled = true\n'
+    for key in approved:
+        text += f'\n[hooks.state."{key}"]\ntrusted_hash = "sha256:{"0" * 64}"\n'
+    (codex_home / "config.toml").write_text(text, encoding="utf-8")
     return codex_home
 
 
 def test_codex_plugin_hooks_current_when_its_clone_matches_the_checkout(cli):
     """The maintainer's Codex runs the plugin, not manual copies; its
     marketplace clone is what to compare (found live, 2026-09-21)."""
-    codex_home = _codex_plugin_config(cli)
+    codex_home = _codex_plugin_config(cli, _plugin_handler_keys())
     clone = codex_home / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin"
     shutil.copytree(ROOT / "plugin", clone)
     result = uc.check_codex_hooks(ROOT)
     assert result["state"] == "current" and "plugin" in result["detail"]
+
+
+def test_codex_plugin_hooks_report_unapproved_handlers(cli):
+    """Codex runs only approved handlers and skips new ones without a word in
+    the desktop app. The 2026-09-24 split added two handler positions, so a
+    Codex home approved before it silently lost the mail previews."""
+    keys = _plugin_handler_keys()
+    legacy = [k for k in keys if k.endswith(":0:0")]
+    assert len(legacy) < len(keys)
+    codex_home = _codex_plugin_config(cli, legacy)
+    shutil.copytree(ROOT / "plugin", codex_home / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin")
+    result = uc.check_codex_hooks(ROOT)
+    assert result["state"] == "needs-approval"
+    assert "setup-codex-hooks.py --source plugin --trust ask" in result["detail"]
+    assert uc._marker(result["state"]) == "[!]"
+
+
+def test_codex_plugin_hooks_respect_a_handler_the_user_disabled(cli):
+    keys = _plugin_handler_keys()
+    codex_home = _codex_plugin_config(cli, [k for k in keys if ":stop:" not in k])
+    with open(codex_home / "config.toml", "a", encoding="utf-8") as config:
+        for key in (k for k in keys if ":stop:" in k):
+            config.write(f'\n[hooks.state."{key}"]\nenabled = false\n')
+    shutil.copytree(ROOT / "plugin", codex_home / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin")
+    assert uc.check_codex_hooks(ROOT)["state"] == "current"
 
 
 def test_codex_plugin_hooks_stale_when_its_clone_differs(cli):
@@ -603,3 +641,13 @@ def test_update_scripts_offer_all_and_call_the_helper_after_health():
     # The call site (the last mention; the usage header mentions it first).
     assert sh.rindex("update_clients.py") > sh.index('step "Healthy."')
     assert ps1.rindex("update_clients.py") > ps1.index('Step "Healthy.')
+
+
+@pytest.mark.parametrize("state", ['"not a table"', "[1, 2]"])
+def test_codex_plugin_approval_check_survives_a_malformed_config(cli, state):
+    """A report that crashes on one odd config value loses the whole ladder."""
+    codex_home = _codex_plugin_config(cli)
+    with open(codex_home / "config.toml", "a", encoding="utf-8") as config:
+        config.write(f"\n[hooks]\nstate = {state}\n")
+    shutil.copytree(ROOT / "plugin", codex_home / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin")
+    assert uc.check_codex_hooks(ROOT)["state"] in ("current", "needs-approval")

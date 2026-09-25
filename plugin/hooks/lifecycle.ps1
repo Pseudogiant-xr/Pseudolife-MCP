@@ -1,10 +1,11 @@
 #Requires -Version 7
 # Native Windows override for Codex. Claude keeps the existing Bash commands.
-param([ValidateSet('SessionStart', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop')][string]$Event)
+param([ValidateSet('SessionStart', 'MemoryPolicy', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop')][string]$Event)
 $ErrorActionPreference = 'Stop'
 
 function Write-Context([string]$text) {
     $hookEvent = switch ($Event) {
+        'MemoryPolicy' { 'SessionStart' }
         'CoordinationStart' { 'SessionStart' }
         'CoordinationPrompt' { 'UserPromptSubmit' }
         default { $Event }
@@ -229,8 +230,11 @@ if ($Event -eq 'CoordinationStart') {
         if (Test-Path -LiteralPath $seenPath -PathType Leaf) { Remove-Item -LiteralPath $seenPath -Force }
     } catch {}
     }
-    Write-Context 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list) to check peers and memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show your current scope. Then use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. Changed-message alerts are brief; receive is the source of full messages. If coordination tools are unavailable, say so and continue independently.'
-    exit 0
+    # The board check-in comes from the daemon below, and only for a
+    # credential that can use the board; a client that set
+    # PSEUDOLIFE_AGENT_COORDINATION to anything but a yes asks for nothing.
+    $coordinationSetting = ([string]$env:PSEUDOLIFE_AGENT_COORDINATION).Trim().ToLowerInvariant()
+    if ($coordinationSetting -and $coordinationSetting -notin '1', 'true', 'yes', 'on') { exit 0 }
 }
 
 $headers = @{}
@@ -276,9 +280,26 @@ try {
     } else { $null }
     $token = if ($managedTokenless) { '' } else { Get-PseudolifeToken $tokenFile }
     if ($token) { $headers.Authorization = "Bearer $token" }
+    if ($Event -eq 'CoordinationStart') {
+        # The daemon serves the check-in, or an empty body when this bearer
+        # cannot use the board. One request, no retry: at most two seconds
+        # inside the five-second hook budget; no answer adds nothing.
+        $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/coordination-start" -Headers $headers -TimeoutSec 2 -MaximumRedirection 0
+        $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+        if ($text.Trim()) { Write-Context $text.TrimEnd() }
+        exit 0
+    }
     $payload = $rawInput | ConvertFrom-Json
     $sid = [string]$payload.session_id
-    if ($Event -eq 'SessionStart') {
+    if ($Event -eq 'MemoryPolicy') {
+        # The separate memory-policy hook: the full block when the daemon's
+        # memory_policy variant is full_separate_hook, else an empty body and
+        # no context. Silent on failure; SessionStart reports a down daemon.
+        $query = if ($sid) { '?session_id=' + [Uri]::EscapeDataString($sid) } else { '' }
+        $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/memory-policy$query" -Headers $headers -TimeoutSec 5 -MaximumRedirection 0
+        $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+        if ($text) { Write-Context $text }
+    } elseif ($Event -eq 'SessionStart') {
         $pairs = @()
         if ($sid) {
             $pairs += 'session_id=' + [Uri]::EscapeDataString($sid)

@@ -34,13 +34,13 @@ REASON=$(printf '%s' "$INPUT" | sed -n 's/.*"reason"[[:space:]]*:[[:space:]]*"\(
 # 1.5s, whatever hooks.json says, and the connection checks and curl below
 # can use all of it. /clear or /resume inside a running process keeps its
 # shim, so the session ending here hands the process's record (see
-# session-start.sh) to the next one: time, this process's creation identity
+# coordination-start.sh) to the next one: time, this process's creation identity
 # and the ending session's key. A record not confirmed for the ending
 # session (none yet under older hooks, or another process's) is first
 # replaced by that session's own key, which is right unless an earlier
 # /clear under older hooks already moved it. Without a creation identity no
 # handoff is written, and the next session starts from its own key.
-# Same helpers as session-start.sh.
+# Same helpers as coordination-start.sh.
 sha256_of() {  # $1 = text
     printf '%s' "$1" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
 }

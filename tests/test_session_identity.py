@@ -266,6 +266,76 @@ def test_outcome_with_header_and_handle(pg_service):
     assert len(sigs) == 1
 
 
+# Without a handle a signal takes the CALLER's open episode. It used to take
+# the process-wide current_id — just the root someone started last — so with
+# several sessions on one daemon it landed on whichever session started most
+# recently (the retrieval-log attribution bug, 2026-09-25).
+
+
+def _two_started_roots(svc):
+    a = svc.episode_start_session("own-key-A", "session A")
+    b = svc.episode_start_session("own-key-B", "session B")
+    assert svc._cms.episodes.current_id == b["id"]   # B started last
+    return a, b
+
+
+def test_outcome_without_handle_lands_on_callers_episode(pg_service):
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        svc.record_outcome(task="own outcome", outcome="success")
+    finally:
+        reset_writer_context(tok)
+    svc.record_outcome(task="anonymous outcome", outcome="success")
+    sigs = {s["task"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)}
+    assert sigs["own outcome"] == a["id"]
+    assert sigs["anonymous outcome"] is None      # no identity -> no episode
+
+
+def test_outcome_with_bad_handle_degrades_to_callers_episode(pg_service):
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        res = svc.record_outcome(task="bad handle outcome", outcome="success",
+                                 episode="ffffffffffff")
+    finally:
+        reset_writer_context(tok)
+    assert res["episode_warning"] == "unknown or closed episode handle"
+    sigs = {s["task"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)}
+    assert sigs["bad handle outcome"] == a["id"]
+
+
+def test_correction_signal_lands_on_callers_episode(pg_service):
+    """A user-tier supersession emits a correction signal; it follows the
+    same rule as record_outcome — the handle's root when one is passed,
+    else the caller's open episode."""
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        svc.cortex_write("server", "port", "8080", support="user")
+        svc.cortex_write("server", "port", "9090", support="user")
+    finally:
+        reset_writer_context(tok)
+    # Header session B, handle A: the handle wins attribution, as it does
+    # for record_outcome (test_outcome_with_header_and_handle).
+    tok = set_writer_context("w", "own-key-B")
+    try:
+        svc.cortex_write("widget", "color", "blue", support="user")
+        svc.cortex_write("widget", "color", "red", support="user",
+                         episode=a["id"][:12])
+    finally:
+        reset_writer_context(tok)
+    corr = {s["about"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)
+            if s["outcome"] == "correction"}
+    assert corr == {"server": a["id"], "widget": a["id"]}
+
+
 # ── Task 5: hook endpoints — register on start, close on end (identity
 # tier 3, spec 2026-07-18) ────────────────────────────────────────────────
 
@@ -499,6 +569,27 @@ def test_tombstone_recreation_preserves_agent_title(pg_service):
     assert root.title == "PseudoLife - deferred benchmark"
 
 
+def test_handle_title_rewrites_existing_entry_stamps(pg_service):
+    """Naming a session by handle must rewrite the denormalised
+    ``episode_title`` on entries already stored under it — in memory and in
+    the DB row — exactly as the header-session path does. The handle path
+    set only ``root.title``, so every entry stored before the rename kept
+    the generic ``session - <date> <time>`` stamp (found 2026-09-25)."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyST", "session - 2026-09-25 10:00")
+    handle = ep["id"][:12]
+    svc.store("work stored before the rename", source="t", episode=handle)
+    out = svc.set_session_title("X - y", episode=handle)
+    assert out["ok"] and out["id"] == ep["id"]
+    found = [e for band in svc._cms.bands for e in band.entries
+             if e.text == "work stored before the rename"]
+    assert found and found[0].episode_id == ep["id"]
+    assert found[0].episode_title == "X - y"
+    row = next(r for r in svc._storage.load_entries()
+               if r["id"] == found[0].db_id)
+    assert row["episode_title"] == "X - y"
+
+
 def test_tombstone_recreation_respects_handle_window(pg_service, monkeypatch):
     svc = pg_service
     ep = svc.episode_start_session("keyTW", "session TW")   # open, 0 entries
@@ -600,8 +691,8 @@ def test_hook_resume_touch_survives_the_next_reaper_sweep(pg_service):
     assert resumed["id"] == ep["id"]
     root = svc._cms.episodes.episodes[ep["id"]]
     assert root.ended_at is None               # resumed, not forked
-    # Outcome-only return: no episode handle (attributes via the current
-    # pointer the resume just moved), so neither a band entry nor a
+    # Outcome-only return: no episode handle and no session identity (the
+    # signal attributes to no episode), so neither a band entry nor a
     # handle-path touch is written — the resume itself must protect.
     svc.record_outcome(task="t", outcome="success")
     svc.reap_idle_sessions(7_200)
@@ -733,6 +824,50 @@ def test_episode_lifecycle_empty_handle_degrades_like_none(pg_service):
     closed = svc.episode_end(episode="")
     assert closed.get("id") == sub["id"]
     svc.set_active_session(None)
+
+
+# ── Handle-less lifecycle calls on a hook-registered root (2026-09-25) ──────
+# Since the stdio shim sends Claude Code's own session id as X-PL-Session, a
+# handle-less lifecycle call resolves to the root the SessionStart hook
+# registered, not to a throwaway shim root. Neither may fork that root nor
+# close it.
+
+
+def test_session_title_after_a_reap_reopens_the_session_root(pg_service):
+    """A title set without a handle after the idle reaper closed the root
+    reopens that root (as a store would) instead of opening a second one."""
+    svc = pg_service
+    started = svc.episode_start_session("title-key", "session - 2026-09-25 10:00")
+    svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 10_000)
+    tok = set_writer_context("w", "title-key")
+    try:
+        out = svc.set_session_title("PseudoLife-MCP - one root per session")
+    finally:
+        reset_writer_context(tok)
+    assert out == {"ok": True, "id": started["id"],
+                   "title": "PseudoLife-MCP - one root per session"}
+    with svc._lock:
+        roots = [e for e in svc._cms.episodes.episodes.values()
+                 if e.session_key == "title-key" and e.parent_id is None]
+    assert [(e.id, e.ended_at) for e in roots] == [(started["id"], None)]
+
+
+def test_handleless_episode_end_pops_sub_episodes_but_never_the_session_root(
+        pg_service):
+    """memory_episode_end closes the current sub-episode; the session root
+    belongs to the hook lifecycle and the idle reaper, with or without a
+    handle."""
+    svc = pg_service
+    root = svc.episode_start_session("pop-key", "session - 2026-09-25 10:00")
+    tok = set_writer_context("w", "pop-key")
+    try:
+        sub = svc.episode_start("a sub-task")
+        assert svc.episode_end().get("id") == sub["id"]
+        assert svc.episode_end() == {}
+    finally:
+        reset_writer_context(tok)
+    with svc._lock:
+        assert svc._cms.episodes.episodes[root["id"]].ended_at is None
 
 
 def test_transport_session_fallback_retired(monkeypatch):

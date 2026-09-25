@@ -13,6 +13,11 @@ What is pinned, each for a reason:
   from a worktree: a worktree's copy disappears with the worktree, and its
   ``data/backups`` is a folder nothing else reads (15 of the 19 deploy
   dumps from 09-11..09-22 ended up in such folders);
+* ``-ScriptCheckout`` runs another checkout's copy instead (the main one
+  can lag master for days): a worktree only once it is locked, and never
+  a checkout that would receive the dumps itself. Dumps and the log stay
+  in the main checkout's ``data/backups``; each run logs the script
+  checkout's HEAD;
 * ``StartWhenAvailable``: a desktop is often off at 03:00, and the replica
   task's missed runs on 09-18/19 vanished without a trace because it lacks
   exactly this;
@@ -34,6 +39,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -132,6 +138,13 @@ def _inner(registered: dict) -> str:
 
 def _norm(path: Path | str) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
+
+
+def _flat(text: str) -> str:
+    """pwsh's error view colors a message and wraps it at the console width
+    behind a '|' gutter; flatten it so a phrase can be matched."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return " ".join(text.replace("|", " ").split())
 
 
 def _checkout(root: Path, backup_body: str = "Write-Output 'backup ran'") -> Path:
@@ -302,6 +315,111 @@ def test_a_docker_that_never_comes_up_still_gets_a_logged_attempt(tmp_path):
     assert run.returncode == 0, (run.stdout, run.stderr)   # the stand-in succeeds
     text = (plain / "data" / "backups" / "backup-task.log").read_text(encoding="utf-8-sig")
     assert "not ready after 1s" in text and "backup ran" in text, text
+
+
+# ----------------------------------------------------------------------
+# -ScriptCheckout: the backup script from a dedicated checkout
+# ----------------------------------------------------------------------
+
+def _main_with_worktree(tmp_path: Path, *, lock: bool) -> tuple[Path, Path]:
+    main = _checkout(tmp_path / "main",
+                     backup_body='param([string]$OutDir)\nWrite-Output "main copy into $OutDir"')
+    _git("init", "-q", "-b", "master", cwd=main)
+    _git("add", ".", cwd=main)
+    _git("commit", "-q", "-m", "init", cwd=main)
+    ops = tmp_path / "ops"
+    _git("worktree", "add", "-q", "--detach", str(ops), cwd=main)
+    if lock:
+        _git("worktree", "lock", "--reason", "daily backup task", str(ops), cwd=main)
+    return main, ops
+
+
+@pytest.mark.skipif(GIT is None, reason="git not on PATH")
+def test_a_script_checkout_runs_its_own_backup_into_the_main_data_folder(tmp_path):
+    """The main checkout can lag master for days while it holds someone's
+    uncommitted work: on 2026-09-24 and 09-25 the task ran a backup.ps1
+    from before the row-count gate. -ScriptCheckout runs another checkout's
+    copy, but dumps and the log stay in the main checkout's data/backups,
+    where restore and the replica push look for them."""
+    main, ops = _main_with_worktree(tmp_path, lock=True)
+    (ops / "ops" / "backup.ps1").write_text(
+        'param([string]$OutDir)\nWrite-Output "ops copy into $OutDir"\n', encoding="utf-8")
+    proc, registered, _ = _run(tmp_path, ops / "ops" / SCRIPT.name,
+                               "-ScriptCheckout", f"'{ops}'", "-DockerWaitSeconds", "0",
+                               env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert proc.returncode == 0, proc.stderr
+    assert registered is not None, "Register-ScheduledTask was never called"
+    run = _execute(registered)
+    assert run.returncode == 0, (run.stdout, run.stderr)
+    text = (main / "data" / "backups" / "backup-task.log").read_text(encoding="utf-8-sig")
+    assert "ops copy into" in text and "main copy" not in text, text
+    out_dir = text.split("ops copy into ", 1)[1].splitlines()[0].strip()
+    assert _norm(out_dir) == _norm(main / "data" / "backups"), text
+    assert not (ops / "data").exists(), "the run wrote into the script checkout"
+    # A script checkout that falls behind must show in the log: each run
+    # names the commit it ran.
+    head = subprocess.run([GIT, "-C", str(ops), "rev-parse", "--short", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    assert head and head in text, text
+
+
+@pytest.mark.skipif(GIT is None, reason="git not on PATH")
+def test_an_unlocked_worktree_is_refused_as_the_script_checkout(tmp_path):
+    """A worktree's copy disappears with the worktree, which is why the
+    default is the main checkout. `git worktree lock` is what keeps
+    `git worktree prune` and `remove` away from it."""
+    _, ops = _main_with_worktree(tmp_path, lock=False)
+    # The driver's `& script` swallows the installer's exit code, so the
+    # contract is read off what it did: nothing registered, and why.
+    proc, registered, _ = _run(tmp_path, ops / "ops" / SCRIPT.name,
+                               "-ScriptCheckout", f"'{ops}'",
+                               env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert registered is None, "an unlocked worktree was registered"
+    assert "git worktree lock" in _flat(proc.stderr), proc.stderr
+
+
+def test_a_misspelled_parameter_fails_instead_of_installing_the_default(tmp_path):
+    """Without [CmdletBinding()] an unknown parameter lands in $args and the
+    run registers the main checkout: a typo in -ScriptCheckout would quietly
+    reinstall the stale copy it was meant to replace."""
+    proc, registered, _ = _run(tmp_path, SCRIPT, "-ScriptChekout", "'x'")
+    assert registered is None, "a misspelled parameter still registered a task"
+    assert "ScriptChekout" in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(GIT is None, reason="git not on PATH")
+def test_a_separate_clone_needs_no_lock(tmp_path):
+    """A clone's git dir is its own common dir: nothing prunes it."""
+    main = _checkout(tmp_path / "main")
+    _git("init", "-q", "-b", "master", cwd=main)
+    _git("add", ".", cwd=main)
+    _git("commit", "-q", "-m", "init", cwd=main)
+    clone = tmp_path / "clone"
+    _git("clone", "-q", str(main), str(clone), cwd=tmp_path)
+    proc, registered, _ = _run(tmp_path, main / "ops" / SCRIPT.name,
+                               "-ScriptCheckout", f"'{clone}'",
+                               env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert proc.returncode == 0, proc.stderr
+    assert registered is not None, proc.stderr
+    inner = _norm(_inner(registered))
+    assert _norm(clone / "ops" / "backup.ps1") in inner, inner
+    assert _norm(main / "data" / "backups" / "backup-task.log") in inner, inner
+
+
+@pytest.mark.skipif(GIT is None, reason="git not on PATH")
+def test_a_script_checkout_that_is_also_the_data_home_is_refused(tmp_path):
+    """The data home is the checkout the installer itself resolves. A
+    separate clone's own installer resolves the clone, so
+    `<clone>\\ops\\install-backup-task.ps1 -ScriptCheckout <clone>` would put
+    the dumps in <clone>/data/backups, where restore and the replica push
+    never look - with nothing to say so."""
+    clone = _checkout(tmp_path / "clone")
+    _git("init", "-q", "-b", "master", cwd=clone)
+    proc, registered, _ = _run(tmp_path, clone / "ops" / SCRIPT.name,
+                               "-ScriptCheckout", f"'{clone}'",
+                               env={"GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert registered is None, "the dumps were routed into the script checkout"
+    assert "worktree of the main checkout" in _flat(proc.stderr), proc.stderr
 
 
 # ----------------------------------------------------------------------

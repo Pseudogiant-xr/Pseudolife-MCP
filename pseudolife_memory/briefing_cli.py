@@ -4,7 +4,9 @@ Torch-free and dependency-light: stdlib ``urllib`` only, no MCP handshake. Hits
 the already-running daemon's REST ``/api/briefing`` (never auto-starts one;
 session-start must stay fast). Prints nothing + exit 0 when the daemon is down,
 the bank is cold, or anything goes wrong — a memory briefing must never break a
-session.
+session. ``--coordination`` prints the agent-board check-in from
+``/api/hook/coordination-start`` instead, which the daemon serves only where
+this bearer can use the board.
 """
 from __future__ import annotations
 
@@ -30,15 +32,34 @@ def _as_hook_json(md: str) -> str:
 def _fetch_markdown(url: str, token: str | None, max_unsure: int, max_lessons: int,
                     max_world: int = 3) -> str:
     """GET ``/api/briefing`` and return its ``markdown`` field. Plain HTTP — no MCP
-    ``initialize`` handshake — so it's fast enough for a per-session hook."""
+    ``initialize`` handshake — so it's fast enough for a per-session hook. A
+    redirect is refused rather than followed, since urllib would carry the
+    bearer to its target."""
+    from pseudolife_memory.shim import _NoRedirectHandler
     qs = urllib.parse.urlencode({"max_unsure": max_unsure, "max_lessons": max_lessons,
                                  "max_world": max_world})
     req = urllib.request.Request(f"{url}/api/briefing?{qs}")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=5) as r:
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    with opener.open(req, timeout=5) as r:
         data = json.loads(r.read().decode("utf-8"))
     return (data or {}).get("markdown", "") or ""
+
+
+def _fetch_checkin(url: str, token: str | None) -> str:
+    """GET ``/api/hook/coordination-start``: the agent-board check-in, or
+    empty where this bearer cannot use the board (off, unauthenticated, or
+    an unlisted principal). A redirect is refused rather than followed, since
+    urllib would carry the bearer to its target; two seconds keeps the hook
+    inside its five-second budget."""
+    from pseudolife_memory.shim import _NoRedirectHandler
+    req = urllib.request.Request(f"{url}/api/hook/coordination-start")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    with opener.open(req, timeout=2) as r:
+        return r.read().decode("utf-8")
 
 
 def run_briefing() -> None:
@@ -52,14 +73,26 @@ def run_briefing() -> None:
     ap.add_argument("--hook-json", action="store_true",
                     help="emit a Claude Code/Codex SessionStart hook payload "
                          "(hookSpecificOutput.additionalContext) instead of raw markdown")
+    ap.add_argument("--coordination", action="store_true",
+                    help="print the agent-board check-in instead, only where this "
+                         "bearer can use the board")
     args, _ = ap.parse_known_args(sys.argv[2:])  # argv[1] == "briefing"
 
+    if args.coordination:
+        # Unset means on by default; any other value that is not a yes is
+        # this client's opt-out, as for the shim and the plugin hooks.
+        setting = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower()
+        if setting and setting not in {"1", "true", "yes", "on"}:
+            return
     url = _daemon_url()
     if probe_health(url) is None:
         return  # daemon down -> inject nothing
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
     try:
-        md = _fetch_markdown(url, token, args.max_unsure, args.max_lessons, args.max_world)
+        if args.coordination:
+            md = _fetch_checkin(url, token)
+        else:
+            md = _fetch_markdown(url, token, args.max_unsure, args.max_lessons, args.max_world)
     except Exception:
         return  # never break session start
     md = (md or "").strip()

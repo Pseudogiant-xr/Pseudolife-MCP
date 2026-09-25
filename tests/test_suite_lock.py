@@ -509,13 +509,17 @@ def _ticket_file(directory: Path, *, age_s: float, pid: int) -> Path:
     return queue_dir / f"{arrived:020d}-{pid}{suite_lock.TICKET_SUFFIX}"
 
 
+# "New" is 1 s old, inside the grace window but strictly earlier than the run
+# under test: at age 0 both tickets can land on one Windows clock tick
+# (15.6 ms), where arrival ties go in pid order and a runner pid below 4242
+# sorts first (the new-and-held flake on Windows CI, 2026-09-26).
 @pytest.mark.parametrize(("age_s", "locked", "outcome"), [
     (3600, True, "queued"),    # an hour in the queue, its owner still holding it
-    (0, True, "queued"),       # arrived a moment ago and holding it
+    (1, True, "queued"),       # arrived a moment ago and holding it
     (3600, False, "deleted"),  # its owner died: the OS dropped the ticket's lock
     # Not locked yet, or its owner died young: passed over, but kept until
     # past the grace window, since its owner may be about to lock it.
-    (0, False, "skipped"),
+    (1, False, "skipped"),
 ], ids=["old-and-held", "new-and-held", "owner-dead", "new-and-free"])
 def test_a_ticket_counts_while_its_owner_holds_it(tmp_path, age_s, locked, outcome):
     path = _ticket_file(tmp_path, age_s=age_s, pid=4242)
