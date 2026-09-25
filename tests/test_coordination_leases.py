@@ -38,6 +38,8 @@ def store(pg_conn):
     assert_disposable_database(pg_conn)
     pg_conn.execute("TRUNCATE coordination_messages, coordination_agents, coordination_events, "
                     "coordination_leases, coordination_lease_waiters")
+    # A fresh bank's fences start at 1; the sequence outlives TRUNCATE.
+    pg_conn.execute("ALTER SEQUENCE coordination_lease_fence RESTART WITH 1")
     now = [1000.0]
     out = CoordinationStore(Storage(pg_conn), clock=lambda: now[0])
     out.test_time = now
@@ -62,7 +64,8 @@ def test_free_lease_is_granted_with_fence_and_expiry(store):
     out = store.acquire_lease(*creds(a), name="full-suite", ttl=120, expect=1200,
                               purpose="pytest tests/")
     assert out["state"] == "held"
-    assert out["fence"] == 1
+    base = out["fence"]
+    assert base >= 1
     assert out["expires_at"] == 1120.0
     assert out["expected_end"] == 2200.0
     assert out["position"] is None and out["queued"] == 0
@@ -71,7 +74,7 @@ def test_free_lease_is_granted_with_fence_and_expiry(store):
     assert out["holder"]["purpose"] == "pytest tests/"
     [row] = events(store, "lease_acquire")
     assert row["agent_id"] == a["agent_id"]
-    assert payload(row) == {"name": "full-suite", "fence": 1, "ttl": 120, "expect": 1200,
+    assert payload(row) == {"name": "full-suite", "fence": base, "ttl": 120, "expect": 1200,
                             "purpose": "pytest tests/"}
 
 
@@ -406,6 +409,9 @@ def test_prune_drops_a_departed_waiter_before_granting(store):
     store.prune()
     [lease] = store.list_leases()["leases"]
     assert lease["holder"]["agent_id"] == live["agent_id"]
+    [left] = events(store, "lease_dequeue")
+    assert (left["agent_id"], left["actor"], payload(left)["reason"]) == (
+        departed["agent_id"], "daemon", "departed")
     assert store.storage.conn.execute(
         "SELECT count(*) FROM coordination_agents WHERE agent_id=%s",
         (departed["agent_id"],)).fetchone()[0] == 0
@@ -455,3 +461,72 @@ def test_a_revoked_waiter_is_passed_over(store):
     store.release_lease(*creds(a), name="gpu")
     [lease] = store.list_leases()["leases"]
     assert lease["holder"]["agent_id"] == c["agent_id"]
+
+
+# ── second review (Codex, 2026-09-26): fences and lock order ─────────────
+
+
+def test_a_fence_never_repeats_after_the_row_is_forgotten(store):
+    """Prune forgets a lease row left free for a week; the next grant of the
+    same name must still carry a fence higher than any before it."""
+    a = store.register("alice")
+    first = store.acquire_lease(*creds(a), name="claim:old.py", ttl=3600)["fence"]
+    store.release_lease(*creds(a), name="claim:old.py")
+    store.test_time[0] += 7 * 86400 + 1
+    store.update(*creds(a), status="back")  # still active, so prune keeps the agent
+    store.prune()
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_leases WHERE name='claim:old.py'").fetchone()[0] == 0
+    again = store.acquire_lease(*creds(a), name="claim:old.py", ttl=3600)["fence"]
+    assert again > first
+
+
+def test_prune_locks_a_lease_before_its_queue(store, pg_url):
+    """Every lease path locks the lease row before its waiter rows; prune
+    locking a departed waiter first could deadlock against an operator
+    break or an acquire holding the lease and reaching for its queue."""
+    import threading
+    import psycopg
+    holder = store.register("alice")
+    departed = store.register("alice", capabilities={"resumable": False})
+    store.acquire_lease(*creds(holder), name="gpu", ttl=60)
+    store.acquire_lease(*creds(departed), name="gpu", ttl=60)
+    store.test_time[0] += 3700  # the hold lapsed; the waiter is past its window
+    other = psycopg.connect(pg_url, autocommit=False)
+    try:
+        # Hold the lease row the way break or acquire would, first.
+        other.execute("SELECT 1 FROM coordination_leases WHERE name='gpu' FOR UPDATE")
+        store.storage.conn.execute("SET lock_timeout = '2s'")
+        done = threading.Event()
+        failures = []
+
+        def run_prune():
+            # Waiting out the lock is fine; a deadlock (Postgres aborting
+            # prune because it held the queue while waiting for the lease)
+            # is the bug.
+            try:
+                store.prune()
+            except psycopg.errors.LockNotAvailable:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                failures.append(type(exc).__name__)
+            finally:
+                done.set()
+
+        worker = threading.Thread(target=run_prune)
+        worker.start()
+        try:
+            # While prune waits on the lease row, the queue must still be
+            # free for the lease holder to lock next.
+            threading.Event().wait(0.5)
+            other.execute("SET lock_timeout = '500ms'")
+            other.execute("SELECT 1 FROM coordination_lease_waiters WHERE name='gpu' "
+                          "FOR UPDATE")
+        finally:
+            other.rollback()
+            worker.join(10)
+        assert done.is_set()
+        assert failures == []
+    finally:
+        other.close()
+        store.storage.conn.execute("SET lock_timeout = '5s'")

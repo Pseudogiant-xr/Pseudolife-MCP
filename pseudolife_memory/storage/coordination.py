@@ -1046,10 +1046,13 @@ class CoordinationStore:
             _refuse_secret(purpose)
 
     def _grant(self, name, agent_id, principal, *, now, hold, expect, purpose):
+        # The fence comes from one sequence for every lease, never from the
+        # row: prune forgets a row left free for a week, and a counter kept
+        # on it would restart and hand a later grant a fence already used.
         return self._one(
             "UPDATE coordination_leases SET holder_agent_id=%s,holder_principal=%s,purpose=%s,"
-            "fence=fence+1,acquired_at=%s,expires_at=%s,expect=%s,expected_end=%s,"
-            "freed_at=NULL WHERE name=%s RETURNING *",
+            "fence=nextval('coordination_lease_fence'),acquired_at=%s,expires_at=%s,expect=%s,"
+            "expected_end=%s,freed_at=NULL WHERE name=%s RETURNING *",
             (agent_id, principal, purpose, now, now + hold, expect,
              None if expect is None else now + expect, name))
 
@@ -1073,9 +1076,26 @@ class CoordinationStore:
                                       actor="daemon", agent_id=row["holder_agent_id"]))
             row = self._vacate(name, now)
         if row["holder_agent_id"] is None:
-            # A waiter whose address is gone (prune) or revoked (restore
-            # recovery) could never take its turn up; it is passed over here
-            # and its row removed by prune or recover.
+            # A waiter that could never take its turn up leaves the queue
+            # here, under the lease lock just taken, so every path locks a
+            # lease before its queue (prune once deleted departed waiters
+            # first, which deadlocked against a break holding the lease:
+            # reproduced 2026-09-26). Departed: the agent row is gone, or it
+            # has been idle past its retention window with no live
+            # attachment (prune's test for removing it, less the retained-
+            # mail condition, which keeps an address but not a turn). A
+            # revoked waiter (restore recovery) is passed over below.
+            window = ("CASE WHEN a.capabilities->>'resumable'='false' THEN %s ELSE %s END")
+            gone = [r["agent_id"] for r in self._all(
+                "DELETE FROM coordination_lease_waiters w WHERE w.name=%s AND (NOT EXISTS "
+                "(SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id) OR EXISTS "
+                "(SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id "
+                f"AND (a.lease_until IS NULL OR a.lease_until<={window}) "
+                f"AND a.last_activity<={window})) RETURNING w.agent_id",
+                (name, *(now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION) * 2))]
+            for agent in gone:
+                events.append(self._event("lease_dequeue", {"name": name, "reason": "departed"},
+                                          actor="daemon", agent_id=agent))
             waiter = self._one(
                 "SELECT w.* FROM coordination_lease_waiters w JOIN coordination_agents a "
                 "ON a.agent_id=w.agent_id AND a.credential_hash IS NOT NULL "
@@ -1645,21 +1665,19 @@ class CoordinationStore:
         now = self.clock()
         ephemeral = "a.capabilities->>'resumable'='false'"
         with self.storage._txn():
-            # Resource leases first. A waiter whose address this pass will
-            # remove loses its place before anything is granted, so no turn
-            # goes to a session that is gone; then a lapsed hold expires (and
-            # its queue moves on) before the address that held it can be
-            # removed, so the log says who lost it. A live holder is never
-            # removed below.
+            # Resource leases first, lease rows before their queues as on
+            # every other path (an offline `lease break` runs on another
+            # connection). Settling drops a departed waiter's place before
+            # anything is granted, so no turn goes to a session that is gone,
+            # and expires a lapsed hold before the address that held it can
+            # be removed, so the log says who lost it. A live holder is
+            # never removed below.
             window = f"CASE WHEN {ephemeral} THEN %s ELSE %s END"
             removable = ("(a.lease_until IS NULL OR a.lease_until<={w}) AND a.last_activity<={w} "
                          "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
                          "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id)"
                          ).format(w=window)
             retention = (now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION) * 2
-            self.storage.conn.execute(
-                "DELETE FROM coordination_lease_waiters w USING coordination_agents a "
-                "WHERE a.agent_id=w.agent_id AND " + removable, retention)
             events = []
             self._settle_due(now, events)
             expired = sorted(r["message_id"] for r in self._all(

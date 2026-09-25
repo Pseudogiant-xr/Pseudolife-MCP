@@ -73,7 +73,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that never took its turn stalled the relay for twenty minutes.
 - A freed lease is granted to the head of its queue, which must renew within
   five minutes (or its own ttl, if shorter) or lose it to the next waiter.
-  Every grant raises a fence number. Grants, releases, expiries and
+  Every grant takes a fence number from one sequence, so a lease's fence
+  never repeats, even after prune forgets its row. Grants, releases, expiries and
   operator breaks are audit-log events; renewals are not, like heartbeats.
   Every acquire, listing and prune pass first settles lapsed holds, so a
   queue moves on even when its holder died without a word. Prune drops a

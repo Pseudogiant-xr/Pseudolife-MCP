@@ -572,6 +572,9 @@ CREATE TABLE IF NOT EXISTS coordination_leases (
 );
 CREATE INDEX IF NOT EXISTS coordination_leases_holder_idx
     ON coordination_leases (holder_agent_id) WHERE holder_agent_id IS NOT NULL;
+-- v45: one sequence hands out every lease's fences, so a fence never repeats
+-- for a name even after prune forgets its row.
+CREATE SEQUENCE IF NOT EXISTS coordination_lease_fence;
 -- v45: each lease's queue, served in ticket (arrival) order.
 CREATE TABLE IF NOT EXISTS coordination_lease_waiters (
     name TEXT NOT NULL,
