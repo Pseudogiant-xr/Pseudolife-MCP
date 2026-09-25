@@ -38,6 +38,14 @@ from tests import suite_lock  # noqa: E402
 
 suite_lock.hide_cuda(os.environ)
 
+# Every report this process renders is scrubbed of PostgreSQL passwords:
+# psycopg's own connect frame shows the DSN as an argument, out of reach of
+# pg_defaults.RedactedUrl. Imported here, before scrub_live_bank_dsn below
+# pops the daemon DSN, so its password is in the snapshot the plugin takes.
+from tests.report_redaction import (  # noqa: E402, F401 — conftest hooks
+    pytest_make_collect_report, pytest_runtest_makereport,
+)
+
 # The eval-backed suites (test_recall, test_memcot_bench,
 # test_constraint_pinning) and evals/ladder_sweep.py read the bench admin
 # URL from PSEUDOLIFE_BENCH_ADMIN_URL. Seed it once, here, from the same
