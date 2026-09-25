@@ -862,10 +862,14 @@ sessions can keep waking each other, so wakes are capped (below).
   debug/audit switch. Before 2026-07-30 this knob was mis-registered as
   `memory.show_superseded` and did nothing.
 - **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
-  above zero and `memory_search` returns `low_confidence: true` whenever
-  the top match scores below the floor. Calibrated as a pair with
-  `memory.cortex.guard_min_score`; the recommended abstention-on values
-  and the calibration story: [Retrieval](retrieval.md#abstention--confidence-floors).
+  above zero and `memory_search` also returns `low_confidence: true` when
+  the top match scores below the floor and no cortex fact clears
+  `memory.cortex.guard_min_score`. No value is calibrated for the current
+  embedder, and the pair this guide used to recommend would flag a fifth
+  of real searches whose hits agents used:
+  [Retrieval](retrieval.md#abstention--confidence-floors). The dense
+  relevance floor under it, `memory.search.min_score` (`0.25`), is a
+  separate knob and not an abstention signal either.
 - **Dream slot resolver off** (`memory.cortex.dream_slot_match_threshold =
   0.0`) — a positive cosine floor lets the dream pass map a paraphrased
   `(entity, attribute)` onto an existing slot before writing, to catch
@@ -1145,7 +1149,8 @@ sessions can keep waking each other, so wakes are capped (below).
   payloads verbatim (superseded hits keep the `replaced_by` pointer, which
   `memory_get` also serves for a superseded entry, and
   `memory_episode_summary` still compacts its `recent_entries` like
-  `memory_recent` — none of the three follows the knob); raise
+  `memory_recent`, and every compact entry keeps its write `date`
+  (2026-09-25) — none of the four follows the knob); raise
   `entry_text_chars` for long-form corpora where
   the tail of a note carries the answer.
 

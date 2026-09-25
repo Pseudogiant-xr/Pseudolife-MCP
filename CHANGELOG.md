@@ -70,6 +70,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that redirects, was already failing and now says why. The endpoint health
   probes (`probe_endpoint`, `fetch_served_model`) are unauthenticated GETs
   and are unchanged.
+### Changed (2026-09-25 — dated search results, an honest low_confidence, and a replay gate for serving changes)
+- Every compact entry from `memory_search`, `memory_recent` and
+  `memory_episode_summary` carries its write `date` (local `YYYY-MM-DD`,
+  as in `replaced_by.at`). Like `replaced_by`, it is not a size cut, so it
+  also survives `memory.mcp.compact_payloads: false`.
+- `low_confidence` is now described as what it is. It fires only when
+  nothing matched, meaning no entry and no cortex fact; over 1,072 agent
+  searches it fired on none. The `memory_search` description no longer says
+  "prefer abstaining" or calls the cortex block "the current, deduped
+  answer". The docs' recommended `guard_min_score = 0.65` +
+  `search_confidence_floor = 0.70` pair, measured on the old MiniLM
+  embedder, is retired: on current agent traffic it would flag 26% of
+  searches, including 20% of the searches whose hits the agent then used.
+  No floor ships; the flag's behavior is unchanged.
+- `memory.search.min_score` (default `0.25`, unchanged) replaces the
+  literal floor in `cms.retrieve`, and a value that is not a number in
+  [0, 1] now fails at load. A per-call `min_score` still overrides it, and
+  only a caller's floor bounds the slot and BM25 injections.
+- The daemon's startup warmup search no longer counts as a read: it adds
+  no access to the entry it hits and no query to the per-band retrieval
+  counters.
+- New gate for projection-side serving changes:
+  `evals/serving_policy_replay.py`. It replays logged served lists under a
+  candidate policy (a narrower default `top_k`, a score floor, a source
+  exclusion) and reports the used hits kept, with rows and entry-text chars
+  as the cost. A narrower `top_k` is simulated from each row's logged
+  fusion inputs, because the dense pool is cut by cosine before the
+  supersession multiplier and the BM25 boost reorder it, so a narrower
+  list is not a prefix of a wider one. Checked against 146 real narrower
+  searches (142 of them the token ledger's 8 -> 3 runs of 2026-09-03/04),
+  the simulation reproduced the exact served set in 98 and the prefix in
+  20. It reads the bank in a read-only transaction and writes an
+  aggregates-only artifact. `evals/regression_gate.ps1` cannot see these
+  changes: it rebuilds contexts offline and never runs search or the MCP
+  projection.
+- Reported, not changed: the default `top_k` stays 8. Over 276
+  default-width agent searches (2026-09-06 to 2026-09-25), a default of 6
+  would keep 85.4% of the hits agents reported using (Wilson 95%
+  79.6-89.8) at 75% of the rows, and 7 would keep 93.0%. The 2026-09-23
+  review's ~90.5% for 6 read the narrower list as a prefix of the wider
+  one; that method gives 90.3% on the same searches. At most 25.7% of
+  agent searches use the default width. Evidence:
+  `evals/results/serving-policy-replay-20260925-r3.json`.
+- Digests, reported and left unchanged: served digests are used at 0.51x
+  the rate of other entries at the same rank (session bootstrap 95%
+  0.38-0.64). 53% of unfiltered agent searches serve at least one digest.
+  Digests are 15% of the rows unfiltered searches serve, but 9% of the hits
+  agents used from them. `memory.dream.digest_enabled` and default search
+  are untouched pending a decision on digests.
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is

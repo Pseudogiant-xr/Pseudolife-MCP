@@ -680,9 +680,39 @@ def test_memory_search_entries_are_compact_by_default(tmp_path: Path, monkeypatc
     out = _invoke("memory_search", {"query": "widget port"})
     assert out["count"] >= 1
     e = out["entries"][0]
-    assert set(e) == {"id", "text", "source", "tags", "score"}
+    assert set(e) == {"id", "text", "source", "tags", "score", "date"}
     for noise in _ENTRY_NOISE + ("superseded", "superseded_by_text"):
         assert noise not in e
+
+
+def test_compact_entries_carry_their_write_date(
+        tmp_path: Path, monkeypatch) -> None:
+    """A hit's age is a signal agents act on, and compact entries had
+    dropped it with the rest of the bookkeeping. In the 2026-09-23
+    review's used_ids labels, status notes were used 51% of the time when
+    under 3 days old and 24% at 3-14 days, and knowledge entries decayed
+    the same way. ``date`` is the entry's write date, the local
+    YYYY-MM-DD that ``replaced_by.at`` already uses. It is omitted rather
+    than invented when the stamp is missing."""
+    from datetime import datetime
+
+    mod = _reload_mod(tmp_path, monkeypatch)
+    ts = 1_790_000_000.0
+    e = mod._compact_entry({"id": 1, "text": "t", "source": "s", "tags": [],
+                            "score": 0.5, "timestamp": ts})
+    assert e["date"] == datetime.fromtimestamp(ts).date().isoformat()
+    assert "timestamp" not in e
+    for missing in (None, 0):
+        assert "date" not in mod._compact_entry(
+            {"id": 2, "text": "t", "timestamp": missing})
+    _invoke("memory_store", {"text": "the widget port is 9191",
+                             "source": "notes"})
+    stored = mod.service.recent(n=1)["entries"][0]["timestamp"]
+    written = datetime.fromtimestamp(stored).date().isoformat()
+    for tool, args in (("memory_search", {"query": "widget port"}),
+                       ("memory_recent", {"n": 5})):
+        hit = _invoke(tool, args)["entries"][0]
+        assert hit["date"] == written, tool
 
 
 def test_memory_search_verbose_restores_full_metadata(tmp_path: Path, monkeypatch) -> None:
@@ -790,6 +820,25 @@ def test_memory_search_docstring_explains_replacement_currency() -> None:
     assert "current: false" in doc and "search again" in doc
 
 
+def test_memory_search_docstring_is_truthful_about_low_confidence() -> None:
+    """``low_confidence`` is ``no entries AND no cortex fact`` at the shipped
+    floor 0. Search nearly always serves entries, and the one search in
+    1,072 real agent searches that served none still served facts, so the
+    flag fired on none of them
+    (evals/results/serving-policy-replay-20260925-r3.json). It cannot tell
+    an absent answer from a present one either: in-domain absent-answer
+    probes score like real hits. The description used to promise "no confident match, prefer
+    abstaining" and called the cortex block "the current, deduped answer";
+    both overstate what is served."""
+    from pseudolife_memory import mcp_server
+
+    doc = " ".join((mcp_server.memory_search.__doc__ or "").split())
+    assert "prefer abstaining" not in doc
+    assert "the current, deduped answer" not in doc
+    assert "only when nothing matched" in doc
+    assert "may bear on" in doc
+
+
 _LIVE_GET = {"found": True, "entry_id": 5, "text": "port is 5433",
              "source": "correction", "reinforcements": 0,
              "explicit_reinforcements": 0, "access_count": 1,
@@ -894,7 +943,7 @@ def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monke
     _invoke("memory_store", {"text": "recent shape probe", "source": "notes",
                              "tags": ["probe"]})
     compact = _invoke("memory_recent", {"n": 5})["entries"][0]
-    assert set(compact) == {"id", "text", "source", "tags"}
+    assert set(compact) == {"id", "text", "source", "tags", "date"}
     full = _invoke("memory_recent", {"n": 5, "verbose": True})["entries"][0]
     for k in _ENTRY_NOISE + ("superseded",):
         assert k in full, f"verbose entry missing {k!r}"
