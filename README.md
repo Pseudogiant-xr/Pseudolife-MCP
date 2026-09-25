@@ -375,7 +375,7 @@ is agent context every session, so it stays lean.
 | `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
-| `memory_agents(action, project?, task?, status?)` | Experimental, opt-in peer awareness or update of the caller's registered context; lists peers holding a lease or active within the hour and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_agents(action, project?, task?, status?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers holding a lease or active within the hour and counts the rest as `idle_omitted`; unknown episode scope stays unknown, and activity is not a resource reservation |
 | `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
@@ -810,12 +810,16 @@ daemon:
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
 The server's value depends on the agent using it. The MCP server advertises
-the core loop and messageboard check-in through protocol-level `instructions`.
+the core loop through protocol-level `instructions`; the shim adds the
+messageboard check-in when its coordination adapter is up.
 The plugin's memory SessionStart hook (also used by verified Codex hooks)
 delivers a short operating guide and a bounded briefing; without the plugin,
 the installer's Claude Code `settings.json` hook delivers the briefing alone.
 A separate coordination hook asks the agent to set its project,
-task and status, discover peers, and read pending messages. Detailed memory
+task and status, discover peers, and read pending messages, but only where
+the board is on for that credential (it is on by default behind bearer
+authentication, so an open install or a disabled board adds no check-in).
+Detailed memory
 guidance remains in the bundled standing block. Hooks add per-prompt reminders
 and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
@@ -876,10 +880,13 @@ If `[features] hooks = false` is intentional, keep it and use the standing
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** setup approval is limited to PseudoLife's current hook
-definitions: the three lifecycle hooks, plus the plugin's `Stop` entry (Claude
-Code's opt-in wake hook, a no-op in Codex). It does not approve other
-plugins or bypass future trust checks. Changed definitions need approval
-again. If automatic setup cannot
+definitions: the memory and coordination SessionStart and UserPromptSubmit
+handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's opt-in
+wake hook, a no-op in Codex). It does not approve other plugins or bypass
+future trust checks. Changed definitions need approval again, and so does a
+handler a plugin update adds; Codex skips an unapproved one silently in the
+desktop app, which `ops/update.ps1 -All` (or `ops/update_clients.py`) now
+reports as `needs-approval`. If automatic setup cannot
 use the installed runtime's trust interface, it reports the problem and
 asks you to open `/hooks` to review and trust the definitions. Approved standing
 instructions remain available as fallback. Installed files alone do not

@@ -38,12 +38,51 @@ def _root(svc, id, *, session=None, title="Peer task", started=10.0,
 
 def test_disabled_awareness_never_initializes_bank(tmp_path, monkeypatch):
     svc = MemoryService(data_dir=tmp_path)
+    svc.config.coordination.enabled = False
     monkeypatch.setattr(svc, "_ensure_init", lambda: pytest.fail("initialized"))
-    assert svc.config.coordination.enabled is False
-    assert svc.config.coordination.allowed_principals == []
     assert svc.coordination_awareness() == {
         "enabled": False, "available": False, "peers": [], "truncated": False,
     }
+
+
+def test_board_is_on_by_default_for_the_singular_token_principal(tmp_path):
+    """Maintainer decision 2026-09-25: on by default, but a config with no
+    ``allowed_principals`` admits only the reserved singular-token principal,
+    never the separately trusted principals of a token map."""
+    assert MemoryService(data_dir=tmp_path).config.coordination.enabled is True
+    for text in ("", "coordination:\n  awareness_limit: 3\n"):
+        path = tmp_path / "config.yaml"
+        path.write_text(text)
+        cfg = load_config(path).coordination
+        assert cfg.enabled is True
+        assert cfg.allowed_principals == ["default"]
+
+
+@pytest.mark.parametrize("text,enabled,allowed", [
+    ("coordination:\n  enabled: false\n", False, ["default"]),
+    ("coordination:\n  allowed_principals: [editor]\n", True, ["editor"]),
+    ("coordination:\n  allowed_principals: []\n", True, []),
+])
+def test_explicit_coordination_settings_override_the_defaults(tmp_path, text, enabled, allowed):
+    path = tmp_path / "config.yaml"
+    path.write_text(text)
+    cfg = load_config(path).coordination
+    assert cfg.enabled is enabled
+    assert cfg.allowed_principals == allowed
+
+
+def test_open_install_keeps_default_awareness_dark(tmp_path, monkeypatch):
+    """With no bearer configured there is no principal, so the ``default``
+    entry of the default list cannot admit an unauthenticated caller."""
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    svc = MemoryService(data_dir=tmp_path)
+    svc._cms = SimpleNamespace(episodes=EpisodeManager(), bands=[])
+    _root(svc, "peer", session="session-b")
+    monkeypatch.setattr(svc, "_ensure_init", lambda: pytest.fail("initialized"))
+    out = svc.coordination_awareness()
+    assert out["enabled"] is True and out["available"] is False
+    assert out["peers"] == [] and out["reason"] == "principal_not_allowed"
 
 
 def test_config_loads_explicit_awareness_settings(tmp_path):
@@ -191,6 +230,7 @@ def test_briefing_preserves_disabled_contract_and_labels_enabled_peers(awareness
     monkeypatch.setattr(svc, "lessons_dump", lambda **kw: {"entries": []})
     monkeypatch.setattr(svc, "world_dump", lambda: {"entries": []})
     monkeypatch.setattr(svc, "episode_list", lambda **kw: {"episodes": []})
+    svc.config.coordination.enabled = False
     disabled = svc.session_briefing()
     assert disabled == {
         "available": False, "markdown": "",

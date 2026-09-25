@@ -61,6 +61,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message naming it, and never displaced. A fresh launch keeps the GPU-busy
   hold (more than 5 GB of VRAM in use) and the owned-process cleanup.
 
+### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
+- The agent board (`memory_agents`, `memory_message`, the awareness digest) is
+  on by default: `coordination.enabled` defaults to `true`, and without an
+  `allowed_principals` key the singular-token principal `default` is admitted.
+  Principals from a `PSEUDOLIFE_MCP_TOKENS` map stay off the board until listed.
+  Bearer authentication is still required: an open (tokenless) install keeps
+  the board dormant. Wake, the Codex doorbell and the Claude stop-wake hook
+  stay opt-in.
+- The shim starts its coordination adapter (Codex: its per-thread registry)
+  by default when it holds a bearer token and the daemon serves that bearer
+  the board, which it asks once at startup; otherwise it stays quiet.
+  `PSEUDOLIFE_AGENT_COORDINATION=0` (any value but `1`/`true`/`yes`/`on`)
+  turns it off for that client, and `=1` keeps the old unconditional start.
+- The startup check-in no longer asks for calls that must fail where the
+  board is off. The daemon serves it from the new
+  `GET /api/hook/coordination-start` only where the board is on for that
+  bearer; the plugin's coordination SessionStart hook (bash and PowerShell, on
+  startup, resume, compaction and `/clear`) and the installers' new
+  `pseudolife-mcp briefing --coordination` hook print what it serves. The
+  daemon cannot see a client's adapter, so an HTTP client without the shim, an
+  opt-out set only in the MCP env block, or a `docker exec` installer hook can
+  still show it. The daemon's MCP instructions drop the board clause; the shim
+  adds a compact one only when its adapter is up.
+- An identity binding sent to `/mcp` now requires bearer authentication; an
+  open install refuses it before touching the store.
+- `ops/update_clients.py` (run by `ops/update.ps1 -All`) reports Codex plugin
+  hook handlers that Codex has not approved as `needs-approval`. The
+  2026-09-24 split added two handlers, which Codex skips without a word in
+  the desktop app until approved, so mail previews silently stopped there.
+- `ops/setup-codex-hooks.py` expects the check-in during its live
+  verification only where the board is available, and migrates the
+  installers' gated check-in hook like the older echo.
+- **Upgrading:** a `config.yaml` with no `coordination` key, or a
+  `coordination` block without `enabled`, now runs the board; write
+  `enabled: false` to keep it off (an explicit `false` is respected). An
+  explicit `allowed_principals` list is kept as is. Deploy with
+  `ops/update.ps1 -All` (or `ops/update.sh --all`) so the plugin cache and
+  the shim move with the daemon, then restart the clients. Re-run
+  `ops/install-hook.*` on installs wired by it, which replaces the old
+  unconditional check-in. Codex plugin users approve the two coordination
+  handlers once: `python ops/setup-codex-hooks.py --source plugin --trust ask`,
+  or `/hooks` in the Codex terminal app. Offline mailbox recovery now needs
+  an explicit `enabled: false` in the restored configuration.
+
 ### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
 - Startup memory context preserves its essential guidance and complete briefing
   items within its output budget, with explicit notices when content is omitted.

@@ -422,6 +422,51 @@ def test_mail_send_after_writer_handover_out_ranks_new_bank_history(
             a._storage.close()
 
 
+def test_mail_send_after_a_plain_reconnect_follows_the_new_writer_epoch(
+        pg_conn, pg_url, tmp_path):
+    """Every reconnect bumps the lease epoch, even with no other writer in
+    between, and a mail send is fenced by that epoch. The resident stores
+    are kept, so no reseed runs: only ``_ensure_init``'s no-handover branch
+    moves the service's copy of the epoch. Without it the fenced send fails,
+    its one retry fails the same way, and every later send is refused until
+    the daemon restarts or another writer's handover forces a re-read."""
+    from pseudolife_memory.coordination import dispatch
+    from pseudolife_memory.service import MemoryService
+
+    principal = "agent-user"
+    a = MemoryService(data_dir=tmp_path / "a", database_url=pg_url)
+    a.config.coordination.enabled = True
+    a.config.coordination.allowed_principals = [principal]
+    try:
+        a.cortex_write("svc", "port", "8080")
+        resident = a._cms
+        agent = dispatch(a, "register", {}, headers={}, principal=principal)
+        creds = {"x-pl-agent": agent["agent_id"],
+                 "x-pl-agent-key": agent["credential"]}
+        before = a._storage._lease_epoch
+        assert a._coordination_hlc_epoch == before
+        _kill(pg_conn, a._storage.conn.info.backend_pid)
+        # Reconnect outside _ensure_init, as any storage call can, so the
+        # send's first attempt meets the moved epoch.
+        a._storage._session_ok_at = 0.0
+        a._storage.verify_writer_session()
+        assert not a._storage.resident_invalidated
+        assert a._storage._lease_epoch != before
+
+        assert dispatch(a, "send", {"to": agent["agent_id"],
+                                    "text": "after a plain reconnect",
+                                    "request_id": "plain-reconnect"},
+                        headers=creds, principal=principal)["state"] == "queued"
+        assert a._coordination_hlc_epoch == a._storage._lease_epoch
+        assert a._cms is resident  # kept, not re-read
+    finally:
+        mailbox = getattr(a, "_coordination_storage", None)
+        if mailbox is not None:
+            mailbox.close()
+        if a._storage is not None:
+            a._storage.close()
+
+
 def test_mail_send_refuses_while_another_writer_holds_the_bank(
         pg_conn, pg_url, tmp_path):
     from pseudolife_memory.coordination import dispatch
