@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 45
+SCHEMA_META_VERSION = 46
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -588,6 +588,12 @@ CREATE INDEX IF NOT EXISTS coordination_lease_waiters_agent_idx
     ON coordination_lease_waiters (agent_id);
 -- v45: when an agent's current status stops being true, if it said.
 ALTER TABLE coordination_agents ADD COLUMN IF NOT EXISTS status_expires_at DOUBLE PRECISION;
+-- v46: a send event's body, outside the row hash. Its hashed payload holds
+-- the body's sha256 and byte count instead, so an operator can redact the
+-- body (NULL, behind a chained redact event) and the chain still verifies.
+-- NULL on every other event, and on sends written before v46, whose body
+-- stays inside the hashed payload.
+ALTER TABLE coordination_events ADD COLUMN IF NOT EXISTS body TEXT;
 """
 
 # v40: operational identities and addressed mail never enter the memory tables.

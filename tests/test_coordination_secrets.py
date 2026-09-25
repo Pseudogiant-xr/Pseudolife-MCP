@@ -1,0 +1,264 @@
+"""The board refuses credential-shaped text where it would keep it.
+
+A message body stays in the audit log for its retention window, and a status
+line or a lease purpose is hashed into the chain for good, so a secret pasted
+into any of them outlives the mistake. ``looks_like_secret`` is a heuristic
+net for the common shapes, not a guarantee; the refusal names only its code.
+
+Every credential-shaped sample below is assembled at run time, so no
+contiguous token lands in the tracked tree for a secret scanner to find.
+"""
+from __future__ import annotations
+
+import asyncio
+import threading
+
+import httpx
+import pytest
+
+from pseudolife_memory.storage.coordination import (
+    CoordinationError, looks_like_secret, secret_kind,
+)
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
+from tests.test_coordination_storage import creds, pair, store  # noqa: F401
+
+
+def j(*parts: str) -> str:
+    return "".join(parts)
+
+
+GITHUB = j("gh", "p_", "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2")
+GITHUB_OAUTH = j("gh", "o_", "Zz9Yy8Xx7Ww6Vv5Uu4Tt3Ss2Rr1Qq0Pp9Oo8")
+GITHUB_PAT = j("github", "_pat_", "11AB2CD3EF4GH5IJ6KL7MN", "_", "q8Rs9Tu0Vw1Xy2Za3Bc4De5Fg6Hi7Jk8Lm9No0")
+ANTHROPIC = j("sk-", "ant-", "api03-", "Xy9_Kq2-Lm7Pz4Rt6Wv8Bc3Dd1Ee5Ff0Gg")
+OPENAI = j("sk", "-", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V2")
+OPENAI_PROJECT = j("sk", "-proj-", "Zq9-Wd4_Rk7Pm2Xs8Lt3Nv6Hb1Jc5Gf0Ky9Ua4Ie7Ow2")
+AWS_KEY_ID = j("AK", "IA", "Q3R7T2W9Y4U8P6L1")
+AWS_SESSION_KEY_ID = j("AS", "IA", "Z9X8C7V6B5N4M3K2")
+SLACK = j("xo", "xb-", "123456789012-1234567890123-", "AbCdEfGhIjKlMnOpQrStUvWx")
+JWT = j("ey", "JhbGciOiJIUzI1NiJ9", ".", "ey", "JzdWIiOiIxMjM0NTY3ODkwIn0", ".",
+        "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U")
+PEM_RSA = j("-----BEGIN ", "RSA PRIVATE ", "KEY-----")
+PEM_PLAIN = j("-----BEGIN ", "PRIVATE ", "KEY-----")
+PEM_OPENSSH = j("-----BEGIN ", "OPENSSH PRIVATE ", "KEY-----")
+PEM_PGP = j("-----BEGIN ", "PGP PRIVATE ", "KEY BLOCK-----")
+URLSAFE = j("q7Hd2kLm9Pz4", "Rt6Wv8Xy1Bc3", "Ns5Jf0Ge")          # like token_urlsafe
+AWS_SECRET = j("wJalrXUtnFEMI", "/K7MDENG/", "bPxRfiCYEXAMPLEKEY")
+
+SECRETS = [
+    ("github_token", f"use {GITHUB} for the push"),
+    ("github_token", GITHUB_OAUTH),
+    ("github_pat", f"GITHUB_TOKEN is {GITHUB_PAT}"),
+    ("anthropic_key", f"key {ANTHROPIC} ok?"),
+    ("openai_key", OPENAI),
+    ("openai_key", f"({OPENAI_PROJECT})"),
+    ("aws_access_key_id", f"id={AWS_KEY_ID}"),
+    ("aws_access_key_id", AWS_SESSION_KEY_ID),
+    ("slack_token", f"bot {SLACK}"),
+    ("jwt", f"Authorization: Bearer {JWT}"),
+    ("private_key", f"{PEM_RSA}\nMIIEow..."),
+    ("private_key", PEM_PLAIN),
+    ("private_key", PEM_OPENSSH),
+    ("private_key", PEM_PGP),
+    ("key_value", f"PSEUDOLIFE_MCP_TOKEN={URLSAFE}"),
+    ("key_value", f'{{"api_key": "{URLSAFE}"}}'),
+    ("key_value", f"password: {j('hunter2', 'hunter2', 'hunter2')}"),
+    ("key_value", f"client_secret = '{URLSAFE}'"),
+    ("key_value", f"aws_secret_access_key={AWS_SECRET}"),
+    ("key_value", f"x-api-key: {URLSAFE}"),
+    ("key_value", f"apiKey={URLSAFE}"),
+    ("key_value", f"passwd={URLSAFE}"),
+    ("key_value", f"credentials:\t{URLSAFE}"),
+]
+
+ORDINARY = [
+    "I rotated the token; the secret now lives in the vault, not here.",
+    "token budget: core 11,495 of 11,500 chars",
+    "Pass the password prompt, then paste nothing: tokens and secrets stay local.",
+    # Digests and ids: 40-hex git SHAs, 64-hex sha256, UUIDs, 32-hex ids.
+    "merged 5057829364fdbf9e2ebfe007d7722c3001bfd471 onto master",
+    "sha256=" + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "credential_hash: " + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "token=" + "5057829364fdbf9e2ebfe007d7722c3001bfd471",
+    "session 123e4567-e89b-12d3-a456-426614174000 closed",
+    "session_token=123e4567-e89b-12d3-a456-426614174000",
+    "acked message 0123456789abcdef0123456789abcdef from agent fedcba9876543210fedcba9876543210",
+    "agent_key=0123456789abcdef0123456789abcdef",
+    "api_key=0123456789ABCDEF0123456789ABCDEF",
+    # Names, placeholders, paths and counts after a keyword.
+    "PSEUDOLIFE_MCP_TOKEN=<bearer>",
+    "token: PSEUDOLIFE_MCP_TOKEN_FILE",
+    "PSEUDOLIFE_MCP_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx",
+    "password_file=/run/secrets/db_password_2026_prod",
+    "token_file=C:/Users/example/token.txt",
+    "max_tokens=4096, tokens: 123456789012345678901234",
+    "tokenizer=all-MiniLM-L6-v2-onnx-quantized-int8",
+    "status: suite=running; secret_like_body=0 of 816",
+    "credential = secrets.token_urlsafe(32)",
+    "token_map=parse_token_map(os.environ.get('PSEUDOLIFE_MCP_TOKENS'))",
+    # Prefixes mentioned in prose, and sk- inside a longer word.
+    "keys start with sk-ant- or ghp_ and PEM files with BEGIN PRIVATE KEY",
+    "the task-a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7 branch",
+    "risk-a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7 note",
+    "sk-learn-style-estimator-wrapper-for-the-bench",
+    # Assembled like the samples above: the tracked-tree guard in
+    # test_release_ux flags these prefixes followed by any long run.
+    j("xo", "xb-", "token-placeholder-in-the-docs"),
+    j("github", "_pat_", "tokens_are_refused_by_the_board"),
+    "",
+]
+
+
+@pytest.mark.parametrize("kind,text", SECRETS)
+def test_credential_shapes_are_recognised(kind, text):
+    assert looks_like_secret(text)
+    assert secret_kind(text) == kind
+
+
+@pytest.mark.parametrize("text", ORDINARY)
+def test_ordinary_board_text_is_not(text):
+    assert not looks_like_secret(text), secret_kind(text)
+
+
+def test_a_long_body_of_identifier_characters_is_scanned_quickly():
+    """The scan runs on every send, up to 8192 bytes: no pattern may rescan
+    quadratically over a long run of key characters. Measured 2026-09-26 on
+    the maintainer's Windows host: the slowest of these took 1.4 ms, and
+    letting ``=`` into the assigned value (so every ``token=`` in a run of
+    them starts a value to the end of the text) made one take 252 ms. The
+    bound sits between the two, with room for a slower machine."""
+    import time
+    for text in ("token" * 1638, "a" * 8192, "sk-" + "a" * 8189, "tokenX" * 1365 + "=",
+                 "token=" * 1365, "token:a1" * 1024, ("secret_" * 1170)[:8192],
+                 "-----BEGIN A " * 630, "eyJ" * 2730, "sk-" * 2730):
+        timings = []
+        for _ in range(3):
+            started = time.perf_counter()
+            looks_like_secret(text)
+            timings.append(time.perf_counter() - started)
+        assert min(timings) < 0.1, (text[:12], min(timings))
+
+
+def _refused(call, secret):
+    with pytest.raises(CoordinationError) as caught:
+        call()
+    assert caught.value.code == "secret_like_body"
+    assert str(caught.value) == "secret_like_body"
+    assert secret not in repr(caught.value) and secret not in str(caught.value.args)
+
+
+def _log(store):
+    return store.storage.conn.execute(
+        "SELECT event, payload, body FROM coordination_events ORDER BY seq").fetchall()
+
+
+def test_send_refuses_a_secret_body_and_keeps_nothing(store):
+    a, b = pair(store)
+    before = _log(store)
+    body = f"here is the deploy key {GITHUB}, thanks"
+    _refused(lambda: store.send(*creds(a), to=b["agent_id"], text=body, request_id="r"), GITHUB)
+    assert _log(store) == before
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_messages").fetchone() == (0,)
+    assert store.receive(*creds(b))["messages"] == []
+
+
+def test_status_updates_and_registration_refuse_a_secret(store):
+    a = store.register("alice", status="starting")
+    before = _log(store)
+    status = f"using PSEUDOLIFE_MCP_TOKEN={URLSAFE}"
+    _refused(lambda: store.update(*creds(a), status=status), URLSAFE)
+    _refused(lambda: store.register("alice", status=status), URLSAFE)
+    assert _log(store) == before
+    assert store.authenticate(*creds(a))["status"] == "starting"
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_agents").fetchone() == (1,)
+    # Ordinary text still goes through on both paths.
+    store.update(*creds(a), status="suite=running, token budget fine")
+    assert store.authenticate(*creds(a))["status"] == "suite=running, token budget fine"
+
+
+def test_a_lease_purpose_refuses_a_secret(store):
+    store.storage.conn.execute("TRUNCATE coordination_leases, coordination_lease_waiters")
+    a = store.register("alice")
+    before = _log(store)
+    _refused(lambda: store.acquire_lease(*creds(a), name="gpu", purpose=f"with {SLACK}"), SLACK)
+    assert _log(store) == before
+    assert store.list_leases()["leases"] == []
+    assert store.acquire_lease(*creds(a), name="gpu", purpose="bench run")["state"] == "held"
+
+
+def test_secret_like_body_is_a_public_code():
+    from pseudolife_memory.coordination import PUBLIC_ERROR_CODES, public_error
+    assert "secret_like_body" in PUBLIC_ERROR_CODES
+    assert public_error(CoordinationError("secret_like_body")) == "secret_like_body"
+
+
+# ── REST: a 400 that names the code and never the text ───────────────────
+
+BEARER = {"Authorization": "Bearer fixture-bearer"}
+
+
+def _app(pg_url):
+    from pseudolife_memory.memory.hlc import HybridLogicalClock
+    from pseudolife_memory.storage.postgres import PostgresStorage
+    from pseudolife_memory.web.api import build_console_app
+    from pseudolife_memory.web.fixtures import FixtureService
+    from tests.asgi_helpers import stub_mcp
+    storage = PostgresStorage(pg_url)
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    service._db_url = pg_url
+    service._storage = storage
+    service._lock = threading.Lock()
+    service._hlc = HybridLogicalClock()
+    service._ensure_init = lambda: None
+    return storage, build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service,
+                                      token_map={})
+
+
+def test_rest_refuses_a_secret_with_400_and_no_echo(pg_conn, pg_url):
+    storage, app = _app(pg_url)
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            async def register(label):
+                response = await client.post(
+                    "http://fixture/api/coordination/register", headers=BEARER,
+                    json={"label": label, "capabilities": {"resumable": False}})
+                assert response.status_code == 200, response.text
+                body = response.json()
+                return body["agent_id"], {**BEARER, "X-PL-Agent": body["agent_id"],
+                                          "X-PL-Agent-Key": body["credential"]}
+
+            _, sender = await register("sender")
+            recipient, _ = await register("recipient")
+            for action, payload, secret in (
+                    ("send", {"to": recipient, "text": f"key: {ANTHROPIC}",
+                              "request_id": "secret-1"}, ANTHROPIC),
+                    ("update", {"status": f"jwt {JWT}"}, JWT),
+                    ("lease", {"name": "gpu", "purpose": PEM_RSA}, PEM_RSA)):
+                response = await client.post(f"http://fixture/api/coordination/{action}",
+                                             headers=sender, json=payload)
+                assert response.status_code == 400, (action, response.text)
+                assert response.json() == {"error": "secret_like_body"}
+                assert secret not in response.text
+            # The operator's redaction is not an agent action on any transport.
+            response = await client.post("http://fixture/api/coordination/redact",
+                                         headers=sender,
+                                         json={"message_id": "0" * 32, "reason": "no"})
+            assert response.status_code == 400
+            assert response.json() == {"error": "unknown_coordination_action"}
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), 20))
+    finally:
+        storage.close()
+
+
+def test_the_refusal_is_documented_where_operators_read_it():
+    """The core tool manifest has no room for it (11,495 of 11,500
+    characters), so the configuration guide carries the contract."""
+    from pathlib import Path
+    guide = (Path(__file__).resolve().parents[1] / "docs" / "guide"
+             / "configuration.md").read_text(encoding="utf-8")
+    assert "secret_like_body" in guide and "board-audit redact" in guide
