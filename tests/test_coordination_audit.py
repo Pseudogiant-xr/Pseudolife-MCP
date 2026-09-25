@@ -692,8 +692,14 @@ def test_redact_removes_a_body_from_the_log_and_the_mailbox_and_logs_why(store):
     sent, other = events(store, "send")
     store.test_time[0] += 30
     result = store.redact(oops["message_id"], "pasted a credential by mistake")
+    redact_row = chain(store)[-1]
     assert result == {"message_id": oops["message_id"], "seq": sent["seq"], "redact_seq": 5,
-                      "live_body_cleared": True}
+                      "redact_hash": redact_row["hash"],
+                      "expect_head": f"5:{redact_row['hash']}",
+                      "live_body_cleared": True, "audit_copy": "removed"}
+    # The new head, recorded outside the bank, catches a later removal of
+    # the redact row itself.
+    assert verify(store, expect_head=(5, redact_row["hash"]))["ok"]
     redacted, still = events(store, "send")
     # The body is gone; the hashed digest stays, so the chain still holds.
     assert redacted["body"] is None and redacted["payload"] == sent["payload"]
@@ -711,7 +717,7 @@ def test_redact_removes_a_body_from_the_log_and_the_mailbox_and_logs_why(store):
             red["recipient_agent_id"], red["message_id"], red["created_at"], red["body"]) == (
         5, "operator", "", a["agent_id"], b["agent_id"], oops["message_id"], 1030.0, None)
     assert red["payload"] == {"message_id": oops["message_id"], "seq": sent["seq"],
-                              "reason": "pasted a credential by mistake"}
+                              "reason": "pasted a credential by mistake", "audit_copy": "removed"}
     assert verify(store)["ok"]
 
     logged = chain(store)
@@ -737,12 +743,13 @@ def test_redact_reaches_the_log_after_the_live_message_is_gone(store):
 
 def test_redact_refuses_what_it_cannot_remove(store):
     a, b = pair(store)
-    legacy = _legacy_send(store, a, b, "a v45 body")
+    legacy = _legacy_send(store, a, b, "a v45 body")      # no live copy left either
     logged = chain(store)
     with pytest.raises(CoordinationError, match="^message_not_found$"):
         store.redact("0" * 32, "no such message")
     # Before v46 the body is inside the hashed payload: removing it would
-    # break the chain, so it stays until audit retention removes the event.
+    # break the chain, so it stays until audit retention removes the event,
+    # and with the live copy gone there is nothing left to take.
     with pytest.raises(CoordinationError, match="^body_in_hashed_payload$"):
         store.redact(legacy, "too old")
     assert chain(store) == logged
@@ -750,9 +757,52 @@ def test_redact_refuses_what_it_cannot_remove(store):
     assert verify(store)["ok"]
 
 
+def _sent_by_v45(monkeypatch, store, a, b, text):
+    """Send as a v45 daemon did: the body inside the hashed payload."""
+    real = CoordinationStore._event
+
+    def v45(event, payload, **fields):
+        if event == "send":
+            payload = {k: v for k, v in payload.items() if k not in ("text_sha256", "text_bytes")}
+            payload["text"] = fields.pop("body")
+        return real(event, payload, **fields)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(CoordinationStore, "_event", staticmethod(v45))
+        return store.send(*creds(a), to=b["agent_id"], text=text, request_id="v45")
+
+
+def test_redacting_a_pre_v46_message_still_takes_its_live_copy_out_of_delivery(
+        store, monkeypatch):
+    """The audit copy of a pre-v46 body cannot be removed, but the live copy
+    would otherwise be served for up to a day: blank and expire it, and say
+    in the log that the audit copy stays."""
+    a, b = pair(store)
+    msg = _sent_by_v45(monkeypatch, store, a, b, "sent by a v45 daemon")
+    [sent] = events(store, "send")
+    assert sent["payload"]["text"] == "sent by a v45 daemon" and sent["body"] is None
+    store.test_time[0] += 30
+    result = store.redact(msg["message_id"], "pasted by mistake")
+    assert (result["seq"], result["live_body_cleared"], result["audit_copy"]) == (
+        sent["seq"], True, "kept")
+    assert store.storage.conn.execute(
+        "SELECT text, expires_at FROM coordination_messages WHERE message_id=%s",
+        (msg["message_id"],)).fetchone() == (None, 1030.0)
+    assert store.receive(*creds(b))["messages"] == []
+    [red] = events(store, "redact")
+    assert (red["actor"], red["payload"]) == ("operator", {
+        "message_id": msg["message_id"], "seq": sent["seq"], "reason": "pasted by mistake",
+        "audit_copy": "kept"})
+    assert events(store, "send")[0]["payload"] == sent["payload"]
+    assert verify(store)["ok"]
+    with pytest.raises(CoordinationError, match="^body_in_hashed_payload$"):
+        store.redact(msg["message_id"], "again")
+    assert len(events(store, "redact")) == 1
+
+
 @pytest.mark.parametrize("reason", [
     "", "   ", "x" * 241, "bell\x07", "tab\tinside", "line\nbreak", "del\x7f", "c1\x85",
-    "bidi‮flip", "lone\ud800", None, 7])
+    "bidi‮flip", "lone\ud800", "line separator", "para separator", None, 7])
 def test_redact_needs_a_short_printable_reason(store, reason):
     a, b = pair(store)
     msg = store.send(*creds(a), to=b["agent_id"], text="body", request_id="r")
@@ -831,8 +881,9 @@ def _rechained(rows):
     return out
 
 
-def _redact_row(*, names, payload_message_id, **fields):
-    payload = {"message_id": payload_message_id, "seq": names, "reason": "forged"}
+def _redact_row(*, names, payload_message_id, audit_copy="removed", **fields):
+    payload = {"message_id": payload_message_id, "seq": names, "reason": "forged",
+               "audit_copy": audit_copy}
     return {"event": "redact", "actor": "operator", "principal": "", "agent_id": "",
             "recipient_agent_id": None, "project": "", "task": "",
             "message_id": payload_message_id, "created_at": 2000.0, "hlc": "",
@@ -847,6 +898,7 @@ def _redact_row(*, names, payload_message_id, **fields):
     ("not_the_operator", False),
     ("before_the_send", False),
     ("malformed_seq", False),              # fails as body_missing, never crashes verify
+    ("audit_copy_kept", False),            # a pre-v46 redaction removes no audit body
 ])
 def test_only_a_later_operator_redact_naming_the_send_accounts_for_a_missing_body(
         store, forgery, ok):
@@ -864,7 +916,9 @@ def test_only_a_later_operator_redact_naming_the_send_accounts_for_a_missing_bod
               "names_another_message": _redact_row(names=3, payload_message_id="f" * 32),
               "not_the_operator": _redact_row(names=3, payload_message_id=mid, actor="agent"),
               "before_the_send": _redact_row(names=4, payload_message_id=mid),
-              "malformed_seq": _redact_row(names=[3], payload_message_id=mid)}[forgery]
+              "malformed_seq": _redact_row(names=[3], payload_message_id=mid),
+              "audit_copy_kept": _redact_row(names=3, payload_message_id=mid,
+                                             audit_copy="kept")}[forgery]
     rows = rows[:2] + [redact] + rows[2:] if forgery == "before_the_send" else rows + [redact]
     report = verify_audit_chain(_rechained(rows))
     if ok:
@@ -872,6 +926,24 @@ def test_only_a_later_operator_redact_naming_the_send_accounts_for_a_missing_bod
     else:
         missing = 4 if forgery == "before_the_send" else 3
         assert report == {"ok": False, "seq": missing, "reason": "body_missing"}
+
+
+def test_rows_read_without_a_body_field_are_named_as_such_not_as_tampering(store):
+    """An export written by a pre-v46 CLI carries no body field at all, so
+    every v46 send in it would read as a removed body. The reason says what
+    is wrong with the file; a body a later redact accounts for still passes."""
+    from pseudolife_memory.storage.coordination import verify_audit_chain
+    a, b = pair(store)
+    msg = store.send(*creds(a), to=b["agent_id"], text="exported without its body",
+                     request_id="r")
+
+    def without_body():
+        return [{k: v for k, v in row.items() if k != "body"} for row in chain(store)]
+
+    assert verify_audit_chain(without_body()) == {
+        "ok": False, "seq": 3, "reason": "body_not_exported"}
+    store.redact(msg["message_id"], "pasted by mistake")
+    assert verify_audit_chain(without_body())["ok"]
 
 
 def test_redact_waits_for_a_retention_cut_without_deadlocking(store, pg_url):

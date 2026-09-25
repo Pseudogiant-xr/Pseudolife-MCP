@@ -22,26 +22,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (operator-only; no MCP tool or REST route) blanks that body and the live
   mailbox copy, ends the message's delivery, and appends a chained operator
   `redact` event naming the send event and the reason, in one transaction and
-  under the daemon's own locks, so it runs beside a live daemon. It refuses
-  an unknown id, a body already redacted, and a message sent before v46,
-  whose body is inside the hashed payload and stays until audit retention
-  removes the event.
+  under the daemon's own locks, so it runs beside a live daemon; a busy board
+  is reported as busy (exit 2), with nothing changed. It then vacuums the two
+  board tables so the old row versions are freed, and prints the new head
+  (`expect_head`) to record for a later `verify --expect-head`. For a message
+  sent before v46, whose body is inside the hashed payload and stays until
+  audit retention removes the event, it still blanks and expires the live
+  copy while there is one, and logs that the audit copy was kept. It refuses
+  an unknown id and a body already redacted.
 - `board-audit verify` checks every present body against its digest
   (`body_mismatch`, which also covers a body on a row that commits to none
   and a body written back after its redaction) and accepts an absent one only
-  behind a later operator `redact` event that names it (`body_missing`). `export` lines carry `body`; exports written
-  before v46 still verify, and the offline recovery CLI still records its
-  events on a restored v42-v45 bank that has no body column yet.
-- The board refuses credential-shaped message bodies, statuses, lease
-  purposes and redaction reasons with a new `secret_like_body` error (HTTP
-  400) that never repeats the text: GitHub, Anthropic, OpenAI-style and
-  Slack tokens, AWS access key ids, JWTs, PEM private-key headers, and a
-  secret-named key assigned a random-looking value. Over the 816 message
-  bodies and 25 non-empty statuses of the 2026-09-23/24 fifteen-session trial
-  it refused none. It is a net for common shapes, not a guarantee.
-- Limits: the send event keeps the body's sha256, so a short or guessable body
-  can still be confirmed by someone who guesses it exactly; backups and
-  exports taken before a redaction still hold the body.
+  behind a later operator `redact` event that names it and removed it
+  (`body_missing`). `export` lines carry `body`; an export without body fields
+  (written by a pre-v46 CLI) fails as `body_not_exported` rather than as
+  tampering, a line with a repeated key is refused, and exports of pre-v46
+  logs still verify. The offline recovery CLI still records its events on a
+  restored v42-v45 bank that has no body column yet.
+- The v46 column is added only when it is missing. `ADD COLUMN IF NOT EXISTS`
+  takes an exclusive table lock even when the column exists, so an open
+  `board-audit export` (a read lock held for its whole snapshot) would have
+  failed every daemon start's schema pass at its 5 s lock timeout.
+- The board refuses text shaped like a credential wherever it would keep it,
+  with a new `secret_like_body` error (HTTP 400) that never repeats the text:
+  message bodies and request ids; statuses, labels, projects, tasks and
+  episodes (project and task are copied into every later audit row); lease
+  names and purposes; and redaction reasons. The shapes are GitHub, GitLab,
+  Hugging Face, Anthropic, OpenAI-style, Stripe, Slack and Google keys and
+  tokens, AWS access key ids and secret keys, JWTs, bearer tokens, DSN
+  passwords, PEM private-key headers, and a secret-named key or `--flag`
+  (including `PSEUDOLIFE_MCP_TOKENS` maps and the `X-PL-Agent-Key` header)
+  given a generated-looking value; paths, branch names, digests, ids, names
+  and placeholders after such a key are not. Over the 2026-09-23/24
+  fifteen-session trial's board export it refused none of the 816 message
+  bodies and request ids, the 25 statuses, or the labels, projects, tasks and
+  episodes of its 26 agents. It is a net for common shapes, not a guarantee:
+  lower-case passwords under 32 characters get through.
+- Limits: the send event keeps the body's sha256, and the mailbox row's
+  request fingerprint (kept seven days) is a sha256 over the body too, so a
+  short or guessable body can still be confirmed by someone who guesses it
+  exactly; backups, WAL archives and exports taken before a redaction still
+  hold the body.
 
 ### Added (2026-09-26 — agents queue for shared resources on the board instead of by message, schema v45)
 - Agents that share one machine can now hold a named, expiring **resource

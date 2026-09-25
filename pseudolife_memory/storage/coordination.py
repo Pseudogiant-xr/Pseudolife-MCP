@@ -294,14 +294,17 @@ def _message_ids(value: Any) -> tuple[list[str], bool]:
 # ── secret-shaped text ────────────────────────────────────────────────────
 #
 # The board keeps what agents write: a message body for the audit log's
-# retention window (and in every backup taken meanwhile), a status line or a
-# lease purpose hashed into the chain for good. Text shaped like a credential
-# is refused where it would be kept, with ``secret_like_body`` and never an
-# echo of the text. A net for the common shapes, not a guarantee: a v46
-# message body it misses can still be removed with ``redact``. Checked
-# 2026-09-26 against the board export of the 2026-09-23/24 fifteen-session
-# trial: no hits in its 816 message bodies or 25 non-empty statuses (one body
-# put ``:`` after a secret-named key, with a value under 20 characters).
+# retention window (and in every backup taken meanwhile); a status, label,
+# project, task, episode, lease name or purpose, or request id hashed into
+# the chain for good. Text shaped like a credential is refused where it
+# would be kept, with ``secret_like_body`` and never an echo of the text. A
+# net for the common shapes, not a guarantee: a v46 message body it misses
+# can still be removed with ``redact``. Checked 2026-09-26 against the board
+# export of the 2026-09-23/24 fifteen-session trial: no hits in its 816
+# message bodies or 25 non-empty statuses. The 2026-09-26 review added this
+# deployment's own shapes (a principal token map, the adapter's key header,
+# a DSN password, a bearer token) and removed its false positives (branch
+# names and paths after a key, truncated digests, names without digits).
 
 
 def _char_classes(value: str) -> int:
@@ -314,6 +317,10 @@ def _random_looking(value: str) -> bool:
     return _char_classes(value) >= 2
 
 
+def _three_classes(value: str) -> bool:
+    return _char_classes(value) == 3
+
+
 def _letter_and_digit(value: str) -> bool:
     return any(c.isalpha() for c in value) and any(c.isdigit() for c in value)
 
@@ -322,49 +329,92 @@ def _has_digit(value: str) -> bool:
     return any(c.isdigit() for c in value)
 
 
+def _random_token(value: str) -> bool:
+    """A run that looks generated rather than written: letters and digits,
+    and under 32 characters all three of lower case, upper case and digits.
+    Words, names (``PSEUDOLIFE_MCP_TOKEN_FILE``, camelCase), branch-like
+    ``name-2026`` strings and counts are not."""
+    return _letter_and_digit(value) and (len(value) >= 32 or _three_classes(value))
+
+
+def _dsn_password(value: str) -> bool:
+    """A DSN's password, unless it is a placeholder (``<password>``,
+    ``${POSTGRES_PASSWORD}``, ``*****``)."""
+    return value[0] not in "<${[(*" and not set(value) <= set("*xX.")
+
+
 # (name, pattern, check on group 1 or None). Prefixes are strong evidence on
 # their own; where a prefix also starts ordinary words or identifiers
-# (``sk-learn-...``, ``github_pat_tests_...``), the tail must look random.
+# (``sk-learn-...``, ``github_pat_tests_...``, ``ghs_<lowercase id>``,
+# ``ASIAPACIFIC...``), the tail must look random. Searched in this order;
+# ``secret_kind`` names the first that matches.
 _SECRET_SHAPES = (
     ("private_key", re.compile(r"-----BEGIN (?:[A-Z0-9]+ ){0,4}PRIVATE KEY(?: BLOCK)?-----"),
      None),
     ("github_pat", re.compile(r"(?<![A-Za-z0-9])github_pat_([A-Za-z0-9_]{22,})"),
-     _random_looking),
-    ("github_token", re.compile(r"(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36,}"), None),
-    ("anthropic_key", re.compile(r"(?<![A-Za-z0-9_-])sk-ant-([A-Za-z0-9_-]{20,})"),
-     _random_looking),
-    ("openai_key", re.compile(r"(?<![A-Za-z0-9_-])sk-([A-Za-z0-9_-]{32,})"),
-     _letter_and_digit),
+     _three_classes),
+    ("github_token", re.compile(r"(?<![A-Za-z0-9])gh[pousr]_([A-Za-z0-9]{36,})"),
+     _three_classes),
+    ("anthropic_key", re.compile(r"(?<![A-Za-z0-9_./-])sk-ant-([A-Za-z0-9_-]{20,})"),
+     _three_classes),
+    ("openai_key", re.compile(r"(?<![A-Za-z0-9_./-])sk-([A-Za-z0-9_-]{32,})"),
+     _three_classes),
     ("aws_access_key_id",
-     re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])"), None),
+     re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)([A-Z0-9]{16})(?![A-Za-z0-9])"), _has_digit),
+    ("aws_secret_key",
+     re.compile(r"(?i:aws_?secret_?(?:access_?)?key)[\"']?[ \t]{0,4}[:=][ \t]{0,4}[\"']?"
+                r"([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+])"), _letter_and_digit),
     ("slack_token", re.compile(r"(?<![A-Za-z0-9])xox[abprs]-([A-Za-z0-9-]{10,})"), _has_digit),
+    ("huggingface_token", re.compile(r"(?<![A-Za-z0-9_])hf_([A-Za-z0-9]{30,})"),
+     _three_classes),
+    ("stripe_key", re.compile(r"(?<![A-Za-z0-9_])[sr]k_live_([A-Za-z0-9]{20,})"),
+     _letter_and_digit),
+    ("google_api_key", re.compile(r"(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])"),
+     None),
+    ("gitlab_token", re.compile(r"(?<![A-Za-z0-9_-])glpat-([A-Za-z0-9_-]{20,})"),
+     _random_looking),
     ("jwt", re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}"
                        r"\.[A-Za-z0-9_-]{8,}"), None),
+    ("bearer_token", re.compile(r"(?<![A-Za-z0-9])(?i:bearer)[ \t]+([A-Za-z0-9_.~+/-]{16,}={0,2})"),
+     _random_token),
+    ("dsn_password", re.compile(r"://[^\s/:@]+:([^\s@/]{6,})@"), _dsn_password),
 )
-# A key naming a secret, then ``:`` or ``=`` and a value. Found keyword first
-# and matched forward with bounded runs, so a long body cannot backtrack
-# quadratically. ``token`` excludes ``tokenizer``/``tokenize``.
-_SECRET_KEY = re.compile(r"(?i:secret|token(?!iz)|password|passwd|api[_-]?key|credential)",
-                         re.ASCII)
+# A key naming a secret, then ``:`` or ``=`` (or, for a ``--flag``,
+# whitespace) and a value. ``token`` excludes tokenize/tokenise; ``key`` and
+# ``auth`` cover private_key, access_key, auth and the adapter's
+# X-PL-Agent-Key header.
+_SECRET_KEY = re.compile(
+    r"(?i:secret|token(?!i[sz])|password|passwd|credential|key|auth|bearer)", re.ASCII)
+# Matched forward from each key with bounded runs, and the scan resumes after
+# the value it consumed, so a long body is read once. The value keeps ``:``,
+# ``,`` and ``=`` so a principal map (``codex:<token>,claude:<token>``) is
+# split into its pieces rather than cut at the first name.
+_VALUE = r"([A-Za-z0-9_+/=:,-]+)"
 _SECRET_ASSIGNMENT = re.compile(
-    r"[A-Za-z0-9_.-]{0,40}[\"']?[ \t]{0,4}[:=][ \t]{0,4}[\"']?([A-Za-z0-9_+/-]{20,}={0,2})",
-    re.ASCII)
+    r"[A-Za-z0-9_.-]{0,40}[\"']?[ \t]{0,4}[:=][ \t]{0,4}[\"']?" + _VALUE, re.ASCII)
+_CLI_FLAG = re.compile(r"(?<![A-Za-z0-9_-])--([A-Za-z0-9_-]{1,60})[ \t]+[\"']?" + _VALUE,
+                       re.ASCII)
+_PIECES = re.compile(r"[,:=]")
 _HEX = frozenset("0123456789abcdefABCDEF")
 _UUID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+_SRI = re.compile(r"sha(?:1|256|384|512)-", re.IGNORECASE)
 
 
 def _assigned_secret(value: str) -> bool:
-    """Whether a value assigned to a secret-named key looks like one. What
-    this board carries after such keys in ordinary traffic is not: a POSIX
-    path, a name (one case, no digits: ``PSEUDOLIFE_MCP_TOKEN_FILE``), a
-    count, a 32-hex id, a 40-hex git SHA, a 64-hex sha256 digest, a UUID."""
-    if value.startswith("/"):
-        return False
-    if len(value) in (32, 40, 64) and all(c in _HEX for c in value):
-        return False
-    if _UUID.fullmatch(value):
-        return False
-    return _random_looking(value)
+    """Whether a value given to a secret-named key holds one. It is split on
+    ``,``, ``:`` and ``=``; a piece counts when it is 20 or more characters
+    and looks generated (``_random_token``). What this board carries after
+    such keys in ordinary traffic does not: anything with a ``/`` (a path, a
+    branch, ``owner/repo``), all-hex (an id, a git SHA, a sha256 digest, whole
+    or truncated), anything holding a UUID, a subresource hash
+    (``sha256-...``), names, words and counts."""
+    for piece in _PIECES.split(value):
+        if (len(piece) >= 20 and "/" not in piece
+                and not all(c in _HEX for c in piece)
+                and _UUID.search(piece) is None and _SRI.match(piece) is None
+                and _random_token(piece)):
+            return True
+    return False
 
 
 def secret_kind(text: str) -> str | None:
@@ -375,19 +425,29 @@ def secret_kind(text: str) -> str | None:
         for match in pattern.finditer(text):
             if check is None or check(match.group(1)):
                 return name
-    for key in _SECRET_KEY.finditer(text):
+    for flag in _CLI_FLAG.finditer(text):
+        if _SECRET_KEY.search(flag.group(1)) and _assigned_secret(flag.group(2)):
+            return "cli_flag"
+    pos = 0
+    while (key := _SECRET_KEY.search(text, pos)) is not None:
         assigned = _SECRET_ASSIGNMENT.match(text, key.end())
-        if assigned is not None and _assigned_secret(assigned.group(1)):
+        if assigned is None:
+            pos = key.end()
+            continue
+        if _assigned_secret(assigned.group(1)):
             return "key_value"
+        pos = assigned.end()
     return None
 
 
 def looks_like_secret(text: str) -> bool:
     """Whether ``text`` holds something shaped like a credential: a GitHub,
-    Anthropic, OpenAI-style or Slack token, an AWS access key id, a JWT, a
-    PEM private-key header, or a secret-named key assigned a random-looking
-    value. Ordinary prose about tokens and secrets, git SHAs, sha256
-    digests, UUIDs and message or agent ids are not."""
+    GitLab, Hugging Face, Anthropic, OpenAI-style, Stripe, Slack or Google
+    key or token, an AWS access key id or secret key, a JWT, a bearer token,
+    a DSN password, a PEM private-key header, or a secret-named key or
+    ``--flag`` given a generated-looking value. Ordinary prose about tokens
+    and secrets, git SHAs, digests, UUIDs, message and agent ids, paths,
+    branch names and placeholders are not."""
     return secret_kind(text) is not None
 
 
@@ -496,12 +556,16 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
     it and ``text_bytes`` (``body_mismatch``; a body on any other row is
     content the chain never vouched for, and one on a send that a later
     operator ``redact`` event names was written back after its redaction,
-    since redaction blanks it in the same transaction). A v46 send event without its body
-    must be named by a later ``redact`` event, written by the operator, whose
-    payload gives that event's ``seq`` and ``message_id``; otherwise it
-    fails as ``body_missing``, reported once the walk ends, since the redact
-    comes after it. Send events from before v46 keep ``text`` inside the
-    hashed payload and carry no body. A log whose oldest rows were removed must start right
+    since redaction blanks it in the same transaction). A v46 send event
+    without its body must be named by a later ``redact`` event, written by
+    the operator, whose payload gives that event's ``seq`` and
+    ``message_id`` and says the body was removed (``audit_copy:
+    removed``); otherwise it fails as ``body_missing``, reported once the
+    walk ends, since the redact comes after it, or as ``body_not_exported``
+    when the row has no ``body`` field at all (an export written by a
+    pre-v46 CLI). Send events from before v46 keep ``text`` inside the
+    hashed payload and carry no body; redacting one takes only the live copy
+    and says so (``audit_copy: kept``). A log whose oldest rows were removed must start right
     after a cut recorded later in the same chain (an ``audit_prune`` naming
     the last removed row) whose own fields add up: written by the daemon, a
     window of at least a day, the cutoff that window gives at its time, and
@@ -527,7 +591,7 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
     count = 0
     cuts = {}
     expected = None
-    absent = {}                                 # seq -> message_id of a bodiless v46 send
+    absent = {}                     # seq -> (message_id, body field present) of a bodiless v46 send
     kept = set()                                # seqs of v46 sends that keep their body
     for row in rows:
         seq = row["seq"]
@@ -549,7 +613,7 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
                 return _broken(seq, "body_mismatch")
             kept.add(seq)
         elif event == "send" and payload is not None and "text_sha256" in payload:
-            absent[seq] = row["message_id"]
+            absent[seq] = (row["message_id"], "body" in row)
         if event == "redact" and row["actor"] == "operator" and payload is not None:
             named, message_id = payload.get("seq"), payload.get("message_id")
             if type(named) is int:
@@ -557,7 +621,8 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
                     # Redaction blanks the body in the redact's own
                     # transaction, so a body still there was written back.
                     return _broken(named, "body_mismatch")
-                if isinstance(message_id, str) and absent.get(named) == message_id:
+                if (payload.get("audit_copy") == "removed" and isinstance(message_id, str)
+                        and named in absent and absent[named][0] == message_id):
                     del absent[named]
         if event == "audit_prune" and (cut := _cut(row)) is not None:
             cuts[(cut["through_seq"], cut["through_hash"])] = cut
@@ -575,7 +640,8 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
         start_cut = {key: cut[key] for key in
                      ("seq", "created_at", "cutoff", "retention_days", "through_seq")}
     if absent:
-        return _broken(min(absent), "body_missing")
+        missing = min(absent)
+        return _broken(missing, "body_missing" if absent[missing][1] else "body_not_exported")
     if expect_head is not None:
         seq, digest = expect_head
         if expected is None:
@@ -703,6 +769,7 @@ class CoordinationStore:
                 cur.executemany(_AUDIT_INSERT, plain)
             if bodied:
                 cur.executemany(_AUDIT_INSERT_BODY, bodied)
+        return seq, prev
 
     def _audit_present(self):
         """Whether the log exists. Only the offline recovery paths ask: they
@@ -819,9 +886,10 @@ class CoordinationStore:
         for key, value in fields.items():
             if key in limits:
                 _string(value, limits[key], key)
-                if key == "status":
-                    # Hashed into the audit chain for good (register, update).
-                    _refuse_secret(value)
+                # Hashed into the audit chain for good: every field in the
+                # register event, and project and task into the columns of
+                # every later event by this agent.
+                _refuse_secret(value)
             elif key == "wake_enabled":
                 if not isinstance(value, bool):
                     raise CoordinationError("invalid_wake_enabled")
@@ -959,6 +1027,8 @@ class CoordinationStore:
                 or len(name) > MAX_LEASE_NAME
                 or any(unicodedata.category(c)[0] == "C" for c in name)):
             raise CoordinationError("invalid_lease")
+        # The name is in every lease event's hashed payload, for good.
+        _refuse_secret(name)
         if ttl is not None and (type(ttl) is not int
                                 or not LEASE_TTL_MIN <= ttl <= LEASE_TTL_MAX):
             raise CoordinationError("invalid_ttl")
@@ -1340,9 +1410,11 @@ class CoordinationStore:
             valid_text = False
         if not valid_text:
             raise CoordinationError("invalid_text")
-        # Refused before any row is read or written: the audit log would keep
-        # the body for its whole retention window.
+        # Refused before this call reads or writes a row: the audit log would
+        # keep the body for its whole retention window, and the request id
+        # in the send event's hashed payload for good.
         _refuse_secret(text)
+        _refuse_secret(request_id)
         if reply_to is not None:
             _string(reply_to, 120, "reply", empty=False)
         if expires_at is not None and (isinstance(expires_at, bool) or
@@ -1705,25 +1777,35 @@ class CoordinationStore:
         In one transaction: blank the ``body`` of the message's send event,
         blank the live copy if prune has not already and end its delivery,
         and append a chained ``redact`` event (actor ``operator``) whose
-        payload names the send event's ``seq`` and the operator's reason. The
-        send event's hashed payload keeps the body's sha256 and byte count,
-        so the chain still verifies, and ``verify_audit_chain`` accepts the
-        absent body only behind that event. Copies outside the bank (a
-        backup, an export, what the recipient already read) are untouched.
+        payload names the send event's ``seq``, the operator's reason, and
+        ``audit_copy: removed``. The send event's hashed payload keeps the
+        body's sha256 and byte count, so the chain still verifies, and
+        ``verify_audit_chain`` accepts the absent body only behind that
+        event. A message sent before v46 has its body inside the hashed
+        payload, which cannot change; while its live copy is still there, that
+        copy is blanked and taken out of delivery all the same, and the event
+        says ``audit_copy: kept``. Copies outside the bank (a backup, an
+        export, what the recipient already read) are untouched.
+
+        Returns the send event's ``seq``, the redact event's ``redact_seq``
+        and ``redact_hash`` (with ``expect_head``, the two as ``verify
+        --expect-head`` takes them: recorded outside the bank, they catch a
+        later removal of this record), ``live_body_cleared`` and
+        ``audit_copy``.
 
         Refused: ``invalid_message_id``, ``invalid_reason`` (blank, over
-        MAX_REDACT_REASON characters, or holding a control or format
-        character), ``secret_like_body`` (the reason is hashed for good),
-        ``message_not_found`` (no send event for the id: unknown, or removed
-        by audit retention), ``body_in_hashed_payload`` (sent before v46,
-        when the body was part of the hashed payload, so removing it would
-        break the chain), ``already_redacted``."""
+        MAX_REDACT_REASON characters, or holding a control, format or
+        line/paragraph separator character), ``secret_like_body`` (the reason
+        is hashed for good), ``message_not_found`` (no send event for the id:
+        unknown, or removed by audit retention), ``body_in_hashed_payload``
+        (sent before v46 and no live copy left to take), ``already_redacted``."""
         if (not isinstance(message_id, str) or not message_id or len(message_id) > 120
                 or any(c not in _ID_CHARS for c in message_id)):
             raise CoordinationError("invalid_message_id")
         if (not isinstance(reason, str) or not reason.strip()
                 or len(reason) > MAX_REDACT_REASON
-                or any(unicodedata.category(c) in ("Cc", "Cf", "Cs") for c in reason)):
+                or any(unicodedata.category(c) in ("Cc", "Cf", "Cs", "Zl", "Zp")
+                       for c in reason)):
             raise CoordinationError("invalid_reason")
         _refuse_secret(reason)
         with self.storage._txn():
@@ -1744,22 +1826,29 @@ class CoordinationStore:
                 raise CoordinationError("message_not_found")
             payload = _parsed_payload(sent)
             if payload is None or "text_sha256" not in payload:
-                # Decided before the body column is touched, so a restored
-                # v42-v45 bank that has none yet refuses here too.
-                raise CoordinationError("body_in_hashed_payload")
-            if self._one("UPDATE coordination_events SET body=NULL WHERE seq=%s "
-                         "AND body IS NOT NULL RETURNING seq", (sent["seq"],)) is None:
+                # Sent before v46: the audit copy stays. Decided before the
+                # body column is touched, so a restored v42-v45 bank that has
+                # none yet takes this path too.
+                if live is None or live["text"] is None:
+                    raise CoordinationError("body_in_hashed_payload")
+                audit_copy = "kept"
+            elif self._one("UPDATE coordination_events SET body=NULL WHERE seq=%s "
+                           "AND body IS NOT NULL RETURNING seq", (sent["seq"],)) is None:
                 raise CoordinationError("already_redacted")
+            else:
+                audit_copy = "removed"
             cleared = False
             if live is not None:
                 cleared = live["text"] is not None
                 self.storage.conn.execute(
                     "UPDATE coordination_messages SET text=NULL,expires_at=LEAST(expires_at,%s) "
                     "WHERE message_id=%s", (now, message_id))
-            self._append([self._event(
-                "redact", {"message_id": message_id, "seq": sent["seq"], "reason": reason},
+            seq, digest = self._append([self._event(
+                "redact", {"message_id": message_id, "seq": sent["seq"], "reason": reason,
+                           "audit_copy": audit_copy},
                 actor="operator", agent_id=sent["agent_id"],
                 recipient=sent["recipient_agent_id"], project=sent["project"],
                 task=sent["task"], message_id=message_id)], now, head=head)
-        return {"message_id": message_id, "seq": sent["seq"], "redact_seq": head[0] + 1,
-                "live_body_cleared": cleared}
+        return {"message_id": message_id, "seq": sent["seq"], "redact_seq": seq,
+                "redact_hash": digest, "expect_head": f"{seq}:{digest}",
+                "live_body_cleared": cleared, "audit_copy": audit_copy}

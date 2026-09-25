@@ -594,8 +594,20 @@ ALTER TABLE coordination_agents ADD COLUMN IF NOT EXISTS status_expires_at DOUBL
 -- the body's sha256 and byte count instead, so an operator can redact the
 -- body (NULL, behind a chained redact event) and the chain still verifies.
 -- NULL on every other event, and on sends written before v46, whose body
--- stays inside the hashed payload.
-ALTER TABLE coordination_events ADD COLUMN IF NOT EXISTS body TEXT;
+-- stays inside the hashed payload. Added only when missing: ADD COLUMN IF
+-- NOT EXISTS takes an ACCESS EXCLUSIVE lock even when the column exists, and
+-- board-audit export/verify hold a read lock on this table for their whole
+-- snapshot, so on every daemon start an open export would fail the schema
+-- pass at its 5 s lock timeout (review, 2026-09-26).
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'coordination_events'::regclass
+                     AND attname = 'body' AND attnum > 0 AND NOT attisdropped) THEN
+        -- IF NOT EXISTS still: two first starts racing both reach here.
+        ALTER TABLE coordination_events ADD COLUMN IF NOT EXISTS body TEXT;
+    END IF;
+END $$;
 """
 
 # v40: operational identities and addressed mail never enter the memory tables.

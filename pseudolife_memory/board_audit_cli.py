@@ -16,7 +16,8 @@ private: keep it out of repositories and anywhere public.
 Exit status: 0 success, 1 the chain failed verification, an expected head
 could not be confirmed, or a redaction was refused (the JSON result says why),
 2 nothing could be checked or changed (bad arguments, no bank, no audit log, a
-log that predates v46 for ``redact``, an unreadable file, output closed early).
+log that predates v46 or a busy board for ``redact``, an unreadable file,
+output closed early).
 """
 from __future__ import annotations
 
@@ -40,15 +41,16 @@ EXIT_OK, EXIT_BROKEN, EXIT_ERROR = 0, 1, 2
 # them repeats the reason or the body.
 _REDACT_REFUSALS = {
     "invalid_message_id": "--message-id must be one message id as the audit log shows it",
-    "invalid_reason": "--reason must be 1-240 characters with no control or format "
-                      "characters (one line)",
+    "invalid_reason": "--reason must be 1-240 characters on one line, with no control, "
+                      "format or separator characters",
     "secret_like_body": "the reason looks like it holds a credential, and the reason is "
                         "kept in the log for good; describe the mistake without repeating it",
     "message_not_found": "no send event for this message id in the audit log: an unknown "
                          "id, or one audit retention already removed",
     "body_in_hashed_payload": "this message was sent before schema v46, when the body was "
                               "part of the hashed payload; removing it would break the "
-                              "chain, so it stays until audit retention removes the event",
+                              "chain, so it stays until audit retention removes the event, "
+                              "and its live copy is already gone",
     "already_redacted": "this message's body is already redacted",
 }
 
@@ -191,6 +193,19 @@ def _export(args) -> int:
     return EXIT_OK
 
 
+class _DuplicateKey(ValueError):
+    """A JSON object in an export repeats a key."""
+
+
+def _unique_keys(pairs):
+    """``json`` keeps the last of a repeated key; an export has none, and a
+    line with one could show a person one body and verify another."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise _DuplicateKey()
+    return dict(pairs)
+
+
 def _read_export(path: Path):
     try:
         handle = path.open(encoding="utf-8")
@@ -209,18 +224,23 @@ def _read_export(path: Path):
             if not line.strip():
                 continue
             try:
-                row = json.loads(line)
+                row = json.loads(line, object_pairs_hook=_unique_keys)
+            except _DuplicateKey:
+                raise AuditCliError(f"{path} line {number} has a duplicate key, so a reader "
+                                    "and verify could see different values; it cannot be "
+                                    "checked") from None
             except ValueError:
                 raise AuditCliError(f"{path} line {number} is not JSON") from None
             # ``body`` is absent from exports written before v46, whose send
-            # bodies are inside the hashed payload; read it as none.
+            # bodies are inside the hashed payload. Left absent, so verify can
+            # tell a file without body fields from a body that was removed.
             if (not isinstance(row, dict) or set(AUDIT_COLUMNS) - set(row)
                     or type(row["seq"]) is not int
                     or type(row["created_at"]) not in (int, float)
                     or not all(isinstance(row[k], str) for k in (
                         "event", "actor", "principal", "agent_id", "project", "task",
                         "hlc", "prev_hash", "hash"))
-                    or not isinstance(row.setdefault("body", None), (str, type(None)))):
+                    or not isinstance(row.get("body"), (str, type(None)))):
                 raise AuditCliError(f"{path} line {number} is not an exported audit event")
             yield row
 
@@ -235,7 +255,16 @@ def _verify(args) -> int:
     return EXIT_OK if report["ok"] else EXIT_BROKEN
 
 
+def _vacuum(conn):
+    """Free the old row versions a redaction leaves in the table files (the
+    body stays readable there until a vacuum lets the space be reused). It
+    runs after the commit, outside any transaction, as VACUUM must, and does
+    not reach WAL, WAL archives or backups."""
+    conn.execute("VACUUM coordination_events, coordination_messages")
+
+
 def _redact(args) -> int:
+    import psycopg
     with _bank(write=True) as conn:
         try:
             result = CoordinationStore(_Storage(conn)).redact(args.message_id, args.reason)
@@ -243,7 +272,26 @@ def _redact(args) -> int:
             print(json.dumps({"ok": False, "message_id": args.message_id, "reason": exc.code}))
             print(f"board-audit: {_REDACT_REFUSALS.get(exc.code, exc.code)}", file=sys.stderr)
             return EXIT_BROKEN
-    print(json.dumps({"ok": True, **result}))
+        except psycopg.errors.LockNotAvailable:
+            raise AuditCliError("the board is busy: a row or the audit chain stayed locked for "
+                                "more than 5 s. Nothing was changed; retry") from None
+        try:
+            _vacuum(conn)
+            vacuumed = True
+        except psycopg.Error:
+            vacuumed = False
+    print(json.dumps({"ok": True, **result, "vacuumed": vacuumed}))
+    if result["audit_copy"] == "kept":
+        print("board-audit: the live copy is blanked and out of delivery, but this message "
+              "was sent before schema v46: the audit log keeps its body until audit "
+              "retention removes the send event", file=sys.stderr)
+    if not vacuumed:
+        print("board-audit: the redaction is committed, but the VACUUM that frees the old "
+              "row versions failed (the board may be busy); run `VACUUM coordination_events, "
+              "coordination_messages` later", file=sys.stderr)
+    print("board-audit: record this head outside the bank; `pseudolife-mcp board-audit "
+          f"verify --expect-head {result['expect_head']}` later shows the redaction record "
+          "is still there", file=sys.stderr)
     return EXIT_OK
 
 

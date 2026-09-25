@@ -43,7 +43,13 @@ PEM_PLAIN = j("-----BEGIN ", "PRIVATE ", "KEY-----")
 PEM_OPENSSH = j("-----BEGIN ", "OPENSSH PRIVATE ", "KEY-----")
 PEM_PGP = j("-----BEGIN ", "PGP PRIVATE ", "KEY BLOCK-----")
 URLSAFE = j("q7Hd2kLm9Pz4", "Rt6Wv8Xy1Bc3", "Ns5Jf0Ge")          # like token_urlsafe
+URLSAFE_2 = j("Lx2eG0fJ5sN", "3cB1yX8vW6t", "R4zP9mLk2dH7q")
 AWS_SECRET = j("wJalrXUtnFEMI", "/K7MDENG/", "bPxRfiCYEXAMPLEKEY")
+HUGGINGFACE = j("h", "f_", "AbCdEfGhIjKlMnOpQrStUvWxYz01234567")
+STRIPE = j("sk", "_live_", "51HAbCdEfGh2IjKl3MnOp4QrSt")
+GOOGLE = j("AI", "za", "SyAbCdEfGh1IjKlMn2OpQrSt3UvWxYz4AbC")
+GITLAB = j("gl", "pat-", "Ab1Cd2Ef3Gh4Ij5Kl6Mn")
+DSN = j("postgresql://pseudo:", "Zq8wKd3mRt", "@127.0.0.1:5433/db")
 
 SECRETS = [
     ("github_token", f"use {GITHUB} for the push"),
@@ -54,17 +60,33 @@ SECRETS = [
     ("openai_key", f"({OPENAI_PROJECT})"),
     ("aws_access_key_id", f"id={AWS_KEY_ID}"),
     ("aws_access_key_id", AWS_SESSION_KEY_ID),
+    ("aws_secret_key", f"aws_secret_access_key={AWS_SECRET}"),
+    ("aws_secret_key", f"AWS_SECRET_ACCESS_KEY: '{AWS_SECRET}'"),
     ("slack_token", f"bot {SLACK}"),
+    ("huggingface_token", f"HF_TOKEN is {HUGGINGFACE}"),
+    ("stripe_key", STRIPE),
+    ("google_api_key", f"maps key {GOOGLE}"),
+    ("gitlab_token", GITLAB),
     ("jwt", f"Authorization: Bearer {JWT}"),
+    ("bearer_token", f"Authorization: Bearer {URLSAFE}"),
+    ("dsn_password", f"connect with {DSN}"),
     ("private_key", f"{PEM_RSA}\nMIIEow..."),
     ("private_key", PEM_PLAIN),
     ("private_key", PEM_OPENSSH),
     ("private_key", PEM_PGP),
+    ("cli_flag", f"pseudolife-mcp shim --token {URLSAFE}"),
+    ("cli_flag", f"--api-key '{URLSAFE}'"),
     ("key_value", f"PSEUDOLIFE_MCP_TOKEN={URLSAFE}"),
+    # This deployment's own shapes: a principal token map, the adapter's
+    # instance-key header, keys named for what they hold.
+    ("key_value", f"PSEUDOLIFE_MCP_TOKENS=codex:{URLSAFE},claude:{URLSAFE_2}"),
+    ("key_value", f"X-PL-Agent-Key: {URLSAFE}"),
+    ("key_value", f"private_key={URLSAFE}"),
+    ("key_value", f"access_key={URLSAFE}"),
+    ("key_value", f"auth={URLSAFE}"),
     ("key_value", f'{{"api_key": "{URLSAFE}"}}'),
-    ("key_value", f"password: {j('hunter2', 'hunter2', 'hunter2')}"),
+    ("key_value", f"password: {j('Correct7', 'Horse9', 'Battery2')}"),
     ("key_value", f"client_secret = '{URLSAFE}'"),
-    ("key_value", f"aws_secret_access_key={AWS_SECRET}"),
     ("key_value", f"x-api-key: {URLSAFE}"),
     ("key_value", f"apiKey={URLSAFE}"),
     ("key_value", f"passwd={URLSAFE}"),
@@ -105,6 +127,34 @@ ORDINARY = [
     # test_release_ux flags these prefixes followed by any long run.
     j("xo", "xb-", "token-placeholder-in-the-docs"),
     j("github", "_pat_", "tokens_are_refused_by_the_board"),
+    # Found by review (2026-09-26): branches, paths, truncated digests,
+    # subresource hashes, ids with a suffix, names and identifiers.
+    "secrets-scan: claude/elated-bartik-bcc1a4",
+    "token-fix: feat/v46-redactable-bodies",
+    "token-limit: example/claude/branch-name-2026",
+    "credential_file=secrets/2026/bench_pg.txt",
+    "credential_hash_prefix=" + "9f86d081884c7d659a2feaa0",
+    "credential_hash=sha256:" + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "token_digest=" + "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce"
+                      "47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e",
+    "token=sha256-" + "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+    "integrity: sha384-" + "oqVuAfXRKap7fdgcCY5uykM6Kz4yPzI4aW2yF3Q9cGo",
+    "session_token=123e4567-e89b-12d3-a456-426614174000-2",
+    "token_source=readTheTokenFromTheEnvironmentVariableNow",
+    "tokeniser=sentencepiece-Model2026-Variant7",
+    "sk-learn-v2-estimator-wrapper-for-the-bench-2026",
+    "/tmp/sk-" + "0123456789abcdef0123456789abcdef01234567",
+    "logs.sk-" + "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8",
+    j("AS", "IA", "PACIFICSALESTEAM"),
+    j("gh", "s_", "abcdefghijklmnopqrstuvwxyz0123456789"),
+    j("github", "_pat_", "rotation_2026_q3_followup_note"),
+    "author: Pseudogiant-xr",
+    "cache_key=memory_agents_2026_09_26_roster",
+    "set PSEUDOLIFE_MCP_TOKENS=editor:<token>,reviewer:<token>",
+    "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>",
+    "Authorization: Bearer $PSEUDOLIFE_MCP_TOKEN",
+    "postgresql://pseudolife:<password>@127.0.0.1:5433/pseudolife",
+    "postgresql://pseudolife:${POSTGRES_PASSWORD}@db:5432/pseudolife",
     "",
 ]
 
@@ -123,20 +173,21 @@ def test_ordinary_board_text_is_not(text):
 def test_a_long_body_of_identifier_characters_is_scanned_quickly():
     """The scan runs on every send, up to 8192 bytes: no pattern may rescan
     quadratically over a long run of key characters. Measured 2026-09-26 on
-    the maintainer's Windows host: the slowest of these took 1.4 ms, and
-    letting ``=`` into the assigned value (so every ``token=`` in a run of
-    them starts a value to the end of the text) made one take 252 ms. The
-    bound sits between the two, with room for a slower machine."""
+    the maintainer's Windows host, best of three: the slowest of these took
+    1.0 ms; rescanning from each key instead of resuming after the value it
+    consumed made one take 77 ms (``auth:x,`` repeated). The bound sits well
+    between the two, with room for a machine several times slower."""
     import time
     for text in ("token" * 1638, "a" * 8192, "sk-" + "a" * 8189, "tokenX" * 1365 + "=",
                  "token=" * 1365, "token:a1" * 1024, ("secret_" * 1170)[:8192],
+                 "auth:x," * 1170, ("key=" + "Ab1," * 5) * 400,
                  "-----BEGIN A " * 630, "eyJ" * 2730, "sk-" * 2730):
         timings = []
         for _ in range(3):
             started = time.perf_counter()
             looks_like_secret(text)
             timings.append(time.perf_counter() - started)
-        assert min(timings) < 0.1, (text[:12], min(timings))
+        assert min(timings) < 0.025, (text[:12], min(timings))
 
 
 def _refused(call, secret):
@@ -184,6 +235,32 @@ def test_a_lease_purpose_refuses_a_secret(store):
     assert _log(store) == before
     assert store.list_leases()["leases"] == []
     assert store.acquire_lease(*creds(a), name="gpu", purpose="bench run")["state"] == "held"
+
+
+@pytest.mark.parametrize("field", ["label", "project", "task", "episode", "status"])
+def test_every_scope_field_an_agent_sets_refuses_a_secret(store, field):
+    """Registration fields are hashed into the register event, and project
+    and task into the columns of every later event by that agent: none of
+    them could ever be redacted."""
+    a = store.register("alice")
+    before = _log(store)
+    _refused(lambda: store.register("alice", **{field: f"see {GITHUB}"}), GITHUB)
+    if field in ("project", "task", "status"):
+        _refused(lambda: store.update(*creds(a), **{field: f"see {GITHUB}"}), GITHUB)
+    assert _log(store) == before
+
+
+def test_a_lease_name_or_request_id_refuses_a_secret(store):
+    store.storage.conn.execute("TRUNCATE coordination_leases, coordination_lease_waiters")
+    a, b = pair(store)
+    before = _log(store)
+    name = f"claim:{GITHUB}"
+    _refused(lambda: store.acquire_lease(*creds(a), name=name), GITHUB)
+    _refused(lambda: store.release_lease(*creds(a), name=name), GITHUB)
+    _refused(lambda: store.list_leases(name=name), GITHUB)
+    _refused(lambda: store.send(*creds(a), to=b["agent_id"], text="hello",
+                                request_id=GITHUB), GITHUB)
+    assert _log(store) == before
 
 
 def test_secret_like_body_is_a_public_code():

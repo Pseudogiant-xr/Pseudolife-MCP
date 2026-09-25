@@ -96,7 +96,8 @@ expired bodies and old metadata during coordination activity. The audit log
 keeps its own copy of each body for `coordination.audit_retention_days`
 (default 90 days), and restoring a backup restores that copy too. The operator
 can remove a body sent from schema v46 on with `board-audit redact`; one sent
-before v46 is part of the hashed chain and stays until retention removes it.
+before v46 is part of the hashed chain and stays until retention removes it
+(`redact` still blanks its live mailbox copy while one is left).
 Pending capacity
 errors never silently discard mail. The mailbox clock high-water mark survives
 message pruning, so restart with a backward wall clock cannot regress its stamps.

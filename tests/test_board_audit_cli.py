@@ -271,13 +271,21 @@ def test_redact_removes_a_body_prints_json_and_the_chain_still_verifies(store, c
     message_id = _send(store)
     code, output = cli("redact", "--message-id", message_id, "--reason", "wrong paste")
     assert code == 0, output.err
-    assert json.loads(output.out) == {"ok": True, "message_id": message_id, "seq": 3,
-                                      "redact_seq": 4, "live_body_cleared": True}
+    result = json.loads(output.out)
+    head = f"4:{result['redact_hash']}"
+    assert result == {"ok": True, "message_id": message_id, "seq": 3, "redact_seq": 4,
+                      "redact_hash": result["redact_hash"], "expect_head": head,
+                      "live_body_cleared": True, "audit_copy": "removed", "vacuumed": True}
+    # The operator is told to keep the new head, which catches a later
+    # removal of the redact row itself.
+    assert f"--expect-head {head}" in output.err
+    assert cli("verify", "--expect-head", head)[0] == 0
     archive = tmp_path / "board-audit.jsonl"
     assert cli("export", "--out", str(archive))[0] == 0
     events = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()]
     assert [(e["event"], e["body"]) for e in events[2:]] == [("send", None), ("redact", None)]
-    assert events[3]["payload"] == {"message_id": message_id, "seq": 3, "reason": "wrong paste"}
+    assert events[3]["payload"] == {"message_id": message_id, "seq": 3, "reason": "wrong paste",
+                                    "audit_copy": "removed"}
     assert "pasted by mistake" not in archive.read_text(encoding="utf-8")
     code, output = cli("verify")
     assert code == 0 and json.loads(output.out)["ok"]
@@ -300,6 +308,97 @@ def test_redact_refuses_a_body_written_before_v46_and_says_why(store, cli):
     assert "before schema v46" in output.err and "an old body" not in output.out + output.err
     code, output = cli("redact", "--message-id", "0" * 32, "--reason", "unknown")
     assert (code, json.loads(output.out)["reason"]) == (1, "message_not_found")
+
+
+def test_redacting_a_live_pre_v46_message_says_the_audit_copy_stays(store, cli, monkeypatch):
+    from tests.test_coordination_audit import _sent_by_v45
+    a, b = pair(store)
+    message_id = _sent_by_v45(monkeypatch, store, a, b, "sent by a v45 daemon")["message_id"]
+    code, output = cli("redact", "--message-id", message_id, "--reason", "pasted by mistake")
+    assert code == 0, output.err
+    result = json.loads(output.out)
+    assert (result["audit_copy"], result["live_body_cleared"]) == ("kept", True)
+    assert "audit log keeps" in output.err and "sent by a v45 daemon" not in output.err
+
+
+def test_redact_vacuums_after_its_commit_and_a_failed_vacuum_does_not_undo_it(
+        store, cli, pg_url, monkeypatch):
+    """Redaction leaves the old row versions in the table files until a
+    vacuum frees them, so the CLI vacuums both tables once the redaction has
+    committed; the vacuum failing is reported, never taken as a failed
+    redaction."""
+    import psycopg
+    from pseudolife_memory import board_audit_cli
+    seen = []
+
+    def spy(conn):
+        with psycopg.connect(pg_url, autocommit=True) as other:
+            other.execute("SET search_path TO public")
+            seen.append(other.execute("SELECT count(*) FROM coordination_events "
+                                      "WHERE event='redact'").fetchone()[0])
+        raise psycopg.errors.LockNotAvailable("simulated")
+
+    monkeypatch.setattr(board_audit_cli, "_vacuum", spy)
+    message_id = _send(store)
+    code, output = cli("redact", "--message-id", message_id, "--reason", "wrong paste")
+    assert code == 0 and seen == [1]                  # committed before the vacuum ran
+    assert json.loads(output.out)["vacuumed"] is False
+    assert "vacuum" in output.err.lower()
+
+
+def test_a_busy_board_is_reported_as_busy_not_as_a_database_failure(store, cli, pg_url):
+    import psycopg
+    message_id = _send(store)
+    with psycopg.connect(pg_url) as holder:
+        holder.execute("SET search_path TO public")
+        holder.execute("SELECT 1 FROM coordination_messages WHERE message_id=%s FOR UPDATE",
+                       (message_id,))
+        code, output = cli("redact", "--message-id", message_id, "--reason", "wrong paste")
+        holder.rollback()
+    assert code == 2 and output.out == ""
+    assert "busy" in output.err and "PSEUDOLIFE_MCP_DATABASE_URL" not in output.err
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_events WHERE event='redact'").fetchone() == (0,)
+
+
+def test_an_open_export_snapshot_does_not_block_the_daemons_schema_pass(store, pg_url):
+    """export and verify hold a read lock on the log for their whole
+    snapshot, and every daemon start runs the schema pass under a 5 s lock
+    timeout, so nothing in that pass may need a lock that conflicts with it
+    once the log exists: an ``export | less`` left open kept a v46 daemon
+    from starting (review, 2026-09-26)."""
+    import psycopg
+    from pseudolife_memory.storage.coordination import audit_events
+    from pseudolife_memory.storage.schema import ensure_schema
+    pair(store)
+    reader = psycopg.connect(pg_url)
+    try:
+        reader.read_only = True
+        reader.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        reader.execute("SET search_path TO public")
+        reader.commit()
+        rows = audit_events(reader)
+        next(rows)                                      # the snapshot is open
+        with psycopg.connect(pg_url, autocommit=True) as daemon:
+            daemon.execute("SET search_path TO public")
+            ensure_schema(daemon)
+        rows.close()
+    finally:
+        reader.close()
+
+
+def test_an_archive_with_a_duplicate_key_cannot_be_checked(store, cli, tmp_path):
+    """A JSON object may repeat a key and a reader keeps the last one, so a
+    line could show one body to a person and verify another."""
+    _send(store, "the body")
+    archive = tmp_path / "board-audit.jsonl"
+    assert cli("export", "--out", str(archive))[0] == 0
+    lines = archive.read_text(encoding="utf-8").splitlines()
+    lines[2] = lines[2].replace('"body":"the body"', '"body":"EVIL","body":"the body"', 1)
+    assert '"body":"EVIL"' in lines[2]
+    archive.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    code, output = cli("verify", "--input", str(archive))
+    assert code == 2 and "line 3" in output.err and "duplicate" in output.err
 
 
 @pytest.mark.parametrize("args", [
@@ -340,6 +439,10 @@ def test_verify_input_names_a_tampered_or_stripped_body_in_an_export(store, cli,
         1, {"ok": False, "seq": 3, "reason": "body_mismatch"})
     stripped = [{k: v for k, v in row.items() if k != "body"} for row in rows]
     assert verify_rows(stripped, "stripped.jsonl") == (
+        1, {"ok": False, "seq": 3, "reason": "body_not_exported"})
+    blanked = [dict(row) for row in rows]
+    blanked[2]["body"] = None
+    assert verify_rows(blanked, "blanked.jsonl") == (
         1, {"ok": False, "seq": 3, "reason": "body_missing"})
     wrong_type = [dict(row) for row in rows]
     wrong_type[2]["body"] = 7
