@@ -719,6 +719,34 @@ def test_board_default_stays_quiet_where_the_daemon_refuses_it(monkeypatch, caps
     assert "coordination" not in capsys.readouterr().err
 
 
+def test_board_default_probe_is_bounded(monkeypatch):
+    """The probe runs before the startup handshake; a stalled daemon must not
+    stretch Codex's startup budget, and an unanswered question means no."""
+    import time
+    seen = _board_env(monkeypatch, None)
+
+    def slow_probe(url, provider):
+        time.sleep(1)
+        return True
+
+    handshake = []
+
+    async def proxy(*args, **kwargs):
+        handshake.append(time.monotonic())
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    monkeypatch.setattr(shim, "_board_available", slow_probe)
+    monkeypatch.setattr(shim, "_BOARD_PROBE_SECONDS", 0.05)
+    started = time.monotonic()
+    # The abandoned probe thread finishes on its own (urllib's 2 s timeout);
+    # asyncio.run waits for it only at teardown, after the handshake.
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert handshake and handshake[0] - started < 0.9
+    assert _BoardAdapter.built == []
+    assert "coordination_adapter" not in seen and "board_checkin" not in seen
+
+
 def test_board_default_stays_quiet_without_a_bearer(monkeypatch, capsys):
     """An open install cannot use the board (bearer auth stays required), so
     the default neither asks, nor builds an adapter, nor warns."""

@@ -68,6 +68,12 @@ _NO_SPAWN_WAIT_S = _SPAWN_WAIT_ALIVE_S
 # wait_for also awaits bounded adapter cleanup; the subsequent instruction fetch
 # has its own 5s timeout. These limits do not guarantee a 10s host startup deadline.
 _ADAPTER_STARTUP_SECONDS = 3.0
+# Bound on the default-mode board probe (GET /api/hook/coordination-start),
+# which runs before the downstream handshake: a design bound, not a measured
+# tuning constant. A healthy daemon answers it without storage I/O in a
+# loopback round trip; a stalled one must not stretch the startup budget
+# above, and an unanswered probe counts as no board for this process.
+_BOARD_PROBE_SECONDS = 1.5
 # The provider guide's 2026-08-31 cold-start check budgets 180 s for a first
 # model-loading tool call. This replaces the MCP SDK's 300 s SSE default while
 # preserving that measured/documented path; deployments may set any finite,
@@ -1129,7 +1135,12 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
     explicit = setting in {"1", "true", "yes", "on"}
     enabled = explicit
     if not setting and _holds_bearer(provider):
-        enabled = await asyncio.to_thread(_board_available, url, provider)
+        try:
+            enabled = await asyncio.wait_for(
+                asyncio.to_thread(_board_available, url, provider),
+                timeout=_BOARD_PROBE_SECONDS)
+        except (TimeoutError, asyncio.TimeoutError):  # 3.10 raises the latter
+            enabled = False
     codex_pull = (not channel
                   and os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
                   == "codex")
