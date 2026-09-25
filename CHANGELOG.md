@@ -119,6 +119,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Digests are 15% of the rows unfiltered searches serve, but 9% of the hits
   agents used from them. `memory.dream.digest_enabled` and default search
   are untouched pending a decision on digests.
+### Fixed (2026-09-25 — upgraded Claude Code installs stop running their hooks twice)
+- Upgrading an installer-wired Claude Code to the plugin left the old hooks
+  in `~/.claude/settings.json`. Since 2026-09-21 the installers add the
+  plugin and stop writing those hooks, but never removed them, so an
+  upgraded user got every session-start context twice (memory core
+  included) and the discipline line twice per turn. `plugin/README.md` was
+  the only fix: delete them by hand.
+- With the plugin installed and Claude Code selected, `ops/install.sh` and
+  `ops/install.ps1` now list those entries and offer to remove them. The
+  prompt defaults to keep (`[y/N]`); an unattended run keeps them and names
+  the flag. `--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove`
+  removes them without asking, `keep` never asks. The wiring summary
+  reports the outcome, with the backup path.
+- The removal is `ops/install-hook.sh --remove-legacy` /
+  `ops/install-hook.ps1 -RemoveLegacy` (`--dry-run` / `-DryRun` lists
+  only), usable on its own. It removes only the exact commands the
+  installers shipped (both briefing commands, both coordination hooks: the
+  2026-09-24 echo and the gated `--coordination` briefing, both
+  discipline-line versions, and the pre-2026-07-14 episode hooks), per
+  event, as `ops/setup-codex-hooks.py` already does for Codex. An edited
+  or compound command that merely mentions one is listed for review and
+  left alone. Other hooks in a shared group stay; a group is dropped only
+  when this emptied it, and an emptied event stays as an empty list, as
+  install-hook's episode-hook clean-up already leaves it. It acts only while
+  `installed_plugins.json` records a user-scope install and
+  `enabledPlugins` enables the plugin in the same `settings.json`: a
+  project-scoped or disabled plugin leaves these hooks as the only ones
+  that run. It writes a timestamped backup first, writes through a
+  symlinked `settings.json`, keeps the line endings and never changes a
+  value (the PowerShell writer spells emoji as `\u` pairs). A file with
+  duplicate keys is refused and left alone, as is a hook whose command is
+  not a string.
 
 ### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
 - The agent board (`memory_agents`, `memory_message`, the awareness digest) is

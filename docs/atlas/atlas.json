@@ -1109,7 +1109,8 @@
    "p": "ops/install-hook.ps1",
    "d": [
     "Adds `pseudolife-mcp briefing --hook-json` and its `--coordination` check-in to settings.json / hooks.json, replacing the unconditional check-in echo older installers wrote",
-    "Backs up the settings file first; strips obsolete episode hooks"
+    "Backs up the settings file first; strips obsolete episode hooks",
+    "--remove-legacy: drops its exact Claude entries once the plugin owns them"
    ]
   },
   {

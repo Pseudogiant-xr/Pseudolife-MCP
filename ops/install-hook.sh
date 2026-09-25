@@ -6,19 +6,40 @@
 #   ops/install-hook.sh
 #   ops/install-hook.sh --client codex
 #   ops/install-hook.sh /path/to/settings.json
+#   ops/install-hook.sh --remove-legacy [--dry-run] [/path/to/settings.json]
 #
 # Backs up settings.json first; re-running is a no-op once installed. Uses
 # python3 (no jq dependency) for the JSON edit.
+#
+# --remove-legacy removes the Claude Code hooks this script and the installers
+# wrote, once the pseudolife-memory plugin provides them. It removes only
+# exact installer-written commands, only while the plugin is installed and
+# enabled for all projects, and backs up settings.json first. --dry-run lists
+# them without writing. Exit: 0 found (dry run) or removed, 3 none found,
+# 4 plugin not active for all projects, 1 error, 2 usage.
 set -euo pipefail
 
 CLIENT=claude
-if [ "${1:-}" = "--client" ]; then
-  CLIENT="${2:-}"
-  shift 2
-fi
+REMOVE_LEGACY=""
+DRY_RUN=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --client) CLIENT="${2:-}"; shift 2 ;;
+    --remove-legacy) REMOVE_LEGACY=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    *) break ;;
+  esac
+done
 case "$CLIENT" in claude|codex) ;; *)
   echo "invalid --client '$CLIENT' (claude|codex)" >&2; exit 2 ;;
 esac
+if [ -n "$REMOVE_LEGACY" ] && [ "$CLIENT" != claude ]; then
+  echo "--remove-legacy is for Claude Code; ops/setup-codex-hooks.py migrates Codex hooks." >&2
+  exit 2
+fi
+if [ -n "$DRY_RUN" ] && [ -z "$REMOVE_LEGACY" ]; then
+  echo "--dry-run applies to --remove-legacy only" >&2; exit 2
+fi
 if [ "$CLIENT" = codex ]; then
   default_settings="$HOME/.codex/hooks.json"
   instruction_file=AGENTS.md
@@ -54,6 +75,179 @@ for c in python3 python; do
   if "$c" -c "" >/dev/null 2>&1; then PYBIN="$c"; break; fi
 done
 [ -n "$PYBIN" ] || { echo "python3 is required" >&2; exit 1; }
+
+if [ -n "$REMOVE_LEGACY" ]; then
+  # The 2026-08-28..09-05 discipline line ended "-> memory_outcome." Derived,
+  # so this file keeps one copy of the line (test_plugin_packaging.py).
+  LEGACY_UPS_COMMAND="echo '${DISCIPLINE_LINE% with used_ids.}.'"
+  rc=0
+  SETTINGS_PATH="$SETTINGS_PATH" DRY_RUN="$DRY_RUN" UPS_COMMAND="$UPS_COMMAND" \
+    LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" COORDINATION_LINE="$COORDINATION_LINE" \
+    "$PYBIN" - <<'PY' || rc=$?
+import json, os, shutil, stat, sys, tempfile, time
+
+sys.stdout.reconfigure(errors="replace")
+path = os.environ["SETTINGS_PATH"]
+plugin_id = "pseudolife-memory@pseudolife-mcp"
+# Exact commands this script and the installers ever wrote, by event. A
+# substring match would also delete a user's own command that merely
+# mentions one (ops/setup-codex-hooks.py applies the same rule). The
+# check-in was an unconditional echo on 2026-09-24, then the briefing
+# command with --coordination (COORDINATION_COMMAND above).
+briefings = ("pseudolife-mcp briefing --hook-json",
+             "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json")
+shipped = {
+    "SessionStart": {
+        *briefings,
+        *(f"{b} --coordination" for b in briefings),
+        f"echo '{os.environ['COORDINATION_LINE']}'",
+        "pseudolife-mcp episode-start",
+    },
+    "UserPromptSubmit": {os.environ["UPS_COMMAND"], os.environ["LEGACY_UPS_COMMAND"]},
+    "SessionEnd": {"pseudolife-mcp episode-end"},
+}
+needles = ("pseudolife-mcp briefing", "mid-session discipline", "Pseudolife coordination:",
+           "pseudolife-mcp episode-start", "pseudolife-mcp episode-end")
+
+
+def is_shipped(event, hook):
+    # Only strings can be ours; a list or object there is someone else's.
+    known = shipped.get(event, ())
+    if not isinstance(hook, dict) or hook.get("type") != "command":
+        return False
+    command = hook.get("command")
+    windows = hook.get("commandWindows", command)
+    return (isinstance(command, str) and command in known
+            and isinstance(windows, str) and windows in known)
+
+
+def unique_keys(pairs):
+    # A duplicate would be silently dropped on rewrite (.NET refuses the
+    # object outright): leave such a file to the user.
+    seen = set()
+    for key, _ in pairs:
+        if key in seen:
+            raise ValueError(f"duplicate key {key!r}")
+        seen.add(key)
+    return dict(pairs)
+
+
+def show(event, command):
+    command = " ".join(command.split())
+    return f"  {event}: {command if len(command) <= 100 else command[:97] + '...'}"
+
+
+def plugin_active(settings):
+    enabled = settings.get("enabledPlugins")
+    if not isinstance(enabled, dict) or enabled.get(plugin_id) is not True:
+        return False
+    record = os.path.join(os.path.dirname(os.path.abspath(path)),
+                          "plugins", "installed_plugins.json")
+    try:
+        with open(record, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        records = data["plugins"][plugin_id]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    records = records if isinstance(records, list) else [records]
+    # A project-scoped install runs in that project only.
+    return any(isinstance(r, dict) and r.get("scope", "user") == "user" for r in records)
+
+
+if not os.path.exists(path):
+    print(f"No settings file at {path} - nothing to remove.")
+    sys.exit(3)
+try:
+    with open(path, "rb") as f:
+        raw = f.read()
+    obj = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique_keys)
+except (OSError, ValueError) as exc:
+    print(f"Could not read {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+hooks = obj.get("hooks") if isinstance(obj, dict) else None
+hooks = hooks if isinstance(hooks, dict) else {}
+
+found, lookalikes = [], []
+for event, groups in hooks.items():
+    for group in groups if isinstance(groups, list) else []:
+        entries = group.get("hooks") if isinstance(group, dict) else None
+        for hook in entries if isinstance(entries, list) else []:
+            command = hook.get("command") if isinstance(hook, dict) else None
+            if not isinstance(command, str):
+                continue
+            if is_shipped(event, hook):
+                found.append(show(event, command))
+            elif any(n in command for n in needles):
+                lookalikes.append(show(event, command))
+
+if found:
+    print(f"Installer-written hooks in {path} (the pseudolife-memory plugin provides these now):")
+    print("\n".join(found))
+else:
+    print(f"No installer-written Pseudolife hooks in {path}.")
+if lookalikes:
+    print("Left alone - not an exact installer-written entry; review by hand:")
+    print("\n".join(lookalikes))
+if not found:
+    sys.exit(3)
+if not plugin_active(obj):
+    print("Not removed: the pseudolife-memory plugin is not installed and enabled for all "
+          "projects, so these may be the only Pseudolife hooks that run.")
+    sys.exit(4)
+if os.environ.get("DRY_RUN"):
+    sys.exit(0)
+
+# Emptied groups go; an emptied event stays an empty list, as this script's
+# episode-hook clean-up leaves it.
+for event in list(hooks):
+    groups = hooks[event]
+    if event not in shipped or not isinstance(groups, list):
+        continue
+    kept_groups = []
+    for group in groups:
+        entries = group.get("hooks") if isinstance(group, dict) else None
+        if isinstance(entries, list):
+            kept = [h for h in entries if not is_shipped(event, h)]
+            if len(kept) != len(entries):
+                if not kept:
+                    continue
+                group = {**group, "hooks": kept}
+        kept_groups.append(group)
+    hooks[event] = kept_groups
+
+text = json.dumps(obj, indent=2, ensure_ascii=False) + "\n"
+if b"\r\n" in raw:
+    text = text.replace("\n", "\r\n")
+# Write through a symlink (dotfile setups link settings.json into a repo),
+# as install mode does, rather than replacing the link with a file.
+target = os.path.realpath(path)
+tmp = None
+try:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup, n = f"{path}.bak-{stamp}", 1
+    while os.path.exists(backup):
+        backup, n = f"{path}.bak-{stamp}-{n}", n + 1
+    shutil.copy2(path, backup)
+    print(f"Backed up -> {backup}")
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target),
+                               prefix=os.path.basename(target) + ".", suffix=".tmp-pseudolife")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    shutil.copymode(target, tmp)
+    os.replace(tmp, target)
+except OSError as exc:
+    if tmp and os.path.exists(tmp):
+        try:
+            os.chmod(tmp, stat.S_IREAD | stat.S_IWRITE)
+            os.remove(tmp)
+        except OSError:
+            pass
+    print(f"Could not write {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+print(f"Removed {len(found)} installer-written hook entries from {path}.")
+PY
+  exit "$rc"
+fi
 
 if [ -f "$SETTINGS_PATH" ]; then
   bak="$SETTINGS_PATH.bak-$(date +%Y%m%d-%H%M%S)"

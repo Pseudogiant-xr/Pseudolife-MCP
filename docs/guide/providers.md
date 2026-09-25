@@ -102,6 +102,14 @@ transport comes from the installer either way (stdio shim by default),
 registered with `PSEUDOLIFE_WRITER_ID=claude-code` so writes are
 attributed per provider.
 
+Upgrading from the fallback to the plugin leaves its hooks in
+`~/.claude/settings.json`, where they duplicate the plugin's. The installer
+offers to remove them once the plugin is installed and enabled for all
+projects (`--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove` does
+it unattended), and `ops/install-hook.* --remove-legacy` does the same by
+hand. Only the exact entries the installers wrote are removed, after a
+backup; an edited copy of one is listed for review and kept.
+
 With the coordination adapter enabled, the same UserPromptSubmit hook also
 prints the session's coordination digest — pending addressed mail, rendered
 by the shim into a per-session file — but only on the turn after it changed;
