@@ -2179,7 +2179,9 @@ class DreamOps:
             with self._lock:
                 rec = self._cortex.restore_settled_contender(
                     row["entity"], row["attribute"], row["new_value"] or "",
-                    since=float(target["started_at"]))
+                    since=float(target["started_at"]),
+                    until=(None if target.get("finished_at") is None
+                           else float(target["finished_at"])))
             return rec.value if rec is not None else None
 
         for row in reversed(journal):

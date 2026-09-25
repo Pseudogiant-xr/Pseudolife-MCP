@@ -443,6 +443,38 @@ def test_restore_settled_contender_re_parks_only_what_a_write_settled():
     assert store.restore_settled_contender("svc", "region", "us-east-2", since=0.0) is None
 
 
+def test_restore_settled_contender_stays_inside_the_run_window():
+    """A contender settled AFTER the reverted run finished was not that
+    run's doing, and re-parking it would invent a contest the pre-run
+    state never had."""
+    store = CortexStore()
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(90), support="user", now=1.0)
+    store.write_fact(Slot("svc", "region", "us-east-2"), _unit(91), support="agent", now=2.0)
+    store.write_fact(Slot("svc", "region", "us-east-2"), _unit(91), support="user", now=5.0)
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(90), support="user", now=6.0)
+    assert store.restore_settled_contender(
+        "svc", "region", "us-east-2", since=3.0, until=4.0) is None
+    assert store.restore_settled_contender(
+        "svc", "region", "us-east-2", since=3.0, until=5.0) is not None
+
+
+def test_restore_settled_contender_ignores_a_dedup_merge_lookalike():
+    """``dedup_siblings`` marks a merged-away current ``superseded`` by the
+    canonical's value, often the same value, so it can carry the settled
+    signature. Only a settle leaves a record at the SAME slot with that
+    value asserted at the settle instant; without one, nothing is re-parked
+    (it was a current, never a contender)."""
+    store = CortexStore()
+    store.write_fact(Slot("svc", "region", "eu-west-1"), _unit(92), support="user", now=1.0)
+    store.records.append(CortexRecord(
+        entity="svc", attribute="region", value="us-east-2",
+        status="superseded", superseded_by_value="us-east-2",
+        superseded_at=3.0, asserted_at=2.0, last_confirmed=2.0))
+    assert store.restore_settled_contender(
+        "svc", "region", "us-east-2", since=0.0) is None
+    assert store.contenders_for("svc", "region") == []
+
+
 def test_unknown_tier_contests_known_but_known_supersedes_legacy_unknown():
     store = CortexStore()
     # known user fact, unknown-tier write -> contends

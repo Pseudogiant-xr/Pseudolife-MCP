@@ -1203,21 +1203,26 @@ class CortexStore:
 
     def restore_settled_contender(self, entity: str, attribute: str,
                                   value: str, since: float,
+                                  until: float | None = None,
                                   now: float | None = None,
                                   ) -> "CortexRecord | None":
         """Re-park the contender :meth:`_settle_matching_contender` settled
-        when ``value`` was written at or after ``since``. For the dream
-        rollback: the v27 journal has no contender column, so reverting a
-        write that settled a contender would otherwise drop that pending
-        review item, which survived a rollback before settling existed.
+        when ``value`` was written inside ``[since, until]`` (a dream run's
+        window; ``until=None`` leaves it open). For the dream rollback: the
+        v27 journal has no contender column, so reverting a write that
+        settled a contender would otherwise drop that pending review item,
+        which survived a rollback before settling existed.
 
-        A settled contender is the one record shape nothing else produces:
-        ``superseded`` with ``superseded_by_value`` equal to its own value
-        (a same-value write confirms, it never supersedes). Returns the
+        A settle leaves a record ``superseded`` with ``superseded_by_value``
+        equal to its own value (a same-value write confirms, it never
+        supersedes) AND, at the same slot, the record it made current: same
+        value, ``asserted_at`` equal to the settle time. The second half
+        rules out ``dedup_siblings``, whose merged-away current can carry
+        the first half but whose survivor lives at another slot. Returns the
         re-parked record, or None when there is nothing to restore: no such
-        record at or after ``since``, a contender already parked (at most
-        one per slot), or ``value`` current again at the slot, scalar or
-        member (re-parking would recreate the identical-contender state)."""
+        record in the window, a contender already parked (at most one per
+        slot), or ``value`` current again at the slot, scalar or member
+        (re-parking would recreate the identical-contender state)."""
         key = (_norm_key(entity), _norm_key(attribute))
         want = _norm_value(value)
         if self._active_contender(key) is not None:
@@ -1228,11 +1233,16 @@ class CortexStore:
         if any(_norm_value(m.value) == want
                for m in self.members(entity, attribute)):
             return None
-        settled = [r for r in self.records
-                   if r.status == "superseded" and r.key == key
-                   and _norm_value(r.value) == want
+        at_slot = [r for r in self.records
+                   if r.key == key and _norm_value(r.value) == want]
+        settled = [r for r in at_slot
+                   if r.status == "superseded"
                    and _norm_value(r.superseded_by_value or "") == want
-                   and (r.superseded_at or 0.0) >= float(since)]
+                   and r.superseded_at is not None
+                   and r.superseded_at >= float(since)
+                   and (until is None or r.superseded_at <= float(until))
+                   and any(o is not r and o.asserted_at == r.superseded_at
+                           for o in at_slot)]
         if not settled:
             return None
         rec = max(settled, key=lambda r: r.superseded_at or 0.0)
