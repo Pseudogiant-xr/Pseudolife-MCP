@@ -355,6 +355,32 @@ def test_the_validity_check_knows_exactly_the_daemons_variants():
     assert all(key in texts for keys in mb.EXPECTED.values() for key in keys)
 
 
+def test_every_known_policy_text_is_found():
+    """A marker whose source moved must fail here, not drop out of the scan:
+    after #367 the coordination hook stopped echoing its check-in and the
+    script parse matched nothing, so the scan stopped naming it (2026-09-26)."""
+    texts = mb.policy_texts()
+    assert set(texts) == {"core", "full_block", "onboarding",
+                          "discipline_line", "coordination_line"}
+    assert all(t.strip() for t in texts.values()), texts
+
+
+def test_a_leaked_coordination_checkin_is_named(tmp_path):
+    """The check-in exactly as /api/hook/coordination-start serves it: its
+    ledger row is not a context hook, so it cannot excuse the text."""
+    from pseudolife_memory.coordination import CHECKIN_TEXT
+    served = f"{AD}\n\n{BRIEFING}"
+    checkin = CHECKIN_TEXT + "\n"
+    cap = _capture(tmp_path, f"SessionStart:startup hook success: {served}",
+                   f"SessionStart:startup hook success: {checkin}")
+    ledger = [_hook(served),
+              {"kind": "hook", "path": "/api/hook/coordination-start", "body": checkin}]
+    v = mb.validity(variant="none", capture_dir=cap, ledger=ledger, prompt=PROMPT,
+                    model="claude-sonnet-5", grade=GRADE)
+    assert not v["valid"]
+    assert any("coordination_line text is present" in r for r in v["reasons"]), v["reasons"]
+
+
 BF16 = {"backend": "torch", "device": "cpu", "dtype": "bf16"}
 FP32 = {"backend": "torch", "device": "cpu", "dtype": "fp32"}
 
