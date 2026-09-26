@@ -70,7 +70,9 @@ verifies, because the chain alone cannot see that its newest rows are missing.
 If you recorded a head earlier, `pseudolife-mcp board-audit verify --expect-head
 SEQ:HASH` shows whether that head survived. `recover` and each `rebind` append
 operator events (`actor: operator`) to the restored log in the same transaction
-as the change.
+as the change. A body redacted after the backup was taken is back, and its
+`redact` row is gone: run `pseudolife-mcp board-audit redact` for it again
+([redacting a body](configuration.md#redacting-a-body)).
 
 A backup taken before v42 restores without the log. Recovery never migrates a
 schema, so both commands still revoke and rebind, print that the operation is
@@ -92,7 +94,11 @@ acknowledged messages. Message bodies expire after 24 hours, while request keys
 and terminal metadata remain for seven days from creation. Maintenance purges
 expired bodies and old metadata during coordination activity. The audit log
 keeps its own copy of each body for `coordination.audit_retention_days`
-(default 90 days), and restoring a backup restores that copy too. Pending capacity
+(default 90 days), and restoring a backup restores that copy too. The operator
+can remove a body sent from schema v46 on with `board-audit redact`; one sent
+before v46 is part of the hashed chain and stays until retention removes it
+(`redact` still blanks its live mailbox copy while one is left).
+Pending capacity
 errors never silently discard mail. The mailbox clock high-water mark survives
 message pruning, so restart with a backward wall clock cannot regress its stamps.
 

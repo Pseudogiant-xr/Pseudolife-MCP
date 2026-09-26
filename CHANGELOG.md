@@ -6,6 +6,75 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-09-26 — a secret pasted into an agent-board message can be removed from the audit log, and credential-shaped text is refused, schema v46)
+- A message sent on the agent board stays in the board's audit log for its
+  retention window (90 days by default, forever with `0`), and until now its
+  body sat inside the log's sha256 hash chain: a credential an agent pasted
+  into a message by mistake could not be removed without breaking
+  `board-audit verify`, and restoring a backup brought it back. Nothing
+  refused such a body at send time either.
+- From schema v46 a `send` event keeps the body in a new
+  `coordination_events.body` column, beside a random 16-byte salt in
+  `body_salt`, both outside the row hash; its hashed payload carries only
+  sha256(salt || body) (`text_commitment`), not the text and not its length.
+  The hash itself does not change, so every existing chain still verifies.
+  The salt goes with the body on a redaction, so nothing left in the chain
+  can confirm a guess of a short or structured body (an unsalted digest, or
+  a byte count, could).
+- `pseudolife-mcp board-audit redact --message-id ID --reason TEXT`
+  (operator-only; no MCP tool or REST route) blanks that body and the live
+  mailbox copy (and its seven-day request fingerprint, so a retry of that
+  request is refused), ends the message's delivery, and appends a chained operator
+  `redact` event naming the send event and the reason, in one transaction and
+  under the daemon's own locks, so it runs beside a live daemon; a busy board
+  is reported as busy (exit 2), with nothing changed. It then vacuums the two
+  board tables so the old row versions are freed, rebuilds their planner
+  statistics and vacuums `pg_statistic` (`ANALYZE` copies sampled bodies,
+  salts and fingerprints into it word for word), and prints the new head
+  (`expect_head`) to record for a later `verify --expect-head`. For a message
+  sent before v46, whose body is inside the hashed payload and stays until
+  audit retention removes the event, it still blanks and expires the live
+  copy while there is one, and logs that the audit copy was kept. It refuses
+  an unknown id and a body already redacted.
+- `board-audit verify` checks every present body against its commitment
+  (`body_mismatch`, which also covers a body on a row that commits to none
+  and a body written back after its redaction) and accepts an absent one only
+  behind a later operator `redact` event that names it and removed it
+  (`body_missing`). `export` lines carry `body`; an export without body fields
+  (written by a pre-v46 CLI) fails as `body_not_exported` rather than as
+  tampering, a line with a repeated key is refused, and exports of pre-v46
+  logs still verify. The offline recovery CLI still records its events on a
+  restored v42-v45 bank that has no body column yet.
+- The v46 column is added only when it is missing. `ADD COLUMN IF NOT EXISTS`
+  takes an exclusive table lock even when the column exists, so an open
+  `board-audit export` (a read lock held for its whole snapshot) would have
+  failed every daemon start's schema pass at its 5 s lock timeout.
+- The board refuses text shaped like a credential wherever it would keep it,
+  with a new `secret_like_body` error (HTTP 400) that never repeats the text:
+  message bodies and request ids; statuses, labels, projects, tasks,
+  episodes and capability names (project and task are copied into every
+  later audit row); lease names and purposes; and redaction reasons. The
+  shapes are GitHub, GitLab,
+  Hugging Face, Anthropic, OpenAI-style, Stripe, Slack and Google keys and
+  tokens, AWS access key ids and secret keys, JWTs, bearer tokens, DSN
+  passwords, PEM private-key headers, and a secret-named key or `--flag`
+  (including `PSEUDOLIFE_MCP_TOKENS` maps and the `X-PL-Agent-Key` header)
+  given a generated-looking value; paths, branch names, digests, ids, names
+  and placeholders after such a key are not. Over the 2026-09-23/24
+  fifteen-session trial's board export it refused none of the 816 message
+  bodies and request ids, the 25 statuses, or the labels, projects, tasks and
+  episodes of its 26 agents. It is a net for common shapes, not a guarantee:
+  single-case passwords under 32 characters get through.
+- Redaction also takes the live mailbox row's request fingerprint (a digest
+  of the body kept seven days for retries), so a retry of the redacted
+  request is refused; with audit retention under seven days it still takes
+  the fingerprint after the send event itself was cut, and logs that the
+  audit copy was already gone.
+- Limits: backups, WAL archives and exports taken before a redaction still
+  hold the body, as do audit copies of messages sent before v46 and whatever
+  the recipient already read. Rotate a leaked credential first; redaction is
+  tidiness, not remediation.
+
 ### Added (2026-09-26 — a coordination report, and the trial baseline to beat)
 - Coordination changes had nothing to be measured against: the 2026-09-23/24
   trial's figures came from one-off scripts over a private board export.

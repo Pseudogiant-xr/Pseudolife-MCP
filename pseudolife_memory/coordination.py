@@ -71,6 +71,8 @@ PUBLIC_ERROR_CODES = frozenset({
     "coordination_unavailable", "invalid_request",
     "invalid_lease", "invalid_ttl", "invalid_expect", "invalid_purpose",
     "lease_not_held", "lease_queue_full",
+    # v46: a body, status or lease purpose shaped like a credential (a 400).
+    "secret_like_body",
 })
 
 

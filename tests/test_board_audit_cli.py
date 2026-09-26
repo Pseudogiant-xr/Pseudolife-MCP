@@ -1,7 +1,9 @@
-"""``pseudolife-mcp board-audit``: the operator's read-only view of the log.
+"""``pseudolife-mcp board-audit``: the operator's view of the log.
 
 Export is JSON lines on stdout (or a new file); verify prints one report and
-exits 0 intact, 1 on tamper evidence, 2 when it could not check at all.
+exits 0 intact, 1 on tamper evidence, 2 when it could not check at all;
+redact (v46) removes one body, printing one result: 0 done, 1 refused, 2 could
+not run.
 """
 from __future__ import annotations
 
@@ -43,10 +45,14 @@ def test_export_writes_json_lines_filtered_by_task_agent_and_time(store, cli):
 
     by_task = export("--task", "t1")
     assert [(e["event"], e["task"]) for e in by_task] == [("register", "t1"), ("send", "t1")]
-    assert by_task[1]["payload"]["text"] == "from t1 ✓"
+    assert by_task[1]["body"] == "from t1 ✓"
+    assert "text" not in by_task[1]["payload"] and "text_bytes" not in by_task[1]["payload"]
+    assert len(by_task[1]["payload"]["text_commitment"]) == 64
+    assert by_task[0]["body"] is None
     assert set(by_task[1]) == {"seq", "event", "actor", "principal", "agent_id",
                                "recipient_agent_id", "project", "task", "message_id",
-                               "payload", "created_at", "hlc", "prev_hash", "hash"}
+                               "payload", "created_at", "hlc", "prev_hash", "hash", "body",
+                               "body_salt"}
     assert [e["event"] for e in export("--agent", b["agent_id"])] == ["register", "send", "send"]
     assert [e["seq"] for e in export("--project", "p", "--since", "2000")] == [3, 4]
     assert [e["seq"] for e in export("--until", "2000")] == [1, 2]
@@ -253,3 +259,323 @@ def test_the_console_script_routes_board_audit(monkeypatch):
         console.main()
     assert (exit_.value.code, seen) == (0, [["verify"]])
     assert "board-audit" in console._USAGE
+
+
+# ── redaction (schema v46) ────────────────────────────────────────────────
+
+
+def _send(store, text="pasted by mistake"):
+    a, b = pair(store)
+    return store.send(*creds(a), to=b["agent_id"], text=text, request_id="r")["message_id"]
+
+
+def test_redact_removes_a_body_prints_json_and_the_chain_still_verifies(store, cli, tmp_path):
+    message_id = _send(store)
+    code, output = cli("redact", "--message-id", message_id, "--reason", "wrong paste")
+    assert code == 0, output.err
+    result = json.loads(output.out)
+    head = f"4:{result['redact_hash']}"
+    assert result == {"ok": True, "message_id": message_id, "seq": 3, "redact_seq": 4,
+                      "redact_hash": result["redact_hash"], "expect_head": head,
+                      "live_body_cleared": True, "audit_copy": "removed", "vacuumed": True}
+    # The operator is told to keep the new head, which catches a later
+    # removal of the redact row itself.
+    assert f"--expect-head {head}" in output.err
+    assert cli("verify", "--expect-head", head)[0] == 0
+    archive = tmp_path / "board-audit.jsonl"
+    assert cli("export", "--out", str(archive))[0] == 0
+    events = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()]
+    assert [(e["event"], e["body"]) for e in events[2:]] == [("send", None), ("redact", None)]
+    assert events[3]["payload"] == {"message_id": message_id, "seq": 3, "reason": "wrong paste",
+                                    "audit_copy": "removed"}
+    assert "pasted by mistake" not in archive.read_text(encoding="utf-8")
+    code, output = cli("verify")
+    assert code == 0 and json.loads(output.out)["ok"]
+    assert cli("verify", "--input", str(archive))[0] == 0
+
+    code, output = cli("redact", "--message-id", message_id, "--reason", "again")
+    assert code == 1
+    assert json.loads(output.out) == {"ok": False, "message_id": message_id,
+                                      "reason": "already_redacted"}
+    assert "already" in output.err
+
+
+def test_redact_refuses_a_body_written_before_v46_and_says_why(store, cli):
+    from tests.test_coordination_audit import _legacy_send
+    a, b = pair(store)
+    message_id = _legacy_send(store, a, b)
+    code, output = cli("redact", "--message-id", message_id, "--reason", "too old")
+    assert code == 1
+    assert json.loads(output.out)["reason"] == "body_in_hashed_payload"
+    assert "before schema v46" in output.err and "an old body" not in output.out + output.err
+    code, output = cli("redact", "--message-id", "0" * 32, "--reason", "unknown")
+    assert (code, json.loads(output.out)["reason"]) == (1, "message_not_found")
+
+
+def test_redacting_a_live_pre_v46_message_says_the_audit_copy_stays(store, cli, monkeypatch):
+    from tests.test_coordination_audit import _sent_by_v45
+    a, b = pair(store)
+    message_id = _sent_by_v45(monkeypatch, store, a, b, "sent by a v45 daemon")["message_id"]
+    code, output = cli("redact", "--message-id", message_id, "--reason", "pasted by mistake")
+    assert code == 0, output.err
+    result = json.loads(output.out)
+    assert (result["audit_copy"], result["live_body_cleared"]) == ("kept", True)
+    assert "audit log keeps" in output.err and "sent by a v45 daemon" not in output.err
+
+
+def test_redacting_a_message_whose_send_event_retention_cut_says_so(store, cli):
+    """With audit retention under seven days the send event can go before
+    the live row's request fingerprint; redact still takes the fingerprint,
+    and tells the operator the log held no copy to remove."""
+    from tests.test_coordination_audit import DAY
+    a, b = pair(store)
+    message_id = store.send(*creds(a), to=b["agent_id"], text="short pin 4417",
+                            request_id="r")["message_id"]
+    store.test_time[0] += 3 * DAY
+    store.update(*creds(a), status="still here")
+    store.prune(audit_retention_days=1)
+    code, output = cli("redact", "--message-id", message_id, "--reason", "pasted by mistake")
+    assert code == 0, output.err
+    result = json.loads(output.out)
+    # The live text expired after a day; only its fingerprint was left to take.
+    assert (result["seq"], result["audit_copy"], result["live_body_cleared"]) == (
+        None, "gone", False)
+    assert "retention" in output.err and "short pin 4417" not in output.err + output.out
+
+
+def test_redact_vacuums_after_its_commit_and_a_failed_vacuum_does_not_undo_it(
+        store, cli, pg_url, monkeypatch):
+    """Redaction leaves the old row versions in the table files until a
+    vacuum frees them, so the CLI vacuums both tables once the redaction has
+    committed; the vacuum failing is reported, never taken as a failed
+    redaction."""
+    import psycopg
+    from pseudolife_memory import board_audit_cli
+    seen = []
+
+    def spy(conn):
+        with psycopg.connect(pg_url, autocommit=True) as other:
+            other.execute("SET search_path TO public")
+            seen.append(other.execute("SELECT count(*) FROM coordination_events "
+                                      "WHERE event='redact'").fetchone()[0])
+        raise psycopg.errors.LockNotAvailable("simulated")
+
+    monkeypatch.setattr(board_audit_cli, "_vacuum", spy)
+    message_id = _send(store)
+    code, output = cli("redact", "--message-id", message_id, "--reason", "wrong paste")
+    assert code == 0 and seen == [1]                  # committed before the vacuum ran
+    assert json.loads(output.out)["vacuumed"] is False
+    assert "vacuum" in output.err.lower()
+
+
+def test_redact_rebuilds_the_statistics_that_copy_the_body(store, cli, pg_url):
+    """ANALYZE copies sampled column values (under 1 kB) word for word into
+    pg_statistic, so on a small board a body, its salt, the live text and
+    its request fingerprint can all sit in the planner statistics. A plain
+    VACUUM leaves them there until the next automatic analyze; the redaction
+    has to rebuild them."""
+    import psycopg
+    a, b = pair(store)
+    sent = [store.send(*creds(a), to=b["agent_id"], text=f"note {n} for the queue",
+                       request_id=f"r{n}")["message_id"] for n in range(6)]
+    target = sent[3]
+
+    def stats():
+        with psycopg.connect(pg_url, autocommit=True) as other:
+            other.execute("SET search_path TO public")
+            other.execute("ANALYZE coordination_events, coordination_messages")
+            salt = other.execute("SELECT body_salt FROM coordination_events WHERE event='send' "
+                                 "AND message_id=%s", (target,)).fetchone()[0]
+            fingerprint = other.execute("SELECT fingerprint FROM coordination_messages "
+                                        "WHERE message_id=%s", (target,)).fetchone()[0]
+            rows = other.execute(
+                "SELECT tablename, attname, coalesce(most_common_vals::text, '') || ' ' || "
+                "coalesce(histogram_bounds::text, '') FROM pg_stats "
+                "WHERE schemaname=current_schema() AND (tablename, attname) IN "
+                "(('coordination_events','body'), ('coordination_events','body_salt'), "
+                "('coordination_messages','text'), ('coordination_messages','fingerprint'))"
+            ).fetchall()
+        return {(t, c): v for t, c, v in rows}, salt, fingerprint
+
+    before, salt, fingerprint = stats()
+    # The statistics really do hold the target's values, or this test proves nothing.
+    assert "note 3 for the queue" in before[("coordination_events", "body")]
+    assert "note 3 for the queue" in before[("coordination_messages", "text")]
+    assert salt in before[("coordination_events", "body_salt")]
+    assert fingerprint in before[("coordination_messages", "fingerprint")]
+
+    def statistic_vacuums():
+        with psycopg.connect(pg_url, autocommit=True) as other:
+            return other.execute("SELECT vacuum_count FROM pg_stat_all_tables "
+                                 "WHERE relid='pg_catalog.pg_statistic'::regclass").fetchone()[0]
+
+    vacuums = statistic_vacuums()
+    code, output = cli("redact", "--message-id", target, "--reason", "wrong paste")
+    assert code == 0, output.err
+    assert json.loads(output.out)["vacuumed"] is True
+    # The superseded statistics row is freed too, not left for autovacuum.
+    assert statistic_vacuums() > vacuums
+    with psycopg.connect(pg_url, autocommit=True) as other:
+        other.execute("SET search_path TO public")
+        after = " ".join(v for (v,) in other.execute(
+            "SELECT coalesce(most_common_vals::text, '') || ' ' || "
+            "coalesce(histogram_bounds::text, '') FROM pg_stats "
+            "WHERE schemaname=current_schema() AND tablename IN "
+            "('coordination_events', 'coordination_messages')").fetchall())
+    for gone in ("note 3 for the queue", salt, fingerprint):
+        assert gone not in after
+    assert "note 2 for the queue" in after          # the statistics were rebuilt, not dropped
+
+
+def test_a_busy_board_is_reported_as_busy_not_as_a_database_failure(store, cli, pg_url):
+    import psycopg
+    message_id = _send(store)
+    with psycopg.connect(pg_url) as holder:
+        holder.execute("SET search_path TO public")
+        holder.execute("SELECT 1 FROM coordination_messages WHERE message_id=%s FOR UPDATE",
+                       (message_id,))
+        code, output = cli("redact", "--message-id", message_id, "--reason", "wrong paste")
+        holder.rollback()
+    assert code == 2 and output.out == ""
+    assert "busy" in output.err and "PSEUDOLIFE_MCP_DATABASE_URL" not in output.err
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_events WHERE event='redact'").fetchone() == (0,)
+
+
+def test_an_open_export_snapshot_does_not_block_the_daemons_schema_pass(store, pg_url):
+    """export and verify hold a read lock on the log for their whole
+    snapshot, and every daemon start runs the schema pass under a 5 s lock
+    timeout, so nothing in that pass may need a lock that conflicts with it
+    once the log exists: an ``export | less`` left open kept a v46 daemon
+    from starting (review, 2026-09-26)."""
+    import psycopg
+    from pseudolife_memory.storage.coordination import audit_events
+    from pseudolife_memory.storage.schema import ensure_schema
+    pair(store)
+    reader = psycopg.connect(pg_url)
+    try:
+        reader.read_only = True
+        reader.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        reader.execute("SET search_path TO public")
+        reader.commit()
+        rows = audit_events(reader)
+        next(rows)                                      # the snapshot is open
+        with psycopg.connect(pg_url, autocommit=True) as daemon:
+            daemon.execute("SET search_path TO public")
+            ensure_schema(daemon)
+        rows.close()
+    finally:
+        reader.close()
+
+
+def test_an_archive_with_a_duplicate_key_cannot_be_checked(store, cli, tmp_path):
+    """A JSON object may repeat a key and a reader keeps the last one, so a
+    line could show one body to a person and verify another."""
+    _send(store, "the body")
+    archive = tmp_path / "board-audit.jsonl"
+    assert cli("export", "--out", str(archive))[0] == 0
+    lines = archive.read_text(encoding="utf-8").splitlines()
+    lines[2] = lines[2].replace('"body":"the body"', '"body":"EVIL","body":"the body"', 1)
+    assert '"body":"EVIL"' in lines[2]
+    archive.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    code, output = cli("verify", "--input", str(archive))
+    assert code == 2 and "line 3" in output.err and "duplicate" in output.err
+
+
+@pytest.mark.parametrize("args", [
+    ("redact", "--reason", "no id"),
+    ("redact", "--message-id", "0" * 32),
+])
+def test_redact_needs_both_a_message_id_and_a_reason(cli, args):
+    code, output = cli(*args)
+    assert code == 2 and output.out == "" and "usage:" in output.err
+
+
+def test_a_redaction_reason_is_checked_before_anything_is_written(store, cli):
+    message_id = _send(store)
+    for reason, code in (("bell\x07", "invalid_reason"), ("x" * 241, "invalid_reason"),
+                         ("token=" + "q7Hd2kLm9Pz4" + "Rt6Wv8Xy1Bc3", "secret_like_body")):
+        exit_code, output = cli("redact", "--message-id", message_id, "--reason", reason)
+        assert (exit_code, json.loads(output.out)["reason"]) == (1, code)
+        assert reason not in output.out + output.err
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_events WHERE event='redact'").fetchone() == (0,)
+
+
+def test_verify_input_names_a_tampered_or_stripped_body_in_an_export(store, cli, tmp_path):
+    _send(store, "the body")
+    archive = tmp_path / "board-audit.jsonl"
+    assert cli("export", "--out", str(archive))[0] == 0
+    rows = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()]
+
+    def verify_rows(rows, name):
+        path = tmp_path / name
+        path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        code, output = cli("verify", "--input", str(path))
+        return code, json.loads(output.out) if output.out else output.err
+
+    edited = [dict(row) for row in rows]
+    edited[2]["body"] = "another body"
+    assert verify_rows(edited, "edited.jsonl") == (
+        1, {"ok": False, "seq": 3, "reason": "body_mismatch"})
+    # A pre-v46 CLI's export has neither field.
+    stripped = [{k: v for k, v in row.items() if k not in ("body", "body_salt")}
+                for row in rows]
+    assert verify_rows(stripped, "stripped.jsonl") == (
+        1, {"ok": False, "seq": 3, "reason": "body_not_exported"})
+    # Removed as a redaction would (body and salt), but with no redact event.
+    blanked = [dict(row) for row in rows]
+    blanked[2]["body"] = blanked[2]["body_salt"] = None
+    assert verify_rows(blanked, "blanked.jsonl") == (
+        1, {"ok": False, "seq": 3, "reason": "body_missing"})
+    # The salt is part of what the payload commits to.
+    resalted = [dict(row) for row in rows]
+    resalted[2]["body_salt"] = "0" * 32
+    assert verify_rows(resalted, "resalted.jsonl") == (
+        1, {"ok": False, "seq": 3, "reason": "body_mismatch"})
+    for field in ("body", "body_salt"):
+        wrong_type = [dict(row) for row in rows]
+        wrong_type[2][field] = 7
+        code, err = verify_rows(wrong_type, f"wrong-type-{field}.jsonl")
+        assert code == 2 and "line 3 is not an exported audit event" in err
+
+
+def test_an_export_written_before_v46_still_verifies(store, cli, tmp_path):
+    """Exports from v42-v45 have no body field; their sends carry the body
+    inside the hashed payload, and they must keep verifying."""
+    from tests.test_coordination_audit import _legacy_send
+    a, b = pair(store)
+    _legacy_send(store, a, b)
+    store.update(*creds(a), status="later")
+    archive = tmp_path / "board-audit.jsonl"
+    assert cli("export", "--out", str(archive))[0] == 0
+    rows = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()]
+    old = tmp_path / "v45.jsonl"
+    old.write_text("".join(json.dumps({k: v for k, v in row.items() if k != "body"}) + "\n"
+                           for row in rows), encoding="utf-8")
+    code, output = cli("verify", "--input", str(old))
+    assert code == 0 and json.loads(output.out)["events"] == 4
+
+
+def test_a_bank_before_v46_exports_and_verifies_but_cannot_redact(store, cli):
+    """A restored v42-v45 bank, read before any v46 daemon has started."""
+    from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+    from tests.test_coordination_audit import _legacy_send
+    a, b = pair(store)
+    message_id = _legacy_send(store, a, b)
+    store.storage.conn.execute("ALTER TABLE coordination_events DROP COLUMN body")
+    try:
+        code, output = cli("export")
+        assert code == 0 and [e["body"] for e in lines(output)] == [None, None, None]
+        code, output = cli("verify")
+        assert code == 0 and json.loads(output.out)["events"] == 3
+        code, output = cli("redact", "--message-id", message_id, "--reason", "why")
+        assert code == 2 and output.out == "" and "v46" in output.err
+    finally:
+        store.storage.conn.execute(COORDINATION_SCHEMA_SQL)
+
+
+def test_the_usage_names_redaction():
+    from pseudolife_memory import cli as console
+    line = next(line for line in console._USAGE.splitlines() if "board-audit" in line)
+    assert "redact" in line

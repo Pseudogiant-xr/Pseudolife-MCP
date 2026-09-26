@@ -1102,7 +1102,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v45 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v46 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -3712,7 +3712,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v45). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v46). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -4204,7 +4204,8 @@ exists without its change. The events are `register`, `update` (the new values
 and the ones they replaced, which is the status history), `attach`, `detach`,
 `send` (with the full body), `read`, `ack`, `attempt`, the prune pass's
 `expire` (bodies blanked) and `prune` (messages and addresses removed),
-`bank_identity`, and the operator's restore `recover` and `rebind`. A `read`
+`bank_identity`, the lease events, the operator's restore `recover` and
+`rebind`, and the operator's `redact` ([below](#redacting-a-body)). A `read`
 records the first time a receive returned the message: an explicit receive
 (`path: pull`), or the recipient's live-delivery adapter fetching it for a wake
 attempt (`path: delivery`). The same time is stamped on the message as
@@ -4224,6 +4225,16 @@ content, so editing, inserting or reordering rows breaks the chain, and so does
 removing any but the oldest (see below). Appends take a transaction-scoped
 advisory lock after every board-row lock the mutation holds, which orders
 writers on separate connections.
+
+A `send` row written from schema v46 on keeps the message text in a separate
+`body` column and a random 16-byte salt in `body_salt`, both outside the hash.
+Its hashed payload holds sha256(salt || body) (`text_commitment`), and
+neither the text nor its length, so the chain vouches for
+the body without containing it, and an operator can remove one body without
+breaking the chain. Redaction removes the salt with the body, so what stays in
+the chain cannot be used to confirm a guess of what was removed. A `send` row written before v46 has the
+text (`text`) inside its hashed payload and no `body`; that body cannot be
+removed, and stays until audit retention removes the row.
 
 Retention is separate from the mailbox. The prune pass that expires bodies also
 removes the log's oldest rows once they are older than `audit_retention_days`.
@@ -4249,9 +4260,10 @@ to read (its two control runs were 1.8 ms apart), and with one writer at a time
 the run did not measure waiting on the append lock.
 
 The log is read by an operator, never by an agent: there is no MCP tool and no
-REST route for it. `pseudolife-mcp board-audit` reads the bank directly, through
-`PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance, in a
-read-only snapshot, so it is safe beside a running daemon:
+REST route for it. `pseudolife-mcp board-audit` reaches the bank directly,
+through `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance;
+`export` and `verify` read one read-only snapshot, so they are safe beside a
+running daemon:
 
 ```sh
 pseudolife-mcp board-audit export --task fix-week --since 2026-09-23 --out board.jsonl
@@ -4259,7 +4271,9 @@ pseudolife-mcp board-audit verify
 ```
 
 `export` writes one JSON object per line, oldest first, to stdout or to a new
-`--out` file, which it never overwrites. Prefer `--out` for anything you keep: a
+`--out` file, which it never overwrites. Each line carries the row's columns,
+the payload parsed, and `body` and `body_salt` (`null` except on a v46
+`send` that has not been redacted). Prefer `--out` for anything you keep: a
 PowerShell 5 `>` redirect writes UTF-16. The filters are `--project`, `--task`,
 `--agent` (the acting agent or a message's recipient), and `--since` / `--until`
 (epoch seconds or ISO 8601; a time without an offset is local). The daemon's
@@ -4272,10 +4286,21 @@ leaves them out.
 and `start_cut`, the cut the log starts from once retention has removed its
 oldest rows. It exits 0 when the chain is intact. It exits 1 with the first
 failing `seq` and a `reason`: `sequence_gap`, `broken_link`, `hash_mismatch` or
-`unanchored_start` for the chain, or `head_missing`, `head_mismatch` or
+`unanchored_start` for the chain; `body_mismatch` for a body that, with its
+salt, does not open the commitment its `send` row's payload holds, a body on
+any other row, a salt left without its body, or a body or salt written back
+after a `redact` row named it; `body_missing` for
+a v46 `send` whose body is gone without a later operator `redact` row that
+names it and says it removed the body (reported after the whole walk, since
+that row comes later); `body_not_exported` for a v46 `send` in an export that
+has no `body` fields at all; or `head_missing`, `head_mismatch` or
 `head_pruned` for an expected head. It exits 2 when it could not check.
 `verify --input <file>` checks an export file instead of the bank; the export
-must be unfiltered, since a filtered one has gaps. In the Docker tier run it
+must be unfiltered, since a filtered one has gaps, and a line that repeats a
+key is refused. Export and verify with a v46 or later CLI: an export written
+by an older one has no `body` fields, so its v46 sends fail as
+`body_not_exported`, and an older `verify` checks no bodies at all. An export
+of a pre-v46 log still verifies. In the Docker tier run it
 inside the daemon container, which already has the database URL:
 `docker exec pseudolife-mcp-daemon pseudolife-mcp board-audit verify`.
 
@@ -4284,10 +4309,13 @@ removed except the oldest, behind a cut record whose own fields add up (written
 by the daemon, a window of at least a day, the cutoff that window gives at its
 time, and a first surviving row no older than that cutoff; retention removes
 only an expired prefix, so a later row stamped before the cutoff can remain).
+No v46 body was edited, and none was removed except behind a `redact` row.
 What it cannot show on its own, because no secret is involved: that the
 newest rows were not dropped; that the table was not rewritten with every
-hash recomputed; and that the oldest rows were not removed by someone who
-also appended a consistent cut record.
+hash recomputed; that the oldest rows were not removed by someone who
+also appended a consistent cut record; and that a body was not removed by
+someone who also appended a consistent `redact` row (which then stays in the
+log, reason and all, like the operator's own).
 Record `head_seq:head_hash` and `head_created_at` from each `verify` somewhere
 outside the bank, and later run `verify --expect-head SEQ:HASH`. That catches
 the first two. The third needs a series of recorded heads: retention never
@@ -4303,10 +4331,116 @@ It proves what was sent and by which verified principal, not that a message was
 true.
 
 The log is private data. It holds message bodies verbatim for the whole
-retention window, and bodies carry machine paths and usernames. It lives only
-in the bank database and its full backups, portable `export`/`import` archives
-omit it, and the CLI writes only to stdout or a local file you name. Keep
-exports out of repositories and anywhere public.
+retention window unless an operator redacts one, and bodies carry machine
+paths and usernames. It lives only in the bank database and its full backups,
+portable `export`/`import` archives omit it, and the CLI writes only to stdout
+or a local file you name. Keep exports out of repositories and anywhere public.
+
+#### Redacting a body
+
+A body that must not stay in the log (a credential pasted into a message by
+mistake) can be removed by the operator, never by an agent: there is no MCP
+tool or REST route for it.
+
+```sh
+pseudolife-mcp board-audit redact --message-id <id> --reason "pasted a credential"
+```
+
+In one transaction it blanks the `send` row's `body` and `body_salt`, blanks
+the live copy in the mailbox if prune has not already and ends its delivery,
+and appends a
+chained `redact` row (actor `operator`, the message's agents, project and task,
+and a payload naming the message, the `send` row's `seq`, the reason and
+`audit_copy: removed`). After the commit it runs `VACUUM (ANALYZE)
+coordination_events, coordination_messages` and `VACUUM pg_statistic`: the old
+row versions that still hold the body are freed for reuse, and the planner
+statistics are rebuilt, since `ANALYZE` copies sampled column values under
+1 kB (bodies, salts, live texts, request fingerprints) word for word into
+`pg_statistic`, where they would otherwise stay until the next automatic
+analyze. It prints one JSON result, `{"ok": true, "message_id", "seq",
+"redact_seq", "redact_hash", "expect_head", "live_body_cleared", "audit_copy",
+"vacuumed"}`, and exits 0. Record `expect_head` outside the bank, as for
+`verify`: a later `verify --expect-head` with it shows the redaction's own
+record is still there. A failed vacuum does not undo the redaction; the result
+says `"vacuumed": false`, and you can run both `VACUUM`s later.
+
+A message sent before v46 has its body inside the hashed payload, which cannot
+change: that audit copy stays until retention removes the `send` row. While
+its live copy is still in the mailbox (up to 24 hours), `redact` blanks it and
+takes it out of delivery all the same, logging `audit_copy: kept`, and says so
+on stderr. With audit retention under seven days, a message's `send` row can
+go before its mailbox row's request fingerprint does; `redact` still blanks
+that fingerprint (and any live text), logs `audit_copy: gone` with `"seq":
+null` in the payload and the result, and says so on stderr.
+
+It refuses, printing `{"ok": false, "message_id", "reason"}` and exiting 1,
+when neither the log nor the mailbox has the message (`message_not_found`: an
+unknown id, or one whose `send` row retention removed and whose mailbox row is
+gone too), when the message was sent before
+v46 and its live copy is gone (`body_in_hashed_payload`), when the body is
+already redacted (`already_redacted`), or when `--reason` is blank, longer
+than 240 characters, holds a control, format or line or paragraph separator
+character (`invalid_reason`), or looks like a credential (`secret_like_body`).
+It exits 2 when it could not run: the board busy (a row or the audit chain
+locked for more than 5 seconds; nothing changed, retry), or a bank whose log
+predates v46. It takes the same locks as the daemon's own board writes, so it
+is safe beside a running daemon; in the Docker tier run it inside the daemon
+container as for `verify`.
+
+What redaction does not reach: audit copies of bodies sent before v46; full
+backups, WAL archives and `--out` exports taken earlier, which still hold the
+body (restoring such a backup brings it back, so redact again after a
+restore); the database's write-ahead log until the server recycles it; row
+versions a still-open snapshot (a long `export`) keeps the vacuum from
+freeing; the superseded statistics row, when the role running `redact` may
+not vacuum `pg_statistic` (Postgres skips it with a warning, and autovacuum
+frees the row later); and whatever the recipient already read. What stays in the bank
+cannot confirm a guess of the body: the `send` row keeps only its salted
+commitment, and the salt goes with the body; the mailbox row's request
+fingerprint (a sha256 over the recipient, body, reply and expiry, kept seven
+days for retries) is blanked too, so a retry of the redacted request is
+refused as `request_conflict`. The reason is hashed into the chain for good;
+describe the mistake, never repeat the secret.
+
+#### Secret-shaped text
+
+The board refuses text shaped like a credential wherever it would keep it: a
+message body and its request id (`send`); a status, label, project, task,
+episode or capability name (`register` and `update`, including
+`memory_agents update`; project and task are copied into every later audit
+row by that agent); a lease name
+or purpose (`lease`, `release` and `leases`, including `memory_agents claim`,
+whose status is the purpose); and a redaction reason. The call fails with
+`secret_like_body` (HTTP 400 on the REST API) before the text is stored
+anywhere, and the error never repeats the text. (The daemon's own
+once-a-minute prune pass may run first on `register` and `send`; it involves
+no caller text.)
+
+The shapes are GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` with 36 or
+more characters, `github_pat_`), GitLab `glpat-`, Hugging Face `hf_`,
+Anthropic `sk-ant-`, OpenAI-style `sk-` and Stripe `sk_live_`/`rk_live_` keys,
+Google `AIza` API keys, AWS access key ids (`AKIA`/`ASIA`) and secret access
+keys, Slack `xox` tokens, JWTs, a `Bearer` token, the password in a DSN
+(`postgresql://user:<password>@host`), PEM private-key headers, and a key
+whose name contains `secret`, `token`, `password`, `passwd`, `credential`,
+`key`, `auth` or `bearer` (such as `PSEUDOLIFE_MCP_TOKENS`,
+`X-PL-Agent-Key` or `private_key`) given a generated-looking value after `:`,
+`=` or, for a `--flag`, a space. A value is split at `,`, `:` and `=`, so each
+token in a principal map (`name:token,name:token`) counts on its own, and a
+piece counts when it is 20 or more characters of letters and digits with
+lower case, upper case and digits all present, or 32 or more in one unbroken
+run (no `_` or `-`, which word-joined identifiers have).
+Where a prefix also starts ordinary identifiers (`ghs_`, `github_pat_`,
+`sk-`), the rest must look generated too. Not refused: ordinary prose about
+tokens and secrets; git SHAs, digests (whole or truncated), UUIDs, message and
+agent ids; anything with a `/` after a key (paths, branches, `owner/repo`);
+names, words, word-joined identifiers and counts; placeholders (`<token>`,
+`$VAR`, `${VAR}`). Single-case passwords shorter than 32 characters get
+through; this is a net for common
+shapes, not a guarantee, and a v46 body it misses can still be redacted. Over
+the 2026-09-23/24 fifteen-session trial's board export it refused none of the
+816 message bodies and request ids, the 25 statuses, or the labels, projects,
+tasks and episodes of its 26 agents.
 
 ### Coordination report
 
@@ -4389,7 +4523,10 @@ Initial limits are 8192 UTF-8 bytes per message, 256 pending messages per recipi
 60 new sends per sender per minute and 50 messages per receive page. Bodies stop
 being served after 24 hours; request-key metadata is retained for seven days.
 The [audit log](#audit-log) keeps its own copy of every body for
-`audit_retention_days`.
+`audit_retention_days`, unless the operator [redacts](#redacting-a-body) it.
+Text shaped like a credential (a body, request id, status, scope field, or
+lease name or purpose) is refused with `secret_like_body`
+([secret-shaped text](#secret-shaped-text)).
 Opportunistic pruning runs at most once per minute during registration, sending
 or heartbeats. Expired bodies remain unservable even when no adapter is running
 to trigger physical cleanup. Full queues and rate limits return explicit errors.
@@ -5479,7 +5616,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v45**; migrations are additive
+The current Postgres meta version is **v46**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -5530,6 +5667,7 @@ The milestones:
 | v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or shim exit, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
 | v44 | Memory-loop observability (2026-09-25). Adds `lesson_search_events`: one row per `memory_lesson_search` call (query, caller session and episode, the lessons served by `(entity_norm, attribute_norm)` slot key with rank and score; an empty list for a search that found nothing). It is a separate table from `retrieval_events`, whose rows the retrieval replay and telemetry harnesses re-run as `memory_search` calls. FK-free; it shares the retrieval log's switch (`memory.retrieval_log.enabled`) and retention (`retention_days`). Adds `outcome_signals.used_ids` (JSONB): what an outcome's `used_ids` became, as `{"credited", "unmatched", "served_elsewhere"}` id lists, or `{"unchecked", "reason"}` when the label write failed; `NULL` when the outcome named no ids, the log is off, or this best-effort write failed (counted in `retrieval_log.write_errors`). The column is serving telemetry and stays out of portable exports, like the retrieval log. Additive/idempotent; existing rows read `NULL` and the new table starts empty. |
 | v45 | Resource leases (2026-09-26). Adds `coordination_leases`, one FK-free row per lease name (holder agent and principal, purpose, the current grant's fence from the `coordination_lease_fence` sequence, so a name's fence never repeats, the acquired, expiry and expected-end times, the estimate the hold was given, and when the lease was last freed, after which a week free and unqueued forgets the row), `coordination_lease_waiters`, each lease's FIFO queue, and `coordination_agents.status_expires_at`, when a status says it stops being true. A process-held lease's truth is an OS file lock that `pseudolife-mcp lease run` takes on the host, and the row mirrors it; a session-held lease (`coordinator:<project>`, `claim:<path>`) lives only here. A freed lease goes to the head of its queue, which must renew within five minutes or lose it to the next. Grants, releases, expiries and operator breaks are audit events; renewals are not. Operational data, excluded from portable exports like the other coordination tables. Additive/idempotent. |
+| v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its digest (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields and lease names and purposes with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
@@ -5642,7 +5780,9 @@ verifies, because the chain alone cannot see that its newest rows are missing.
 If you recorded a head earlier, `pseudolife-mcp board-audit verify --expect-head
 SEQ:HASH` shows whether that head survived. `recover` and each `rebind` append
 operator events (`actor: operator`) to the restored log in the same transaction
-as the change.
+as the change. A body redacted after the backup was taken is back, and its
+`redact` row is gone: run `pseudolife-mcp board-audit redact` for it again
+([redacting a body](configuration.md#redacting-a-body)).
 
 A backup taken before v42 restores without the log. Recovery never migrates a
 schema, so both commands still revoke and rebind, print that the operation is
@@ -5664,7 +5804,11 @@ acknowledged messages. Message bodies expire after 24 hours, while request keys
 and terminal metadata remain for seven days from creation. Maintenance purges
 expired bodies and old metadata during coordination activity. The audit log
 keeps its own copy of each body for `coordination.audit_retention_days`
-(default 90 days), and restoring a backup restores that copy too. Pending capacity
+(default 90 days), and restoring a backup restores that copy too. The operator
+can remove a body sent from schema v46 on with `board-audit redact`; one sent
+before v46 is part of the hashed chain and stays until retention removes it
+(`redact` still blanks its live mailbox copy while one is left).
+Pending capacity
 errors never silently discard mail. The mailbox clock high-water mark survives
 message pruning, so restart with a backward wall clock cannot regress its stamps.
 
