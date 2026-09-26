@@ -4308,6 +4308,65 @@ in the bank database and its full backups, portable `export`/`import` archives
 omit it, and the CLI writes only to stdout or a local file you name. Keep
 exports out of repositories and anywhere public.
 
+### Coordination report
+
+`evals/coordination_report.py` turns a board record into an aggregate-only
+report, the measure a coordination change is judged by: a change should beat
+the committed baseline of the 2026-09-23/24 trial
+([artifact](../../evals/results/coordination-baseline-20260924.json)) by more
+than night-to-night noise. One night is a reference point, not an interval:
+that noise stays unmeasured until a second comparable night is reported. The
+report reads an audit export, or the older whole-board export the trial was
+recorded in, and writes a new JSON file plus a Markdown rendering beside it. It
+never replaces either without `--force`, and never its own input:
+
+```sh
+pseudolife-mcp board-audit export --out board.jsonl
+python -m evals.coordination_report board.jsonl --out night.json \
+  --since 2026-09-26T16:00+10:00 --until 2026-09-27T08:00+10:00 \
+  --window "evening=2026-09-26T16:00+10:00/2026-09-26T21:30+10:00"
+```
+
+Export the whole log and scope the report with `--since`/`--until` (messages
+by send time; staleness is measured at `--until`). The report still reads the
+registrations and statuses set before the scope, which an export filtered at
+the source drops: it flags such an export (a gap in its sequence, or a start no
+retention cut anchors). In a filtered export, a recipient that registered
+before the cut and did not act after it appears under the principal `unknown`,
+and staleness counts the agents with no status event.
+
+It reports acknowledgement latency (median, p90, acknowledged and never
+acknowledged) per recipient principal, overall and in each `--window`
+(`LABEL=START/END` by send time, epoch seconds or ISO 8601 with an offset,
+either side may be left open); the share of acknowledgements that covered three
+or more messages at once; each directed pair's busiest 60 minutes; near-identical
+fan-out bursts; the kind mix; SUITE-START/SUITE-END traffic and baton passes;
+status staleness from an audit export (the older export has no status history),
+leaving out detached and revoked sessions, whose statuses no peer is shown; and
+resources agents coordinated by hand repeatedly, listed as candidate lease
+declarations with counts only. Every metric carries its definition in the
+output. Wakes per session-hour, requests past their reply-by time and the time
+to answer a NEEDS-HUMAN message are `null` until the schema records what they
+need.
+
+The kind mix uses a message's declared `kind` when the event carries one and
+otherwise a tag-first heuristic over the body, hand-calibrated on the trial and
+marked `heuristic` in the output. Some of its rules depend on which agent
+coordinates: `--coordinator auto` (the default) picks the agent with the most
+distinct counterparties, `none` turns those rules off, and an agent id names
+one.
+
+The report is aggregate-only by construction. Bodies, labels, statuses, tasks,
+projects and paths are matched against fixed keyword lists in memory and only
+counts are written; agents appear as `<principal>-<n>` in first-seen order, and
+no raw id or input path reaches either file. A principal is written by name
+only when it is one of the installer's role names (`default`, `claude-code`,
+`claude-desktop`, `codex`, `gemini`, `mcp-client`); any other is written as
+`principal-<n>`, because an operator-chosen principal can be a username or a
+host. `--keep-principal NAME` keeps one you know to be a role. Window labels are
+limited to 40 letters, digits, spaces and `:._+-`. The input itself stays
+private.
+
 ### Delivery and recovery
 
 Use ordinary `pseudolife-mcp` for authenticated pull messaging. The optional
