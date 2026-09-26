@@ -1840,8 +1840,12 @@ class CoordinationStore:
         event. A message sent before v46 has its body inside the hashed
         payload, which cannot change; while its live copy is still there, that
         copy is blanked and taken out of delivery all the same, and the event
-        says ``audit_copy: kept``. Copies outside the bank (a backup, an
-        export, what the recipient already read) are untouched.
+        says ``audit_copy: kept``. With audit retention under the seven days
+        a mailbox row keeps its request fingerprint, the send event can go
+        first: the live row's fingerprint (and any live text) is still
+        taken, and the event says ``seq: None`` and ``audit_copy: gone``.
+        Copies outside the bank (a backup, an export, what the recipient
+        already read) are untouched.
 
         Returns the send event's ``seq``, the redact event's ``redact_seq``
         and ``redact_hash`` (with ``expect_head``, the two as ``verify
@@ -1852,8 +1856,9 @@ class CoordinationStore:
         Refused: ``invalid_message_id``, ``invalid_reason`` (blank, over
         MAX_REDACT_REASON characters, or holding a control, format or
         line/paragraph separator character), ``secret_like_body`` (the reason
-        is hashed for good), ``message_not_found`` (no send event for the id:
-        unknown, or removed by audit retention), ``body_in_hashed_payload``
+        is hashed for good), ``message_not_found`` (neither a send event nor
+        a mailbox row for the id: unknown, or both gone),
+        ``body_in_hashed_payload``
         (sent before v46 and no live copy left to take), ``already_redacted``."""
         if (not isinstance(message_id, str) or not message_id or len(message_id) > 120
                 or any(c not in _ID_CHARS for c in message_id)):

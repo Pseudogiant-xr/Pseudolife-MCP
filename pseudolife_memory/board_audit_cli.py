@@ -45,8 +45,8 @@ _REDACT_REFUSALS = {
                       "format or separator characters",
     "secret_like_body": "the reason looks like it holds a credential, and the reason is "
                         "kept in the log for good; describe the mistake without repeating it",
-    "message_not_found": "no send event for this message id in the audit log: an unknown "
-                         "id, or one audit retention already removed",
+    "message_not_found": "no record of this message id: an unknown id, or one whose send "
+                         "event audit retention removed and whose live copy is gone too",
     "body_in_hashed_payload": "this message was sent before schema v46, when the body was "
                               "part of the hashed payload; removing it would break the "
                               "chain, so it stays until audit retention removes the event, "
@@ -258,10 +258,16 @@ def _verify(args) -> int:
 
 def _vacuum(conn):
     """Free the old row versions a redaction leaves in the table files (the
-    body stays readable there until a vacuum lets the space be reused). It
-    runs after the commit, outside any transaction, as VACUUM must, and does
-    not reach WAL, WAL archives or backups."""
-    conn.execute("VACUUM coordination_events, coordination_messages")
+    body stays readable there until a vacuum lets the space be reused), and
+    rebuild the planner statistics: ANALYZE copies sampled column values under
+    1 kB (a body, its salt, the live text, its request fingerprint) word for
+    word into pg_statistic, where they would stay until the next automatic
+    analyze. Then vacuum pg_statistic, so the superseded statistics row is
+    freed as well; a role that may not vacuum it gets a warning and a skip,
+    not an error. It runs after the commit, outside any transaction, as
+    VACUUM must, and does not reach WAL, WAL archives or backups."""
+    conn.execute("VACUUM (ANALYZE) coordination_events, coordination_messages")
+    conn.execute("VACUUM pg_catalog.pg_statistic")
 
 
 def _redact(args) -> int:
@@ -286,10 +292,15 @@ def _redact(args) -> int:
         print("board-audit: the live copy is blanked and out of delivery, but this message "
               "was sent before schema v46: the audit log keeps its body until audit "
               "retention removes the send event", file=sys.stderr)
+    if result["audit_copy"] == "gone":
+        print("board-audit: audit retention had already removed this message's send event, "
+              "so the audit log held no copy of it; its live request fingerprint (and any "
+              "live text) is blanked", file=sys.stderr)
     if not vacuumed:
         print("board-audit: the redaction is committed, but the VACUUM that frees the old "
-              "row versions failed (the board may be busy); run `VACUUM coordination_events, "
-              "coordination_messages` later", file=sys.stderr)
+              "row versions and rebuilds the statistics failed (the board may be busy); run "
+              "`VACUUM (ANALYZE) coordination_events, coordination_messages` and `VACUUM "
+              "pg_statistic` later", file=sys.stderr)
     print("board-audit: record this head outside the bank; `pseudolife-mcp board-audit "
           f"verify --expect-head {result['expect_head']}` later shows the redaction record "
           "is still there", file=sys.stderr)

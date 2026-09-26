@@ -323,6 +323,26 @@ def test_redacting_a_live_pre_v46_message_says_the_audit_copy_stays(store, cli, 
     assert "audit log keeps" in output.err and "sent by a v45 daemon" not in output.err
 
 
+def test_redacting_a_message_whose_send_event_retention_cut_says_so(store, cli):
+    """With audit retention under seven days the send event can go before
+    the live row's request fingerprint; redact still takes the fingerprint,
+    and tells the operator the log held no copy to remove."""
+    from tests.test_coordination_audit import DAY
+    a, b = pair(store)
+    message_id = store.send(*creds(a), to=b["agent_id"], text="short pin 4417",
+                            request_id="r")["message_id"]
+    store.test_time[0] += 3 * DAY
+    store.update(*creds(a), status="still here")
+    store.prune(audit_retention_days=1)
+    code, output = cli("redact", "--message-id", message_id, "--reason", "pasted by mistake")
+    assert code == 0, output.err
+    result = json.loads(output.out)
+    # The live text expired after a day; only its fingerprint was left to take.
+    assert (result["seq"], result["audit_copy"], result["live_body_cleared"]) == (
+        None, "gone", False)
+    assert "retention" in output.err and "short pin 4417" not in output.err + output.out
+
+
 def test_redact_vacuums_after_its_commit_and_a_failed_vacuum_does_not_undo_it(
         store, cli, pg_url, monkeypatch):
     """Redaction leaves the old row versions in the table files until a
@@ -346,6 +366,65 @@ def test_redact_vacuums_after_its_commit_and_a_failed_vacuum_does_not_undo_it(
     assert code == 0 and seen == [1]                  # committed before the vacuum ran
     assert json.loads(output.out)["vacuumed"] is False
     assert "vacuum" in output.err.lower()
+
+
+def test_redact_rebuilds_the_statistics_that_copy_the_body(store, cli, pg_url):
+    """ANALYZE copies sampled column values (under 1 kB) word for word into
+    pg_statistic, so on a small board a body, its salt, the live text and
+    its request fingerprint can all sit in the planner statistics. A plain
+    VACUUM leaves them there until the next automatic analyze; the redaction
+    has to rebuild them."""
+    import psycopg
+    a, b = pair(store)
+    sent = [store.send(*creds(a), to=b["agent_id"], text=f"note {n} for the queue",
+                       request_id=f"r{n}")["message_id"] for n in range(6)]
+    target = sent[3]
+
+    def stats():
+        with psycopg.connect(pg_url, autocommit=True) as other:
+            other.execute("SET search_path TO public")
+            other.execute("ANALYZE coordination_events, coordination_messages")
+            salt = other.execute("SELECT body_salt FROM coordination_events WHERE event='send' "
+                                 "AND message_id=%s", (target,)).fetchone()[0]
+            fingerprint = other.execute("SELECT fingerprint FROM coordination_messages "
+                                        "WHERE message_id=%s", (target,)).fetchone()[0]
+            rows = other.execute(
+                "SELECT tablename, attname, coalesce(most_common_vals::text, '') || ' ' || "
+                "coalesce(histogram_bounds::text, '') FROM pg_stats "
+                "WHERE schemaname=current_schema() AND (tablename, attname) IN "
+                "(('coordination_events','body'), ('coordination_events','body_salt'), "
+                "('coordination_messages','text'), ('coordination_messages','fingerprint'))"
+            ).fetchall()
+        return {(t, c): v for t, c, v in rows}, salt, fingerprint
+
+    before, salt, fingerprint = stats()
+    # The statistics really do hold the target's values, or this test proves nothing.
+    assert "note 3 for the queue" in before[("coordination_events", "body")]
+    assert "note 3 for the queue" in before[("coordination_messages", "text")]
+    assert salt in before[("coordination_events", "body_salt")]
+    assert fingerprint in before[("coordination_messages", "fingerprint")]
+
+    def statistic_vacuums():
+        with psycopg.connect(pg_url, autocommit=True) as other:
+            return other.execute("SELECT vacuum_count FROM pg_stat_all_tables "
+                                 "WHERE relid='pg_catalog.pg_statistic'::regclass").fetchone()[0]
+
+    vacuums = statistic_vacuums()
+    code, output = cli("redact", "--message-id", target, "--reason", "wrong paste")
+    assert code == 0, output.err
+    assert json.loads(output.out)["vacuumed"] is True
+    # The superseded statistics row is freed too, not left for autovacuum.
+    assert statistic_vacuums() > vacuums
+    with psycopg.connect(pg_url, autocommit=True) as other:
+        other.execute("SET search_path TO public")
+        after = " ".join(v for (v,) in other.execute(
+            "SELECT coalesce(most_common_vals::text, '') || ' ' || "
+            "coalesce(histogram_bounds::text, '') FROM pg_stats "
+            "WHERE schemaname=current_schema() AND tablename IN "
+            "('coordination_events', 'coordination_messages')").fetchall())
+    for gone in ("note 3 for the queue", salt, fingerprint):
+        assert gone not in after
+    assert "note 2 for the queue" in after          # the statistics were rebuilt, not dropped
 
 
 def test_a_busy_board_is_reported_as_busy_not_as_a_database_failure(store, cli, pg_url):

@@ -642,28 +642,37 @@ tool or REST route for it.
 pseudolife-mcp board-audit redact --message-id <id> --reason "pasted a credential"
 ```
 
-In one transaction it blanks the `send` row's `body`, blanks the live copy in
-the mailbox if prune has not already and ends its delivery, and appends a
+In one transaction it blanks the `send` row's `body` and `body_salt`, blanks
+the live copy in the mailbox if prune has not already and ends its delivery,
+and appends a
 chained `redact` row (actor `operator`, the message's agents, project and task,
 and a payload naming the message, the `send` row's `seq`, the reason and
-`audit_copy: removed`). After the commit it runs `VACUUM coordination_events,
-coordination_messages`, so the old row versions that still hold the body are
-freed for reuse. It prints one JSON result, `{"ok": true, "message_id", "seq",
+`audit_copy: removed`). After the commit it runs `VACUUM (ANALYZE)
+coordination_events, coordination_messages` and `VACUUM pg_statistic`: the old
+row versions that still hold the body are freed for reuse, and the planner
+statistics are rebuilt, since `ANALYZE` copies sampled column values under
+1 kB (bodies, salts, live texts, request fingerprints) word for word into
+`pg_statistic`, where they would otherwise stay until the next automatic
+analyze. It prints one JSON result, `{"ok": true, "message_id", "seq",
 "redact_seq", "redact_hash", "expect_head", "live_body_cleared", "audit_copy",
 "vacuumed"}`, and exits 0. Record `expect_head` outside the bank, as for
 `verify`: a later `verify --expect-head` with it shows the redaction's own
 record is still there. A failed vacuum does not undo the redaction; the result
-says `"vacuumed": false`, and you can run the `VACUUM` later.
+says `"vacuumed": false`, and you can run both `VACUUM`s later.
 
 A message sent before v46 has its body inside the hashed payload, which cannot
 change: that audit copy stays until retention removes the `send` row. While
 its live copy is still in the mailbox (up to 24 hours), `redact` blanks it and
 takes it out of delivery all the same, logging `audit_copy: kept`, and says so
-on stderr.
+on stderr. With audit retention under seven days, a message's `send` row can
+go before its mailbox row's request fingerprint does; `redact` still blanks
+that fingerprint (and any live text), logs `audit_copy: gone` with `"seq":
+null` in the payload and the result, and says so on stderr.
 
 It refuses, printing `{"ok": false, "message_id", "reason"}` and exiting 1,
-when the log has no `send` row for the message (`message_not_found`: an
-unknown id, or one audit retention removed), when the message was sent before
+when neither the log nor the mailbox has the message (`message_not_found`: an
+unknown id, or one whose `send` row retention removed and whose mailbox row is
+gone too), when the message was sent before
 v46 and its live copy is gone (`body_in_hashed_payload`), when the body is
 already redacted (`already_redacted`), or when `--reason` is blank, longer
 than 240 characters, holds a control, format or line or paragraph separator
@@ -679,7 +688,9 @@ backups, WAL archives and `--out` exports taken earlier, which still hold the
 body (restoring such a backup brings it back, so redact again after a
 restore); the database's write-ahead log until the server recycles it; row
 versions a still-open snapshot (a long `export`) keeps the vacuum from
-freeing; and whatever the recipient already read. What stays in the bank
+freeing; the superseded statistics row, when the role running `redact` may
+not vacuum `pg_statistic` (Postgres skips it with a warning, and autovacuum
+frees the row later); and whatever the recipient already read. What stays in the bank
 cannot confirm a guess of the body: the `send` row keeps only its salted
 commitment, and the salt goes with the body; the mailbox row's request
 fingerprint (a sha256 over the recipient, body, reply and expiry, kept seven
@@ -1892,7 +1903,7 @@ The milestones:
 | v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or shim exit, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
 | v44 | Memory-loop observability (2026-09-25). Adds `lesson_search_events`: one row per `memory_lesson_search` call (query, caller session and episode, the lessons served by `(entity_norm, attribute_norm)` slot key with rank and score; an empty list for a search that found nothing). It is a separate table from `retrieval_events`, whose rows the retrieval replay and telemetry harnesses re-run as `memory_search` calls. FK-free; it shares the retrieval log's switch (`memory.retrieval_log.enabled`) and retention (`retention_days`). Adds `outcome_signals.used_ids` (JSONB): what an outcome's `used_ids` became, as `{"credited", "unmatched", "served_elsewhere"}` id lists, or `{"unchecked", "reason"}` when the label write failed; `NULL` when the outcome named no ids, the log is off, or this best-effort write failed (counted in `retrieval_log.write_errors`). The column is serving telemetry and stays out of portable exports, like the retrieval log. Additive/idempotent; existing rows read `NULL` and the new table starts empty. |
 | v45 | Resource leases (2026-09-26). Adds `coordination_leases`, one FK-free row per lease name (holder agent and principal, purpose, the current grant's fence from the `coordination_lease_fence` sequence, so a name's fence never repeats, the acquired, expiry and expected-end times, the estimate the hold was given, and when the lease was last freed, after which a week free and unqueued forgets the row), `coordination_lease_waiters`, each lease's FIFO queue, and `coordination_agents.status_expires_at`, when a status says it stops being true. A process-held lease's truth is an OS file lock that `pseudolife-mcp lease run` takes on the host, and the row mirrors it; a session-held lease (`coordinator:<project>`, `claim:<path>`) lives only here. A freed lease goes to the head of its queue, which must renew within five minutes or lose it to the next. Grants, releases, expiries and operator breaks are audit events; renewals are not. Operational data, excluded from portable exports like the other coordination tables. Additive/idempotent. |
-| v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`), not the text or its length, instead of the text, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its digest (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields and lease names and purposes with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
+| v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its digest (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields and lease names and purposes with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

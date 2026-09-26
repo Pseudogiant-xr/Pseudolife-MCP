@@ -28,13 +28,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `redact` event naming the send event and the reason, in one transaction and
   under the daemon's own locks, so it runs beside a live daemon; a busy board
   is reported as busy (exit 2), with nothing changed. It then vacuums the two
-  board tables so the old row versions are freed, and prints the new head
+  board tables so the old row versions are freed, rebuilds their planner
+  statistics and vacuums `pg_statistic` (`ANALYZE` copies sampled bodies,
+  salts and fingerprints into it word for word), and prints the new head
   (`expect_head`) to record for a later `verify --expect-head`. For a message
   sent before v46, whose body is inside the hashed payload and stays until
   audit retention removes the event, it still blanks and expires the live
   copy while there is one, and logs that the audit copy was kept. It refuses
   an unknown id and a body already redacted.
-- `board-audit verify` checks every present body against its digest
+- `board-audit verify` checks every present body against its commitment
   (`body_mismatch`, which also covers a body on a row that commits to none
   and a body written back after its redaction) and accepts an absent one only
   behind a later operator `redact` event that names it and removed it
