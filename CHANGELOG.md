@@ -15,9 +15,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `_validated_daemon_url`, `DEFAULT_URL`) and the redirect-refusing handler
   (`_NoRedirectHandler`) now live in `pseudolife_memory/daemon_url.py`,
   which imports only the standard library. The shim re-exports them under
-  the same names, and `briefing_cli` takes them from the new module, so
-  the hook no longer imports the shim. Measured 2026-09-27 against a stub
-  daemon (runs of 10 spawns): medians of 132-136 ms, down from 266-275 ms.
+  the same names, and the hook takes them from the new module, so it no
+  longer imports the shim. `pseudolife-mcp briefing` still imports the
+  shim for its health probe; it runs once per session, not every turn.
+  Measured 2026-09-27 against a stub daemon (runs of 10 spawns): medians
+  of 132-136 ms, down from 266-275 ms.
   Behaviour is unchanged, error text included. A test fails if the hook
   path imports the shim, httpx or rich again.
 - Deploy with `ops/update.ps1 -All`: the hook runs from the client-side
