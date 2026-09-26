@@ -301,6 +301,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   static line; a new plugin against an old daemon gets a 404 and prints
   nothing per turn until the daemon is updated.
 
+### Fixed (2026-09-26 — the memory-policy bench names a leaked coordination check-in again)
+- The bench's validity check keeps a list of known policy texts, and a run
+  whose context carries one its arm does not serve is invalid with that
+  text named. The coordination check-in was read from `echo "..."` in
+  `plugin/hooks/coordination-start.sh`, but since #367 that script fetches
+  the check-in from the daemon (`/api/hook/coordination-start`), so the
+  parse matched nothing and the entry silently dropped out of the list. A
+  leaked check-in was still caught by the generic `memory_*` scan, but only
+  as an unnamed "memory-policy mention". `policy_texts()` now takes it from
+  `pseudolife_memory.coordination.CHECKIN_TEXT`, the constant the daemon
+  serves, and a test pins the full set of known texts so a marker whose
+  source moves fails the suite instead of vanishing. The committed
+  2026-09-25 artifacts were graded with the check-in present in the list;
+  their results are unaffected. The coordination-start ledger rows need no
+  change: they are not context hooks, so a served check-in cannot excuse
+  itself from the scan.
+
 ### Fixed (2026-09-25 — Postgres connects retry a Windows local-port failure)
 - A daemon running natively on Windows (including the daemons the test suite
   spawns) now tries its own Postgres connects again (the storage connection
