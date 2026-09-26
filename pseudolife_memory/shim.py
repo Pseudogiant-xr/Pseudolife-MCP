@@ -720,7 +720,8 @@ def _toolset_changed(result) -> bool:
 def _requires_coordination_identity(name: str, arguments: dict | None) -> bool:
     if name == "memory_message":
         return True
-    return name == "memory_agents" and (arguments or {}).get("action") == "update"
+    return name == "memory_agents" and (arguments or {}).get("action") in {
+        "update", "claim", "release"}
 
 
 # Returned, instead of a board identity, by a process that answers for every

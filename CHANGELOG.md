@@ -6,6 +6,71 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-26 — agents queue for shared resources on the board instead of by message, schema v45)
+- Agents that share one machine can now hold a named, expiring **resource
+  lease** (a full test suite, the GPU, a maintenance window, a work area)
+  and queue for it on the agent board, instead of announcing turns by hand.
+  In the 2026-09-23/24 overnight trial the full-suite relay ran on
+  hand-written SUITE-START/SUITE-END messages, and one hand-off to a session
+  that never took its turn stalled the relay for twenty minutes.
+- A freed lease is granted to the head of its queue, which must renew within
+  five minutes (or its own ttl, if shorter) or lose it to the next waiter.
+  Every grant takes a fence number from one sequence, so a lease's fence
+  never repeats, even after prune forgets its row. Grants, releases, expiries and
+  operator breaks are audit-log events; renewals are not, like heartbeats.
+  Every acquire, listing and prune pass first settles lapsed holds, so a
+  queue moves on even when its holder died without a word. Prune drops a
+  departed agent's place in every queue before anything is granted, never
+  removes an agent that holds a live lease, and forgets a lease row left
+  free and unqueued for a week. Restore recovery frees every lease and
+  empties every queue, since it revokes every credential.
+- A renewal only extends the hold: repeating the estimate a hold already
+  carries leaves its expected end alone, so a stalled holder that keeps
+  renewing still reads stale. A new estimate or purpose is logged as a
+  `lease_update`. Lease names refuse control and invisible format
+  characters (zero-width, bidi), so two names that look alike are one lease.
+- REST gains `lease` (acquire, renew or queue once), `release` and
+  `leases` (a listing that needs only the bearer). A full queue is a
+  transient 429.
+- `pseudolife-mcp lease run NAME [--expect D] [--ttl S] [--purpose T]
+  [--no-board] [--timeout D] -- COMMAND` holds a named lease around any
+  command. What excludes is an OS file lock
+  (`~/.pseudolife-mcp/locks/lease-<name>.lock`, `PSEUDOLIFE_LEASE_LOCK_DIR`
+  overrides), released the moment its holder exits or dies, so nothing goes
+  stale. Where the daemon's board is on for the bearer, the board mirrors
+  it: runs queue in arrival order and see the holder, purpose and expected
+  end. Without a board, or when the board fails in any way, the run waits on
+  the OS lock alone; a board failure never stops the command. Ctrl-C,
+  SIGTERM and SIGHUP stop the command, giving it time to clean up, before
+  the lease is released. A run nested inside a run of the same lease exits
+  64 instead of waiting for itself. The command gets
+  `PSEUDOLIFE_LEASES_HELD`; exit codes are the command's own, 75 when
+  `--timeout` expired first, 128+N when stopped by a signal.
+- `pseudolife-mcp lease list [NAME] [--json]` shows the board's leases
+  beside the local lock files, and `pseudolife-mcp lease break NAME` is the
+  operator's way to free a hold nobody will release: through the bank
+  directly, never an agent credential, logged with the operator as actor.
+  The test suite's own `full-suite.lock` is unchanged; `lease list` only
+  probes it.
+- `memory_agents` gains `claim` and `release`: a session-held lease such as
+  `coordinator:<project>` or `claim:<path>`, whose `status` is its purpose.
+  A model renews by claiming again; a `claim:` lease lasts a day between
+  renewals and any other an hour. The roster lists held and queued leases,
+  resource leases before claims, and says when the page cut some off. A
+  claim is advisory: it tells peers, it blocks no edit. A queued model is
+  not told when its turn comes: it sees the grant the next time it lists or
+  claims, and must renew within the five-minute window.
+- A status can carry an expected duration: `memory_agents update` takes
+  `expect` (seconds), and past it the roster marks the row
+  `status_overdue`. The audit log records the expectation only when it
+  changes, so existing status history keeps its shape.
+- Schema v45 adds `coordination_leases`, `coordination_lease_waiters` and
+  `coordination_agents.status_expires_at`. The lease tables carry no
+  foreign keys, like the audit log, and stay out of portable exports.
+- The opt-in full-tier tool-description budget moves from 17,500 to 17,800
+  characters for the new `memory_agents` contract (+295); core fits within
+  its unchanged 11,500.
+
 ### Fixed (2026-09-25 — Postgres connects retry a Windows local-port failure)
 - A daemon running natively on Windows (including the daemons the test suite
   spawns) now tries its own Postgres connects again (the storage connection
