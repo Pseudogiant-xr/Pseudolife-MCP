@@ -526,6 +526,24 @@ def test_install_replaces_the_shipped_static_lines_exactly_and_once(variant, tmp
     assert json.loads(path.read_text(encoding="utf-8")) == first
 
 
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_install_replaces_the_checkin_echo_only_where_both_commands_are_ours(variant, tmp_path):
+    """The unconditional check-in echo follows the same exact-pair rule in
+    both installers: a Codex entry whose commandWindows is the user's own
+    is theirs (2026-09-26 review of the PowerShell copy)."""
+    env = _env(variant, tmp_path)
+    codex_pair = _hook(COORD_CMD, commandWindows=f"Write-Output '{COORDINATION}'", timeout=5)
+    customized = _hook(COORD_CMD, commandWindows="Write-Output 'my own override'")
+    path = _write_home(Path(env["HOME"]), {"hooks": {"SessionStart": [
+        {"hooks": [_hook(COORD_CMD)]}, {"hooks": [codex_pair, customized]}]}}, record=None)
+    proc = _run_hook(variant, env, path, mode="install", command=DOCKER_BRIEFING)
+    assert proc.returncode == 0, _out(proc)
+    starts = [h for g in json.loads(path.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+              for h in g["hooks"]]
+    assert [h for h in starts if h["command"] == COORD_CMD] == [customized]
+    assert DOCKER_GATED_COORD in [h["command"] for h in starts]
+
+
 # ── installer consent block (section 9) ─────────────────────────────────────
 
 def _run_installer_block(variant, tmp_path: Path, *, flag: str = "ask",

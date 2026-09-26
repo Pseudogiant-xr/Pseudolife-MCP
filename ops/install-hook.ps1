@@ -310,13 +310,18 @@ $coordinationCommand = if ($Command -like "*pseudolife-mcp briefing*") {
 } else {
     "pseudolife-mcp briefing --hook-json --coordination"
 }
-# Exact commands only: a user's own hook that mentions the phrase stays.
+# Exact commands only (commandWindows too, when set): a user's own hook that
+# mentions the phrase stays.
 $legacyCommands = @("echo '$coordinationLine'", "Write-Output '$coordinationLine'")
 $legacyRemoved = $false
 $keptGroups = @()
 foreach ($group in @($obj.hooks.SessionStart)) {
     if ($null -eq $group) { continue }
-    $keptHooks = @(@($group.hooks) | Where-Object { $_.command -notin $legacyCommands })
+    $keptHooks = @(@($group.hooks) | Where-Object {
+        -not (($_.command -cin $legacyCommands) -and
+              ((-not ($_.PSObject.Properties.Name -contains 'commandWindows')) -or
+               ($_.commandWindows -cin $legacyCommands)))
+    })
     if ($keptHooks.Count -ne @($group.hooks).Count) { $legacyRemoved = $true }
     if ($keptHooks.Count -gt 0) {
         $group.hooks = $keptHooks

@@ -5699,8 +5699,9 @@ it unattended), and `ops/install-hook.* --remove-legacy` does the same by
 hand. Only the exact entries the installers wrote are removed, after a
 backup; an edited copy of one is listed for review and kept.
 
-With the coordination adapter enabled, the same UserPromptSubmit hook also
-prints the session's coordination digest — pending addressed mail, rendered
+With the coordination adapter enabled, the plugin's coordination
+UserPromptSubmit hook prints the session's coordination digest (the
+fallback's `prompt-hook` does not) — pending addressed mail, rendered
 by the shim into a per-session file — but only on the turn after it changed;
 see [Configuration](configuration.md#experimental-agent-coordination) for the file layout
 and `PSEUDOLIFE_DIGEST_DIR`.

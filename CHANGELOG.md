@@ -24,8 +24,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `install-hook` writes `pseudolife-mcp prompt-hook`, or for the Docker
   tier's `docker exec pseudolife-mcp-daemon … briefing --hook-json`,
   `docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook` (`-i`
-  hands the container the hook's stdin; its cursor then lives in the
-  container, so recreating the container can repeat one note). A re-run
+  hands the container the hook's stdin). There the cursor lives in the
+  container's writable layer, so after a daemon rebuild the next turn
+  reports again what landed since the session started; the bearer is the
+  container's `PSEUDOLIFE_MCP_TOKEN` (a stack set up only with
+  `PSEUDOLIFE_MCP_TOKENS` gets no note), and a stopped container makes
+  `docker exec` fail on each turn, which the client reports as a hook
+  error, as it does for the briefing once per session. A re-run
   removes the exact static echoes earlier versions wrote: the current
   line, the 2026-08-28..09-05 one, and Codex's `Write-Output` pair. An
   entry whose command or `commandWindows` differs from those is the
