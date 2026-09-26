@@ -15,9 +15,12 @@ reliably — without the agent having to remember:
    **verified world facts** (fresh, cited, age-ranked), and **where we left
    off** (a one-line recap of your last closed session). Empty sections are
    omitted, so a cold bank prints nothing. As a hook (`--hook-json`, or the
-   plugin) it injects a short memory core first and then this block, fitted
-   to the hook's size budget, so even a cold bank's session starts with
-   the core.
+   plugin) it injects a short memory core first and then this block without
+   the unsure section (the Console's Insight view keeps it), fitted to the
+   hook's size budget, so even a cold bank's session starts with the core.
+   A resumed or compacted session is not served the block again: it gets
+   the episode-handle line and a pointer to the full briefing (after a
+   compaction, also a daemon-side `hook-instructions.md`).
 2. **Episode lifecycle is owned by the daemon, keyed by a resolved session
    identity — hooks make that identity precise, but nothing about opening
    or closing an episode requires them.** Five tiers, strict precedence
@@ -208,8 +211,7 @@ briefing content is also available on demand via the CLI or the Console's
 
 The plugin's daemon-served memory hook uses a short operating guide rather
 than repeating the full standing memory policy. Its bounded briefing retains
-complete items, prioritizes lessons and recap over global uncertainties, and
-reports omitted content. Full standing guidance is in
+complete items, prioritizes lessons and recap, and reports omitted content. Full standing guidance is in
 [`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md). A custom
 `hook-instructions.md` in the daemon's data directory is also bounded: an
 omission notice means the complete custom instructions must be obtained before

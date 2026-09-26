@@ -178,9 +178,10 @@ took 143 CUDA OOMs.
   area), then compare what memory says against the files and correct drift
   in both directions — fix stale memory on the spot (`memory_fact_set` +
   `memory_outcome`), and treat memory-vs-file mismatches as review
-  findings, not noise. The served session-start block and the
-  UserPromptSubmit hook (plugin + `ops/install-hook.*`, Claude client)
-  enforce the same rule for any install.
+  findings, not noise. The served session-start block carries the same
+  rule for any install; the per-turn hook repeats it every turn for
+  `ops/install-hook.*` installs, and in the plugin's memory-change note on
+  turns where memory changed.
 - Every PR gets a review pass before the merge click — `/code-review` medium,
   or a reviewer subagent over the branch diff. The 2026-08-19 transcript audit
   found 1 of 59 merges across seven weeks carried any in-transcript review;

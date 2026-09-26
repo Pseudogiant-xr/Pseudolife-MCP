@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Pseudolife-MCP SessionStart hook — stdout becomes session context.
 # Serves the memory-loop instructions + briefing from the running daemon;
-# must never break a session start (always exits 0).
+# must never break a session start (always exits 0). With `memory-policy` it
+# serves the separate memory-policy output, and with `memory-changes`
+# (sourced by user-prompt-submit.sh) the per-turn memory-change note.
 #
 # Runs under Git Bash on Windows and bash/sh everywhere else. curl only —
 # no pip package, no node, no python on the host.
@@ -116,6 +118,57 @@ INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$SRC" ] || SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"session_start_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+# The per-turn memory-change note (user-prompt-submit.sh sources this script
+# with `memory-changes`): one request per turn, printing only when memory
+# changed since this session's last note (new lessons, other sessions'
+# status notes). The cursor lives in <digest dir>/<sha256(session id)>.mark
+# and is saved only after printing, so a request that failed or timed out
+# asks for the same window next turn. Silent on every failure: the
+# SessionStart hook reports a down daemon or a bad credential.
+if [ "${1:-}" = memory-changes ]; then
+    [ -z "$CONNECTION_ERROR" ] || exit 0
+    # The payload also carries the user's prompt, which may quote
+    # "session_id": only a top-level key counts, as in coordination-prompt.sh.
+    SID=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' 2>/dev/null |
+          head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
+    case "$SID" in ''|*[!A-Za-z0-9._-]*) exit 0 ;; esac
+    [ "${#SID}" -le 128 ] || exit 0
+    MARK_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
+    KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+    case "$KEY" in *[!0-9a-f]*) exit 0 ;; esac
+    [ "${#KEY}" -eq 64 ] || exit 0
+    MARK="$MARK_DIR/$KEY.mark"
+    SINCE=""
+    if [ -f "$MARK" ] && [ ! -L "$MARK" ]; then
+        IFS= read -r SINCE 2>/dev/null < "$MARK"
+    fi
+    SINCE=${SINCE%$'\r'}
+    case "$SINCE" in ''|*[!0-9.]*) SINCE="" ;; esac
+    [ "${#SINCE}" -le 22 ] || SINCE=""
+    # One attempt, no retry: at most about 2 s of the 5 s hook budget.
+    BODY=$(curl -L --max-redirs 0 -sf --connect-timeout 1 --max-time 2 \
+        "${AUTH[@]}" "${URL}/api/hook/memory-changes?session_id=${SID}${SINCE:+&since=${SINCE}}" \
+        2>/dev/null) || exit 0
+    TOKEN=${BODY%%$'\n'*}
+    case "$TOKEN" in ''|*[!0-9.]*) exit 0 ;; esac
+    [ "${#TOKEN}" -le 22 ] || exit 0
+    NOTE=""
+    case "$BODY" in *$'\n'*) NOTE=${BODY#*$'\n'} ;; esac
+    if [ ! -d "$MARK_DIR" ]; then
+        mkdir -p "$MARK_DIR" 2>/dev/null && chmod 700 "$MARK_DIR" 2>/dev/null
+    fi
+    # A cursor that cannot be saved would repeat the same note every turn:
+    # stay silent instead.
+    [ -d "$MARK_DIR" ] && [ -w "$MARK_DIR" ] && [ ! -L "$MARK" ] || exit 0
+    [ ! -e "$MARK" ] || [ -w "$MARK" ] || exit 0
+    if [ ! -f "$MARK" ]; then
+        # A session's first note: marks of sessions gone a month go too.
+        find "$MARK_DIR" -maxdepth 1 -type f -name '*.mark' -mtime +30 -delete 2>/dev/null
+    fi
+    [ -z "$NOTE" ] || printf '%s\n' "$NOTE"
+    printf '%s\n' "$TOKEN" 2>/dev/null > "$MARK"
+    exit 0
+fi
 # The separate memory-policy hook (hooks.json runs this script again with
 # `memory-policy`): the full memory-loop block when the daemon's
 # memory_policy variant is full_separate_hook, otherwise an empty body and
@@ -125,7 +178,7 @@ SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"
 if [ "${1:-}" = memory-policy ]; then
     [ -z "$CONNECTION_ERROR" ] || exit 0
     PQS=""
-    [ -n "$SID" ] && PQS="?session_id=${SID}"
+    [ -n "$SID" ] && PQS="?session_id=${SID}&source=${SRC}"
     curl -L --max-redirs 0 -sf --max-time 5 --retry 1 --retry-delay 1 \
         "${AUTH[@]}" "${URL}/api/hook/memory-policy${PQS}" || true
     exit 0

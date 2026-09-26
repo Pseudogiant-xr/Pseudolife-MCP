@@ -8271,7 +8271,8 @@ class MemoryService(DreamOps):
         that output. Read-only; no LLM. Each sub-call takes the lock itself, so this
         orchestrator must not hold it."""
         from pseudolife_memory.memory.briefing import format_briefing, select_lessons
-        dg = self.graph_digest()
+        # The SessionStart hook asks for no unsure items: skip the read.
+        dg = self.graph_digest() if max_unsure > 0 else {}
         surprises: list[dict] = []
         questions: list[dict] = []
         if dg.get("available"):
@@ -8320,6 +8321,77 @@ class MemoryService(DreamOps):
         if coordination is not None:
             result["coordination"] = coordination
         return result
+
+    def memory_changes_since(self, since: float | None, *,
+                             session_key: str | None = None,
+                             limit: int = 1) -> dict[str, Any]:
+        """What the per-turn memory-change note reports: memory that landed
+        after ``since`` (this daemon's wall-clock seconds, the ``now`` of a
+        previous call). Two kinds count:
+
+        * current ``source="status"`` entries written outside
+          ``session_key``'s own episodes (sub-episodes carry the root's
+          key), newest first;
+        * current lessons asserted since, newest first. A confirmation only
+          refreshes ``last_confirmed``, so it is not new.
+
+        ``now`` is read under the service lock, which every entry and lesson
+        write holds while it stamps and publishes (dream synthesis swaps its
+        staged store in inside the same hold, and a band relocation keeps
+        the entry's timestamp), so a write this scan missed carries a later
+        stamp: ``now`` is the caller's next ``since``. Known misses: paths
+        that restore rows with their original stamps (lesson-synthesis
+        commit recovery, entry reinstatement, correction recovery) can land
+        behind a cursor a scan already passed, and a wall clock stepped
+        backwards hides writes until it catches up. All of them still reach
+        search and the next startup briefing.
+
+        With ``since`` None (a session's first turn) the scan starts where
+        ``session_key``'s open root episode started, so what landed between
+        SessionStart and the first prompt is reported; for a key with no
+        open episode nothing is scanned and only ``now`` comes back (a
+        baseline). ``since`` in the result is the start actually used, None
+        for a baseline. Counts cover every change, ``status`` / ``lessons``
+        at most ``limit`` of each. Read-only."""
+        out: dict[str, Any] = {"now": 0.0, "since": since, "status_count": 0,
+                               "status": [], "lesson_count": 0, "lessons": []}
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            out["now"] = time.time()
+            episodes = self._cms.episodes.episodes
+            if since is None and session_key:
+                ep = self._cms.episodes.open_leaf_for(session_key)
+                seen: set[str] = set()
+                while ep is not None and ep.parent_id in episodes and ep.id not in seen:
+                    seen.add(ep.id)
+                    ep = episodes[ep.parent_id]
+                since = out["since"] = ep.started_at if ep is not None else None
+            if since is None:
+                return out
+            status = []
+            for band in self._cms.bands:
+                for en in band.entries:
+                    if (en.source != "status" or en.superseded_at is not None
+                            or en.timestamp <= since):
+                        continue
+                    ep = episodes.get(en.episode_id) if en.episode_id else None
+                    if session_key and ep is not None and ep.session_key == session_key:
+                        continue
+                    status.append((en.timestamp, en.seq, en.text))
+            lessons = ([(r.asserted_at, r.value, r.polarity)
+                        for r in self._lessons.current_records() if r.asserted_at > since]
+                       if self._lessons is not None else [])
+        status.sort(reverse=True)
+        lessons.sort(key=lambda r: r[0], reverse=True)
+        n = max(0, int(limit))
+        out.update(
+            status_count=len(status),
+            status=[{"text": text, "timestamp": ts} for ts, _, text in status[:n]],
+            lesson_count=len(lessons),
+            lessons=[{"lesson": value, "polarity": polarity, "asserted_at": ts}
+                     for ts, value, polarity in lessons[:n]])
+        return out
 
     def _episode_digest_body(self, episode_id: str | None) -> str | None:
         """The narrative body (header line stripped) of ``episode_id``'s

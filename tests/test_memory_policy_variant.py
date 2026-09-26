@@ -204,6 +204,24 @@ def test_memory_policy_endpoint_rejects_post(svc):
     assert st == 405
 
 
+@pytest.mark.parametrize("source", ["resume", "compact"])
+def test_full_block_is_not_re_sent_on_resume_or_compact(svc, source):
+    """Like the main SessionStart output, the separate block is served once
+    per conversation: a resume still holds it and a compaction keeps the
+    MCP server instructions (maintainer decision 2026-09-26)."""
+    _set(svc, "full_separate_hook")
+    assert hook_memory_policy(svc, "s1", source) == ""
+    assert hook_memory_policy(svc, "s1", "startup") == MEMORY_LOOP_BLOCK
+    st, body = call(_app(svc), "GET", "/api/hook/memory-policy",
+                    query=f"session_id=s1&source={source}")
+    assert st == 200 and body == b""
+    # Unauthorized: source is dropped with session_id, as on session-start.
+    app = _app(svc, token="secret")
+    st, body = call(app, "GET", "/api/hook/memory-policy",
+                    query=f"session_id=s1&source={source}")
+    assert st == 200 and body.decode("utf-8") == MEMORY_LOOP_BLOCK
+
+
 # ── plugin wiring ──────────────────────────────────────────────────────────
 
 def test_plugin_runs_the_memory_policy_hook_as_its_own_session_start_output():
@@ -243,21 +261,44 @@ def _policy_daemon(body: bytes):
     return server, worker, paths
 
 
-def _run_policy_hook(hook, port, tmp_path):
+def _run_policy_hook(hook, port, tmp_path, stdin='{"session_id":"fixture","source":"startup"}',
+                     event="MemoryPolicy"):
     import subprocess
     from tests.test_codex_hooks import HOOK_PROCESS_TIMEOUT, bash_exe, isolated_env, pwsh_run
     env = isolated_env(tmp_path / "codex-home")
     env.update({"PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
                 "PSEUDOLIFE_MCP_TOKEN": "fixture-token"})
-    stdin = '{"session_id":"fixture","source":"startup"}'
     if hook == "bash":
+        args = ["memory-policy"] if event == "MemoryPolicy" else []
         return subprocess.run(
-            [bash_exe(), str(ROOT / "plugin/hooks/session-start.sh"), "memory-policy"],
+            [bash_exe(), str(ROOT / "plugin/hooks/session-start.sh"), *args],
             input=stdin, env=env, capture_output=True, text=True,
             timeout=HOOK_PROCESS_TIMEOUT, check=True).stdout
     return pwsh_run("-Command",
-                    f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event MemoryPolicy",
+                    f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event {event}",
                     input=stdin, env=env).stdout
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+@pytest.mark.parametrize("event", ["SessionStart", "MemoryPolicy"])
+@pytest.mark.parametrize("reason", ["compact", "resume"])
+def test_hooks_forward_a_start_reason_given_as_session_start_reason(tmp_path, hook, event, reason):
+    """Codex can name the start reason ``session_start_reason`` instead of
+    ``source``. Both scripts resolve either field; the daemon only knows a
+    continued session by what the request forwards, so a dropped reason
+    re-sends the whole startup block (PR #408 review, 2026-09-26)."""
+    from urllib.parse import parse_qs, urlsplit
+    server, worker, paths = _policy_daemon(b"")
+    stdin = json.dumps({"session_id": "fixture", "session_start_reason": reason})
+    try:
+        _run_policy_hook(hook, server.server_port, tmp_path, stdin=stdin, event=event)
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+    wanted = "/api/hook/session-start" if event == "SessionStart" else "/api/hook/memory-policy"
+    sent = [parse_qs(urlsplit(p).query) for p in paths if urlsplit(p).path == wanted]
+    assert sent and sent[0]["source"] == [reason], paths
 
 
 @pytest.mark.parametrize("hook", ["bash", "native"])
@@ -269,7 +310,7 @@ def test_memory_policy_hook_prints_the_daemon_body_as_its_own_output(tmp_path, h
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
-    assert paths == ["/api/hook/memory-policy?session_id=fixture"]
+    assert paths == ["/api/hook/memory-policy?session_id=fixture&source=startup"]
     if hook == "bash":
         assert out == "FULL POLICY BLOCK"
     else:
