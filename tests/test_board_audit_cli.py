@@ -454,6 +454,12 @@ def test_the_clean_up_catches_a_step_postgres_skips_with_a_warning(store, pg_url
                 return real.execute(sql, *args)
 
         assert _vacuum(Skipping()) == [SKIP_WARNING]
+        # A role, database or connection option can set client_min_messages
+        # to ERROR, and the server then never sends the warning at all; the
+        # clean-up asks for warnings itself and puts the setting back.
+        real.execute("SET client_min_messages TO error")
+        assert _vacuum(Skipping()) == [SKIP_WARNING]
+        assert real.execute("SHOW client_min_messages").fetchone()[0] == "error"
 
 
 def test_redact_reports_a_clean_up_postgres_skipped(store, cli, monkeypatch):

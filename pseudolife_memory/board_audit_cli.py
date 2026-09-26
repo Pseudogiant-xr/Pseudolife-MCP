@@ -276,12 +276,18 @@ def _vacuum(conn):
         if diag.severity_nonlocalized == "WARNING":
             warnings.append(diag.message_primary or "")
 
+    # A role, database or connection option can set client_min_messages to
+    # ERROR, and the server then never sends a skip's warning at all: ask for
+    # warnings for these two statements, and put the setting back after.
+    previous = conn.execute("SHOW client_min_messages").fetchone()[0]
     conn.add_notice_handler(note)
     try:
+        conn.execute("SET client_min_messages TO warning")
         conn.execute("VACUUM (ANALYZE) coordination_events, coordination_messages")
         conn.execute("VACUUM pg_catalog.pg_statistic")
     finally:
         conn.remove_notice_handler(note)
+        conn.execute("SELECT set_config('client_min_messages', %s, false)", (previous,))
     return warnings
 
 

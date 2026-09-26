@@ -14,7 +14,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tables' owner the statistics could still hold the redacted body while the
   result said it was done. The clean-up now collects Postgres's warnings: any
   skip reads `"vacuumed": false`, and the warning is printed with the
-  commands to run as the tables' owner. The Docker tier connects as a
+  commands to run as the tables' owner. It asks for warnings itself for its
+  two statements and restores the setting after, so a role or database whose
+  `client_min_messages` is `error` cannot hide a skip. The Docker tier connects as a
   superuser and was not affected. The guide also lists what a vacuum leaves
   on disk (freed bytes are not overwritten) and what can hold it back (a
   replication slot, like an open snapshot).
