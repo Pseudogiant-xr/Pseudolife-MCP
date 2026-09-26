@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-26 — a redaction no longer reports a clean-up Postgres skipped as done)
+- `board-audit redact` reported `"vacuumed": true` even when Postgres had
+  skipped part of its clean-up. A role that may not vacuum or analyze a table
+  gets a warning and a skip rather than an error, and psycopg drops notices
+  nobody handles, so on a managed Postgres where the bank's role is not the
+  tables' owner the statistics could still hold the redacted body while the
+  result said it was done. The clean-up now collects Postgres's warnings: any
+  skip reads `"vacuumed": false`, and the warning is printed with the
+  commands to run as the tables' owner. The Docker tier connects as a
+  superuser and was not affected. The guide also lists what a vacuum leaves
+  on disk (freed bytes are not overwritten) and what can hold it back (a
+  replication slot, like an open snapshot).
+
 ### Security (2026-09-26 — a secret pasted into an agent-board message can be removed from the audit log, and credential-shaped text is refused, schema v46)
 - A message sent on the agent board stays in the board's audit log for its
   retention window (90 days by default, forever with `0`), and until now its

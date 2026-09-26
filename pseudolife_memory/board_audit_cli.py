@@ -263,11 +263,26 @@ def _vacuum(conn):
     1 kB (a body, its salt, the live text, its request fingerprint) word for
     word into pg_statistic, where they would stay until the next automatic
     analyze. Then vacuum pg_statistic, so the superseded statistics row is
-    freed as well; a role that may not vacuum it gets a warning and a skip,
-    not an error. It runs after the commit, outside any transaction, as
-    VACUUM must, and does not reach WAL, WAL archives or backups."""
-    conn.execute("VACUUM (ANALYZE) coordination_events, coordination_messages")
-    conn.execute("VACUUM pg_catalog.pg_statistic")
+    freed as well. It runs after the commit, outside any transaction, as
+    VACUUM must, and does not reach WAL, WAL archives or backups.
+
+    Returns the warnings Postgres raised on the way. A role that may not
+    vacuum or analyze a table gets a WARNING and a skip, not an error, and
+    psycopg drops notices nobody handles, so without this a skipped step
+    would read as done."""
+    warnings = []
+
+    def note(diag):
+        if diag.severity_nonlocalized == "WARNING":
+            warnings.append(diag.message_primary or "")
+
+    conn.add_notice_handler(note)
+    try:
+        conn.execute("VACUUM (ANALYZE) coordination_events, coordination_messages")
+        conn.execute("VACUUM pg_catalog.pg_statistic")
+    finally:
+        conn.remove_notice_handler(note)
+    return warnings
 
 
 def _redact(args) -> int:
@@ -282,9 +297,10 @@ def _redact(args) -> int:
         except psycopg.errors.LockNotAvailable:
             raise AuditCliError("the board is busy: a row or the audit chain stayed locked for "
                                 "more than 5 s. Nothing was changed; retry") from None
+        skipped = []
         try:
-            _vacuum(conn)
-            vacuumed = True
+            skipped = _vacuum(conn)
+            vacuumed = not skipped
         except psycopg.Error:
             vacuumed = False
     print(json.dumps({"ok": True, **result, "vacuumed": vacuumed}))
@@ -296,7 +312,13 @@ def _redact(args) -> int:
         print("board-audit: audit retention had already removed this message's send event, "
               "so the audit log held no copy of it; its live request fingerprint (and any "
               "live text) is blanked", file=sys.stderr)
-    if not vacuumed:
+    if skipped:
+        print("board-audit: the redaction is committed, but Postgres skipped part of the "
+              "clean-up (" + "; ".join(skipped) + "), so the old row versions or the "
+              "statistics may still hold the body; run `VACUUM (ANALYZE) coordination_events, "
+              "coordination_messages` and `VACUUM pg_statistic` as the tables' owner or a "
+              "superuser", file=sys.stderr)
+    elif not vacuumed:
         print("board-audit: the redaction is committed, but the VACUUM that frees the old "
               "row versions and rebuilds the statistics failed (the board may be busy); run "
               "`VACUUM (ANALYZE) coordination_events, coordination_messages` and `VACUUM "

@@ -286,6 +286,7 @@ def test_a_capability_name_refuses_a_secret(store):
     store.update(*creds(a), capabilities={"resumable": False, "pull": True})
     assert store.authenticate(*creds(a))["capabilities"] == {"resumable": False, "pull": True}
 
+
 def test_a_lease_name_or_request_id_refuses_a_secret(store):
     _clear_leases(store)
     a, b = pair(store)
