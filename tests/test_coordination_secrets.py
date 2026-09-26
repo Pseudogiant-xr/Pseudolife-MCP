@@ -268,6 +268,24 @@ def test_every_scope_field_an_agent_sets_refuses_a_secret(store, field):
     assert _log(store) == before
 
 
+def test_a_capability_name_refuses_a_secret(store):
+    """Capability names are hashed into the register event (and an update's
+    event) like every other registration field, and a GitHub token fits their
+    40-character limit."""
+    assert len(GITHUB) <= 40
+    a = store.register("alice", capabilities={"resumable": True})
+    before = _log(store)
+    agents = store.storage.conn.execute("SELECT count(*) FROM coordination_agents").fetchone()
+    _refused(lambda: store.register("alice", capabilities={GITHUB: True}), GITHUB)
+    _refused(lambda: store.update(*creds(a), capabilities={GITHUB: False}), GITHUB)
+    assert _log(store) == before
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_agents").fetchone() == agents
+    assert store.authenticate(*creds(a))["capabilities"] == {"resumable": True}
+    # Ordinary capability names still go through on both paths.
+    store.update(*creds(a), capabilities={"resumable": False, "pull": True})
+    assert store.authenticate(*creds(a))["capabilities"] == {"resumable": False, "pull": True}
+
 def test_a_lease_name_or_request_id_refuses_a_secret(store):
     _clear_leases(store)
     a, b = pair(store)
@@ -327,6 +345,13 @@ def test_rest_refuses_a_secret_with_400_and_no_echo(pg_conn, pg_url):
 
             _, sender = await register("sender")
             recipient, _ = await register("recipient")
+            # A capability name is hashed into the register event too.
+            response = await client.post(
+                "http://fixture/api/coordination/register", headers=BEARER,
+                json={"label": "third", "capabilities": {GITHUB: False}})
+            assert response.status_code == 400, response.text
+            assert response.json() == {"error": "secret_like_body"}
+            assert GITHUB not in response.text
             for action, payload, secret in (
                     ("send", {"to": recipient, "text": f"key: {ANTHROPIC}",
                               "request_id": "secret-1"}, ANTHROPIC),

@@ -701,9 +701,10 @@ describe the mistake, never repeat the secret.
 #### Secret-shaped text
 
 The board refuses text shaped like a credential wherever it would keep it: a
-message body and its request id (`send`); a status, label, project, task or
-episode (`register` and `update`, including `memory_agents update`; project
-and task are copied into every later audit row by that agent); a lease name
+message body and its request id (`send`); a status, label, project, task,
+episode or capability name (`register` and `update`, including
+`memory_agents update`; project and task are copied into every later audit
+row by that agent); a lease name
 or purpose (`lease`, `release` and `leases`, including `memory_agents claim`,
 whose status is the purpose); and a redaction reason. The call fails with
 `secret_like_body` (HTTP 400 on the REST API) before the text is stored

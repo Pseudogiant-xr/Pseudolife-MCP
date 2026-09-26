@@ -931,6 +931,9 @@ class CoordinationStore:
                     raise CoordinationError("invalid_capabilities")
                 for item, enabled in value.items():
                     _string(item, 40, "capabilities", empty=False)
+                    # Capability names are hashed into the event too, and a
+                    # GitHub token fits in 40 characters.
+                    _refuse_secret(item)
                     if not isinstance(enabled, bool):
                         raise CoordinationError("invalid_capabilities")
             else:

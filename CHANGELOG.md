@@ -51,9 +51,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   failed every daemon start's schema pass at its 5 s lock timeout.
 - The board refuses text shaped like a credential wherever it would keep it,
   with a new `secret_like_body` error (HTTP 400) that never repeats the text:
-  message bodies and request ids; statuses, labels, projects, tasks and
-  episodes (project and task are copied into every later audit row); lease
-  names and purposes; and redaction reasons. The shapes are GitHub, GitLab,
+  message bodies and request ids; statuses, labels, projects, tasks,
+  episodes and capability names (project and task are copied into every
+  later audit row); lease names and purposes; and redaction reasons. The
+  shapes are GitHub, GitLab,
   Hugging Face, Anthropic, OpenAI-style, Stripe, Slack and Google keys and
   tokens, AWS access key ids and secret keys, JWTs, bearer tokens, DSN
   passwords, PEM private-key headers, and a secret-named key or `--flag`
