@@ -270,15 +270,13 @@ def test_coordination_has_independent_start_and_prompt_handlers():
 # ── content sync ────────────────────────────────────────────────────────────
 
 def test_discipline_line_synced_across_installers():
-    """The installers' per-turn discipline line (plugin-less installs; the
-    plugin's hook became the memory-change note on 2026-09-26) ships in TWO
-    copies. Drift means bash and PowerShell installs carry different
-    standing instructions forever, silently, and ops/setup-codex-hooks.py
-    reads the PowerShell copy to recognise the echo it may migrate. Pin:
-    exactly one occurrence per file, identical, the installers' idempotency
-    needle inside the line itself (a needle that only matches the file would
-    let a reworded line duplicate the hook on every re-run), and a length
-    budget — the line is injected on EVERY user turn."""
+    """The static per-turn discipline line the installers wrote until
+    2026-09-26 (when their hook, like the plugin's, became the memory-change
+    note) survives in TWO copies as a migration key: install mode and
+    --remove-legacy match the exact echo, and ops/setup-codex-hooks.py reads
+    the PowerShell copy. A reworded copy would strand every install that
+    carries the old echo. Pin: exactly one occurrence per file, identical,
+    the lookalike needle inside the line, and the length it shipped with."""
     pat = re.compile(r"(Memory \(PseudoLife\) mid-session discipline:[^'\"\n]*)")
     lines = {}
     for rel in ("ops/install-hook.sh", "ops/install-hook.ps1"):
@@ -287,8 +285,8 @@ def test_discipline_line_synced_across_installers():
         lines[rel] = found[0]
     assert len(set(lines.values())) == 1, f"discipline line drift: {lines}"
     line = lines["ops/install-hook.sh"]
-    assert "mid-session discipline" in line   # the installers' idempotency needle
-    assert len(line) <= 800                   # every-turn cost budget (~700 on 2026-08-28)
+    assert "mid-session discipline" in line   # --remove-legacy's lookalike needle
+    assert len(line) <= 800                   # as shipped (~700 on 2026-08-28)
     for rel in ("plugin/hooks/user-prompt-submit.sh", "plugin/hooks/lifecycle.ps1"):
         assert not pat.search(_read(rel)), f"{rel} still carries the static line"
 

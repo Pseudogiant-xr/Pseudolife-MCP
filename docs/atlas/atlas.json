@@ -248,6 +248,7 @@
    "d": [
     "GET /api/briefing → markdown; --hook-json: GET /api/hook/session-start → hookSpecificOutput JSON; --coordination prints the board check-in from /api/hook/coordination-start instead, empty where the board is off",
     "Never auto-starts the daemon; prints nothing on any failure",
+    "prompt-hook: the plugin's per-turn memory-change note (GET /api/hook/memory-changes, 2 s, redirects refused) with the same <digest dir>/<sha256(session id)>.mark cursor, saved only after printing",
     "Wired by ops/install-hook for non-plugin installs"
    ]
   },
@@ -1117,6 +1118,7 @@
    "p": "ops/install-hook.ps1",
    "d": [
     "Adds `pseudolife-mcp briefing --hook-json` and its `--coordination` check-in to settings.json / hooks.json, replacing the unconditional check-in echo older installers wrote",
+    "UserPromptSubmit: `pseudolife-mcp prompt-hook` (Docker tier: `docker exec -i`), replacing the exact static discipline echoes older installers wrote",
     "Backs up the settings file first; strips obsolete episode hooks",
     "--remove-legacy: drops its exact Claude entries once the plugin owns them"
    ]

@@ -135,14 +135,15 @@ def test_codex_http_auth_uses_supported_token_configuration() -> None:
 
 
 def test_hook_installers_wire_user_prompt_submit_for_both_clients() -> None:
-    """Both clients get the per-turn reminder; Codex runs it after trust."""
+    """Both clients get the per-turn memory-change note; Codex runs it after
+    trust. The static line stays in both files only so re-runs can migrate
+    it (test_installer_legacy_hooks.py runs the scripts)."""
     ps = _read("ops/install-hook.ps1")
     sh = _read("ops/install-hook.sh")
     for text in (ps, sh):
         assert "UserPromptSubmit" in text
-        assert "reviewing code, docs, or a PR" in text
-    # Line identity is pinned by test_plugin_packaging.py.
-    assert 'UPS_COMMAND="echo' in sh
+        assert "pseudolife-mcp prompt-hook" in text
+    assert 'add_group(hooks["UserPromptSubmit"], prompt_cmd)' in sh
     assert 'if ($Client -in "claude", "codex")' in ps
 
 

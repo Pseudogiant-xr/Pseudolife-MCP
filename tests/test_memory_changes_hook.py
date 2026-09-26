@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -243,10 +244,12 @@ def test_endpoint_rejects_post(svc):
 # ── the hook scripts ───────────────────────────────────────────────────────
 
 class _Daemon:
-    """Answers each GET with the next scripted body; records query strings."""
+    """Answers each GET with the next scripted body; records query strings
+    and the Authorization header. A ``(status, location)`` tuple answers a
+    redirect instead."""
 
     def __init__(self, bodies):
-        self.bodies, self.queries = list(bodies), []
+        self.bodies, self.queries, self.auth = list(bodies), [], []
         daemon = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -256,7 +259,14 @@ class _Daemon:
             def do_GET(self):
                 parts = urlsplit(self.path)
                 daemon.queries.append((parts.path, parse_qs(parts.query)))
+                daemon.auth.append(self.headers.get("Authorization"))
                 body = daemon.bodies.pop(0) if daemon.bodies else b""
+                if isinstance(body, tuple):
+                    self.send_response(body[0])
+                    self.send_header("Location", body[1])
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -276,18 +286,31 @@ class _Daemon:
         self.worker.join(timeout=2)
 
 
-def _run_prompt_hook(hook, url, digest_dir, payload, tmp_path):
+HOOKS = ["bash", "native", "cli"]
+
+
+def _run_prompt_hook(hook, url, digest_dir, payload, tmp_path, **env_overrides):
+    """``bash`` and ``native`` are the plugin's hooks; ``cli`` is
+    ``pseudolife-mcp prompt-hook``, which the installers write for installs
+    without the plugin (Claude Code settings.json, Codex hooks.json)."""
     env = isolated_env(tmp_path / "codex-home")
     env.update({"PSEUDOLIFE_MCP_DAEMON_URL": url, "PSEUDOLIFE_MCP_TOKEN": "fixture-token",
                 "PSEUDOLIFE_DIGEST_DIR": str(digest_dir)})
+    env.update(env_overrides)
     if hook == "bash":
         return subprocess.run(
             [bash_exe(), str(ROOT / "plugin/hooks/user-prompt-submit.sh")],
             input=payload, env=env, capture_output=True, text=True,
             timeout=HOOK_PROCESS_TIMEOUT, check=True).stdout
-    out = pwsh_run("-Command",
-                   f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event UserPromptSubmit",
-                   input=payload, env=env).stdout
+    if hook == "cli":
+        out = subprocess.run(
+            [sys.executable, "-m", "pseudolife_memory.cli", "prompt-hook"],
+            input=payload, env=env, cwd=ROOT, capture_output=True, text=True,
+            timeout=HOOK_PROCESS_TIMEOUT, check=True).stdout
+    else:
+        out = pwsh_run("-Command",
+                       f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event UserPromptSubmit",
+                       input=payload, env=env).stdout
     if not out.strip():
         return ""
     context = json.loads(out)["hookSpecificOutput"]
@@ -299,7 +322,7 @@ def _mark(digest_dir, session_id):
     return digest_dir / (hashlib.sha256(session_id.encode()).hexdigest() + ".mark")
 
 
-@pytest.mark.parametrize("hook", ["bash", "native"])
+@pytest.mark.parametrize("hook", HOOKS)
 def test_prompt_hook_prints_only_changes_and_advances_its_cursor(tmp_path, hook):
     note = "Memory changed since your last turn:\n- 1 new lesson; newest: prefer: x"
     daemon = _Daemon([b"100.500000\n", ("200.250000\n" + note + "\n").encode(),
@@ -322,7 +345,7 @@ def test_prompt_hook_prints_only_changes_and_advances_its_cursor(tmp_path, hook)
     assert _mark(digest_dir, "sess-1").read_text().strip() == "300.000000"
 
 
-@pytest.mark.parametrize("hook", ["bash", "native"])
+@pytest.mark.parametrize("hook", HOOKS)
 @pytest.mark.parametrize("answer", [b"", b"not-a-cursor\nnote\n"])
 def test_prompt_hook_keeps_its_cursor_on_an_empty_or_malformed_answer(tmp_path, hook, answer):
     """An unauthorized hook's empty body, or garbage: print nothing and keep
@@ -341,7 +364,7 @@ def test_prompt_hook_keeps_its_cursor_on_an_empty_or_malformed_answer(tmp_path, 
     assert _mark(digest_dir, "sess-1").read_text().strip() == "100.500000"
 
 
-@pytest.mark.parametrize("hook", ["bash", "native"])
+@pytest.mark.parametrize("hook", HOOKS)
 def test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor(tmp_path, hook):
     """A cursor that can be read but not written would repeat the same note
     on every turn; better to stay silent (2026-09-26 review)."""
@@ -363,7 +386,7 @@ def test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor(tmp_path, hoo
     assert mark.read_text().strip() == "100.500000"
 
 
-@pytest.mark.parametrize("hook", ["bash", "native"])
+@pytest.mark.parametrize("hook", HOOKS)
 def test_prompt_hook_is_silent_and_keeps_its_cursor_when_the_daemon_is_down(tmp_path, hook):
     daemon = _Daemon([])
     url = daemon.url
@@ -377,7 +400,7 @@ def test_prompt_hook_is_silent_and_keeps_its_cursor_when_the_daemon_is_down(tmp_
     assert _mark(digest_dir, "sess-1").read_text().strip() == "100.500000"
 
 
-@pytest.mark.parametrize("hook", ["bash", "native"])
+@pytest.mark.parametrize("hook", HOOKS)
 @pytest.mark.parametrize("session_id", ["", "bad id", "x" * 129, "a/b"])
 def test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id(tmp_path, hook, session_id):
     daemon = _Daemon([b"100.000000\n"])
@@ -387,3 +410,120 @@ def test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id(tmp_path, h
     finally:
         daemon.close()
     assert out == "" and daemon.queries == []
+
+
+@pytest.mark.parametrize("hook", HOOKS)
+def test_a_sessions_first_note_clears_marks_idle_for_a_month(tmp_path, hook):
+    import os
+    digest_dir = tmp_path / "digests"
+    digest_dir.mkdir()
+    stale, recent = _mark(digest_dir, "sess-gone"), _mark(digest_dir, "sess-live")
+    for mark in (stale, recent):
+        mark.write_text("100.000000\n")
+    month_ago = time.time() - 40 * 86400
+    os.utime(stale, (month_ago, month_ago))
+    daemon = _Daemon([b"200.000000\n"])
+    try:
+        _run_prompt_hook(hook, daemon.url, digest_dir,
+                         json.dumps({"session_id": "sess-new"}), tmp_path)
+    finally:
+        daemon.close()
+    assert not stale.exists() and recent.exists()
+    assert _mark(digest_dir, "sess-new").read_text().strip() == "200.000000"
+
+
+# ── pseudolife-mcp prompt-hook (installs without the plugin) ──────────────
+
+def test_cli_prompt_hook_refuses_a_redirect_and_keeps_its_cursor(tmp_path):
+    """urllib would carry the bearer to a redirect's target: refused, like
+    the briefing command and the plugin's curl --max-redirs 0."""
+    elsewhere = _Daemon([b"200.000000\nMemory changed since your last turn:\n- x\n"])
+    daemon = _Daemon([(302, elsewhere.url + "/api/hook/memory-changes?session_id=sess-1")])
+    digest_dir = tmp_path / "digests"
+    digest_dir.mkdir()
+    _mark(digest_dir, "sess-1").write_text("100.500000\n")
+    try:
+        out = _run_prompt_hook("cli", daemon.url, digest_dir,
+                               json.dumps({"session_id": "sess-1"}), tmp_path)
+    finally:
+        daemon.close()
+        elsewhere.close()
+    assert out == ""
+    assert len(daemon.queries) == 1 and elsewhere.queries == []
+    assert _mark(digest_dir, "sess-1").read_text().strip() == "100.500000"
+
+
+def test_cli_prompt_hook_sends_the_bearer_and_prefers_the_token_file(tmp_path):
+    from pseudolife_memory.credentials import _write_token_file
+    token_file = tmp_path / "secrets" / "token"
+    _write_token_file(token_file, "file-token")
+    daemon = _Daemon([b"100.000000\n", b"200.000000\n"])
+    payload = json.dumps({"session_id": "sess-1"})
+    try:
+        _run_prompt_hook("cli", daemon.url, tmp_path / "digests", payload, tmp_path)
+        _run_prompt_hook("cli", daemon.url, tmp_path / "digests", payload, tmp_path,
+                         PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
+    finally:
+        daemon.close()
+    assert daemon.auth == ["Bearer fixture-token", "Bearer file-token"]
+
+
+@pytest.mark.parametrize("payload", ["not json", "[]", '{"session_id": 7}',
+                                     '{"prompt": "\\"session_id\\": \\"sess-1\\""}'])
+def test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id(tmp_path, payload):
+    daemon = _Daemon([b"100.000000\n"])
+    try:
+        out = _run_prompt_hook("cli", daemon.url, tmp_path / "digests", payload, tmp_path)
+    finally:
+        daemon.close()
+    assert out == "" and daemon.queries == []
+
+
+def test_cli_prompt_hook_prints_nothing_through_a_symlinked_cursor(tmp_path):
+    digest_dir = tmp_path / "digests"
+    digest_dir.mkdir()
+    target = tmp_path / "elsewhere.mark"
+    target.write_text("100.500000\n")
+    try:
+        _mark(digest_dir, "sess-1").symlink_to(target)
+    except OSError:
+        pytest.skip("this host cannot create symlinks")
+    daemon = _Daemon([b"200.000000\nMemory changed since your last turn:\n- x\n"])
+    try:
+        out = _run_prompt_hook("cli", daemon.url, digest_dir,
+                               json.dumps({"session_id": "sess-1"}), tmp_path)
+    finally:
+        daemon.close()
+    assert out == ""
+    assert target.read_text().strip() == "100.500000"
+
+
+def test_cli_prompt_hook_is_a_listed_mode():
+    out = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", "--help"],
+                         cwd=ROOT, capture_output=True, text=True, check=True,
+                         timeout=HOOK_PROCESS_TIMEOUT).stdout
+    assert "\n  prompt-hook " in out
+
+
+def test_cli_prompt_hook_reads_its_payload_as_utf8(tmp_path):
+    """A prompt quoting non-ASCII text must not cost the turn its note:
+    the payload is UTF-8 whatever the locale's code page. Read as cp1252
+    (a Windows host's), the 0x81 in ``ā`` (C4 81) is undefined and the
+    whole payload fails to decode."""
+    note = "Memory changed since your last turn:\n- 1 new lesson; newest: prefer: x"
+    daemon = _Daemon([("200.250000\n" + note + "\n").encode()])
+    env = isolated_env(tmp_path / "codex-home")
+    env.update({"PSEUDOLIFE_MCP_DAEMON_URL": daemon.url, "PSEUDOLIFE_MCP_TOKEN": "t",
+                "PSEUDOLIFE_DIGEST_DIR": str(tmp_path / "digests"),
+                "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"})
+    payload = json.dumps({"prompt": "naïve café ☕ 🚀 Rīga ā", "session_id": "sess-1"},
+                         ensure_ascii=False).encode("utf-8")
+    try:
+        out = subprocess.run(
+            [sys.executable, "-m", "pseudolife_memory.cli", "prompt-hook"],
+            input=payload, env=env, cwd=ROOT, capture_output=True,
+            timeout=HOOK_PROCESS_TIMEOUT, check=True).stdout
+    finally:
+        daemon.close()
+    context = json.loads(out)["hookSpecificOutput"]
+    assert context["additionalContext"] == note

@@ -141,9 +141,10 @@ listed for review and left alone. By hand:
 1. Delete the `pseudolife-mcp briefing` SessionStart entries from
    `~/.claude/settings.json`: the briefing, and the `--coordination`
    check-in that installers write since 2026-09-25
-2. Delete the `mid-session discipline` UserPromptSubmit entry from
-   `~/.claude/settings.json` (the plugin echoes the same line — keeping
-   both injects it twice per turn)
+2. Delete the `pseudolife-mcp prompt-hook` UserPromptSubmit entry (or, from
+   installs before 2026-09-26, the `mid-session discipline` echo) from
+   `~/.claude/settings.json`: the plugin's own prompt hook serves the same
+   memory-change note
 3. Remove any installer-added `Pseudolife coordination:` SessionStart echo
    (2026-09-24 installs) from `~/.claude/settings.json`; the plugin supplies
    its own check-in hook.

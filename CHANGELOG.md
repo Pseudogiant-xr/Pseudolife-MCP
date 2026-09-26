@@ -206,6 +206,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   characters for the new `memory_agents` contract (+295); core fits within
   its unchanged 11,500.
 
+### Changed (2026-09-26 — installs without the plugin get the memory-change note too)
+- Claude Code and Codex installs wired by `ops/install-hook.*` (the
+  fallback without the plugin, and the Docker tier's installers) still
+  echoed the 614-character discipline line on every turn. They now run
+  the plugin's memory-change note through a new CLI mode,
+  `pseudolife-mcp prompt-hook`: it reads the hook payload on stdin, asks
+  `GET /api/hook/memory-changes` once (2 s, no retry, redirects refused so
+  the bearer never follows one), and prints a UserPromptSubmit
+  `hookSpecificOutput` only when new lessons or other sessions' status
+  notes landed. It keeps the plugin hooks' cursor file
+  (`<PSEUDOLIFE_DIGEST_DIR or ~/.pseudolife-mcp/digests>/<sha256(session
+  id)>.mark`), saves it only after printing, stays silent when the cursor
+  cannot be saved, and is silent on every failure. The bearer comes from
+  `PSEUDOLIFE_MCP_TOKEN_FILE` or `PSEUDOLIFE_MCP_TOKEN`; the payload is
+  read as UTF-8 whatever the console code page.
+- `install-hook` writes `pseudolife-mcp prompt-hook`, or for the Docker
+  tier's `docker exec pseudolife-mcp-daemon … briefing --hook-json`,
+  `docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook` (`-i`
+  hands the container the hook's stdin). There the cursor lives in the
+  container's writable layer, so after a daemon rebuild the next turn
+  reports again what landed since the session started; the bearer is the
+  container's `PSEUDOLIFE_MCP_TOKEN` (a stack set up only with
+  `PSEUDOLIFE_MCP_TOKENS` gets no note), and a stopped container makes
+  `docker exec` fail on each turn, which the client reports as a hook
+  error, as it does for the briefing once per session. A re-run
+  removes the exact static echoes earlier versions wrote: the current
+  line, the 2026-08-28..09-05 one, and Codex's `Write-Output` pair. An
+  entry whose command or `commandWindows` differs from those is the
+  user's and stays; the same exact-pair rule now also applies to the
+  check-in echo it replaces. `--remove-legacy` and
+  `ops/setup-codex-hooks.py` recognise the new commands.
+- Upgrading: the command runs from the host's `pseudolife-mcp` runtime
+  (the daemon container's on the Docker tier), so update it before
+  rewriting the hook: `ops/update.ps1 -All` (or `ops/update.sh --all`, or
+  `ops/update_clients.py --only shim`), then re-run the installer or
+  `ops/install-hook.*`, then restart clients. An older runtime rejects the
+  unknown mode (exit 2), which Claude Code reports as a hook error on each
+  turn. Codex asks to approve the changed hook in `/hooks`.
+
 ### Changed (2026-09-26 — session hooks say each thing once, and the per-turn hook speaks only when memory changed)
 - The session-start hook stopped serving "What your memory is unsure
   about" (graph bridges and contested slots). Every session paid for it, and
@@ -243,8 +282,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coordination digest.
   `user-prompt-submit.sh` sources `session-start.sh memory-changes`, so the
   connection checks stay in one script; `lifecycle.ps1` does the same for
-  Codex on Windows. The `ops/install-hook.*` fallback keeps the fixed line,
-  and `ops/setup-codex-hooks.py` now reads it from `install-hook.ps1`.
+  Codex on Windows. `ops/setup-codex-hooks.py` now reads the fixed line from
+  `install-hook.ps1`; the `ops/install-hook.*` fallback moved to the note
+  too (next entry).
 - New `MemoryService.memory_changes_since(since, session_key=)`: counts and
   the newest of each kind, scanned under the service lock that every entry
   and lesson write holds while stamping, so its `now` (rounded down) is a
