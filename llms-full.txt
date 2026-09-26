@@ -1208,8 +1208,8 @@ docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 
 Host-process installs: also unregister the logon task
 (`Unregister-ScheduledTask -TaskName "Pseudolife-MCP Daemon"`) and remove
-the SessionStart briefing hook — plus, Claude client, the UserPromptSubmit
-discipline hook — from `~/.claude/settings.json` and/or
+the SessionStart briefing hook — plus the UserPromptSubmit memory-change
+hook (`pseudolife-mcp prompt-hook`; older installs: the discipline echo) — from `~/.claude/settings.json` and/or
 `~/.codex/hooks.json` (a timestamped `.bak-*` sits next to each edited file).
 
 ## Testing
@@ -3653,8 +3653,9 @@ and do not depend on execution order.
 The lightweight `install-hook` scripts install the briefing, the coordination
 check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
 the daemon serves it: a board that is on and usable by that bearer), and the
-per-turn discipline line. Re-running them replaces the unconditional check-in
-echo older versions wrote. They do not register an
+per-turn memory-change note (`pseudolife-mcp prompt-hook`). Re-running them
+replaces the unconditional check-in echo and the static discipline echo
+older versions wrote. They do not register an
 agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing --hook-json` reads
 `/api/hook/session-start` (the plugin hook's memory core and briefing) but
 forwards no session id, and no SessionEnd hook is written, so an install
@@ -5679,8 +5680,11 @@ also wake an idle session when board mail arrives (see
 `ops/install-hook.*`
 is the non-plugin fallback: it installs the SessionStart briefing
 (`pseudolife-mcp briefing --hook-json`, which serves the plugin hook's memory
-core and bounded briefing) and the per-turn discipline line,
-but no SessionEnd hook and no identity registration — those sessions fall
+core and bounded briefing) and the per-turn memory-change note
+(`pseudolife-mcp prompt-hook`, the plugin hook's note: it prints only when
+new lessons or other sessions' status notes landed since the session's last
+note; re-running the installer replaces the static discipline echo older
+versions wrote), but no SessionEnd hook and no identity registration — those sessions fall
 back to the shim header or idle-gap sessionization (see
 [Episodes](episodes.md#session-lifecycle--daemon-owned-episodes)). The MCP
 transport comes from the installer either way (stdio shim by default),
@@ -5913,7 +5917,7 @@ other instructions still belong there. A custom daemon
 |---|---|
 | `AGENTS.md` memory block | Standing guidance to recall, capture, and reflect when the client loads instructions |
 | `SessionStart` | A compact memory policy, a live briefing, and session episode identity |
-| `UserPromptSubmit` | A short memory reminder on each prompt |
+| `UserPromptSubmit` | A short note on a prompt after memory changed (new lessons, other sessions' status notes); nothing otherwise |
 | `SessionEnd` | Automatic session episode cleanup |
 
 Hooks provide timed execution and lifecycle bookkeeping. Their briefings

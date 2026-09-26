@@ -4,6 +4,7 @@
 * ``pseudolife-mcp serve``     — the HTTP memory daemon (deployment mode).
 * ``pseudolife-mcp embedded``  — v0.1 in-process stdio server (escape hatch).
 * ``pseudolife-mcp briefing``  — print the session-start briefing (for a hook).
+* ``pseudolife-mcp prompt-hook`` — the per-turn memory-change note (for a hook).
 
 The heavy imports (torch, sentence-transformers) happen only inside the
 ``serve`` / ``embedded`` branches; the shim path imports nothing heavier
@@ -31,6 +32,9 @@ modes:
                  --hook-json emits the memory core + bounded briefing as
                  Claude Code/Codex hook JSON; --coordination prints the
                  agent-board check-in, only where the board works)
+  prompt-hook    per-turn UserPromptSubmit hook: prints a note only when new
+                 lessons or other sessions' status notes landed since this
+                 session's last one (installs without the plugin)
   doctor         check this runtime, daemon health and MCP handshake (no writes)
   backup         back up the bank: pg_dump + state archive with rotation
                  (pip tiers; the Docker tier keeps ops/backup.ps1)
@@ -79,6 +83,9 @@ def main() -> None:
     elif mode == "briefing":
         from pseudolife_memory.briefing_cli import run_briefing
         run_briefing()
+    elif mode == "prompt-hook":
+        from pseudolife_memory.briefing_cli import run_prompt_hook
+        run_prompt_hook()
     elif mode == "doctor":
         from pseudolife_memory.doctor_cli import run_doctor
         run_doctor()

@@ -372,6 +372,27 @@ def test_lightweight_coordination_hook_migrates_without_touching_other_hooks(tmp
     assert len(starts) == (1 if source == "plugin" else 4)
 
 
+@pytest.mark.parametrize("command", [
+    "pseudolife-mcp prompt-hook",
+    "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook"])
+@pytest.mark.parametrize("source", ["manual", "plugin"])
+def test_lightweight_prompt_hook_migrates_without_touching_other_hooks(tmp_path, command, source):
+    """install-hook -Client codex writes the memory-change command (since
+    2026-09-26) with commandWindows equal to it; setup takes it over like
+    the static line it replaced."""
+    written = {"type": "command", "command": command, "commandWindows": command, "timeout": 5}
+    unrelated = {"type": "command", "command": "echo user-owned"}
+    path = tmp_path / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [written, unrelated]}]}}))
+    result = {"backups": []}
+    setup.install_manual(tmp_path, result, plugin=source == "plugin")
+    hooks = json.loads(path.read_text())["hooks"]
+    prompts = [h["command"] for group in hooks["UserPromptSubmit"] for h in group["hooks"]]
+    assert command not in prompts
+    assert unrelated["command"] in prompts
+    assert len(prompts) == (1 if source == "plugin" else 3)
+
+
 @pytest.mark.parametrize("custom_field", ["command", "commandWindows"])
 def test_custom_platform_override_stops_migration_without_duplicate_hooks(tmp_path, monkeypatch, custom_field):
     original = seed_user_files(tmp_path)

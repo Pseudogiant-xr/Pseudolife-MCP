@@ -113,10 +113,12 @@ def test_codex_hook_install_preserves_existing_hooks_and_is_idempotent(tmp_path)
     # running the command here would reach whatever daemon answers.
     assert starts[2]["command"] == starts[2]["commandWindows"] == (
         "pseudolife-mcp briefing --hook-json --coordination")
+    # The memory-change note, run by the installed CLI against whatever daemon
+    # answers; its cases live in tests/test_memory_changes_hook.py.
     prompts = [h for g in hooks["UserPromptSubmit"] for h in g["hooks"]]
     assert len(prompts) == 1
-    result = pwsh_run("-Command", prompts[0]["commandWindows"])
-    assert "memory_lesson_search" in result.stdout
+    assert prompts[0]["command"] == prompts[0]["commandWindows"] == "pseudolife-mcp prompt-hook"
+    assert prompts[0]["timeout"] == 5
 
 
 def test_plugin_native_windows_prompt_context(tmp_path):

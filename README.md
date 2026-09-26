@@ -1202,8 +1202,8 @@ docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 
 Host-process installs: also unregister the logon task
 (`Unregister-ScheduledTask -TaskName "Pseudolife-MCP Daemon"`) and remove
-the SessionStart briefing hook — plus, Claude client, the UserPromptSubmit
-discipline hook — from `~/.claude/settings.json` and/or
+the SessionStart briefing hook — plus the UserPromptSubmit memory-change
+hook (`pseudolife-mcp prompt-hook`; older installs: the discipline echo) — from `~/.claude/settings.json` and/or
 `~/.codex/hooks.json` (a timestamped `.bak-*` sits next to each edited file).
 
 ## Testing

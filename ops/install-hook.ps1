@@ -38,10 +38,19 @@ if (-not $SettingsPath) {
 }
 
 # The unconditional check-in echo older installers wrote (install mode
-# replaces it, -RemoveLegacy removes it), and the every-turn discipline line
-# (see the UserPromptSubmit step). Both are shared with -RemoveLegacy.
+# replaces it, -RemoveLegacy removes it), and the static every-turn
+# discipline line the memory-change hook replaced on 2026-09-26 (install mode
+# swaps it, -RemoveLegacy removes it, ops/setup-codex-hooks.py reads it here).
 $coordinationLine = "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
 $disciplineLine = "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
+# Exactly as the installers wrote it: the 2026-08-28..09-05 line ended
+# "-> memory_outcome." (derived, so this file keeps one copy of the line),
+# and Codex installs carry a PowerShell twin in commandWindows.
+$staticDisciplineCommands = @("echo '$disciplineLine'",
+    "echo '$($disciplineLine -replace ' with used_ids\.$', '.')'",
+    "Write-Output '$disciplineLine'")
+$promptCommands = @("pseudolife-mcp prompt-hook",
+    "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook")
 
 if ($DryRun -and -not $RemoveLegacy) {
     [Console]::Error.WriteLine("-DryRun applies to -RemoveLegacy only.")
@@ -59,21 +68,20 @@ if ($RemoveLegacy) {
     # Exact commands this script and the installers ever wrote, by event. A
     # substring match would also delete a user's own command that merely
     # mentions one (ops/setup-codex-hooks.py applies the same rule). The
-    # 2026-08-28..09-05 discipline line ended "-> memory_outcome."; derived,
-    # so this file keeps one copy of the line (test_plugin_packaging.py). The
     # check-in was an unconditional echo on 2026-09-24, then the briefing
-    # command with --coordination ($coordinationCommand below).
+    # command with --coordination ($coordinationCommand below). The prompt
+    # hook was the static discipline echo until 2026-09-26, then the
+    # memory-change note.
     $briefings = @("pseudolife-mcp briefing --hook-json",
         "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json")
     $shipped = [ordered]@{
         SessionStart = @($briefings + @($briefings | ForEach-Object { "$_ --coordination" }) +
             @("echo '$coordinationLine'", "pseudolife-mcp episode-start"))
-        UserPromptSubmit = @("echo '$disciplineLine'",
-            "echo '$($disciplineLine -replace ' with used_ids\.$', '.')'")
+        UserPromptSubmit = @($promptCommands + $staticDisciplineCommands)
         SessionEnd = @("pseudolife-mcp episode-end")
     }
-    $needles = @("pseudolife-mcp briefing", "mid-session discipline", "Pseudolife coordination:",
-        "pseudolife-mcp episode-start", "pseudolife-mcp episode-end")
+    $needles = @("pseudolife-mcp briefing", "pseudolife-mcp prompt-hook", "mid-session discipline",
+        "Pseudolife coordination:", "pseudolife-mcp episode-start", "pseudolife-mcp episode-end")
     function Get-JsonString($node) {
         # A JSON string value, or $null for anything else (ToString alone
         # would also render numbers and objects as text).
@@ -334,35 +342,64 @@ if (-not $hasCoordination) {
     Write-Host "  command: $coordinationCommand"
 }
 
-# Every-turn memory-discipline line (UserPromptSubmit), both clients.
-# Codex requires review and trust before newly installed hooks run. Static echo
-# (no daemon call): the one-shot session-start briefing loses salience over
-# a long session; this keeps the loop — including recall-before-review —
-# mechanical. Keep the line free of quote characters (it nests in JSON+sh).
-# $disciplineLine is defined at the top, shared with -RemoveLegacy.
+# Per-turn memory-change note (UserPromptSubmit), both clients; Codex requires
+# review and trust before newly installed hooks run. `pseudolife-mcp
+# prompt-hook` prints only when new lessons or other sessions' status notes
+# landed since the session's last note, as the plugin's hook does. It runs
+# where the briefing runs: the Docker tier's `docker exec` gets -i, since the
+# hook's session id arrives on stdin. It replaces the static discipline echo
+# ($staticDisciplineCommands, defined at the top) older installers wrote.
+$briefingTail = "pseudolife-mcp briefing --hook-json"
+$promptCommand = "pseudolife-mcp prompt-hook"
+if ($Command.EndsWith($briefingTail, [StringComparison]::Ordinal)) {
+    $promptCommand = $Command.Substring(0, $Command.Length - $briefingTail.Length) + $promptCommand
+    if ($promptCommand.StartsWith("docker exec ", [StringComparison]::Ordinal) -and
+        -not $promptCommand.StartsWith("docker exec -i ", [StringComparison]::Ordinal)) {
+        $promptCommand = "docker exec -i " + $promptCommand.Substring("docker exec ".Length)
+    }
+}
 if ($Client -in "claude", "codex") {
     if (-not ($obj.hooks.PSObject.Properties.Name -contains 'UserPromptSubmit')) {
         $obj.hooks | Add-Member -NotePropertyName UserPromptSubmit -NotePropertyValue @()
     }
-    $hasDiscipline = $false
+    # Exact commands only (commandWindows too, when set): a user's own hook
+    # that mentions the phrase stays.
+    $staticRemoved = $false
+    $keptGroups = @()
     foreach ($group in @($obj.hooks.UserPromptSubmit)) {
         if ($null -eq $group) { continue }
-        foreach ($h in @($group.hooks)) {
-            if ($h.command -like "*mid-session discipline*") { $hasDiscipline = $true }
+        $keptHooks = @(@($group.hooks) | Where-Object {
+            -not (($_.command -cin $staticDisciplineCommands) -and
+                  ((-not ($_.PSObject.Properties.Name -contains 'commandWindows')) -or
+                   ($_.commandWindows -cin $staticDisciplineCommands)))
+        })
+        if ($keptHooks.Count -ne @($group.hooks).Count) { $staticRemoved = $true }
+        if ($keptHooks.Count -gt 0) {
+            $group.hooks = $keptHooks
+            $keptGroups += $group
         }
     }
-    if (-not $hasDiscipline) {
+    $obj.hooks.UserPromptSubmit = $keptGroups
+    if ($staticRemoved) { Write-Host "Removed the static mid-session discipline hook." }
+    $hasPromptHook = $false
+    foreach ($group in @($obj.hooks.UserPromptSubmit)) {
+        foreach ($h in @($group.hooks)) {
+            if ($h.command -like "*pseudolife-mcp prompt-hook*") { $hasPromptHook = $true }
+        }
+    }
+    if (-not $hasPromptHook) {
         $upsGroup = [pscustomobject]@{
-            hooks = @([pscustomobject]@{ type = 'command'; command = "echo '$disciplineLine'" })
+            hooks = @([pscustomobject]@{ type = 'command'; command = $promptCommand })
         }
         if ($Client -eq "codex") {
-            $upsGroup.hooks[0] | Add-Member commandWindows "Write-Output '$disciplineLine'"
+            $upsGroup.hooks[0] | Add-Member commandWindows $promptCommand
             $upsGroup.hooks[0] | Add-Member timeout 5
         }
         $obj.hooks.UserPromptSubmit = @($obj.hooks.UserPromptSubmit) + $upsGroup
-        Write-Host "Installed UserPromptSubmit discipline hook -> $SettingsPath"
+        Write-Host "Installed UserPromptSubmit memory-change hook -> $SettingsPath"
+        Write-Host "  command: $promptCommand"
     } else {
-        Write-Host "Mid-session discipline hook already present in $SettingsPath - skipping."
+        Write-Host "Memory-change hook already present in $SettingsPath - skipping."
     }
 }
 

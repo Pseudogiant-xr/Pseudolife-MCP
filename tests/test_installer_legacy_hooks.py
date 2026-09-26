@@ -61,6 +61,10 @@ GATED_COORD = BRIEFING + " --coordination"
 DOCKER_GATED_COORD = DOCKER_BRIEFING + " --coordination"
 UPS_CMD = f"echo '{DISCIPLINE}'"
 OLD_UPS_CMD = f"echo '{OLD_DISCIPLINE}'"
+# Since 2026-09-26 the per-turn hook is the memory-change note, not the echo.
+# The Docker tier's needs -i: the hook's session id arrives on stdin.
+PROMPT_CMD = "pseudolife-mcp prompt-hook"
+DOCKER_PROMPT_CMD = "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook"
 EPISODE_START = "pseudolife-mcp episode-start"
 EPISODE_END = "pseudolife-mcp episode-end"
 
@@ -206,7 +210,9 @@ def _out(proc) -> str:
 @pytest.mark.parametrize("ups, coord", [
     (UPS_CMD, COORD_CMD), (OLD_UPS_CMD, COORD_CMD),
     (UPS_CMD, DOCKER_GATED_COORD), (UPS_CMD, GATED_COORD),
-], ids=["echo-checkin", "pre-2026-09-05-discipline", "gated-checkin-docker", "gated-checkin"])
+    (PROMPT_CMD, GATED_COORD), (DOCKER_PROMPT_CMD, DOCKER_GATED_COORD),
+], ids=["echo-checkin", "pre-2026-09-05-discipline", "gated-checkin-docker", "gated-checkin",
+        "prompt-hook", "prompt-hook-docker"])
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
 def test_removes_exactly_the_shipped_entries_after_a_backup(variant, ups, coord, tmp_path):
     env = _env(variant, tmp_path)
@@ -456,6 +462,68 @@ def test_everything_install_mode_writes_is_removable(variant, command, tmp_path)
     assert proc.returncode == 0, _out(proc)
     assert "Removed 3" in _out(proc)
     assert _commands(json.loads(path.read_text(encoding="utf-8"))) == ["echo user-start"]
+
+
+# ── install mode: the per-turn memory-change hook ───────────────────────────
+
+def _settings_path(env: dict[str, str], client: str) -> Path:
+    home = Path(env["HOME"])
+    return home / ".codex" / "hooks.json" if client == "codex" else home / ".claude" / "settings.json"
+
+
+def _ups(settings: dict) -> list[dict]:
+    return [h for g in settings["hooks"].get("UserPromptSubmit", []) for h in g.get("hooks", [])]
+
+
+@pytest.mark.parametrize("command, prompt", [(BRIEFING, PROMPT_CMD),
+                                             (DOCKER_BRIEFING, DOCKER_PROMPT_CMD)],
+                         ids=["default", "installer"])
+@pytest.mark.parametrize("client", ["claude", "codex"])
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_install_writes_the_memory_change_hook_not_the_static_line(
+        variant, client, command, prompt, tmp_path):
+    """Plugin-less installs get the plugin's per-turn memory-change note
+    (maintainer decision 2026-09-26) instead of a 614-character line on
+    every turn. The Docker tier runs it in the daemon container, fed the
+    hook's stdin by ``docker exec -i``."""
+    env = _env(variant, tmp_path)
+    path = _settings_path(env, client)
+    for _ in range(2):
+        proc = _run_hook(variant, env, path, mode="install", client=client, command=command)
+        assert proc.returncode == 0, _out(proc)
+    written = json.loads(path.read_text(encoding="utf-8"))
+    ups = _ups(written)
+    assert [h["command"] for h in ups] == [prompt], ups
+    assert "mid-session discipline" not in path.read_text(encoding="utf-8")
+    if variant[0] == "pwsh" and client == "codex":
+        assert ups[0]["commandWindows"] == prompt and ups[0]["timeout"] == 5
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+def test_install_replaces_the_shipped_static_lines_exactly_and_once(variant, tmp_path):
+    """Re-running an installer migrates what earlier versions wrote: the
+    current line, the pre-2026-09-05 one, and Codex's PowerShell pair.
+    A user's own hook that merely mentions the phrase stays."""
+    env = _env(variant, tmp_path)
+    lookalike = _hook("echo 'my own mid-session discipline reminder'")
+    codex_pair = _hook(UPS_CMD, commandWindows=f"Write-Output '{DISCIPLINE}'", timeout=5)
+    # A platform override of the user's own makes the entry theirs.
+    customized = _hook(UPS_CMD, commandWindows="Write-Output 'my own override'")
+    path = _write_home(Path(env["HOME"]), {"hooks": {
+        "SessionStart": [{"hooks": [_hook(DOCKER_BRIEFING)]},
+                         {"hooks": [_hook(DOCKER_GATED_COORD)]}],
+        "UserPromptSubmit": [{"hooks": [USER_PROMPT, _hook(UPS_CMD)]},
+                             {"hooks": [_hook(OLD_UPS_CMD)]},
+                             {"hooks": [codex_pair, lookalike, customized]}]}}, record=None)
+    proc = _run_hook(variant, env, path, mode="install", command=DOCKER_BRIEFING)
+    assert proc.returncode == 0, _out(proc)
+    first = json.loads(path.read_text(encoding="utf-8"))
+    assert [h["command"] for h in _ups(first)] == [
+        USER_PROMPT["command"], lookalike["command"], UPS_CMD, DOCKER_PROMPT_CMD]
+    assert _ups(first)[2]["commandWindows"] == customized["commandWindows"]
+    proc = _run_hook(variant, env, path, mode="install", command=DOCKER_BRIEFING)
+    assert proc.returncode == 0, _out(proc)
+    assert json.loads(path.read_text(encoding="utf-8")) == first
 
 
 # ── installer consent block (section 9) ─────────────────────────────────────

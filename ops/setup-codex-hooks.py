@@ -399,16 +399,18 @@ def owned_manual(hook, home):
 def legacy_commands():
     # Only shipped legacy commands are migratable; substring matches would
     # silently remove or approve arbitrary user code. The discipline line is
-    # the one install-hook writes (the plugin's prompt hook stopped carrying
-    # it on 2026-09-26, when it became the memory-change note).
+    # the static echo install-hook wrote until 2026-09-26, when it (and the
+    # plugin's prompt hook) became the memory-change note, prompt-hook.
     install_hook = (ROOT / "ops/install-hook.ps1").read_text(encoding="utf-8")
     line = re.search(r'\$disciplineLine = "(.*)"', install_hook)[1]
     coordination = re.search(r'\$coordinationLine = "(.*)"', install_hook)[1]
     briefings = {"pseudolife-mcp briefing --hook-json",
                  "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"}
+    prompts = {"pseudolife-mcp prompt-hook",
+               "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook"}
     # The installers' daemon-gated check-in (2026-09-25) and the
     # unconditional echo it replaced.
-    return {*briefings, *(command + " --coordination" for command in briefings),
+    return {*briefings, *(command + " --coordination" for command in briefings), *prompts,
             f"echo '{line}'", f"Write-Output '{line}'",
             f"echo '{coordination}'", f"Write-Output '{coordination}'"}
 

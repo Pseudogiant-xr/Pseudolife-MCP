@@ -230,8 +230,9 @@ and do not depend on execution order.
 The lightweight `install-hook` scripts install the briefing, the coordination
 check-in (`pseudolife-mcp briefing --coordination`, which prints it only where
 the daemon serves it: a board that is on and usable by that bearer), and the
-per-turn discipline line. Re-running them replaces the unconditional check-in
-echo older versions wrote. They do not register an
+per-turn memory-change note (`pseudolife-mcp prompt-hook`). Re-running them
+replaces the unconditional check-in echo and the static discipline echo
+older versions wrote. They do not register an
 agent identity or install the plugin's local inbox-preview handler. `pseudolife-mcp briefing --hook-json` reads
 `/api/hook/session-start` (the plugin hook's memory core and briefing) but
 forwards no session id, and no SessionEnd hook is written, so an install
