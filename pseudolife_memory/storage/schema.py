@@ -593,15 +593,17 @@ CREATE INDEX IF NOT EXISTS coordination_lease_waiters_agent_idx
     ON coordination_lease_waiters (agent_id);
 -- v45: when an agent's current status stops being true, if it said.
 ALTER TABLE coordination_agents ADD COLUMN IF NOT EXISTS status_expires_at DOUBLE PRECISION;
--- v46: a send event's body, outside the row hash. Its hashed payload holds
--- the body's sha256 and byte count instead, so an operator can redact the
--- body (NULL, behind a chained redact event) and the chain still verifies.
--- NULL on every other event, and on sends written before v46, whose body
--- stays inside the hashed payload. Added only when missing: ADD COLUMN IF
--- NOT EXISTS takes an ACCESS EXCLUSIVE lock even when the column exists, and
--- board-audit export/verify hold a read lock on this table for their whole
--- snapshot, so on every daemon start an open export would fail the schema
--- pass at its 5 s lock timeout (review, 2026-09-26).
+-- v46: a send event's body and a random salt, both outside the row hash. Its
+-- hashed payload commits to sha256(salt || body) and the byte count instead,
+-- so an operator can redact the body (body and salt NULL, behind a chained
+-- redact event), the chain still verifies, and with the salt gone nothing is
+-- left to test a guess of a short body against. NULL on every other event,
+-- and on sends written before v46, whose body stays inside the hashed
+-- payload. Added only when missing: ADD COLUMN IF NOT EXISTS takes an ACCESS
+-- EXCLUSIVE lock even when the column exists, and board-audit export/verify
+-- hold a read lock on this table for their whole snapshot, so on every
+-- daemon start an open export would fail the schema pass at its 5 s lock
+-- timeout (review, 2026-09-26).
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_attribute
@@ -609,6 +611,11 @@ BEGIN
                      AND attname = 'body' AND attnum > 0 AND NOT attisdropped) THEN
         -- IF NOT EXISTS still: two first starts racing both reach here.
         ALTER TABLE coordination_events ADD COLUMN IF NOT EXISTS body TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'coordination_events'::regclass
+                     AND attname = 'body_salt' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE coordination_events ADD COLUMN IF NOT EXISTS body_salt TEXT;
     END IF;
 END $$;
 """

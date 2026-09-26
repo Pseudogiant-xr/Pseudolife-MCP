@@ -209,9 +209,12 @@ GENESIS_HASH = "0" * 64
 # cannot close a deadlock cycle.
 AUDIT_LOCK_KEY = "coordination-audit-chain"
 # The columns every event has, hashed or a hash. A send event (v46) also
-# carries ``body``, outside the hash: its hashed payload holds the body's
-# sha256 and byte count instead, so the body can be redacted and the chain
-# still verifies. Rows written before v46 keep the body inside the payload.
+# carries ``body`` and ``body_salt``, outside the hash: its hashed payload
+# holds sha256(salt || body) and the byte count instead, so the body can be
+# redacted and the chain still verifies, and once the salt goes with it a
+# guess at a short body has nothing to be checked against (maintainer
+# decision, 2026-09-26). Rows written before v46 keep the body inside the
+# payload.
 AUDIT_COLUMNS = ("seq", "event", "actor", "principal", "agent_id", "recipient_agent_id",
                  "project", "task", "message_id", "payload", "created_at", "hlc",
                  "prev_hash", "hash")
@@ -221,7 +224,23 @@ _AUDIT_INSERT = ("INSERT INTO coordination_events (" + ",".join(AUDIT_COLUMNS)
 # bodiless events to a restored bank before any schema pass, which on a v42-v45
 # backup has no body column yet.
 _AUDIT_INSERT_BODY = ("INSERT INTO coordination_events (" + ",".join(AUDIT_COLUMNS)
-                      + ",body) VALUES (" + ",".join(["%s"] * (len(AUDIT_COLUMNS) + 1)) + ")")
+                      + ",body,body_salt) VALUES ("
+                      + ",".join(["%s"] * (len(AUDIT_COLUMNS) + 2)) + ")")
+# Bytes of random salt per body (hex in the column): enough that the salt
+# itself can never be guessed.
+BODY_SALT_BYTES = 16
+
+
+def body_commitment(salt_hex, body):
+    """sha256(salt || body), the value a v46 send's hashed payload holds;
+    None when the salt or body is not the shape one is written in."""
+    if (not isinstance(salt_hex, str) or len(salt_hex) != 2 * BODY_SALT_BYTES
+            or not isinstance(body, str)):
+        return None
+    try:
+        return hashlib.sha256(bytes.fromhex(salt_hex) + body.encode("utf-8")).hexdigest()
+    except (ValueError, UnicodeEncodeError):
+        return None
 MAX_REDACT_REASON = 240
 
 
@@ -536,18 +555,19 @@ def _parsed_payload(row):
     return payload if isinstance(payload, dict) else None
 
 
-def _body_matches(body, payload) -> bool:
-    """Whether a present body is the one a v46 send payload commits to."""
+def _body_matches(body, salt, payload) -> bool:
+    """Whether a present body and its salt open the commitment a v46 send
+    payload holds."""
     if not isinstance(body, str) or payload is None:
         return False
-    digest = payload.get("text_sha256")
-    if not isinstance(digest, str):
+    commitment = payload.get("text_commitment")
+    if not isinstance(commitment, str):
         return False
     try:
-        raw = body.encode("utf-8")
+        size = len(body.encode("utf-8"))
     except UnicodeEncodeError:
         return False
-    return hashlib.sha256(raw).hexdigest() == digest and payload.get("text_bytes") == len(raw)
+    return body_commitment(salt, body) == commitment and payload.get("text_bytes") == size
 
 
 def verify_audit_chain(rows, *, expect_head=None) -> dict:
@@ -557,8 +577,9 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
     prev_hash is not the previous row's hash) or ``hash_mismatch`` (its
     content changed). Bodies are outside the hash (schema v46), so they are
     checked against what the hashed payload commits to: a present ``body``
-    must be on a send event whose payload carries ``text_sha256``, and match
-    it and ``text_bytes`` (``body_mismatch``; a body on any other row is
+    must be on a send event whose payload carries ``text_commitment``, and
+    with its ``body_salt`` open it and match ``text_bytes`` (``body_mismatch``,
+    also for a salt left without its body; a body on any other row is
     content the chain never vouched for, and one on a send that a later
     operator ``redact`` event names was written back after its redaction,
     since redaction blanks it in the same transaction). A v46 send event
@@ -610,14 +631,18 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
             return _broken(seq, "broken_link")
         if audit_hash(row["prev_hash"], row) != row["hash"]:
             return _broken(seq, "hash_mismatch")
-        event, body = row["event"], row.get("body")
+        event, body, salt = row["event"], row.get("body"), row.get("body_salt")
         payload = (_parsed_payload(row)
                    if body is not None or event in ("send", "redact") else None)
+        if body is None and salt is not None:
+            # A redaction removes both; a salt left behind would make the
+            # removed body guessable against its commitment again.
+            return _broken(seq, "body_mismatch")
         if body is not None:
-            if not _body_matches(body, payload if event == "send" else None):
+            if not _body_matches(body, salt, payload if event == "send" else None):
                 return _broken(seq, "body_mismatch")
             kept.add(seq)
-        elif event == "send" and payload is not None and "text_sha256" in payload:
+        elif event == "send" and payload is not None and "text_commitment" in payload:
             absent[seq] = (row["message_id"], "body" in row)
         if event == "redact" and row["actor"] == "operator" and payload is not None:
             named, message_id = payload.get("seq"), payload.get("message_id")
@@ -677,8 +702,8 @@ def audit_has_body_column(conn) -> bool:
 def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, until=None):
     """Stream the audit log in chain order through a server-side cursor.
 
-    Each row carries ``body`` too (None on every event but a v46 send, and
-    on a redacted one). ``agent_id`` matches the acting agent or a message's
+    Each row carries ``body`` and ``body_salt`` too (None on every event but
+    a v46 send, and on a redacted one). ``agent_id`` matches the acting agent or a message's
     recipient; ``since`` is inclusive and ``until`` exclusive, in epoch
     seconds. A filtered stream is a slice for reading, not a chain
     ``verify_audit_chain`` can check."""
@@ -701,7 +726,10 @@ def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, un
         # created_at is hashed as the float written; a server configured for
         # rounded float output would make every row read back as tampered.
         conn.execute("SET LOCAL extra_float_digits = 3")
-        body = "body" if audit_has_body_column(conn) else "NULL::text AS body"
+        if audit_has_body_column(conn):
+            body = "body,body_salt"
+        else:
+            body = "NULL::text AS body,NULL::text AS body_salt"
         sql = "SELECT " + ",".join(AUDIT_COLUMNS) + "," + body + " FROM coordination_events" + where
         with conn.cursor(name="coordination_audit", row_factory=dict_row) as cur:
             cur.itersize = 1000
@@ -726,16 +754,16 @@ class CoordinationStore:
 
     @staticmethod
     def _event(event, payload, *, actor="agent", principal="", agent_id="", recipient=None,
-               project="", task="", message_id=None, hlc="", body=None):
+               project="", task="", message_id=None, hlc="", body=None, body_salt=None):
         """One audit row before its chain position. ``principal`` is the
         bearer principal the transport verified, empty for the daemon's own
         maintenance and for the offline operator; never a credential.
-        ``body`` (a send's text) is stored outside the hash; the payload
-        must commit to it."""
+        ``body`` (a send's text) and ``body_salt`` are stored outside the
+        hash; the payload must commit to both."""
         return {"event": event, "actor": actor, "principal": principal, "agent_id": agent_id,
                 "recipient_agent_id": recipient, "project": project, "task": task,
                 "message_id": message_id, "hlc": hlc, "payload": _canonical(payload),
-                "body": body}
+                "body": body, "body_salt": body_salt}
 
     def _chain_head(self):
         """Take the chain lock, then read the head ``(seq, hash)``.
@@ -768,7 +796,7 @@ class CoordinationStore:
             if row.get("body") is None:
                 plain.append(values)
             else:
-                bodied.append(values + (row["body"],))
+                bodied.append(values + (row["body"], row.get("body_salt")))
         with self.storage.conn.cursor() as cur:
             if plain:
                 cur.executemany(_AUDIT_INSERT, plain)
@@ -1513,15 +1541,18 @@ class CoordinationStore:
                     "((EXCLUDED.value->>0)::bigint,(EXCLUDED.value->>1)::bigint)",
                     (HLC_META_KEY, Jsonb(stamp)))
             # The body lives on in the event's body column after prune blanks
-            # the live copy. The hashed payload holds its digest, not the
-            # text (v46), so ``redact`` can remove it and the chain holds.
-            raw = text.encode("utf-8")
+            # the live copy. The hashed payload holds a salted commitment to
+            # it, not the text (v46), so ``redact`` can remove body and salt
+            # and the chain holds, with nothing left to test a guess against.
+            salt = secrets.token_hex(BODY_SALT_BYTES)
             self._append([self._event(
-                "send", {"text_sha256": hashlib.sha256(raw).hexdigest(), "text_bytes": len(raw),
+                "send", {"text_commitment": body_commitment(salt, text),
+                         "text_bytes": len(text.encode("utf-8")),
                          "reply_to": reply_to, "request_id": request_id,
                          "recipient_sequence": seq, "expires_at": expiry},
                 principal=principal, agent_id=agent_id, recipient=to, project=sender["project"],
-                task=sender["task"], message_id=message_id, hlc=hlc, body=text)], now)
+                task=sender["task"], message_id=message_id, hlc=hlc, body=text,
+                body_salt=salt)], now)
         return self._receipt(row)
 
     @staticmethod
@@ -1797,12 +1828,15 @@ class CoordinationStore:
         """Operator only (``pseudolife-mcp board-audit redact``; never exposed
         to agents): remove one message body from the board.
 
-        In one transaction: blank the ``body`` of the message's send event,
-        blank the live copy if prune has not already and end its delivery,
+        In one transaction: blank the ``body`` and ``body_salt`` of the
+        message's send event, blank the live copy (and its request
+        fingerprint, a digest of the text kept seven days for retries, so a
+        retry of the request is refused as ``request_conflict``) if prune has
+        not already, end its delivery,
         and append a chained ``redact`` event (actor ``operator``) whose
         payload names the send event's ``seq``, the operator's reason, and
         ``audit_copy: removed``. The send event's hashed payload keeps the
-        body's sha256 and byte count, so the chain still verifies, and
+        salted commitment and byte count, so the chain still verifies, and
         ``verify_audit_chain`` accepts the absent body only behind that
         event. A message sent before v46 has its body inside the hashed
         payload, which cannot change; while its live copy is still there, that
@@ -1848,15 +1882,16 @@ class CoordinationStore:
             if sent is None:
                 raise CoordinationError("message_not_found")
             payload = _parsed_payload(sent)
-            if payload is None or "text_sha256" not in payload:
+            if payload is None or "text_commitment" not in payload:
                 # Sent before v46: the audit copy stays. Decided before the
                 # body column is touched, so a restored v42-v45 bank that has
                 # none yet takes this path too.
                 if live is None or live["text"] is None:
                     raise CoordinationError("body_in_hashed_payload")
                 audit_copy = "kept"
-            elif self._one("UPDATE coordination_events SET body=NULL WHERE seq=%s "
-                           "AND body IS NOT NULL RETURNING seq", (sent["seq"],)) is None:
+            elif self._one("UPDATE coordination_events SET body=NULL,body_salt=NULL "
+                           "WHERE seq=%s AND body IS NOT NULL RETURNING seq",
+                           (sent["seq"],)) is None:
                 raise CoordinationError("already_redacted")
             else:
                 audit_copy = "removed"
@@ -1864,8 +1899,8 @@ class CoordinationStore:
             if live is not None:
                 cleared = live["text"] is not None
                 self.storage.conn.execute(
-                    "UPDATE coordination_messages SET text=NULL,expires_at=LEAST(expires_at,%s) "
-                    "WHERE message_id=%s", (now, message_id))
+                    "UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
+                    "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message_id))
             seq, digest = self._append([self._event(
                 "redact", {"message_id": message_id, "seq": sent["seq"], "reason": reason,
                            "audit_copy": audit_copy},

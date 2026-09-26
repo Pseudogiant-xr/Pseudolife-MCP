@@ -666,7 +666,12 @@ def _legacy_send(store, a, b, text="an old body"):
     return message_id
 
 
-def test_a_send_event_commits_to_its_body_by_digest_outside_the_hash(store):
+def test_a_send_event_commits_to_its_salted_body_outside_the_hash(store):
+    """The hashed payload commits to sha256(salt || body); the salt and the
+    body sit beside it, outside the hash, and go together on a redaction, so
+    a redacted body cannot be confirmed by guessing (maintainer decision
+    2026-09-26: an unsalted digest let anyone holding the log test guesses
+    of a short or structured body)."""
     import hashlib
     from pseudolife_memory.storage.coordination import audit_hash
     a, b = pair(store)
@@ -674,15 +679,62 @@ def test_a_send_event_commits_to_its_body_by_digest_outside_the_hash(store):
     store.send(*creds(a), to=b["agent_id"], text=text, request_id="r")
     [sent] = events(store, "send")
     raw = text.encode("utf-8")
-    assert sent["payload"] == {"text_sha256": hashlib.sha256(raw).hexdigest(),
+    salt = sent["body_salt"]
+    assert isinstance(salt, str) and len(salt) == 32 and int(salt, 16) >= 0
+    assert sent["payload"] == {"text_commitment": hashlib.sha256(bytes.fromhex(salt) + raw)
+                               .hexdigest(),
                                "text_bytes": len(raw), "reply_to": None, "request_id": "r",
                                "recipient_sequence": 1, "expires_at": 1000.0 + DAY}
+    # Not the bare digest a guess could be checked against.
+    assert sent["payload"]["text_commitment"] != hashlib.sha256(raw).hexdigest()
     assert sent["body"] == text
-    # The body is not part of the row hash; the digest in the payload is.
+    # Neither the body nor the salt is part of the row hash.
     row = chain(store)[-1]
-    assert row["body"] == text
-    assert audit_hash(row["prev_hash"], {**row, "body": "anything else"}) == row["hash"]
+    assert (row["body"], row["body_salt"]) == (text, salt)
+    assert audit_hash(row["prev_hash"], {**row, "body": "anything else",
+                                         "body_salt": "0" * 32}) == row["hash"]
     assert verify(store)["ok"]
+
+
+def test_the_same_text_sent_twice_commits_differently(store):
+    a, b = pair(store)
+    store.send(*creds(a), to=b["agent_id"], text="same words", request_id="r1")
+    store.send(*creds(a), to=b["agent_id"], text="same words", request_id="r2")
+    first, second = events(store, "send")
+    assert first["body_salt"] != second["body_salt"]
+    assert first["payload"]["text_commitment"] != second["payload"]["text_commitment"]
+    assert verify(store)["ok"]
+
+
+@pytest.mark.parametrize("column,value,reason", [
+    ("body_salt", "f" * 32, "body_mismatch"),     # a different salt no longer opens it
+    ("body_salt", None, "body_mismatch"),         # a body whose salt was removed
+    ("body", None, "body_mismatch"),              # a body removed, its salt left behind
+])
+def test_verify_holds_the_body_and_its_salt_together(store, column, value, reason):
+    a, b = pair(store)
+    store.send(*creds(a), to=b["agent_id"], text="the body", request_id="r")
+    [sent] = events(store, "send")
+    store.storage.conn.execute(
+        f"UPDATE coordination_events SET {column}=%s WHERE seq=%s", (value, sent["seq"]))
+    report = verify(store)
+    assert (report["ok"], report["seq"], report["reason"]) == (False, sent["seq"], reason)
+
+
+def test_a_salt_written_back_after_a_redaction_fails_verify(store):
+    """A redaction that left the salt, or had it restored, would make the
+    removed body guessable against its commitment again."""
+    a, b = pair(store)
+    msg = store.send(*creds(a), to=b["agent_id"], text="short pin 4417", request_id="r")
+    [sent] = events(store, "send")
+    salt = sent["body_salt"]
+    store.redact(msg["message_id"], "pasted by mistake")
+    assert verify(store)["ok"]
+    store.storage.conn.execute(
+        "UPDATE coordination_events SET body_salt=%s WHERE seq=%s", (salt, sent["seq"]))
+    report = verify(store)
+    assert (report["ok"], report["seq"], report["reason"]) == (False, sent["seq"],
+                                                               "body_mismatch")
 
 
 def test_redact_removes_a_body_from_the_log_and_the_mailbox_and_logs_why(store):
@@ -701,17 +753,25 @@ def test_redact_removes_a_body_from_the_log_and_the_mailbox_and_logs_why(store):
     # the redact row itself.
     assert verify(store, expect_head=(5, redact_row["hash"]))["ok"]
     redacted, still = events(store, "send")
-    # The body is gone; the hashed digest stays, so the chain still holds.
-    assert redacted["body"] is None and redacted["payload"] == sent["payload"]
-    assert still["body"] == "keep me"
+    # The body and its salt are gone; the hashed commitment stays, so the
+    # chain still holds, and nothing is left to test a guess against.
+    assert redacted["body"] is None and redacted["body_salt"] is None
+    assert redacted["payload"] == sent["payload"]
+    assert still["body"] == "keep me" and still["body_salt"] is not None
     # The live copy is blanked and leaves delivery at once.
     assert store.storage.conn.execute(
         "SELECT text, expires_at FROM coordination_messages WHERE message_id=%s",
         (oops["message_id"],)).fetchone() == (None, 1030.0)
     assert store._pending_count(b["agent_id"]) == 1
     assert [m["message_id"] for m in store.receive(*creds(b))["messages"]] == [kept["message_id"]]
-    assert store.send(*creds(a), to=b["agent_id"], text="oops, wrong paste",
-                      request_id="r1")["state"] == "expired"
+    # The live row's request fingerprint (a digest of the text, kept seven
+    # days for retries) goes too, so a retry of the redacted request is
+    # refused rather than recognised.
+    assert store.storage.conn.execute(
+        "SELECT fingerprint FROM coordination_messages WHERE message_id=%s",
+        (oops["message_id"],)).fetchone() == ("redacted",)
+    with pytest.raises(CoordinationError, match="^request_conflict$"):
+        store.send(*creds(a), to=b["agent_id"], text="oops, wrong paste", request_id="r1")
     [red] = events(store, "redact")
     assert (red["seq"], red["actor"], red["principal"], red["agent_id"],
             red["recipient_agent_id"], red["message_id"], red["created_at"], red["body"]) == (
@@ -763,8 +823,10 @@ def _sent_by_v45(monkeypatch, store, a, b, text):
 
     def v45(event, payload, **fields):
         if event == "send":
-            payload = {k: v for k, v in payload.items() if k not in ("text_sha256", "text_bytes")}
+            payload = {k: v for k, v in payload.items()
+                       if k not in ("text_commitment", "text_bytes")}
             payload["text"] = fields.pop("body")
+            fields.pop("body_salt", None)
         return real(event, payload, **fields)
 
     with monkeypatch.context() as patched:
@@ -835,7 +897,8 @@ def test_a_redaction_reason_that_looks_like_a_secret_is_refused(store):
 @pytest.mark.parametrize("damage,seq,reason", [
     ("UPDATE coordination_events SET body='edited' WHERE seq=3", 3, "body_mismatch"),
     ("UPDATE coordination_events SET body=body || ' ' WHERE seq=3", 3, "body_mismatch"),
-    ("UPDATE coordination_events SET body=NULL WHERE seq=3", 3, "body_missing"),
+    ("UPDATE coordination_events SET body=NULL,body_salt=NULL WHERE seq=3", 3,
+     "body_missing"),
     # A body on a row that commits to none is content the chain never vouched for.
     ("UPDATE coordination_events SET body='smuggled' WHERE seq=1", 1, "body_mismatch"),
 ])
@@ -888,7 +951,7 @@ def _redact_row(*, names, payload_message_id, audit_copy="removed", **fields):
             "recipient_agent_id": None, "project": "", "task": "",
             "message_id": payload_message_id, "created_at": 2000.0, "hlc": "",
             "payload": json.dumps(payload, sort_keys=True, separators=(",", ":")),
-            "body": None, **fields}
+            "body": None, "body_salt": None, **fields}
 
 
 @pytest.mark.parametrize("forgery,ok", [
@@ -909,7 +972,7 @@ def test_only_a_later_operator_redact_naming_the_send_accounts_for_a_missing_bod
     a, b = pair(store)
     msg = store.send(*creds(a), to=b["agent_id"], text="gone", request_id="r")
     rows = [dict(row) for row in chain(store)]
-    rows[2]["body"] = None
+    rows[2]["body"] = rows[2]["body_salt"] = None
     mid = msg["message_id"]
     redact = {"genuine": _redact_row(names=3, payload_message_id=mid),
               "names_another_seq": _redact_row(names=2, payload_message_id=mid),
@@ -938,7 +1001,8 @@ def test_rows_read_without_a_body_field_are_named_as_such_not_as_tampering(store
                      request_id="r")
 
     def without_body():
-        return [{k: v for k, v in row.items() if k != "body"} for row in chain(store)]
+        return [{k: v for k, v in row.items() if k not in ("body", "body_salt")}
+                for row in chain(store)]
 
     assert verify_audit_chain(without_body()) == {
         "ok": False, "seq": 3, "reason": "body_not_exported"}

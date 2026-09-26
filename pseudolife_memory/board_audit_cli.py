@@ -240,7 +240,8 @@ def _read_export(path: Path):
                     or not all(isinstance(row[k], str) for k in (
                         "event", "actor", "principal", "agent_id", "project", "task",
                         "hlc", "prev_hash", "hash"))
-                    or not isinstance(row.get("body"), (str, type(None)))):
+                    or not isinstance(row.get("body"), (str, type(None)))
+                    or not isinstance(row.get("body_salt"), (str, type(None)))):
                 raise AuditCliError(f"{path} line {number} is not an exported audit event")
             yield row
 

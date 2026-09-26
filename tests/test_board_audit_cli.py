@@ -50,7 +50,8 @@ def test_export_writes_json_lines_filtered_by_task_agent_and_time(store, cli):
     assert by_task[0]["body"] is None
     assert set(by_task[1]) == {"seq", "event", "actor", "principal", "agent_id",
                                "recipient_agent_id", "project", "task", "message_id",
-                               "payload", "created_at", "hlc", "prev_hash", "hash", "body"}
+                               "payload", "created_at", "hlc", "prev_hash", "hash", "body",
+                               "body_salt"}
     assert [e["event"] for e in export("--agent", b["agent_id"])] == ["register", "send", "send"]
     assert [e["seq"] for e in export("--project", "p", "--since", "2000")] == [3, 4]
     assert [e["seq"] for e in export("--until", "2000")] == [1, 2]
@@ -437,17 +438,26 @@ def test_verify_input_names_a_tampered_or_stripped_body_in_an_export(store, cli,
     edited[2]["body"] = "another body"
     assert verify_rows(edited, "edited.jsonl") == (
         1, {"ok": False, "seq": 3, "reason": "body_mismatch"})
-    stripped = [{k: v for k, v in row.items() if k != "body"} for row in rows]
+    # A pre-v46 CLI's export has neither field.
+    stripped = [{k: v for k, v in row.items() if k not in ("body", "body_salt")}
+                for row in rows]
     assert verify_rows(stripped, "stripped.jsonl") == (
         1, {"ok": False, "seq": 3, "reason": "body_not_exported"})
+    # Removed as a redaction would (body and salt), but with no redact event.
     blanked = [dict(row) for row in rows]
-    blanked[2]["body"] = None
+    blanked[2]["body"] = blanked[2]["body_salt"] = None
     assert verify_rows(blanked, "blanked.jsonl") == (
         1, {"ok": False, "seq": 3, "reason": "body_missing"})
-    wrong_type = [dict(row) for row in rows]
-    wrong_type[2]["body"] = 7
-    code, err = verify_rows(wrong_type, "wrong-type.jsonl")
-    assert code == 2 and "line 3 is not an exported audit event" in err
+    # The salt is part of what the payload commits to.
+    resalted = [dict(row) for row in rows]
+    resalted[2]["body_salt"] = "0" * 32
+    assert verify_rows(resalted, "resalted.jsonl") == (
+        1, {"ok": False, "seq": 3, "reason": "body_mismatch"})
+    for field in ("body", "body_salt"):
+        wrong_type = [dict(row) for row in rows]
+        wrong_type[2][field] = 7
+        code, err = verify_rows(wrong_type, f"wrong-type-{field}.jsonl")
+        assert code == 2 and "line 3 is not an exported audit event" in err
 
 
 def test_an_export_written_before_v46_still_verifies(store, cli, tmp_path):

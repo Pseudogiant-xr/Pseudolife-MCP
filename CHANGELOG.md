@@ -14,13 +14,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `board-audit verify`, and restoring a backup brought it back. Nothing
   refused such a body at send time either.
 - From schema v46 a `send` event keeps the body in a new
-  `coordination_events.body` column, outside the row hash; its hashed payload
-  carries the body's sha256 and UTF-8 byte count (`text_sha256`,
+  `coordination_events.body` column, beside a random 16-byte salt in
+  `body_salt`, both outside the row hash; its hashed payload carries
+  sha256(salt || body) and the UTF-8 byte count (`text_commitment`,
   `text_bytes`) instead of the text. The hash itself does not change, so every
-  existing chain still verifies.
+  existing chain still verifies. The salt goes with the body on a redaction,
+  so the commitment left in the chain cannot confirm a guess of a short or
+  structured body (an unsalted digest could).
 - `pseudolife-mcp board-audit redact --message-id ID --reason TEXT`
   (operator-only; no MCP tool or REST route) blanks that body and the live
-  mailbox copy, ends the message's delivery, and appends a chained operator
+  mailbox copy (and its seven-day request fingerprint, so a retry of that
+  request is refused), ends the message's delivery, and appends a chained operator
   `redact` event naming the send event and the reason, in one transaction and
   under the daemon's own locks, so it runs beside a live daemon; a busy board
   is reported as busy (exit 2), with nothing changed. It then vacuums the two
