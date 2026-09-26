@@ -8,6 +8,7 @@ Codex home.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -75,6 +76,41 @@ def _wrapped_stub(tmp_path, **options):
     wrapper = tmp_path / "launcher.py"
     wrapper.write_text(WRAPPER, encoding="utf-8")
     return [sys.executable, str(wrapper), command[1]], log
+
+
+# A launcher whose worker is started by an intermediate that exits at once,
+# so the worker's parent is gone: a walk of the launcher's child tree never
+# reaches it. The launcher itself then hangs.
+ORPHANING = """import subprocess, sys, time
+subprocess.call([sys.executable, "-c",
+                 "import subprocess, sys; subprocess.Popen(sys.argv[1:])",
+                 sys.executable, *sys.argv[1:]])
+time.sleep(60)
+"""
+
+
+def _orphaning_stub(tmp_path, **options):
+    command, log = _stub(tmp_path, **options)
+    launcher = tmp_path / "orphaning_launcher.py"
+    launcher.write_text(ORPHANING, encoding="utf-8")
+    return [sys.executable, str(launcher), command[1]], log
+
+
+def _hang_until_timeout(command, timeout=3.0):
+    """Ring once with a CLI that never finishes; the seconds the ring took."""
+    now = [1000.0]
+
+    async def drive():
+        bell = CodexDoorbell(command, clock=lambda: now[0], timeout=timeout)
+        box = Mailbox()
+        bell.watch(THREAD, box)
+        now[0] += 60
+        started = time.monotonic()
+        box.set("m1")
+        await _settle(bell)
+        return time.monotonic() - started
+
+    return asyncio.run(drive())
 
 
 def _fake_cli(directory, name="codex"):
@@ -521,6 +557,175 @@ def test_a_hung_cli_tree_is_killed_at_the_timeout(tmp_path, capsys):
     assert asyncio.run(drive()) < 30
     assert "did not finish" in capsys.readouterr().err
     assert not _still_running(log)
+
+
+def _kill_once_running(command, log):
+    """Ring with a CLI that never finishes and shut the doorbell down once its
+    worker ticks: the kill (the one a timeout runs) always meets a live tree.
+    A deadline instead would race the start: with the CPU oversubscribed 2x
+    (2026-09-27), three interpreters once took over 8 s to tick."""
+    now = [1000.0]
+
+    async def drive():
+        bell = CodexDoorbell(command, clock=lambda: now[0], timeout=120)
+        box = Mailbox()
+        bell.watch(THREAD, box)
+        now[0] += 60
+        box.set("m1")
+        for _ in range(1200):         # up to 60 s for the worker to start
+            if _ticks(log):
+                break
+            await asyncio.sleep(0.05)
+        started = time.monotonic()
+        await bell.aclose()
+        return time.monotonic() - started
+
+    return asyncio.run(drive())
+
+
+def test_a_hung_cli_dies_with_a_worker_whose_parent_already_exited(tmp_path):
+    command, log = _orphaning_stub(tmp_path, sleep=60)
+    assert _kill_once_running(command, log) < 30
+    assert _ticks(log)                # the orphaned worker really ran
+    assert not _still_running(log)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="taskkill is the Windows kill")
+def test_a_hung_cli_tree_dies_even_when_taskkill_would_stall(tmp_path, monkeypatch):
+    # CI run 36222271064 (2026-09-26): on a loaded runner the tree survived
+    # the timeout kill. Locally taskkill took 0.11 s idle and up to 2.5 s
+    # with the CPU oversubscribed 2x; past its 5 s wait, only the launcher
+    # died. Here taskkill never finishes in time.
+    command, log = _wrapped_stub(tmp_path, sleep=60)
+    real_exec = asyncio.create_subprocess_exec
+
+    async def stalling_taskkill(program, *args, **kwargs):
+        if os.path.basename(str(program)).lower() == "taskkill.exe":
+            return await real_exec(sys.executable, "-c", "import time; time.sleep(8)",
+                                   **kwargs)
+        return await real_exec(program, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", stalling_taskkill)
+    assert _kill_once_running(command, log) < 30
+    assert _ticks(log)
+    assert not _still_running(log)
+
+
+def _ring_once(command):
+    now = [1000.0]
+
+    async def drive():
+        bell = CodexDoorbell(command, clock=lambda: now[0])
+        box = Mailbox()
+        bell.watch(THREAD, box)
+        now[0] += 60
+        box.set("m1")
+        await _settle(bell)
+
+    asyncio.run(drive())
+
+
+CREATE_SUSPENDED = 0x00000004        # winbase.h; the subprocess module lacks it
+
+
+@pytest.mark.skipif(os.name != "nt", reason="job objects exist only on Windows")
+def test_the_cli_starts_suspended_until_it_is_in_the_kill_job(tmp_path, capsys, monkeypatch):
+    # Running, a launcher could start its worker before it joins the job, and
+    # that worker would be outside it: cmd.exe starts in milliseconds.
+    command, log = _stub(tmp_path)
+    flags = []
+    real_exec = asyncio.create_subprocess_exec
+
+    async def spy(program, *args, **kwargs):
+        flags.append(kwargs.get("creationflags", 0))
+        return await real_exec(program, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    _ring_once(command)
+    assert _argv(log) == [_queued(1)]  # resumed: it ran to completion
+    assert "doorbell off" not in capsys.readouterr().err
+    assert flags and flags[0] & CREATE_SUSPENDED
+
+
+class _Failing:
+    """kernel32 with one call failing, the rest real."""
+
+    def __init__(self, real, name):
+        self._real, self._name = real, name
+
+    def __getattr__(self, attribute):
+        if attribute == self._name:
+            return lambda *args: 0
+        return getattr(self._real, attribute)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="job objects exist only on Windows")
+@pytest.mark.parametrize("failing", ["CreateJobObjectW", "AssignProcessToJobObject"])
+def test_a_cli_the_job_cannot_hold_still_runs(tmp_path, capsys, monkeypatch, failing):
+    # A parent job with UI limits forbids nesting, for one: the CLI runs as
+    # before, with taskkill as its timeout kill.
+    from pseudolife_memory import codex_doorbell
+
+    monkeypatch.setattr(codex_doorbell, "_kernel32", _Failing(codex_doorbell._kernel32, failing))
+    command, log = _stub(tmp_path)
+    _ring_once(command)
+    assert _argv(log) == [_queued(1)]
+    assert "doorbell off" not in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.name != "nt", reason="job objects exist only on Windows")
+def test_without_the_job_a_hung_cli_is_taskkilled(tmp_path, capsys, monkeypatch):
+    from pseudolife_memory import codex_doorbell
+
+    monkeypatch.setattr(codex_doorbell, "_kernel32",
+                        _Failing(codex_doorbell._kernel32, "AssignProcessToJobObject"))
+    command, log = _stub(tmp_path, sleep=60)
+    started, taskkills = [], []
+    real_exec = asyncio.create_subprocess_exec
+
+    async def spy(program, *args, **kwargs):
+        process = await real_exec(program, *args, **kwargs)
+        if os.path.basename(str(program)).lower() == "taskkill.exe":
+            taskkills.append(list(args))
+        else:
+            started.append(process.pid)
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    assert _hang_until_timeout(command) < 30
+    assert "did not finish" in capsys.readouterr().err
+    assert taskkills == [["/T", "/F", "/PID", str(started[0])]]
+    assert not _still_running(log)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="job objects exist only on Windows")
+def test_a_cli_that_cannot_join_its_job_is_never_left_suspended(tmp_path, capsys, monkeypatch):
+    import psutil
+
+    from pseudolife_memory import codex_doorbell
+
+    def broken(self, process):
+        raise AttributeError("_handle")    # an asyncio without the Popen handle
+
+    monkeypatch.setattr(codex_doorbell._KillJob, "adopt", broken)
+    command, log = _stub(tmp_path, sleep=60)
+    started = []
+    real_exec = asyncio.create_subprocess_exec
+
+    async def spy(program, *args, **kwargs):
+        process = await real_exec(program, *args, **kwargs)
+        started.append(process.pid)
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    try:
+        _ring_once(command)
+        assert "could not start the Codex CLI" in capsys.readouterr().err
+        assert not psutil.pid_exists(started[0])
+    finally:
+        for pid in started:
+            with contextlib.suppress(psutil.Error):
+                psutil.Process(pid).kill()
 
 
 def test_an_unstartable_cli_turns_the_doorbell_off(tmp_path, capsys):
