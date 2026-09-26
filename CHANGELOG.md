@@ -75,6 +75,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the recipient already read. Rotate a leaked credential first; redaction is
   tidiness, not remediation.
 
+### Added (2026-09-26 — a coordination report, and the trial baseline to beat)
+- Coordination changes had nothing to be measured against: the 2026-09-23/24
+  trial's figures came from one-off scripts over a private board export.
+  `evals/coordination_report.py` reads an audit export
+  (`pseudolife-mcp board-audit export --out`) or that older whole-board export
+  and writes an aggregate-only JSON report plus a Markdown rendering. It never
+  replaces either without `--force`, and never its own input even with it.
+  It measures acknowledgement latency per recipient principal (overall and
+  per `--window`), the share of acknowledgements covering three or more
+  messages at once, each directed pair's busiest 60 minutes, near-identical
+  fan-out bursts, the kind mix (a declared `kind`, else a tag-first heuristic
+  marked as such), SUITE-START/SUITE-END baton traffic, status staleness at
+  the end of an audit export (leaving out detached and revoked sessions,
+  whose statuses no peer is shown), and resources coordinated by hand
+  repeatedly, listed as candidate lease declarations (proposals only, nothing
+  enforced). Wakes per session-hour, requests past their reply-by time and
+  the time to answer a NEEDS-HUMAN message are `null` until the schema
+  records what they need.
+- Export the whole audit log and scope the report with `--since`/`--until`:
+  the report then still reads the registrations and statuses set before the
+  scope, which an export filtered at the source drops. A filtered export
+  (a gap in its sequence, or a start no retention cut anchors) is flagged in
+  both files, and staleness counts the agents with no status event. A schema
+  v46 export's top-level `body` is read (older sends' bodies still come from
+  the payload, including in an upgraded bank's export); a redacted body
+  counts its message without text, in `input.bodies_missing`.
+- The committed baseline (`evals/results/coordination-baseline-20260924.json`)
+  is the report over the trial's final export. It matches every figure of
+  the trial's one-off analysis except one, pinned in
+  `tests/test_coordination_report.py`: fan-out similarity now runs difflib
+  with autojunk off, which past 200 characters had scored near-identical
+  copies as unrelated. Over 816 messages, acknowledgements to Claude
+  Code sessions took a median 296.8 s (p90 5261.2 s) from 16:00 to 21:30 AEST
+  and 31.7 s (p90 140.2 s) from 01:00 to 07:05; 12 messages were never
+  acknowledged; 32.7% of acknowledgements came in batches of three or more;
+  39 fan-out bursts covered 22.8% of messages; and SUITE-END traffic amounted
+  to 39 baton passes. The older export has no status history, so the
+  baseline's staleness is `null`. One night is a reference point, not an
+  interval: night-to-night noise stays unmeasured until a second comparable
+  night is reported.
+- Aggregate-only by construction: bodies, labels, statuses, tasks, projects
+  and paths are matched in memory against fixed keyword lists and only
+  counts are written; agents appear as `<principal>-<n>` in first-seen order,
+  and no raw id or input path is written. A principal is written by name only
+  when it is one of the installer's role names (or `--keep-principal` names
+  it), since an operator-chosen principal can be a username or a host. Window
+  labels are short plain names. A test sends bodies, statuses, labels, tasks,
+  a username-shaped principal and machine paths carrying a sentinel through
+  both input formats and checks that neither output file contains any of
+  them.
+
 ### Added (2026-09-26 — agents queue for shared resources on the board instead of by message, schema v45)
 - Agents that share one machine can now hold a named, expiring **resource
   lease** (a full test suite, the GPU, a maintenance window, a work area)
