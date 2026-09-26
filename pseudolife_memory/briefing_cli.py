@@ -44,7 +44,7 @@ def _fetch_markdown(url: str, token: str | None, max_unsure: int, max_lessons: i
     ``initialize`` handshake — so it's fast enough for a per-session hook. A
     redirect is refused rather than followed, since urllib would carry the
     bearer to its target."""
-    from pseudolife_memory.shim import _NoRedirectHandler
+    from pseudolife_memory.daemon_url import _NoRedirectHandler
     qs = urllib.parse.urlencode({"max_unsure": max_unsure, "max_lessons": max_lessons,
                                  "max_world": max_world})
     req = urllib.request.Request(f"{url}/api/briefing?{qs}")
@@ -62,7 +62,7 @@ def _fetch_session_start(url: str, token: str | None) -> str:
     within the hook's size budget. No ``session_id`` is sent, so this path
     registers no episode. A redirect is refused rather than followed, since
     urllib would carry the bearer to its target."""
-    from pseudolife_memory.shim import _NoRedirectHandler
+    from pseudolife_memory.daemon_url import _NoRedirectHandler
     req = urllib.request.Request(f"{url}/api/hook/session-start")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -77,7 +77,7 @@ def _fetch_checkin(url: str, token: str | None) -> str:
     an unlisted principal). A redirect is refused rather than followed, since
     urllib would carry the bearer to its target; two seconds keeps the hook
     inside its five-second budget."""
-    from pseudolife_memory.shim import _NoRedirectHandler
+    from pseudolife_memory.daemon_url import _NoRedirectHandler
     req = urllib.request.Request(f"{url}/api/hook/coordination-start")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -146,7 +146,7 @@ def _fetch_memory_changes(url: str, token: str | None, session_id: str,
     note when memory changed. One attempt, two seconds: the turn waits on
     it. A redirect is refused rather than followed, since urllib would
     carry the bearer to its target."""
-    from pseudolife_memory.shim import _NoRedirectHandler
+    from pseudolife_memory.daemon_url import _NoRedirectHandler
     query = {"session_id": session_id}
     if since:
         query["since"] = since
@@ -172,7 +172,7 @@ def _prompt_hook(raw: bytes) -> None:
     if not isinstance(session_id, str) or not _SESSION_ID.fullmatch(session_id):
         return
     from pseudolife_memory.credentials import CredentialProvider
-    from pseudolife_memory.shim import _daemon_url
+    from pseudolife_memory.daemon_url import _daemon_url
 
     mark_dir = os.environ.get("PSEUDOLIFE_DIGEST_DIR") or os.path.join(
         os.path.expanduser("~"), ".pseudolife-mcp", "digests")

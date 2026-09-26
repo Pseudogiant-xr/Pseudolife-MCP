@@ -248,7 +248,7 @@
    "d": [
     "GET /api/briefing → markdown; --hook-json: GET /api/hook/session-start → hookSpecificOutput JSON; --coordination prints the board check-in from /api/hook/coordination-start instead, empty where the board is off",
     "Never auto-starts the daemon; prints nothing on any failure",
-    "prompt-hook: the plugin's per-turn memory-change note (GET /api/hook/memory-changes, 2 s, redirects refused) with the same <digest dir>/<sha256(session id)>.mark cursor, saved only after printing",
+    "prompt-hook: the plugin's per-turn memory-change note (GET /api/hook/memory-changes, 2 s, redirects refused) with the same <digest dir>/<sha256(session id)>.mark cursor, saved only after printing; imports no shim or httpx (URL and redirect helpers come from the stdlib-only daemon_url.py), since it runs every turn",
     "Wired by ops/install-hook for non-plugin installs"
    ]
   },

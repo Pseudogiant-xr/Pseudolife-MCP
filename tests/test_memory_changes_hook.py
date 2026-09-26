@@ -498,6 +498,33 @@ def test_cli_prompt_hook_prints_nothing_through_a_symlinked_cursor(tmp_path):
     assert target.read_text().strip() == "100.500000"
 
 
+def test_cli_prompt_hook_imports_neither_the_shim_nor_httpx(tmp_path):
+    """The hook runs on every turn. Importing the shim pulled in httpx
+    (and rich through it), about half of each turn's 270 ms (2026-09-27),
+    so the prompt-hook path takes its URL and redirect helpers from the
+    stdlib-only ``daemon_url`` module instead."""
+    daemon = _Daemon([b"100.000000\n"])
+    env = isolated_env(tmp_path / "codex-home")
+    env.update({"PSEUDOLIFE_MCP_DAEMON_URL": daemon.url, "PSEUDOLIFE_MCP_TOKEN": "t",
+                "PSEUDOLIFE_DIGEST_DIR": str(tmp_path / "digests")})
+    probe = ("import sys\n"
+             "sys.argv = ['pseudolife-mcp', 'prompt-hook']\n"
+             "from pseudolife_memory.cli import main\n"
+             "main()\n"
+             "heavy = ('httpx', 'rich', 'pseudolife_memory.shim')\n"
+             "sys.stderr.write(repr(sorted(m for m in heavy if m in sys.modules)))\n")
+    try:
+        done = subprocess.run([sys.executable, "-c", probe],
+                              input=json.dumps({"session_id": "sess-1"}), env=env,
+                              cwd=ROOT, capture_output=True, text=True,
+                              timeout=HOOK_PROCESS_TIMEOUT, check=True)
+    finally:
+        daemon.close()
+    assert len(daemon.queries) == 1  # the hook reached the daemon
+    assert _mark(tmp_path / "digests", "sess-1").read_text().strip() == "100.000000"
+    assert done.stderr.strip() == "[]"
+
+
 def test_cli_prompt_hook_is_a_listed_mode():
     out = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", "--help"],
                          cwd=ROOT, capture_output=True, text=True, check=True,
