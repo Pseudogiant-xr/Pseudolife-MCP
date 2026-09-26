@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 44
+SCHEMA_META_VERSION = 45
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -553,6 +553,46 @@ CREATE TABLE IF NOT EXISTS coordination_events (
 );
 CREATE INDEX IF NOT EXISTS coordination_events_time_idx
     ON coordination_events (created_at);
+-- v45: named leases on shared resources, one row per name. The row outlives
+-- each hold so the fence keeps rising across grants. No foreign keys, like
+-- the audit log: prune drops a departed waiter's row itself and never
+-- removes a live holder, and the fixtures' TRUNCATE of the agent table must
+-- not need a CASCADE.
+CREATE TABLE IF NOT EXISTS coordination_leases (
+    name TEXT PRIMARY KEY,
+    holder_agent_id TEXT,
+    holder_principal TEXT NOT NULL DEFAULT '',
+    purpose TEXT NOT NULL DEFAULT '',
+    fence BIGINT NOT NULL DEFAULT 0,
+    acquired_at DOUBLE PRECISION,
+    expires_at DOUBLE PRECISION,
+    expect INTEGER,
+    expected_end DOUBLE PRECISION,
+    freed_at DOUBLE PRECISION
+);
+CREATE INDEX IF NOT EXISTS coordination_leases_holder_idx
+    ON coordination_leases (holder_agent_id) WHERE holder_agent_id IS NOT NULL;
+-- v45: one sequence hands out every lease's fences, so a fence never repeats
+-- for a name even after prune forgets its row.
+CREATE SEQUENCE IF NOT EXISTS coordination_lease_fence;
+-- v45: each lease's queue, served in ticket (arrival) order.
+CREATE TABLE IF NOT EXISTS coordination_lease_waiters (
+    name TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    ticket BIGSERIAL,
+    principal TEXT NOT NULL,
+    purpose TEXT NOT NULL DEFAULT '',
+    ttl INTEGER NOT NULL,
+    expect INTEGER,
+    enqueued_at DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (name, agent_id)
+);
+CREATE INDEX IF NOT EXISTS coordination_lease_waiters_order_idx
+    ON coordination_lease_waiters (name, ticket);
+CREATE INDEX IF NOT EXISTS coordination_lease_waiters_agent_idx
+    ON coordination_lease_waiters (agent_id);
+-- v45: when an agent's current status stops being true, if it said.
+ALTER TABLE coordination_agents ADD COLUMN IF NOT EXISTS status_expires_at DOUBLE PRECISION;
 """
 
 # v40: operational identities and addressed mail never enter the memory tables.
@@ -593,6 +633,7 @@ BENCH_RESET_TABLES = (
     "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",
     "store_decisions",
     "coordination_agents", "coordination_messages", "coordination_events",
+    "coordination_leases", "coordination_lease_waiters",
 )
 
 # A test or bench reset reaps every other backend on its database, applies

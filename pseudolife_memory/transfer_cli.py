@@ -95,6 +95,8 @@ EXCLUDED_TABLES = (
     # The board's audit log holds message bodies (paths, usernames) and its
     # hash chain is anchored in this bank: it stays in full backups only.
     "coordination_events",
+    # v45: who holds or queues for each lease, by this bank's agent ids.
+    "coordination_leases", "coordination_lease_waiters",
 )
 
 # Columns of an exported table that are serving telemetry under the same

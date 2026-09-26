@@ -116,7 +116,8 @@ async def _send_coordination_error(send, exc):
               else 403 if code in {"principal_not_allowed", "invalid_credential"}
               else 404 if code == "instance_not_found"
               else 409 if code == "bank_identity_mismatch"
-              else 429 if code in {"wait_capacity_exceeded", "rate_limited", "queue_full"}
+              else 429 if code in {"wait_capacity_exceeded", "rate_limited", "queue_full",
+                                   "lease_queue_full"}
               else 500 if code in {"coordination_unavailable", "invalid_bank_identity"}
               else 400)
     if status == 500:
