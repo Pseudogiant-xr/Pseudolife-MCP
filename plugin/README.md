@@ -141,9 +141,10 @@ listed for review and left alone. By hand:
 1. Delete the `pseudolife-mcp briefing` SessionStart entries from
    `~/.claude/settings.json`: the briefing, and the `--coordination`
    check-in that installers write since 2026-09-25
-2. Delete the `mid-session discipline` UserPromptSubmit entry from
-   `~/.claude/settings.json` (the plugin echoes the same line — keeping
-   both injects it twice per turn)
+2. Delete the `pseudolife-mcp prompt-hook` UserPromptSubmit entry (or, from
+   installs before 2026-09-26, the `mid-session discipline` echo) from
+   `~/.claude/settings.json`: the plugin's own prompt hook serves the same
+   memory-change note
 3. Remove any installer-added `Pseudolife coordination:` SessionStart echo
    (2026-09-24 installs) from `~/.claude/settings.json`; the plugin supplies
    its own check-in hook.
@@ -158,7 +159,8 @@ listed for review and left alone. By hand:
 
 - **Memory SessionStart hook** — curls the daemon's `/api/hook/session-start`
   for concise memory guidance and a bounded briefing, and registers the
-  session's episode identity. Needs `bash` on PATH
+  session's episode identity. On a resume or compaction it serves only the
+  episode-handle line and a pointer to the full briefing. Needs `bash` on PATH
   (Git Bash on Windows) and `curl` — both ship with git / the OS.
 - **Memory-policy SessionStart hook** — curls `/api/hook/memory-policy`,
   which returns the full memory-loop block only when the daemon's
@@ -168,10 +170,15 @@ listed for review and left alone. By hand:
 - **Coordination SessionStart hook** — preserves the local digest mapping
   across supported session changes, then prints the agent check-in the
   daemon serves where the board works (one bounded request).
-- **Memory UserPromptSubmit hook** — echoes a one-line mid-session memory
-  discipline on every turn (recall before reviewing code/docs/PRs, then
-  compare memory against the files; status questions are memory questions;
-  log outcomes). Static — no daemon call, works offline.
+- **Memory UserPromptSubmit hook** — the memory-change note. One bounded
+  request per turn (at most about 2 s; silent when the daemon does not
+  answer) prints a short note only when memory changed since this session's
+  last note: new lessons, or new status notes from other sessions, each with
+  its newest one-line excerpt and a one-line memory-loop reminder (recall
+  before reviewing code/docs/PRs, then compare memory against the files;
+  status notes for long work; log outcomes). Quiet turns add nothing. The
+  hook keeps its cursor in `~/.pseudolife-mcp/digests/<sha256>.mark`
+  (`PSEUDOLIFE_DIGEST_DIR` moves it) and saves it only after printing.
 - **Coordination UserPromptSubmit hook** — reads changed local mailbox previews
   independently of the memory reminder, without a daemon call.
 - **SessionEnd hook** — closes the session's episode and clears the

@@ -579,6 +579,79 @@ def test_hook_session_start_preserves_notice_core_and_late_briefing_items(svc):
     assert "briefing item(s) omitted" in out
 
 
+# Resume and compaction re-fire SessionStart. A resumed conversation still
+# holds the startup block it was served; a compacted one keeps its session
+# id, and the MCP server instructions still carry the memory rules. Both
+# re-sent the whole block before 2026-09-26: 88 of 156 payloads in the
+# 2026-09-23 review's transcript scan, about 5.3 KB each.
+
+def _registered(svc):
+    svc.episode_start_session = lambda *a, **_: {"id": "episode-123456789"}
+    svc.set_active_session = lambda *a: None
+    return svc
+
+
+@pytest.mark.parametrize("source", ["resume", "compact"])
+def test_hook_session_start_resume_or_compact_serves_the_handle_not_the_block(svc, source):
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE, hook_session_start
+    (svc.data_dir / "hook-instructions.md").write_text(
+        "House rule sentinel.", encoding="utf-8")
+    out = hook_session_start(_registered(svc), "session-1", source)
+    ad, note = out.split("\n\n", 1)
+    assert ad.startswith('Session episode: episode-1234 — pass episode="episode-1234"')
+    assert STARTUP_MEMORY_CORE not in out
+    assert "(fixture)" not in out                       # no briefing
+    assert "is not re-sent" in note
+    assert "episode handle above" in note
+    assert "memory_search" in note and "pseudolife-mcp briefing" in note
+    # The daemon-side override has no other carrier once a compaction has
+    # dropped it; a resumed transcript still holds it.
+    assert ("House rule sentinel." in out) == (source == "compact")
+    assert len(out.encode("utf-8")) < 800
+
+
+@pytest.mark.parametrize("source", ["resume", "compact"])
+def test_hook_session_start_continued_session_keeps_the_drift_notice(svc, source):
+    from pseudolife_memory.web.session_hook import hook_session_start
+    out = hook_session_start(_registered(svc), "session-1", source,
+                             plugin_version="0.0.1")
+    assert out.startswith("Pseudolife-MCP: plugin 0.0.1 and daemon")
+    assert "Session episode: episode-1234" in out
+    assert "(fixture)" not in out
+
+
+def test_hook_session_start_continued_without_a_handle_does_not_point_at_one(svc):
+    from pseudolife_memory.web.session_hook import hook_session_start
+    out = hook_session_start(svc, None, "resume")
+    assert "is not re-sent" in out
+    assert "Session episode" not in out and "handle above" not in out
+
+
+@pytest.mark.parametrize("source", ["startup", "clear", None, "fork"])
+def test_hook_session_start_new_context_still_gets_the_full_block(svc, source):
+    """Startup and /clear start with an empty context; an unknown source
+    (a future one) gets the full block rather than nothing."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE, hook_session_start
+    out = hook_session_start(_registered(svc), "session-1", source)
+    assert STARTUP_MEMORY_CORE in out and "(fixture)" in out
+    assert "is not re-sent" not in out
+
+
+def test_hook_session_start_endpoint_honours_source_only_when_authorized(svc):
+    """The route drops session_id and source for an unauthorized caller, so
+    a token-gated hook without its bearer keeps the public core."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    _registered(svc)
+    st, body = call(_app(svc), "GET", "/api/hook/session-start",
+                    query="session_id=s1&source=compact")
+    text = body.decode("utf-8")
+    assert st == 200 and "is not re-sent" in text
+    assert STARTUP_MEMORY_CORE not in text
+    st, body = call(_app(svc, token="secret"), "GET", "/api/hook/session-start",
+                    query="session_id=s1&source=compact")
+    assert st == 200 and STARTUP_MEMORY_CORE in body.decode("utf-8")
+
+
 def test_hook_session_start_large_override_is_complete_blocks_with_warning(svc):
     from pseudolife_memory.web.session_hook import session_start_context
     (svc.data_dir / "hook-instructions.md").write_text(

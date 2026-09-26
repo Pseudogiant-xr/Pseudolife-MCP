@@ -50,13 +50,29 @@ fi
 SETTINGS_PATH="${1:-$default_settings}"
 COMMAND="${2:-pseudolife-mcp briefing --hook-json}"
 
-# Every-turn memory-discipline line (UserPromptSubmit), both clients.
-# Codex requires review and trust before newly installed hooks run. Static echo
-# (no daemon call): the one-shot session-start briefing loses salience over
-# a long session; this keeps the loop — including recall-before-review —
-# mechanical. Keep the line free of quote characters (it nests in JSON+sh).
+# Per-turn memory-change note (UserPromptSubmit), both clients; Codex requires
+# review and trust before newly installed hooks run. `pseudolife-mcp
+# prompt-hook` prints only when new lessons or other sessions' status notes
+# landed since the session's last note, as the plugin's hook does. It runs
+# where the briefing runs: the Docker tier's `docker exec` gets -i, since the
+# hook's session id arrives on stdin.
+case "$COMMAND" in
+  *"pseudolife-mcp briefing --hook-json")
+    PROMPT_COMMAND="${COMMAND%pseudolife-mcp briefing --hook-json}pseudolife-mcp prompt-hook"
+    case "$PROMPT_COMMAND" in
+      "docker exec -i "*) ;;
+      "docker exec "*) PROMPT_COMMAND="docker exec -i ${PROMPT_COMMAND#docker exec }" ;;
+    esac ;;
+  *) PROMPT_COMMAND="pseudolife-mcp prompt-hook" ;;
+esac
+# Until 2026-09-26 that hook was a static echo of this line on every turn.
+# Kept to replace it: install mode swaps it for the note, --remove-legacy
+# removes it, and ops/setup-codex-hooks.py reads the PowerShell copy.
 DISCIPLINE_LINE="Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids."
 UPS_COMMAND="echo '$DISCIPLINE_LINE'"
+# The 2026-08-28..09-05 line ended "-> memory_outcome." Derived, so this file
+# keeps one copy of the line (test_plugin_packaging.py).
+LEGACY_UPS_COMMAND="echo '${DISCIPLINE_LINE% with used_ids.}.'"
 # Board check-in, separate from the daemon-backed memory briefing. The daemon
 # serves it only where this bearer can use the board, so a board that is off
 # costs no failed tool call at every session start. COORDINATION_LINE is the
@@ -77,9 +93,6 @@ done
 [ -n "$PYBIN" ] || { echo "python3 is required" >&2; exit 1; }
 
 if [ -n "$REMOVE_LEGACY" ]; then
-  # The 2026-08-28..09-05 discipline line ended "-> memory_outcome." Derived,
-  # so this file keeps one copy of the line (test_plugin_packaging.py).
-  LEGACY_UPS_COMMAND="echo '${DISCIPLINE_LINE% with used_ids.}.'"
   rc=0
   SETTINGS_PATH="$SETTINGS_PATH" DRY_RUN="$DRY_RUN" UPS_COMMAND="$UPS_COMMAND" \
     LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" COORDINATION_LINE="$COORDINATION_LINE" \
@@ -103,11 +116,15 @@ shipped = {
         f"echo '{os.environ['COORDINATION_LINE']}'",
         "pseudolife-mcp episode-start",
     },
-    "UserPromptSubmit": {os.environ["UPS_COMMAND"], os.environ["LEGACY_UPS_COMMAND"]},
+    # The memory-change note (2026-09-26) and the static line it replaced.
+    "UserPromptSubmit": {"pseudolife-mcp prompt-hook",
+                         "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook",
+                         os.environ["UPS_COMMAND"], os.environ["LEGACY_UPS_COMMAND"]},
     "SessionEnd": {"pseudolife-mcp episode-end"},
 }
-needles = ("pseudolife-mcp briefing", "mid-session discipline", "Pseudolife coordination:",
-           "pseudolife-mcp episode-start", "pseudolife-mcp episode-end")
+needles = ("pseudolife-mcp briefing", "pseudolife-mcp prompt-hook", "mid-session discipline",
+           "Pseudolife coordination:", "pseudolife-mcp episode-start",
+           "pseudolife-mcp episode-end")
 
 
 def is_shipped(event, hook):
@@ -258,13 +275,19 @@ else
 fi
 
 SETTINGS_PATH="$SETTINGS_PATH" BRIEFING_COMMAND="$COMMAND" \
-  UPS_COMMAND="$UPS_COMMAND" COORDINATION_COMMAND="$COORDINATION_COMMAND" \
+  PROMPT_COMMAND="$PROMPT_COMMAND" UPS_COMMAND="$UPS_COMMAND" \
+  LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" DISCIPLINE_LINE="$DISCIPLINE_LINE" \
+  COORDINATION_COMMAND="$COORDINATION_COMMAND" \
   LEGACY_COORDINATION_LINE="$COORDINATION_LINE" "$PYBIN" - <<'PY'
 import json, os
 
 path = os.environ["SETTINGS_PATH"]
 briefing_cmd = os.environ["BRIEFING_COMMAND"]
-ups_cmd = os.environ.get("UPS_COMMAND", "")
+prompt_cmd = os.environ["PROMPT_COMMAND"]
+# The static line the note replaced, as the installers wrote it (Codex's
+# PowerShell pair included).
+static_cmds = {os.environ["UPS_COMMAND"], os.environ["LEGACY_UPS_COMMAND"],
+               f"Write-Output '{os.environ['DISCIPLINE_LINE']}'"}
 coordination_cmd = os.environ["COORDINATION_COMMAND"]
 legacy_line = os.environ["LEGACY_COORDINATION_LINE"]
 
@@ -289,12 +312,16 @@ def add_group(groups, command):
 
 
 def drop_exact(groups, commands):
-    """Remove hooks whose command is exactly one of ``commands``: a user's
-    own hook that merely mentions the same words stays."""
+    """Remove hooks whose command (and commandWindows, when set) is exactly
+    one of ``commands``: a user's own hook that merely mentions the same
+    words stays."""
+    def ours(h):
+        return (h.get("command") in commands
+                and h.get("commandWindows", h.get("command")) in commands)
     removed = False
     for g in groups:
         before = len(g.get("hooks") or [])
-        g["hooks"] = [h for h in (g.get("hooks") or []) if h.get("command") not in commands]
+        g["hooks"] = [h for h in (g.get("hooks") or []) if not ours(h)]
         removed = removed or len(g["hooks"]) != before
     groups[:] = [g for g in groups if g.get("hooks")]
     return removed
@@ -315,13 +342,15 @@ if not has_command(hooks["SessionStart"], "pseudolife-mcp briefing", coordinatio
     print(f"Installed SessionStart coordination hook -> {path}")
     print(f"  command: {coordination_cmd}")
 
-if ups_cmd:
-    hooks.setdefault("UserPromptSubmit", [])
-    if has_command(hooks["UserPromptSubmit"], "mid-session discipline"):
-        print(f"Mid-session discipline hook already present in {path} - skipping.")
-    else:
-        add_group(hooks["UserPromptSubmit"], ups_cmd)
-        print(f"Installed UserPromptSubmit discipline hook -> {path}")
+hooks.setdefault("UserPromptSubmit", [])
+if drop_exact(hooks["UserPromptSubmit"], static_cmds):
+    print("Removed the static mid-session discipline hook.")
+if has_command(hooks["UserPromptSubmit"], "pseudolife-mcp prompt-hook"):
+    print(f"Memory-change hook already present in {path} - skipping.")
+else:
+    add_group(hooks["UserPromptSubmit"], prompt_cmd)
+    print(f"Installed UserPromptSubmit memory-change hook -> {path}")
+    print(f"  command: {prompt_cmd}")
 
 # Episode hooks are OBSOLETE since the 2026-06-30 session-scoped episodes
 # rework: the daemon lazily opens/closes episodes keyed by mcp-session-id

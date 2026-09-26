@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-26 — a redaction no longer reports a clean-up Postgres skipped as done)
+- `board-audit redact` reported `"vacuumed": true` even when Postgres had
+  skipped part of its clean-up. A role that may not vacuum or analyze a table
+  gets a warning and a skip rather than an error, and psycopg drops notices
+  nobody handles, so on a managed Postgres where the bank's role is not the
+  tables' owner the statistics could still hold the redacted body while the
+  result said it was done. The clean-up now collects Postgres's warnings: any
+  skip reads `"vacuumed": false`, and the warning is printed with the
+  commands to run as the tables' owner. It asks for warnings itself for its
+  two statements and restores the setting after, so a role or database whose
+  `client_min_messages` is `error` cannot hide a skip. The Docker tier connects as a
+  superuser and was not affected. The guide also lists what a vacuum leaves
+  on disk (freed bytes are not overwritten) and what can hold it back (a
+  replication slot, like an open snapshot).
+
 ### Security (2026-09-26 — a secret pasted into an agent-board message can be removed from the audit log, and credential-shaped text is refused, schema v46)
 - A message sent on the agent board stays in the board's audit log for its
   retention window (90 days by default, forever with `0`), and until now its
@@ -190,6 +205,118 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The opt-in full-tier tool-description budget moves from 17,500 to 17,800
   characters for the new `memory_agents` contract (+295); core fits within
   its unchanged 11,500.
+
+### Changed (2026-09-26 — installs without the plugin get the memory-change note too)
+- Claude Code and Codex installs wired by `ops/install-hook.*` (the
+  fallback without the plugin, and the Docker tier's installers) still
+  echoed the 614-character discipline line on every turn. They now run
+  the plugin's memory-change note through a new CLI mode,
+  `pseudolife-mcp prompt-hook`: it reads the hook payload on stdin, asks
+  `GET /api/hook/memory-changes` once (2 s, no retry, redirects refused so
+  the bearer never follows one), and prints a UserPromptSubmit
+  `hookSpecificOutput` only when new lessons or other sessions' status
+  notes landed. It keeps the plugin hooks' cursor file
+  (`<PSEUDOLIFE_DIGEST_DIR or ~/.pseudolife-mcp/digests>/<sha256(session
+  id)>.mark`), saves it only after printing, stays silent when the cursor
+  cannot be saved, and is silent on every failure. The bearer comes from
+  `PSEUDOLIFE_MCP_TOKEN_FILE` or `PSEUDOLIFE_MCP_TOKEN`; the payload is
+  read as UTF-8 whatever the console code page.
+- `install-hook` writes `pseudolife-mcp prompt-hook`, or for the Docker
+  tier's `docker exec pseudolife-mcp-daemon … briefing --hook-json`,
+  `docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook` (`-i`
+  hands the container the hook's stdin). There the cursor lives in the
+  container's writable layer, so after a daemon rebuild the next turn
+  reports again what landed since the session started; the bearer is the
+  container's `PSEUDOLIFE_MCP_TOKEN` (a stack set up only with
+  `PSEUDOLIFE_MCP_TOKENS` gets no note), and a stopped container makes
+  `docker exec` fail on each turn, which the client reports as a hook
+  error, as it does for the briefing once per session. A re-run
+  removes the exact static echoes earlier versions wrote: the current
+  line, the 2026-08-28..09-05 one, and Codex's `Write-Output` pair. An
+  entry whose command or `commandWindows` differs from those is the
+  user's and stays; the same exact-pair rule now also applies to the
+  check-in echo it replaces. `--remove-legacy` and
+  `ops/setup-codex-hooks.py` recognise the new commands.
+- Upgrading: the command runs from the host's `pseudolife-mcp` runtime
+  (the daemon container's on the Docker tier), so update it before
+  rewriting the hook: `ops/update.ps1 -All` (or `ops/update.sh --all`, or
+  `ops/update_clients.py --only shim`), then re-run the installer or
+  `ops/install-hook.*`, then restart clients. An older runtime rejects the
+  unknown mode (exit 2), which Claude Code reports as a hook error on each
+  turn. Codex asks to approve the changed hook in `/hooks`.
+
+### Changed (2026-09-26 — session hooks say each thing once, and the per-turn hook speaks only when memory changed)
+- The session-start hook stopped serving "What your memory is unsure
+  about" (graph bridges and contested slots). Every session paid for it, and
+  it carried test probe slots and a LAN-address slot into transcripts. The
+  Console's Insight view (`/api/graph/digest`), `GET /api/briefing` and
+  `pseudolife-mcp briefing` keep it. The hook now asks
+  `session_briefing(max_unsure=0)`.
+- A resumed or compacted session is no longer re-sent the startup block.
+  Both re-fire SessionStart; the 2026-09-23 review found 88 of 156 payloads
+  were such re-fires, and one local session re-sent about 5.3 KB on each of
+  3 compactions and 4 resumes into a transcript that still held the first.
+  For `source=resume|compact` `/api/hook/session-start` now serves the drift
+  notices, the episode-handle line (resume can change the session id;
+  compaction drops the line from context) and one pointer line; after a
+  compaction also a daemon-side `hook-instructions.md`, whose rules nothing
+  else carries. `/api/hook/memory-policy` serves nothing for those sources,
+  and both plugin hooks now forward `source` to it (`lifecycle.ps1` forwards
+  the reason it resolved, so a Codex payload that names it
+  `session_start_reason` counts too). Startup, `/clear` and
+  any other source still get the full block. The route honours `source`
+  only for an authorized caller, like `session_id`.
+- The plugin's UserPromptSubmit hook no longer echoes the 614-character
+  discipline line every turn (170 turns of one session cost about 25k
+  tokens). It is now a memory-change note: one request per turn to the new
+  `GET /api/hook/memory-changes` (2 s cap, no retry, silent on failure),
+  printing only when new lessons or new `source="status"` notes from other
+  sessions landed since this session's last note, with the newest one-line
+  excerpt of each and a one-line reminder of the memory loop. Quiet turns
+  add nothing. The hook keeps its cursor (the daemon's clock) in
+  `<digest dir>/<sha256(session id)>.mark` and saves the next one only after
+  printing, so a timed-out request is asked again next turn; a cursor it
+  cannot save keeps it silent rather than repeating the note. A session's
+  first turn counts from the start of its episode, so what landed between
+  SessionStart and the first prompt is reported. Mail keeps its
+  coordination digest.
+  `user-prompt-submit.sh` sources `session-start.sh memory-changes`, so the
+  connection checks stay in one script; `lifecycle.ps1` does the same for
+  Codex on Windows. `ops/setup-codex-hooks.py` now reads the fixed line from
+  `install-hook.ps1`; the `ops/install-hook.*` fallback moved to the note
+  too (next entry).
+- New `MemoryService.memory_changes_since(since, session_key=)`: counts and
+  the newest of each kind, scanned under the service lock that every entry
+  and lesson write holds while stamping, so its `now` (rounded down) is a
+  safe next cursor. A lesson confirmation is not new; a superseded status
+  note is not counted. Known limits: rows restored with their original
+  stamps (recovery, reinstatement) or written while the wall clock is
+  stepped back can land behind a cursor; a status note stored without
+  `episode=` after `/clear` can be attributed to the previous session and
+  reported back to its own writer. Read-only; no schema change.
+  `session_briefing(max_unsure=0)` no longer reads the graph digest.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to re-approve
+  the changed hooks in `/hooks`. An old plugin against a new daemon keeps its
+  static line; a new plugin against an old daemon gets a 404 and prints
+  nothing per turn until the daemon is updated.
+
+### Fixed (2026-09-26 — the memory-policy bench names a leaked coordination check-in again)
+- The bench's validity check keeps a list of known policy texts, and a run
+  whose context carries one its arm does not serve is invalid with that
+  text named. The coordination check-in was read from `echo "..."` in
+  `plugin/hooks/coordination-start.sh`, but since #367 that script fetches
+  the check-in from the daemon (`/api/hook/coordination-start`), so the
+  parse matched nothing and the entry silently dropped out of the list. A
+  leaked check-in was still caught by the generic `memory_*` scan, but only
+  as an unnamed "memory-policy mention". `policy_texts()` now takes it from
+  `pseudolife_memory.coordination.CHECKIN_TEXT`, the constant the daemon
+  serves, and a test pins the full set of known texts so a marker whose
+  source moves fails the suite instead of vanishing. The committed
+  2026-09-25 artifacts were graded with the check-in present in the list;
+  their results are unaffected. The coordination-start ledger rows need no
+  change: they are not context hooks, so a served check-in cannot excuse
+  itself from the scan.
 
 ### Fixed (2026-09-25 — Postgres connects retry a Windows local-port failure)
 - A daemon running natively on Windows (including the daemons the test suite

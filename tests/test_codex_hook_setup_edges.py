@@ -260,7 +260,20 @@ def test_a_plugin_from_before_the_stop_hook_is_reported_as_skew(tmp_path, monkey
     assert result["status"] == "unavailable" and "differ" in result["recovery"], result
 
 
+def _prompt_cursor(tmp_path, monkeypatch):
+    """The cursor the memory-change prompt hook saves for the verification
+    thread after an authorized answer; its first turn prints nothing."""
+    import hashlib
+    digests = tmp_path / "digests"
+    digests.mkdir(exist_ok=True)
+    monkeypatch.setenv("PSEUDOLIFE_DIGEST_DIR", str(digests))
+    mark = digests / (hashlib.sha256(b"fixture-thread").hexdigest() + ".mark")
+    mark.write_text("100.000000\n")
+    return mark
+
+
 def test_verification_counts_every_selected_hook(tmp_path, monkeypatch):
+    mark = _prompt_cursor(tmp_path, monkeypatch)
     hooks = plugin_hooks(tmp_path)
     for h in hooks:
         h["trustStatus"] = "trusted"
@@ -271,7 +284,7 @@ def test_verification_counts_every_selected_hook(tmp_path, monkeypatch):
             for event, text in (("sessionStart", "Session episode: fixture"),
                                 ("sessionStart", ""),
                                 ("sessionStart", "memory_agents(action=list)"),
-                                ("userPromptSubmit", "memory_lesson_search"),
+                                ("userPromptSubmit", ""),
                                 ("userPromptSubmit", ""))]
 
         def rpc(self, method, params):
@@ -296,6 +309,24 @@ def test_verification_counts_every_selected_hook(tmp_path, monkeypatch):
     monkeypatch.setattr(setup, "board_checkin_expected", lambda: True)
     verified = setup.verify("fixture-codex", tmp_path, tmp_path, {"config": {}}, hooks, hooks)
     assert verified == {"session_start": True, "user_prompt_submit": True, "session_end": True}
+    assert not mark.exists()      # the verification cleans up after itself
+
+
+def test_verification_needs_the_prompt_hooks_cursor(tmp_path, monkeypatch):
+    """Completed prompt hooks that never reached the daemon (no cursor
+    saved) are not a working memory-change note."""
+    mark = _prompt_cursor(tmp_path, monkeypatch)
+    mark.unlink()
+    hooks = plugin_hooks(tmp_path)
+    for h in hooks:
+        h["trustStatus"] = "trusted"
+    monkeypatch.setattr(setup, "codex", _verification_client(
+        hooks, ["Session episode: fixture", "", "memory_agents(action=list)"]))
+    monkeypatch.setattr(setup, "wait_for_daemon", lambda: None)
+    monkeypatch.setattr(setup, "episode_open", lambda thread: True)
+    monkeypatch.setattr(setup, "board_checkin_expected", lambda: True)
+    with pytest.raises(setup.SetupError, match="UserPromptSubmit did not return"):
+        setup.verify("fixture-codex", tmp_path, tmp_path, {"config": {}}, hooks, hooks)
 
 
 def test_legacy_migration_removes_exact_commands_and_preserves_lookalikes(tmp_path):
@@ -339,6 +370,27 @@ def test_lightweight_coordination_hook_migrates_without_touching_other_hooks(tmp
     assert command not in starts
     assert unrelated["command"] in starts
     assert len(starts) == (1 if source == "plugin" else 4)
+
+
+@pytest.mark.parametrize("command", [
+    "pseudolife-mcp prompt-hook",
+    "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook"])
+@pytest.mark.parametrize("source", ["manual", "plugin"])
+def test_lightweight_prompt_hook_migrates_without_touching_other_hooks(tmp_path, command, source):
+    """install-hook -Client codex writes the memory-change command (since
+    2026-09-26) with commandWindows equal to it; setup takes it over like
+    the static line it replaced."""
+    written = {"type": "command", "command": command, "commandWindows": command, "timeout": 5}
+    unrelated = {"type": "command", "command": "echo user-owned"}
+    path = tmp_path / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [written, unrelated]}]}}))
+    result = {"backups": []}
+    setup.install_manual(tmp_path, result, plugin=source == "plugin")
+    hooks = json.loads(path.read_text())["hooks"]
+    prompts = [h["command"] for group in hooks["UserPromptSubmit"] for h in group["hooks"]]
+    assert command not in prompts
+    assert unrelated["command"] in prompts
+    assert len(prompts) == (1 if source == "plugin" else 3)
 
 
 @pytest.mark.parametrize("custom_field", ["command", "commandWindows"])
@@ -414,7 +466,7 @@ def _verification_client(hooks, start_texts):
             for event, text in ((("sessionStart", t) for t in start_texts))]
         events += [{"method": "hook/completed", "params": {"run": {
             "eventName": "userPromptSubmit", "status": "completed", "entries": [{"text": text}]}}}
-            for text in ("memory_lesson_search", "")]
+            for text in ("", "")]
 
         def rpc(self, method, params):
             answers = {"config/read": {"config": {}},
@@ -443,6 +495,7 @@ def test_verification_expects_the_checkin_only_where_the_board_works(
         tmp_path, monkeypatch, available, checkin, ok):
     """A board that is off serves no check-in; setup must not call that a
     broken hook (the board is on by default only where it can work)."""
+    _prompt_cursor(tmp_path, monkeypatch)
     hooks = plugin_hooks(tmp_path)
     for h in hooks:
         h["trustStatus"] = "trusted"

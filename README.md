@@ -1092,7 +1092,7 @@ bank.
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
-| Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
+| Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
@@ -1202,8 +1202,8 @@ docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 
 Host-process installs: also unregister the logon task
 (`Unregister-ScheduledTask -TaskName "Pseudolife-MCP Daemon"`) and remove
-the SessionStart briefing hook — plus, Claude client, the UserPromptSubmit
-discipline hook — from `~/.claude/settings.json` and/or
+the SessionStart briefing hook — plus the UserPromptSubmit memory-change
+hook (`pseudolife-mcp prompt-hook`; older installs: the discipline echo) — from `~/.claude/settings.json` and/or
 `~/.codex/hooks.json` (a timestamped `.bak-*` sits next to each edited file).
 
 ## Testing

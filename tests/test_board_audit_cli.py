@@ -427,6 +427,50 @@ def test_redact_rebuilds_the_statistics_that_copy_the_body(store, cli, pg_url):
     assert "note 2 for the queue" in after          # the statistics were rebuilt, not dropped
 
 
+SKIP_WARNING = 'permission denied to vacuum "pg_statistic", skipping it'
+
+
+def test_the_clean_up_catches_a_step_postgres_skips_with_a_warning(store, pg_url):
+    """A role that may not vacuum or analyze a table gets a WARNING and a
+    skip from Postgres, not an error, and psycopg drops notices nobody
+    handles; the clean-up must hand those warnings back. A clean run on a
+    real connection raises none."""
+    import psycopg
+    from pseudolife_memory.board_audit_cli import _vacuum
+    with psycopg.connect(pg_url, autocommit=True) as real:
+        real.execute("SET search_path TO public")
+        assert _vacuum(real) == []
+
+        class Skipping:
+            """The real connection, but Postgres warns as it would for a role
+            without the privilege (a NOTICE, which is not a skip, alongside)."""
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def execute(self, sql, *args):
+                if "pg_statistic" in sql:
+                    real.execute("DO $$BEGIN RAISE NOTICE 'only a notice'; "
+                                 f"RAISE WARNING '{SKIP_WARNING}'; END$$")
+                return real.execute(sql, *args)
+
+        assert _vacuum(Skipping()) == [SKIP_WARNING]
+        # A role, database or connection option can set client_min_messages
+        # to ERROR, and the server then never sends the warning at all; the
+        # clean-up asks for warnings itself and puts the setting back.
+        real.execute("SET client_min_messages TO error")
+        assert _vacuum(Skipping()) == [SKIP_WARNING]
+        assert real.execute("SHOW client_min_messages").fetchone()[0] == "error"
+
+
+def test_redact_reports_a_clean_up_postgres_skipped(store, cli, monkeypatch):
+    from pseudolife_memory import board_audit_cli
+    monkeypatch.setattr(board_audit_cli, "_vacuum", lambda conn: [SKIP_WARNING])
+    code, output = cli("redact", "--message-id", _send(store), "--reason", "wrong paste")
+    assert code == 0, output.err
+    assert json.loads(output.out)["vacuumed"] is False
+    assert "skipped" in output.err and SKIP_WARNING in output.err
+
+
 def test_a_busy_board_is_reported_as_busy_not_as_a_database_failure(store, cli, pg_url):
     import psycopg
     message_id = _send(store)

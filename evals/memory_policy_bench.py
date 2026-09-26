@@ -1021,14 +1021,16 @@ def mcp_instructions() -> str:
 
 
 def policy_texts() -> dict[str, str]:
+    from pseudolife_memory.coordination import CHECKIN_TEXT
     from pseudolife_memory.web import session_hook as sh
+    # The per-turn surface is held off; since 2026-09-26 it is the plugin's
+    # memory-change note, whose one fixed text is its reminder tail. The
+    # coordination hook fetches its check-in from the daemon (since #367), so
+    # that text comes from the constant the daemon serves, not the script.
     texts = {"core": sh.STARTUP_MEMORY_CORE,
-             "full_block": sh.MEMORY_LOOP_BLOCK, "onboarding": sh.ONBOARDING_BLOCK}
-    for rel, key in (("plugin/hooks/user-prompt-submit.sh", "discipline_line"),
-                     ("plugin/hooks/coordination-start.sh", "coordination_line")):
-        m = re.search(r'echo "(.*)"', (ROOT / rel).read_text(encoding="utf-8"))
-        if m:
-            texts[key] = m.group(1)
+             "full_block": sh.MEMORY_LOOP_BLOCK, "onboarding": sh.ONBOARDING_BLOCK,
+             "memory_changes_tail": sh.MEMORY_CHANGES_TAIL,
+             "coordination_line": CHECKIN_TEXT}
     return texts
 
 

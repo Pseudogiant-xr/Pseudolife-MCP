@@ -113,22 +113,28 @@ def test_codex_hook_install_preserves_existing_hooks_and_is_idempotent(tmp_path)
     # running the command here would reach whatever daemon answers.
     assert starts[2]["command"] == starts[2]["commandWindows"] == (
         "pseudolife-mcp briefing --hook-json --coordination")
+    # The memory-change note, run by the installed CLI against whatever daemon
+    # answers; its cases live in tests/test_memory_changes_hook.py.
     prompts = [h for g in hooks["UserPromptSubmit"] for h in g["hooks"]]
     assert len(prompts) == 1
-    result = pwsh_run("-Command", prompts[0]["commandWindows"])
-    assert "memory_lesson_search" in result.stdout
+    assert prompts[0]["command"] == prompts[0]["commandWindows"] == "pseudolife-mcp prompt-hook"
+    assert prompts[0]["timeout"] == 5
 
 
 def test_plugin_native_windows_prompt_context(tmp_path):
+    """The plugin's Windows prompt command runs the memory-change note, which
+    says nothing when the daemon has nothing to report — here, no daemon at
+    all. Its output cases live in tests/test_memory_changes_hook.py."""
     manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text())
     hook = manifest["hooks"]["UserPromptSubmit"][0]["hooks"][0]
     command = hook["commandWindows"]
+    assert "-Event UserPromptSubmit" in command
     env = isolated_env(tmp_path / "codex-home")
     env["CLAUDE_PLUGIN_ROOT"] = str(ROOT / "plugin")
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:9"   # discard port: refused
+    env["PSEUDOLIFE_DIGEST_DIR"] = str(tmp_path / "digests")
     result = pwsh_run("-Command", command, input='{"session_id":"fixture"}', env=env)
-    output = json.loads(result.stdout)
-    assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
-    assert "memory_lesson_search" in output["hookSpecificOutput"]["additionalContext"]
+    assert result.stdout.strip() == ""
 
 
 def test_windows_installer_no_longer_skips_codex_hooks():
@@ -578,10 +584,13 @@ def test_codex_session_end_fits_the_three_second_cap(tmp_path):
 
 
 def test_native_prompt_reminder_matches_claude_script():
-    import re
+    """Both prompt hooks fetch the same daemon-rendered note, so the text
+    cannot drift between them; neither carries a static line of its own."""
     ps = (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8")
-    sh = (ROOT / "plugin/hooks/user-prompt-submit.sh").read_text(encoding="utf-8")
-    assert re.search(r'\$disciplineLine = "(.*)"', ps)[1] == re.search(r'echo "(.*)"', sh)[1]
+    sh = (ROOT / "plugin/hooks/session-start.sh").read_text(encoding="utf-8")
+    for script in (ps, sh):
+        assert "/api/hook/memory-changes" in script
+        assert "mid-session discipline" not in script
 
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])

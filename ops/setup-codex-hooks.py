@@ -398,16 +398,19 @@ def owned_manual(hook, home):
 
 def legacy_commands():
     # Only shipped legacy commands are migratable; substring matches would
-    # silently remove or approve arbitrary user code.
-    line = re.search(r'\$disciplineLine = "(.*)"',
-                     (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8"))[1]
-    coordination = re.search(r'\$coordinationLine = "(.*)"',
-                             (ROOT / "ops/install-hook.ps1").read_text(encoding="utf-8"))[1]
+    # silently remove or approve arbitrary user code. The discipline line is
+    # the static echo install-hook wrote until 2026-09-26, when it (and the
+    # plugin's prompt hook) became the memory-change note, prompt-hook.
+    install_hook = (ROOT / "ops/install-hook.ps1").read_text(encoding="utf-8")
+    line = re.search(r'\$disciplineLine = "(.*)"', install_hook)[1]
+    coordination = re.search(r'\$coordinationLine = "(.*)"', install_hook)[1]
     briefings = {"pseudolife-mcp briefing --hook-json",
                  "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"}
+    prompts = {"pseudolife-mcp prompt-hook",
+               "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook"}
     # The installers' daemon-gated check-in (2026-09-25) and the
     # unconditional echo it replaced.
-    return {*briefings, *(command + " --coordination" for command in briefings),
+    return {*briefings, *(command + " --coordination" for command in briefings), *prompts,
             f"echo '{line}'", f"Write-Output '{line}'",
             f"echo '{coordination}'", f"Write-Output '{coordination}'"}
 
@@ -870,13 +873,20 @@ def verify(executable, home, cwd, config, hooks, selected):
                    for event in expected):
                 break
             client.receive(deadline - time.monotonic())
+        # The prompt hook prints only when memory changed, and a session's
+        # first turn is a silent baseline, so its proof is the cursor it
+        # saves after an authorized answer from the daemon (2026-09-26).
+        from pseudolife_memory.coordination_identity import default_digest_dir
+        mark = default_digest_dir() / (hashlib.sha256(thread.encode("utf-8")).hexdigest() + ".mark")
         for event, text in (("sessionStart", "Session episode:"),
-                            ("userPromptSubmit", "memory_lesson_search")):
+                            ("userPromptSubmit", None)):
             runs = [run for run in completed if run.get("eventName") == event]
-            if len(runs) != expected[event] or any(run.get("status") != "completed" for run in runs) or not any(
-                    text in entry.get("text", "") for run in runs for entry in run.get("entries", [])):
+            memory = (mark.is_file() if text is None else any(
+                text in entry.get("text", "") for run in runs for entry in run.get("entries", [])))
+            if len(runs) != expected[event] or any(run.get("status") != "completed" for run in runs) or not memory:
                 raise SetupError(f"{EVENTS[event]} did not return the expected memory context "
-                                 f"({len(runs)} completed events, memory={any(text in entry.get('text', '') for run in runs for entry in run.get('entries', []))}). Check daemon access and /hooks.")
+                                 f"({len(runs)} completed events, memory={memory}). Check daemon access and /hooks.")
+        mark.unlink(missing_ok=True)
         if board_checkin_expected() and not any(
                 "memory_agents(action=list)" in entry.get("text", "")
                 for run in completed if run.get("eventName") == "sessionStart"

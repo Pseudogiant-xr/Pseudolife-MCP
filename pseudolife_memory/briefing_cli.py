@@ -10,13 +10,19 @@ Prints nothing + exit 0 when the daemon is down, the bank is cold, or anything
 goes wrong — a memory briefing must never break a session. ``--coordination``
 prints the agent-board check-in from ``/api/hook/coordination-start``
 instead, which the daemon serves only where this bearer can use the board.
+
+``pseudolife-mcp prompt-hook`` is the per-turn UserPromptSubmit hook for the
+same installs: the plugin's memory-change note (see :func:`run_prompt_hook`).
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 
@@ -124,3 +130,107 @@ def run_briefing() -> None:
             print(payload)
     elif md:
         print(md)
+
+
+# The plugin hooks' shapes (session-start.sh memory-changes, lifecycle.ps1):
+# a session id safe to put in a query and a file name, and the daemon's
+# cursor, which the hook stores verbatim and sends back as ``since``.
+_SESSION_ID = re.compile(r"[A-Za-z0-9._-]{1,128}")
+_CURSOR = re.compile(r"[0-9.]{1,22}")
+_MARK_MAX_AGE_S = 30 * 86400
+
+
+def _fetch_memory_changes(url: str, token: str | None, session_id: str,
+                          since: str) -> str:
+    """GET ``/api/hook/memory-changes``: the next cursor on line 1, then the
+    note when memory changed. One attempt, two seconds: the turn waits on
+    it. A redirect is refused rather than followed, since urllib would
+    carry the bearer to its target."""
+    from pseudolife_memory.shim import _NoRedirectHandler
+    query = {"session_id": session_id}
+    if since:
+        query["since"] = since
+    req = urllib.request.Request(
+        f"{url}/api/hook/memory-changes?{urllib.parse.urlencode(query)}")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    with opener.open(req, timeout=2) as r:
+        return r.read().decode("utf-8")
+
+
+def _prompt_hook(raw: bytes) -> None:
+    """Print this turn's note, if any, then advance the cursor. A turn that
+    prints nothing because the request failed keeps the cursor, so the next
+    turn asks for the same window."""
+    try:
+        # Hook payloads are UTF-8 JSON; the console code page is not.
+        payload = json.loads(raw.decode("utf-8", errors="replace"))
+    except ValueError:
+        return
+    session_id = payload.get("session_id") if isinstance(payload, dict) else None
+    if not isinstance(session_id, str) or not _SESSION_ID.fullmatch(session_id):
+        return
+    from pseudolife_memory.credentials import CredentialProvider
+    from pseudolife_memory.shim import _daemon_url
+
+    mark_dir = os.environ.get("PSEUDOLIFE_DIGEST_DIR") or os.path.join(
+        os.path.expanduser("~"), ".pseudolife-mcp", "digests")
+    mark = os.path.join(
+        mark_dir, hashlib.sha256(session_id.encode("utf-8")).hexdigest() + ".mark")
+    since = ""
+    if os.path.isfile(mark) and not os.path.islink(mark):
+        try:
+            with open(mark, encoding="ascii") as f:
+                since = f.readline().strip()
+        except (OSError, ValueError):
+            since = ""
+        if not _CURSOR.fullmatch(since):
+            since = ""
+    token = CredentialProvider.from_environment().snapshot().token
+    body = _fetch_memory_changes(_daemon_url(), token, session_id, since)
+    cursor, _, note = body.partition("\n")
+    cursor = cursor.rstrip("\r")
+    if not _CURSOR.fullmatch(cursor):
+        return
+    note = note.rstrip("\r\n")
+    os.makedirs(mark_dir, mode=0o700, exist_ok=True)
+    if os.path.islink(mark):
+        return
+    if not os.path.exists(mark):
+        # A session's first note: marks of sessions gone a month go too.
+        cutoff = time.time() - _MARK_MAX_AGE_S
+        for name in os.listdir(mark_dir):
+            old = os.path.join(mark_dir, name)
+            try:
+                if (name.endswith(".mark") and os.path.isfile(old)
+                        and not os.path.islink(old) and os.path.getmtime(old) < cutoff):
+                    os.remove(old)
+            except OSError:
+                pass
+    # Open the cursor for writing before printing: one that cannot be saved
+    # would repeat the same note every turn, so a refusal stays silent.
+    fd = os.open(mark, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="ascii", newline="\n") as f:
+        if note:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit", "additionalContext": note}}), flush=True)
+        f.truncate(0)
+        f.write(cursor + "\n")
+
+
+def run_prompt_hook() -> None:
+    """``pseudolife-mcp prompt-hook``: the plugin's per-turn memory-change
+    note for installs without the plugin (the Claude Code settings.json and
+    Codex hooks.json hooks ``ops/install-hook.*`` write). Reads the hook
+    payload on stdin and prints a UserPromptSubmit hook payload only when
+    new lessons or other sessions' status notes landed since this session's
+    last note. The cursor is the plugin hooks' own file,
+    ``<PSEUDOLIFE_DIGEST_DIR or ~/.pseudolife-mcp/digests>/<sha256(session
+    id)>.mark``. Silent, exit 0, on every failure: a memory hook must never
+    break a turn, and the SessionStart briefing reports a down daemon or a
+    bad credential."""
+    try:
+        _prompt_hook(sys.stdin.buffer.read())
+    except BaseException:  # noqa: BLE001 — SystemExit from a bad URL included
+        pass

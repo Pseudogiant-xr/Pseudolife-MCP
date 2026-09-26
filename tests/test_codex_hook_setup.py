@@ -497,12 +497,26 @@ def _powershell_pair_seconds():
     return sorted(times)[1]
 
 
+# More than twice the 0.41 s pair measured on the maintainer host at 60-80%
+# CPU (2026-09-25): a judgment threshold, below which the 5 s hooks (0.9-2.2 s
+# there) and SessionEnd (0.9 s of Codex's 3 s cap) still had room.
+BUSY_PAIR_SECONDS = 0.8
+
+
+def _skip_if_too_busy():
+    """Codex kills a hook that overruns its budget, and a PowerShell hook
+    killed during its cold start can stay stuck in kernel teardown until
+    reboot: nothing can reap it. Don't start Codex on a machine this busy."""
+    pair = _powershell_pair_seconds()
+    if pair > BUSY_PAIR_SECONDS:
+        pytest.skip(f"Machine too busy for Codex's hook budgets: two PowerShell cold "
+                    f"starts took {pair:.1f} s (0.41 s at 60-80% CPU).")
+
+
 def _ready_unless_overloaded(result):
-    """Setup must verify ready. The exception is a hook out of time while
-    PowerShell starts more than twice as slowly as on the maintainer host at
-    60-80% CPU (a 0.41 s pair): a judgment threshold, below which the 5 s
-    hooks (0.9-2.2 s there) and SessionEnd (0.9 s of Codex's 3 s cap) still
-    had room, so a failure there is reported rather than put down to load."""
+    """Setup must verify ready. The exception is a hook out of time when
+    load rose after the preflight; below BUSY_PAIR_SECONDS a failure there is
+    reported rather than put down to load."""
     recovery = result.get("recovery") or ""
     if (result["status"] != "ready" and os.name == "nt"
             and any(phrase in recovery for phrase in (
@@ -510,7 +524,7 @@ def _ready_unless_overloaded(result):
                 "SessionEnd did not close the verification episode",
                 "Codex did not respond within the setup timeout"))):
         pair = _powershell_pair_seconds()
-        if pair > 0.8:
+        if pair > BUSY_PAIR_SECONDS:
             pytest.skip(f"Machine too busy for Codex's hook budgets: two PowerShell cold "
                         f"starts took {pair:.1f} s (0.41 s at 60-80% CPU). {recovery}")
     assert result["status"] == "ready", recovery or result
@@ -522,6 +536,8 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
     codex = shutil.which("codex")
     if not codex or (os.name == "nt" and not shutil.which("pwsh")):
         pytest.skip("Codex CLI and native hook runtime are required")
+    if os.name == "nt":
+        _skip_if_too_busy()
     sessions = set()
     seen = []
 
@@ -546,6 +562,9 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
                 self.send(b"Session episode: abcdef123456 -- fixture briefing", "text/plain; charset=utf-8")
             elif parsed.path == "/api/episodes":
                 self.send(json.dumps({"episodes": [{"session_key": s} for s in sessions]}).encode())
+            elif parsed.path == "/api/hook/memory-changes":
+                seen.append("prompt")
+                self.send(b"100.000000\n", "text/plain; charset=utf-8")
             else:
                 self.send_error(404)
 
@@ -563,6 +582,8 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
     home.mkdir()
     if existing_config:
         (home / "config.toml").write_text('# User comment must survive\n[features]\nmemories = false\n')
+    digests = tmp_path / "digests"
+    monkeypatch.setenv("PSEUDOLIFE_DIGEST_DIR", str(digests))
     monkeypatch.setenv("CODEX_HOME", str(home))
     monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", f"http://127.0.0.1:{server.server_port}")
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
@@ -575,13 +596,16 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
     # 5.2-6.7 s against 5 s budgets: the intermittent "did not return the
     # expected memory context" while other suites ran. Widening the budgets
     # here cannot help SessionEnd anyway (Codex holds it to 3 s whatever
-    # hooks.json asks), so a machine that busy is skipped instead.
+    # hooks.json asks), so a machine that busy is skipped instead: before
+    # Codex starts, and again if load rises during the run.
     try:
         result = setup.setup(options(trust="yes", non_interactive=True))
         _ready_unless_overloaded(result)
         assert result["verified"] == {"session_start": True, "user_prompt_submit": True, "session_end": True}
         assert result["instructions"] == "covered-by-hooks"
-        assert seen == ["start", "end"] and not sessions
+        assert seen == ["start", "prompt", "end"] and not sessions
+        # The verifier proves the prompt hook by its cursor, then removes it.
+        assert not list(digests.glob("*.mark"))
         text = (home / "config.toml").read_text()
         assert text.count("trusted_hash") == 6
         if existing_config:
@@ -612,3 +636,23 @@ def test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, existing_c
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the PowerShell hook runtime is Windows-only")
+def test_real_codex_test_does_not_launch_codex_on_a_busy_machine(tmp_path, monkeypatch):
+    """Found 2026-09-26: three hook processes Codex had killed, stuck in
+    kernel teardown (exit code set, one thread, directory held open), all
+    from a 2026-09-25 CPU-burner window. Only avoiding the kill helps."""
+    launches = []
+
+    def launched(*args, **kwargs):
+        launches.append(args)
+        raise RuntimeError("Codex launched")
+
+    monkeypatch.setattr(setup, "Codex", launched)
+    monkeypatch.setattr(shutil, "which", lambda name: str(tmp_path / (name + ".exe")))
+    # The 16-busy-process median measured 2026-09-25.
+    monkeypatch.setitem(globals(), "_powershell_pair_seconds", lambda: 3.8)
+    with pytest.raises(pytest.skip.Exception, match="too busy"):
+        test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, True)
+    assert launches == []

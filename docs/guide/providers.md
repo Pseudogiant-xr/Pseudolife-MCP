@@ -51,10 +51,12 @@ they do not enforce semantic compliance with every memory instruction:
    briefing keeps complete items and reports omissions; detailed guidance stays
    in the standing block. Claude Code (hook or plugin), Codex
    (approve setup or review the definitions in `/hooks` first).
-5. **Per-turn hooks** — a memory-discipline reminder injected on every
-   prompt (recall before review, status questions are memory questions,
-   log outcomes), plus a separate coordination handler for changed inbox
-   previews. Full addressed messages are read through `memory_message`, then
+5. **Per-turn hooks** — with the plugin, a memory-change note printed only
+   when new lessons or other sessions' status notes landed since the last
+   one, with a one-line reminder (recall before review, status questions are
+   memory questions, log outcomes); the `ops/install-hook.*` fallback
+   injects that reminder as a fixed line on every prompt. Plus a separate
+   coordination handler for changed inbox previews. Full addressed messages are read through `memory_message`, then
    acknowledged after reading. Claude Code and current Codex runtimes.
 
 The coordination hook does not register a second mailbox or own credentials:
@@ -95,8 +97,11 @@ also wake an idle session when board mail arrives (see
 `ops/install-hook.*`
 is the non-plugin fallback: it installs the SessionStart briefing
 (`pseudolife-mcp briefing --hook-json`, which serves the plugin hook's memory
-core and bounded briefing) and the per-turn discipline line,
-but no SessionEnd hook and no identity registration — those sessions fall
+core and bounded briefing) and the per-turn memory-change note
+(`pseudolife-mcp prompt-hook`, the plugin hook's note: it prints only when
+new lessons or other sessions' status notes landed since the session's last
+note; re-running the installer replaces the static discipline echo older
+versions wrote), but no SessionEnd hook and no identity registration — those sessions fall
 back to the shim header or idle-gap sessionization (see
 [Episodes](episodes.md#session-lifecycle--daemon-owned-episodes)). The MCP
 transport comes from the installer either way (stdio shim by default),
@@ -111,8 +116,9 @@ it unattended), and `ops/install-hook.* --remove-legacy` does the same by
 hand. Only the exact entries the installers wrote are removed, after a
 backup; an edited copy of one is listed for review and kept.
 
-With the coordination adapter enabled, the same UserPromptSubmit hook also
-prints the session's coordination digest — pending addressed mail, rendered
+With the coordination adapter enabled, the plugin's coordination
+UserPromptSubmit hook prints the session's coordination digest (the
+fallback's `prompt-hook` does not) — pending addressed mail, rendered
 by the shim into a per-session file — but only on the turn after it changed;
 see [Configuration](configuration.md#experimental-agent-coordination) for the file layout
 and `PSEUDOLIFE_DIGEST_DIR`.
@@ -329,7 +335,7 @@ other instructions still belong there. A custom daemon
 |---|---|
 | `AGENTS.md` memory block | Standing guidance to recall, capture, and reflect when the client loads instructions |
 | `SessionStart` | A compact memory policy, a live briefing, and session episode identity |
-| `UserPromptSubmit` | A short memory reminder on each prompt |
+| `UserPromptSubmit` | A short note on a prompt after memory changed (new lessons, other sessions' status notes); nothing otherwise |
 | `SessionEnd` | Automatic session episode cleanup |
 
 Hooks provide timed execution and lifecycle bookkeeping. Their briefings
