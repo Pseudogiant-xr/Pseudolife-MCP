@@ -34,6 +34,73 @@ QUIET_SECONDS = 30.0
 TIMEOUT_SECONDS = 20.0
 
 
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    # Private library instances: the argtypes set here never reach other
+    # users of ctypes.windll.
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    _kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    _kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    _kernel32.TerminateJobObject.restype = wintypes.BOOL
+    _kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+    _ntdll = ctypes.WinDLL("ntdll")
+    _ntdll.NtResumeProcess.argtypes = (wintypes.HANDLE,)
+    _ntdll.NtResumeProcess.restype = ctypes.c_long
+
+# winbase.h; the subprocess module does not export it.
+_CREATE_SUSPENDED = 0x00000004
+
+
+class _KillJob:
+    """A Windows Job Object holding the CLI and every process it starts.
+
+    A process joins its creator's jobs as it is created, so the timeout kill
+    reaches a worker however late it started and whatever became of its
+    parent. ``taskkill /T`` reaches only what it can walk from the CLI's PID
+    when it runs, and on a loaded machine it can outlast its wait (CI run
+    36222271064, 2026-09-26). The job allows no breakaway, so a nested job
+    below it (a Node launcher's) cannot let a process out either. No
+    kill-on-close: closing the handle after a CLI that exited leaves whatever
+    it started running, as it did before the job.
+    """
+
+    def __init__(self, handle):
+        self._handle = handle
+
+    @classmethod
+    def create(cls) -> "_KillJob | None":
+        handle = _kernel32.CreateJobObjectW(None, None)
+        return cls(handle) if handle else None
+
+    def adopt(self, process) -> bool:
+        """Put the suspended CLI in the job, then let it run. False when the
+        job cannot take it (a parent job with UI limits forbids nesting); it
+        runs anyway. Raises when it cannot be resumed."""
+        transport = getattr(process, "_transport", None)
+        popen = transport.get_extra_info("subprocess") if transport is not None else None
+        if popen is None:
+            raise OSError("no process handle")
+        handle = int(popen._handle)
+        assigned = bool(_kernel32.AssignProcessToJobObject(self._handle, handle))
+        # Resumes every thread: ResumeThread would need the primary thread's
+        # handle, which subprocess closes as soon as the process starts.
+        if _ntdll.NtResumeProcess(handle) < 0:     # a failure NTSTATUS
+            raise OSError("NtResumeProcess failed")
+        return assigned
+
+    def terminate(self) -> bool:
+        return bool(_kernel32.TerminateJobObject(self._handle, 1))
+
+    def close(self) -> None:
+        _kernel32.CloseHandle(self._handle)
+
+
 def doorbell_text(count: int) -> str:
     """The whole queued message. Only the count varies, so nothing a peer
     wrote (text, label, excerpt) can reach the user-role turn, and the
@@ -225,9 +292,15 @@ class CodexDoorbell:
         environment = {key: value for key, value in os.environ.items()
                        if not key.upper().startswith("PSEUDOLIFE_")}
         options = {}
+        job = None
         if os.name == "nt":
             # The shim may have no console (desktop app); do not flash one.
             options["creationflags"] = subprocess.CREATE_NO_WINDOW
+            job = _KillJob.create()
+            if job is not None:
+                # Running, a launcher could start its worker (cmd.exe does in
+                # milliseconds) before joining the job, leaving it outside.
+                options["creationflags"] |= _CREATE_SUSPENDED
         else:
             # Its own process group, so a kill reaches a launcher's children.
             options["start_new_session"] = True
@@ -238,30 +311,49 @@ class CodexDoorbell:
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL, env=environment, **options)
         except asyncio.CancelledError:
+            if job is not None:
+                job.close()
             raise
         except Exception as error:  # noqa: BLE001 - any spawn failure degrades to pull
+            if job is not None:
+                job.close()
             self._disable(f"could not start the Codex CLI: {type(error).__name__}")
             return
         try:
-            status = await asyncio.wait_for(process.wait(), self._timeout)
-        except asyncio.TimeoutError:
-            await self._kill(process)
-            self._disable(f"codex queue did not finish within {self._timeout:g} s")
-            return
-        except asyncio.CancelledError:
-            await self._kill(process)
-            raise
+            if job is not None:
+                try:
+                    if not job.adopt(process):
+                        job.close()
+                        job = None      # taskkill is the kill, as before
+                except Exception as error:  # noqa: BLE001 - never leave it suspended
+                    await self._kill(process, job)
+                    self._disable(f"could not start the Codex CLI: {type(error).__name__}")
+                    return
+            try:
+                status = await asyncio.wait_for(process.wait(), self._timeout)
+            except asyncio.TimeoutError:
+                await self._kill(process, job)
+                self._disable(f"codex queue did not finish within {self._timeout:g} s")
+                return
+            except asyncio.CancelledError:
+                await self._kill(process, job)
+                raise
+        finally:
+            if job is not None:
+                job.close()
         if status != 0:
             self._disable(f"codex queue exited with status {status}")
             return
         adapter.note_delivery("bell", len(text) + 1)
 
     @staticmethod
-    async def _kill(process) -> None:
+    async def _kill(process, job: _KillJob | None = None) -> None:
         """Kill the CLI and everything it started: ``codex`` may be a launcher
         (an npm ``codex.cmd``, a Node shim) whose real work is a grandchild
-        that killing the direct child leaves running."""
+        that killing the direct child leaves running. On Windows that is the
+        CLI's job; without one, taskkill walks the tree from the CLI's PID."""
         if os.name == "nt":
+            killed = job is not None and job.terminate()
             # An open process handle pins its PID. Holding the Popen object
             # (which owns the handle) until the kill is over means an exit
             # racing this can never free the PID for another process tree.
@@ -269,7 +361,7 @@ class CodexDoorbell:
             popen = transport.get_extra_info("subprocess") if transport is not None else None
             taskkill = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
                                     "System32", "taskkill.exe")
-            if process.returncode is None:
+            if not killed and process.returncode is None:
                 with suppress(Exception):
                     killer = await asyncio.create_subprocess_exec(
                         taskkill, "/T", "/F", "/PID", str(process.pid),

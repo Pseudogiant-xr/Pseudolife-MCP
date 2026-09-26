@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-27 — a hung Codex CLI's whole tree dies at the doorbell timeout on Windows, even on a busy machine)
+- When `codex queue` hangs, the opt-in Codex doorbell kills it and everything
+  it started. On Windows that kill was `taskkill /T /F`, given 5 seconds, then
+  a kill of the direct child only. On a loaded machine taskkill can take
+  longer than that (measured 2026-09-27: 0.11 s idle, up to 2.5 s with the
+  CPU oversubscribed 2x); the launcher then died and its worker kept running,
+  and `taskkill` could still act on the PID after its handle was released.
+  `taskkill /T` also never reaches a worker whose parent has exited, or one
+  started after it walked the tree. CI run 36222271064 (2026-09-26) failed
+  `test_a_hung_cli_tree_is_killed_at_the_timeout` this way.
+- The CLI now starts suspended, joins a new job object and only then runs, so
+  every process it starts belongs to the job, however late it starts; the
+  timeout and shim shutdown end the job with `TerminateJobObject`, with no
+  helper process to wait for. The job allows no breakaway. It has no
+  kill-on-close: a CLI that exits normally leaves whatever it started running,
+  as before. Where the job cannot be created or cannot take the CLI (a parent
+  job that forbids nesting), the CLI runs as before, with taskkill as the kill.
+  POSIX is unchanged: the CLI's process group is killed.
+
 ### Fixed (2026-09-26 — a redaction no longer reports a clean-up Postgres skipped as done)
 - `board-audit redact` reported `"vacuumed": true` even when Postgres had
   skipped part of its clean-up. A role that may not vacuum or analyze a table
