@@ -644,8 +644,8 @@ def test_repeated_ack_does_not_change_activity_without_an_event(store):
 
 # ── message bodies outside the hash; operator redaction (schema v46) ─────
 #
-# From v46 a send event's hashed payload carries the body's sha256 and byte
-# count, and the body itself sits in the row's ``body`` column, outside the
+# From v46 a send event's hashed payload carries a salted commitment to the
+# body (salt in ``body_salt``), and the body itself sits in the row's ``body`` column, outside the
 # hash. The chain then vouches for the body without holding it, so an
 # operator can remove one (``redact``) and the chain still verifies: an
 # absent body must be accounted for by a later operator ``redact`` event
@@ -681,9 +681,11 @@ def test_a_send_event_commits_to_its_salted_body_outside_the_hash(store):
     raw = text.encode("utf-8")
     salt = sent["body_salt"]
     assert isinstance(salt, str) and len(salt) == 32 and int(salt, 16) >= 0
+    # No byte count either: a length left in the chain would settle a guess
+    # between candidates of different lengths ("yes" or "no").
     assert sent["payload"] == {"text_commitment": hashlib.sha256(bytes.fromhex(salt) + raw)
                                .hexdigest(),
-                               "text_bytes": len(raw), "reply_to": None, "request_id": "r",
+                               "reply_to": None, "request_id": "r",
                                "recipient_sequence": 1, "expires_at": 1000.0 + DAY}
     # Not the bare digest a guess could be checked against.
     assert sent["payload"]["text_commitment"] != hashlib.sha256(raw).hexdigest()
@@ -694,6 +696,58 @@ def test_a_send_event_commits_to_its_salted_body_outside_the_hash(store):
     assert audit_hash(row["prev_hash"], {**row, "body": "anything else",
                                          "body_salt": "0" * 32}) == row["hash"]
     assert verify(store)["ok"]
+
+
+def test_a_salt_must_be_exactly_thirty_two_lowercase_hex_digits():
+    """bytes.fromhex skips whitespace, so a loose check would let a salt
+    that decodes to 15 bytes shift the salt/body split; with no length in
+    the chain, the salt's exact form is what fixes that split."""
+    from pseudolife_memory.storage.coordination import body_commitment
+    good = "0123456789abcdef" * 2
+    assert body_commitment(good, "x") is not None
+    for bad in (good[:30] + " a", good.upper(), good[:31], good + "0", "zz" * 16, None, 7):
+        assert body_commitment(bad, "x") is None, bad
+
+
+def test_redact_clears_a_salt_left_without_its_body(store):
+    """A salt with no body (only reachable by hand) is the one state a guess
+    could be tested in; redact clears it rather than saying already done."""
+    a, b = pair(store)
+    msg = store.send(*creds(a), to=b["agent_id"], text="short pin 4417", request_id="r")
+    [sent] = events(store, "send")
+    store.storage.conn.execute(
+        "UPDATE coordination_events SET body=NULL WHERE seq=%s", (sent["seq"],))
+    result = store.redact(msg["message_id"], "tidy a half-removed body")
+    assert result["audit_copy"] == "removed"
+    [after] = events(store, "send")
+    assert after["body"] is None and after["body_salt"] is None
+    assert verify(store)["ok"]
+
+
+def test_redact_blanks_a_live_fingerprint_whose_send_event_retention_cut(store):
+    """With audit retention under the seven days a mailbox row keeps its
+    request fingerprint, the send event can be cut first; the fingerprint is
+    still a digest of the body, so redact blanks it and logs that the audit
+    copy was already gone."""
+    a, b = pair(store)
+    msg = store.send(*creds(a), to=b["agent_id"], text="short pin 4417", request_id="r")
+    store.test_time[0] += 3 * DAY
+    store.update(*creds(a), status="still here")   # keep the addresses and the row
+    store.prune(audit_retention_days=1)
+    assert events(store, "send") == []
+    assert store.storage.conn.execute(
+        "SELECT fingerprint FROM coordination_messages WHERE message_id=%s",
+        (msg["message_id"],)).fetchone()[0] != "redacted"
+    result = store.redact(msg["message_id"], "pasted by mistake")
+    assert (result["seq"], result["audit_copy"]) == (None, "gone")
+    assert store.storage.conn.execute(
+        "SELECT fingerprint FROM coordination_messages WHERE message_id=%s",
+        (msg["message_id"],)).fetchone()[0] == "redacted"
+    [red] = events(store, "redact")
+    assert red["payload"]["audit_copy"] == "gone" and red["payload"]["seq"] is None
+    assert verify(store)["ok"]
+    with pytest.raises(CoordinationError, match="^already_redacted$"):
+        store.redact(msg["message_id"], "again")
 
 
 def test_the_same_text_sent_twice_commits_differently(store):
@@ -824,7 +878,7 @@ def _sent_by_v45(monkeypatch, store, a, b, text):
     def v45(event, payload, **fields):
         if event == "send":
             payload = {k: v for k, v in payload.items()
-                       if k not in ("text_commitment", "text_bytes")}
+                       if k != "text_commitment"}
             payload["text"] = fields.pop("body")
             fields.pop("body_salt", None)
         return real(event, payload, **fields)
@@ -911,16 +965,19 @@ def test_verify_names_an_edited_smuggled_or_silently_removed_body(store, damage,
 
 
 def test_a_body_written_back_after_its_redaction_fails_verification(store):
-    """Redaction blanks the body in the same transaction as its record, so a
-    body present on a send that a later redact names was put back (from an
-    older backup or export, say): what the operator removed is in the log
-    again, and its digest alone would still match."""
+    """Redaction blanks the body and its salt in the same transaction as its
+    record, so a body present on a send that a later redact names was put
+    back (from an older backup or export, which carry both): what the
+    operator removed is in the log again, and the restored pair would still
+    open the commitment."""
     a, b = pair(store)
     msg = store.send(*creds(a), to=b["agent_id"], text="the pasted secret", request_id="r")
+    [sent] = events(store, "send")
     store.redact(msg["message_id"], "pasted by mistake")
     assert verify(store)["ok"]
     store.storage.conn.execute(
-        "UPDATE coordination_events SET body='the pasted secret' WHERE seq=3")
+        "UPDATE coordination_events SET body=%s, body_salt=%s WHERE seq=%s",
+        (sent["body"], sent["body_salt"], sent["seq"]))
     assert verify(store) == {"ok": False, "seq": 3, "reason": "body_mismatch"}
 
 
@@ -1048,8 +1105,13 @@ def test_redact_waits_for_a_retention_cut_without_deadlocking(store, pg_url):
     finally:
         other.close()
     assert not thread.is_alive()
-    error = outcome.get("error")
-    assert isinstance(error, CoordinationError) and error.code == "message_not_found", outcome
+    # No deadlock: once the cut committed, the send event was gone, so the
+    # redaction took the live copy (still holding its text and fingerprint)
+    # and logged that the audit copy was already gone.
+    result = outcome.get("result")
+    assert result is not None, outcome
+    assert (result["seq"], result["audit_copy"], result["live_body_cleared"]) == (
+        None, "gone", True)
 
 
 def test_redaction_is_never_an_agent_action():

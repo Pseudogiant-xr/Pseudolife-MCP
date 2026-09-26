@@ -46,7 +46,8 @@ def test_export_writes_json_lines_filtered_by_task_agent_and_time(store, cli):
     by_task = export("--task", "t1")
     assert [(e["event"], e["task"]) for e in by_task] == [("register", "t1"), ("send", "t1")]
     assert by_task[1]["body"] == "from t1 ✓"
-    assert "text" not in by_task[1]["payload"] and by_task[1]["payload"]["text_bytes"] == 11
+    assert "text" not in by_task[1]["payload"] and "text_bytes" not in by_task[1]["payload"]
+    assert len(by_task[1]["payload"]["text_commitment"]) == 64
     assert by_task[0]["body"] is None
     assert set(by_task[1]) == {"seq", "event", "actor", "principal", "agent_id",
                                "recipient_agent_id", "project", "task", "message_id",

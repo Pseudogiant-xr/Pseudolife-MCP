@@ -594,7 +594,7 @@ CREATE INDEX IF NOT EXISTS coordination_lease_waiters_agent_idx
 -- v45: when an agent's current status stops being true, if it said.
 ALTER TABLE coordination_agents ADD COLUMN IF NOT EXISTS status_expires_at DOUBLE PRECISION;
 -- v46: a send event's body and a random salt, both outside the row hash. Its
--- hashed payload commits to sha256(salt || body) and the byte count instead,
+-- hashed payload commits to sha256(salt || body) instead, and not its length,
 -- so an operator can redact the body (body and salt NULL, behind a chained
 -- redact event), the chain still verifies, and with the salt gone nothing is
 -- left to test a guess of a short body against. NULL on every other event,

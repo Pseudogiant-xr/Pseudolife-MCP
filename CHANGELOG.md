@@ -15,12 +15,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refused such a body at send time either.
 - From schema v46 a `send` event keeps the body in a new
   `coordination_events.body` column, beside a random 16-byte salt in
-  `body_salt`, both outside the row hash; its hashed payload carries
-  sha256(salt || body) and the UTF-8 byte count (`text_commitment`,
-  `text_bytes`) instead of the text. The hash itself does not change, so every
-  existing chain still verifies. The salt goes with the body on a redaction,
-  so the commitment left in the chain cannot confirm a guess of a short or
-  structured body (an unsalted digest could).
+  `body_salt`, both outside the row hash; its hashed payload carries only
+  sha256(salt || body) (`text_commitment`), not the text and not its length.
+  The hash itself does not change, so every existing chain still verifies.
+  The salt goes with the body on a redaction, so nothing left in the chain
+  can confirm a guess of a short or structured body (an unsalted digest, or
+  a byte count, could).
 - `pseudolife-mcp board-audit redact --message-id ID --reason TEXT`
   (operator-only; no MCP tool or REST route) blanks that body and the live
   mailbox copy (and its seven-day request fingerprint, so a retry of that
@@ -62,11 +62,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bodies and request ids, the 25 statuses, or the labels, projects, tasks and
   episodes of its 26 agents. It is a net for common shapes, not a guarantee:
   single-case passwords under 32 characters get through.
-- Limits: the send event keeps the body's sha256, and the mailbox row's
-  request fingerprint (kept seven days) is a sha256 over the body too, so a
-  short or guessable body can still be confirmed by someone who guesses it
-  exactly; backups, WAL archives and exports taken before a redaction still
-  hold the body.
+- Redaction also takes the live mailbox row's request fingerprint (a digest
+  of the body kept seven days for retries), so a retry of the redacted
+  request is refused; with audit retention under seven days it still takes
+  the fingerprint after the send event itself was cut, and logs that the
+  audit copy was already gone.
+- Limits: backups, WAL archives and exports taken before a redaction still
+  hold the body, as do audit copies of messages sent before v46 and whatever
+  the recipient already read. Rotate a leaked credential first; redaction is
+  tidiness, not remediation.
 
 ### Added (2026-09-26 — agents queue for shared resources on the board instead of by message, schema v45)
 - Agents that share one machine can now hold a named, expiring **resource

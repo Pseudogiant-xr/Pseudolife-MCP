@@ -210,11 +210,11 @@ GENESIS_HASH = "0" * 64
 AUDIT_LOCK_KEY = "coordination-audit-chain"
 # The columns every event has, hashed or a hash. A send event (v46) also
 # carries ``body`` and ``body_salt``, outside the hash: its hashed payload
-# holds sha256(salt || body) and the byte count instead, so the body can be
-# redacted and the chain still verifies, and once the salt goes with it a
-# guess at a short body has nothing to be checked against (maintainer
-# decision, 2026-09-26). Rows written before v46 keep the body inside the
-# payload.
+# holds sha256(salt || body) instead, and nothing else derived from the body
+# (not even its length), so the body can be redacted and the chain still
+# verifies, and once the salt goes with it a guess at the body has nothing to
+# be checked against (maintainer decision, 2026-09-26). Rows written before
+# v46 keep the body inside the payload.
 AUDIT_COLUMNS = ("seq", "event", "actor", "principal", "agent_id", "recipient_agent_id",
                  "project", "task", "message_id", "payload", "created_at", "hlc",
                  "prev_hash", "hash")
@@ -229,12 +229,16 @@ _AUDIT_INSERT_BODY = ("INSERT INTO coordination_events (" + ",".join(AUDIT_COLUM
 # Bytes of random salt per body (hex in the column): enough that the salt
 # itself can never be guessed.
 BODY_SALT_BYTES = 16
+# Exactly the form secrets.token_hex writes. bytes.fromhex alone would skip
+# whitespace, and a salt decoding to fewer bytes would move the salt/body
+# split, which nothing else in the commitment pins.
+_SALT = re.compile("[0-9a-f]{%d}" % (2 * BODY_SALT_BYTES))
 
 
 def body_commitment(salt_hex, body):
     """sha256(salt || body), the value a v46 send's hashed payload holds;
     None when the salt or body is not the shape one is written in."""
-    if (not isinstance(salt_hex, str) or len(salt_hex) != 2 * BODY_SALT_BYTES
+    if (not isinstance(salt_hex, str) or _SALT.fullmatch(salt_hex) is None
             or not isinstance(body, str)):
         return None
     try:
@@ -563,11 +567,7 @@ def _body_matches(body, salt, payload) -> bool:
     commitment = payload.get("text_commitment")
     if not isinstance(commitment, str):
         return False
-    try:
-        size = len(body.encode("utf-8"))
-    except UnicodeEncodeError:
-        return False
-    return body_commitment(salt, body) == commitment and payload.get("text_bytes") == size
+    return body_commitment(salt, body) == commitment
 
 
 def verify_audit_chain(rows, *, expect_head=None) -> dict:
@@ -578,7 +578,7 @@ def verify_audit_chain(rows, *, expect_head=None) -> dict:
     content changed). Bodies are outside the hash (schema v46), so they are
     checked against what the hashed payload commits to: a present ``body``
     must be on a send event whose payload carries ``text_commitment``, and
-    with its ``body_salt`` open it and match ``text_bytes`` (``body_mismatch``,
+    with its ``body_salt`` open it (``body_mismatch``,
     also for a salt left without its body; a body on any other row is
     content the chain never vouched for, and one on a send that a later
     operator ``redact`` event names was written back after its redaction,
@@ -1547,7 +1547,6 @@ class CoordinationStore:
             salt = secrets.token_hex(BODY_SALT_BYTES)
             self._append([self._event(
                 "send", {"text_commitment": body_commitment(salt, text),
-                         "text_bytes": len(text.encode("utf-8")),
                          "reply_to": reply_to, "request_id": request_id,
                          "recipient_sequence": seq, "expires_at": expiry},
                 principal=principal, agent_id=agent_id, recipient=to, project=sender["project"],
@@ -1836,7 +1835,7 @@ class CoordinationStore:
         and append a chained ``redact`` event (actor ``operator``) whose
         payload names the send event's ``seq``, the operator's reason, and
         ``audit_copy: removed``. The send event's hashed payload keeps the
-        salted commitment and byte count, so the chain still verifies, and
+        salted commitment, so the chain still verifies, and
         ``verify_audit_chain`` accepts the absent body only behind that
         event. A message sent before v46 has its body inside the hashed
         payload, which cannot change; while its live copy is still there, that
@@ -1880,7 +1879,30 @@ class CoordinationStore:
                 "FROM coordination_events WHERE event='send' AND message_id=%s "
                 "ORDER BY seq LIMIT 1", (message_id,))
             if sent is None:
-                raise CoordinationError("message_not_found")
+                # Audit retention under the seven days a mailbox row keeps
+                # its request fingerprint can cut the send event first; the
+                # fingerprint is still a digest of the body, so take it (and
+                # any live text) and log that the audit copy was gone.
+                live_row = self._one("SELECT text,fingerprint,sender_agent_id,"
+                                     "recipient_agent_id,project,task FROM coordination_messages "
+                                     "WHERE message_id=%s", (message_id,))
+                if live_row is None:
+                    raise CoordinationError("message_not_found")
+                if live_row["text"] is None and live_row["fingerprint"] == "redacted":
+                    raise CoordinationError("already_redacted")
+                self.storage.conn.execute(
+                    "UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
+                    "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message_id))
+                seq, digest = self._append([self._event(
+                    "redact", {"message_id": message_id, "seq": None, "reason": reason,
+                               "audit_copy": "gone"},
+                    actor="operator", agent_id=live_row["sender_agent_id"],
+                    recipient=live_row["recipient_agent_id"], project=live_row["project"],
+                    task=live_row["task"], message_id=message_id)], now, head=head)
+                return {"message_id": message_id, "seq": None, "redact_seq": seq,
+                        "redact_hash": digest, "expect_head": f"{seq}:{digest}",
+                        "live_body_cleared": live_row["text"] is not None,
+                        "audit_copy": "gone"}
             payload = _parsed_payload(sent)
             if payload is None or "text_commitment" not in payload:
                 # Sent before v46: the audit copy stays. Decided before the
@@ -1890,8 +1912,8 @@ class CoordinationStore:
                     raise CoordinationError("body_in_hashed_payload")
                 audit_copy = "kept"
             elif self._one("UPDATE coordination_events SET body=NULL,body_salt=NULL "
-                           "WHERE seq=%s AND body IS NOT NULL RETURNING seq",
-                           (sent["seq"],)) is None:
+                           "WHERE seq=%s AND (body IS NOT NULL OR body_salt IS NOT NULL) "
+                           "RETURNING seq", (sent["seq"],)) is None:
                 raise CoordinationError("already_redacted")
             else:
                 audit_copy = "removed"
