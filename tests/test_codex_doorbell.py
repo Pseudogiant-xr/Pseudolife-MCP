@@ -559,19 +559,39 @@ def test_a_hung_cli_tree_is_killed_at_the_timeout(tmp_path, capsys):
     assert not _still_running(log)
 
 
-def test_a_hung_cli_dies_with_a_worker_whose_parent_already_exited(tmp_path, capsys):
+def _kill_once_running(command, log):
+    """Ring with a CLI that never finishes and shut the doorbell down once its
+    worker ticks: the kill (the one a timeout runs) always meets a live tree.
+    A deadline instead would race the start: with the CPU oversubscribed 2x
+    (2026-09-27), three interpreters once took over 8 s to tick."""
+    now = [1000.0]
+
+    async def drive():
+        bell = CodexDoorbell(command, clock=lambda: now[0], timeout=120)
+        box = Mailbox()
+        bell.watch(THREAD, box)
+        now[0] += 60
+        box.set("m1")
+        for _ in range(1200):         # up to 60 s for the worker to start
+            if _ticks(log):
+                break
+            await asyncio.sleep(0.05)
+        started = time.monotonic()
+        await bell.aclose()
+        return time.monotonic() - started
+
+    return asyncio.run(drive())
+
+
+def test_a_hung_cli_dies_with_a_worker_whose_parent_already_exited(tmp_path):
     command, log = _orphaning_stub(tmp_path, sleep=60)
-    # Three interpreters start before the worker ticks. With the CPU
-    # oversubscribed 2x (2026-09-27), a launcher and its worker took up to
-    # 1.7 s to start; 8 s leaves room for the third.
-    assert _hang_until_timeout(command, timeout=8.0) < 30
-    assert "did not finish" in capsys.readouterr().err
+    assert _kill_once_running(command, log) < 30
     assert _ticks(log)                # the orphaned worker really ran
     assert not _still_running(log)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="taskkill is the Windows kill")
-def test_a_hung_cli_tree_dies_even_when_taskkill_would_stall(tmp_path, capsys, monkeypatch):
+def test_a_hung_cli_tree_dies_even_when_taskkill_would_stall(tmp_path, monkeypatch):
     # CI run 36222271064 (2026-09-26): on a loaded runner the tree survived
     # the timeout kill. Locally taskkill took 0.11 s idle and up to 2.5 s
     # with the CPU oversubscribed 2x; past its 5 s wait, only the launcher
@@ -586,8 +606,7 @@ def test_a_hung_cli_tree_dies_even_when_taskkill_would_stall(tmp_path, capsys, m
         return await real_exec(program, *args, **kwargs)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", stalling_taskkill)
-    assert _hang_until_timeout(command) < 30
-    assert "did not finish" in capsys.readouterr().err
+    assert _kill_once_running(command, log) < 30
     assert _ticks(log)
     assert not _still_running(log)
 
